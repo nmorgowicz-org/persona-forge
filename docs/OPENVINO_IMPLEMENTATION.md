@@ -28,7 +28,7 @@ Validated on `dockermisc1` on 2026-06-27:
 - Container limit: 7 GiB RAM and 8 GiB RAM+swap.
 - Warm container usage during inspection: approximately 4.7 GiB.
 - Current stack: Python 3.13.13, `qwen-tts==0.1.1`, PyTorch 2.12.1,
-  Transformers 4.57.3, and ONNX Runtime 1.27.0.
+  Torchaudio 2.11.0, Transformers 4.57.3, and ONNX Runtime 1.27.0.
 - Service source: `/home/nick/docker/qwen3-tts`.
 - Compose file: `/home/nick/docker/docker-compose.yml`.
 - Model cache: `/var/data/autopirate/qwen3-tts/model`.
@@ -116,6 +116,11 @@ The current PyTorch installation includes CUDA libraries on a CPU-only VM. In th
 cleanup milestone, install the matching CPU-only PyTorch wheel before `qwen-tts` to reduce
 image size and avoid unnecessary CUDA packages. This is independent of OpenVINO latency and
 must be benchmarked separately.
+
+Pin Torch and Torchaudio independently. The Python 3.13 CPU wheel index currently provides
+`torch==2.12.1+cpu` but Torchaudio only through `torchaudio==2.11.0+cpu`; this same mixed
+version pair is already running successfully in the existing service. Do not assume both
+packages publish identical version numbers.
 
 ## Build and Artifact Boundaries
 
