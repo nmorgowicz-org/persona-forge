@@ -26,6 +26,10 @@
   color: "f9b700"
   description: Release preparation
 
+- name: ready-to-test
+  color: "0e8a16"
+  description: Run expensive container and integration checks
+
 - name: python
   color: "3572a5"
   description: Python code

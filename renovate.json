@@ -2,12 +2,44 @@
   "extends": [
     "github>nmorgowicz-org/docker-compose-config//renovate"
   ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": ["ARG TORCH_VERSION=(?<currentValue>[^\\s]+)"],
+      "depNameTemplate": "torch",
+      "datasourceTemplate": "pypi",
+      "versioningTemplate": "pep440"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": ["ARG TORCHAUDIO_VERSION=(?<currentValue>[^\\s]+)"],
+      "depNameTemplate": "torchaudio",
+      "datasourceTemplate": "pypi",
+      "versioningTemplate": "pep440"
+    }
+  ],
   "packageRules": [
     {
       "description": "Keep the OpenVINO export stack together",
       "matchManagers": ["pip_requirements"],
       "matchPackageNames": ["openvino", "optimum-intel", "nncf"],
-      "groupName": "OpenVINO stack"
+      "groupName": "OpenVINO stack",
+      "automerge": false
+    },
+    {
+      "description": "Track CPU Torch packages together and require compatibility review",
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": ["torch", "torchaudio"],
+      "groupName": "PyTorch CPU stack",
+      "automerge": false
+    },
+    {
+      "description": "Qwen package updates can change the custom generation contract",
+      "matchManagers": ["pip_requirements"],
+      "matchPackageNames": ["qwen-tts"],
+      "automerge": false
     }
   ]
 }

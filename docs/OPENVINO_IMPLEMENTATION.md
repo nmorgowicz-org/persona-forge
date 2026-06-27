@@ -145,13 +145,18 @@ ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-<git-sha>
 Workflow placement:
 
 - `arc-general`: linting, unit tests, metadata/schema tests, and cleanup.
-- `arc-general-docker`: Buildx builds and publishes both AMD64 image targets.
+- `arc-general-docker`: Buildx builds both AMD64 image targets after an internal PR receives
+  `ready-to-test`, and publishes them from trusted `main`/tag events.
 - `dockermisc1`: downloads the Hugging Face model, runs export/quantization, validates the
   generated IR, and runs hardware-specific benchmarks.
 
 CI smoke tests may import packages and exercise synthetic wrapper models, but must not
 download or convert the full Qwen3-TTS checkpoint. The ARC Docker runner does not have enough
 guaranteed memory for the full export.
+
+Every PR receives lightweight validation. Apply `ready-to-test` only after that validation
+passes and the branch is ready for the expensive container matrix. Commits pushed while the
+label remains present rerun the matrix.
 
 Relevant current documentation:
 

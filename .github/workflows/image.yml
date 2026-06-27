@@ -2,6 +2,7 @@ name: Container Images
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, ready_for_review]
     paths:
       - .github/workflows/image.yml
       - Dockerfile
@@ -29,7 +30,13 @@ concurrency:
 
 jobs:
   build:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      github.event_name != 'pull_request' ||
+      (
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        contains(github.event.pull_request.labels.*.name, 'ready-to-test') &&
+        (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test')
+      )
     runs-on: arc-general-docker
     timeout-minutes: 90
     permissions:

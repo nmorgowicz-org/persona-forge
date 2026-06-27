@@ -73,6 +73,10 @@ validating their presence.
 - Do not update one OpenVINO-stack dependency in isolation without rebuilding both images and
   rerunning export parity.
 - Update the implementation plan when a non-obvious compatibility pin changes.
+- Renovate tracks pip requirements, Docker base images, GitHub Actions, and the Dockerfile's
+  independent Torch/Torchaudio ARGs. OpenVINO, Qwen-TTS, and PyTorch CPU-stack updates require
+  review and must not auto-merge.
+- Validate Renovate changes with the pinned `renovate-config-validator` command in CI.
 
 ## Build and CI Boundaries
 
@@ -81,6 +85,11 @@ Use the correct ARC pool:
 - `arc-general`: repository validation, labels, release automation, and non-Docker jobs.
 - `arc-general-docker`: native Linux AMD64 runtime/exporter image builds.
 - Never download or convert the full model in current ARC jobs; their memory is insufficient.
+
+Cheap repository validation runs on every internal PR. Expensive runtime/exporter image builds
+run only when an authorized maintainer applies the `ready-to-test` label. After that label is
+present, later commits rerun the image checks. Pushes to `main`, version tags, and manual
+workflow dispatches build unconditionally.
 
 Images are immutable build artifacts:
 
@@ -104,7 +113,8 @@ git diff --check
 ```
 
 For container or dependency changes, both Docker targets and their import smoke tests must
-pass on `arc-general-docker`.
+pass on `arc-general-docker`. Apply `ready-to-test` only after local validation passes and the
+branch is ready to spend runner capacity.
 
 For model execution changes, also run the relevant staged gates from the implementation plan:
 
