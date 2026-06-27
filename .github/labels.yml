@@ -1,0 +1,67 @@
+- name: bug
+  color: "d73a4a"
+  description: Something is not working
+
+- name: documentation
+  color: "0075ca"
+  description: Documentation changes
+
+- name: enhancement
+  color: "a2ee10"
+  description: New feature or improvement
+
+- name: dependencies
+  color: "0366d6"
+  description: Dependency updates
+
+- name: github-actions
+  color: "26b2a0"
+  description: GitHub Actions workflow changes
+
+- name: ci
+  color: "20ce95"
+  description: CI and delivery changes
+
+- name: release
+  color: "f9b700"
+  description: Release preparation
+
+- name: python
+  color: "3572a5"
+  description: Python code
+
+- name: docker
+  color: "0db7ed"
+  description: Container build or deployment
+
+- name: openvino
+  color: "8f5db7"
+  description: OpenVINO export or runtime
+
+- name: shell
+  color: "6f42c1"
+  description: Shell scripts
+
+- name: fix
+  color: "d73a4a"
+  description: Bug fixes
+
+- name: feat
+  color: "a2ee10"
+  description: New features
+
+- name: refactor
+  color: "c5def5"
+  description: Code refactoring
+
+- name: chore
+  color: "d89b60"
+  description: Maintenance tasks
+
+- name: perf
+  color: "0e8a16"
+  description: Performance improvements
+
+- name: test
+  color: "e99695"
+  description: Tests and validation

@@ -1,0 +1,42 @@
+name: Bug Report
+description: Report a service, export, or inference failure
+title: "fix: "
+labels: [bug]
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Describe the observed and expected behavior.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend
+      options:
+        - OpenVINO
+        - PyTorch fallback
+        - Exporter
+        - Container build or startup
+    validations:
+      required: true
+
+  - type: input
+    id: image
+    attributes:
+      label: Image tag or digest
+      placeholder: "runtime-<git-sha>"
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: CPU, memory limit, model revision, OpenVINO version, and relevant settings.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      render: shell

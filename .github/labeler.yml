@@ -1,0 +1,70 @@
+python:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.py"
+
+docker:
+  - changed-files:
+      - any-glob-to-any-file:
+          - Dockerfile
+          - .dockerignore
+          - "**/docker-compose*.yml"
+          - "**/docker-compose*.yaml"
+
+openvino:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*openvino*"
+          - "**/ov_*.py"
+          - "requirements-ov-*.txt"
+
+shell:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.sh"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**"
+  - head-branch: ["^ci/"]
+
+github-actions:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - "docs/**"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "requirements*.txt"
+          - Dockerfile
+          - renovate.json
+
+test:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tests/**"
+          - "**/test_*.py"
+          - "scripts/validate_repo.py"
+
+fix:
+  - head-branch: ["^fix/"]
+
+feat:
+  - head-branch: ["^feat/"]
+
+refactor:
+  - head-branch: ["^refactor/"]
+
+perf:
+  - head-branch: ["^perf/"]
+
+chore:
+  - head-branch: ["^chore/", "^codex/"]

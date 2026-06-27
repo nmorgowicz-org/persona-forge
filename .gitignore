@@ -209,6 +209,17 @@ tempCodeRunnerFile.py
 # PyPI configuration file
 .pypirc
 
+# Local model, voice, and generated OpenVINO artifacts
+/artifacts/
+/models/
+/openvino/
+/ov_cache/
+/voice/
+*.onnx
+*.safetensors
+openvino_model*.bin
+openvino_model*.xml
+
 # Marimo
 marimo/_static/
 marimo/_lsp/

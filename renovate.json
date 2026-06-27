@@ -1,0 +1,13 @@
+{
+  "extends": [
+    "github>nmorgowicz-org/docker-compose-config//renovate"
+  ],
+  "packageRules": [
+    {
+      "description": "Keep the OpenVINO export stack together",
+      "matchManagers": ["pip_requirements"],
+      "matchPackageNames": ["openvino", "optimum-intel", "nncf"],
+      "groupName": "OpenVINO stack"
+    }
+  ]
+}

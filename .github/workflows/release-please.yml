@@ -1,0 +1,31 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-please:
+    runs-on: arc-general
+    steps:
+      - name: Generate GitHub App token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        id: app-token
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: .github/release-please/config.json5
