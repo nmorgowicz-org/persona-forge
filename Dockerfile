@@ -2,6 +2,7 @@ ARG PYTHON_IMAGE=python:3.13-slim
 FROM ${PYTHON_IMAGE} AS base
 
 ARG TORCH_VERSION=2.12.1
+ARG TORCHAUDIO_VERSION=2.11.0
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -20,7 +21,7 @@ COPY requirements.txt requirements-ov-runtime.txt requirements-ov-export.txt ./
 # Install CPU-only Torch explicitly before qwen-tts so pip does not pull CUDA libraries.
 RUN python -m pip install \
       --index-url https://download.pytorch.org/whl/cpu \
-      "torch==${TORCH_VERSION}" "torchaudio==${TORCH_VERSION}" && \
+      "torch==${TORCH_VERSION}" "torchaudio==${TORCHAUDIO_VERSION}" && \
     python -m pip install -r requirements.txt
 
 # Fix Qwen3-TTS ONNX Runtime: set intra threads to 6 instead of 1
