@@ -1,3 +1,5 @@
+# Export uses openvino.convert_model + nncf.compress_weights directly.
+# Optimum Intel is intentionally excluded; see docs/OPENVINO_IMPLEMENTATION.md
+# ("Export library: openvino + nncf only") for the rationale.
 -r requirements-ov-runtime.txt
 nncf==3.2.0
-optimum-intel[openvino]==2.0.0
