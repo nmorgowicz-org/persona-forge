@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from export_openvino import _resolve_vocoder_decoder, parse_args
+from export_openvino import _resolve_vocoder_decoder, _set_eager_attention, parse_args
 
 
 class ExportOpenVINOTests(unittest.TestCase):
@@ -25,6 +25,20 @@ class ExportOpenVINOTests(unittest.TestCase):
 
         self.assertTrue(args.vocoder_only)
         self.assertFalse(args.skip_vocoder)
+
+    def test_sets_each_nested_attention_config_once(self):
+        eager = SimpleNamespace(_attn_implementation="sdpa")
+        untouched = SimpleNamespace()
+        children = [
+            SimpleNamespace(config=eager),
+            SimpleNamespace(config=eager),
+            SimpleNamespace(config=untouched),
+        ]
+        module = SimpleNamespace(modules=lambda: iter(children))
+
+        self.assertEqual(_set_eager_attention(module), 1)
+        self.assertEqual(eager._attn_implementation, "eager")
+        self.assertFalse(hasattr(untouched, "_attn_implementation"))
 
 
 if __name__ == "__main__":

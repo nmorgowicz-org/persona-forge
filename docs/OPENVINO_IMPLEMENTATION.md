@@ -570,11 +570,13 @@ The exporter must:
 1. Resolve `MODEL_SIZE`/`MODEL_REPO`, then load `qwen-tts==0.1.1` and the exact configured
    model revision.
 2. Put modules in `eval()` mode and use `torch.inference_mode()`.
-3. Load the export copy with `attn_implementation="eager"`. The default SDPA mask path uses
-   nested `torch.vmap` operations that TorchScript/OpenVINO cannot trace (`unordered_map::at`);
-   eager attention keeps the mathematically equivalent mask construction traceable. Record the
-   selected implementation in metadata and compare against the normal PyTorch baseline at the
-   parity gate.
+3. Load the export copy with `attn_implementation="eager"`, then explicitly set
+   `_attn_implementation="eager"` on the distinct nested configs under the vocoder decoder,
+   main core, and predictor core. The top-level load option does not propagate into the separately
+   loaded speech tokenizer. Its default SDPA mask path uses nested `torch.vmap` operations that
+   TorchScript/OpenVINO cannot trace (`unordered_map::at`); eager attention keeps the
+   mathematically equivalent mask construction traceable. Record the selected implementation in
+   metadata and compare against the normal PyTorch baseline at the parity gate.
 4. Build example inputs from the real model configuration rather than hard-coded dimensions.
 5. Convert with `openvino.convert_model(wrapper, example_input=...)`.
 6. Save uncompressed FP32 IR first.

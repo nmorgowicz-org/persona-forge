@@ -124,6 +124,19 @@ def _resolve_vocoder_decoder(speech_tokenizer):
     return decoder
 
 
+def _set_eager_attention(module) -> int:
+    """Force eager attention on every distinct Transformers config below a module."""
+    configs = {}
+    candidates = module.modules() if callable(getattr(module, "modules", None)) else (module,)
+    for candidate in candidates:
+        config = getattr(candidate, "config", None)
+        if config is not None and hasattr(config, "_attn_implementation"):
+            configs[id(config)] = config
+    for config in configs.values():
+        config._attn_implementation = "eager"
+    return len(configs)
+
+
 def run() -> int:
     args = parse_args()
     configure_hf_token()
@@ -151,6 +164,10 @@ def run() -> int:
     )
     talker = wrapped.model.talker
     vocoder_decoder = _resolve_vocoder_decoder(wrapped.model.speech_tokenizer)
+    eager_config_count = _set_eager_attention(vocoder_decoder)
+    eager_config_count += _set_eager_attention(talker.model)
+    eager_config_count += _set_eager_attention(talker.code_predictor.model)
+    print(f"[export] forced eager attention on {eager_config_count} nested configs", flush=True)
 
     voc_dims = wrappers.vocoder_dims(vocoder_decoder.config)
 
