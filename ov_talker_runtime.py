@@ -459,10 +459,21 @@ class OVTalkerRuntime:
             if st is not None:
                 self._orig_st_decode = st.decode
 
+                # One-time warning on first fallback to avoid silent PyTorch takeover.
+                first_decode_failure = [True]
+
                 def _ov_decode(inputs, *args, **kwargs):
                     try:
                         return self.vocoder_runtime.decode(inputs, *args, **kwargs)
                     except Exception:
+                        if first_decode_failure[0]:
+                            first_decode_failure[0] = False
+                            print(
+                                "[ov_talker_runtime] vocoder IR failed; "
+                                "falling back to PyTorch speech_tokenizer.decode. "
+                                "Subsequent calls will keep using PyTorch without logging.",
+                                flush=True,
+                            )
                         return self._orig_st_decode(inputs, *args, **kwargs)
 
                 st.decode = _ov_decode
@@ -500,8 +511,15 @@ class OVTalkerRuntime:
             try:
                 return self.vocoder_runtime.decode(codes)
             except Exception:
-                # Fallback to PyTorch vocoder on any error.
-                pass
+                # One-time warning on first fallback.
+                if getattr(self, "_wvf_first_warn", True):
+                    self._wvf_first_warn = False
+                    print(
+                        "[ov_talker_runtime] generate_waveform_from_codes: "
+                        "vocoder IR failed; falling back to PyTorch. "
+                        "Subsequent calls will keep using PyTorch without logging.",
+                        flush=True,
+                    )
         # PyTorch fallback.
         st = getattr(self._talker, "speech_tokenizer", None)
         if st is not None:

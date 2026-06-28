@@ -164,8 +164,8 @@ class OpenVinoVocoderRuntime:
           - raw codes: a [frames, Q] tensor or numpy array (for direct calls).
 
         Returns:
-            For list-of-dict input: list of 1-D float32 waveforms (one per item).
-            For raw input: single 1-D float32 waveform.
+            For list-of-dict input: list of 1-D float32 waveforms as torch tensors (one per item).
+            For raw input: single 1-D float32 waveform as torch tensor.
         Raises:
             RuntimeError on failure so caller can fall back.
         """
@@ -178,11 +178,15 @@ class OpenVinoVocoderRuntime:
                 results = []
                 for item in inputs:
                     c = item["audio_codes"]
-                    results.append(self._decode_codes_tensor(c))
+                    wav = self._decode_codes_tensor(c)
+                    results.append(
+                        torch.from_numpy(wav) if isinstance(wav, np.ndarray) else wav
+                    )
                 return results
 
         # Fallback: treat inputs as raw codes tensor/array.
-        return self._decode_codes_tensor(inputs)
+        wav = self._decode_codes_tensor(inputs)
+        return torch.from_numpy(wav) if isinstance(wav, np.ndarray) else wav
 
     def _decode_codes_tensor(self, codes):
         """Core decode path for a single [frames, Q] codes tensor/array."""
@@ -192,6 +196,7 @@ class OpenVinoVocoderRuntime:
         if isinstance(codes, torch.Tensor):
             codes = codes.detach().cpu().numpy()
         codes = np.asarray(codes, dtype=np.int64)
+
 
         if codes.ndim == 2:
             frames, q = codes.shape
@@ -213,9 +218,10 @@ class OpenVinoVocoderRuntime:
         left_context = 25       # previous frames for continuity
         ir_input_frames = chunk_size + left_context  # 325
 
-        # If input fits in one chunk, pad and infer directly.
+        # If input fits in one chunk, pad and infer directly, using left-context
+        # warmup to match multi-chunk behavior.
         if frames <= chunk_size:
-            return self._single_chunk(codes, ir_input_frames)
+            return self._single_chunk(codes, chunk_size, left_context)
 
         # Longer: chunk with left context overlap, concatenate waveforms.
         chunks = []
@@ -247,25 +253,37 @@ class OpenVinoVocoderRuntime:
 
         return np.concatenate(chunks, axis=0).astype(np.float32)
 
-    def _single_chunk(self, codes, ir_input_frames):
-        """Handle frames <= chunk_size with right-padding."""
+    def _single_chunk(self, codes, chunk_size, left_context):
+        """Handle frames <= chunk_size with left-context warmup and right-padding.
+
+        Mirrors the first chunk of the multi-chunk path:
+          - prepend left_context=25 zero frames as warmup,
+          - pad chunk to 300 frames,
+          - infer,
+          - skip the left_context output, keep only the real frames' output.
+        """
         frames = codes.shape[0]
-        if frames >= ir_input_frames:
-            # Shouldn't happen (handled by caller), but be safe.
-            codes = codes[:ir_input_frames]
+        q = codes.shape[1]
+
+        # Prepend zero left-context to warm up the decoder (matches multi-chunk behavior).
+        left_pad = np.zeros((int(left_context), int(q)), dtype=np.int64)
+        ctx_and_codes = np.concatenate([left_pad, codes], axis=0)
+
+        # Pad chunk to 300 frames (so total length is 325 including left_context).
+        remaining = chunk_size - frames
+        if remaining > 0:
+            right_pad = np.zeros((int(remaining), int(q)), dtype=np.int64)
+            combined = np.concatenate([ctx_and_codes, right_pad], axis=0)
         else:
-            pad = np.zeros(
-                (int(ir_input_frames - frames), int(codes.shape[1])),
-                dtype=np.int64,
-            )
-            codes = np.concatenate([codes, pad], axis=0)
+            combined = ctx_and_codes
 
-        wav = self._run_ir(codes)
+        wav = self._run_ir(combined)
 
-        # Crop to the original frame count.
-        expected_samples = int(frames * self._total_upsample)
-        if wav.size > expected_samples:
-            wav = wav[:expected_samples]
+        # Skip left-context output; keep only samples for the real frames.
+        skip_ctx = int(left_context * self._total_upsample)
+        chunk_samples = int(frames * self._total_upsample)
+        wav = wav[skip_ctx : skip_ctx + chunk_samples]
+
         return wav.astype(np.float32)
 
     def _run_ir(self, codes_2d):

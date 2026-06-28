@@ -28,19 +28,17 @@ def get_ov_config() -> dict[str, object]:
         "KV_CACHE_PRECISION": kv_cache_precision,
     }
 
-    # Vocoder runtime config.
+    # Vocoder runtime config (FP32-only; INT8 vocoder rejected).
     vocoder_enabled = os.getenv("OPENVINO_VOCODER_ENABLED", "0").strip() == "1"
     vocoder_dir = (os.getenv("OPENVINO_VOCODER_DIR") or "").strip() or None
     vocoder_device = (os.getenv("OPENVINO_VOCODER_DEVICE", "CPU") or "CPU").strip()
-    vocoder_compression = (
-        os.getenv("OPENVINO_VOCODER_COMPRESSION", "fp32").strip().lower() or "fp32"
-    )
+    # OPENVINO_VOCODER_COMPRESSION is kept for metadata; runtime only supports FP32.
+    _ = os.getenv("OPENVINO_VOCODER_COMPRESSION", "fp32").strip().lower()
 
     cfg["vocoder"] = {
         "enabled": vocoder_enabled,
         "model_path": Path(vocoder_dir) if vocoder_dir else None,
         "device": vocoder_device,
-        "compression": vocoder_compression,
         "config": {
             "PERFORMANCE_HINT": "LATENCY",
             "NUM_STREAMS": "1",
