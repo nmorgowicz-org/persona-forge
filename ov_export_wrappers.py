@@ -47,6 +47,32 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 from transformers.cache_utils import DynamicCache
+from transformers.cache_utils import DynamicLayer
+
+
+class _OVDynamicLayer(DynamicLayer):
+    """DynamicLayer whose lazy_initialization starts with a rank-4 zero-length tensor.
+
+    The default implementation uses `torch.tensor([])` (shape [0], rank 1).  PyTorch
+    allows `torch.cat([rank-1-empty, rank-4-keys], dim=-2)` as a special case, but
+    OpenVINO's converter validates axis bounds against each input's rank independently
+    and rejects axis -2 for a rank-1 tensor (valid range: [-1, 0]).  Slicing to
+    `[..., :0, :]` gives a rank-4 empty tensor so the cat is always rank-safe.
+    """
+
+    def lazy_initialization(self, key_states: torch.Tensor) -> None:
+        self.dtype = key_states.dtype
+        self.device = key_states.device
+        empty = key_states[..., :0, :]   # [batch, kv_heads, 0, head_dim] — rank 4
+        self.keys = empty
+        self.values = empty
+        self.is_initialized = True
+
+
+class _OVDynamicCache(DynamicCache):
+    """DynamicCache that uses _OVDynamicLayer so every aten::cat in the trace is rank-safe."""
+
+    layer_class_to_replicate = _OVDynamicLayer
 
 
 class CoreCacheWrapper(nn.Module):
@@ -59,7 +85,7 @@ class CoreCacheWrapper(nn.Module):
 
     def _build_cache(self, past_kv: tuple[torch.Tensor, ...]) -> DynamicCache:
         if not past_kv:
-            return DynamicCache()
+            return _OVDynamicCache()
         if len(past_kv) != 2 * self.num_layers:
             raise ValueError(
                 f"expected {2 * self.num_layers} past K/V tensors, got {len(past_kv)}"
@@ -67,7 +93,7 @@ class CoreCacheWrapper(nn.Module):
         legacy = tuple(
             (past_kv[2 * i], past_kv[2 * i + 1]) for i in range(self.num_layers)
         )
-        return DynamicCache.from_legacy_cache(legacy)
+        return _OVDynamicCache.from_legacy_cache(legacy)
 
     @staticmethod
     def _flatten_present(cache: DynamicCache) -> list[torch.Tensor]:
