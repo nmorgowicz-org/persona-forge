@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.5.4...qwen3-tts-openvino-v0.6.0) (2026-06-28)
+
+
+### Features
+
+* **export:** relax provenance fields to best-effort non-blocking defaults ([e9d9943](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/e9d9943fcdaed612d6997633be2b6f017b1dabc4))
+* **runtime:** add M4 OpenVINO talker runtime with explicit K/V cache, persistent InferRequests ([e9d9943](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/e9d9943fcdaed612d6997633be2b6f017b1dabc4))
+* **test:** add generation-level parity harness (code agreement, waveform SNR, latency/RTF) ([e9d9943](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/e9d9943fcdaed612d6997633be2b6f017b1dabc4))
+
 ## [0.5.4](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.5.3...qwen3-tts-openvino-v0.5.4) (2026-06-28)
 
 
