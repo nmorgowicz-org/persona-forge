@@ -121,10 +121,13 @@ compose.example.yml                validated runtime and download-tool Compose e
 SECURITY.md                        private vulnerability-reporting policy
 requirements.txt                   base service dependencies
 requirements-ov-runtime.txt        OpenVINO runtime dependency
-requirements-ov-export.txt         Optimum Intel and NNCF export dependencies
+requirements-ov-export.txt         NNCF export dependency (no Optimum Intel)
 requirements-dev.txt               lightweight repository validation dependencies
 scripts/validate_repo.py           model-free repository checks
 scripts/download_model.py          explicit persistent-cache pre-download command
+bench_common.py                    shared Milestone 0 benchmark/profile helpers
+benchmark_tts.py                   Milestone 0 latency/RTF/memory benchmark
+profile_tts.py                     Milestone 0 component profiler (main vs predictor split)
 tests/                              model-free unit tests
 docs/OPENVINO_IMPLEMENTATION.md     architecture and implementation contract
 AGENTS.md                           agent rules, tests, and troubleshooting
@@ -140,7 +143,8 @@ The Dockerfile has two Linux AMD64 targets:
 
 - `runtime`: service dependencies, CPU-only Torch, Qwen3-TTS, OpenVINO Runtime, and ONNX
   Runtime.
-- `exporter`: the runtime image plus Optimum Intel and NNCF conversion dependencies.
+- `exporter`: the runtime image plus NNCF conversion dependencies (no Optimum Intel; export
+  uses `openvino.convert_model` + `nncf.compress_weights` directly).
 
 Trusted `main` and tag builds publish private GHCR images:
 

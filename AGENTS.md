@@ -73,8 +73,14 @@ validating their presence.
 
 ## Dependency Rules
 
-- Pin the OpenVINO stack because OpenVINO, Optimum Intel, NNCF, Transformers, and Python
-  compatibility move together.
+- Pin the OpenVINO stack because OpenVINO, NNCF, Transformers, and Python compatibility move
+  together. Optimum Intel is intentionally not a dependency: the custom talker has no
+  registered exporter, so export uses `openvino.convert_model` + `nncf.compress_weights`
+  directly, and avoiding Optimum keeps the Transformers pin owned solely by `qwen-tts`.
+- Do not upgrade `transformers` independently. `qwen-tts==0.1.1` hard-pins
+  `transformers==4.57.3`, and the OpenVINO export wrappers depend on that exact
+  `DynamicCache` (`to_legacy_cache`/`from_legacy_cache`) and `generate` API. Bump it only
+  when `qwen-tts` itself does, and re-verify the export wrappers and parity gate.
 - Install CPU-only Torch before `qwen-tts` so pip does not pull CUDA libraries.
 - Pin Torch and Torchaudio independently. The validated Python 3.13 CPU pair is currently
   `torch==2.12.1+cpu` with `torchaudio==2.11.0+cpu`.
@@ -163,7 +169,7 @@ Synthetic fixtures must be deterministic and small enough for `arc-general`.
 Run on `arc-general-docker` without model weights:
 
 - build both `runtime` and `exporter` targets for Linux AMD64
-- import Torch, Torchaudio, Qwen3-TTS, OpenVINO, Optimum Intel, and NNCF as appropriate
+- import Torch, Torchaudio, Qwen3-TTS, OpenVINO, and NNCF as appropriate
 - assert Torch reports a CPU build and does not require CUDA shared libraries
 - validate executable entrypoints and dependency metadata
 - validate `compose.example.yml`, the image health check, both model presets, the downloader
@@ -207,11 +213,13 @@ results with image digest, model revision, IR metadata hash, and runtime configu
 - Compare with the versions already importing successfully on `dockermisc1`.
 - After changing a pin, rebuild and smoke-test both Docker targets.
 
-### Optimum does not recognize the model
+### Why Optimum Intel is not used
 
-`qwen3_tts_talker` is a custom architecture. Do not force it through a standard
-`text-generation-with-past` exporter. Use tensor-only wrapper modules with
-`openvino.convert_model()` as described in the implementation plan.
+`qwen3_tts_talker` is a custom architecture with no exporter registered in Optimum Intel's
+`TasksManager`, so `optimum-cli export openvino` and `OVModelFor*.from_pretrained(export=True)`
+fail with a "custom or unsupported architecture" error. Do not add Optimum Intel to make this
+work. Use tensor-only wrapper modules with `openvino.convert_model()`, then
+`nncf.compress_weights()`, as described in the implementation plan.
 
 ### Export expects `input_ids`
 
@@ -247,8 +255,14 @@ milestone uses one dynamic stateful model per transformer core.
 ### Hugging Face generation code rejects the cache/output object
 
 Do not return `None` or a cosmetic `SimpleNamespace` where Transformers expects a real cache
-contract. Prefer the custom `talker.generate()` integration seam and keep OpenVINO cache state
-inside the dedicated runtime.
+contract. The integration seam is `self.talker.generate(...)` on
+`Qwen3TTSForConditionalGeneration` (reached as `wrapped.model.talker.generate(...)`). Note
+that this is the *stock* `GenerationMixin.generate`, not a custom method: the per-frame
+code-predictor loop lives inside the talker's custom `forward`, and the outer model consumes
+`talker_result.hidden_states` (codes from `hid[-1]`, hidden state from `hid[0][-1]`) with
+`output_hidden_states=True` and `return_dict_in_generate=True`. The OpenVINO replacement must
+reproduce that sampling loop, the in-`forward` predictor invocation, and that exact return
+structure, keeping OpenVINO cache state inside the dedicated runtime.
 
 ### OpenVINO is loaded but RAM increases
 

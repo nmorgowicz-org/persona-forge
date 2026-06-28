@@ -14,16 +14,58 @@ The production backend will use:
 
 - PyTorch for prompt construction, embedding lookups, sampling, and lightweight glue.
 - OpenVINO for both autoregressive transformer cores.
-- ONNX Runtime for the existing speech tokenizer and waveform decoder.
+- A decision (Milestone 0 finding) for the waveform decoder: it is **PyTorch, not ONNX
+  Runtime** on the live install — `speech_tokenizer.decode` runs `Qwen3TTSTokenizerV2Decoder
+  .chunked_decode`, a 114M-parameter conv/GAN vocoder, in a single non-iterative forward. At
+  ~29% of end-to-end it is a strong OpenVINO/INT8 conversion candidate (no KV cache, no loop),
+  and leaving it in PyTorch caps the achievable speedup. See "Milestone 0".
 
 The optimization target is at least a 2x reduction in warm end-to-end latency without an
 audible quality regression. Treat 7-14 seconds for a short utterance as an investigation
 target, not a release guarantee. The measured real-time factor, latency distribution, and
 peak memory determine whether the backend ships.
 
-[IRIS NOTE] The 2x claim is reasonable as a target on 0.6B but optimistic for 1.7B and long
-prompts on this CPU (no AVX-512, 8 vCPUs, noisy host). Confirm with frontier model:
-adjust to model-size-specific targets or add conditional language in "Release Gates."
+Targets are model-size-specific. 2x warm-latency reduction is a reasonable goal for 0.6B.
+For 1.7B on this CPU (no AVX-512, 8 vCPUs, noisy host) it is optimistic; treat 1.5x as
+the acceptance floor and validate per "Release Gates." The code predictor (15 sequential
+forward passes per audio frame) is the dominant cost *within the transformer loop*: the
+measured Milestone 0 baseline (0.6B, FP32, sampling — see "Milestone 0") puts it at ~69%
+of main+predictor time, confirming the ~70% external figure when scoped that way. It is
+therefore the highest-value transformer target, not a co-equal of the main talker.
+
+Two findings from that baseline reshape the end-to-end picture and must be carried forward:
+
+- The `speech_tokenizer.decode` (code -> waveform) is **~29% of end-to-end wall time** in a
+  single call (8.1 s of a 27.8 s run). Accelerating only the two transformer cores leaves
+  this untouched and caps the achievable speedup; the tokenizer/vocoder decode is now a
+  first-class profiling and optimization target, not glue. Profiled: it is **PyTorch**
+  (`Qwen3TTSTokenizerV2Decoder.chunked_decode`, 114M params, single non-iterative forward),
+  not ONNX Runtime — so it is a clean OpenVINO/INT8 conversion candidate, not a fixed cost.
+- Greedy decoding (`do_sample=False`) does **not** terminate on this model — it runs to
+  `max_new_tokens` instead of emitting EOS (a short sentence ran past 575 frames / 46 s of
+  audio before being stopped). Realistic latency/RTF must be measured under production
+  sampling. Parity tests, which need determinism, must therefore compare a *bounded* number
+  of decode steps (prefill + N steps), never a full greedy utterance to EOS.
+
+## Implementation Status
+
+Bootstrap is complete; no optimization milestone has started yet. In place today:
+
+- PyTorch-only worker (`app_worker.py`) serving `/infer` and `/health`, with the
+  single-worker serialized executor and signal-forwarding supervisor (`serve.py`).
+- Model selection and HF authentication helpers (`model_config.py`).
+- Split dependency sets (`requirements.txt`, `requirements-ov-runtime.txt`,
+  `requirements-ov-export.txt`) and `runtime`/`exporter` Docker targets.
+- Model-free CI validation (`scripts/validate_repo.py`) and one-shot download tool.
+- Milestone 0 harness (`bench_common.py`, `benchmark_tts.py`, `profile_tts.py`) with a
+  first measured baseline captured under "Milestone 0" (0.6B FP32, sampling, RTF ~6.6).
+- Milestone 2 export scaffold (`ov_export_wrappers.py`, `export_openvino.py`) — structure
+  and verified core/cache contract only; NOT validated (no parity gate, no trusted IR yet).
+
+Not yet implemented: the FP32 parity gate and dynamic-axis handling for the export, INT8
+compression validation, the OpenVINO generation runtime (`ov_talker_runtime.py`), and the
+`TTS_BACKEND=openvino` worker path with its `/health` metadata. The OpenVINO quantization
+command described below is not functional until Milestones 2 and 3 land.
 
 ## Validated Deployment Snapshot
 
@@ -64,23 +106,36 @@ The actual call path is:
 
 ```text
 Qwen3TTSModel.generate_voice_clone()
-  -> Qwen3TTSForConditionalGeneration.generate()
+  -> Qwen3TTSForConditionalGeneration.generate()   # custom; builds all embeddings
        -> construct text, speaker, reference, and codec embeddings in PyTorch
-       -> Qwen3TTSTalkerForConditionalGeneration.generate()
-            -> main talker prefill
-            -> for each audio frame:
-                 -> code_predictor.generate(max_new_tokens=15)
-                 -> assemble the 16-codebook frame embedding
-                 -> main talker decode
-       -> speech_tokenizer.decode() in ONNX Runtime
+       -> self.talker.generate(inputs_embeds=..., attention_mask=..., **subtalker_kwargs)
+            # NOTE: this is STOCK transformers GenerationMixin.generate, not a custom method
+            -> main talker prefill, then per-frame decode driven by the HF sampling loop
+            -> talker.forward (custom) runs the code predictor for codebooks 2..16 inline
+       -> consume talker_result.hidden_states: codes = hid[-1], hidden = hid[0][-1]
+       -> speech_tokenizer.decode() -> Qwen3TTSTokenizerV2Decoder.chunked_decode (PyTorch, ~29%)
   -> waveform
 ```
 
-The stable integration seam is `wrapped.model.talker.generate(...)`. The outer Qwen3-TTS
-method already prepares `inputs_embeds`, `attention_mask`, `trailing_text_hidden`, and
-`tts_pad_embed`, then consumes the generated codebooks and hidden states. Implement an
-OpenVINO-backed replacement for this generation method while retaining the original talker
-object, its embeddings, projections, configuration, and codebook heads.
+The integration seam is `self.talker.generate(...)` on `Qwen3TTSForConditionalGeneration`
+(reached as `wrapped.model.talker.generate(...)`). Two facts verified against
+`qwen-tts==0.1.1` that the Milestone 4 implementer must rely on:
+
+- `talker.generate` is **not** a custom method — it is the stock transformers
+  `GenerationMixin.generate`. The custom nested schedule (predict first codebook, then run
+  the 5-layer code predictor for codebooks 2..16, assemble the 16-codebook frame, decode the
+  next main step) lives inside the talker's custom `forward`, threaded via the `subtalker_*`
+  sampling kwargs. So the OpenVINO replacement must reproduce both the HF sampling loop *and*
+  the in-`forward` code-predictor invocation; there is no single custom generate to mirror.
+- The outer model calls the talker with `output_hidden_states=True` and
+  `return_dict_in_generate=True`, then reads `talker_result.hidden_states`, taking the
+  generated codes from `hid[-1]` and the main hidden state from `hid[0][-1]`. The replacement
+  must return this exact structure.
+
+The outer method already prepares `inputs_embeds`, `attention_mask`, `trailing_text_hidden`,
+and `tts_pad_embed`. Implement an OpenVINO-backed replacement for the talker generation while
+retaining the original talker object, its embeddings, projections, configuration, and
+codebook heads.
 
 Source reference: [Qwen3-TTS model implementation](https://github.com/QwenLM/Qwen3-TTS/blob/main/qwen_tts/core/models/modeling_qwen3_tts.py).
 
@@ -130,8 +185,8 @@ size does not certify the other.
 
 ## Dependency Strategy
 
-Split runtime and export dependencies. The production image does not need NNCF or Optimum
-Intel after the IR has been generated:
+Split runtime and export dependencies. The production image does not need NNCF after the
+IR has been generated:
 
 ```text
 # requirements-ov-runtime.txt
@@ -139,17 +194,38 @@ openvino==2026.2.1
 
 # requirements-ov-export.txt
 -r requirements-ov-runtime.txt
-optimum-intel[openvino]==2.0.0
 nncf==3.2.0
 ```
 
 These versions were current on 2026-06-27 and support Python 3.13 on x86-64 Linux. Re-run
 the compatibility smoke test before changing any pin. Do not use loose lower bounds for
-this integration; OpenVINO, Optimum Intel, NNCF, and Transformers evolve together.
+this integration; OpenVINO, NNCF, and Transformers evolve together.
 
-Optimum Intel does not provide a registered `qwen3_tts_talker` exporter. Use native
-`openvino.convert_model()` with purpose-built wrapper modules. `export_from_model()` remains
-useful only if a complete custom export configuration is supplied.
+### Export library: `openvino` + `nncf` only, no Optimum Intel
+
+The export path uses OpenVINO and NNCF directly. Optimum Intel is intentionally **not** a
+dependency. The reasoning, which a future implementation must not silently reverse:
+
+- The talker is a custom architecture. Optimum Intel exports models through architecture
+  configs registered in its `TasksManager`; there is no registered `qwen3_tts_talker`
+  exporter, so `optimum-cli export openvino` and `OVModelFor*.from_pretrained(export=True)`
+  fail for this model with a "custom or unsupported architecture" error.
+- Both APIs the plan actually needs are standalone and require neither Optimum nor a
+  registered config:
+  - `openvino.convert_model(wrapper, example_input=...)` traces a plain `torch.nn.Module`
+    (the per-core wrappers from Milestone 2) straight to an `openvino.Model`.
+  - `nncf.compress_weights(ov_model, mode=nncf.CompressWeightsMode.INT8_ASYM)` quantizes
+    that `openvino.Model`. Optimum Intel is only a convenience wrapper over this same NNCF
+    call, so it adds nothing for custom modules.
+- Avoiding Optimum Intel also removes a transitive constraint: each Optimum Intel release
+  pins a compatible Transformers range, which can collide with the exact Transformers
+  version `qwen-tts==0.1.1` requires. Depending only on `openvino` + `nncf` keeps the
+  Transformers pin owned solely by `qwen-tts`.
+
+The only scenario that would justify Optimum Intel is reusing its `export_from_model()`
+plumbing, and that still requires writing a complete `custom_export_configs` entry for the
+talker — strictly more work than the custom-wrapper + `convert_model()` path above. Do not
+add it for that reason without a concrete justification recorded here.
 
 The current PyTorch installation includes CUDA libraries on a CPU-only VM. In the image
 cleanup milestone, install the matching CPU-only PyTorch wheel before `qwen-tts` to reduce
@@ -161,11 +237,13 @@ Pin Torch and Torchaudio independently. The Python 3.13 CPU wheel index currentl
 version pair is already running successfully in the existing service. Do not assume both
 packages publish identical version numbers.
 
-[IRIS NOTE] The Dockerfile's sed-based patch to override ONNX Runtime's intra_op_num_threads
-is fragile across qwen-tts releases. Prefer:
-- relying on ORT_INTRA_OP_NUM_THREADS (already set in app_worker.py), or
-- a small runtime patch in Python rather than in-place sed on a site-packages file.
-Confirm with frontier model.
+The Dockerfile's sed-based patch of ONNX Runtime's `intra_op_num_threads` in
+`speech_vq.py` is fragile across `qwen-tts` releases (it depends on an exact source line)
+and should be replaced. Because `qwen-tts` sets `intra_op_num_threads` explicitly on the
+`SessionOptions`, that hard-coded value overrides the `ORT_INTRA_OP_NUM_THREADS` environment
+variable, so the env var alone does not fix it. Apply a small runtime monkeypatch in Python
+before the ONNX session is created (or upstream a configurable thread count) instead of
+editing a site-packages file at build time.
 
 ## Build and Artifact Boundaries
 
@@ -177,8 +255,7 @@ Use two Docker targets from the same source revision:
 
 - `runtime`: service code, CPU-only PyTorch, Qwen3-TTS, OpenVINO Runtime, ONNX Runtime, and
   audio dependencies.
-- `exporter`: the runtime dependencies plus Optimum Intel, NNCF, export code, and parity
-  tooling.
+- `exporter`: the runtime dependencies plus NNCF, export code, and parity tooling.
 
 Publish immutable SHA tags to private GHCR, for example:
 
@@ -227,10 +304,9 @@ Milestones 2 and 3 implement `export_openvino.py`.
 
 Relevant current documentation:
 
-- [OpenVINO inference with Optimum Intel](https://docs.openvino.ai/2026/openvino-workflow-generative/inference-with-optimum-intel.html)
+- [Convert a PyTorch model with `openvino.convert_model()`](https://docs.openvino.ai/2026/openvino-workflow/model-preparation/convert-model-pytorch.html)
 - [OpenVINO deployment through `torch.compile`](https://docs.openvino.ai/2026/openvino-workflow/torch-compile.html)
-- [OpenVINO weight compression](https://docs.openvino.ai/2026/openvino-workflow/model-optimization-guide/weight-compression.html)
-- [Optimum Intel OpenVINO export API](https://github.com/huggingface/optimum-intel/blob/main/optimum/exporters/openvino/convert.py)
+- [OpenVINO weight compression (NNCF `compress_weights`)](https://docs.openvino.ai/2026/openvino-workflow/model-optimization-guide/weight-compression.html)
 
 ## Milestone 0: Reproducible Baseline and Profile
 
@@ -268,6 +344,33 @@ Add temporary timers around:
 Also count main-talker steps and code-predictor steps. This establishes where time is spent
 and prevents optimizing only one side of the nested generator.
 
+### Measured baseline (first pass)
+
+0.6B Base, FP32, CPU (dockermisc1, no AVX-512), **production sampling**, 10-word prompt,
+single profiled generation via `profile_tts.py --prompt short`:
+
+| Component             | Time    | Share | Calls | Per call |
+| --------------------- | ------- | ----- | ----- | -------- |
+| `code_predictor`      | 12.66 s | 45.6% | 795   | 15.9 ms  |
+| `speech_tokenizer.decode` | 8.09 s | 29.1% | 1   | 8.09 s   |
+| `main_talker`         | 5.78 s  | 20.8% | 54    | 107 ms   |
+| other / glue          | 1.25 s  | 4.5%  | —     | —        |
+| **end-to-end**        | 27.78 s | —     | —     | RTF 6.55 |
+
+Predictor/main step ratio 14.7 (≈ the 15 codebooks/frame). Predictor is ~69% of the
+transformer loop (main+predictor) — confirms the ~70% assumption. But note the tokenizer
+decode is ~29% of *end-to-end*: a two-core-only backend caps speedup around 3.4x and must
+be paired with tokenizer profiling. Greedy (`do_sample=False`) did not terminate; these
+numbers are sampling-mode and parity must use bounded decode steps (see "Set the right
+warm-latency target").
+
+Warm latency from `benchmark_tts.py --prompts short --iterations 5` (same config, 5 measured
+runs after 1 warm-up): median **28.7 s**, p95 **30.8 s** for ~4.6 s of audio (RTF 6.18);
+**peak RSS 6394 MiB**, swap delta negligible (466 pages in, 0 out). The 6.4 GiB peak against
+the 7 GiB production limit leaves <20% headroom *at FP32 baseline*, before any hybrid backend
+that transiently holds both PyTorch and OpenVINO weights — the thin selective loader / memory
+milestone is load-bearing for the limit, not optional polish.
+
 Before benchmarking, set thread controls before importing Torch, ONNX Runtime, or OpenVINO:
 
 ```python
@@ -282,11 +385,15 @@ torch.set_num_interop_threads(1)
 Benchmark 6 and 8 inference threads. Keep one request in flight; the service already
 serializes inference with a single-worker executor.
 
-[IRIS NOTE] As OpenVINO is added, these thread settings become insufficient:
-PyTorch, OpenVINO, and ONNX Runtime will compete on 8 vCPUs. Introduce an explicit
-thread budget (e.g., OpenVINO 4, PyTorch 4, ORT 2-4), then benchmark splits.
-Frontier model should double-check that these numbers remain safe under concurrent
-workloads and swap pressure.
+Once OpenVINO is added, a single shared thread count is insufficient: PyTorch and OpenVINO
+compete for the same 8 vCPUs (ONNX Runtime too if any encode path uses it). Because the
+stages run sequentially per request — transformer generation, then the one-shot vocoder
+decode — the active stage should get the bulk of the cores. The vocoder decoder is PyTorch
+today (or OpenVINO once converted), not ONNX Runtime; budget threads for whichever engine
+actually runs `chunked_decode`. Start from an explicit per-engine budget (OpenVINO transformer
+cores 6, vocoder decode 6 while it is the only active stage, residual PyTorch glue small) and
+benchmark alternative splits. Set every engine's thread count explicitly rather than
+leaving any at its library default.
 
 ## Milestone 1: FP32 OpenVINO Feasibility Spike
 
@@ -347,12 +454,46 @@ a persistent, versioned output directory such as:
 
 Create small `torch.nn.Module` wrappers around:
 
-- `talker.model` for the 28-layer main transformer.
-- `talker.code_predictor.model` for the 5-layer predictor transformer.
+- `talker.model` for the main transformer.
+- `talker.code_predictor.model` for the predictor transformer.
 
 Each wrapper must accept tensors only and return tensors only. Flatten the per-layer K/V
 cache into named inputs and outputs. Do not pass a Transformers `Cache` object through the
 OpenVINO boundary.
+
+Derive every shape from the loaded config; do not hard-code. Verified attribute paths and
+values for the 0.6B Base checkpoint (`qwen-tts==0.1.1`, transformers 4.57.3):
+
+- Main core: `config.talker_config` → `num_hidden_layers=28`, `hidden_size=1024`,
+  `intermediate_size=3072`, `num_attention_heads=16`, `num_key_value_heads=8` (GQA).
+- Predictor core: `config.talker_config.code_predictor_config` → `num_hidden_layers=5`,
+  `hidden_size=1024`, `intermediate_size=3072`, `num_key_value_heads=8`.
+- `config.talker_config.num_code_groups=16` (1 main codebook + 15 predictor codebooks).
+
+The 1.7B checkpoint shares this layout but with larger `hidden_size`/`intermediate_size`;
+read it from its own config rather than scaling these numbers by hand.
+
+Verified core forward and cache contract (qwen-tts==0.1.1 / transformers 4.57.3),
+implemented in `ov_export_wrappers.py`:
+
+- `head_dim=128` for both cores — decoupled from `hidden_size/num_attention_heads`
+  (1024/16=64). Do not assume `head_dim = hidden/heads`. Each per-layer K/V tensor is
+  `[batch, num_key_value_heads=8, seq, head_dim=128]`.
+- Both core forwards accept `inputs_embeds, attention_mask, position_ids, past_key_values,
+  cache_position, use_cache` and return `BaseModelOutputWithPast`. The predictor core
+  additionally accepts `generation_steps`.
+- The cores use a `DynamicCache`, which in transformers 4.57.3 stores `self.layers[i]`
+  (`.keys`/`.values`) — not the older `key_cache`/`value_cache` lists. The wrappers convert
+  flat tensors via `DynamicCache.from_legacy_cache()` / `.to_legacy_cache()` rather than
+  touching internals, so the boundary stays a flat tensor list (`k0, v0, k1, v1, ...`).
+- Pass `cache_position` (and `position_ids`) as **explicit** wrapper inputs. If omitted, the
+  core derives `cache_position` from the cache length, which trace-bakes the decode graph to
+  the example prior length and breaks dynamic decode.
+- The main core expands `position_ids` into a 3-axis mRoPE layout internally. The exact
+  `position_ids`/`cache_position` values the eager generation path supplies at prefill and at
+  each decode step are NOT yet confirmed and are the primary subject of the FP32 parity gate
+  (greedy top-1 token agreement). The predictor's `generation_steps` semantics across the 15
+  codebook steps are likewise parity-gated.
 
 Export two graphs per core:
 
@@ -397,10 +538,13 @@ semantics as PyTorch.
 
 ## INT8 and CPU microarchitecture note
 
-[IRIS NOTE] AVX-512 is not exposed (only AVX2 + AVX-VNNI). INT8 gains may be modest compared
-with plans that assume AVX-512 acceleration. Frontier model should verify that OpenVINO 2026.x
-plus NNCF 3.2.x behavior on AVX2/AVX-VNNI still justifies INT8 for this architecture, and
-whether the dynamic quantization group-size choices (0/32/64) remain appropriate.
+This VM exposes AVX2 + AVX-VNNI but not AVX-512, so do not expect AVX-512-class INT8
+throughput. INT8 weight compression is still justified here: autoregressive decode is
+memory-bandwidth bound, and weight-only INT8 roughly halves weight footprint and per-token
+cache transfer, which is the primary win on this profile. AVX-VNNI accelerates the INT8
+dot products, giving a smaller compute gain on top. Validate empirically rather than
+assuming AVX-512 numbers. Keep `DYNAMIC_QUANTIZATION_GROUP_SIZE=32` as the default and
+benchmark 0 and 64 to confirm the accuracy/latency trade-off on AVX2/AVX-VNNI.
 
 ## Milestone 3: INT8 Weight Compression and Runtime Tuning
 
@@ -519,19 +663,25 @@ Compare stateful FP32-cache and U8-cache output quality before selecting the dep
 setting. The expected benefit is lower per-token cache transfer and allocation overhead;
 measure it rather than assuming it.
 
-[IRIS NOTE] Because stateful OpenVINO for custom graphs is less robust than for known
-architectures, treat stateful as optional (controlled by an env var) rather than mandatory.
-Frontier model should review whether stateful KV-cache is worth the complexity once
-explicit-cache runtime is stable and meeting latency goals.
+Stateful OpenVINO for hand-built custom graphs is less robust than for recognized LLM
+architectures, so this milestone is optional and gated by an environment variable, not a
+prerequisite for shipping. Pursue it only after the explicit-cache runtime is stable and
+meeting latency goals, and only if the measured per-token cache-transfer and allocation
+overhead justifies the added complexity. The explicit-cache runtime remains the supported
+default.
 
 ## 1.7B feasibility note
 
-[IRIS NOTE] The 1.7B checkpoint must be treated as its own experiment. On 8 vCPUs with
-7 GiB container, it will push both memory and latency; consider:
-- (a) looser latency gates (e.g., 1.5x as acceptable),
-- (b) mandatory memory budgeting before enabling INT8.
-Ask a frontier model to propose concrete memory/latency thresholds for 1.7B on this
-profile and whether any of the current release gates are unrealistic at this scale.
+The 1.7B checkpoint is a separate experiment with its own gates; passing 0.6B does not
+certify it. On 8 vCPUs with a 7 GiB container it pushes both memory and latency, so:
+
+- Latency: accept 1.5x warm-latency improvement rather than 2x.
+- Memory: INT8 weight compression is mandatory (FP32 1.7B weights plus the transient
+  PyTorch + OpenVINO double-hold during bring-up will not fit). Budget memory before
+  enabling the backend and keep at least 20% headroom below the 7 GiB limit (target peak
+  RSS under ~5.6 GiB).
+- Validate cold start, warm inference, and a long utterance under the memory limit before
+  declaring 1.7B shippable.
 
 ## Milestone 6: Memory Reduction
 
@@ -628,7 +778,7 @@ convenience but must not be the Compose production reference.
 | File | Action |
 |---|---|
 | `requirements-ov-runtime.txt` | Add the pinned OpenVINO runtime dependency |
-| `requirements-ov-export.txt` | Add pinned Optimum Intel and NNCF export dependencies |
+| `requirements-ov-export.txt` | Add the pinned NNCF export dependency (no Optimum Intel) |
 | `benchmark_tts.py` | Reproducible latency, RTF, memory, and quality benchmark harness |
 | `profile_tts.py` | Per-component timing and generation-step counters |
 | `export_openvino.py` | Implement the documented one-shot export, validation, and compression CLI |
@@ -652,16 +802,17 @@ Ship the OpenVINO backend only when all gates pass:
 2. INT8 quality passes deterministic code checks and listening tests.
 3. No per-token graph compilation or `InferRequest` creation occurs.
 4. Main state resets per utterance and predictor state resets per audio frame.
-5. For each model size released, five-run warm median improves by at least 2x, or the measured
-   result is explicitly accepted based on quality and resource savings.
+5. For each model size released, the five-run warm median improves by at least the
+   model-specific floor (2x for 0.6B, 1.5x for 1.7B), or the measured result is explicitly
+   accepted based on quality and resource savings.
 6. p95 latency, real-time factor, and peak RSS are recorded for short and paragraph prompts.
 7. The container remains below its memory limit without increasing host swap pressure.
 8. `/generate`, `/infer`, `/health`, MP3 output, WAV output, and serialized concurrency pass.
 9. `TTS_BACKEND=pytorch` provides a tested one-setting rollback.
 
-[IRIS NOTE] Gate 5 (2x improvement) should probably be model-size-specific: 2x for 0.6B is
-reasonable; for 1.7B on this hardware, 1.5x might be more honest. Ask frontier model to
-clarify thresholds and whether we should call this out explicitly here.
+Gate 5 is model-size-specific: the warm median must improve by at least 2x for 0.6B and at
+least 1.5x for 1.7B, or the measured result must be explicitly accepted on quality and
+resource-savings grounds.
 
 ## First Commands for the Implementation Session
 
