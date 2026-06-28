@@ -76,16 +76,53 @@ In place today:
 - Milestone 1.5 vocoder export: `VocoderDecoderWrapper`, `vocoder_dims()`, `--vocoder-only`
   flag, `test_vocoder_parity.py` (with SNR/p99 metrics and SNR gate), `benchmark_vocoder.py`.
   FP32 IR passes SNR gate; INT8 rejected (see above). Runtime integration pending.
-- Milestone 2 export scaffold (`ov_export_wrappers.py`, `export_openvino.py`) — structure
-  and verified core/cache contract only; NOT validated (no parity gate, no trusted IR yet).
+- Milestone 2 transformer core export: COMPLETE (2026-06-28)
 
-Not yet implemented: the FP32 parity gate and dynamic-axis handling for the transformer core
-export, INT8 compression validation, the OpenVINO generation runtime (`ov_talker_runtime.py`),
-and the `TTS_BACKEND=openvino` worker path with its `/health` metadata.
+**Milestone 2 — Transformer core export and FP32 parity gate: COMPLETE (2026-06-28)**
+
+Four IR graphs exported and parity-gated against PyTorch eager on dockermisc1:
+
+- `main_prefill.xml`, `main_decode.xml` (28-layer, 0.6B main talker)
+- `predictor_prefill.xml`, `predictor_decode.xml` (5-layer code predictor)
+
+FP32 parity (OV 2026.2.1, 6 threads, seed 20260628): SNR **72–91 dB** across all 8
+scopes (prefill + 3 decode steps for each core). Gate: SNR ≥ 60 dB. All pass.
+IR artifacts: `qwen-tts-0.1.1_0.6b_main_ov-2026.2.1/` on dockermisc1.
+Parity report: `transformer_parity.json`.
+
+Two non-obvious export bugs encountered and fixed during this milestone:
+
+1. **`create_causal_mask` bakes static `kv_length` into the decode IR**: The model's
+   `create_causal_mask` calls `past_key_values.get_mask_sizes()`, which returns Python ints
+   at trace time. These become static constants in the OV IR, locking the decode mask to the
+   example prior length. Fix: `CoreCacheWrapper._build_causal_mask` constructs a 4D additive
+   mask from tensor ops and passes it as `attention_mask`. This triggers the
+   `_preprocess_mask_arguments` early-exit (transformers 4.57.3: `if isinstance(m, Tensor)
+   and len(m.shape) == 4: return True, m, ...`), bypassing `get_mask_sizes()` entirely.
+
+2. **`DynamicLayer.lazy_initialization` creates a rank-1 empty tensor that OV rejects**:
+   The default `lazy_initialization` seeds `self.keys = torch.tensor([])` (shape `[0]`,
+   rank 1). PyTorch allows `torch.cat([rank-1-empty, rank-4-keys], dim=-2)` as a special
+   case; OV's converter validates axis bounds per input rank and rejects axis -2 for rank 1.
+   A subclass approach (`layer_class_to_replicate`) failed because `DynamicCache.__init__()`
+   calls `Cache.__init__(layer_class_to_replicate=DynamicLayer)`, setting an *instance*
+   attribute that overrides any class attribute on the subclass. Fix: monkey-patch
+   `DynamicLayer.lazy_initialization` at module import time to seed with
+   `key_states[..., :0, :]` — a rank-4 `[batch, kv_heads, 0, head_dim]` tensor.
+
+**Caveat**: the parity gate uses `position_ids = arange(seq)` and `cache_position = arange(seq)`
+as a scaffold. The main core uses 3-axis mRoPE expansion (`position_ids.expand(3, ...)`);
+exact values from the live `talker.generate` path have not been traced and compared.
+The parity gate proves IR correctness and dynamic-shape safety; end-to-end code-sequence
+agreement requires M4 integration and a generation-level comparison.
+
+Not yet implemented: INT8 compression validation, the OpenVINO generation runtime
+(`ov_talker_runtime.py`), and the `TTS_BACKEND=openvino` worker path with its `/health`
+metadata.
 
 ## Validated Deployment Snapshot
 
-Validated on `dockermisc1` on 2026-06-27:
+Validated on `dockermisc1` on 2026-06-28 (M2 complete):
 
 - Host kernel: Linux `7.0.0-27-generic` under KVM.
 - CPU exposed to the VM: 8 single-threaded vCPUs from an Intel Core i7-1360P.
@@ -99,6 +136,10 @@ Validated on `dockermisc1` on 2026-06-27:
 - Service source: `/home/nick/docker/qwen3-tts`.
 - Compose file: `/home/nick/docker/docker-compose.yml`.
 - Model cache: `/var/data/autopirate/qwen3-tts/model`.
+- OV IR artifacts: `/var/data/autopirate/qwen3-tts/openvino/qwen-tts-0.1.1_0.6b_main_ov-2026.2.1/`
+  (main transformer cores, FP32, M2 validated). Vocoder IR:
+  `qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1_vocoder/` (M1.5 validated).
+- Exporter image: `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-v0.4.4`
 
 The host runs many other containers. Record host load, CPU throttling, available RAM, and
 swap activity beside every benchmark so contention is not mistaken for a model regression.
@@ -539,7 +580,7 @@ Baseline: `speech_tokenizer.decode` = ~8.1 s per utterance (29% of 27.8 s end-to
 Achieved: **1.27× FP32 speedup** (PyTorch 15.6s → FP32 IR 12.3s, warm 6-thread, seq=325).
 The 1.5× INT8 target is withdrawn — INT8 is quality-rejected. FP32 result accepted.
 
-## Milestone 2: Export the Two Transformer Cores
+## Milestone 2: Export the Two Transformer Cores ✓ COMPLETE
 
 Create `export_openvino.py`. CI places this script in the exporter image. After that image is
 published, run it on `dockermisc1` against the persistent model cache and write the result to

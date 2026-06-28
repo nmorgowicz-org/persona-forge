@@ -42,7 +42,29 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", required=True, help="parent dir for the versioned IR directory")
     parser.add_argument("--compression", choices=COMPRESSION_CHOICES, default="both")
-    parser.add_argument("--validate", action="store_true", help="run the FP32 parity gate before publishing")
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="run the FP32 parity gate before publishing",
+    )
+    parser.add_argument(
+        "--int8-mode",
+        choices=("sym", "asym", "int8_asym", "int8_sym"),
+        default="int8_asym",
+        help="NNCF INT8 quantization mode (default: int8_asym)",
+    )
+    parser.add_argument(
+        "--int8-group-size",
+        type=int,
+        default=32,
+        help="NNCF weight compression group size: 0=per-channel, 32/64=per-group (default: 32)",
+    )
+    parser.add_argument(
+        "--int8-ratio",
+        type=float,
+        default=1.0,
+        help="fraction of weights to quantize (0.0-1.0; default 1.0 = all)",
+    )
     parser.add_argument("--prefill-seq", type=int, default=8, help="example prefill length for tracing")
     parser.add_argument("--decode-prior", type=int, default=4, help="example prior cache length for the decode graph")
     parser.add_argument(
@@ -107,8 +129,24 @@ def _convert(wrapper, example, ov):
     return ov.convert_model(wrapper, example_input=example)
 
 
-def _compress(ov_model, nncf):
-    return nncf.compress_weights(ov_model, mode=nncf.CompressWeightsMode.INT8_ASYM)
+def _compress(ov_model, nncf, *, mode: str = "int8_asym", group_size: int = 32, ratio: float = 1.0):
+    """Compress weights with NNCF.
+
+    mode: NNCF CompressWeightsMode enum name prefix.
+    group_size: 0=per-channel, >0=per-group (32/64).
+    ratio: fraction of weights to quantize.
+    """
+    if mode.lower().startswith("sym"):
+        ov_mode = nncf.CompressWeightsMode.INT8_SYM
+    else:
+        ov_mode = nncf.CompressWeightsMode.INT8_ASYM
+
+    kwargs = {
+        "mode": ov_mode,
+        "group_size": group_size,
+        "ratio": ratio,
+    }
+    return nncf.compress_weights(ov_model, **kwargs)
 
 
 def _source_hash() -> str:
@@ -256,8 +294,21 @@ def run() -> int:
                 if want_fp32:
                     ov.save_model(ov_model, tmp_dir / f"{name}.xml")
                 if want_int8:
-                    print(f"[export] compressing {name} to INT8_ASYM ...", flush=True)
-                    ov.save_model(_compress(ov_model, nncf), tmp_dir / f"{name}_int8.xml")
+                    print(
+                        f"[export] compressing {name} to INT8 "
+                        f"(mode={args.int8_mode}, group_size={args.int8_group_size}) ...",
+                        flush=True,
+                    )
+                    ov.save_model(
+                        _compress(
+                            ov_model,
+                            nncf,
+                            mode=args.int8_mode,
+                            group_size=args.int8_group_size,
+                            ratio=args.int8_ratio,
+                        ),
+                        tmp_dir / f"{name}_int8.xml",
+                    )
 
         if args.validate:
             # The FP32 parity gate belongs here: compare PyTorch core vs compiled IR on
@@ -274,6 +325,15 @@ def run() -> int:
             "source_commit": source_commit,
             "exporter_image_digest": exporter_image_digest,
             "compression": args.compression,
+            "int8_config": (
+                {
+                    "mode": args.int8_mode,
+                    "group_size": args.int8_group_size,
+                    "ratio": args.int8_ratio,
+                }
+                if want_int8
+                else None
+            ),
             "main_dims": main_dims,
             "predictor_dims": pred_dims,
             "vocoder_dims": voc_dims,
