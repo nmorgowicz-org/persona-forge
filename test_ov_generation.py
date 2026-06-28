@@ -43,6 +43,10 @@ from bench_common import (
     swap_delta,
 )
 
+# Qwen3-TTS 12 Hz uses 16 acoustic codebooks per frame; used only to orient captured
+# code tensors (the codebook axis is fixed-size, the frame axis is long/variable).
+NUM_CODEBOOKS = 16
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -107,23 +111,46 @@ def _waveform_snr(reference: np.ndarray, candidate: np.ndarray) -> float:
     return float(20.0 * np.log10(max(signal_rms, 1e-12) / max(error_rms, 1e-12)))
 
 
-def _compare_codes(pt_codes: np.ndarray, ov_codes: np.ndarray) -> dict:
-    """Frame/codebook agreement and first divergence between two [16, frames] code tensors."""
-    pt = np.squeeze(pt_codes)
-    ov = np.squeeze(ov_codes)
-    frames = min(pt.shape[-1], ov.shape[-1])
-    pt, ov = pt[..., :frames], ov[..., :frames]
+def _as_frames_by_codebooks(codes: np.ndarray) -> np.ndarray:
+    """Normalize a captured code tensor to [frames, codebooks].
 
-    frame_equal = np.all(pt == ov, axis=0)  # all 16 codebooks agree at each frame
-    first_codebook_equal = pt[0] == ov[0]
+    The capture point yields [frames, codebooks] (e.g. [255, 16]); some code paths
+    emit the transpose [codebooks, frames]. Orient by the codebook axis, which has the
+    fixed small size NUM_CODEBOOKS while frames is the long, variable axis.
+    """
+    a = np.squeeze(np.asarray(codes))
+    if a.ndim == 1:
+        a = a[:, None]
+    if a.shape[0] == NUM_CODEBOOKS and a.shape[1] != NUM_CODEBOOKS:
+        a = a.T
+    return a
+
+
+def _compare_codes(pt_codes: np.ndarray, ov_codes: np.ndarray) -> dict:
+    """Frame/codebook agreement and first divergence between two code tensors.
+
+    Greedy PyTorch and OpenVINO decodes can terminate at different frame counts when
+    numerical drift flips an argmax (which cascades through autoregression and shifts
+    EOS). Agreement is measured over the common frame prefix; the differing total
+    lengths are reported separately so an early divergence is not hidden.
+    """
+    pt = _as_frames_by_codebooks(pt_codes)
+    ov = _as_frames_by_codebooks(ov_codes)
+    pt_frames, ov_frames = pt.shape[0], ov.shape[0]
+    frames = min(pt_frames, ov_frames)
+    pt, ov = pt[:frames], ov[:frames]
+
+    frame_equal = np.all(pt == ov, axis=1)  # all codebooks agree at each frame
+    first_codebook_equal = pt[:, 0] == ov[:, 0]
     diverged = np.where(~frame_equal)[0]
     first_divergence = int(diverged[0]) if diverged.size else -1
     pre = first_divergence if first_divergence >= 0 else frames
 
     return {
         "frames_compared": int(frames),
-        "pt_frames": int(pt.shape[-1]),
-        "ov_frames": int(ov.shape[-1]),
+        "pt_frames": int(pt_frames),
+        "ov_frames": int(ov_frames),
+        "length_match": bool(pt_frames == ov_frames),
         "frame_agreement": float(np.mean(frame_equal)),
         "first_codebook_agreement": float(np.mean(first_codebook_equal)),
         "first_divergence_frame": first_divergence,
