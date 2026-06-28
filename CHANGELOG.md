@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.6.0...qwen3-tts-openvino-v0.6.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* **ci:** make Dockerfile COPY-line check robust to additional files ([5717ddb](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5717ddb37d5f80398e11ff879a3ed6a882bb3734))
+* **docker:** include ov_runtime_config, ov_talker_runtime, bench_common, test_ov_generation in build ([5717ddb](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5717ddb37d5f80398e11ff879a3ed6a882bb3734))
+* **scripts:** default M4 reference WAV to persistent project-owned path on dockermisc1 ([5717ddb](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5717ddb37d5f80398e11ff879a3ed6a882bb3734))
+
 ## [0.6.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.5.4...qwen3-tts-openvino-v0.6.0) (2026-06-28)
 
 
