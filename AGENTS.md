@@ -14,7 +14,9 @@ implementation contract for this repository.
 
 - `app_api.py` and `app_worker.py` are the working PyTorch service baseline imported from
   `dockermisc1`.
-- The OpenVINO generation runtime and exporter are not implemented yet.
+- The OpenVINO generation runtime and `export_openvino.py` are not implemented yet. The
+  exporter image currently provides dependencies and a working one-shot model downloader,
+  not quantization.
 - CI builds model-free `runtime` and `exporter` Docker targets.
 - Full model export, INT8 compression, parity testing, and performance benchmarking run on
   `dockermisc1`, not on ARC runners.
@@ -45,6 +47,10 @@ Preserve these boundaries:
 - Keep `TTS_BACKEND=pytorch` as an explicit rollback path.
 - Derive tensor shapes from the selected checkpoint and keep IR, metadata, parity results,
   and benchmarks isolated by model repository and revision.
+- Keep `serve.py` as the signal-aware supervisor for both Gunicorn masters. If either master
+  exits, the container must exit; container stop signals must reach both process groups.
+- Return HTTP 503 from public readiness while the worker is loading or unreachable. Do not
+  weaken `/health` to return HTTP 200 for a degraded worker.
 
 ## Model and Secret Safety
 
@@ -111,6 +117,9 @@ For repository-only changes:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python scripts/validate_repo.py
+REF_AUDIO_PATH=./voice/reference.wav \
+REF_TEXT='Configuration validation transcript' \
+docker compose -f compose.example.yml config --quiet
 git diff --check
 ```
 
@@ -157,6 +166,8 @@ Run on `arc-general-docker` without model weights:
 - import Torch, Torchaudio, Qwen3-TTS, OpenVINO, Optimum Intel, and NNCF as appropriate
 - assert Torch reports a CPU build and does not require CUDA shared libraries
 - validate executable entrypoints and dependency metadata
+- validate `compose.example.yml`, the image health check, both model presets, the downloader
+  module, and the signal-aware supervisor entrypoint
 
 ### Tier 3: Model parity tests
 
@@ -278,6 +289,22 @@ the property after conversion to recognized stateful cache graphs.
 - Keep output on the persistent OpenVINO volume so a container exit does not lose validated
   artifacts.
 
+### Exporter image does not quantize
+
+The bootstrap exporter image contains export dependencies but does not make quantization
+functional by itself. `python -m scripts.download_model` is currently supported.
+`python export_openvino.py --output-dir /ov_output --compression both --validate` becomes the
+supported one-shot conversion only when Milestones 2 and 3 implement the script and its
+parity gates. Do not add a placeholder that emits unvalidated IR.
+
+### Container remains up after one Gunicorn service exits
+
+- Confirm the image command is `python serve.py`, not a shell with a background process.
+- Confirm both Gunicorn masters were started in their own process groups.
+- Confirm the supervisor exits after either child exits and forwards stop signals to the
+  remaining group.
+- A public `/health` response must return HTTP 503 while the worker is unavailable.
+
 ### ARC job remains queued
 
 - Confirm the workflow uses the exact `arc-general` or `arc-general-docker` label.
@@ -317,6 +344,8 @@ tests, and target-hardware performance. Passing one category does not imply the 
 - Record host load, available RAM, and swap beside performance results.
 - Do not run a second full model inside the existing 7 GiB production container.
 - On export or deployment failure, restore the previous image or use the PyTorch backend.
+- The service has no built-in authentication or TLS. Keep port 8318 on a trusted network or
+  use an authenticated TLS reverse proxy, and follow `SECURITY.md` for private reports.
 
 ## Commit and Pull Request Conventions
 

@@ -28,7 +28,7 @@ RUN python -m pip install \
 RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/' \
     /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_25hz/vq/speech_vq.py || true
 
-COPY app_api.py app_worker.py model_config.py ./
+COPY app_api.py app_worker.py model_config.py serve.py ./
 COPY scripts/download_model.py scripts/download_model.py
 
 FROM base AS runtime
@@ -37,10 +37,10 @@ RUN python -m pip install -r requirements-ov-runtime.txt
 
 EXPOSE 8318 8319
 
-CMD ["sh", "-c", \
-    "gunicorn app_worker:app -w 1 -k gthread --threads 4 --timeout 300 --bind 0.0.0.0:8319 --preload --log-level info & \
-     sleep 10 && \
-     gunicorn app_api:app -w 1 -k gthread --threads 2 --timeout 300 --bind 0.0.0.0:8318 --log-level info"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10m --retries=3 \
+    CMD curl --fail --silent --show-error http://127.0.0.1:8318/health >/dev/null || exit 1
+
+CMD ["python", "serve.py"]
 
 FROM runtime AS exporter
 

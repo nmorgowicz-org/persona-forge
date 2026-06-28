@@ -5,19 +5,23 @@ on:
     types: [opened, synchronize, reopened, labeled, ready_for_review]
     paths:
       - .github/workflows/image.yml
+      - .dockerignore
       - Dockerfile
-      - app_api.py
-      - app_worker.py
+      - compose.example.yml
+      - "*.py"
       - requirements*.txt
+      - "scripts/**"
   push:
     branches: [main]
     tags: ["v*"]
     paths:
       - .github/workflows/image.yml
+      - .dockerignore
       - Dockerfile
-      - app_api.py
-      - app_worker.py
+      - compose.example.yml
+      - "*.py"
       - requirements*.txt
+      - "scripts/**"
   workflow_dispatch:
 
 env:
@@ -78,6 +82,12 @@ jobs:
             echo EOF
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Validate Compose example
+        env:
+          REF_AUDIO_PATH: ./voice/reference.wav
+          REF_TEXT: Example reference transcript for configuration validation
+        run: docker compose -f compose.example.yml config --quiet
+
       - name: Build and optionally publish ${{ matrix.target }}
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
         with:
@@ -102,10 +112,10 @@ jobs:
           image="${REGISTRY}/${IMAGE_NAME}:${{ matrix.target }}-${GITHUB_SHA}"
           if [[ "${{ matrix.target }}" == "exporter" ]]; then
             docker run --rm --entrypoint python "${image}" -c \
-              'import nncf, openvino, optimum.intel, qwen_tts, torch; print("exporter imports passed")'
+              'import nncf, openvino, optimum.intel, qwen_tts, torch; from model_config import resolve_model_repo; import scripts.download_model; assert resolve_model_repo({"MODEL_SIZE": "0.6B"}).endswith("0.6B-Base"); assert resolve_model_repo({"MODEL_SIZE": "1.7B"}).endswith("1.7B-Base"); print("exporter imports passed")'
           else
             docker run --rm --entrypoint python "${image}" -c \
-              'import openvino, qwen_tts, torch; print("runtime imports passed")'
+              'import openvino, qwen_tts, torch; from model_config import resolve_model_repo; import scripts.download_model; assert resolve_model_repo({"MODEL_SIZE": "0.6B"}).endswith("0.6B-Base"); assert resolve_model_repo({"MODEL_SIZE": "1.7B"}).endswith("1.7B-Base"); print("runtime imports passed")'
           fi
 
   cleanup:

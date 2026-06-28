@@ -1,0 +1,38 @@
+name: qwen3-tts-openvino
+
+x-model-environment: &model-environment
+  MODEL_SIZE: ${MODEL_SIZE:-0.6B}
+  MODEL_REPO: ${MODEL_REPO:-}
+  MODEL_REVISION: ${MODEL_REVISION:-}
+  HF_TOKEN: ${HF_TOKEN:-}
+
+services:
+  qwen3-tts:
+    image: ${QWEN3_TTS_IMAGE:-ghcr.io/nmorgowicz-org/qwen3-tts-openvino:runtime-latest}
+    container_name: qwen3-tts
+    restart: unless-stopped
+    ports:
+      - "${QWEN3_TTS_PORT:-8318}:8318"
+    environment:
+      <<: *model-environment
+      DEVICE: cpu
+      REF_AUDIO: /voice/reference.wav
+      REF_TEXT: ${REF_TEXT:?Set REF_TEXT to the exact transcript of the reference audio}
+      TZ: ${TZ:-America/Detroit}
+    volumes:
+      - ${MODEL_CACHE_PATH:-./data/model}:/root/.cache/huggingface/hub:rw
+      - ${REF_AUDIO_PATH:?Set REF_AUDIO_PATH to the reference WAV file}:/voice/reference.wav:ro
+    mem_limit: ${TTS_MEMORY_LIMIT:-7G}
+    memswap_limit: ${TTS_MEMORY_SWAP_LIMIT:-8G}
+    stop_grace_period: 45s
+
+  # This profile performs the currently supported one-shot model pre-download. It does not
+  # create OpenVINO IR; the quantization CLI lands with implementation milestones 2 and 3.
+  qwen3-tts-download:
+    image: ${QWEN3_TTS_EXPORTER_IMAGE:-ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-latest}
+    profiles: [tools]
+    command: ["python", "-m", "scripts.download_model"]
+    environment:
+      <<: *model-environment
+    volumes:
+      - ${MODEL_CACHE_PATH:-./data/model}:/root/.cache/huggingface/hub:rw

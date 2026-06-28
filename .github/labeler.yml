@@ -10,6 +10,8 @@ docker:
           - .dockerignore
           - "**/docker-compose*.yml"
           - "**/docker-compose*.yaml"
+          - "**/compose*.yml"
+          - "**/compose*.yaml"
 
 openvino:
   - changed-files:

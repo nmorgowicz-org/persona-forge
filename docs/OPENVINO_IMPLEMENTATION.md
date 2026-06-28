@@ -193,6 +193,28 @@ Every PR receives lightweight validation. Apply `ready-to-test` only after that 
 passes and the branch is ready for the expensive container matrix. Commits pushed while the
 label remains present rerun the matrix.
 
+### One-shot exporter CLI contract
+
+The exporter is a disposable tool container, not a long-running service. Milestones 2 and 3
+must implement this stable command:
+
+```bash
+python export_openvino.py \
+  --output-dir /ov_output \
+  --compression both \
+  --validate
+```
+
+`--compression` accepts `fp32`, `int8`, or `both`. Model selection and authentication come
+from `MODEL_SIZE`/`MODEL_REPO`, `MODEL_REVISION`, and optional `HF_TOKEN`/`HF_TOKEN_FILE`.
+The command reuses the standard Hugging Face cache and writes only to `--output-dir`.
+
+Write into a temporary checkpoint-specific directory and atomically publish the final
+directory only after requested export, parity, compression, and metadata checks pass. Exit
+nonzero and leave no apparently valid final artifact on any failure. The exporter dependencies
+exist in the first repository bootstrap, but this quantization command is not functional until
+Milestones 2 and 3 implement `export_openvino.py`.
+
 Relevant current documentation:
 
 - [OpenVINO inference with Optimum Intel](https://docs.openvino.ai/2026/openvino-workflow-generative/inference-with-optimum-intel.html)
@@ -520,6 +542,16 @@ Extend `/health` with:
 - Thread and quantization settings.
 - Whether stateful KV cache is active.
 
+The public API readiness endpoint returns HTTP 200 only after the worker reports ready and
+returns HTTP 503 while the worker is loading or unreachable. The image health check uses this
+endpoint. Keep its long first-start grace period because an empty cache may require a complete
+checkpoint download.
+
+`serve.py` remains PID 1 and supervises both Gunicorn masters. It must forward `SIGTERM` and
+`SIGINT` to both process groups, allow graceful shutdown, and terminate the container if
+either service exits. Do not restore a shell command that backgrounds one Gunicorn process
+without signal forwarding.
+
 Compose additions after the IR exists:
 
 ```yaml
@@ -562,18 +594,18 @@ convenience but must not be the Compose production reference.
 | `requirements-ov-export.txt` | Add pinned Optimum Intel and NNCF export dependencies |
 | `benchmark_tts.py` | Reproducible latency, RTF, memory, and quality benchmark harness |
 | `profile_tts.py` | Per-component timing and generation-step counters |
-| `export_openvino.py` | Export and compress the two transformer cores |
+| `export_openvino.py` | Implement the documented one-shot export, validation, and compression CLI |
 | `ov_export_wrappers.py` | Tensor-only prefill/decode wrappers and cache flattening |
 | `ov_talker_runtime.py` | Nested main-talker/code-predictor generation runtime |
 | `test_ov_parity.py` | FP32 and INT8 tensor/cache/token parity tests |
 | `app_worker.py` | Backend selection, loading, health metadata, and rollback path |
+| `app_api.py` | Preserve API behavior and return HTTP 503 until the worker is ready |
+| `serve.py` | Supervise both Gunicorn masters and forward shutdown signals |
 | `Dockerfile` | Experimental OpenVINO stage and CPU-only PyTorch cleanup |
-| `docker-compose.yml` | Read-only IR mount and OpenVINO environment settings |
+| `compose.example.yml` | Keep runnable runtime/downloader wiring and add the validated IR mount |
 | `.github/workflows/ci.yml` | Lightweight tests on `arc-general` without model download |
 | `.github/workflows/image.yml` | Build and publish runtime/exporter targets on `arc-general-docker` |
 | `scripts/export-on-dockermisc1.sh` | Versioned host-side export and validation command |
-
-`app_api.py` remains unchanged.
 
 ## Release Gates
 
@@ -583,8 +615,8 @@ Ship the OpenVINO backend only when all gates pass:
 2. INT8 quality passes deterministic code checks and listening tests.
 3. No per-token graph compilation or `InferRequest` creation occurs.
 4. Main state resets per utterance and predictor state resets per audio frame.
-5. For each model size released, five-run warm median improves by at least 2x, or the measured result is explicitly
-   accepted based on quality and resource savings.
+5. For each model size released, five-run warm median improves by at least 2x, or the measured
+   result is explicitly accepted based on quality and resource savings.
 6. p95 latency, real-time factor, and peak RSS are recorded for short and paragraph prompts.
 7. The container remains below its memory limit without increasing host swap pressure.
 8. `/generate`, `/infer`, `/health`, MP3 output, WAV output, and serialized concurrency pass.
@@ -600,6 +632,7 @@ cd /home/nick/docker/qwen3-tts
 
 docker exec qwen3-tts python3 - <<'PY'
 import inspect
+import os
 from qwen_tts.core.models.configuration_qwen3_tts import Qwen3TTSConfig
 from qwen_tts.core.models.modeling_qwen3_tts import (
     Qwen3TTSTalkerCodePredictorModel,

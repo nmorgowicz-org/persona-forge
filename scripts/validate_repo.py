@@ -18,6 +18,7 @@ def validate_python() -> None:
         ROOT / "app_api.py",
         ROOT / "app_worker.py",
         ROOT / "model_config.py",
+        ROOT / "serve.py",
         ROOT / "scripts" / "download_model.py",
     )
     for path in paths:
@@ -42,12 +43,35 @@ def validate_repository_metadata() -> None:
     for path in (ROOT / "renovate.json", ROOT / ".github" / "release-please" / "config.json5"):
         json.loads(path.read_text(encoding="utf-8"))
 
+    labeler = yaml.safe_load((ROOT / ".github" / "labeler.yml").read_text(encoding="utf-8"))
+    for label in ("python", "shell", "ci", "github-actions", "documentation", "dependencies", "test"):
+        rules = labeler.get(label)
+        if not rules:
+            raise RuntimeError(f"Labeler rule {label!r} has no changed-file patterns")
+        patterns = rules[0].get("changed-files", [{}])[0].get("any-glob-to-any-file")
+        if not isinstance(patterns, list) or not patterns:
+            raise RuntimeError(f"Labeler rule {label!r} has no glob patterns")
+
+
+def validate_compose_example() -> None:
+    document = yaml.safe_load((ROOT / "compose.example.yml").read_text(encoding="utf-8"))
+    services = document.get("services", {}) if isinstance(document, dict) else {}
+    for service in ("qwen3-tts", "qwen3-tts-download"):
+        if service not in services:
+            raise RuntimeError(f"compose.example.yml is missing service {service!r}")
+
 
 def validate_dockerfile() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     for target in ("runtime", "exporter"):
         if f" AS {target}" not in dockerfile:
             raise RuntimeError(f"Dockerfile target {target!r} is missing")
+    for marker in ('HEALTHCHECK ', 'CMD ["python", "serve.py"]'):
+        if marker not in dockerfile:
+            raise RuntimeError(f"Dockerfile runtime contract is missing {marker!r}")
+
+    if not (ROOT / "SECURITY.md").is_file():
+        raise RuntimeError("SECURITY.md is missing")
 
 
 def validate_artifact_policy() -> None:
@@ -65,6 +89,7 @@ def main() -> None:
     validate_python()
     validate_workflows()
     validate_repository_metadata()
+    validate_compose_example()
     validate_dockerfile()
     validate_artifact_policy()
     print("repository validation passed")

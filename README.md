@@ -40,7 +40,7 @@ images, or target GPU inference.
 
 ## How it works
 
-The container runs two Gunicorn applications:
+The container runs two Gunicorn applications under a small signal-aware supervisor:
 
 ```text
 client / Hermes agent
@@ -65,6 +65,11 @@ MP3 or WAV response
 
 Port `8318` is the public service API. Port `8319` is an internal worker endpoint and normally
 does not need to be published outside the container.
+
+`serve.py` starts both Gunicorn masters, forwards container stop signals to their process
+groups, allows graceful shutdown, and stops the other service if either one exits. The API
+starts immediately; readiness remains unavailable while the worker downloads and loads the
+model.
 
 At startup, the worker:
 
@@ -110,7 +115,10 @@ that does not match its selected checkpoint.
 app_api.py                         public HTTP proxy
 app_worker.py                      model worker and current PyTorch backend
 model_config.py                    model preset and Hugging Face secret resolver
+serve.py                           Gunicorn lifecycle and signal supervisor
 Dockerfile                         runtime and exporter image targets
+compose.example.yml                validated runtime and download-tool Compose example
+SECURITY.md                        private vulnerability-reporting policy
 requirements.txt                   base service dependencies
 requirements-ov-runtime.txt        OpenVINO runtime dependency
 requirements-ov-export.txt         Optimum Intel and NNCF export dependencies
@@ -155,6 +163,24 @@ The images intentionally contain no Hugging Face weights, OpenVINO IR, reference
 credentials.
 
 ## Docker Compose wiring
+
+[`compose.example.yml`](compose.example.yml) is the checked deployment example. Use immutable
+SHA tags in production:
+
+```bash
+export QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:runtime-<git-sha>
+export QWEN3_TTS_EXPORTER_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-<git-sha>
+export MODEL_SIZE=0.6B
+export MODEL_CACHE_PATH=/var/data/qwen3-tts/model
+export REF_AUDIO_PATH=/private/path/reference.wav
+export REF_TEXT='Exact transcript of the reference recording'
+
+docker compose -f compose.example.yml config
+docker compose -f compose.example.yml up -d qwen3-tts
+```
+
+The example deliberately requires `REF_AUDIO_PATH` and `REF_TEXT`; silently using the wrong
+voice transcript would produce a running service with poor output.
 
 The current PyTorch baseline can run from the runtime image with persistent model and voice
 mounts:
@@ -229,6 +255,42 @@ Omit the token settings and token mount for an anonymous download. Change only
 `MODEL_SIZE=1.7B` to download the larger Base model. The future export command will use the
 same selection and authentication variables.
 
+The same download is available through the example's tools profile:
+
+```bash
+docker compose -f compose.example.yml --profile tools run --rm qwen3-tts-download
+```
+
+### One-shot OpenVINO export and quantization
+
+Your understanding is correct for the target workflow: the exporter container is a one-shot
+tool. It reuses the mounted Hugging Face cache, writes checkpoint-specific OpenVINO IR into a
+persistent output mount, runs parity validation, and applies INT8 compression. It does not
+embed weights or generated IR into the image.
+
+The intended command contract is:
+
+```bash
+docker run --rm --init \
+  -e MODEL_SIZE=0.6B \
+  -e MODEL_REVISION=<immutable-hugging-face-revision> \
+  -e HF_TOKEN_FILE=/run/secrets/hf_token \
+  -v /private/path/hf_token:/run/secrets/hf_token:ro \
+  -v /var/data/qwen3-tts/model:/root/.cache/huggingface/hub:rw \
+  -v /var/data/qwen3-tts/openvino:/ov_output:rw \
+  ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-<git-sha> \
+  python export_openvino.py \
+    --output-dir /ov_output \
+    --compression both \
+    --validate
+```
+
+This quantization command is an implementation contract, not current functionality. The
+first PR provides the exporter dependencies and working pre-download command; Milestones 2
+and 3 add `export_openvino.py`, FP32 parity, and INT8 generation. Until then, use only the
+download command above. The completed exporter must exit nonzero without publishing an
+artifact when export, parity, or compression validation fails.
+
 ### Target OpenVINO additions
 
 After the OpenVINO milestones are implemented and the generated IR passes parity checks,
@@ -266,6 +328,7 @@ PyTorch worker.
 | `OMP_NUM_THREADS` | `6` | OpenMP thread limit |
 | `MKL_NUM_THREADS` | `6` | MKL thread limit |
 | `OPENBLAS_NUM_THREADS` | `6` | OpenBLAS thread limit |
+| `SHUTDOWN_TIMEOUT_SECONDS` | `30` | Grace period before the supervisor force-kills child processes |
 
 `REF_TEXT` must match the spoken recording. A mismatched transcript can reduce voice quality
 or destabilize generation.
@@ -293,7 +356,9 @@ Healthy response shape:
 ```
 
 The API returns `status: degraded` when port 8318 is running but the model worker is not yet
-reachable.
+reachable. A degraded response uses HTTP 503, so Docker and orchestrators do not treat the
+container as ready. The image health check allows up to ten minutes for first-start download
+and model initialization, then checks `/health` every 30 seconds.
 
 ### Generate MP3
 
@@ -392,6 +457,8 @@ For implementation constraints, test tiers, VM safety, and diagnostic guidance, 
 
 - Model startup may take several minutes on first download; check worker logs before treating
   a degraded health response as a crash.
+- The supervisor shuts the whole container down if either Gunicorn master exits and forwards
+  `SIGTERM` for graceful worker cleanup.
 - A `502 Worker unreachable` response means the API process cannot reach port 8319.
 - A `504` means the API's 300-second proxy timeout elapsed.
 - The baseline currently uses approximately 4.7 GiB warm on the target VM; retain the 7 GiB
@@ -403,6 +470,10 @@ For implementation constraints, test tiers, VM safety, and diagnostic guidance, 
 
 Detailed cache, parity, INT8, memory, ARC, and GHCR troubleshooting is maintained in
 [AGENTS.md](AGENTS.md).
+
+The HTTP service has no built-in authentication or TLS. Keep it on a trusted Compose network
+or place an authenticated TLS reverse proxy in front of it. Report vulnerabilities according
+to [SECURITY.md](SECURITY.md).
 
 ## License
 

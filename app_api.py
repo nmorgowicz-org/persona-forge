@@ -14,7 +14,16 @@ def health():
         r.raise_for_status()
         return jsonify({"status": "ok", "worker": r.json(), "timestamp": time.time()})
     except Exception:
-        return jsonify({"status": "degraded", "detail": "API up, worker unreachable", "timestamp": time.time()})
+        return (
+            jsonify(
+                {
+                    "status": "degraded",
+                    "detail": "API up, worker unreachable",
+                    "timestamp": time.time(),
+                }
+            ),
+            503,
+        )
 
 
 @app.route("/generate", methods=["POST"])
