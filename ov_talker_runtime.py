@@ -60,10 +60,12 @@ _MAX_SEQ = 4096
 def _to_numpy(tensor, dtype) -> np.ndarray:
     """Detach a torch tensor to a contiguous numpy array of the IR's expected dtype.
 
-    Avoids extra ascontiguousarray when the array is already C-contiguous (avoids one
-    unnecessary alloc + scan for small inputs like position_ids, cache_position).
+    - If already the correct dtype and C-contiguous, returns the array directly.
+    - Otherwise applies minimal conversions (astype, ascontiguousarray) as needed.
     """
     array = tensor.detach().cpu().numpy()
+    if array.dtype == dtype and array.flags["C_CONTIGUOUS"]:
+        return array
     if array.dtype != dtype:
         array = array.astype(dtype, copy=False)
     if not array.flags["C_CONTIGUOUS"]:
@@ -72,9 +74,21 @@ def _to_numpy(tensor, dtype) -> np.ndarray:
 
 
 class _OVCore:
-    """Persistent prefill/decode InferRequests with zero-alloc K/V buffers."""
+    """Persistent prefill/decode InferRequests with optional zero-alloc K/V buffers.
+
+    Buffer-backed mode (OPENVINO_BUFFER_KV=1):
+      - Allocates K/V and output buffers once from IR shapes.
+      - Zero per-step numpy allocations for K/V inputs/outputs.
+      - Uses np.copyto and torch.from_numpy views for cache reconstruction.
+
+    Non-buffered fallback:
+      - Uses DynamicCache round-trip (to_legacy_cache → _to_numpy → from_legacy_cache).
+      - Preserved for parity and as a safe default.
+    """
 
     def __init__(self, compiled_prefill, compiled_decode, num_layers: int, predictor: bool):
+        import os
+
         # One persistent request per graph (Design Constraint #5).
         self._prefill_req = compiled_prefill.create_infer_request()
         self._decode_req = compiled_decode.create_infer_request()
@@ -83,7 +97,10 @@ class _OVCore:
         self._n_outputs = 1 + 2 * num_layers
         self._axis_checked = False
 
-        # Persistent K/V and output buffers (allocated lazily from IR shapes).
+        # Buffer-backed K/V cache mode controlled by environment.
+        self._buffer_kv = os.getenv("OPENVINO_BUFFER_KV", "0") == "1"
+
+        # Persistent K/V and output buffers (only when buffer mode is enabled).
         self._kv_buf = None          # [L][2][1, kv_heads, max_seq, head_dim]
         self._out_decode = None      # [1, 1, hidden] reused every decode step
         self._cache_len = 0
@@ -91,7 +108,7 @@ class _OVCore:
 
     def _ensure_buffers(self):
         """Derive head / hidden dims from IR and allocate persistent buffers (once)."""
-        if self._dims_set:
+        if not self._buffer_kv or self._dims_set:
             return
 
         # Output 0: last_hidden_state [batch, seq, hidden]
@@ -136,8 +153,11 @@ class _OVCore:
             return position_ids[0]
         return position_ids
 
-    def run(self, *, inputs_embeds, attention_mask, position_ids, cache_position,
-            past_key_values, generation_steps=None):
+    # ---------------------------------------------------------------------
+    # Buffer-backed run (OPENVINO_BUFFER_KV=1)
+    # ---------------------------------------------------------------------
+    def _run_buffered(self, *, inputs_embeds, attention_mask, position_ids,
+                      cache_position, past_key_values, generation_steps=None):
         import torch
         from transformers.cache_utils import DynamicCache
         from transformers.modeling_outputs import BaseModelOutputWithPast
@@ -152,14 +172,12 @@ class _OVCore:
                 inputs_embeds.shape[0], prior + seq, dtype=torch.long, device=inputs_embeds.device
             )
 
-        # Ensure persistent buffers are allocated (from IR output shapes).
         self._ensure_buffers()
 
-        # --- Prefill reset ------------------------------------------------
         if is_prefill:
             self._cache_len = 0
 
-        # --- Build IR inputs (no per-step K/V allocs) ---------------------
+        # Build base inputs.
         base_inputs = [
             _to_numpy(inputs_embeds, np.float32),
             _to_numpy(attention_mask, np.int64),
@@ -171,13 +189,11 @@ class _OVCore:
                 generation_steps = torch.zeros(1, dtype=torch.long)
             base_inputs.append(_to_numpy(generation_steps, np.int64))
 
+        # Build K/V inputs from buffer views (zero extra allocs).
         ir_inputs = base_inputs
         if not is_prefill:
-            # Feed K/V as views into persistent buffer (zero extra allocs).
             L = self.num_layers
             clen = self._cache_len
-            # Pre-extend once; avoid repeated list append overhead.
-            capacity = len(base_inputs) + 2 * L
             ir_inputs = base_inputs + [None] * (2 * L)
             idx = len(base_inputs)
             for i in range(L):
@@ -187,65 +203,47 @@ class _OVCore:
                 ir_inputs[idx + 1] = v
                 idx += 2
 
-        # --- Infer --------------------------------------------------------
         request = self._prefill_req if is_prefill else self._decode_req
         request.infer(ir_inputs)
 
-        # --- Prefill path: write all K/V into buffers ---------------------
         if is_prefill:
             new_len = int(self._cache_len + seq)
             self._cache_len = new_len
 
-            # Hidden output: allocate per prefill (rare; OK).
             hidden_out = request.get_output_tensor(0)
             last_hidden = torch.from_numpy(
                 np.array(hidden_out.data, dtype=np.float32, copy=True)
             )
 
-            # K/V: in-place copyto into persistent buffer slices.
-            L = self.num_layers
-            out = 1  # start after hidden
-            for i in range(L):
-                kt = request.get_output_tensor(out)
-                vt = request.get_output_tensor(out + 1)
-                np.copyto(
-                    self._kv_buf[i][0][:, :, :new_len, :],
-                    kt.data,
-                )
-                np.copyto(
-                    self._kv_buf[i][1][:, :, :new_len, :],
-                    vt.data,
-                )
-                out += 2
-
-        # --- Decode path: write new K/V into buffers in place -------------
-        else:
-            next_len = self._cache_len + 1
-            self._cache_len = next_len
-
-            # Hidden output: copyto into persistent decode buffer.
-            hidden_out = request.get_output_tensor(0)
-            np.copyto(self._out_decode, hidden_out.data)
-            last_hidden = torch.from_numpy(self._out_decode)
-
-            # K/V: in-place copyto.
+            # K/V: copyto into persistent buffers.
             L = self.num_layers
             out = 1
             for i in range(L):
                 kt = request.get_output_tensor(out)
                 vt = request.get_output_tensor(out + 1)
-                np.copyto(
-                    self._kv_buf[i][0][:, :, :next_len, :],
-                    kt.data,
-                )
-                np.copyto(
-                    self._kv_buf[i][1][:, :, :next_len, :],
-                    vt.data,
-                )
+                np.copyto(self._kv_buf[i][0][:, :, :new_len, :], kt.data)
+                np.copyto(self._kv_buf[i][1][:, :, :new_len, :], vt.data)
                 out += 2
 
-        # --- Build DynamicCache from buffer views -------------------------
-        # Minimal torch involvement: from_numpy views over existing buffers.
+        else:
+            next_len = self._cache_len + 1
+            self._cache_len = next_len
+
+            hidden_out = request.get_output_tensor(0)
+            np.copyto(self._out_decode, hidden_out.data)
+            last_hidden = torch.from_numpy(self._out_decode)
+
+            # K/V: copyto into persistent buffers.
+            L = self.num_layers
+            out = 1
+            for i in range(L):
+                kt = request.get_output_tensor(out)
+                vt = request.get_output_tensor(out + 1)
+                np.copyto(self._kv_buf[i][0][:, :, :next_len, :], kt.data)
+                np.copyto(self._kv_buf[i][1][:, :, :next_len, :], vt.data)
+                out += 2
+
+        # Build DynamicCache from buffer views.
         L = self.num_layers
         clen = self._cache_len
         legacy_present = []
@@ -255,12 +253,102 @@ class _OVCore:
             legacy_present.append((k, v))
         present = DynamicCache.from_legacy_cache(tuple(legacy_present))
 
-        # hidden_states=(H,) so the outer extractor's hid[0][-1] yields the final hidden.
         return BaseModelOutputWithPast(
             last_hidden_state=last_hidden,
             past_key_values=present,
             hidden_states=(last_hidden,),
             attentions=None,
+        )
+
+    # ---------------------------------------------------------------------
+    # Non-buffered run (OPENVINO_BUFFER_KV not set)
+    # ---------------------------------------------------------------------
+    def _run_non_buffered(self, *, inputs_embeds, attention_mask, position_ids,
+                          cache_position, past_key_values, generation_steps=None):
+        import torch
+        from transformers.cache_utils import DynamicCache
+        from transformers.modeling_outputs import BaseModelOutputWithPast
+
+        seq = inputs_embeds.shape[1]
+        prior = past_key_values.get_seq_length() if past_key_values is not None else 0
+        is_prefill = prior == 0
+
+        position_ids = self._resolve_position_ids(position_ids, cache_position)
+        if attention_mask is None:
+            attention_mask = torch.ones(
+                inputs_embeds.shape[0], prior + seq, dtype=torch.long, device=inputs_embeds.device
+            )
+
+        # Build base inputs.
+        base_inputs = [
+            _to_numpy(inputs_embeds, np.float32),
+            _to_numpy(attention_mask, np.int64),
+            _to_numpy(position_ids, np.int64),
+            _to_numpy(cache_position, np.int64),
+        ]
+        if self.predictor:
+            if generation_steps is None:
+                generation_steps = torch.zeros(1, dtype=torch.long)
+            base_inputs.append(_to_numpy(generation_steps, np.int64))
+
+        # Build K/V inputs from DynamicCache via to_legacy_cache.
+        ir_inputs = base_inputs
+        if not is_prefill:
+            legacy = past_key_values.to_legacy_cache()
+            L = self.num_layers
+            for i in range(L):
+                k_t, v_t = legacy[i]
+                ir_inputs.append(_to_numpy(k_t, np.float32))
+                ir_inputs.append(_to_numpy(v_t, np.float32))
+
+        # Infer.
+        request = self._prefill_req if is_prefill else self._decode_req
+        request.infer(ir_inputs)
+
+        # Read outputs: [0]=last_hidden, [1..]=K/V per layer.
+        hidden_out = request.get_output_tensor(0)
+        last_hidden = torch.from_numpy(
+            np.array(hidden_out.data, dtype=np.float32, copy=True)
+        )
+
+        L = self.num_layers
+        out = 1
+        legacy_present = []
+        for i in range(L):
+            kt = request.get_output_tensor(out)
+            vt = request.get_output_tensor(out + 1)
+            k = torch.from_numpy(np.array(kt.data, dtype=np.float32, copy=True))
+            v = torch.from_numpy(np.array(vt.data, dtype=np.float32, copy=True))
+            legacy_present.append((k, v))
+            out += 2
+
+        present = DynamicCache.from_legacy_cache(tuple(legacy_present))
+
+        return BaseModelOutputWithPast(
+            last_hidden_state=last_hidden,
+            past_key_values=present,
+            hidden_states=(last_hidden,),
+            attentions=None,
+        )
+
+    def run(self, *, inputs_embeds, attention_mask, position_ids, cache_position,
+            past_key_values, generation_steps=None):
+        if self._buffer_kv:
+            return self._run_buffered(
+                inputs_embeds=inputs_embeds,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                cache_position=cache_position,
+                past_key_values=past_key_values,
+                generation_steps=generation_steps,
+            )
+        return self._run_non_buffered(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            cache_position=cache_position,
+            past_key_values=past_key_values,
+            generation_steps=generation_steps,
         )
 
 

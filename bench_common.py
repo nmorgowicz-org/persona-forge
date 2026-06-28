@@ -153,6 +153,15 @@ def load_model() -> LoadedModel:
     return LoadedModel(model=model, voice_clone_prompt=prompt)
 
 
+def export_bench_env():
+    """Export environment variables for benchmarking with optimized settings.
+
+    Called at the top of any benchmark or profile entrypoint. Enables buffer-backed
+    K/V cache in the OpenVINO runtime to reduce per-frame glue overhead.
+    """
+    os.environ.setdefault("OPENVINO_BUFFER_KV", "1")
+
+
 def fmt_mib(num_bytes: int | None) -> str:
     return f"{num_bytes / (1024 * 1024):.0f} MiB" if num_bytes is not None else "n/a"
 
