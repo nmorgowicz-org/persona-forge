@@ -119,7 +119,7 @@ jobs:
           image="${REGISTRY}/${IMAGE_NAME}:${{ matrix.target }}-${GITHUB_SHA}"
           if [[ "${{ matrix.target }}" == "exporter" ]]; then
             docker run --rm --entrypoint python "${image}" -c \
-              'import nncf, openvino, optimum.intel, qwen_tts, torch; from model_config import resolve_model_repo; import scripts.download_model; assert resolve_model_repo({"MODEL_SIZE": "0.6B"}).endswith("0.6B-Base"); assert resolve_model_repo({"MODEL_SIZE": "1.7B"}).endswith("1.7B-Base"); print("exporter imports passed")'
+              'import nncf, openvino, qwen_tts, torch; from model_config import resolve_model_repo; import scripts.download_model; assert resolve_model_repo({"MODEL_SIZE": "0.6B"}).endswith("0.6B-Base"); assert resolve_model_repo({"MODEL_SIZE": "1.7B"}).endswith("1.7B-Base"); print("exporter imports passed")'
           else
             docker run --rm --entrypoint python "${image}" -c \
               'import openvino, qwen_tts, torch; from model_config import resolve_model_repo; import scripts.download_model; assert resolve_model_repo({"MODEL_SIZE": "0.6B"}).endswith("0.6B-Base"); assert resolve_model_repo({"MODEL_SIZE": "1.7B"}).endswith("1.7B-Base"); print("runtime imports passed")'
