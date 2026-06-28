@@ -23,12 +23,23 @@ Two graphs are exported per core from this one wrapper, differing only by exampl
 
 Embedding lookups and codebook output heads stay in PyTorch (implementation plan).
 
-NOT YET VERIFIED — must be locked down by the Milestone 2 FP32 parity gate on dockermisc1:
-  * That the `position_ids` / `cache_position` values fed here match exactly what the
-    eager generation path passes at prefill and at every decode step (the main core uses
-    a 3-axis mRoPE expansion; greedy top-1 token agreement is the gate).
-  * Predictor specifics: its core forward also accepts `generation_steps`; the predictor
-    cache resets every audio frame and runs 15 codebook steps. See PredictorCoreWrapper.
+Causal mask strategy (critical for dynamic-shape correctness):
+  Both model forwards call `create_causal_mask(... past_key_values=cache ...)`, which
+  internally calls `cache.get_mask_sizes()` → returns a Python int at trace time → that
+  integer is baked into the IR as a static constant. The decode graph would always emit
+  a mask of size (example prior + 1), breaking inference at any other cache length.
+
+  Fix: `_build_causal_mask` constructs a 4D additive mask from tensor shape operations
+  only. Passing it as `attention_mask` triggers `_preprocess_mask_arguments`'s early-exit
+  path (transformers 4.57.3, line: `if isinstance(m, Tensor) and len(m.shape) == 4: ...`)
+  so `create_causal_mask` returns it unchanged and no Python integer from the cache is
+  ever used. This works identically for both model forwards.
+
+NOT YET CONFIRMED on dockermisc1 (Milestone 2 parity gate):
+  * That `position_ids` / `cache_position` values match the eager generation path exactly
+    (the main core uses 3-axis mRoPE expansion; top-1 token agreement is the gate).
+  * Predictor specifics: the base model's forward accepts but ignores `generation_steps`;
+    the cache resets every audio frame and runs 15 codebook steps. See PredictorCoreWrapper.
 """
 
 from __future__ import annotations
@@ -66,10 +77,34 @@ class CoreCacheWrapper(nn.Module):
             present.append(value)
         return present
 
+    @staticmethod
+    def _build_causal_mask(
+        attention_mask: torch.Tensor,
+        cache_position: torch.Tensor,
+        inputs_embeds: torch.Tensor,
+    ) -> torch.Tensor:
+        """Build a 4-D additive causal mask from a 2-D padding mask and cache positions.
+
+        Returns [batch, 1, seq_q, total_seq] with 0 for attended and -inf for masked.
+        Passing a 4-D tensor as attention_mask to create_causal_mask triggers its early-exit
+        path, so the total_seq dimension stays dynamic in the exported IR.
+        """
+        dtype = inputs_embeds.dtype
+        device = inputs_embeds.device
+        q_pos = cache_position[:, None]                                    # [seq_q, 1]
+        k_pos = torch.arange(attention_mask.shape[-1], device=device)[None, :]  # [1, total_seq]
+        causal_ok = k_pos <= q_pos                                         # [seq_q, total_seq]
+        pad_ok = attention_mask.bool()                                     # [batch, total_seq]
+        combined = causal_ok[None, None] & pad_ok[:, None, None, :]       # [batch, 1, seq_q, total_seq]
+        zero = torch.zeros((), device=device, dtype=dtype)
+        neg_inf = torch.full((), torch.finfo(dtype).min, device=device, dtype=dtype)
+        return torch.where(combined, zero, neg_inf)
+
     def _run_core(self, *, inputs_embeds, attention_mask, position_ids, cache_position, cache, **extra):
+        mask_4d = self._build_causal_mask(attention_mask, cache_position, inputs_embeds)
         return self.core(
             inputs_embeds=inputs_embeds,
-            attention_mask=attention_mask,
+            attention_mask=mask_4d,
             position_ids=position_ids,
             cache_position=cache_position,
             past_key_values=cache,
