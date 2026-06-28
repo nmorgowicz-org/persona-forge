@@ -137,11 +137,26 @@ jobs:
           PACKAGE: qwen3-tts-openvino
         shell: bash
         run: |
+          # Minimal curl-based wrapper for the packages API.
+          # The runner may not have gh CLI installed.
+          api_get() {
+            curl -sS -H "Authorization: Bearer $GITHUB_TOKEN" \
+                 -H "Accept: application/vnd.github+json" \
+                 "https://api.github.com$1"
+          }
+
+          api_delete() {
+            curl -sS -X DELETE \
+                 -H "Authorization: Bearer $GITHUB_TOKEN" \
+                 -H "Accept: application/vnd.github+json" \
+                 "https://api.github.com$1" >/dev/null 2>&1 || true
+          }
+
           # List all versions (newest first)
-          versions=$(gh api \
-            -H "Accept: application/vnd.github+json" \
-            "/repos/$REPO/packages/container/$PACKAGE/versions" \
-            --jq '[.[] | {id, updated_at, tags}] | sort_by(.updated_at) | reverse')
+          versions=$(api_get "/repos/$REPO/packages/container/$PACKAGE/versions" | jq '
+            [.[] | {id, updated_at, tags}]
+            | sort_by(.updated_at) | reverse
+          ')
 
           # Helper: check if a version has any protected tag
           # Protected:
@@ -204,11 +219,11 @@ jobs:
             if [[ -z "${protected_set[$id]+_}" ]]; then
               # Unprotected version, always delete.
               echo "DELETING unprotected: id=$id name=...$name tags=[$tags]"
-              gh api -X DELETE "/repos/$REPO/packages/container/$PACKAGE/versions/$id" >/dev/null 2>&1
+              api_delete "/repos/$REPO/packages/container/$PACKAGE/versions/$id"
             elif [[ -n "${delete_set[$id]+_}" ]]; then
               # Protected but oldest beyond keep limit.
               echo "DELETING oldest-protected: id=$id name=...$name tags=[$tags]"
-              gh api -X DELETE "/repos/$REPO/packages/container/$PACKAGE/versions/$id" >/dev/null 2>&1
+              api_delete "/repos/$REPO/packages/container/$PACKAGE/versions/$id"
             else
               # Keep this version.
               echo "KEEPING: id=$id name=...$name tags=[$tags]"
