@@ -469,6 +469,10 @@ total_upsample = prod([8, 5, 4, 3, 2, 2]) = 1920  (samples per input frame at 24
 (`chunk_size=300, left_context_size=25`) stays in Python. Only one graph needed: no
 prefill/decode split, no cache tensors.
 
+Use `python export_openvino.py --output-dir /ov_output --compression both --vocoder-only`
+for this milestone. The exporter writes an isolated `_vocoder` artifact directory so a
+validated vocoder-only result cannot be mistaken for, or block, the later five-graph export.
+
 **Dynamic axis**: `seq_len` (codes dim 2) varies per chunk. After conversion, reshape:
 ```python
 ov_model.reshape({0: ov.PartialShape([1, 16, -1])})

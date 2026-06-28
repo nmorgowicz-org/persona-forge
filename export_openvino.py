@@ -45,7 +45,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--prefill-seq", type=int, default=8, help="example prefill length for tracing")
     parser.add_argument("--decode-prior", type=int, default=4, help="example prior cache length for the decode graph")
     parser.add_argument("--vocoder-chunk", type=int, default=300, help="example vocoder chunk length in frames for tracing")
-    parser.add_argument("--skip-vocoder", action="store_true", help="skip vocoder decoder export (transformer cores only)")
+    graph_scope = parser.add_mutually_exclusive_group()
+    graph_scope.add_argument(
+        "--skip-vocoder",
+        action="store_true",
+        help="skip vocoder decoder export (transformer cores only)",
+    )
+    graph_scope.add_argument(
+        "--vocoder-only",
+        action="store_true",
+        help="export only the vocoder decoder into an isolated milestone directory",
+    )
     return parser.parse_args()
 
 
@@ -136,26 +146,52 @@ def run() -> int:
     talker = wrapped.model.talker
     vocoder_decoder = _resolve_vocoder_decoder(wrapped.model.speech_tokenizer)
 
-    main_dims = wrappers.core_dims(talker.model.config)
-    pred_dims = wrappers.core_dims(talker.code_predictor.model.config)
     voc_dims = wrappers.vocoder_dims(vocoder_decoder.config)
 
-    main = wrappers.MainCoreWrapper(talker.model, main_dims["num_layers"])
-    predictor = wrappers.PredictorCoreWrapper(talker.code_predictor.model, pred_dims["num_layers"])
     vocoder = wrappers.VocoderDecoderWrapper(vocoder_decoder)
 
-    plan: dict[str, tuple] = {
-        "main_prefill": (main, main_dims, dict(seq=args.prefill_seq, prior=0, predictor=False)),
-        "main_decode": (main, main_dims, dict(seq=1, prior=args.decode_prior, predictor=False)),
-        "predictor_prefill": (predictor, pred_dims, dict(seq=args.prefill_seq, prior=0, predictor=True)),
-        "predictor_decode": (predictor, pred_dims, dict(seq=1, prior=args.decode_prior, predictor=True)),
-    }
+    plan: dict[str, tuple] = {}
     if not args.skip_vocoder:
         plan["vocoder_decoder"] = (vocoder, voc_dims, dict(vocoder_chunk=args.vocoder_chunk))
+    main_dims = None
+    pred_dims = None
+    if not args.vocoder_only:
+        main_dims = wrappers.core_dims(talker.model.config)
+        pred_dims = wrappers.core_dims(talker.code_predictor.model.config)
+        main = wrappers.MainCoreWrapper(talker.model, main_dims["num_layers"])
+        predictor = wrappers.PredictorCoreWrapper(
+            talker.code_predictor.model, pred_dims["num_layers"]
+        )
+        plan.update(
+            {
+                "main_prefill": (
+                    main,
+                    main_dims,
+                    dict(seq=args.prefill_seq, prior=0, predictor=False),
+                ),
+                "main_decode": (
+                    main,
+                    main_dims,
+                    dict(seq=1, prior=args.decode_prior, predictor=False),
+                ),
+                "predictor_prefill": (
+                    predictor,
+                    pred_dims,
+                    dict(seq=args.prefill_seq, prior=0, predictor=True),
+                ),
+                "predictor_decode": (
+                    predictor,
+                    pred_dims,
+                    dict(seq=1, prior=args.decode_prior, predictor=True),
+                ),
+            }
+        )
 
     out_parent = Path(args.output_dir)
     out_parent.mkdir(parents=True, exist_ok=True)
     final_name = _versioned_dirname(qwen_version, model_repo, revision or "main", ov_version)
+    if args.vocoder_only:
+        final_name = f"{final_name}_vocoder"
     final_dir = out_parent / final_name
     if final_dir.exists():
         raise SystemExit(f"refusing to overwrite existing IR dir: {final_dir}")
