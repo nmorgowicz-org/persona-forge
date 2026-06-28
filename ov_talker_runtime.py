@@ -53,29 +53,69 @@ _GRAPH_FILES = {
 # INT8 variants, when a compressed export is present.
 _INT8_GRAPH_FILES = {key: name.replace(".xml", "_int8.xml") for key, name in _GRAPH_FILES.items()}
 
+# Max sequence length for K/V buffers. 4096 is safe for typical TTS generation.
+_MAX_SEQ = 4096
+
 
 def _to_numpy(tensor, dtype) -> np.ndarray:
-    """Detach a torch tensor to a contiguous numpy array of the IR's expected dtype."""
+    """Detach a torch tensor to a contiguous numpy array of the IR's expected dtype.
+
+    Avoids extra ascontiguousarray when the array is already C-contiguous (avoids one
+    unnecessary alloc + scan for small inputs like position_ids, cache_position).
+    """
     array = tensor.detach().cpu().numpy()
     if array.dtype != dtype:
-        array = array.astype(dtype)
-    return np.ascontiguousarray(array)
+        array = array.astype(dtype, copy=False)
+    if not array.flags["C_CONTIGUOUS"]:
+        array = np.ascontiguousarray(array)
+    return array
 
 
 class _OVCore:
-    """Persistent prefill/decode InferRequests for one transformer core."""
+    """Persistent prefill/decode InferRequests with zero-alloc K/V buffers."""
 
     def __init__(self, compiled_prefill, compiled_decode, num_layers: int, predictor: bool):
-        # One persistent request per graph: never create an InferRequest per token
-        # (Design Constraint #5). The predictor pair is reused across all 15 codebook
-        # steps and reset implicitly each frame because the FCG glue starts a fresh
-        # DynamicCache via predictor.generate().
+        # One persistent request per graph (Design Constraint #5).
         self._prefill_req = compiled_prefill.create_infer_request()
         self._decode_req = compiled_decode.create_infer_request()
         self.num_layers = num_layers
         self.predictor = predictor
         self._n_outputs = 1 + 2 * num_layers
         self._axis_checked = False
+
+        # Persistent K/V and output buffers (allocated lazily from IR shapes).
+        self._kv_buf = None          # [L][2][1, kv_heads, max_seq, head_dim]
+        self._out_decode = None      # [1, 1, hidden] reused every decode step
+        self._cache_len = 0
+        self._dims_set = False
+
+    def _ensure_buffers(self):
+        """Derive head / hidden dims from IR and allocate persistent buffers (once)."""
+        if self._dims_set:
+            return
+
+        # Output 0: last_hidden_state [batch, seq, hidden]
+        # Output 1: k0             [batch, kv_heads, seq, head_dim]
+        o0 = self._prefill_req.get_output_tensor(0)
+        o1 = self._prefill_req.get_output_tensor(1)
+        hidden_size = o0.shape[2]
+        kv_heads = o1.shape[1]
+        head_dim = o1.shape[3]
+
+        L = self.num_layers
+
+        # K/V: [L][2] where 0=K, 1=V
+        self._kv_buf = [
+            [
+                np.empty((1, kv_heads, _MAX_SEQ, head_dim), dtype=np.float32, order="C")
+                for _ in range(2)
+            ]
+            for _ in range(L)
+        ]
+        # Decode output buffer reused every step.
+        self._out_decode = np.empty((1, 1, hidden_size), dtype=np.float32, order="C")
+
+        self._dims_set = True
 
     def _resolve_position_ids(self, position_ids, cache_position):
         import torch
@@ -112,7 +152,15 @@ class _OVCore:
                 inputs_embeds.shape[0], prior + seq, dtype=torch.long, device=inputs_embeds.device
             )
 
-        ir_inputs = [
+        # Ensure persistent buffers are allocated (from IR output shapes).
+        self._ensure_buffers()
+
+        # --- Prefill reset ------------------------------------------------
+        if is_prefill:
+            self._cache_len = 0
+
+        # --- Build IR inputs (no per-step K/V allocs) ---------------------
+        base_inputs = [
             _to_numpy(inputs_embeds, np.float32),
             _to_numpy(attention_mask, np.int64),
             _to_numpy(position_ids, np.int64),
@@ -121,22 +169,91 @@ class _OVCore:
         if self.predictor:
             if generation_steps is None:
                 generation_steps = torch.zeros(1, dtype=torch.long)
-            ir_inputs.append(_to_numpy(generation_steps, np.int64))
-        if not is_prefill:
-            for key, value in past_key_values.to_legacy_cache():
-                ir_inputs.append(_to_numpy(key, np.float32))
-                ir_inputs.append(_to_numpy(value, np.float32))
+            base_inputs.append(_to_numpy(generation_steps, np.int64))
 
+        ir_inputs = base_inputs
+        if not is_prefill:
+            # Feed K/V as views into persistent buffer (zero extra allocs).
+            L = self.num_layers
+            clen = self._cache_len
+            # Pre-extend once; avoid repeated list append overhead.
+            capacity = len(base_inputs) + 2 * L
+            ir_inputs = base_inputs + [None] * (2 * L)
+            idx = len(base_inputs)
+            for i in range(L):
+                k = self._kv_buf[i][0][:, :, :clen, :]
+                v = self._kv_buf[i][1][:, :, :clen, :]
+                ir_inputs[idx] = k
+                ir_inputs[idx + 1] = v
+                idx += 2
+
+        # --- Infer --------------------------------------------------------
         request = self._prefill_req if is_prefill else self._decode_req
         request.infer(ir_inputs)
-        outs = [np.array(request.get_output_tensor(i).data, copy=True) for i in range(self._n_outputs)]
 
-        last_hidden = torch.from_numpy(outs[0])
-        legacy_present = tuple(
-            (torch.from_numpy(outs[1 + 2 * i]), torch.from_numpy(outs[2 + 2 * i]))
-            for i in range(self.num_layers)
-        )
-        present = DynamicCache.from_legacy_cache(legacy_present)
+        # --- Prefill path: write all K/V into buffers ---------------------
+        if is_prefill:
+            new_len = int(self._cache_len + seq)
+            self._cache_len = new_len
+
+            # Hidden output: allocate per prefill (rare; OK).
+            hidden_out = request.get_output_tensor(0)
+            last_hidden = torch.from_numpy(
+                np.array(hidden_out.data, dtype=np.float32, copy=True)
+            )
+
+            # K/V: in-place copyto into persistent buffer slices.
+            L = self.num_layers
+            out = 1  # start after hidden
+            for i in range(L):
+                kt = request.get_output_tensor(out)
+                vt = request.get_output_tensor(out + 1)
+                np.copyto(
+                    self._kv_buf[i][0][:, :, :new_len, :],
+                    kt.data,
+                )
+                np.copyto(
+                    self._kv_buf[i][1][:, :, :new_len, :],
+                    vt.data,
+                )
+                out += 2
+
+        # --- Decode path: write new K/V into buffers in place -------------
+        else:
+            next_len = self._cache_len + 1
+            self._cache_len = next_len
+
+            # Hidden output: copyto into persistent decode buffer.
+            hidden_out = request.get_output_tensor(0)
+            np.copyto(self._out_decode, hidden_out.data)
+            last_hidden = torch.from_numpy(self._out_decode)
+
+            # K/V: in-place copyto.
+            L = self.num_layers
+            out = 1
+            for i in range(L):
+                kt = request.get_output_tensor(out)
+                vt = request.get_output_tensor(out + 1)
+                np.copyto(
+                    self._kv_buf[i][0][:, :, :next_len, :],
+                    kt.data,
+                )
+                np.copyto(
+                    self._kv_buf[i][1][:, :, :next_len, :],
+                    vt.data,
+                )
+                out += 2
+
+        # --- Build DynamicCache from buffer views -------------------------
+        # Minimal torch involvement: from_numpy views over existing buffers.
+        L = self.num_layers
+        clen = self._cache_len
+        legacy_present = []
+        for i in range(L):
+            k = torch.from_numpy(self._kv_buf[i][0][:, :, :clen, :])
+            v = torch.from_numpy(self._kv_buf[i][1][:, :, :clen, :])
+            legacy_present.append((k, v))
+        present = DynamicCache.from_legacy_cache(tuple(legacy_present))
 
         # hidden_states=(H,) so the outer extractor's hid[0][-1] yields the final hidden.
         return BaseModelOutputWithPast(
