@@ -23,10 +23,24 @@ peak memory determine whether the backend ships.
 
 Targets are model-size-specific. 2x warm-latency reduction is a reasonable goal for 0.6B.
 For 1.7B on this CPU (no AVX-512, 8 vCPUs, noisy host) it is optimistic; treat 1.5x as
-the acceptance floor and validate per "Release Gates." Note that the code predictor
-(15 sequential forward passes per audio frame) is the dominant cost — external reports
-put it at roughly 70% of generation time — so it is the highest-value optimization target,
-not a co-equal one with the main talker.
+the acceptance floor and validate per "Release Gates." The code predictor (15 sequential
+forward passes per audio frame) is the dominant cost *within the transformer loop*: the
+measured Milestone 0 baseline (0.6B, FP32, sampling — see "Milestone 0") puts it at ~69%
+of main+predictor time, confirming the ~70% external figure when scoped that way. It is
+therefore the highest-value transformer target, not a co-equal of the main talker.
+
+Two findings from that baseline reshape the end-to-end picture and must be carried forward:
+
+- The `speech_tokenizer.decode` (code -> waveform) is **~29% of end-to-end wall time** in a
+  single call (8.1 s of a 27.8 s run). Accelerating only the two transformer cores leaves
+  this untouched and caps the achievable speedup; the tokenizer/vocoder decode is now a
+  first-class profiling and optimization target, not glue. Profile it separately and check
+  whether it already runs under ONNX Runtime before assuming the cores are the whole story.
+- Greedy decoding (`do_sample=False`) does **not** terminate on this model — it runs to
+  `max_new_tokens` instead of emitting EOS (a short sentence ran past 575 frames / 46 s of
+  audio before being stopped). Realistic latency/RTF must be measured under production
+  sampling. Parity tests, which need determinism, must therefore compare a *bounded* number
+  of decode steps (prefill + N steps), never a full greedy utterance to EOS.
 
 ## Implementation Status
 
@@ -38,12 +52,15 @@ Bootstrap is complete; no optimization milestone has started yet. In place today
 - Split dependency sets (`requirements.txt`, `requirements-ov-runtime.txt`,
   `requirements-ov-export.txt`) and `runtime`/`exporter` Docker targets.
 - Model-free CI validation (`scripts/validate_repo.py`) and one-shot download tool.
+- Milestone 0 harness (`bench_common.py`, `benchmark_tts.py`, `profile_tts.py`) with a
+  first measured baseline captured under "Milestone 0" (0.6B FP32, sampling, RTF ~6.6).
+- Milestone 2 export scaffold (`ov_export_wrappers.py`, `export_openvino.py`) — structure
+  and verified core/cache contract only; NOT validated (no parity gate, no trusted IR yet).
 
-Not yet implemented: Milestone 0 baseline/profiling (`benchmark_tts.py`,
-`profile_tts.py`), the export CLI (`export_openvino.py`, `ov_export_wrappers.py`),
-parity tests, the OpenVINO generation runtime (`ov_talker_runtime.py`), and the
-`TTS_BACKEND=openvino` worker path with its `/health` metadata. The OpenVINO
-quantization command described below is not functional until Milestones 2 and 3 land.
+Not yet implemented: the FP32 parity gate and dynamic-axis handling for the export, INT8
+compression validation, the OpenVINO generation runtime (`ov_talker_runtime.py`), and the
+`TTS_BACKEND=openvino` worker path with its `/health` metadata. The OpenVINO quantization
+command described below is not functional until Milestones 2 and 3 land.
 
 ## Validated Deployment Snapshot
 
@@ -321,6 +338,33 @@ Add temporary timers around:
 
 Also count main-talker steps and code-predictor steps. This establishes where time is spent
 and prevents optimizing only one side of the nested generator.
+
+### Measured baseline (first pass)
+
+0.6B Base, FP32, CPU (dockermisc1, no AVX-512), **production sampling**, 10-word prompt,
+single profiled generation via `profile_tts.py --prompt short`:
+
+| Component             | Time    | Share | Calls | Per call |
+| --------------------- | ------- | ----- | ----- | -------- |
+| `code_predictor`      | 12.66 s | 45.6% | 795   | 15.9 ms  |
+| `speech_tokenizer.decode` | 8.09 s | 29.1% | 1   | 8.09 s   |
+| `main_talker`         | 5.78 s  | 20.8% | 54    | 107 ms   |
+| other / glue          | 1.25 s  | 4.5%  | —     | —        |
+| **end-to-end**        | 27.78 s | —     | —     | RTF 6.55 |
+
+Predictor/main step ratio 14.7 (≈ the 15 codebooks/frame). Predictor is ~69% of the
+transformer loop (main+predictor) — confirms the ~70% assumption. But note the tokenizer
+decode is ~29% of *end-to-end*: a two-core-only backend caps speedup around 3.4x and must
+be paired with tokenizer profiling. Greedy (`do_sample=False`) did not terminate; these
+numbers are sampling-mode and parity must use bounded decode steps (see "Set the right
+warm-latency target").
+
+Warm latency from `benchmark_tts.py --prompts short --iterations 5` (same config, 5 measured
+runs after 1 warm-up): median **28.7 s**, p95 **30.8 s** for ~4.6 s of audio (RTF 6.18);
+**peak RSS 6394 MiB**, swap delta negligible (466 pages in, 0 out). The 6.4 GiB peak against
+the 7 GiB production limit leaves <20% headroom *at FP32 baseline*, before any hybrid backend
+that transiently holds both PyTorch and OpenVINO weights — the thin selective loader / memory
+milestone is load-bearing for the limit, not optional polish.
 
 Before benchmarking, set thread controls before importing Torch, ONNX Runtime, or OpenVINO:
 
