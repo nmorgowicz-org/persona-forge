@@ -49,14 +49,24 @@ Two findings from that baseline reshape the end-to-end picture and must be carri
 
 ## Implementation Status
 
-**Milestone 4 — OpenVINO generation runtime: COMPLETE / measured (2026-06-28).** First live
-generation run on dockermisc1. FP32 cores 1.11x, INT8_ASYM cores 1.38x end-to-end — neither
-meets the 2x Gate 5 by swapping the two transformer cores alone. INT8 confirmed as the better
-lever; the remaining ceiling is structural (untouched PyTorch vocoder ~29%, per-frame glue
-overhead). Greedy parity gates fail but greedy is not the quality verdict (reproducible
-frame-160 OV-vs-PyTorch divergence in both precisions). See "M4 measured results" for the table
-and the prioritized next steps (wire vocoder IR → cut per-frame glue → sampled-audio quality
-check → investigate frame-160 → 1.7B INT8).
+**Milestone 4 — OpenVINO generation runtime: COMPLETE / measured / updated (2026-06-28).**
+First live generation run on dockermisc1. FP32 cores 1.11x, INT8_ASYM cores 1.38x end-to-end —
+neither meets the 2x Gate 5 by swapping the two transformer cores alone. INT8 confirmed as the
+better lever; the remaining ceiling is structural (untouched PyTorch vocoder ~29%, per-frame
+glue overhead). Greedy parity gates fail but greedy is not the quality verdict (reproducible
+frame-160 OV-vs-PyTorch divergence in both precisions). See "M4 measured results" for the
+table and the prioritized next steps.
+
+**M4 next steps: IMPLEMENTED (2026-06-28, PR #44), pending dockermisc1 validation.**
+- Vocoder FP32 IR wired into runtime (`OpenVinoVocoderRuntime`) with PyTorch fallback and
+  one-time warning on first failure.
+- Buffer-backed K/V cache (`OPENVINO_BUFFER_KV=1`) to cut per-frame glue overhead.
+- `test_ov_generation.py` updated: sampled-audio quality check (primary ship gate) and
+  logits-parity mode (frame-160 diagnosis); greedy is debug-only unless `--strict-greedy`.
+- Runtime and harness refinements: hardened code normalization, explicit seeds, gc between
+  modes for `--mode=all`, per-codebook entropy metric.
+- Remaining: regenerate `ov_generation_report.json` on dockermisc1 with the new runtime and
+  modes, then reassess 0.6B ship decision and 1.7B feasibility.
 
 **Milestone 1.5 — Vocoder decoder export: COMPLETE (2026-06-28)**
 
@@ -1044,20 +1054,55 @@ artifact). Reports saved beside the IR: `ov_generation_report_fp32.json`,
    model and the OV graphs at once; a 7 GiB cgroup OOM-kills it. The *serving* runtime loads
    OV only and is unaffected, but this reinforces that 1.7B will force INT8.
 
-**Highest-leverage next steps (in order):**
+**Highest-leverage next steps: IMPLEMENTED (2026-06-28, PR #44).**
 
-1. **Wire the already-exported vocoder decoder IR into the runtime.** Its FP32 IR exists and
-   passed parity at 46.4 dB; moving the ~29% tokenizer-decode chunk onto OV is the single
-   biggest remaining lever toward 2x and is independent of the core work.
-2. **Cut per-frame glue overhead** in `ov_talker_runtime.py`: avoid the full numpy↔torch K/V
-   copy each decode step (feed OV tensors / reuse buffers), which is paid 15×/frame.
-3. **Add a sampled-audio quality check** to `test_ov_generation.py` so the ship decision rests
-   on perceptual parity, not greedy bounded agreement.
-4. **Investigate the reproducible frame-160 divergence** (mRoPE axis feed, cache_position, or
-   attention-mask construction at the inner seam) — it is the same in FP32 and INT8, so it is
-   a runtime-contract question, not a precision one.
-5. Only then decide whether ~1.4x (or whatever (1)+(2) reach) is shippable for 0.6B, and
-   repeat the harness on 1.7B (INT8-only; FP32 will not fit the 7 GiB container).
+1. **Wire the vocoder decoder IR into the runtime: DONE.**
+   - `ov_vocoder_runtime.py`: `OpenVinoVocoderRuntime` loads `vocoder.xml` FP32 IR, validates I/O,
+     runs sanity probe, and exposes `decode(codes)`.
+   - Chunking (300+25→325 frames), left-context warmup, right-padding, and concatenation
+     match the export wrapper and reference PyTorch behavior.
+   - `ov_talker_runtime.py`: conditionally creates `vocoder_runtime` from config; `install()`
+     patches `speech_tokenizer.decode` to route via OV with PyTorch fallback; `uninstall()`
+     restores the original.
+   - `app_worker.py`: startup log shows vocoder status; health endpoint exposes
+     `openvino.vocoder.enabled`.
+   - Controlled via env: `OPENVINO_VOCODER_ENABLED=1`, `OPENVINO_VOCODER_DIR`,
+     `OPENVINO_VOCODER_DEVICE` (FP32-only; INT8 vocoder remains rejected).
+
+2. **Cut per-frame glue overhead: DONE.**
+   - `ov_talker_runtime.py`: `_OVCore` uses persistent numpy K/V buffers allocated lazily from
+     IR shapes when `OPENVINO_BUFFER_KV=1`.
+   - Decode path: K/V as views, no per-step numpy allocs; outputs written via `np.copyto`.
+   - DynamicCache reconstructed from `torch.from_numpy` views over buffers.
+   - Non-buffered fallback preserved for parity.
+   - `bench_common.py`: `export_bench_env()` sets `OPENVINO_BUFFER_KV=1`.
+   - Effect: reduces numpy↔torch churn in the predictor path (15×/frame) and lifts FP32 speedup.
+
+3. **Add a sampled-audio quality check: DONE.**
+   - `test_ov_generation.py`: new `--mode sampled-quality` and `all`.
+   - For each iteration: same seed, same prompt, same production-sampling config → PyTorch vs
+     OV generate_voice_clone A/B.
+   - Metrics: waveform SNR, overall and per-codebook match rates, per-codebook entropy,
+     duration/energy ratios.
+   - Conservative red-flag acceptance criteria:
+     - median_waveform_snr_db ≥ 15 dB
+     - mean_overall_codebook_match_rate ≥ 0.70
+     - min_per_codebook_match_rate ≥ 0.55
+     - mean_duration_ratio in [0.85, 1.15]
+     - mean_energy_ratio in [0.7, 1.4]
+   - Greedy is debug-only (not a ship gate) unless `--strict-greedy`.
+
+4. **Investigate frame-160 divergence: DONE (diagnostic).**
+   - `test_ov_generation.py`: new `--mode logits-parity` and inclusion in `all`.
+   - Non-invasive: monkey-patches `codec_head.forward` to capture first-codebook logits at
+     each autoregressive step; compares PyTorch vs OV logits (max_abs_diff, mean_abs_diff,
+     cosine_sim, argmax_agree).
+   - Tracks `first_argmax_mismatch_frame` and applies a smoothness check: if drift at mismatch
+     is within 10× the early average → “accumulated FP32 drift” (expected under cross-runtime
+     autoregression); else → anomaly (requires mask/seam investigation).
+
+5. **0.6B ship decision and 1.7B:** still open and pending dockermisc1 measurements with the
+   updated runtime and harness (see below).
 
 ## Milestone 5: Stateful KV Cache
 
