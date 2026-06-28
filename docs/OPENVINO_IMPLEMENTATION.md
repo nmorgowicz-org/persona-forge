@@ -136,6 +136,13 @@ three of 15 scopes. INT8 top-1 still agreed at every tested position, but each s
 only one synthetic final-position choice. These results are not INT8_ASYM or generation-level
 evidence and do not justify accepting predictor INT8 or lowering the main threshold.
 
+Release v0.5.4 then produced a genuine all-weight INT8_ASYM artifact with immutable
+provenance. The corrected harness measured main INT8_ASYM at 24.5-28.3 dB (all four scopes
+failed) and predictor INT8_ASYM at 25.5-38.1 dB (decode steps 0 and 5 failed). Top-1 agreed
+at all 19 synthetic positions, while FP32 remained at 75.8-113.0 dB. All-weight INT8_ASYM
+is therefore rejected by the synthetic SNR gate for both cores. The top-1 result is useful
+characterization but is too small and synthetic to override those failures.
+
 M3 cannot complete until the FP32 M4 generation adapter supplies real prompt embeddings,
 3-axis mRoPE positions, and the nested code-predictor schedule. That adapter is also required
 for generated-code agreement, production-sampling listening tests, warm latency, and RSS.
@@ -147,7 +154,7 @@ level FP32/INT8 validation, or the `TTS_BACKEND=openvino` worker path with `/hea
 
 ## Validated Deployment Snapshot
 
-Validated on `dockermisc1` on 2026-06-28 (M2 complete):
+Validated on `dockermisc1` on 2026-06-28 (M3 characterization current):
 
 - Host kernel: Linux `7.0.0-27-generic` under KVM.
 - CPU exposed to the VM: 8 single-threaded vCPUs from an Intel Core i7-1360P.
@@ -161,10 +168,12 @@ Validated on `dockermisc1` on 2026-06-28 (M2 complete):
 - Service source: `/home/nick/docker/qwen3-tts`.
 - Compose file: `/home/nick/docker/docker-compose.yml`.
 - Model cache: `/var/data/autopirate/qwen3-tts/model`.
-- OV IR artifacts: `/var/data/autopirate/qwen3-tts/openvino/qwen-tts-0.1.1_0.6b_main_ov-2026.2.1/`
-  (main transformer cores, FP32, M2 validated). Vocoder IR:
+- OV IR artifacts:
+  `/var/data/autopirate/qwen3-tts/openvino/qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1/`
+  (main and predictor cores, FP32 plus rejected all-weight INT8_ASYM). Vocoder IR:
   `qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1_vocoder/` (M1.5 validated).
-- Exporter image: `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-v0.4.4`
+- Exporter image: `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-v0.5.4` at
+  `sha256:cc6492e5c92aed16380da8f378fd4f6a6195efb528825f08f1a545500874b6ba`.
 
 The host runs many other containers. Record host load, CPU throttling, available RAM, and
 swap activity beside every benchmark so contention is not mistaken for a model regression.
@@ -817,6 +826,24 @@ Corrected synthetic rerun (`transformer_parity_corrected_int8_sym.json`):
 - The corrected result strengthens the rejection of this artifact but remains synthetic
   characterization, not generation acceptance.
 
+Authoritative INT8_ASYM characterization (release v0.5.4):
+
+- Source commit: `00ce55c1d0e44fb7ecc367436b2b4f4de2843d26`.
+- Exporter: `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-v0.5.4` at
+  `sha256:cc6492e5c92aed16380da8f378fd4f6a6195efb528825f08f1a545500874b6ba`.
+- Model revision: `5d83992436eae1d760afd27aff78a71d676296fc`.
+- Artifact directory: `qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1/`.
+- IR metadata SHA-256: `abec65a5d2f2dcf07382d707513cb2a9f5c2a4c5872728069b169d9601e3da7f`.
+- Parity report SHA-256: `3cfb89c5eb6f95f7e40348c30c6a849865d1ca5eec6f91bb373e3d771c8da09e`.
+- NNCF reported INT8_ASYM per-channel compression on 100% of main (196/196) and predictor
+  (35/35) weight layers. Each compressed graph is approximately half its FP32 size.
+- FP32: 75.8-113.0 dB; top-1 agreed in all 19 synthetic scopes.
+- INT8_ASYM main: 24.5-28.3 dB; all four scopes failed; top-1 agreed in all four.
+- INT8_ASYM predictor: 25.5-38.1 dB; decode steps 0 and 5 failed; top-1 agreed in all 15.
+- Result: reject all-weight INT8_ASYM for both cores pending generation-path evidence. Do
+  not spend time on selective scopes until the FP32 M4 adapter provides representative inputs
+  and a measured need for additional memory or latency reduction.
+
 Unsupported MIX8 attempt (2026-06-28) found:
 
 - NNCF 3.2.0 has no CompressWeightsMode.MIX_8.
@@ -831,22 +858,20 @@ list and NNCF configuration in metadata.
 
 Current position:
 - FP32 transformer cores: synthetic core parity passes and is ready for an M4 FP32 adapter.
-- INT8 predictor and main: not accepted; both require generation-path testing.
-- The existing INT8 artifacts remain useful for the corrected characterization rerun, but
-  their mutable revision metadata means they are not release artifacts.
+- All-weight INT8_SYM and INT8_ASYM: rejected by the corrected synthetic SNR gate for both
+  cores. Neither is a runtime candidate without new generation-path evidence.
+- The v0.5.4 INT8_ASYM artifact is reproducible and may be reused for later generation-level
+  comparison; the older mutable-revision INT8_SYM artifact is characterization-only.
 
 Next steps (M3 continued):
 
-1. Run the corrected synthetic harness against the existing artifacts to characterize
-   independent cache accumulation and all output heads. Do not use that rerun as release
-   acceptance because its inputs remain synthetic.
-2. Implement the M4 adapter with FP32 main and predictor IR first. Trace real embeddings,
+1. Implement the M4 adapter with FP32 main and predictor IR first. Trace real embeddings,
    attention masks, position IDs, cache positions, and all 15 predictor steps.
-3. Establish bounded generated-code agreement and production-sampling A/B output with FP32.
-4. Benchmark warm FP32/FP32, FP32-main/INT8-predictor, and INT8/INT8 configurations with the
+2. Establish bounded generated-code agreement and production-sampling A/B output with FP32.
+3. Benchmark warm FP32/FP32, FP32-main/INT8-predictor, and INT8/INT8 configurations with the
    same prompts and runtime settings. Record median, p95, RTF, peak RSS, swap delta, and
    per-core timings.
-5. Accept the simplest configuration that passes code, listening, and performance gates.
+4. Accept the simplest configuration that passes code, listening, and performance gates.
    Attempt selective main INT8 with `IgnoredScope` only if measured performance or memory
    shows that it is necessary.
 
