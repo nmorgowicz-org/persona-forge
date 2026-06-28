@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.4](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.5.3...qwen3-tts-openvino-v0.5.4) (2026-06-28)
+
+
+### Bug Fixes
+
+* **ci:** authenticate and reduce Docker Hub pulls in image validation ([b320f0d](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/b320f0d72ad1391874f053a7a8d759a3905c6725))
+* **ci:** retain reliable GHCR cleanup with 15 versions ([b320f0d](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/b320f0d72ad1391874f053a7a8d759a3905c6725))
+* **export:** correct INT8 mode selection and make transformer parity fail closed ([b320f0d](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/b320f0d72ad1391874f053a7a8d759a3905c6725))
+
 ## [0.5.3](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.5.2...qwen3-tts-openvino-v0.5.3) (2026-06-28)
 
 
