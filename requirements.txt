@@ -4,8 +4,8 @@ gunicorn==26.0.0
 httpx==0.28.1
 soundfile==0.14.0
 qwen-tts==0.1.1
-# qwen-tts==0.1.1 hard-pins transformers==4.57.3; mirrored here because the OpenVINO
+# qwen-tts==0.1.1 hard-pins transformers==5.0.0rc3; mirrored here because the OpenVINO
 # export wrappers depend on this exact DynamicCache / generate API. Do not upgrade
 # independently of qwen-tts.
-transformers==4.57.3
+transformers==5.0.0rc3
 requests==2.34.2
