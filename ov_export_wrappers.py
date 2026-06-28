@@ -138,8 +138,9 @@ class VocoderDecoderWrapper(nn.Module):
         codes:  [batch, num_quantizers=16, seq_len]  int64   (VQ codebook indices, 0..2047)
         wav:    [batch, 1, audio_samples]             float32 (clamped to [-1, 1])
 
-    seq_len is dynamic — different audio durations produce different lengths. Mark codes
-    dim-2 as dynamic after conversion via ov_model.reshape().
+    The exported graph uses a fixed 325-frame input: a 300-frame chunk plus the decoder's
+    25-frame left context. Runtime code right-pads shorter chunks with code 0 and crops the
+    causal decoder output to the original frame count.
 
     The chunked_decode loop (chunk_size=300, left_context=25) stays in Python; only the
     per-chunk Decoder.forward call is exported. total_upsample = prod((8,5,4,3)+(2,2)) = 1920

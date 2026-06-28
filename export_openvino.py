@@ -45,7 +45,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--validate", action="store_true", help="run the FP32 parity gate before publishing")
     parser.add_argument("--prefill-seq", type=int, default=8, help="example prefill length for tracing")
     parser.add_argument("--decode-prior", type=int, default=4, help="example prior cache length for the decode graph")
-    parser.add_argument("--vocoder-chunk", type=int, default=300, help="example vocoder chunk length in frames for tracing")
+    parser.add_argument(
+        "--vocoder-chunk",
+        type=int,
+        default=325,
+        help="fixed vocoder input frames (300-frame chunk plus 25-frame left context)",
+    )
     graph_scope = parser.add_mutually_exclusive_group()
     graph_scope.add_argument(
         "--skip-vocoder",
@@ -245,10 +250,6 @@ def run() -> int:
                 print(f"[export] converting {name} ...", flush=True)
                 example = _example_inputs(dims, torch=torch, **kw)
                 ov_model = _convert(wrapper, example, ov)
-                if name == "vocoder_decoder":
-                    # codes dim-2 (seq_len) is dynamic: different chunk sizes at runtime.
-                    # Input 0 = codes [1, 16, seq_len]; mark only the seq dim dynamic.
-                    ov_model.reshape({0: ov.PartialShape([1, dims["num_quantizers"], -1])})
                 # TODO(parity): mark dynamic seq / prior axes for transformer cores via
                 # ov_model.reshape once the eager position_ids/cache_position contract is
                 # confirmed on dockermisc1.
@@ -276,6 +277,7 @@ def run() -> int:
             "main_dims": main_dims,
             "predictor_dims": pred_dims,
             "vocoder_dims": voc_dims,
+            "vocoder_input_frames": args.vocoder_chunk if not args.skip_vocoder else None,
             "num_code_groups": getattr(talker.model.config, "num_code_groups", None)
             or getattr(wrapped.model.config.talker_config, "num_code_groups", None),
             "source_hash": _source_hash(),

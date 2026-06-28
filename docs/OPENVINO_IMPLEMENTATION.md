@@ -476,10 +476,13 @@ Use `python export_openvino.py --output-dir /ov_output --compression both --voco
 for this milestone. The exporter writes an isolated `_vocoder` artifact directory so a
 validated vocoder-only result cannot be mistaken for, or block, the later five-graph export.
 
-**Dynamic axis**: `seq_len` (codes dim 2) varies per chunk. After conversion, reshape:
-```python
-ov_model.reshape({0: ov.PartialShape([1, 16, -1])})
-```
+**Fixed input contract**: export `codes` as `[1, 16, 325]`. The stock chunk loop uses a
+300-frame chunk plus up to 25 frames of left context. TorchScript bakes the decoder's Python
+shape arithmetic, and `torch.export` cannot satisfy the convolution/transposed-convolution
+guards for an arbitrary symbolic length, so post-conversion `reshape()` is not a valid dynamic
+graph. Right-pad shorter decoder calls to 325 frames with valid code `0`, run the causal graph,
+then crop to `actual_frames * 1920` output samples before applying the stock left-context crop.
+Parity at 8, 32, 300, and 325 frames must prove padded future codes do not affect retained audio.
 
 The tokenizer transformer normally builds its causal/sliding-window mask through Transformers'
 generic `torch.vmap` mask factory, which TorchScript/OpenVINO cannot trace. The tensor-only
@@ -494,8 +497,8 @@ Run `Decoder.forward` in PyTorch and through the compiled FP32 IR on the same ra
 tensor. Accept if max absolute error < 1e-4 on the output waveform.
 
 Run `test_vocoder_parity.py --model-dir <versioned-vocoder-dir>` in the exporter container.
-The gate uses deterministic codes at 8, 32, and 300 frames to validate the explicit-mask
-wrapper seam, dynamic output shapes, FP32 IR, and INT8 IR. It writes `vocoder_parity.json`
+The gate uses deterministic codes at 8, 32, 300, and 325 frames to validate the explicit-mask
+wrapper seam, fixed-input pad/crop behavior, FP32 IR, and INT8 IR. It writes `vocoder_parity.json`
 beside the IR with source/image provenance, metadata hash, error summaries, and single-run
 diagnostic timings.
 

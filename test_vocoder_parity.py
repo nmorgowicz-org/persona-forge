@@ -19,7 +19,7 @@ from ov_export_wrappers import VocoderDecoderWrapper
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model-dir", required=True, type=Path)
-    parser.add_argument("--sequence-lengths", nargs="+", type=int, default=[8, 32, 300])
+    parser.add_argument("--sequence-lengths", nargs="+", type=int, default=[8, 32, 300, 325])
     parser.add_argument("--seed", type=int, default=20260628)
     parser.add_argument("--threads", type=int, default=6)
     parser.add_argument("--fp32-max-abs", type=float, default=1e-4)
@@ -56,6 +56,11 @@ def run() -> int:
 
     metadata_path = args.model_dir / "metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    fixed_input_frames = metadata["vocoder_input_frames"]
+    if any(length > fixed_input_frames for length in args.sequence_lengths):
+        raise SystemExit(
+            f"sequence lengths cannot exceed fixed vocoder input {fixed_input_frames}"
+        )
     required_graphs = {"vocoder_decoder.xml", "vocoder_decoder_int8.xml"}
     missing = sorted(name for name in required_graphs if not (args.model_dir / name).is_file())
     if missing:
@@ -100,22 +105,29 @@ def run() -> int:
         )
         with torch.inference_mode():
             torch_output, torch_seconds = _timed(lambda: decoder(codes))
-            wrapper_output, wrapper_seconds = _timed(lambda: export_wrapper(codes))
+            padded_codes = torch.nn.functional.pad(
+                codes, (0, fixed_input_frames - length), value=0
+            )
+            wrapper_output, wrapper_seconds = _timed(lambda: export_wrapper(padded_codes))
         reference = torch_output.detach().cpu().numpy()
-        wrapper_array = wrapper_output.detach().cpu().numpy()
+        expected_samples = length * metadata["vocoder_dims"]["total_upsample"]
+        wrapper_array = wrapper_output[..., :expected_samples].detach().cpu().numpy()
 
         row = {
             "sequence_length": length,
-            "expected_output_samples": length * metadata["vocoder_dims"]["total_upsample"],
+            "expected_output_samples": expected_samples,
             "torch_seconds": torch_seconds,
             "wrapper_seconds": wrapper_seconds,
             "wrapper": _metrics(reference, wrapper_array),
         }
         try:
-            fp32_output, fp32_seconds = _timed(lambda: _infer(fp32, codes.numpy()))
-            int8_output, int8_seconds = _timed(lambda: _infer(int8, codes.numpy()))
+            fp32_full, fp32_seconds = _timed(lambda: _infer(fp32, padded_codes.numpy()))
+            int8_full, int8_seconds = _timed(lambda: _infer(int8, padded_codes.numpy()))
+            fp32_output = fp32_full[..., :expected_samples]
+            int8_output = int8_full[..., :expected_samples]
             row.update(
                 {
+                    "ir_output_shape": list(fp32_full.shape),
                     "actual_output_shape": list(fp32_output.shape),
                     "fp32_seconds": fp32_seconds,
                     "int8_seconds": int8_seconds,
