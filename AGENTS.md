@@ -106,6 +106,10 @@ present, later commits rerun the image checks. Release Please version tags publi
 manual workflow dispatches remain an explicit build-and-publish override. Merges to `main` do
 not build or publish images by themselves.
 
+Release cleanup must protect `runtime-latest`, `exporter-latest`, `buildcache-runtime`, and
+`buildcache-exporter`. Keep five additional package versions for rollback; do not use an
+unqualified package-wide retention rule that can delete the active tags or caches.
+
 Images are immutable build artifacts:
 
 ```text
@@ -114,6 +118,12 @@ ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-<git-sha>
 ```
 
 Production Compose must use an immutable SHA tag or digest, not `latest`.
+
+Private GHCR pulls on `dockermisc1` require a GitHub token with `read:packages`. A workflow's
+`GITHUB_TOKEN` does not authenticate the target VM. Pass credentials only through
+`docker login --password-stdin`; never echo a token, put it in Compose, or commit a Docker
+config. Prefer a temporary Docker config for one-shot pulls, or configure a host credential
+helper and least-privilege read-only package token for persistent deployment access.
 
 If the repository becomes public, do not run untrusted fork PR code on self-hosted runners.
 Keep or strengthen the same-repository PR guards before changing visibility.

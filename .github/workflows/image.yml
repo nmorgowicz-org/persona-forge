@@ -109,7 +109,7 @@ jobs:
           image="${REGISTRY}/${IMAGE_NAME}:${{ matrix.target }}-${GITHUB_SHA}"
           if [[ "${{ matrix.target }}" == "exporter" ]]; then
             docker run --rm --entrypoint python "${image}" -c \
-              'import export_openvino, nncf, openvino, ov_export_wrappers, qwen_tts, torch; from model_config import resolve_model_repo; import scripts.download_model; assert resolve_model_repo({"MODEL_SIZE": "0.6B"}).endswith("0.6B-Base"); assert resolve_model_repo({"MODEL_SIZE": "1.7B"}).endswith("1.7B-Base"); print("exporter imports passed")'
+              'import benchmark_vocoder, export_openvino, nncf, openvino, ov_export_wrappers, qwen_tts, test_vocoder_parity, torch; from model_config import resolve_model_repo; import scripts.download_model; assert resolve_model_repo({"MODEL_SIZE": "0.6B"}).endswith("0.6B-Base"); assert resolve_model_repo({"MODEL_SIZE": "1.7B"}).endswith("1.7B-Base"); print("exporter imports passed")'
           else
             docker run --rm --entrypoint python "${image}" -c \
               'import openvino, qwen_tts, torch; from model_config import resolve_model_repo; import scripts.download_model; assert resolve_model_repo({"MODEL_SIZE": "0.6B"}).endswith("0.6B-Base"); assert resolve_model_repo({"MODEL_SIZE": "1.7B"}).endswith("1.7B-Base"); print("runtime imports passed")'
@@ -124,9 +124,10 @@ jobs:
     permissions:
       packages: write
     steps:
-      - name: Keep recent GHCR versions
+      - name: Protect active tags and keep recent GHCR versions
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5
         with:
           package-name: qwen3-tts-openvino
           package-type: container
-          min-versions-to-keep: 20
+          min-versions-to-keep: 5
+          ignore-versions: ^(runtime-latest|exporter-latest|buildcache-runtime|buildcache-exporter)$

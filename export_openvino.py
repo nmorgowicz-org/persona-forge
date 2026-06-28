@@ -24,6 +24,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -44,8 +45,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--validate", action="store_true", help="run the FP32 parity gate before publishing")
     parser.add_argument("--prefill-seq", type=int, default=8, help="example prefill length for tracing")
     parser.add_argument("--decode-prior", type=int, default=4, help="example prior cache length for the decode graph")
-    parser.add_argument("--vocoder-chunk", type=int, default=300, help="example vocoder chunk length in frames for tracing")
-    parser.add_argument("--skip-vocoder", action="store_true", help="skip vocoder decoder export (transformer cores only)")
+    parser.add_argument(
+        "--vocoder-chunk",
+        type=int,
+        default=325,
+        help="fixed vocoder input frames (300-frame chunk plus 25-frame left context)",
+    )
+    graph_scope = parser.add_mutually_exclusive_group()
+    graph_scope.add_argument(
+        "--skip-vocoder",
+        action="store_true",
+        help="skip vocoder decoder export (transformer cores only)",
+    )
+    graph_scope.add_argument(
+        "--vocoder-only",
+        action="store_true",
+        help="export only the vocoder decoder into an isolated milestone directory",
+    )
     return parser.parse_args()
 
 
@@ -103,8 +119,43 @@ def _source_hash() -> str:
     return h.hexdigest()[:16]
 
 
+def _resolve_vocoder_decoder(speech_tokenizer):
+    """Return the loaded 12 Hz decoder from qwen-tts's inference wrapper."""
+    tokenizer_model = getattr(speech_tokenizer, "model", None)
+    decoder = getattr(tokenizer_model, "decoder", None)
+    if decoder is None:
+        raise RuntimeError(
+            "qwen-tts tokenizer contract mismatch: expected speech_tokenizer.model.decoder"
+        )
+    return decoder
+
+
+def _set_eager_attention(module) -> int:
+    """Force eager attention on every distinct Transformers config below a module."""
+    configs = {}
+    candidates = module.modules() if callable(getattr(module, "modules", None)) else (module,)
+    for candidate in candidates:
+        config = getattr(candidate, "config", None)
+        if config is not None and hasattr(config, "_attn_implementation"):
+            configs[id(config)] = config
+    for config in configs.values():
+        config._attn_implementation = "eager"
+    return len(configs)
+
+
+def _export_provenance(environ=os.environ) -> tuple[str, str]:
+    source_commit = environ.get("SOURCE_COMMIT", "")
+    image_digest = environ.get("EXPORTER_IMAGE_DIGEST", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+        raise SystemExit("SOURCE_COMMIT must be the full 40-character Git commit SHA")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest):
+        raise SystemExit("EXPORTER_IMAGE_DIGEST must be a sha256 registry digest")
+    return source_commit, image_digest
+
+
 def run() -> int:
     args = parse_args()
+    source_commit, exporter_image_digest = _export_provenance()
     configure_hf_token()
 
     import openvino as ov
@@ -121,29 +172,66 @@ def run() -> int:
     qwen_version = getattr(qwen_tts, "__version__", "0.1.1")
 
     print(f"[export] loading {model_repo} (rev={revision}) at float32...", flush=True)
-    wrapped = Qwen3TTSModel.from_pretrained(model_repo, revision=revision, device_map="cpu", dtype=torch.float32)
+    wrapped = Qwen3TTSModel.from_pretrained(
+        model_repo,
+        revision=revision,
+        device_map="cpu",
+        dtype=torch.float32,
+        attn_implementation="eager",
+    )
     talker = wrapped.model.talker
+    vocoder_decoder = _resolve_vocoder_decoder(wrapped.model.speech_tokenizer)
+    eager_config_count = _set_eager_attention(vocoder_decoder)
+    eager_config_count += _set_eager_attention(talker.model)
+    eager_config_count += _set_eager_attention(talker.code_predictor.model)
+    print(f"[export] forced eager attention on {eager_config_count} nested configs", flush=True)
 
-    main_dims = wrappers.core_dims(talker.model.config)
-    pred_dims = wrappers.core_dims(talker.code_predictor.model.config)
-    voc_dims = wrappers.vocoder_dims(wrapped.model.speech_tokenizer.decoder.config)
+    voc_dims = wrappers.vocoder_dims(vocoder_decoder.config)
 
-    main = wrappers.MainCoreWrapper(talker.model, main_dims["num_layers"])
-    predictor = wrappers.PredictorCoreWrapper(talker.code_predictor.model, pred_dims["num_layers"])
-    vocoder = wrappers.VocoderDecoderWrapper(wrapped.model.speech_tokenizer.decoder)
+    vocoder = wrappers.VocoderDecoderWrapper(vocoder_decoder)
 
-    plan: dict[str, tuple] = {
-        "main_prefill": (main, main_dims, dict(seq=args.prefill_seq, prior=0, predictor=False)),
-        "main_decode": (main, main_dims, dict(seq=1, prior=args.decode_prior, predictor=False)),
-        "predictor_prefill": (predictor, pred_dims, dict(seq=args.prefill_seq, prior=0, predictor=True)),
-        "predictor_decode": (predictor, pred_dims, dict(seq=1, prior=args.decode_prior, predictor=True)),
-    }
+    plan: dict[str, tuple] = {}
     if not args.skip_vocoder:
         plan["vocoder_decoder"] = (vocoder, voc_dims, dict(vocoder_chunk=args.vocoder_chunk))
+    main_dims = None
+    pred_dims = None
+    if not args.vocoder_only:
+        main_dims = wrappers.core_dims(talker.model.config)
+        pred_dims = wrappers.core_dims(talker.code_predictor.model.config)
+        main = wrappers.MainCoreWrapper(talker.model, main_dims["num_layers"])
+        predictor = wrappers.PredictorCoreWrapper(
+            talker.code_predictor.model, pred_dims["num_layers"]
+        )
+        plan.update(
+            {
+                "main_prefill": (
+                    main,
+                    main_dims,
+                    dict(seq=args.prefill_seq, prior=0, predictor=False),
+                ),
+                "main_decode": (
+                    main,
+                    main_dims,
+                    dict(seq=1, prior=args.decode_prior, predictor=False),
+                ),
+                "predictor_prefill": (
+                    predictor,
+                    pred_dims,
+                    dict(seq=args.prefill_seq, prior=0, predictor=True),
+                ),
+                "predictor_decode": (
+                    predictor,
+                    pred_dims,
+                    dict(seq=1, prior=args.decode_prior, predictor=True),
+                ),
+            }
+        )
 
     out_parent = Path(args.output_dir)
     out_parent.mkdir(parents=True, exist_ok=True)
     final_name = _versioned_dirname(qwen_version, model_repo, revision or "main", ov_version)
+    if args.vocoder_only:
+        final_name = f"{final_name}_vocoder"
     final_dir = out_parent / final_name
     if final_dir.exists():
         raise SystemExit(f"refusing to overwrite existing IR dir: {final_dir}")
@@ -162,10 +250,6 @@ def run() -> int:
                 print(f"[export] converting {name} ...", flush=True)
                 example = _example_inputs(dims, torch=torch, **kw)
                 ov_model = _convert(wrapper, example, ov)
-                if name == "vocoder_decoder":
-                    # codes dim-2 (seq_len) is dynamic: different chunk sizes at runtime.
-                    # Input 0 = codes [1, 16, seq_len]; mark only the seq dim dynamic.
-                    ov_model.reshape({0: ov.PartialShape([1, dims["num_quantizers"], -1])})
                 # TODO(parity): mark dynamic seq / prior axes for transformer cores via
                 # ov_model.reshape once the eager position_ids/cache_position contract is
                 # confirmed on dockermisc1.
@@ -186,10 +270,14 @@ def run() -> int:
             "model_repo": model_repo,
             "model_revision": revision or "main",
             "openvino_version": ov.__version__,
+            "attention_implementation": "eager",
+            "source_commit": source_commit,
+            "exporter_image_digest": exporter_image_digest,
             "compression": args.compression,
             "main_dims": main_dims,
             "predictor_dims": pred_dims,
             "vocoder_dims": voc_dims,
+            "vocoder_input_frames": args.vocoder_chunk if not args.skip_vocoder else None,
             "num_code_groups": getattr(talker.model.config, "num_code_groups", None)
             or getattr(wrapped.model.config.talker_config, "num_code_groups", None),
             "source_hash": _source_hash(),
@@ -199,6 +287,7 @@ def run() -> int:
         (tmp_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
         os.replace(tmp_dir, final_dir)
+        final_dir.chmod(0o755)
         print(f"[export] published {final_dir}")
         return 0
     finally:
