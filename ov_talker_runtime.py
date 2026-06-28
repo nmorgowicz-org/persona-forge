@@ -305,8 +305,18 @@ class OVTalkerRuntime:
             compiled["predictor_prefill"], compiled["predictor_decode"], pred_layers, predictor=True
         )
 
+        # Vocoder runtime: loads vocoder IR and patches speech_tokenizer.decode.
+        self.vocoder_runtime = None
+        vocoder_cfg = (self._ov_config or {}).get("vocoder")
+        if vocoder_cfg:
+            from ov_vocoder_runtime import OpenVinoVocoderRuntime
+            speech_tokenizer = getattr(self._talker, "speech_tokenizer", None)
+            if speech_tokenizer is not None:
+                self.vocoder_runtime = OpenVinoVocoderRuntime(speech_tokenizer, vocoder_cfg)
+
         self._orig_main_forward = None
         self._orig_pred_forward = None
+        self._orig_st_decode = None
 
     def _default_compression(self) -> str:
         meta_path = self.model_dir / "metadata.json"
@@ -354,6 +364,21 @@ class OVTalkerRuntime:
 
         main_module.forward = main_forward
         pred_module.forward = predictor_forward
+
+        # Patch speech_tokenizer.decode to use vocoder_runtime (if enabled).
+        if self.vocoder_runtime and self.vocoder_runtime.enabled:
+            st = getattr(self._talker, "speech_tokenizer", None)
+            if st is not None:
+                self._orig_st_decode = st.decode
+
+                def _ov_decode(inputs, *args, **kwargs):
+                    try:
+                        return self.vocoder_runtime.decode(inputs, *args, **kwargs)
+                    except Exception:
+                        return self._orig_st_decode(inputs, *args, **kwargs)
+
+                st.decode = _ov_decode
+
         return self
 
     def uninstall(self) -> None:
@@ -363,6 +388,37 @@ class OVTalkerRuntime:
         if self._orig_pred_forward is not None:
             self._talker.code_predictor.model.forward = self._orig_pred_forward
             self._orig_pred_forward = None
+        if self._orig_st_decode is not None:
+            st = getattr(self._talker, "speech_tokenizer", None)
+            if st is not None:
+                st.decode = self._orig_st_decode
+            self._orig_st_decode = None
+
+    @property
+    def talker(self):
+        """Expose the talker for external callers (e.g., parity tests)."""
+        return self._talker
+
+    def generate_waveform_from_codes(self, codes):
+        """Generate waveform from audio codes using vocoder_runtime or PyTorch fallback.
+
+        Args:
+            codes: tensor or numpy [frames, num_quantizers] of audio codes.
+
+        Returns:
+            1-D float32 waveform (same convention as speech_tokenizer.decode).
+        """
+        if self.vocoder_runtime and self.vocoder_runtime.enabled:
+            try:
+                return self.vocoder_runtime.decode(codes)
+            except Exception:
+                # Fallback to PyTorch vocoder on any error.
+                pass
+        # PyTorch fallback.
+        st = getattr(self._talker, "speech_tokenizer", None)
+        if st is not None:
+            return st.decode(codes)
+        raise RuntimeError("No vocoder available (no speech_tokenizer).")
 
     def __enter__(self) -> "OVTalkerRuntime":
         return self.install()

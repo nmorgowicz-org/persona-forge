@@ -6,9 +6,10 @@ compilation config derived from environment variables.
 
 from __future__ import annotations
 import os
+from pathlib import Path
 
 
-def get_ov_config() -> dict[str, str]:
+def get_ov_config() -> dict[str, object]:
     """Build an OpenVINO compile_model config from environment variables."""
 
     inference_threads = os.getenv(
@@ -18,7 +19,7 @@ def get_ov_config() -> dict[str, str]:
     dynamic_quant_group = os.getenv("OV_DYNAMIC_QUANT_GROUP_SIZE", "32").strip()
     kv_cache_precision = os.getenv("OV_KV_CACHE_PRECISION", "f32").strip()
 
-    cfg: dict[str, str] = {
+    cfg: dict[str, object] = {
         "PERFORMANCE_HINT": "LATENCY",
         "NUM_STREAMS": "1",
         "INFERENCE_NUM_THREADS": str(inference_threads),
@@ -26,6 +27,27 @@ def get_ov_config() -> dict[str, str]:
         "DYNAMIC_QUANTIZATION_GROUP_SIZE": dynamic_quant_group,
         "KV_CACHE_PRECISION": kv_cache_precision,
     }
+
+    # Vocoder runtime config.
+    vocoder_enabled = os.getenv("OPENVINO_VOCODER_ENABLED", "0").strip() == "1"
+    vocoder_dir = (os.getenv("OPENVINO_VOCODER_DIR") or "").strip() or None
+    vocoder_device = (os.getenv("OPENVINO_VOCODER_DEVICE", "CPU") or "CPU").strip()
+    vocoder_compression = (
+        os.getenv("OPENVINO_VOCODER_COMPRESSION", "fp32").strip().lower() or "fp32"
+    )
+
+    cfg["vocoder"] = {
+        "enabled": vocoder_enabled,
+        "model_path": Path(vocoder_dir) if vocoder_dir else None,
+        "device": vocoder_device,
+        "compression": vocoder_compression,
+        "config": {
+            "PERFORMANCE_HINT": "LATENCY",
+            "NUM_STREAMS": "1",
+            "INFERENCE_NUM_THREADS": str(inference_threads),
+        },
+    }
+
     return cfg
 
 
