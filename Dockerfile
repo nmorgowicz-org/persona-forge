@@ -28,7 +28,9 @@ RUN python -m pip install \
 RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/' \
     /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_25hz/vq/speech_vq.py || true
 
-COPY app_api.py app_worker.py model_config.py serve.py ./
+# ov_runtime_config is imported eagerly by app_worker (both backends); ov_talker_runtime is
+# imported lazily by the openvino backend. Both must ship in the runtime image.
+COPY app_api.py app_worker.py model_config.py serve.py ov_runtime_config.py ov_talker_runtime.py ./
 COPY scripts/download_model.py scripts/download_model.py
 
 FROM base AS runtime
@@ -46,6 +48,7 @@ FROM runtime AS exporter
 
 RUN python -m pip install -r requirements-ov-export.txt
 
-COPY export_openvino.py ov_export_wrappers.py parity_contract.py test_vocoder_parity.py benchmark_vocoder.py test_transformer_parity.py ./
+# bench_common + test_ov_generation provide the M4 generation-parity / warm-latency harness.
+COPY export_openvino.py ov_export_wrappers.py parity_contract.py test_vocoder_parity.py benchmark_vocoder.py test_transformer_parity.py bench_common.py test_ov_generation.py ./
 
 LABEL org.opencontainers.image.source="https://github.com/nmorgowicz-org/qwen3-tts-openvino"
