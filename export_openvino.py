@@ -49,21 +49,31 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--int8-mode",
-        choices=("sym", "asym", "int8_asym", "int8_sym"),
+        choices=("int8_sym", "int8_asym", "mix8", "int4_asym"),
         default="int8_asym",
-        help="NNCF INT8 quantization mode (default: int8_asym)",
+        help=(
+            "NNCF weight compression mode (default: int8_asym). "
+            "INT8 modes: all weights, per-channel, fixed. "
+            "MIX8/INT4 modes accept --int8-group-size and --int8-ratio."
+        ),
     )
     parser.add_argument(
         "--int8-group-size",
         type=int,
         default=32,
-        help="NNCF weight compression group size: 0=per-channel, 32/64=per-group (default: 32)",
+        help=(
+            "NNCF weight compression group size for MIX8/INT4 modes (0=per-channel, 32/64=per-group). "
+            "Ignored for INT8 modes (per-channel, all weights)."
+        ),
     )
     parser.add_argument(
         "--int8-ratio",
         type=float,
         default=1.0,
-        help="fraction of weights to quantize (0.0-1.0; default 1.0 = all)",
+        help=(
+            "Fraction of weights to quantize (0.0-1.0; default 1.0) for MIX8/INT4 modes. "
+            "Ignored for INT8 modes (all weights)."
+        ),
     )
     parser.add_argument("--prefill-seq", type=int, default=8, help="example prefill length for tracing")
     parser.add_argument("--decode-prior", type=int, default=4, help="example prior cache length for the decode graph")
@@ -132,15 +142,31 @@ def _convert(wrapper, example, ov):
 def _compress(ov_model, nncf, *, mode: str = "int8_asym", group_size: int = 32, ratio: float = 1.0):
     """Compress weights with NNCF.
 
-    mode: NNCF CompressWeightsMode enum name prefix.
-    group_size: 0=per-channel, >0=per-group (32/64).
-    ratio: fraction of weights to quantize.
+    mode: NNCF CompressWeightsMode enum name (e.g. INT8_ASYM, MIX_8, INT4_ASYM).
+    group_size: used for MIX_8/INT4 modes only (0=per-channel, 32/64=per-group).
+    ratio: fraction of weights to quantize (used for MIX_8/INT4 modes only).
+
+    NOTE: INT8 modes are all-or-nothing (per-channel, ratio=1) and reject
+    non-default group_size/ratio. Only MIX_8/INT4 modes accept tuning.
     """
-    if mode.lower().startswith("sym"):
-        ov_mode = nncf.CompressWeightsMode.INT8_SYM
+    mode_lower = mode.lower()
+    if "mix" in mode_lower:
+        ov_mode = nncf.CompressWeightsMode.MIX_8
+    elif mode_lower.startswith("int4"):
+        ov_mode = nncf.CompressWeightsMode.INT4_ASYM
+    elif mode_lower.startswith("int8"):
+        if "sym" in mode_lower:
+            ov_mode = nncf.CompressWeightsMode.INT8_SYM
+        else:
+            ov_mode = nncf.CompressWeightsMode.INT8_ASYM
     else:
         ov_mode = nncf.CompressWeightsMode.INT8_ASYM
 
+    # INT8 modes: all weights, per-channel, fixed
+    if ov_mode in (nncf.CompressWeightsMode.INT8_SYM, nncf.CompressWeightsMode.INT8_ASYM):
+        return nncf.compress_weights(ov_model, mode=ov_mode)
+
+    # MIX_8 / INT4 modes: allow tuning
     kwargs = {
         "mode": ov_mode,
         "group_size": group_size,
@@ -294,11 +320,15 @@ def run() -> int:
                 if want_fp32:
                     ov.save_model(ov_model, tmp_dir / f"{name}.xml")
                 if want_int8:
-                    print(
-                        f"[export] compressing {name} to INT8 "
-                        f"(mode={args.int8_mode}, group_size={args.int8_group_size}) ...",
-                        flush=True,
-                    )
+                    if "mix" in args.int8_mode or "int4" in args.int8_mode:
+                        detail = (
+                            f"mode={args.int8_mode}, "
+                            f"group_size={args.int8_group_size}, "
+                            f"ratio={args.int8_ratio}"
+                        )
+                    else:
+                        detail = f"mode={args.int8_mode}, per-channel, all weights"
+                    print(f"[export] compressing {name} ({detail}) ...", flush=True)
                     ov.save_model(
                         _compress(
                             ov_model,
