@@ -40,6 +40,12 @@
       "matchManagers": ["pip_requirements"],
       "matchPackageNames": ["qwen-tts"],
       "automerge": false
+    },
+    {
+      "description": "transformers is pinned to the version qwen-tts==0.1.1 was tested against; our OV export wrappers depend on specific internals (DynamicLayer, create_causal_mask). Re-enable when qwen-tts bumps its compatibility baseline.",
+      "matchManagers": ["pip_requirements"],
+      "matchPackageNames": ["transformers"],
+      "enabled": false
     }
   ]
 }
