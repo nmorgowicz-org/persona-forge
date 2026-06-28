@@ -46,6 +46,6 @@ FROM runtime AS exporter
 
 RUN python -m pip install -r requirements-ov-export.txt
 
-COPY export_openvino.py ov_export_wrappers.py test_vocoder_parity.py benchmark_vocoder.py test_transformer_parity.py ./
+COPY export_openvino.py ov_export_wrappers.py parity_contract.py test_vocoder_parity.py benchmark_vocoder.py test_transformer_parity.py ./
 
 LABEL org.opencontainers.image.source="https://github.com/nmorgowicz-org/qwen3-tts-openvino"

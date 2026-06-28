@@ -94,8 +94,8 @@ def validate_dockerfile() -> None:
         if marker not in dockerfile:
             raise RuntimeError(f"Dockerfile runtime contract is missing {marker!r}")
     if (
-        "COPY export_openvino.py ov_export_wrappers.py test_vocoder_parity.py "
-        "benchmark_vocoder.py test_transformer_parity.py ./"
+        "COPY export_openvino.py ov_export_wrappers.py parity_contract.py "
+        "test_vocoder_parity.py benchmark_vocoder.py test_transformer_parity.py ./"
         not in dockerfile
     ):
         raise RuntimeError("Dockerfile exporter target is missing the export CLI sources")

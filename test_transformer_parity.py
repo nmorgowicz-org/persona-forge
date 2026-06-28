@@ -36,6 +36,8 @@ from pathlib import Path
 
 import numpy as np
 
+from parity_contract import require_output_head
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -91,15 +93,10 @@ def _top1_agreement(a: np.ndarray, b: np.ndarray) -> float:
 
 def _project_last_hidden(output_heads, hidden: np.ndarray, head_index: int) -> np.ndarray:
     """Project the generation-relevant final position through the required codebook head."""
-    if not output_heads:
-        raise RuntimeError("required output heads are unavailable; token parity cannot be skipped")
-    if head_index >= len(output_heads):
-        raise RuntimeError(
-            f"missing output head {head_index}; only {len(output_heads)} heads are available"
-        )
+    output_head = require_output_head(output_heads, head_index)
     import torch
 
-    return output_heads[head_index](torch.from_numpy(hidden[:, -1:, :])).detach().numpy()
+    return output_head(torch.from_numpy(hidden[:, -1:, :])).detach().numpy()
 
 
 def _timed(callable_):
