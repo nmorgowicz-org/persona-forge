@@ -128,12 +128,13 @@ tested only three of the predictor's 15 output heads, and timed first calls rath
 warm benchmark. The artifact also recorded the mutable revision `main`; the cache used the
 immutable model revision `5d83992436eae1d760afd27aff78a71d676296fc`.
 
-The measured 26-29 dB main and 31-37 dB predictor SNR values are retained as exploratory
-INT8_SYM characterization only. They are not INT8_ASYM evidence and do not establish that
-predictor INT8 is acceptable or that the main threshold should be lowered. The corrected
-core harness fails closed when output heads are unavailable, projects through
-`talker.codec_head` and all 15 predictor `lm_head` entries,
-and carries independent PyTorch, FP32 OpenVINO, and INT8 OpenVINO caches across decode steps.
+The corrected synthetic rerun carried independent caches and projected through
+`talker.codec_head` plus all 15 predictor `lm_head` entries. FP32 measured 75.8-113.0 dB
+with top-1 agreement at every tested final position. The actual INT8_SYM main measured
+25.3-27.3 dB and failed all four scopes; predictor INT8_SYM measured 24.3-37.4 dB and failed
+three of 15 scopes. INT8 top-1 still agreed at every tested position, but each scope contains
+only one synthetic final-position choice. These results are not INT8_ASYM or generation-level
+evidence and do not justify accepting predictor INT8 or lowering the main threshold.
 
 M3 cannot complete until the FP32 M4 generation adapter supplies real prompt embeddings,
 3-axis mRoPE positions, and the nested code-predictor schedule. That adapter is also required
@@ -788,8 +789,8 @@ Exploratory M3 results (0.6B, actual INT8_SYM despite INT8_ASYM metadata, all we
 per-channel):
 
 - FP32: all scopes pass (72-91 dB SNR), same as M2.
-- INT8 (main): 26-29 dB SNR → fails 30 dB gate (all 4 scopes).
-- INT8 (predictor): 31-37 dB SNR in the four tested scopes.
+- Original INT8_SYM harness (main): 26-29 dB SNR; all four scopes failed.
+- Original INT8_SYM harness (predictor): 31-37 dB in the four tested scopes.
 - These are hidden-state SNR measurements from the superseded synthetic harness. They are
   insufficient to accept or reject a runtime configuration.
 
@@ -807,6 +808,14 @@ Superseded INT8_SYM parity summary (0.6B transformer cores, all weights, per-cha
 - predictor/decode step0-2: 33.1-36.7 dB → passes
 
 FP32 IR remains excellent (71-91 dB) and identical to M2.
+
+Corrected synthetic rerun (`transformer_parity_corrected_int8_sym.json`):
+
+- FP32: 75.8-113.0 dB; top-1 agreed in all 19 tested scopes.
+- INT8_SYM main: 25.3-27.3 dB; all four scopes failed; top-1 agreed in all four.
+- INT8_SYM predictor: 24.3-37.4 dB; decode steps 1, 5, and 9 failed; top-1 agreed in all 15.
+- The corrected result strengthens the rejection of this artifact but remains synthetic
+  characterization, not generation acceptance.
 
 Unsupported MIX8 attempt (2026-06-28) found:
 
