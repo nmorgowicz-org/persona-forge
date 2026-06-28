@@ -23,8 +23,12 @@
 #   MODEL_CACHE    /var/data/autopirate/qwen3-tts/model
 #   OV_ROOT        /var/data/autopirate/qwen3-tts/openvino
 #   MODEL_SIZE     0.6B
-#   REF_AUDIO_PATH host WAV mounted as the voice-clone reference (default: $MODEL_CACHE/../voice_A.wav)
-#   REF_TEXT       exact transcript of the reference audio
+#   REF_AUDIO_PATH host WAV mounted as the voice-clone reference
+#                  (default: /var/data/autopirate/qwen3-tts/voice/voice_A.wav — project-owned,
+#                  persistent. Do not point at hermes-agent scratch; it gets wiped.)
+#   REF_TEXT       transcript of the reference audio. Defaults to the committed transcript of
+#                  voice_A.wav (the same default app_worker.py / bench_common.py use), so you
+#                  only need to set this if you swap in a different reference WAV.
 #   THREADS        6
 #
 set -euo pipefail
@@ -38,7 +42,7 @@ EXPORTER_IMAGE="${EXPORTER_IMAGE:-ghcr.io/nmorgowicz-org/qwen3-tts-openvino:expo
 MODEL_CACHE="${MODEL_CACHE:-/var/data/autopirate/qwen3-tts/model}"
 OV_ROOT="${OV_ROOT:-/var/data/autopirate/qwen3-tts/openvino}"
 MODEL_SIZE="${MODEL_SIZE:-0.6B}"
-REF_AUDIO_PATH="${REF_AUDIO_PATH:-${OV_ROOT%/openvino}/voice_A.wav}"
+REF_AUDIO_PATH="${REF_AUDIO_PATH:-/var/data/autopirate/qwen3-tts/voice/voice_A.wav}"
 REF_TEXT="${REF_TEXT:-}"
 THREADS="${THREADS:-6}"
 
