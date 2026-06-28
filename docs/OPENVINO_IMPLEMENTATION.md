@@ -1181,6 +1181,7 @@ convenience but must not be the Compose production reference.
 | `.github/workflows/ci.yml` | Lightweight tests on `arc-general` without model download |
 | `.github/workflows/image.yml` | Build and publish runtime/exporter targets on `arc-general-docker` |
 | `scripts/export-on-dockermisc1.sh` | Versioned host-side export and validation command |
+| `scripts/run-m4-on-dockermisc1.sh` | Stop service, run the M4 generation harness in the exporter image, restart |
 
 ## Release Gates
 
