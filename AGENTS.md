@@ -200,6 +200,22 @@ Compare one boundary at a time:
 Record max/mean absolute error, relative error, top-1 agreement, top-k overlap, cache shapes,
 and the first divergent step. Exact waveform equality is not a useful parity criterion.
 
+Parity gates must fail closed:
+
+- Do not catch a missing projection, output head, cache output, or required metric and continue
+  with a reduced test. Treat it as a harness failure.
+- In multi-step decode tests, carry each backend's own K/V output into its next step. Seeding
+  every step from PyTorch cache is allowed only as a separately labeled single-step diagnostic.
+- Exercise `talker.codec_head` and all 15 predictor `lm_head` selections before claiming token
+  parity. Hidden-state SNR alone cannot complete a transformer milestone.
+- Synthetic inputs characterize graph conversion only. Milestone acceptance additionally
+  requires inputs and mRoPE positions captured from the real generation path, bounded generated-
+  code comparison, production-sampling listening checks, and warm performance measurements.
+- Do not lower an existing accuracy threshold solely to make a failed run pass. A gate change
+  requires documented generation-level evidence and listening results.
+- Verify compression modes and parameter semantics against the pinned NNCF API. Unsupported
+  convenience names such as a hypothetical `MIX8` mode must not be added to the exporter CLI.
+
 ### Tier 4: INT8 quality and performance
 
 Use both deterministic greedy generation and production sampling. Record:

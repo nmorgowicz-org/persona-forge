@@ -3,8 +3,10 @@ from types import SimpleNamespace
 from unittest import mock
 
 from export_openvino import (
+    _compress,
     _export_provenance,
     _resolve_vocoder_decoder,
+    _resolved_model_revision,
     _set_eager_attention,
     parse_args,
 )
@@ -30,6 +32,19 @@ class ExportOpenVINOTests(unittest.TestCase):
 
         self.assertTrue(args.vocoder_only)
         self.assertFalse(args.skip_vocoder)
+
+    def test_rejects_unsupported_mix8_mode(self):
+        with mock.patch(
+            "sys.argv",
+            [
+                "export_openvino.py",
+                "--output-dir",
+                "/tmp/ov",
+                "--int8-mode",
+                "mix8",
+            ],
+        ), self.assertRaises(SystemExit):
+            parse_args()
 
     def test_sets_each_nested_attention_config_once(self):
         eager = SimpleNamespace(_attn_implementation="sdpa")
@@ -59,6 +74,43 @@ class ExportOpenVINOTests(unittest.TestCase):
     def test_rejects_missing_export_provenance(self):
         with self.assertRaisesRegex(SystemExit, "SOURCE_COMMIT"):
             _export_provenance({})
+
+    def test_resolves_immutable_model_revision_from_loaded_config(self):
+        resolved = "a" * 40
+        wrapped = SimpleNamespace(
+            model=SimpleNamespace(config=SimpleNamespace(_commit_hash=resolved))
+        )
+
+        self.assertEqual(_resolved_model_revision(wrapped, "main"), resolved)
+
+    def test_rejects_mutable_model_revision(self):
+        wrapped = SimpleNamespace(model=SimpleNamespace(config=SimpleNamespace()))
+
+        with self.assertRaisesRegex(RuntimeError, "immutable"):
+            _resolved_model_revision(wrapped, "main")
+
+    def test_int8_compression_does_not_pass_int4_tuning_arguments(self):
+        modes = SimpleNamespace(INT8_SYM="int8_sym", INT8_ASYM="int8_asym", INT4_ASYM="int4")
+        nncf = SimpleNamespace(CompressWeightsMode=modes, compress_weights=mock.Mock())
+
+        _compress("model", nncf, mode="int8_asym", group_size=64, ratio=0.5)
+
+        nncf.compress_weights.assert_called_once_with("model", mode="int8_asym")
+
+    def test_int8_sym_and_asym_modes_are_not_confused(self):
+        modes = SimpleNamespace(INT8_SYM="symmetric", INT8_ASYM="asymmetric", INT4_ASYM="int4")
+        nncf = SimpleNamespace(CompressWeightsMode=modes, compress_weights=mock.Mock())
+
+        _compress("model", nncf, mode="int8_sym")
+        _compress("model", nncf, mode="int8_asym")
+
+        self.assertEqual(
+            nncf.compress_weights.call_args_list,
+            [
+                mock.call("model", mode="symmetric"),
+                mock.call("model", mode="asymmetric"),
+            ],
+        )
 
 
 if __name__ == "__main__":
