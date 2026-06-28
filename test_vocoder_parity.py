@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sequence-lengths", nargs="+", type=int, default=[8, 32, 300, 325])
     parser.add_argument("--seed", type=int, default=20260628)
     parser.add_argument("--threads", type=int, default=6)
+    parser.add_argument("--int8-model", default="vocoder_decoder_int8.xml")
     parser.add_argument("--fp32-max-abs", type=float, default=1e-4)
     parser.add_argument("--int8-max-abs", type=float, default=5e-3)
     parser.add_argument("--output-json", type=Path)
@@ -31,9 +32,17 @@ def parse_args() -> argparse.Namespace:
 def _metrics(reference: np.ndarray, candidate: np.ndarray) -> dict[str, float]:
     absolute = np.abs(reference - candidate)
     relative = absolute / np.maximum(np.abs(reference), 1e-6)
+    error_rms = float(np.sqrt(np.mean(np.square(reference - candidate))))
+    signal_rms = float(np.sqrt(np.mean(np.square(reference))))
+    snr_db = float(20.0 * np.log10(max(signal_rms, 1e-12) / max(error_rms, 1e-12)))
     return {
         "max_abs": float(absolute.max(initial=0.0)),
         "mean_abs": float(absolute.mean()),
+        "p99_abs": float(np.percentile(absolute, 99)),
+        "p999_abs": float(np.percentile(absolute, 99.9)),
+        "error_rms": error_rms,
+        "signal_rms": signal_rms,
+        "snr_db": snr_db,
         "max_rel": float(relative.max(initial=0.0)),
         "mean_rel": float(relative.mean()),
     }
@@ -61,7 +70,7 @@ def run() -> int:
         raise SystemExit(
             f"sequence lengths cannot exceed fixed vocoder input {fixed_input_frames}"
         )
-    required_graphs = {"vocoder_decoder.xml", "vocoder_decoder_int8.xml"}
+    required_graphs = {"vocoder_decoder.xml", args.int8_model}
     missing = sorted(name for name in required_graphs if not (args.model_dir / name).is_file())
     if missing:
         raise SystemExit(f"missing vocoder IR files: {missing}")
@@ -87,10 +96,13 @@ def run() -> int:
         "PERFORMANCE_HINT": "LATENCY",
         "NUM_STREAMS": "1",
         "INFERENCE_NUM_THREADS": str(args.threads),
+        # The CPU plugin may otherwise lower eligible FP32 operations to BF16.
+        # Parity must measure the converted graph before reduced-precision execution.
+        "INFERENCE_PRECISION_HINT": "f32",
     }
     core = ov.Core()
     fp32 = core.compile_model(args.model_dir / "vocoder_decoder.xml", "CPU", ov_config)
-    int8 = core.compile_model(args.model_dir / "vocoder_decoder_int8.xml", "CPU", ov_config)
+    int8 = core.compile_model(args.model_dir / args.int8_model, "CPU", ov_config)
 
     results = []
     failures = []
@@ -163,6 +175,8 @@ def run() -> int:
         "openvino_version": ov.__version__,
         "seed": args.seed,
         "threads": args.threads,
+        "inference_precision_hint": "f32",
+        "int8_model": args.int8_model,
         "fp32_max_abs_tolerance": args.fp32_max_abs,
         "int8_max_abs_tolerance": args.int8_max_abs,
         "results": results,
