@@ -1,0 +1,23 @@
+name: Feature Request
+description: Propose an inference, export, deployment, or quality improvement
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the use case, bottleneck, or quality issue.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: Include expected performance, memory, or compatibility impact when known.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
