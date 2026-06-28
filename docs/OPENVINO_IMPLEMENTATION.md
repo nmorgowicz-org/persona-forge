@@ -14,7 +14,11 @@ The production backend will use:
 
 - PyTorch for prompt construction, embedding lookups, sampling, and lightweight glue.
 - OpenVINO for both autoregressive transformer cores.
-- ONNX Runtime for the existing speech tokenizer and waveform decoder.
+- A decision (Milestone 0 finding) for the waveform decoder: it is **PyTorch, not ONNX
+  Runtime** on the live install — `speech_tokenizer.decode` runs `Qwen3TTSTokenizerV2Decoder
+  .chunked_decode`, a 114M-parameter conv/GAN vocoder, in a single non-iterative forward. At
+  ~29% of end-to-end it is a strong OpenVINO/INT8 conversion candidate (no KV cache, no loop),
+  and leaving it in PyTorch caps the achievable speedup. See "Milestone 0".
 
 The optimization target is at least a 2x reduction in warm end-to-end latency without an
 audible quality regression. Treat 7-14 seconds for a short utterance as an investigation
@@ -34,8 +38,9 @@ Two findings from that baseline reshape the end-to-end picture and must be carri
 - The `speech_tokenizer.decode` (code -> waveform) is **~29% of end-to-end wall time** in a
   single call (8.1 s of a 27.8 s run). Accelerating only the two transformer cores leaves
   this untouched and caps the achievable speedup; the tokenizer/vocoder decode is now a
-  first-class profiling and optimization target, not glue. Profile it separately and check
-  whether it already runs under ONNX Runtime before assuming the cores are the whole story.
+  first-class profiling and optimization target, not glue. Profiled: it is **PyTorch**
+  (`Qwen3TTSTokenizerV2Decoder.chunked_decode`, 114M params, single non-iterative forward),
+  not ONNX Runtime — so it is a clean OpenVINO/INT8 conversion candidate, not a fixed cost.
 - Greedy decoding (`do_sample=False`) does **not** terminate on this model — it runs to
   `max_new_tokens` instead of emitting EOS (a short sentence ran past 575 frames / 46 s of
   audio before being stopped). Realistic latency/RTF must be measured under production
@@ -108,7 +113,7 @@ Qwen3TTSModel.generate_voice_clone()
             -> main talker prefill, then per-frame decode driven by the HF sampling loop
             -> talker.forward (custom) runs the code predictor for codebooks 2..16 inline
        -> consume talker_result.hidden_states: codes = hid[-1], hidden = hid[0][-1]
-       -> speech_tokenizer.decode() in ONNX Runtime
+       -> speech_tokenizer.decode() -> Qwen3TTSTokenizerV2Decoder.chunked_decode (PyTorch, ~29%)
   -> waveform
 ```
 
@@ -380,12 +385,14 @@ torch.set_num_interop_threads(1)
 Benchmark 6 and 8 inference threads. Keep one request in flight; the service already
 serializes inference with a single-worker executor.
 
-Once OpenVINO is added, a single shared thread count is insufficient: PyTorch, OpenVINO,
-and ONNX Runtime all compete for the same 8 vCPUs. Because inference is serialized to one
-in-flight request, the active engine should get the bulk of the cores while the others stay
-small to avoid oversubscription and swap pressure. Start from an explicit per-engine budget
-(OpenVINO transformer cores 6, ONNX Runtime tokenizer/decoder 2, residual PyTorch glue 2)
-and benchmark alternative splits. Set every engine's thread count explicitly rather than
+Once OpenVINO is added, a single shared thread count is insufficient: PyTorch and OpenVINO
+compete for the same 8 vCPUs (ONNX Runtime too if any encode path uses it). Because the
+stages run sequentially per request — transformer generation, then the one-shot vocoder
+decode — the active stage should get the bulk of the cores. The vocoder decoder is PyTorch
+today (or OpenVINO once converted), not ONNX Runtime; budget threads for whichever engine
+actually runs `chunked_decode`. Start from an explicit per-engine budget (OpenVINO transformer
+cores 6, vocoder decode 6 while it is the only active stage, residual PyTorch glue small) and
+benchmark alternative splits. Set every engine's thread count explicitly rather than
 leaving any at its library default.
 
 ## Milestone 1: FP32 OpenVINO Feasibility Spike
