@@ -21,6 +21,7 @@ Writes ov_generation_report.json beside the IR files.
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import statistics
 import time
@@ -81,7 +82,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-waveform-snr", type=float, default=30.0,
                         help="soft gate: greedy PyTorch-vs-OV waveform SNR in dB")
     parser.add_argument("--strict", action="store_true",
-                        help="(legacy alias for --strict-greedy when mode=greedy)")
+                        help="(legacy alias: same as --strict-greedy)")
     parser.add_argument("--output-json", type=Path)
     parser.add_argument(
         "--logits-max-frames",
@@ -138,9 +139,17 @@ def _as_frames_by_codebooks(codes: np.ndarray) -> np.ndarray:
     emit the transpose [codebooks, frames]. Orient by the codebook axis, which has the
     fixed small size NUM_CODEBOOKS while frames is the long, variable axis.
     """
-    a = np.squeeze(np.asarray(codes))
-    if a.ndim == 1:
-        a = a[:, None]
+    a = np.asarray(codes)
+    # Remove leading batch dim(s) safely (e.g. [1, frames, 16] -> [frames, 16]).
+    if a.ndim == 3 and a.shape[0] == 1:
+        a = a[0]
+    if a.ndim == 4 and a.shape[0] == 1 and a.shape[1] == 1:
+        a = a[0, 0]
+    # Now enforce 2D: [frames, codebooks] or [codebooks, frames].
+    if a.ndim != 2:
+        raise ValueError(
+            f"_as_frames_by_codebooks: unexpected shape {a.shape} after squeeze"
+        )
     if a.shape[0] == NUM_CODEBOOKS and a.shape[1] != NUM_CODEBOOKS:
         a = a.T
     return a
@@ -238,6 +247,18 @@ def _compute_sampled_run_metrics(
         m = float(np.mean(pt_c[:, cb] == ov_c[:, cb]))
         per_codebook_match_rates.append(round(m, 4))
 
+    # Per-codebook entropy (token diversity).
+    def _codebook_entropy(codes_col: np.ndarray) -> float:
+        unique, counts = np.unique(codes_col, return_counts=True)
+        probs = counts / max(counts.sum(), 1)
+        return float(-np.sum(probs * np.log(probs + 1e-12)))
+
+    per_codebook_entropy_pt = []
+    per_codebook_entropy_ov = []
+    for cb in range(pt_c.shape[1]):
+        per_codebook_entropy_pt.append(round(_codebook_entropy(pt_c[:, cb]), 4))
+        per_codebook_entropy_ov.append(round(_codebook_entropy(ov_c[:, cb]), 4))
+
     return {
         "waveform_snr_db": round(waveform_snr_db, 2),
         "overall_codebook_match_rate": round(overall_codebook_match_rate, 4),
@@ -246,6 +267,8 @@ def _compute_sampled_run_metrics(
         "duration_pt": round(duration_pt, 3),
         "duration_ov": round(duration_ov, 3),
         "per_codebook_match_rates": per_codebook_match_rates,
+        "per_codebook_entropy_pt": per_codebook_entropy_pt,
+        "per_codebook_entropy_ov": per_codebook_entropy_ov,
     }
 
 
@@ -499,8 +522,8 @@ def run() -> int:
     args = parse_args()
     import torch
 
-    # Normalize legacy --strict to --strict-greedy when relevant
-    if args.strict and not args.strict_greedy:
+    # Normalize legacy --strict to --strict-greedy (always)
+    if args.strict:
         args.strict_greedy = True
 
     torch.set_num_threads(args.threads)
@@ -527,6 +550,7 @@ def run() -> int:
     greedy_section = {}
     if run_greedy:
         print("[gen-parity] greedy PyTorch reference ...", flush=True)
+        torch.manual_seed(args.seed)
         with _CodeCapture(speech_tokenizer) as cap:
             pt_wav, sr = _generate(
                 model, prompt, args.text, args.language,
@@ -536,6 +560,7 @@ def run() -> int:
 
         print("[gen-parity] greedy OpenVINO candidate ...", flush=True)
         runtime.install()
+        torch.manual_seed(args.seed)
         try:
             with _CodeCapture(speech_tokenizer) as cap:
                 ov_wav, _ = _generate(
@@ -612,6 +637,8 @@ def run() -> int:
     # ── Sampled-quality mode ────────────────────────────────────────────────────
     sampled_section = {}
     if run_sampled:
+        # Help with memory when --mode=all and both PT+OV models are loaded.
+        gc.collect()
         sampled_section = run_sampled_quality(args, model, prompt, runtime)
         if sampled_section["failures"]:
             all_failures.extend(sampled_section["failures"])
@@ -619,6 +646,8 @@ def run() -> int:
     # ── Logits-parity mode ──────────────────────────────────────────────────────
     logits_section = {}
     if run_logits:
+        # Help with memory when --mode=all and both PT+OV models are loaded.
+        gc.collect()
         print("[logits-parity] running ...", flush=True)
         logits_section = run_logits_parity(args, model, prompt, runtime)
         if logits_section["first_argmax_mismatch_frame"] is not None:
