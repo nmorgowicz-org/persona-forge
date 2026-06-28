@@ -205,30 +205,50 @@ def _set_eager_attention(module) -> int:
     return len(configs)
 
 
+def _git_commit() -> str:
+    """Best-effort Git commit of the exporter source tree, or "unknown"."""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(Path(__file__).resolve().parent), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return out.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
 def _export_provenance(environ=os.environ) -> tuple[str, str]:
-    source_commit = environ.get("SOURCE_COMMIT", "")
-    image_digest = environ.get("EXPORTER_IMAGE_DIGEST", "")
-    if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
-        raise SystemExit("SOURCE_COMMIT must be the full 40-character Git commit SHA")
-    if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest):
-        raise SystemExit("EXPORTER_IMAGE_DIGEST must be a sha256 registry digest")
+    """Best-effort provenance for metadata. Recorded, never required.
+
+    Runs no longer fail when SOURCE_COMMIT / EXPORTER_IMAGE_DIGEST are absent: the
+    commit is auto-detected from the source tree when possible, and the image digest
+    falls back to "unknown". Set the env vars to pin exact provenance for published
+    artifacts; leave them unset for easy local/ad-hoc runs.
+    """
+    source_commit = environ.get("SOURCE_COMMIT", "").strip() or _git_commit()
+    image_digest = environ.get("EXPORTER_IMAGE_DIGEST", "").strip() or "unknown"
     return source_commit, image_digest
 
 
 def _resolved_model_revision(wrapped, requested_revision: str | None) -> str:
-    """Return the immutable Hugging Face commit resolved by from_pretrained()."""
+    """Best-effort revision label for the dir name and metadata.
+
+    Prefers the immutable Hugging Face commit resolved by from_pretrained(); falls back
+    to the requested revision or "main" when no commit hash is exposed, instead of
+    failing the export.
+    """
     candidates = (
         getattr(getattr(getattr(wrapped, "model", None), "config", None), "_commit_hash", None),
         getattr(getattr(wrapped, "config", None), "_commit_hash", None),
-        requested_revision,
     )
     for candidate in candidates:
         if isinstance(candidate, str) and re.fullmatch(r"[0-9a-f]{40}", candidate):
             return candidate
-    raise RuntimeError(
-        "could not resolve an immutable 40-character model revision; "
-        "set MODEL_REVISION to a commit SHA"
-    )
+    return requested_revision or "main"
 
 
 def run() -> int:

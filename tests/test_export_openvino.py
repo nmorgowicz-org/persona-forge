@@ -60,7 +60,7 @@ class ExportOpenVINOTests(unittest.TestCase):
         self.assertEqual(eager._attn_implementation, "eager")
         self.assertFalse(hasattr(untouched, "_attn_implementation"))
 
-    def test_validates_export_provenance(self):
+    def test_export_provenance_uses_explicit_env_values(self):
         commit = "a" * 40
         digest = f"sha256:{'b' * 64}"
 
@@ -71,9 +71,14 @@ class ExportOpenVINOTests(unittest.TestCase):
             (commit, digest),
         )
 
-    def test_rejects_missing_export_provenance(self):
-        with self.assertRaisesRegex(SystemExit, "SOURCE_COMMIT"):
-            _export_provenance({})
+    def test_export_provenance_defaults_when_missing(self):
+        # Missing provenance must NOT abort an export. Digest falls back to "unknown";
+        # the commit is best-effort (auto-detected git SHA or "unknown").
+        commit, digest = _export_provenance({})
+
+        self.assertEqual(digest, "unknown")
+        self.assertIsInstance(commit, str)
+        self.assertTrue(commit)
 
     def test_resolves_immutable_model_revision_from_loaded_config(self):
         resolved = "a" * 40
@@ -83,11 +88,11 @@ class ExportOpenVINOTests(unittest.TestCase):
 
         self.assertEqual(_resolved_model_revision(wrapped, "main"), resolved)
 
-    def test_rejects_mutable_model_revision(self):
+    def test_falls_back_to_requested_revision_when_no_commit_hash(self):
         wrapped = SimpleNamespace(model=SimpleNamespace(config=SimpleNamespace()))
 
-        with self.assertRaisesRegex(RuntimeError, "immutable"):
-            _resolved_model_revision(wrapped, "main")
+        self.assertEqual(_resolved_model_revision(wrapped, "v1.2"), "v1.2")
+        self.assertEqual(_resolved_model_revision(wrapped, None), "main")
 
     def test_int8_compression_does_not_pass_int4_tuning_arguments(self):
         modes = SimpleNamespace(INT8_SYM="int8_sym", INT8_ASYM="int8_asym", INT4_ASYM="int4")

@@ -48,6 +48,7 @@ voice_clone_prompt = None
 
 ov_metadata = None
 ov_config = None
+ov_runtime = None
 
 executor = ThreadPoolExecutor(max_workers=1)
 
@@ -70,11 +71,19 @@ def _validate_ov_metadata(model_dir: str):
             f"!= {MODEL_ID!r}"
         )
 
-    expected_revision = MODEL_REVISION or "main"
-    if ov_metadata.get("model_revision") != expected_revision:
+    # Revision check: only enforced when MODEL_REVISION is explicitly pinned. When it is
+    # unset, accept whatever the export recorded (an auto-resolved commit SHA or "main"),
+    # so easy/ad-hoc exports don't block worker startup.
+    artifact_revision = ov_metadata.get("model_revision")
+    if MODEL_REVISION and artifact_revision != MODEL_REVISION:
         raise RuntimeError(
-            f"OV metadata model_revision {ov_metadata.get('model_revision')!r} "
-            f"!= {expected_revision!r}"
+            f"OV metadata model_revision {artifact_revision!r} != pinned {MODEL_REVISION!r}"
+        )
+    if not MODEL_REVISION:
+        print(
+            f"[app_worker] MODEL_REVISION unpinned; accepting artifact revision "
+            f"{artifact_revision!r}.",
+            flush=True,
         )
 
     qwen_version = ov_metadata.get("qwen_tts_version")
@@ -99,7 +108,7 @@ def _validate_ov_metadata(model_dir: str):
 
 
 def load_model():
-    global model, voice_clone_prompt
+    global model, voice_clone_prompt, ov_runtime
 
     if TTS_BACKEND not in ("pytorch", "openvino"):
         raise RuntimeError(f"Invalid TTS_BACKEND: {TTS_BACKEND!r}")
@@ -141,12 +150,16 @@ def load_model():
     )
 
     if TTS_BACKEND == "openvino":
-        # NOTE: ov_talker_runtime integration (Milestone 4) not yet implemented.
-        # For now, generation runs in PyTorch; backend metadata is exposed in /health
-        # for deployment readiness and M4 wiring.
+        # Milestone 4: install the OpenVINO talker runtime by swapping the two inner
+        # transformer core forwards. All other generation glue stays in PyTorch.
+        from ov_talker_runtime import OVTalkerRuntime
+
+        talker = model.model.talker
+        ov_runtime = OVTalkerRuntime(OV_MODEL_DIR, talker, ov_config=ov_config)
+        ov_runtime.install()
         print(
-            "[app_worker] TTS_BACKEND=openvino, runtime not wired (M4 pending); "
-            "generation still via PyTorch.",
+            f"[app_worker] OpenVINO talker runtime installed "
+            f"(compression={ov_runtime.compression}); cores run on OpenVINO.",
             flush=True,
         )
 
@@ -179,7 +192,10 @@ def health():
                     "compression": ov_metadata.get("compression"),
                     "int8_config": ov_metadata.get("int8_config"),
                     "config": ov_config,
-                    "runtime_wired": False,  # set to True when M4 is implemented
+                    "runtime_wired": ov_runtime is not None,
+                    "active_compression": (
+                        ov_runtime.compression if ov_runtime is not None else None
+                    ),
                 }
             }
         )
