@@ -273,8 +273,8 @@ class OpenVinoVocoderRuntime:
         Expects IR input: [1, Q, 325].
         Output: [1, 1, samples]; returns 1-D float32.
         """
-        batch, frames, q = codes_2d.shape
-        codes_input = codes_2d.transpose(1, 2, 0).reshape(1, q, frames)
+        frames, q = codes_2d.shape
+        codes_input = codes_2d.T.reshape(1, q, frames)
 
         self.req.infer({self.input_name: codes_input})
         out = self.req.get_tensor(self.output_name)
