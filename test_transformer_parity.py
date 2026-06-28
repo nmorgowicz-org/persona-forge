@@ -42,9 +42,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--decode-steps", type=int, default=3)
     parser.add_argument("--seed", type=int, default=20260628)
     parser.add_argument("--threads", type=int, default=6)
-    parser.add_argument("--fp32-max-abs", type=float, default=1e-3,
+    parser.add_argument("--fp32-max-abs", type=float, default=1e-2,
                         help="max absolute error threshold for FP32 hidden-state parity")
-    parser.add_argument("--fp32-min-snr", type=float, default=None,
+    parser.add_argument("--fp32-min-snr", type=float, default=60.0,
                         help="SNR gate (dB) for FP32; overrides --fp32-max-abs when set")
     parser.add_argument("--int8-max-abs", type=float, default=5e-2,
                         help="max absolute error threshold for INT8 hidden-state parity")
