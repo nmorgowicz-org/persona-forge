@@ -130,10 +130,87 @@ jobs:
     permissions:
       packages: write
     steps:
-      - name: Protect active tags and keep recent GHCR versions
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5
-        with:
-          package-name: qwen3-tts-openvino
-          package-type: container
-          min-versions-to-keep: 5
-          ignore-versions: ^(runtime|exporter|buildcache)-
+      - name: Cleanup old container versions (tag-aware)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: nmorgowicz-org/qwen3-tts-openvino
+          PACKAGE: qwen3-tts-openvino
+        shell: bash
+        run: |
+          # List all versions (newest first)
+          versions=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/$REPO/packages/container/$PACKAGE/versions" \
+            --jq '[.[] | {id, updated_at, tags}] | sort_by(.updated_at) | reverse')
+
+          # Helper: check if a version has any protected tag
+          # Protected:
+          # - runtime-latest, exporter-latest (active deployment)
+          # - buildcache-runtime, buildcache-exporter (build caches)
+          # - runtime-vX.Y.Z, exporter-vX.Y.Z (release version tags)
+          # - runtime-<40-hex-sha>, exporter-<40-hex-sha> (immutable SHA tags)
+          is_protected() {
+            local tags_json="$1"
+            echo "$tags_json" | jq -e '
+              any(
+                . == "runtime-latest" or
+                . == "exporter-latest" or
+                . == "buildcache-runtime" or
+                . == "buildcache-exporter" or
+                (test("^runtime-v[0-9]+\\.[0-9]+\\.[0-9]+$")) or
+                (test("^exporter-v[0-9]+\\.[0-9]+\\.[0-9]+$")) or
+                (test("^runtime-[0-9a-f]{40}$")) or
+                (test("^exporter-[0-9a-f]{40}$"))
+              )
+            ' >/dev/null 2>&1
+          }
+
+          # Build list of protected version IDs (newest-first order preserved)
+          protected_ids=()
+          while IFS= read -r ver; do
+            id=$(echo "$ver" | jq -r '.id')
+            tags_json=$(echo "$ver" | jq -c '.tags')
+            if is_protected "$tags_json"; then
+              protected_ids+=("$id")
+            fi
+          done < <(echo "$versions" | jq -c '.[]')
+
+          # Determine which protected IDs to delete (oldest beyond keep limit)
+          min_keep=5
+          delete_ids=()
+          if [[ ${#protected_ids[@]} -gt $min_keep ]]; then
+            # Delete oldest protected versions (beyond first $min_keep).
+            for i in $(seq $min_keep $((${#protected_ids[@]} - 1))); do
+              delete_ids+=("${protected_ids[$i]}")
+            done
+          fi
+
+          # Build protected and delete sets
+          declare -A protected_set
+          declare -A delete_set
+          for pid in "${protected_ids[@]}"; do
+            protected_set[$pid]=1
+          done
+          for did in "${delete_ids[@]}"; do
+            delete_set[$did]=1
+          done
+
+          # Process each version (newest first)
+          while IFS= read -r ver; do
+            id=$(echo "$ver" | jq -r '.id')
+            name=$(echo "$ver" | jq -r '.name' | cut -c1-16)
+            tags=$(echo "$ver" | jq -r '.tags | join(",")')
+
+            if [[ -z "${protected_set[$id]+_}" ]]; then
+              # Unprotected version, always delete.
+              echo "DELETING unprotected: id=$id name=...$name tags=[$tags]"
+              gh api -X DELETE "/repos/$REPO/packages/container/$PACKAGE/versions/$id" >/dev/null 2>&1
+            elif [[ -n "${delete_set[$id]+_}" ]]; then
+              # Protected but oldest beyond keep limit.
+              echo "DELETING oldest-protected: id=$id name=...$name tags=[$tags]"
+              gh api -X DELETE "/repos/$REPO/packages/container/$PACKAGE/versions/$id" >/dev/null 2>&1
+            else
+              # Keep this version.
+              echo "KEEPING: id=$id name=...$name tags=[$tags]"
+            fi
+          done < <(echo "$versions" | jq -c '.[]')
