@@ -102,8 +102,9 @@ Use the correct ARC pool:
 
 Cheap repository validation runs on every internal PR. Expensive runtime/exporter image builds
 run only when an authorized maintainer applies the `ready-to-test` label. After that label is
-present, later commits rerun the image checks. Pushes to `main`, version tags, and manual
-workflow dispatches build unconditionally.
+present, later commits rerun the image checks. Release Please version tags publish images;
+manual workflow dispatches remain an explicit build-and-publish override. Merges to `main` do
+not build or publish images by themselves.
 
 Images are immutable build artifacts:
 

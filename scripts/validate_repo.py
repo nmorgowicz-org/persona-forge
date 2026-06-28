@@ -34,6 +34,26 @@ def validate_workflows() -> None:
         if not isinstance(document, dict) or "jobs" not in document:
             raise RuntimeError(f"{path.relative_to(ROOT)} is not a workflow mapping")
 
+    release_config = json.loads(
+        (ROOT / ".github" / "release-please" / "config.json5").read_text(encoding="utf-8")
+    )
+    package_name = release_config["packages"]["."]["package-name"]
+    tag_prefix = release_config.get("tag-prefix", "v")
+    expected_release_tag = f"{package_name}-{tag_prefix}*"
+
+    image_workflow = yaml.load(
+        (ROOT / ".github" / "workflows" / "image.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    push_trigger = image_workflow["on"]["push"]
+    if push_trigger.get("branches"):
+        raise RuntimeError("Container images must not publish from branch pushes")
+    if push_trigger.get("tags") != [expected_release_tag]:
+        raise RuntimeError(
+            "Container image tag trigger does not match the Release Please tag pattern: "
+            f"expected {expected_release_tag!r}"
+        )
+
 
 def validate_repository_metadata() -> None:
     for path in sorted((ROOT / ".github").rglob("*.yml")):
@@ -69,6 +89,8 @@ def validate_dockerfile() -> None:
     for marker in ('HEALTHCHECK ', 'CMD ["python", "serve.py"]'):
         if marker not in dockerfile:
             raise RuntimeError(f"Dockerfile runtime contract is missing {marker!r}")
+    if "COPY export_openvino.py ov_export_wrappers.py ./" not in dockerfile:
+        raise RuntimeError("Dockerfile exporter target is missing the export CLI sources")
 
     if not (ROOT / "SECURITY.md").is_file():
         raise RuntimeError("SECURITY.md is missing")
