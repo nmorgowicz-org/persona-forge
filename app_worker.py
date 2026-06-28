@@ -157,9 +157,14 @@ def load_model():
         talker = model.model.talker
         ov_runtime = OVTalkerRuntime(OV_MODEL_DIR, talker, ov_config=ov_config)
         ov_runtime.install()
+
+        vocoder_status = (
+            f"vocoder={'OV' if (ov_runtime.vocoder_runtime and ov_runtime.vocoder_runtime.enabled) else 'PyTorch'}"
+        )
         print(
             f"[app_worker] OpenVINO talker runtime installed "
-            f"(compression={ov_runtime.compression}); cores run on OpenVINO.",
+            f"(compression={ov_runtime.compression}, {vocoder_status}); "
+            f"cores run on OpenVINO.",
             flush=True,
         )
 
@@ -182,6 +187,14 @@ def health():
     }
 
     if TTS_BACKEND == "openvino" and ov_metadata:
+        vocoder_info = None
+        if ov_runtime is not None:
+            vr = ov_runtime.vocoder_runtime
+            vocoder_info = {
+                "enabled": bool(vr and vr.enabled),
+                "device": "CPU",
+            }
+
         base.update(
             {
                 "openvino": {
@@ -196,6 +209,7 @@ def health():
                     "active_compression": (
                         ov_runtime.compression if ov_runtime is not None else None
                     ),
+                    "vocoder": vocoder_info,
                 }
             }
         )
