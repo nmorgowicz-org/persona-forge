@@ -149,6 +149,35 @@ for generated-code agreement, production-sampling listening tests, warm latency,
 The next implementation target is therefore the FP32 explicit-cache M4 path; quantization
 selection resumes after that path passes generation-level parity.
 
+**Interpretation and M4 framing (do not mis-read the INT8 result):**
+
+1. **FP32-to-M4 is a prerequisite, not a rejection of INT8.** The only INT8 verdict we
+   have is a *synthetic hidden-state* SNR gate. The harness that can actually judge INT8
+   quality — bounded generated-code agreement plus production-sampling listening tests —
+   does not exist until the M4 generation runtime exists. We are building M4 in FP32 first
+   *because that is the thing that unlocks an honest INT8 evaluation*, not because FP32 won
+   an argument. The reproducible v0.5.4 INT8_ASYM artifact is retained for exactly that
+   re-evaluation.
+2. **Synthetic hidden-state SNR is a debug signal, not a quality verdict.** Top-1 token
+   agreement held at every tested INT8 position; we have no listening or generated-code
+   evidence that INT8 is audibly worse. "INT8 fails a synthetic diagnostic" is the accurate
+   statement; "INT8 quality is bad" overstates what we measured. (The vocoder milestone
+   already showed a chosen gate can be the wrong gate — see Milestone 1.5 max_abs vs SNR.)
+3. **FP32 is itself unproven against the 2x latency gate (Gate 5).** Vocoder FP32 IR bought
+   only 1.27x on a 29% slice (~1.07x end-to-end). The transformer cores are ~66% of wall
+   time and have *no measured FP32 speedup yet*; FP32-vs-eager on this AVX2/no-AVX-512 CPU
+   is often only ~1.2-1.5x. Per the INT8 microarchitecture note, autoregressive decode is
+   memory-bandwidth bound and weight-only INT8 is the lever most likely to reach 2x. M4 must
+   therefore **measure warm FP32 transformer latency as an early, explicit Gate-5 check** —
+   if FP32 lands well under 2x, INT8 is load-bearing, not optional polish. Treat FP32 M4 as
+   the evaluation platform, not the presumed shipping config.
+4. **1.7B structurally forces INT8; keep the path warm.** FP32 1.7B weights plus the
+   transient PyTorch+OpenVINO double-hold do not fit the 7 GiB container (see "1.7B
+   feasibility note"), so 1.7B cannot follow a "0.6B-at-FP32" path. Larger models are also
+   generally *more* robust to weight-only INT8, not less, so 1.7B is plausibly a better INT8
+   candidate than 0.6B. Do not let an FP32-is-fine conclusion on 0.6B quietly retire the
+   INT8 work that 1.7B requires.
+
 Not yet implemented: the OpenVINO generation runtime (`ov_talker_runtime.py`), generation-
 level FP32/INT8 validation, or the `TTS_BACKEND=openvino` worker path with `/health` metadata.
 
@@ -386,10 +415,14 @@ python export_openvino.py \
 
 `--compression` accepts `fp32`, `int8`, or `both`. Model selection and authentication come
 from `MODEL_SIZE`/`MODEL_REPO`, `MODEL_REVISION`, and optional `HF_TOKEN`/`HF_TOKEN_FILE`.
-Set `SOURCE_COMMIT` to the full commit SHA for the mounted exporter source and
-`EXPORTER_IMAGE_DIGEST` to the immutable `sha256:...` registry digest; publication fails if
-either provenance value is absent or malformed.
-The command reuses the standard Hugging Face cache and writes only to `--output-dir`.
+Provenance is **best-effort and never blocks a run**: `source_commit` is taken from
+`SOURCE_COMMIT` if set, otherwise auto-detected from the source tree's Git HEAD (falling back
+to `"unknown"`), and `exporter_image_digest` is taken from `EXPORTER_IMAGE_DIGEST` if set,
+otherwise `"unknown"`. Set those env vars to pin exact provenance for published artifacts;
+leave them unset for easy local/ad-hoc exports. Likewise the recorded `model_revision` prefers
+the immutable Hugging Face commit but falls back to the requested revision or `"main"` rather
+than failing. The worker only enforces a revision match when `MODEL_REVISION` is explicitly
+pinned. The command reuses the standard Hugging Face cache and writes only to `--output-dir`.
 
 Write into a temporary checkpoint-specific directory and atomically publish the final
 directory only after requested export, parity, compression, and metadata checks pass. Exit
@@ -880,8 +913,10 @@ is a debugging signal, not a substitute for generated-code agreement and listeni
 
 ## Milestone 4: OpenVINO Generation Runtime
 
-Create `ov_talker_runtime.py` with an `OpenVINOTalkerGenerator` that implements the exact
-nested generation schedule expected by `talker.generate(...)`.
+Create `ov_talker_runtime.py` that honors the exact nested generation schedule expected by
+`talker.generate(...)`. The implementation realizes this by swapping the two inner core
+forwards rather than reimplementing the schedule (see "Chosen implementation" below); the
+contract the cores must satisfy is unchanged and is described here.
 
 The runtime owns four compiled models and their requests:
 
@@ -920,6 +955,46 @@ the original object's embeddings, projections, configuration, dtype, and device.
 Return the same generation-result fields consumed by
 `Qwen3TTSForConditionalGeneration.generate()`, especially `hidden_states` with generated
 codebook IDs and main hidden states.
+
+### Chosen implementation: replace the two inner core forwards (not the schedule)
+
+Rather than reimplement the nested generation schedule, M4 swaps only the two transformer
+*inner* `forward` methods for OpenVINO-backed equivalents and leaves every other line of the
+stock generation path in PyTorch. This is the lowest-risk way to satisfy "do not replace
+`wrapped.model.talker`" and is correct-by-construction for generation-level parity, because
+sampling, EOS, mRoPE position math, `generation_steps`, `small_to_mtp_projection`, the codec
+and predictor output heads, and the `(outputs.hidden_states, codec_ids)` result packing all
+remain the original PyTorch code. Verified against `qwen-tts==0.1.1` source:
+
+- Patch `talker.model.forward` and `talker.code_predictor.model.forward` (the *inner*
+  `Qwen3TTSTalkerModel` / `Qwen3TTSTalkerCodePredictorModel`, which is exactly what the
+  export wrappers wrapped). The surrounding `…ForConditionalGeneration.forward` glue is
+  untouched.
+- The inner forwards receive flat tensors at this seam: 2-D `attention_mask`, `cache_position`,
+  `inputs_embeds` already projected for the predictor, and (predictor only) `generation_steps`
+  — the same tensors the IR was traced from. The inner predictor core ignores
+  `generation_steps`; only the head/embedding selection in the FCG glue uses it.
+- `position_ids` arrives 3-axis `[3, batch, seq]` for the main core (the FCG expands mRoPE
+  before the inner call). In the TTS audio path all three axes are identical (both the
+  prefill `get_rope_index` and the decode `arange+rope_deltas` branch use `expand(3, …)`), so
+  the adapter feeds axis 0 to the 2-D-position IR. Assert equality of the three axes on the
+  first call to catch any contract drift.
+- Each patched forward picks prefill vs decode by incoming cache length, runs the persistent
+  InferRequest, and returns `BaseModelOutputWithPast(last_hidden_state=H, hidden_states=(H,),
+  past_key_values=<DynamicCache from present K/V>)`. The outer extractor reads `hid[0][-1]`
+  (final hidden) and `hid[-1]` (codec_ids from the glue), so the length-1 `hidden_states`
+  tuple is sufficient and the intermediate per-layer states (unused) are not reproduced.
+
+This design is pinned to the `qwen-tts==0.1.1` generation contract; `app_worker` already fails
+startup on a package/revision mismatch.
+
+### Early Gate-5 check: measure warm FP32 transformer latency first
+
+Before any INT8 re-evaluation, M4 must record warm FP32 transformer latency and end-to-end
+RTF (see "Interpretation and M4 framing"). FP32 IR has unproven speedup on the cores; if it
+lands well under the 2x goal, INT8 becomes load-bearing and the retained INT8_ASYM artifact is
+re-evaluated through this same generation-level harness. `test_ov_generation.py` produces both
+the bounded generated-code agreement (greedy) and the warm sampling latency/RTF/peak-RSS rows.
 
 ## Milestone 5: Stateful KV Cache
 
@@ -1095,8 +1170,9 @@ convenience but must not be the Compose production reference.
 | `export_openvino.py` | Implement the documented one-shot export, validation, and compression CLI |
 | `ov_export_wrappers.py` | Tensor-only prefill/decode wrappers and cache flattening |
 | `test_vocoder_parity.py` | Deterministic vocoder wrapper, dynamic-shape, FP32, and INT8 parity gate |
-| `ov_talker_runtime.py` | Nested main-talker/code-predictor generation runtime |
-| `test_ov_parity.py` | FP32 and INT8 tensor/cache/token parity tests |
+| `ov_talker_runtime.py` | Install/uninstall OV cores by swapping the two inner core forwards (M4) |
+| `test_transformer_parity.py` | Synthetic FP32/INT8 tensor/cache/token core parity (M2/M3) |
+| `test_ov_generation.py` | Generation-level greedy code agreement + warm latency/RTF (M4) |
 | `app_worker.py` | Backend selection, loading, health metadata, and rollback path |
 | `app_api.py` | Preserve API behavior and return HTTP 503 until the worker is ready |
 | `serve.py` | Supervise both Gunicorn masters and forward shutdown signals |
@@ -1105,6 +1181,7 @@ convenience but must not be the Compose production reference.
 | `.github/workflows/ci.yml` | Lightweight tests on `arc-general` without model download |
 | `.github/workflows/image.yml` | Build and publish runtime/exporter targets on `arc-general-docker` |
 | `scripts/export-on-dockermisc1.sh` | Versioned host-side export and validation command |
+| `scripts/run-m4-on-dockermisc1.sh` | Stop service, run the M4 generation harness in the exporter image, restart |
 
 ## Release Gates
 
