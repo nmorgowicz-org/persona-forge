@@ -1,0 +1,48 @@
+"""Shared model selection and Hugging Face authentication helpers."""
+
+from __future__ import annotations
+
+import os
+from collections.abc import MutableMapping
+from pathlib import Path
+
+
+MODEL_PRESETS = {
+    "0.6B": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+    "1.7B": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+}
+
+
+def configure_hf_token(environ: MutableMapping[str, str] = os.environ) -> None:
+    """Populate HF_TOKEN from a Docker secret without logging the credential."""
+
+    if environ.get("HF_TOKEN"):
+        return
+
+    token_file = environ.get("HF_TOKEN_FILE")
+    if not token_file:
+        return
+
+    try:
+        token = Path(token_file).read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise RuntimeError(f"Unable to read HF_TOKEN_FILE: {token_file}") from exc
+    if not token:
+        raise RuntimeError(f"HF_TOKEN_FILE is empty: {token_file}")
+
+    environ["HF_TOKEN"] = token
+
+
+def resolve_model_repo(environ: MutableMapping[str, str] = os.environ) -> str:
+    """Resolve a supported Base checkpoint, with MODEL_REPO as an expert override."""
+
+    override = environ.get("MODEL_REPO", "").strip()
+    if override:
+        return override
+
+    model_size = environ.get("MODEL_SIZE", "0.6B").strip().upper()
+    try:
+        return MODEL_PRESETS[model_size]
+    except KeyError as exc:
+        choices = ", ".join(MODEL_PRESETS)
+        raise RuntimeError(f"Unsupported MODEL_SIZE={model_size!r}; choose {choices}") from exc

@@ -2,8 +2,13 @@
 
 ## Objective
 
-Accelerate `Qwen/Qwen3-TTS-12Hz-0.6B-Base` on the CPU-only `dockermisc1` VM while
-preserving the current `/generate`, `/infer`, and voice-cloning behavior.
+Accelerate either official Qwen3-TTS Base voice-cloning checkpoint on the CPU-only
+`dockermisc1` VM while preserving the current `/generate`, `/infer`, and voice-cloning
+behavior:
+
+- `Qwen/Qwen3-TTS-12Hz-0.6B-Base` is the default and first optimization target.
+- `Qwen/Qwen3-TTS-12Hz-1.7B-Base` uses the same runtime design but has its own export,
+  validation, memory, and performance gates.
 
 The production backend will use:
 
@@ -43,8 +48,9 @@ The relevant model configuration is:
 
 | Component | Layers | Hidden | Intermediate | KV heads | Work per audio frame |
 |---|---:|---:|---:|---:|---|
-| Main talker transformer | 28 | 1024 | 3072 | 8 | One decode step |
-| Code predictor transformer | 5 | 1024 | 3072 | 8 | Up to 15 decode steps |
+| 0.6B main talker transformer | 28 | 1024 | 3072 | 8 | One decode step |
+| 1.7B main talker transformer | 28 | 2048 | 6144 | 8 | One decode step |
+| Code predictor transformer (both sizes) | 5 | 1024 | 3072 | 8 | Up to 15 decode steps |
 
 The configured model has 16 audio code groups. The main talker predicts the first codebook.
 For every generated audio frame, the code predictor generates the remaining 15 codebooks.
@@ -88,6 +94,35 @@ Source reference: [Qwen3-TTS model implementation](https://github.com/QwenLM/Qwe
 7. Keep the 7 GiB container limit until peak RSS is measured under the final backend.
 8. Pin `qwen-tts==0.1.1` and verify the expected model classes and configuration at startup.
    The adapter depends on this generation contract.
+9. Derive export shapes from the selected checkpoint configuration. Never hard-code the
+   0.6B hidden or intermediate sizes into wrappers shared with 1.7B.
+
+## Model Selection and Authentication
+
+Normal deployments select a Base checkpoint with one setting:
+
+```text
+MODEL_SIZE=0.6B|1.7B
+```
+
+`MODEL_REPO` is an explicit expert override. The shared resolver maps the two supported sizes
+to their official Base repositories and rejects unknown sizes. Both checkpoints are public,
+so anonymous download works. `HF_TOKEN` is accepted for authenticated Hugging Face access;
+`HF_TOKEN_FILE` is the preferred container setting because it reads a mounted secret without
+placing the token in Compose source.
+
+Model download, export, runtime loading, metadata validation, health reporting, and
+benchmarking must all use the same resolved repository and revision. Every generated output
+directory is checkpoint-specific, for example:
+
+```text
+/var/data/autopirate/qwen3-tts/openvino/
+  qwen-tts-0.1.1_0.6b_<revision>_ov-2026.2.1/
+  qwen-tts-0.1.1_1.7b_<revision>_ov-2026.2.1/
+```
+
+Never load 0.6B IR for a 1.7B selection or vice versa. Passing release gates for one model
+size does not certify the other.
 
 ## Dependency Strategy
 
@@ -262,7 +297,7 @@ a persistent, versioned output directory such as:
 
 ```text
 /var/data/autopirate/qwen3-tts/openvino/
-  qwen-tts-0.1.1_0.6b_ov-2026.2.1/
+  qwen-tts-0.1.1_<size>_<revision>_ov-2026.2.1/
     main_prefill.xml
     main_decode.xml
     predictor_prefill.xml
@@ -292,7 +327,8 @@ and codebook-head selection inside the exported graph.
 
 The exporter must:
 
-1. Load `qwen-tts==0.1.1` and the exact configured model revision.
+1. Resolve `MODEL_SIZE`/`MODEL_REPO`, then load `qwen-tts==0.1.1` and the exact configured
+   model revision.
 2. Put modules in `eval()` mode and use `torch.inference_mode()`.
 3. Build example inputs from the real model configuration rather than hard-coded dimensions.
 4. Convert with `openvino.convert_model(wrapper, example_input=...)`.
@@ -472,8 +508,9 @@ OV_KV_CACHE_PRECISION=u8
 ```
 
 The worker should fail startup if metadata does not match the installed Qwen package, model
-revision, architecture, or configured code-group count. Do not silently fall back after a
-partial OpenVINO initialization; use `TTS_BACKEND=pytorch` for explicit rollback.
+repository, model revision, architecture, tensor dimensions, or configured code-group count.
+Do not silently fall back after a partial OpenVINO initialization; use
+`TTS_BACKEND=pytorch` for explicit rollback.
 
 Extend `/health` with:
 
@@ -502,14 +539,16 @@ Keep `mem_limit: 7G` and `memswap_limit: 8G` until Milestone 6 is complete.
 1. Merge a source revision after lightweight CI passes.
 2. `arc-general-docker` builds and pushes `runtime-<git-sha>` and `exporter-<git-sha>`.
 3. Pull both immutable tags on `dockermisc1`.
-4. Stop the existing `qwen3-tts` container to release its model memory.
-5. Run `exporter-<git-sha>` with these mounts:
+4. Set `MODEL_SIZE` to `0.6B` or `1.7B`, with optional `HF_TOKEN_FILE`, and pre-download the
+   selected checkpoint into the persistent cache.
+5. Stop the existing `qwen3-tts` container to release its model memory.
+6. Run `exporter-<git-sha>` with the same model selection and these mounts:
    - `/var/data/autopirate/qwen3-tts/model:/root/.cache/huggingface/hub:rw`
    - `/var/data/autopirate/qwen3-tts/openvino:/ov_output:rw`
-6. Run parity and IR metadata validation in the exporter container.
-7. Point Compose at `runtime-<git-sha>` and the validated versioned IR directory.
-8. Start the service, verify `/health`, and run the short and paragraph benchmarks.
-9. Roll back by restoring the previous image/Compose settings or by setting
+7. Run parity and IR metadata validation in the exporter container.
+8. Point Compose at `runtime-<git-sha>` and the matching validated IR directory.
+9. Start the service, verify `/health`, and run the short and paragraph benchmarks.
+10. Roll back by restoring the previous image/Compose settings or by setting
    `TTS_BACKEND=pytorch`.
 
 Deployment must use immutable SHA tags or image digests. Moving `latest` tags may exist for
@@ -544,7 +583,7 @@ Ship the OpenVINO backend only when all gates pass:
 2. INT8 quality passes deterministic code checks and listening tests.
 3. No per-token graph compilation or `InferRequest` creation occurs.
 4. Main state resets per utterance and predictor state resets per audio frame.
-5. Five-run warm median improves by at least 2x, or the measured result is explicitly
+5. For each model size released, five-run warm median improves by at least 2x, or the measured result is explicitly
    accepted based on quality and resource savings.
 6. p95 latency, real-time factor, and peak RSS are recorded for short and paragraph prompts.
 7. The container remains below its memory limit without increasing host swap pressure.
@@ -568,7 +607,11 @@ from qwen_tts.core.models.modeling_qwen3_tts import (
     Qwen3TTSTalkerModel,
 )
 
-model_id = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+model_size = os.getenv("MODEL_SIZE", "0.6B").upper()
+model_id = {
+    "0.6B": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+    "1.7B": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+}[model_size]
 config = Qwen3TTSConfig.from_pretrained(model_id, local_files_only=True)
 
 print("talker class:", Qwen3TTSTalkerForConditionalGeneration)

@@ -14,7 +14,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def validate_python() -> None:
-    for path in (ROOT / "app_api.py", ROOT / "app_worker.py"):
+    paths = (
+        ROOT / "app_api.py",
+        ROOT / "app_worker.py",
+        ROOT / "model_config.py",
+        ROOT / "scripts" / "download_model.py",
+    )
+    for path in paths:
         ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 

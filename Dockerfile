@@ -28,7 +28,8 @@ RUN python -m pip install \
 RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/' \
     /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_25hz/vq/speech_vq.py || true
 
-COPY app_api.py app_worker.py .
+COPY app_api.py app_worker.py model_config.py ./
+COPY scripts/download_model.py scripts/download_model.py
 
 FROM base AS runtime
 

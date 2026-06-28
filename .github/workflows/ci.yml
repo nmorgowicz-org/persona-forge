@@ -40,5 +40,8 @@ jobs:
       - name: Validate repository
         run: python scripts/validate_repo.py
 
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
       - name: Validate Renovate configuration
         run: npx --yes --package renovate@43.245.0 renovate-config-validator renovate.json

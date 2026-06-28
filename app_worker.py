@@ -15,11 +15,16 @@ import torch
 import torch.nn as nn
 
 from flask import Flask, Response, jsonify, request
+from model_config import configure_hf_token, resolve_model_repo
+
+configure_hf_token()
+
 from qwen_tts import Qwen3TTSModel
 
 app = Flask(__name__)
 
-MODEL_ID = os.getenv("MODEL_REPO", "Qwen/Qwen3-TTS-12Hz-1.7B-Base")
+MODEL_ID = resolve_model_repo()
+MODEL_REVISION = os.getenv("MODEL_REVISION") or None
 DEVICE = os.getenv("DEVICE", "cpu")
 REF_AUDIO = os.getenv("REF_AUDIO", "/voice/voice_A.wav")
 REF_TEXT = os.getenv(
@@ -42,6 +47,7 @@ def load_model():
     print("[app_worker] Loading model at float32...")
     wrapped = Qwen3TTSModel.from_pretrained(
         MODEL_ID,
+        revision=MODEL_REVISION,
         device_map=DEVICE,
         dtype=torch.float32,
     )
@@ -67,6 +73,7 @@ def health():
         {
             "status": "ok",
             "model": MODEL_ID,
+            "model_revision": MODEL_REVISION,
             "device": DEVICE,
             "ref_audio": REF_AUDIO,
             "timestamp": time.time(),

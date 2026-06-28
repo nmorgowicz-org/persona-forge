@@ -2,9 +2,9 @@
 
 ## Project Objective
 
-Provide a reproducible Linux AMD64 container that accelerates
-`Qwen/Qwen3-TTS-12Hz-0.6B-Base` on Intel CPUs with OpenVINO while preserving the existing
-voice-cloning API and a tested PyTorch rollback path.
+Provide a reproducible Linux AMD64 container that accelerates the official 0.6B or 1.7B
+Qwen3-TTS Base voice-cloning checkpoint on Intel CPUs with OpenVINO while preserving the
+existing API and a tested PyTorch rollback path.
 
 Read `docs/OPENVINO_IMPLEMENTATION.md` before changing model export, cache handling,
 generation, quantization, memory loading, Docker packaging, or deployment behavior. It is the
@@ -43,6 +43,8 @@ Preserve these boundaries:
 - Keep `/generate`, `/infer`, `/health`, MP3 output, WAV output, and serialized inference
   compatible with the baseline.
 - Keep `TTS_BACKEND=pytorch` as an explicit rollback path.
+- Derive tensor shapes from the selected checkpoint and keep IR, metadata, parity results,
+  and benchmarks isolated by model repository and revision.
 
 ## Model and Secret Safety
 

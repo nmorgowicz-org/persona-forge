@@ -27,6 +27,7 @@ gates are defined in the [implementation plan](docs/OPENVINO_IMPLEMENTATION.md).
 ## Goals
 
 - Preserve voice cloning from a local reference recording and transcript.
+- Support both official Base voice-cloning sizes through one `MODEL_SIZE` setting.
 - Keep the external HTTP contract stable while the inference backend changes.
 - Accelerate both Qwen3-TTS autoregressive transformer paths on Intel CPUs.
 - Reduce CPU-seconds and warm memory after unused PyTorch transformer weights are removed.
@@ -86,17 +87,37 @@ The production backend will export and accelerate both cores. PyTorch initially 
 responsible for prompt construction, embeddings, sampling, and lightweight control flow;
 ONNX Runtime continues to decode audio tokens into a waveform.
 
+## Model selection
+
+This project supports the two official Qwen3-TTS Base voice-cloning checkpoints:
+
+| `MODEL_SIZE` | Resolved checkpoint | Deployment guidance |
+|---|---|---|
+| `0.6B` | `Qwen/Qwen3-TTS-12Hz-0.6B-Base` | Default; lower memory and compute demand |
+| `1.7B` | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | Larger talker; benchmark memory, latency, and quality separately |
+
+`MODEL_REPO` remains an expert override, but normal deployments should only set
+`MODEL_SIZE`. The `CustomVoice` and `VoiceDesign` checkpoints have different behavior and are
+not substitutes for the Base models used by this voice-cloning service.
+
+The two sizes cannot share generated OpenVINO IR. Export metadata records the exact model
+repository, revision, architecture, and tensor shapes, and the runtime refuses to load IR
+that does not match its selected checkpoint.
+
 ## Repository layout
 
 ```text
 app_api.py                         public HTTP proxy
 app_worker.py                      model worker and current PyTorch backend
+model_config.py                    model preset and Hugging Face secret resolver
 Dockerfile                         runtime and exporter image targets
 requirements.txt                   base service dependencies
 requirements-ov-runtime.txt        OpenVINO runtime dependency
 requirements-ov-export.txt         Optimum Intel and NNCF export dependencies
 requirements-dev.txt               lightweight repository validation dependencies
 scripts/validate_repo.py           model-free repository checks
+scripts/download_model.py          explicit persistent-cache pre-download command
+tests/                              model-free unit tests
 docs/OPENVINO_IMPLEMENTATION.md     architecture and implementation contract
 AGENTS.md                           agent rules, tests, and troubleshooting
 .github/workflows/                 CI, images, labels, and release automation
@@ -150,7 +171,7 @@ services:
       - "8318"
     environment:
       TZ: America/Detroit
-      MODEL_REPO: Qwen/Qwen3-TTS-12Hz-0.6B-Base
+      MODEL_SIZE: 0.6B
       DEVICE: cpu
       REF_AUDIO: /voice/reference.wav
       REF_TEXT: "Exact transcript of the reference recording"
@@ -170,6 +191,43 @@ needed for host or LAN clients.
 The first model download requires the cache mount to be writable. After the cache is fully
 populated by the post-build export process, deployments may mount it read-only if the runtime
 does not need to fetch additional files.
+
+Both supported checkpoints are public, so a Hugging Face token is not required. For
+authenticated downloads, mount a token as a Compose secret instead of putting it directly in
+the Compose file:
+
+```yaml
+services:
+  qwen3-tts:
+    environment:
+      HF_TOKEN_FILE: /run/secrets/hf_token
+    secrets:
+      - hf_token
+
+secrets:
+  hf_token:
+    file: /private/path/hf_token
+```
+
+The container reads the secret into `HF_TOKEN` before importing the Hugging Face stack and
+never returns or logs it. A direct `HF_TOKEN` environment variable is also supported, but is
+more visible through container inspection.
+
+To populate the persistent cache before starting the service, choose either size and run:
+
+```bash
+docker run --rm \
+  -e MODEL_SIZE=0.6B \
+  -e HF_TOKEN_FILE=/run/secrets/hf_token \
+  -v /private/path/hf_token:/run/secrets/hf_token:ro \
+  -v /var/data/qwen3-tts/model:/root/.cache/huggingface/hub:rw \
+  ghcr.io/nmorgowicz-org/qwen3-tts-openvino:runtime-<git-sha> \
+  python -m scripts.download_model
+```
+
+Omit the token settings and token mount for an anonymous download. Change only
+`MODEL_SIZE=1.7B` to download the larger Base model. The future export command will use the
+same selection and authentication variables.
 
 ### Target OpenVINO additions
 
@@ -194,7 +252,11 @@ PyTorch worker.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MODEL_REPO` | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` in code | Hugging Face model ID; Compose should set the intended 0.6B model explicitly |
+| `MODEL_SIZE` | `0.6B` | Supported Base model preset: `0.6B` or `1.7B` |
+| `MODEL_REPO` | unset | Expert override for the complete Hugging Face model ID |
+| `MODEL_REVISION` | repository default | Optional immutable Hugging Face revision for pre-download/export |
+| `HF_TOKEN` | unset | Optional Hugging Face token; direct environment form |
+| `HF_TOKEN_FILE` | unset | Preferred path to a mounted token secret |
 | `DEVICE` | `cpu` | PyTorch device for the baseline |
 | `REF_AUDIO` | `/voice/voice_A.wav` | Reference voice recording inside the container |
 | `REF_TEXT` | built-in fallback | Exact transcript of `REF_AUDIO`; set explicitly in deployment |
@@ -281,11 +343,15 @@ guaranteed memory. The intended lifecycle is:
 3. The existing TTS service is stopped during the export maintenance window to release model
    memory.
 4. The exporter downloads/reuses the persistent Hugging Face cache.
-5. It exports FP32 IR, validates PyTorch/OpenVINO parity, and then creates INT8 IR.
+5. It resolves `MODEL_SIZE`, exports checkpoint-specific FP32 IR, validates
+   PyTorch/OpenVINO parity, and then creates INT8 IR.
 6. Metadata records the source commit, image digest, model revision, package versions, and IR
    hash.
 7. Compose starts the matching runtime image with the validated IR mounted read-only.
 8. Health, short-prompt, paragraph, quality, memory, and rollback checks run on the target CPU.
+
+Export and release gates are run independently for 0.6B and 1.7B. Passing the 0.6B gates
+does not certify a 1.7B artifact.
 
 The exporter code and commands will land during the corresponding implementation milestones.
 
