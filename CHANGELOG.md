@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.6.1...qwen3-tts-openvino-v0.6.2) (2026-06-28)
+
+
+### Bug Fixes
+
+* **harness:** correct frame/codebook axes in M4 code comparison ([d7136c4](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d7136c4c4ef99f5cbe762ecad6879db0ede9ccc5))
+
 ## [0.6.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.6.0...qwen3-tts-openvino-v0.6.1) (2026-06-28)
 
 
