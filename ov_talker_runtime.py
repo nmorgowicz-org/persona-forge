@@ -378,13 +378,16 @@ class OVTalkerRuntime:
         self.core = core or ov.Core()
         self.compression = (compression or self._default_compression()).lower()
 
+        # "vocoder" is internal config; OpenVINO CPU plugin doesn't understand it.
+        core_config = {k: v for k, v in self._ov_config.items() if k != "vocoder"}
+
         graph_files = _INT8_GRAPH_FILES if self.compression == "int8" else _GRAPH_FILES
         compiled = {}
         for key, filename in graph_files.items():
             path = self.model_dir / filename
             if not path.is_file():
                 raise FileNotFoundError(f"missing IR graph for {key}: {path}")
-            compiled[key] = self.core.compile_model(str(path), "CPU", self._ov_config)
+            compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
 
         main_layers = talker.model.config.num_hidden_layers
         pred_layers = talker.code_predictor.model.config.num_hidden_layers
