@@ -570,12 +570,17 @@ The exporter must:
 1. Resolve `MODEL_SIZE`/`MODEL_REPO`, then load `qwen-tts==0.1.1` and the exact configured
    model revision.
 2. Put modules in `eval()` mode and use `torch.inference_mode()`.
-3. Build example inputs from the real model configuration rather than hard-coded dimensions.
-4. Convert with `openvino.convert_model(wrapper, example_input=...)`.
-5. Save uncompressed FP32 IR first.
-6. Write model revision, package versions, tensor names, shapes, dtypes, and source config
+3. Load the export copy with `attn_implementation="eager"`. The default SDPA mask path uses
+   nested `torch.vmap` operations that TorchScript/OpenVINO cannot trace (`unordered_map::at`);
+   eager attention keeps the mathematically equivalent mask construction traceable. Record the
+   selected implementation in metadata and compare against the normal PyTorch baseline at the
+   parity gate.
+4. Build example inputs from the real model configuration rather than hard-coded dimensions.
+5. Convert with `openvino.convert_model(wrapper, example_input=...)`.
+6. Save uncompressed FP32 IR first.
+7. Write model revision, package versions, tensor names, shapes, dtypes, and source config
    hash to `metadata.json`.
-7. Record the exporter image digest and Git commit in `metadata.json` so every IR can be
+8. Record the exporter image digest and Git commit in `metadata.json` so every IR can be
    reproduced from source.
 
 Do not run the exporter while the production PyTorch worker remains loaded. The current

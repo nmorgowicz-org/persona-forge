@@ -142,7 +142,13 @@ def run() -> int:
     qwen_version = getattr(qwen_tts, "__version__", "0.1.1")
 
     print(f"[export] loading {model_repo} (rev={revision}) at float32...", flush=True)
-    wrapped = Qwen3TTSModel.from_pretrained(model_repo, revision=revision, device_map="cpu", dtype=torch.float32)
+    wrapped = Qwen3TTSModel.from_pretrained(
+        model_repo,
+        revision=revision,
+        device_map="cpu",
+        dtype=torch.float32,
+        attn_implementation="eager",
+    )
     talker = wrapped.model.talker
     vocoder_decoder = _resolve_vocoder_decoder(wrapped.model.speech_tokenizer)
 
@@ -234,6 +240,7 @@ def run() -> int:
             "model_repo": model_repo,
             "model_revision": revision or "main",
             "openvino_version": ov.__version__,
+            "attention_implementation": "eager",
             "compression": args.compression,
             "main_dims": main_dims,
             "predictor_dims": pred_dims,
