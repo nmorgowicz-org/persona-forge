@@ -767,20 +767,48 @@ M3 results (0.6B, INT8_ASYM, all weights, per-channel):
 - INT8_ASYM is not acceptable for the main core on this model. Predictor INT8 is acceptable
   and will be evaluated during M4 with full generation-level testing.
 
+M3 completed on 2026-06-28 with INT8_ASYM parity on dockermisc1 (exporter-v0.5.2).
+Key finding: INT8_ASYM is marginal on the main core.
+
+INT8_ASYM parity summary (0.6B main transformer, INT8_ASYM, all weights, per-channel):
+
+- main/prefill: 27.3 dB → fails 30 dB gate
+- main/decode step0-2: 26.2-28.7 dB → fails
+- predictor/prefill: 30.6 dB → passes
+- predictor/decode step0-2: 33.1-36.7 dB → passes
+
+FP32 IR remains excellent (71-91 dB) and identical to M2.
+
+MIX8 attempt (2026-06-28) found:
+
+- NNCF 3.2.0 has no CompressWeightsMode.MIX_8.
+- The --int8-mode mix8 path in export_openvino.py is incorrect for this NNCF version.
+- Available modes: INT8_ASYM, INT8_SYM, INT4_ASYM, INT4_SYM, FP8_E4M3, FP4,
+  ADAPTIVE_CODEBOOK, MXFP4, MXFP8_E4M3, CB4, CODEBOOK, NF4, NVFP4.
+
+For mixed-precision (some layers INT8, some FP32), we need:
+- A custom NNCF config (per-layer selection), or
+- A per-layer compress_weights call outside the simple --int8-mode CLI.
+
+Current position:
+- FP32 transformer cores: validated and ready for M4.
+- INT8 predictor: acceptable (31-37 dB); can be considered for use if main is FP32.
+- INT8 main: not acceptable at 30 dB gate; would require gate relaxation or a proper
+  per-layer MIX8 config.
+
 Next steps (M3 continued):
 
-- Test MIX8 modes with selective INT8/FP32 per layer (group_size 32/64, ratio 0.5-0.9).
-  MIX8 is wired in export_openvino.py via --int8-mode mix8. Example:
-
-  docker run --rm -v ... --compression both --int8-mode mix8 --int8-group-size 32 --int8-ratio 0.75
-
-- If MIX8 passes:
-  - Re-run parity with SNR >= 30 dB per scope (main and predictor).
+- Either:
+  1) Relax the main-core INT8 gate (e.g., to 25 dB), re-run parity, and decide after
+     A/B listening on a short utterance, or
+  2) Implement a proper per-layer MIX8 config (only INT8 main where safe; FP32 for
+     sensitive layers), export, and validate again.
+- After a passing INT8/MIX8 configuration:
   - Run end-to-end A/B listening.
   - Run latency and RSS benchmarks.
-- If MIX8 fails:
-  - Fall back to INT8 predictor only + FP32 main as a compromise.
-  - Re-evaluate 1.7B plan if only this compromise is viable.
+- If INT8/MIX8 cannot meet quality/latency goals, fall back to:
+  - INT8 predictor + FP32 main (compromise)
+  - FP32 for both (if INT8 predictor is marginal).
 
 ## Milestone 4: OpenVINO Generation Runtime
 
