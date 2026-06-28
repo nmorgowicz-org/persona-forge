@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.6.2...qwen3-tts-openvino-v0.7.0) (2026-06-28)
+
+
+### Features
+
+* **m4:** buffer-backed K/V cache with OPENVINO_BUFFER_KV guard and bench env helper ([a78be3d](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/a78be3d7a4b137a4588f6af47ad48c028c56a146))
+* **m4:** wire OpenVINO vocoder IR into the runtime with PyTorch fallback ([a78be3d](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/a78be3d7a4b137a4588f6af47ad48c028c56a146))
+
+
+### Bug Fixes
+
+* **runtime:** correct _single_chunk left-context warmup and return types; add fallback warnings ([a78be3d](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/a78be3d7a4b137a4588f6af47ad48c028c56a146))
+* **runtime:** correct vocoder IR 2D/3D shape unpack in _run_ir ([a78be3d](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/a78be3d7a4b137a4588f6af47ad48c028c56a146))
+* **runtime:** correct vocoder multi-chunk waveform slicing and tensor copy ([a78be3d](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/a78be3d7a4b137a4588f6af47ad48c028c56a146))
+* **test:** harden code normalization, seed greedy runs, gc for mode=all, add entropy metric ([a78be3d](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/a78be3d7a4b137a4588f6af47ad48c028c56a146))
+
 ## [0.6.2](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.6.1...qwen3-tts-openvino-v0.6.2) (2026-06-28)
 
 
