@@ -1,18 +1,23 @@
 import gc
 import io
+import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
-os.environ["ORT_INTRA_OP_NUM_THREADS"] = "6"
-os.environ["ORT_INTER_OP_NUM_THREADS"] = "2"
-os.environ["OMP_NUM_THREADS"] = "6"
-os.environ["MKL_NUM_THREADS"] = "6"
-os.environ["OPENBLAS_NUM_THREADS"] = "6"
+# Apply thread and runtime envs before heavy imports
+from ov_runtime_config import apply_thread_env
+
+apply_thread_env()
+os.environ.setdefault("ORT_INTRA_OP_NUM_THREADS", "6")
+os.environ.setdefault("ORT_INTER_OP_NUM_THREADS", "2")
+os.environ.setdefault("OMP_NUM_THREADS", "6")
+os.environ.setdefault("MKL_NUM_THREADS", "6")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 import soundfile as sf
 import torch
-import torch.nn as nn
 
 from flask import Flask, Response, jsonify, request
 from model_config import configure_hf_token, resolve_model_repo
@@ -33,18 +38,91 @@ REF_TEXT = os.getenv(
     "You want me, dont you? I am on the menu too.",
 )
 
+TTS_BACKEND = (os.getenv("TTS_BACKEND", "pytorch") or "pytorch").strip().lower()
+OV_MODEL_DIR = os.getenv("OV_MODEL_DIR")
+
 torch.set_num_threads(6)
 
 model = None
 voice_clone_prompt = None
 
+ov_metadata = None
+ov_config = None
+
 executor = ThreadPoolExecutor(max_workers=1)
+
+
+def _validate_ov_metadata(model_dir: str):
+    global ov_metadata, ov_config
+    path = Path(model_dir)
+    meta_path = path / "metadata.json"
+    if not meta_path.is_file():
+        raise RuntimeError(f"OV_MODEL_DIR missing metadata.json: {meta_path}")
+
+    ov_metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+    from ov_runtime_config import get_ov_config
+    ov_config = get_ov_config()
+
+    # Validate metadata matches loaded model
+    if ov_metadata.get("model_repo") != MODEL_ID:
+        raise RuntimeError(
+            f"OV metadata model_repo {ov_metadata.get('model_repo')!r} "
+            f"!= {MODEL_ID!r}"
+        )
+
+    expected_revision = MODEL_REVISION or "main"
+    if ov_metadata.get("model_revision") != expected_revision:
+        raise RuntimeError(
+            f"OV metadata model_revision {ov_metadata.get('model_revision')!r} "
+            f"!= {expected_revision!r}"
+        )
+
+    qwen_version = ov_metadata.get("qwen_tts_version")
+    if qwen_version:
+        try:
+            import qwen_tts
+            runtime_version = getattr(qwen_tts, "__version__", None)
+            if runtime_version and runtime_version != qwen_version:
+                raise RuntimeError(
+                    f"OV metadata qwen_tts_version {qwen_version!r} "
+                    f"!= runtime {runtime_version!r}"
+                )
+        except ImportError:
+            pass
+
+    print(
+        f"[app_worker] OpenVINO metadata OK: {path.name} "
+        f"(openvino={ov_metadata.get('openvino_version')}, "
+        f"compression={ov_metadata.get('compression')})",
+        flush=True,
+    )
 
 
 def load_model():
     global model, voice_clone_prompt
 
-    print("[app_worker] Loading model at float32...")
+    if TTS_BACKEND not in ("pytorch", "openvino"):
+        raise RuntimeError(f"Invalid TTS_BACKEND: {TTS_BACKEND!r}")
+
+    if TTS_BACKEND == "openvino":
+        if not OV_MODEL_DIR:
+            raise RuntimeError(
+                "TTS_BACKEND=openvino requires OV_MODEL_DIR"
+            )
+        _validate_ov_metadata(OV_MODEL_DIR)
+    else:
+        # PyTorch-only backend
+        if OV_MODEL_DIR:
+            print(
+                "[app_worker] OV_MODEL_DIR set but TTS_BACKEND=pytorch; "
+                "ignoring OpenVINO directory.",
+                flush=True,
+            )
+
+    print(
+        f"[app_worker] Backend={TTS_BACKEND}, loading model at float32...",
+        flush=True,
+    )
     wrapped = Qwen3TTSModel.from_pretrained(
         MODEL_ID,
         revision=MODEL_REVISION,
@@ -53,7 +131,7 @@ def load_model():
     )
 
     gc.collect()
-    print("[app_worker] Model loaded. Creating voice clone prompt...")
+    print("[app_worker] Model loaded. Creating voice clone prompt...", flush=True)
 
     model = wrapped
     voice_clone_prompt = model.create_voice_clone_prompt(
@@ -61,6 +139,17 @@ def load_model():
         ref_text=REF_TEXT,
         x_vector_only_mode=False,
     )
+
+    if TTS_BACKEND == "openvino":
+        # NOTE: ov_talker_runtime integration (Milestone 4) not yet implemented.
+        # For now, generation runs in PyTorch; backend metadata is exposed in /health
+        # for deployment readiness and M4 wiring.
+        print(
+            "[app_worker] TTS_BACKEND=openvino, runtime not wired (M4 pending); "
+            "generation still via PyTorch.",
+            flush=True,
+        )
+
     print("[app_worker] Model loaded and ready.")
 
 
@@ -69,16 +158,33 @@ load_model()
 
 @app.route("/health")
 def health():
-    return jsonify(
-        {
-            "status": "ok",
-            "model": MODEL_ID,
-            "model_revision": MODEL_REVISION,
-            "device": DEVICE,
-            "ref_audio": REF_AUDIO,
-            "timestamp": time.time(),
-        }
-    )
+    base = {
+        "status": "ok",
+        "backend": TTS_BACKEND,
+        "model": MODEL_ID,
+        "model_revision": MODEL_REVISION,
+        "device": DEVICE,
+        "ref_audio": REF_AUDIO,
+        "timestamp": time.time(),
+    }
+
+    if TTS_BACKEND == "openvino" and ov_metadata:
+        base.update(
+            {
+                "openvino": {
+                    "version": ov_metadata.get("openvino_version"),
+                    "device": "CPU",
+                    "ir_directory": Path(OV_MODEL_DIR or "").name,
+                    "ir_metadata_hash": ov_metadata.get("source_hash"),
+                    "compression": ov_metadata.get("compression"),
+                    "int8_config": ov_metadata.get("int8_config"),
+                    "config": ov_config,
+                    "runtime_wired": False,  # set to True when M4 is implemented
+                }
+            }
+        )
+
+    return jsonify(base)
 
 
 def _run_generate(text: str, language: str):

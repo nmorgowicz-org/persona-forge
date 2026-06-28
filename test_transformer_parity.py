@@ -48,6 +48,10 @@ def parse_args() -> argparse.Namespace:
                         help="SNR gate (dB) for FP32; overrides --fp32-max-abs when set")
     parser.add_argument("--int8-max-abs", type=float, default=5e-2,
                         help="max absolute error threshold for INT8 hidden-state parity")
+    parser.add_argument("--int8-min-snr", type=float, default=30.0,
+                        help="SNR gate (dB) for INT8; overrides --int8-max-abs when set")
+    parser.add_argument("--int8-min-token-agreement", type=float, default=0.90,
+                        help="minimum top-1 token agreement fraction for INT8 vs PyTorch")
     parser.add_argument("--fp32-min-token-agreement", type=float, default=0.95,
                         help="minimum top-1 token agreement fraction for FP32 vs PyTorch")
     parser.add_argument("--output-json", type=Path)
@@ -133,6 +137,12 @@ def _compare_core(
     fp32_min_snr: float | None,
     fp32_min_token_agreement: float,
     predictor: bool,
+    *,
+    int8_prefill=None,
+    int8_decode=None,
+    int8_max_abs: float,
+    int8_min_snr: float | None,
+    int8_min_token_agreement: float,
 ) -> tuple[list[dict], list[str]]:
     import torch
 
@@ -147,6 +157,7 @@ def _compare_core(
 
     results = []
     failures = []
+    has_int8 = int8_prefill is not None and int8_decode is not None
 
     # ── Prefill ───────────────────────────────────────────────────────────────
     inputs_embeds = _rand(1, prefill_seq, hidden)
@@ -195,10 +206,25 @@ def _compare_core(
         "expected_kv_shape": list(expected_kv_shape),
         "fp32": prefill_metrics,
     }
+
+    pt_logits_prefill = None
     if output_head is not None:
-        pt_logits = output_head(torch.from_numpy(pt_hidden_prefill)).detach().numpy()
+        pt_logits_prefill = output_head(torch.from_numpy(pt_hidden_prefill)).detach().numpy()
         ov_logits = output_head(torch.from_numpy(ov_hidden_prefill)).detach().numpy()
-        prefill_row["top1_agreement"] = _top1_agreement(pt_logits, ov_logits)
+        prefill_row["top1_agreement"] = _top1_agreement(pt_logits_prefill, ov_logits)
+
+    # INT8 prefill comparison (if available)
+    if has_int8:
+        int8_out, int8_seconds = _timed(lambda: _ov_infer(int8_prefill, *ov_prefill_inputs))
+        int8_hidden = int8_out[0]
+        int8_metrics = _metrics(pt_hidden_prefill, int8_hidden)
+        prefill_row["int8"] = int8_metrics
+        prefill_row["int8_seconds"] = int8_seconds
+
+        if output_head is not None:
+            int8_logits = output_head(torch.from_numpy(int8_hidden)).detach().numpy()
+            prefill_row["int8_top1_agreement"] = _top1_agreement(pt_logits_prefill, int8_logits)
+
     results.append(prefill_row)
 
     _check_failures(failures, f"{core_name}/prefill", prefill_metrics, fp32_max_abs, fp32_min_snr)
@@ -208,6 +234,13 @@ def _compare_core(
         failures.append(
             f"{core_name}/prefill: top-1 agreement {prefill_row['top1_agreement']:.3f}"
             f" below {fp32_min_token_agreement}"
+        )
+
+    if has_int8 and "int8" in prefill_row:
+        _check_int8_failures(
+            failures, f"{core_name}/prefill",
+            prefill_row["int8"], int8_max_abs, int8_min_snr,
+            prefill_row.get("int8_top1_agreement"), int8_min_token_agreement,
         )
 
     # ── Decode steps ──────────────────────────────────────────────────────────
@@ -253,10 +286,25 @@ def _compare_core(
             "ov_seconds": ov_dec_seconds,
             "fp32": decode_metrics,
         }
+
+        pt_logits_decode = None
         if output_head is not None:
-            pt_logits = output_head(torch.from_numpy(pt_hidden_decode)).detach().numpy()
+            pt_logits_decode = output_head(torch.from_numpy(pt_hidden_decode)).detach().numpy()
             ov_logits = output_head(torch.from_numpy(ov_hidden_decode)).detach().numpy()
-            decode_row["top1_agreement"] = _top1_agreement(pt_logits, ov_logits)
+            decode_row["top1_agreement"] = _top1_agreement(pt_logits_decode, ov_logits)
+
+        # INT8 decode comparison (if available)
+        if has_int8:
+            int8_out, int8_seconds = _timed(lambda: _ov_infer(int8_decode, *ov_decode_inputs))
+            int8_hidden = int8_out[0]
+            int8_metrics = _metrics(pt_hidden_decode, int8_hidden)
+            decode_row["int8"] = int8_metrics
+            decode_row["int8_seconds"] = int8_seconds
+
+            if output_head is not None:
+                int8_logits = output_head(torch.from_numpy(int8_hidden)).detach().numpy()
+                decode_row["int8_top1_agreement"] = _top1_agreement(pt_logits_decode, int8_logits)
+
         results.append(decode_row)
 
         _check_failures(failures, f"{core_name}/decode/step{step}", decode_metrics, fp32_max_abs, fp32_min_snr)
@@ -264,6 +312,13 @@ def _compare_core(
             failures.append(
                 f"{core_name}/decode/step{step}: top-1 agreement {decode_row['top1_agreement']:.3f}"
                 f" below {fp32_min_token_agreement}"
+            )
+
+        if has_int8 and "int8" in decode_row:
+            _check_int8_failures(
+                failures, f"{core_name}/decode/step{step}",
+                decode_row["int8"], int8_max_abs, int8_min_snr,
+                decode_row.get("int8_top1_agreement"), int8_min_token_agreement,
             )
 
         # Carry forward PyTorch's updated cache for the next step
@@ -276,9 +331,35 @@ def _check_failures(failures, label, metrics, fp32_max_abs, fp32_min_snr):
     snr = metrics.get("snr_db")
     if fp32_min_snr is not None and snr is not None:
         if snr < fp32_min_snr:
-            failures.append(f"{label}: SNR {snr:.1f} dB below {fp32_min_snr} dB")
+            failures.append(f"{label}: FP32 SNR {snr:.1f} dB below {fp32_min_snr} dB")
     elif metrics["max_abs"] >= fp32_max_abs:
-        failures.append(f"{label}: max_abs {metrics['max_abs']:.3e} >= {fp32_max_abs:.3e}")
+        failures.append(
+            f"{label}: FP32 max_abs {metrics['max_abs']:.3e} >= {fp32_max_abs:.3e}"
+        )
+
+
+def _check_int8_failures(
+    failures, label, metrics, int8_max_abs, int8_min_snr,
+    top1_agreement, int8_min_token_agreement,
+):
+    snr = metrics.get("snr_db")
+    if int8_min_snr is not None and snr is not None:
+        if snr < int8_min_snr:
+            failures.append(
+                f"{label}: INT8 SNR {snr:.1f} dB below {int8_min_snr} dB"
+            )
+    elif metrics["max_abs"] >= int8_max_abs:
+        failures.append(
+            f"{label}: INT8 max_abs {metrics['max_abs']:.3e} >= {int8_max_abs:.3e}"
+        )
+    if (
+        top1_agreement is not None
+        and top1_agreement < int8_min_token_agreement
+    ):
+        failures.append(
+            f"{label}: INT8 top-1 agreement {top1_agreement:.3f}"
+            f" below {int8_min_token_agreement}"
+        )
 
 
 def run() -> int:
@@ -293,6 +374,16 @@ def run() -> int:
     missing = sorted(name for name in required if not (args.model_dir / name).is_file())
     if missing:
         raise SystemExit(f"missing IR files: {missing}")
+
+    int8_files = {
+        "main_prefill": "main_prefill_int8.xml",
+        "main_decode": "main_decode_int8.xml",
+        "predictor_prefill": "predictor_prefill_int8.xml",
+        "predictor_decode": "predictor_decode_int8.xml",
+    }
+    has_all_int8 = all(
+        (args.model_dir / f).is_file() for f in int8_files.values()
+    )
 
     from export_openvino import _resolve_vocoder_decoder, _set_eager_attention
     from model_config import configure_hf_token
@@ -331,6 +422,35 @@ def run() -> int:
     pred_prefill = core.compile_model(args.model_dir / "predictor_prefill.xml", "CPU", ov_config)
     pred_decode = core.compile_model(args.model_dir / "predictor_decode.xml", "CPU", ov_config)
 
+    # Optionally compile INT8 models if present
+    int8_config = {
+        "PERFORMANCE_HINT": "LATENCY",
+        "NUM_STREAMS": "1",
+        "INFERENCE_NUM_THREADS": str(args.threads),
+        "INFERENCE_PRECISION_HINT": "f32",
+        "DYNAMIC_QUANTIZATION_GROUP_SIZE": "32",
+    }
+    int8_main_prefill = None
+    int8_main_decode = None
+    int8_pred_prefill = None
+    int8_pred_decode = None
+    if has_all_int8:
+        print("[parity] INT8 IR files detected — compiling INT8 models", flush=True)
+        int8_main_prefill = core.compile_model(
+            args.model_dir / int8_files["main_prefill"], "CPU", int8_config
+        )
+        int8_main_decode = core.compile_model(
+            args.model_dir / int8_files["main_decode"], "CPU", int8_config
+        )
+        int8_pred_prefill = core.compile_model(
+            args.model_dir / int8_files["predictor_prefill"], "CPU", int8_config
+        )
+        int8_pred_decode = core.compile_model(
+            args.model_dir / int8_files["predictor_decode"], "CPU", int8_config
+        )
+    else:
+        print("[parity] INT8 IR not found — running FP32-only", flush=True)
+
     # Use the first codebook output head as the projection for top-1 comparison.
     # The output head is a linear over hidden_size -> vocab_size.
     try:
@@ -348,6 +468,11 @@ def run() -> int:
         output_head,
         args.fp32_max_abs, args.fp32_min_snr, args.fp32_min_token_agreement,
         predictor=False,
+        int8_prefill=int8_main_prefill,
+        int8_decode=int8_main_decode,
+        int8_max_abs=args.int8_max_abs,
+        int8_min_snr=args.int8_min_snr,
+        int8_min_token_agreement=args.int8_min_token_agreement,
     )
     all_results.extend(r)
     all_failures.extend(f)
@@ -359,6 +484,11 @@ def run() -> int:
         None,  # no simple output head for the predictor; use hidden-state comparison only
         args.fp32_max_abs, args.fp32_min_snr, args.fp32_min_token_agreement,
         predictor=True,
+        int8_prefill=int8_pred_prefill,
+        int8_decode=int8_pred_decode,
+        int8_max_abs=args.int8_max_abs,
+        int8_min_snr=args.int8_min_snr,
+        int8_min_token_agreement=args.int8_min_token_agreement,
     )
     all_results.extend(r)
     all_failures.extend(f)
@@ -378,6 +508,10 @@ def run() -> int:
         "fp32_max_abs_tolerance": args.fp32_max_abs,
         "fp32_min_snr_db": args.fp32_min_snr,
         "fp32_min_token_agreement": args.fp32_min_token_agreement,
+        "int8_available": has_all_int8,
+        "int8_max_abs_tolerance": args.int8_max_abs,
+        "int8_min_snr_db": args.int8_min_snr,
+        "int8_min_token_agreement": args.int8_min_token_agreement,
         "NOTE": (
             "position_ids/cache_position use simple arange — mRoPE 3-axis expansion and "
             "exact generation-path semantics NOT yet confirmed. See M2 parity gate docs."
