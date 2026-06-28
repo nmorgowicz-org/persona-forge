@@ -146,7 +146,7 @@ The Dockerfile has two Linux AMD64 targets:
 - `exporter`: the runtime image plus NNCF conversion dependencies (no Optimum Intel; export
   uses `openvino.convert_model` + `nncf.compress_weights` directly).
 
-Trusted `main` and tag builds publish private GHCR images:
+Release Please version tags publish private GHCR images:
 
 ```text
 ghcr.io/nmorgowicz-org/qwen3-tts-openvino:runtime-<git-sha>
@@ -430,7 +430,8 @@ The exporter code and commands will land during the corresponding implementation
 - Apply `ready-to-test` when a PR is ready for expensive runtime/exporter builds on
   `arc-general-docker`.
 - Later commits rerun image checks while `ready-to-test` remains applied.
-- Pushes to `main`, version tags, and manual image dispatches build unconditionally.
+- Release Please version tags build and publish images; merges to `main` do not.
+- Manual image dispatches remain an explicit build-and-publish override.
 - Label synchronization and path-based PR labels run automatically.
 - Release Please manages versions and GitHub releases.
 - Renovate monitors requirements, Docker base images, GitHub Actions, OpenVINO dependencies,

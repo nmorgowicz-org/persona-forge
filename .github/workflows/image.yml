@@ -12,16 +12,7 @@ on:
       - requirements*.txt
       - "scripts/**"
   push:
-    branches: [main]
-    tags: ["v*"]
-    paths:
-      - .github/workflows/image.yml
-      - .dockerignore
-      - Dockerfile
-      - compose.example.yml
-      - "*.py"
-      - requirements*.txt
-      - "scripts/**"
+    tags: ["qwen3-tts-openvino-v*"]
   workflow_dispatch:
 
 env:
@@ -73,11 +64,10 @@ jobs:
           {
             echo 'value<<EOF'
             echo "${image}:${{ matrix.target }}-${GITHUB_SHA}"
-            if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            if [[ "${GITHUB_REF}" == refs/tags/qwen3-tts-openvino-v* ]]; then
+              release_tag="${GITHUB_REF_NAME#qwen3-tts-openvino-}"
+              echo "${image}:${{ matrix.target }}-${release_tag}"
               echo "${image}:${{ matrix.target }}-latest"
-            fi
-            if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-              echo "${image}:${{ matrix.target }}-${GITHUB_REF_NAME}"
             fi
             echo EOF
           } >> "${GITHUB_OUTPUT}"
@@ -119,14 +109,16 @@ jobs:
           image="${REGISTRY}/${IMAGE_NAME}:${{ matrix.target }}-${GITHUB_SHA}"
           if [[ "${{ matrix.target }}" == "exporter" ]]; then
             docker run --rm --entrypoint python "${image}" -c \
-              'import nncf, openvino, qwen_tts, torch; from model_config import resolve_model_repo; import scripts.download_model; assert resolve_model_repo({"MODEL_SIZE": "0.6B"}).endswith("0.6B-Base"); assert resolve_model_repo({"MODEL_SIZE": "1.7B"}).endswith("1.7B-Base"); print("exporter imports passed")'
+              'import export_openvino, nncf, openvino, ov_export_wrappers, qwen_tts, torch; from model_config import resolve_model_repo; import scripts.download_model; assert resolve_model_repo({"MODEL_SIZE": "0.6B"}).endswith("0.6B-Base"); assert resolve_model_repo({"MODEL_SIZE": "1.7B"}).endswith("1.7B-Base"); print("exporter imports passed")'
           else
             docker run --rm --entrypoint python "${image}" -c \
               'import openvino, qwen_tts, torch; from model_config import resolve_model_repo; import scripts.download_model; assert resolve_model_repo({"MODEL_SIZE": "0.6B"}).endswith("0.6B-Base"); assert resolve_model_repo({"MODEL_SIZE": "1.7B"}).endswith("1.7B-Base"); print("runtime imports passed")'
           fi
 
   cleanup:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/qwen3-tts-openvino-v')
     needs: build
     runs-on: arc-general
     permissions:

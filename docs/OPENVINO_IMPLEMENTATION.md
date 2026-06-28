@@ -268,7 +268,8 @@ Workflow placement:
 
 - `arc-general`: linting, unit tests, metadata/schema tests, and cleanup.
 - `arc-general-docker`: Buildx builds both AMD64 image targets after an internal PR receives
-  `ready-to-test`, and publishes them from trusted `main`/tag events.
+  `ready-to-test`, and publishes them from Release Please version tags or an explicit manual
+  workflow dispatch. Merges to `main` do not publish images.
 - `dockermisc1`: downloads the Hugging Face model, runs export/quantization, validates the
   generated IR, and runs hardware-specific benchmarks.
 
@@ -809,8 +810,10 @@ Keep `mem_limit: 7G` and `memswap_limit: 8G` until Milestone 6 is complete.
 
 ### Build, export, and deployment sequence
 
-1. Merge a source revision after lightweight CI passes.
-2. `arc-general-docker` builds and pushes `runtime-<git-sha>` and `exporter-<git-sha>`.
+1. Merge a source revision after lightweight CI passes, then merge the corresponding Release
+   Please pull request.
+2. The Release Please tag triggers `arc-general-docker` to build and push
+   `runtime-<release-commit-sha>` and `exporter-<release-commit-sha>`.
 3. Pull both immutable tags on `dockermisc1`.
 4. Set `MODEL_SIZE` to `0.6B` or `1.7B`, with optional `HF_TOKEN_FILE`, and pre-download the
    selected checkpoint into the persistent cache.
