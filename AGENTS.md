@@ -106,6 +106,10 @@ present, later commits rerun the image checks. Release Please version tags publi
 manual workflow dispatches remain an explicit build-and-publish override. Merges to `main` do
 not build or publish images by themselves.
 
+Release cleanup must protect `runtime-latest`, `exporter-latest`, `buildcache-runtime`, and
+`buildcache-exporter`. Keep five additional package versions for rollback; do not use an
+unqualified package-wide retention rule that can delete the active tags or caches.
+
 Images are immutable build artifacts:
 
 ```text

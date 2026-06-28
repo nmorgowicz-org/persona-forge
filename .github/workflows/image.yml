@@ -124,9 +124,10 @@ jobs:
     permissions:
       packages: write
     steps:
-      - name: Keep recent GHCR versions
+      - name: Protect active tags and keep recent GHCR versions
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5
         with:
           package-name: qwen3-tts-openvino
           package-type: container
-          min-versions-to-keep: 20
+          min-versions-to-keep: 5
+          ignore-versions: ^(runtime-latest|exporter-latest|buildcache-runtime|buildcache-exporter)$
