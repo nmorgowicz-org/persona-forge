@@ -237,9 +237,10 @@ class OpenVinoVocoderRuntime:
             # Run chunk via IR.
             wav_chunk = self._run_ir(combined)
 
-            # Crop to just this chunk's samples.
+            # Crop to just this chunk's samples, skipping left-context output.
+            skip_ctx = int(left_context * self._total_upsample)
             chunk_samples = int(chunk_len * self._total_upsample)
-            wav_chunk = wav_chunk[:chunk_samples]
+            wav_chunk = wav_chunk[skip_ctx : skip_ctx + chunk_samples]
             chunks.append(wav_chunk)
 
             pos = end
@@ -281,4 +282,4 @@ class OpenVinoVocoderRuntime:
         wav = out.data
         # Squeeze batch and channel dims.
         wav = wav.reshape(-1)
-        return wav.astype(np.float32, copy=False)
+        return wav.astype(np.float32, copy=True)
