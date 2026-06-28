@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.7.0...qwen3-tts-openvino-v0.7.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* **runtime:** exclude internal 'vocoder' key from OpenVINO CPU compile_model config ([5d56038](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5d56038c8d35f219e3ced4672392e71628b784fa))
+
 ## [0.7.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.6.2...qwen3-tts-openvino-v0.7.0) (2026-06-28)
 
 
