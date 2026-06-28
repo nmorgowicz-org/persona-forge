@@ -93,12 +93,26 @@ def validate_dockerfile() -> None:
     for marker in ('HEALTHCHECK ', 'CMD ["python", "serve.py"]'):
         if marker not in dockerfile:
             raise RuntimeError(f"Dockerfile runtime contract is missing {marker!r}")
-    if (
-        "COPY export_openvino.py ov_export_wrappers.py parity_contract.py "
-        "test_vocoder_parity.py benchmark_vocoder.py test_transformer_parity.py ./"
-        not in dockerfile
-    ):
+    required_export_files = {
+        "export_openvino.py",
+        "ov_export_wrappers.py",
+        "parity_contract.py",
+        "test_vocoder_parity.py",
+        "benchmark_vocoder.py",
+        "test_transformer_parity.py",
+    }
+    exporter_copy_lines = [
+        line for line in dockerfile.splitlines()
+        if line.strip().startswith("COPY export_openvino.py")
+    ]
+    if not exporter_copy_lines:
         raise RuntimeError("Dockerfile exporter target is missing the export CLI sources")
+    copy_target = " ".join(" ".join(exporter_copy_lines).split())
+    missing = {f for f in required_export_files if f not in copy_target}
+    if missing:
+        raise RuntimeError(
+            f"Dockerfile exporter target is missing: {', '.join(sorted(missing))}"
+        )
 
     if not (ROOT / "SECURITY.md").is_file():
         raise RuntimeError("SECURITY.md is missing")
