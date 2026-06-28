@@ -759,6 +759,29 @@ INT8 acceptance checks:
 - Warm median and p95 latency.
 - IR size, compiled-model memory, and peak container RSS.
 
+M3 results (0.6B, INT8_ASYM, all weights, per-channel):
+
+- FP32: all scopes pass (72-91 dB SNR), same as M2.
+- INT8 (main): 26-29 dB SNR → fails 30 dB gate (all 4 scopes).
+- INT8 (predictor): 31-37 dB SNR → passes 30 dB gate (all 4 scopes).
+- INT8_ASYM is not acceptable for the main core on this model. Predictor INT8 is acceptable
+  and will be evaluated during M4 with full generation-level testing.
+
+Next steps (M3 continued):
+
+- Test MIX8 modes with selective INT8/FP32 per layer (group_size 32/64, ratio 0.5-0.9).
+  MIX8 is wired in export_openvino.py via --int8-mode mix8. Example:
+
+  docker run --rm -v ... --compression both --int8-mode mix8 --int8-group-size 32 --int8-ratio 0.75
+
+- If MIX8 passes:
+  - Re-run parity with SNR >= 30 dB per scope (main and predictor).
+  - Run end-to-end A/B listening.
+  - Run latency and RSS benchmarks.
+- If MIX8 fails:
+  - Fall back to INT8 predictor only + FP32 main as a compromise.
+  - Re-evaluate 1.7B plan if only this compromise is viable.
+
 ## Milestone 4: OpenVINO Generation Runtime
 
 Create `ov_talker_runtime.py` with an `OpenVINOTalkerGenerator` that implements the exact
