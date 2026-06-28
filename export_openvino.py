@@ -103,6 +103,17 @@ def _source_hash() -> str:
     return h.hexdigest()[:16]
 
 
+def _resolve_vocoder_decoder(speech_tokenizer):
+    """Return the loaded 12 Hz decoder from qwen-tts's inference wrapper."""
+    tokenizer_model = getattr(speech_tokenizer, "model", None)
+    decoder = getattr(tokenizer_model, "decoder", None)
+    if decoder is None:
+        raise RuntimeError(
+            "qwen-tts tokenizer contract mismatch: expected speech_tokenizer.model.decoder"
+        )
+    return decoder
+
+
 def run() -> int:
     args = parse_args()
     configure_hf_token()
@@ -123,14 +134,15 @@ def run() -> int:
     print(f"[export] loading {model_repo} (rev={revision}) at float32...", flush=True)
     wrapped = Qwen3TTSModel.from_pretrained(model_repo, revision=revision, device_map="cpu", dtype=torch.float32)
     talker = wrapped.model.talker
+    vocoder_decoder = _resolve_vocoder_decoder(wrapped.model.speech_tokenizer)
 
     main_dims = wrappers.core_dims(talker.model.config)
     pred_dims = wrappers.core_dims(talker.code_predictor.model.config)
-    voc_dims = wrappers.vocoder_dims(wrapped.model.speech_tokenizer.decoder.config)
+    voc_dims = wrappers.vocoder_dims(vocoder_decoder.config)
 
     main = wrappers.MainCoreWrapper(talker.model, main_dims["num_layers"])
     predictor = wrappers.PredictorCoreWrapper(talker.code_predictor.model, pred_dims["num_layers"])
-    vocoder = wrappers.VocoderDecoderWrapper(wrapped.model.speech_tokenizer.decoder)
+    vocoder = wrappers.VocoderDecoderWrapper(vocoder_decoder)
 
     plan: dict[str, tuple] = {
         "main_prefill": (main, main_dims, dict(seq=args.prefill_seq, prior=0, predictor=False)),

@@ -129,7 +129,7 @@ def core_dims(core_config) -> dict[str, int]:
 
 
 class VocoderDecoderWrapper(nn.Module):
-    """Wraps `speech_tokenizer.decoder` (Qwen3TTSTokenizerV2Decoder) for OpenVINO export.
+    """Wraps `speech_tokenizer.model.decoder` for OpenVINO export.
 
     Verified against qwen-tts==0.1.1 (Milestone 1.5):
 

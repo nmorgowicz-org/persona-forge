@@ -437,7 +437,7 @@ to explicit OpenVINO IR export.
 
 ## Milestone 1.5: Vocoder Decoder Export
 
-Export `speech_tokenizer.decoder` (`Qwen3TTSTokenizerV2Decoder`) before tackling the
+Export `speech_tokenizer.model.decoder` (`Qwen3TTSTokenizerV2Decoder`) before tackling the
 transformer cores. It is the simplest of the three models — no KV cache, no autoregressive
 loop, single feed-forward call — and it contributes ~29% of end-to-end latency (Milestone 0).
 Doing it first exercises `export_openvino.py` end-to-end (convert → INT8 → dynamic-axis →
@@ -445,7 +445,9 @@ metadata) on clean footing before the cache/mRoPE complexity of Milestone 2.
 
 ### Export contract (verified qwen-tts==0.1.1)
 
-Access path: `wrapped.model.speech_tokenizer.decoder` — `Qwen3TTSTokenizerV2Decoder` instance.
+Access path: `wrapped.model.speech_tokenizer.model.decoder` — the inference-level
+`Qwen3TTSTokenizer` stores the loaded `Qwen3TTSTokenizerV2Model` under `.model`, whose
+`.decoder` is the `Qwen3TTSTokenizerV2Decoder` instance.
 `VocoderDecoderWrapper` in `ov_export_wrappers.py` wraps it for `openvino.convert_model`.
 
 ```
@@ -808,19 +810,40 @@ volumes:
 
 Keep `mem_limit: 7G` and `memswap_limit: 8G` until Milestone 6 is complete.
 
+### Private GHCR authentication on `dockermisc1`
+
+The GitHub Actions token that publishes the images is scoped to the workflow runner and is not
+available on `dockermisc1`. Before pulling a private image, authenticate with a token that has
+`read:packages`. When GitHub CLI is already authenticated on the host, use:
+
+```bash
+gh auth refresh -h github.com -s read:packages
+gh auth token | docker login ghcr.io -u nmorgowicz --password-stdin
+docker pull ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-<git-sha>
+docker logout ghcr.io
+```
+
+Never print the token or place it in shell history, Compose, or repository files. For automated
+deployments, use a least-privilege read-only package token with a Docker credential helper. For
+a one-shot pull, a temporary Docker config that is deleted immediately after the pull avoids
+leaving registry credentials on disk.
+
 ### Build, export, and deployment sequence
 
 1. Merge a source revision after lightweight CI passes, then merge the corresponding Release
    Please pull request.
 2. The Release Please tag triggers `arc-general-docker` to build and push
    `runtime-<release-commit-sha>` and `exporter-<release-commit-sha>`.
-3. Pull both immutable tags on `dockermisc1`.
+3. Authenticate `dockermisc1` to private GHCR with `read:packages`, pull both immutable tags,
+   then remove temporary registry credentials.
 4. Set `MODEL_SIZE` to `0.6B` or `1.7B`, with optional `HF_TOKEN_FILE`, and pre-download the
    selected checkpoint into the persistent cache.
 5. Stop the existing `qwen3-tts` container to release its model memory.
 6. Run `exporter-<git-sha>` with the same model selection and these mounts:
    - `/var/data/autopirate/qwen3-tts/model:/root/.cache/huggingface/hub:rw`
    - `/var/data/autopirate/qwen3-tts/openvino:/ov_output:rw`
+   If the root-owned output directory does not exist, create it with `sudo install -d` and
+   assign it to the deployment user before starting the exporter.
 7. Run parity and IR metadata validation in the exporter container.
 8. Point Compose at `runtime-<git-sha>` and the matching validated IR directory.
 9. Start the service, verify `/health`, and run the short and paragraph benchmarks.
