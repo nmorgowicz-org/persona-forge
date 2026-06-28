@@ -2,7 +2,12 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from export_openvino import _resolve_vocoder_decoder, _set_eager_attention, parse_args
+from export_openvino import (
+    _export_provenance,
+    _resolve_vocoder_decoder,
+    _set_eager_attention,
+    parse_args,
+)
 
 
 class ExportOpenVINOTests(unittest.TestCase):
@@ -39,6 +44,21 @@ class ExportOpenVINOTests(unittest.TestCase):
         self.assertEqual(_set_eager_attention(module), 1)
         self.assertEqual(eager._attn_implementation, "eager")
         self.assertFalse(hasattr(untouched, "_attn_implementation"))
+
+    def test_validates_export_provenance(self):
+        commit = "a" * 40
+        digest = f"sha256:{'b' * 64}"
+
+        self.assertEqual(
+            _export_provenance(
+                {"SOURCE_COMMIT": commit, "EXPORTER_IMAGE_DIGEST": digest}
+            ),
+            (commit, digest),
+        )
+
+    def test_rejects_missing_export_provenance(self):
+        with self.assertRaisesRegex(SystemExit, "SOURCE_COMMIT"):
+            _export_provenance({})
 
 
 if __name__ == "__main__":

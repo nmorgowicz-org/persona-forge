@@ -24,6 +24,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -137,8 +138,19 @@ def _set_eager_attention(module) -> int:
     return len(configs)
 
 
+def _export_provenance(environ=os.environ) -> tuple[str, str]:
+    source_commit = environ.get("SOURCE_COMMIT", "")
+    image_digest = environ.get("EXPORTER_IMAGE_DIGEST", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+        raise SystemExit("SOURCE_COMMIT must be the full 40-character Git commit SHA")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest):
+        raise SystemExit("EXPORTER_IMAGE_DIGEST must be a sha256 registry digest")
+    return source_commit, image_digest
+
+
 def run() -> int:
     args = parse_args()
+    source_commit, exporter_image_digest = _export_provenance()
     configure_hf_token()
 
     import openvino as ov
@@ -258,6 +270,8 @@ def run() -> int:
             "model_revision": revision or "main",
             "openvino_version": ov.__version__,
             "attention_implementation": "eager",
+            "source_commit": source_commit,
+            "exporter_image_digest": exporter_image_digest,
             "compression": args.compression,
             "main_dims": main_dims,
             "predictor_dims": pred_dims,
@@ -271,6 +285,7 @@ def run() -> int:
         (tmp_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
         os.replace(tmp_dir, final_dir)
+        final_dir.chmod(0o755)
         print(f"[export] published {final_dir}")
         return 0
     finally:

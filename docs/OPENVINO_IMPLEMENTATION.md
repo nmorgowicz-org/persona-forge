@@ -295,6 +295,9 @@ python export_openvino.py \
 
 `--compression` accepts `fp32`, `int8`, or `both`. Model selection and authentication come
 from `MODEL_SIZE`/`MODEL_REPO`, `MODEL_REVISION`, and optional `HF_TOKEN`/`HF_TOKEN_FILE`.
+Set `SOURCE_COMMIT` to the full commit SHA for the mounted exporter source and
+`EXPORTER_IMAGE_DIGEST` to the immutable `sha256:...` registry digest; publication fails if
+either provenance value is absent or malformed.
 The command reuses the standard Hugging Face cache and writes only to `--output-dir`.
 
 Write into a temporary checkpoint-specific directory and atomically publish the final
