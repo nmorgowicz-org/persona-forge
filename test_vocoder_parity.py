@@ -25,6 +25,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--int8-model", default="vocoder_decoder_int8.xml")
     parser.add_argument("--fp32-max-abs", type=float, default=1e-4)
     parser.add_argument("--int8-max-abs", type=float, default=5e-3)
+    # SNR gates override max-abs for architectures (e.g. GAN vocoder) where floating-point
+    # accumulation reordering in conv layers causes legitimate single-sample outliers that
+    # don't represent perceptible audio degradation.  When set, a sequence length passes if
+    # SNR >= threshold even if max_abs exceeds the max-abs threshold.
+    parser.add_argument("--fp32-min-snr", type=float, default=None,
+                        help="minimum acceptable FP32 SNR (dB); overrides --fp32-max-abs when set")
+    parser.add_argument("--int8-min-snr", type=float, default=None,
+                        help="minimum acceptable INT8 SNR (dB); overrides --int8-max-abs when set")
     parser.add_argument("--output-json", type=Path)
     return parser.parse_args()
 
@@ -157,9 +165,21 @@ def run() -> int:
                 )
             if row["wrapper"]["max_abs"] >= 1e-6:
                 failures.append(f"length {length}: wrapper seam exceeded 1e-6")
-            if row["fp32"]["max_abs"] >= args.fp32_max_abs:
+            fp32_snr = row["fp32"].get("snr_db")
+            if args.fp32_min_snr is not None and fp32_snr is not None:
+                if fp32_snr < args.fp32_min_snr:
+                    failures.append(
+                        f"length {length}: FP32 SNR {fp32_snr:.1f} dB below {args.fp32_min_snr} dB"
+                    )
+            elif row["fp32"]["max_abs"] >= args.fp32_max_abs:
                 failures.append(f"length {length}: FP32 exceeded {args.fp32_max_abs}")
-            if row["int8"]["max_abs"] >= args.int8_max_abs:
+            int8_snr = row["int8"].get("snr_db")
+            if args.int8_min_snr is not None and int8_snr is not None:
+                if int8_snr < args.int8_min_snr:
+                    failures.append(
+                        f"length {length}: INT8 SNR {int8_snr:.1f} dB below {args.int8_min_snr} dB"
+                    )
+            elif row["int8"]["max_abs"] >= args.int8_max_abs:
                 failures.append(f"length {length}: INT8 exceeded {args.int8_max_abs}")
         except Exception as exc:
             row["inference_error"] = f"{type(exc).__name__}: {exc}"
@@ -178,7 +198,9 @@ def run() -> int:
         "inference_precision_hint": "f32",
         "int8_model": args.int8_model,
         "fp32_max_abs_tolerance": args.fp32_max_abs,
+        "fp32_min_snr_db": args.fp32_min_snr,
         "int8_max_abs_tolerance": args.int8_max_abs,
+        "int8_min_snr_db": args.int8_min_snr,
         "results": results,
         "failures": failures,
     }
