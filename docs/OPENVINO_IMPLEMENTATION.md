@@ -714,6 +714,21 @@ compressed = nncf.compress_weights(
 ov.save_model(compressed, output_xml)
 ```
 
+NNCF mode behavior (validated 2026-06-28 on dockermisc1):
+
+- INT8 modes (INT8_ASYM, INT8_SYM):
+  - All weights, per-channel, no tuning knobs.
+  - Reject non-default group_size and ratio overrides.
+  - Use: `nncf.compress_weights(ov_model, mode=INT8_ASYM)`.
+- MIX8 / INT4 modes:
+  - Accept group_size (0 / 32 / 64) and ratio (0.0–1.0) to tune selectivity and
+    per-group quantization.
+  - Use only if INT8 quality or speedup is unsatisfactory and the mode is
+    available in the pinned NNCF version.
+
+Do not assume INT8 modes support group_size/ratio; this constraint caused a failed
+export attempt on dockermisc1 (see #29).
+
 Compile the compressed models for CPU latency:
 
 ```python
