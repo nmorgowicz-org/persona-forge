@@ -49,12 +49,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--int8-mode",
-        choices=("int8_sym", "int8_asym", "mix8", "int4_asym"),
+        choices=("int8_sym", "int8_asym", "int4_asym"),
         default="int8_asym",
         help=(
             "NNCF weight compression mode (default: int8_asym). "
             "INT8 modes: all weights, per-channel, fixed. "
-            "MIX8/INT4 modes accept --int8-group-size and --int8-ratio."
+            "INT4 accepts --int8-group-size and --int8-ratio."
         ),
     )
     parser.add_argument(
@@ -62,7 +62,7 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=32,
         help=(
-            "NNCF weight compression group size for MIX8/INT4 modes (0=per-channel, 32/64=per-group). "
+            "NNCF weight compression group size for INT4 (-1=no grouping). "
             "Ignored for INT8 modes (per-channel, all weights)."
         ),
     )
@@ -71,8 +71,8 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=1.0,
         help=(
-            "Fraction of weights to quantize (0.0-1.0; default 1.0) for MIX8/INT4 modes. "
-            "Ignored for INT8 modes (all weights)."
+            "Fraction of layers using primary INT4 precision (0.0-1.0; default 1.0); "
+            "remaining layers use NNCF's backup precision. Ignored for INT8 modes."
         ),
     )
     parser.add_argument("--prefill-seq", type=int, default=8, help="example prefill length for tracing")
@@ -142,23 +142,21 @@ def _convert(wrapper, example, ov):
 def _compress(ov_model, nncf, *, mode: str = "int8_asym", group_size: int = 32, ratio: float = 1.0):
     """Compress weights with NNCF.
 
-    mode: NNCF CompressWeightsMode enum name (e.g. INT8_ASYM, MIX_8, INT4_ASYM).
-    group_size: used for MIX_8/INT4 modes only (0=per-channel, 32/64=per-group).
-    ratio: fraction of weights to quantize (used for MIX_8/INT4 modes only).
+    mode: NNCF CompressWeightsMode enum name (INT8_ASYM, INT8_SYM, or INT4_ASYM).
+    group_size: used for INT4 only (-1 disables grouping).
+    ratio: fraction of layers assigned primary INT4 precision. NNCF uses its backup
+        precision for the remainder; this is not an INT8/FP32 mixed mode.
 
     NOTE: INT8 modes are all-or-nothing (per-channel, ratio=1) and reject
-    non-default group_size/ratio. Only MIX_8/INT4 modes accept tuning.
+    non-default group_size/ratio. Only INT4 accepts tuning in the supported CLI.
     """
     mode_lower = mode.lower()
-    if "mix" in mode_lower:
-        ov_mode = nncf.CompressWeightsMode.MIX_8
-    elif mode_lower.startswith("int4"):
+    if mode_lower.startswith("int4"):
         ov_mode = nncf.CompressWeightsMode.INT4_ASYM
-    elif mode_lower.startswith("int8"):
-        if "sym" in mode_lower:
-            ov_mode = nncf.CompressWeightsMode.INT8_SYM
-        else:
-            ov_mode = nncf.CompressWeightsMode.INT8_ASYM
+    elif mode_lower == "int8_sym":
+        ov_mode = nncf.CompressWeightsMode.INT8_SYM
+    elif mode_lower == "int8_asym":
+        ov_mode = nncf.CompressWeightsMode.INT8_ASYM
     else:
         ov_mode = nncf.CompressWeightsMode.INT8_ASYM
 
@@ -166,7 +164,7 @@ def _compress(ov_model, nncf, *, mode: str = "int8_asym", group_size: int = 32, 
     if ov_mode in (nncf.CompressWeightsMode.INT8_SYM, nncf.CompressWeightsMode.INT8_ASYM):
         return nncf.compress_weights(ov_model, mode=ov_mode)
 
-    # MIX_8 / INT4 modes: allow tuning
+    # INT4 mixed precision: primary INT4 with NNCF's configured/default backup mode.
     kwargs = {
         "mode": ov_mode,
         "group_size": group_size,
@@ -217,6 +215,22 @@ def _export_provenance(environ=os.environ) -> tuple[str, str]:
     return source_commit, image_digest
 
 
+def _resolved_model_revision(wrapped, requested_revision: str | None) -> str:
+    """Return the immutable Hugging Face commit resolved by from_pretrained()."""
+    candidates = (
+        getattr(getattr(getattr(wrapped, "model", None), "config", None), "_commit_hash", None),
+        getattr(getattr(wrapped, "config", None), "_commit_hash", None),
+        requested_revision,
+    )
+    for candidate in candidates:
+        if isinstance(candidate, str) and re.fullmatch(r"[0-9a-f]{40}", candidate):
+            return candidate
+    raise RuntimeError(
+        "could not resolve an immutable 40-character model revision; "
+        "set MODEL_REVISION to a commit SHA"
+    )
+
+
 def run() -> int:
     args = parse_args()
     source_commit, exporter_image_digest = _export_provenance()
@@ -243,6 +257,7 @@ def run() -> int:
         dtype=torch.float32,
         attn_implementation="eager",
     )
+    resolved_revision = _resolved_model_revision(wrapped, revision)
     talker = wrapped.model.talker
     vocoder_decoder = _resolve_vocoder_decoder(wrapped.model.speech_tokenizer)
     eager_config_count = _set_eager_attention(vocoder_decoder)
@@ -293,7 +308,7 @@ def run() -> int:
 
     out_parent = Path(args.output_dir)
     out_parent.mkdir(parents=True, exist_ok=True)
-    final_name = _versioned_dirname(qwen_version, model_repo, revision or "main", ov_version)
+    final_name = _versioned_dirname(qwen_version, model_repo, resolved_revision, ov_version)
     if args.vocoder_only:
         final_name = f"{final_name}_vocoder"
     final_dir = out_parent / final_name
@@ -320,7 +335,7 @@ def run() -> int:
                 if want_fp32:
                     ov.save_model(ov_model, tmp_dir / f"{name}.xml")
                 if want_int8:
-                    if "mix" in args.int8_mode or "int4" in args.int8_mode:
+                    if "int4" in args.int8_mode:
                         detail = (
                             f"mode={args.int8_mode}, "
                             f"group_size={args.int8_group_size}, "
@@ -349,7 +364,7 @@ def run() -> int:
         metadata = {
             "qwen_tts_version": qwen_version,
             "model_repo": model_repo,
-            "model_revision": revision or "main",
+            "model_revision": resolved_revision,
             "openvino_version": ov.__version__,
             "attention_implementation": "eager",
             "source_commit": source_commit,

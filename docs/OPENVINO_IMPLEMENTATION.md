@@ -116,9 +116,33 @@ exact values from the live `talker.generate` path have not been traced and compa
 The parity gate proves IR correctness and dynamic-shape safety; end-to-end code-sequence
 agreement requires M4 integration and a generation-level comparison.
 
-Not yet implemented: INT8 compression validation, the OpenVINO generation runtime
-(`ov_talker_runtime.py`), and the `TTS_BACKEND=openvino` worker path with its `/health`
-metadata.
+**Milestone 3 — INT8 characterization: IN PROGRESS (2026-06-28)**
+
+The first all-weight INT8 run produced useful hidden-state error measurements, but it did
+not complete the M3 acceptance gate. Although the command and metadata said `INT8_ASYM`,
+the exporter checked `"sym" in "int8_asym"` and therefore selected `INT8_SYM`. The original
+harness also silently skipped every token-agreement check because it looked for a nonexistent
+`talker.first_codebook_head`, fed
+each OpenVINO decode step from the PyTorch cache instead of carrying backend-owned state,
+tested only three of the predictor's 15 output heads, and timed first calls rather than a
+warm benchmark. The artifact also recorded the mutable revision `main`; the cache used the
+immutable model revision `5d83992436eae1d760afd27aff78a71d676296fc`.
+
+The measured 26-29 dB main and 31-37 dB predictor SNR values are retained as exploratory
+INT8_SYM characterization only. They are not INT8_ASYM evidence and do not establish that
+predictor INT8 is acceptable or that the main threshold should be lowered. The corrected
+core harness fails closed when output heads are unavailable, projects through
+`talker.codec_head` and all 15 predictor `lm_head` entries,
+and carries independent PyTorch, FP32 OpenVINO, and INT8 OpenVINO caches across decode steps.
+
+M3 cannot complete until the FP32 M4 generation adapter supplies real prompt embeddings,
+3-axis mRoPE positions, and the nested code-predictor schedule. That adapter is also required
+for generated-code agreement, production-sampling listening tests, warm latency, and RSS.
+The next implementation target is therefore the FP32 explicit-cache M4 path; quantization
+selection resumes after that path passes generation-level parity.
+
+Not yet implemented: the OpenVINO generation runtime (`ov_talker_runtime.py`), generation-
+level FP32/INT8 validation, or the `TTS_BACKEND=openvino` worker path with `/health` metadata.
 
 ## Validated Deployment Snapshot
 
@@ -720,11 +744,12 @@ NNCF mode behavior (validated 2026-06-28 on dockermisc1):
   - All weights, per-channel, no tuning knobs.
   - Reject non-default group_size and ratio overrides.
   - Use: `nncf.compress_weights(ov_model, mode=INT8_ASYM)`.
-- MIX8 / INT4 modes:
-  - Accept group_size (0 / 32 / 64) and ratio (0.0–1.0) to tune selectivity and
-    per-group quantization.
-  - Use only if INT8 quality or speedup is unsatisfactory and the mode is
-    available in the pinned NNCF version.
+- INT4 modes:
+  - Accept `group_size` and `ratio`; `ratio` selects the fraction of layers assigned the
+    primary INT4 precision and the remainder use NNCF's backup precision (INT8 by default).
+  - This is not an INT8/FP32 mixed mode.
+- NNCF 3.2.0 has no `CompressWeightsMode.MIX_8`. Selective INT8/FP32 requires a single
+  INT8 compression pass with an explicit `IgnoredScope` for layers retained in FP32.
 
 Do not assume INT8 modes support group_size/ratio; this constraint caused a failed
 export attempt on dockermisc1 (see #29).
@@ -759,18 +784,22 @@ INT8 acceptance checks:
 - Warm median and p95 latency.
 - IR size, compiled-model memory, and peak container RSS.
 
-M3 results (0.6B, INT8_ASYM, all weights, per-channel):
+Exploratory M3 results (0.6B, actual INT8_SYM despite INT8_ASYM metadata, all weights,
+per-channel):
 
 - FP32: all scopes pass (72-91 dB SNR), same as M2.
 - INT8 (main): 26-29 dB SNR → fails 30 dB gate (all 4 scopes).
-- INT8 (predictor): 31-37 dB SNR → passes 30 dB gate (all 4 scopes).
-- INT8_ASYM is not acceptable for the main core on this model. Predictor INT8 is acceptable
-  and will be evaluated during M4 with full generation-level testing.
+- INT8 (predictor): 31-37 dB SNR in the four tested scopes.
+- These are hidden-state SNR measurements from the superseded synthetic harness. They are
+  insufficient to accept or reject a runtime configuration.
 
-M3 completed on 2026-06-28 with INT8_ASYM parity on dockermisc1 (exporter-v0.5.2).
-Key finding: INT8_ASYM is marginal on the main core.
+The run used exporter-v0.5.2 on dockermisc1. Source commit:
+`4fe690b0ff4dd2f74cbe47a2cfb7c942bc18ccb6`; exporter digest:
+`sha256:0808f1f70777f160f8bca4b29486c0b94a6728c372715eef96e39a945e2c817d`; actual model
+revision: `5d83992436eae1d760afd27aff78a71d676296fc`; IR metadata SHA-256:
+`a52d681e3b9f8f386c4ba85f181e1e240f853d34eddb53604ee0525ec7a858ae`.
 
-INT8_ASYM parity summary (0.6B main transformer, INT8_ASYM, all weights, per-channel):
+Superseded INT8_SYM parity summary (0.6B transformer cores, all weights, per-channel):
 
 - main/prefill: 27.3 dB → fails 30 dB gate
 - main/decode step0-2: 26.2-28.7 dB → fails
@@ -779,36 +808,41 @@ INT8_ASYM parity summary (0.6B main transformer, INT8_ASYM, all weights, per-cha
 
 FP32 IR remains excellent (71-91 dB) and identical to M2.
 
-MIX8 attempt (2026-06-28) found:
+Unsupported MIX8 attempt (2026-06-28) found:
 
 - NNCF 3.2.0 has no CompressWeightsMode.MIX_8.
-- The --int8-mode mix8 path in export_openvino.py is incorrect for this NNCF version.
+- The unsupported `--int8-mode mix8` exporter path has been removed.
 - Available modes: INT8_ASYM, INT8_SYM, INT4_ASYM, INT4_SYM, FP8_E4M3, FP4,
   ADAPTIVE_CODEBOOK, MXFP4, MXFP8_E4M3, CB4, CODEBOOK, NF4, NVFP4.
 
-For mixed-precision (some layers INT8, some FP32), we need:
-- A custom NNCF config (per-layer selection), or
-- A per-layer compress_weights call outside the simple --int8-mode CLI.
+Do not call `compress_weights` repeatedly per layer. For selective INT8/FP32, identify
+sensitive MatMuls through generation-path ablation and pass their names or patterns in one
+`nncf.IgnoredScope` to `compress_weights(..., mode=INT8_ASYM)`. Preserve the resulting scope
+list and NNCF configuration in metadata.
 
 Current position:
-- FP32 transformer cores: validated and ready for M4.
-- INT8 predictor: acceptable (31-37 dB); can be considered for use if main is FP32.
-- INT8 main: not acceptable at 30 dB gate; would require gate relaxation or a proper
-  per-layer MIX8 config.
+- FP32 transformer cores: synthetic core parity passes and is ready for an M4 FP32 adapter.
+- INT8 predictor and main: not accepted; both require generation-path testing.
+- The existing INT8 artifacts remain useful for the corrected characterization rerun, but
+  their mutable revision metadata means they are not release artifacts.
 
 Next steps (M3 continued):
 
-- Either:
-  1) Relax the main-core INT8 gate (e.g., to 25 dB), re-run parity, and decide after
-     A/B listening on a short utterance, or
-  2) Implement a proper per-layer MIX8 config (only INT8 main where safe; FP32 for
-     sensitive layers), export, and validate again.
-- After a passing INT8/MIX8 configuration:
-  - Run end-to-end A/B listening.
-  - Run latency and RSS benchmarks.
-- If INT8/MIX8 cannot meet quality/latency goals, fall back to:
-  - INT8 predictor + FP32 main (compromise)
-  - FP32 for both (if INT8 predictor is marginal).
+1. Run the corrected synthetic harness against the existing artifacts to characterize
+   independent cache accumulation and all output heads. Do not use that rerun as release
+   acceptance because its inputs remain synthetic.
+2. Implement the M4 adapter with FP32 main and predictor IR first. Trace real embeddings,
+   attention masks, position IDs, cache positions, and all 15 predictor steps.
+3. Establish bounded generated-code agreement and production-sampling A/B output with FP32.
+4. Benchmark warm FP32/FP32, FP32-main/INT8-predictor, and INT8/INT8 configurations with the
+   same prompts and runtime settings. Record median, p95, RTF, peak RSS, swap delta, and
+   per-core timings.
+5. Accept the simplest configuration that passes code, listening, and performance gates.
+   Attempt selective main INT8 with `IgnoredScope` only if measured performance or memory
+   shows that it is necessary.
+
+Do not lower the 30 dB diagnostic threshold to make an existing run pass. Hidden-state SNR
+is a debugging signal, not a substitute for generated-code agreement and listening quality.
 
 ## Milestone 4: OpenVINO Generation Runtime
 
