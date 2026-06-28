@@ -152,8 +152,49 @@ class VocoderDecoderWrapper(nn.Module):
         super().__init__()
         self.decoder = decoder
 
+    @staticmethod
+    def _attention_masks(hidden: torch.Tensor, sliding_window: int) -> dict[str, torch.Tensor]:
+        """Build traceable 4-D additive causal and sliding-window masks."""
+        seq_len = hidden.shape[1]
+        positions = torch.arange(seq_len, device=hidden.device)
+        query = positions[:, None]
+        key = positions[None, :]
+        causal_allowed = key <= query
+        sliding_allowed = causal_allowed & (key > query - sliding_window)
+        min_value = torch.finfo(hidden.dtype).min
+        zero = torch.zeros((), device=hidden.device, dtype=hidden.dtype)
+        blocked = torch.full((), min_value, device=hidden.device, dtype=hidden.dtype)
+
+        def additive(allowed: torch.Tensor) -> torch.Tensor:
+            mask = torch.where(allowed, zero, blocked)
+            return mask[None, None, :, :].expand(hidden.shape[0], 1, seq_len, seq_len)
+
+        return {
+            "full_attention": additive(causal_allowed),
+            "sliding_attention": additive(sliding_allowed),
+        }
+
     def forward(self, codes: torch.Tensor) -> torch.Tensor:
-        return self.decoder(codes)
+        if codes.shape[1] != self.decoder.config.num_quantizers:
+            raise ValueError(
+                f"expected {self.decoder.config.num_quantizers} codebooks, got {codes.shape[1]}"
+            )
+
+        hidden = self.decoder.quantizer.decode(codes)
+        hidden = self.decoder.pre_conv(hidden).transpose(1, 2)
+        masks = self._attention_masks(hidden, self.decoder.config.sliding_window)
+        hidden = self.decoder.pre_transformer(
+            inputs_embeds=hidden,
+            attention_mask=masks,
+        ).last_hidden_state
+        hidden = hidden.permute(0, 2, 1)
+        for blocks in self.decoder.upsample:
+            for block in blocks:
+                hidden = block(hidden)
+        wav = hidden
+        for block in self.decoder.decoder:
+            wav = block(wav)
+        return wav.clamp(min=-1, max=1)
 
 
 def vocoder_dims(decoder_config) -> dict[str, int]:

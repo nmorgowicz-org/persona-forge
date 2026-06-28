@@ -478,6 +478,13 @@ validated vocoder-only result cannot be mistaken for, or block, the later five-g
 ov_model.reshape({0: ov.PartialShape([1, 16, -1])})
 ```
 
+The tokenizer transformer normally builds its causal/sliding-window mask through Transformers'
+generic `torch.vmap` mask factory, which TorchScript/OpenVINO cannot trace. The tensor-only
+vocoder wrapper must construct the equivalent 4-D additive masks directly (`kv <= q` and
+`kv > q - sliding_window`) and pass the `full_attention`/`sliding_attention` mapping into
+`pre_transformer`. Compare the wrapper against the stock decoder in PyTorch before conversion;
+this bypass is accepted only if the FP32 waveform gate below passes.
+
 ### FP32 parity gate
 
 Run `Decoder.forward` in PyTorch and through the compiled FP32 IR on the same random codes
@@ -573,10 +580,11 @@ The exporter must:
 3. Load the export copy with `attn_implementation="eager"`, then explicitly set
    `_attn_implementation="eager"` on the distinct nested configs under the vocoder decoder,
    main core, and predictor core. The top-level load option does not propagate into the separately
-   loaded speech tokenizer. Its default SDPA mask path uses nested `torch.vmap` operations that
-   TorchScript/OpenVINO cannot trace (`unordered_map::at`); eager attention keeps the
-   mathematically equivalent mask construction traceable. Record the selected implementation in
-   metadata and compare against the normal PyTorch baseline at the parity gate.
+   loaded speech tokenizer. Its default mask path uses nested `torch.vmap` operations that
+   TorchScript/OpenVINO cannot trace (`unordered_map::at`). The vocoder wrapper supplies the
+   equivalent explicit mask described in Milestone 1.5; the transformer-core mask seam remains
+   separately parity-gated. Record the selected implementation in metadata and compare against
+   the normal PyTorch baseline at the parity gate.
 4. Build example inputs from the real model configuration rather than hard-coded dimensions.
 5. Convert with `openvino.convert_model(wrapper, example_input=...)`.
 6. Save uncompressed FP32 IR first.
