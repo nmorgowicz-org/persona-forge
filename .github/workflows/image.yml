@@ -130,4 +130,4 @@ jobs:
           package-name: qwen3-tts-openvino
           package-type: container
           min-versions-to-keep: 5
-          ignore-versions: ^(runtime-latest|exporter-latest|buildcache-runtime|buildcache-exporter)$
+          ignore-versions: ^(runtime|exporter|buildcache)-
