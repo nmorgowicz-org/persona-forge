@@ -1,0 +1,5 @@
+# Renovate handles pip, Docker, and GitHub Actions version updates.
+# Setting version: 2 with no updates entries disables Dependabot version-update PRs
+# while leaving Dependabot security alerts active (controlled separately in repo settings).
+version: 2
+updates: []
