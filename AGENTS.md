@@ -378,5 +378,19 @@ Supported types: `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `build`, `ci
 and `revert`.
 
 Use squash merge. Release Please evaluates the pull request title, so a user-facing feature or
-fix must have a corresponding `feat:` or `fix:` PR title. Keep generated model artifacts and
-benchmark audio out of PRs.
+fix must have a corresponding `feat:` or `fix:` PR title.
+
+Every implementation PR body must include an explicit Release Please override block. Put one
+Conventional Commit entry on each line so every user-visible change that belongs in the release
+notes is represented:
+
+```text
+BEGIN_COMMIT_OVERRIDE
+fix(ci): publish images only from Release Please tags
+fix(export): include the OpenVINO export CLI in the exporter image
+END_COMMIT_OVERRIDE
+```
+
+The block is authoritative release-note input; keep it aligned with the full PR scope instead
+of relying on the PR title alone. Generated Release Please version PRs are exempt. Keep generated
+model artifacts and benchmark audio out of PRs.
