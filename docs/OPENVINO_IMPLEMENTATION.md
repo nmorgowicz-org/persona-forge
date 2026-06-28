@@ -422,6 +422,28 @@ values for the 0.6B Base checkpoint (`qwen-tts==0.1.1`, transformers 4.57.3):
 The 1.7B checkpoint shares this layout but with larger `hidden_size`/`intermediate_size`;
 read it from its own config rather than scaling these numbers by hand.
 
+Verified core forward and cache contract (qwen-tts==0.1.1 / transformers 4.57.3),
+implemented in `ov_export_wrappers.py`:
+
+- `head_dim=128` for both cores — decoupled from `hidden_size/num_attention_heads`
+  (1024/16=64). Do not assume `head_dim = hidden/heads`. Each per-layer K/V tensor is
+  `[batch, num_key_value_heads=8, seq, head_dim=128]`.
+- Both core forwards accept `inputs_embeds, attention_mask, position_ids, past_key_values,
+  cache_position, use_cache` and return `BaseModelOutputWithPast`. The predictor core
+  additionally accepts `generation_steps`.
+- The cores use a `DynamicCache`, which in transformers 4.57.3 stores `self.layers[i]`
+  (`.keys`/`.values`) — not the older `key_cache`/`value_cache` lists. The wrappers convert
+  flat tensors via `DynamicCache.from_legacy_cache()` / `.to_legacy_cache()` rather than
+  touching internals, so the boundary stays a flat tensor list (`k0, v0, k1, v1, ...`).
+- Pass `cache_position` (and `position_ids`) as **explicit** wrapper inputs. If omitted, the
+  core derives `cache_position` from the cache length, which trace-bakes the decode graph to
+  the example prior length and breaks dynamic decode.
+- The main core expands `position_ids` into a 3-axis mRoPE layout internally. The exact
+  `position_ids`/`cache_position` values the eager generation path supplies at prefill and at
+  each decode step are NOT yet confirmed and are the primary subject of the FP32 parity gate
+  (greedy top-1 token agreement). The predictor's `generation_steps` semantics across the 15
+  codebook steps are likewise parity-gated.
+
 Export two graphs per core:
 
 - Prefill: dynamic sequence-length `inputs_embeds`, masks/positions, no prior cache.

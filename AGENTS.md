@@ -77,6 +77,10 @@ validating their presence.
   together. Optimum Intel is intentionally not a dependency: the custom talker has no
   registered exporter, so export uses `openvino.convert_model` + `nncf.compress_weights`
   directly, and avoiding Optimum keeps the Transformers pin owned solely by `qwen-tts`.
+- Do not upgrade `transformers` independently. `qwen-tts==0.1.1` hard-pins
+  `transformers==4.57.3`, and the OpenVINO export wrappers depend on that exact
+  `DynamicCache` (`to_legacy_cache`/`from_legacy_cache`) and `generate` API. Bump it only
+  when `qwen-tts` itself does, and re-verify the export wrappers and parity gate.
 - Install CPU-only Torch before `qwen-tts` so pip does not pull CUDA libraries.
 - Pin Torch and Torchaudio independently. The validated Python 3.13 CPU pair is currently
   `torch==2.12.1+cpu` with `torchaudio==2.11.0+cpu`.
