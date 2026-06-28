@@ -46,33 +46,22 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
-from transformers.cache_utils import DynamicCache
-from transformers.cache_utils import DynamicLayer
+from transformers.cache_utils import DynamicCache, DynamicLayer
 
+# transformers 4.57.3: DynamicCache.__init__() calls Cache.__init__(layer_class_to_replicate=DynamicLayer),
+# setting an INSTANCE attribute that cannot be overridden by a subclass class attribute.
+# Patching lazy_initialization directly is the only reliable way to replace the rank-1
+# torch.tensor([]) seed tensor with a rank-4 empty tensor that OV's aten::cat converter
+# can validate (axis -2 is out of range [-1, 0] for a rank-1 tensor).
+# This module is only imported in the export container so the global patch is safe.
+def _ov_lazy_initialization(self: DynamicLayer, key_states: torch.Tensor) -> None:
+    self.dtype = key_states.dtype
+    self.device = key_states.device
+    self.keys = key_states[..., :0, :]    # [batch, kv_heads, 0, head_dim] — rank 4
+    self.values = key_states[..., :0, :]
+    self.is_initialized = True
 
-class _OVDynamicLayer(DynamicLayer):
-    """DynamicLayer whose lazy_initialization starts with a rank-4 zero-length tensor.
-
-    The default implementation uses `torch.tensor([])` (shape [0], rank 1).  PyTorch
-    allows `torch.cat([rank-1-empty, rank-4-keys], dim=-2)` as a special case, but
-    OpenVINO's converter validates axis bounds against each input's rank independently
-    and rejects axis -2 for a rank-1 tensor (valid range: [-1, 0]).  Slicing to
-    `[..., :0, :]` gives a rank-4 empty tensor so the cat is always rank-safe.
-    """
-
-    def lazy_initialization(self, key_states: torch.Tensor) -> None:
-        self.dtype = key_states.dtype
-        self.device = key_states.device
-        empty = key_states[..., :0, :]   # [batch, kv_heads, 0, head_dim] — rank 4
-        self.keys = empty
-        self.values = empty
-        self.is_initialized = True
-
-
-class _OVDynamicCache(DynamicCache):
-    """DynamicCache that uses _OVDynamicLayer so every aten::cat in the trace is rank-safe."""
-
-    layer_class_to_replicate = _OVDynamicLayer
+DynamicLayer.lazy_initialization = _ov_lazy_initialization  # type: ignore[method-assign]
 
 
 class CoreCacheWrapper(nn.Module):
@@ -85,7 +74,7 @@ class CoreCacheWrapper(nn.Module):
 
     def _build_cache(self, past_kv: tuple[torch.Tensor, ...]) -> DynamicCache:
         if not past_kv:
-            return _OVDynamicCache()
+            return DynamicCache()
         if len(past_kv) != 2 * self.num_layers:
             raise ValueError(
                 f"expected {2 * self.num_layers} past K/V tensors, got {len(past_kv)}"
@@ -93,7 +82,7 @@ class CoreCacheWrapper(nn.Module):
         legacy = tuple(
             (past_kv[2 * i], past_kv[2 * i + 1]) for i in range(self.num_layers)
         )
-        return _OVDynamicCache.from_legacy_cache(legacy)
+        return DynamicCache.from_legacy_cache(legacy)
 
     @staticmethod
     def _flatten_present(cache: DynamicCache) -> list[torch.Tensor]:
