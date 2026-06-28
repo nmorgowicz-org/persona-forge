@@ -493,6 +493,12 @@ this bypass is accepted only if the FP32 waveform gate below passes.
 Run `Decoder.forward` in PyTorch and through the compiled FP32 IR on the same random codes
 tensor. Accept if max absolute error < 1e-4 on the output waveform.
 
+Run `test_vocoder_parity.py --model-dir <versioned-vocoder-dir>` in the exporter container.
+The gate uses deterministic codes at 8, 32, and 300 frames to validate the explicit-mask
+wrapper seam, dynamic output shapes, FP32 IR, and INT8 IR. It writes `vocoder_parity.json`
+beside the IR with source/image provenance, metadata hash, error summaries, and single-run
+diagnostic timings.
+
 ### INT8 acceptance gate
 
 - Waveform max absolute error vs FP32 IR < 5e-3.
@@ -885,6 +891,7 @@ convenience but must not be the Compose production reference.
 | `profile_tts.py` | Per-component timing and generation-step counters |
 | `export_openvino.py` | Implement the documented one-shot export, validation, and compression CLI |
 | `ov_export_wrappers.py` | Tensor-only prefill/decode wrappers and cache flattening |
+| `test_vocoder_parity.py` | Deterministic vocoder wrapper, dynamic-shape, FP32, and INT8 parity gate |
 | `ov_talker_runtime.py` | Nested main-talker/code-predictor generation runtime |
 | `test_ov_parity.py` | FP32 and INT8 tensor/cache/token parity tests |
 | `app_worker.py` | Backend selection, loading, health metadata, and rollback path |

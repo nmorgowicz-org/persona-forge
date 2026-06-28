@@ -17,8 +17,11 @@ def validate_python() -> None:
     paths = (
         ROOT / "app_api.py",
         ROOT / "app_worker.py",
+        ROOT / "export_openvino.py",
         ROOT / "model_config.py",
+        ROOT / "ov_export_wrappers.py",
         ROOT / "serve.py",
+        ROOT / "test_vocoder_parity.py",
         ROOT / "scripts" / "download_model.py",
     )
     for path in paths:
@@ -89,7 +92,7 @@ def validate_dockerfile() -> None:
     for marker in ('HEALTHCHECK ', 'CMD ["python", "serve.py"]'):
         if marker not in dockerfile:
             raise RuntimeError(f"Dockerfile runtime contract is missing {marker!r}")
-    if "COPY export_openvino.py ov_export_wrappers.py ./" not in dockerfile:
+    if "COPY export_openvino.py ov_export_wrappers.py test_vocoder_parity.py ./" not in dockerfile:
         raise RuntimeError("Dockerfile exporter target is missing the export CLI sources")
 
     if not (ROOT / "SECURITY.md").is_file():
