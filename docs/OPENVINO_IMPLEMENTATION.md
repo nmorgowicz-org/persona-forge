@@ -49,6 +49,15 @@ Two findings from that baseline reshape the end-to-end picture and must be carri
 
 ## Implementation Status
 
+**Milestone 4 — OpenVINO generation runtime: COMPLETE / measured (2026-06-28).** First live
+generation run on dockermisc1. FP32 cores 1.11x, INT8_ASYM cores 1.38x end-to-end — neither
+meets the 2x Gate 5 by swapping the two transformer cores alone. INT8 confirmed as the better
+lever; the remaining ceiling is structural (untouched PyTorch vocoder ~29%, per-frame glue
+overhead). Greedy parity gates fail but greedy is not the quality verdict (reproducible
+frame-160 OV-vs-PyTorch divergence in both precisions). See "M4 measured results" for the table
+and the prioritized next steps (wire vocoder IR → cut per-frame glue → sampled-audio quality
+check → investigate frame-160 → 1.7B INT8).
+
 **Milestone 1.5 — Vocoder decoder export: COMPLETE (2026-06-28)**
 
 - FP32 IR exported and validated: SNR **46.4 dB** vs PyTorch (mean_abs 1.76e-4, p99.9 6.8e-3).
@@ -995,6 +1004,60 @@ RTF (see "Interpretation and M4 framing"). FP32 IR has unproven speedup on the c
 lands well under the 2x goal, INT8 becomes load-bearing and the retained INT8_ASYM artifact is
 re-evaluated through this same generation-level harness. `test_ov_generation.py` produces both
 the bounded generated-code agreement (greedy) and the warm sampling latency/RTF/peak-RSS rows.
+
+### M4 measured results: COMPLETE (2026-06-28, dockermisc1, 0.6B Base, 6 threads)
+
+First live generation run of the M4 runtime, exporter image `exporter-v0.6.1`, IR
+`qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1` (FP32 + INT8_ASYM, the retained v0.5.4
+artifact). Reports saved beside the IR: `ov_generation_report_fp32.json`,
+`ov_generation_report_int8.json`. Warm sampling latency, 5 iterations, ~3 s utterance.
+
+| metric | FP32 OV | INT8_ASYM OV |
+| --- | --- | --- |
+| warm median latency (PyTorch → OV) | 25.23 s → 22.72 s | 21.75 s → 15.79 s |
+| **speedup_median** | **1.11x** | **1.38x** |
+| OV RTF | 7.28 | 5.33 |
+| Gate 5 (≥2x) | ❌ not met | ❌ not met |
+| greedy frame agreement | 0.766 | 0.829 |
+| first divergence frame | 160 | 160 |
+| greedy waveform SNR | −0.0 dB | −2.4 dB |
+| peak RSS | 11.9 GiB | 8.8 GiB |
+
+**Verdict and interpretation:**
+
+1. **Neither precision meets the 2x gate on 0.6B by swapping the two cores alone.** INT8 is
+   the better lever (1.38x vs 1.11x, and 8.8 vs 11.9 GiB), confirming INT8 is load-bearing —
+   but the ceiling here is structural, not a quantization shortfall. Per Milestone 0, the
+   PyTorch vocoder/tokenizer decode (~29% of end-to-end) is still untouched, and the M4
+   design keeps all per-frame glue in PyTorch (sampling, mRoPE, DynamicCache rebuild, and a
+   numpy↔torch copy of every K/V each step), which adds fixed overhead the core speedup must
+   overcome.
+2. **The greedy parity gates fail, but greedy is the wrong gate for a quality verdict.** Both
+   OV variants diverge from the PyTorch greedy reference at the *same* frame (160), which is
+   reproducible and therefore a *systematic* OV-vs-PyTorch discrepancy, not random quantization
+   noise (FP32 OV diverges identically to INT8 OV). Under `do_sample=False` a single argmax
+   flip cascades through code feedback and shifts EOS, so frame-agreement and the
+   divergence-contaminated waveform SNR are debug signals, not the perceptual verdict. A
+   sampled-audio quality check (fixed seed, PyTorch-sampled vs OV-sampled) is the missing
+   measurement.
+3. **Harness needs ~12 GiB (FP32) / ~9 GiB (INT8)** because it holds both the full PyTorch
+   model and the OV graphs at once; a 7 GiB cgroup OOM-kills it. The *serving* runtime loads
+   OV only and is unaffected, but this reinforces that 1.7B will force INT8.
+
+**Highest-leverage next steps (in order):**
+
+1. **Wire the already-exported vocoder decoder IR into the runtime.** Its FP32 IR exists and
+   passed parity at 46.4 dB; moving the ~29% tokenizer-decode chunk onto OV is the single
+   biggest remaining lever toward 2x and is independent of the core work.
+2. **Cut per-frame glue overhead** in `ov_talker_runtime.py`: avoid the full numpy↔torch K/V
+   copy each decode step (feed OV tensors / reuse buffers), which is paid 15×/frame.
+3. **Add a sampled-audio quality check** to `test_ov_generation.py` so the ship decision rests
+   on perceptual parity, not greedy bounded agreement.
+4. **Investigate the reproducible frame-160 divergence** (mRoPE axis feed, cache_position, or
+   attention-mask construction at the inner seam) — it is the same in FP32 and INT8, so it is
+   a runtime-contract question, not a precision one.
+5. Only then decide whether ~1.4x (or whatever (1)+(2) reach) is shippable for 0.6B, and
+   repeat the harness on 1.7B (INT8-only; FP32 will not fit the 7 GiB container).
 
 ## Milestone 5: Stateful KV Cache
 
