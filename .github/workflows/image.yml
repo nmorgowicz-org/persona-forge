@@ -78,6 +78,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Validate Compose example
+        if: matrix.target == 'runtime'
         env:
           REF_AUDIO_PATH: ./voice/reference.wav
           REF_TEXT: Example reference transcript for configuration validation
