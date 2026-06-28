@@ -21,6 +21,10 @@ audible quality regression. Treat 7-14 seconds for a short utterance as an inves
 target, not a release guarantee. The measured real-time factor, latency distribution, and
 peak memory determine whether the backend ships.
 
+[IRIS NOTE] The 2x claim is reasonable as a target on 0.6B but optimistic for 1.7B and long
+prompts on this CPU (no AVX-512, 8 vCPUs, noisy host). Confirm with frontier model:
+adjust to model-size-specific targets or add conditional language in "Release Gates."
+
 ## Validated Deployment Snapshot
 
 Validated on `dockermisc1` on 2026-06-27:
@@ -157,6 +161,12 @@ Pin Torch and Torchaudio independently. The Python 3.13 CPU wheel index currentl
 version pair is already running successfully in the existing service. Do not assume both
 packages publish identical version numbers.
 
+[IRIS NOTE] The Dockerfile's sed-based patch to override ONNX Runtime's intra_op_num_threads
+is fragile across qwen-tts releases. Prefer:
+- relying on ORT_INTRA_OP_NUM_THREADS (already set in app_worker.py), or
+- a small runtime patch in Python rather than in-place sed on a site-packages file.
+Confirm with frontier model.
+
 ## Build and Artifact Boundaries
 
 CI builds model-free Linux AMD64 images from the private Git repository. Model weights,
@@ -272,6 +282,12 @@ torch.set_num_interop_threads(1)
 Benchmark 6 and 8 inference threads. Keep one request in flight; the service already
 serializes inference with a single-worker executor.
 
+[IRIS NOTE] As OpenVINO is added, these thread settings become insufficient:
+PyTorch, OpenVINO, and ONNX Runtime will compete on 8 vCPUs. Introduce an explicit
+thread budget (e.g., OpenVINO 4, PyTorch 4, ORT 2-4), then benchmark splits.
+Frontier model should double-check that these numbers remain safe under concurrent
+workloads and swap pressure.
+
 ## Milestone 1: FP32 OpenVINO Feasibility Spike
 
 Use an isolated image tag and leave the production container unchanged.
@@ -378,6 +394,13 @@ Compare PyTorch and OpenVINO at tensor level for:
 Use absolute and relative error summaries, top-1 token agreement, and greedy multi-step code
 agreement. Do not proceed to INT8 until FP32 OpenVINO follows the same cache and position
 semantics as PyTorch.
+
+## INT8 and CPU microarchitecture note
+
+[IRIS NOTE] AVX-512 is not exposed (only AVX2 + AVX-VNNI). INT8 gains may be modest compared
+with plans that assume AVX-512 acceleration. Frontier model should verify that OpenVINO 2026.x
+plus NNCF 3.2.x behavior on AVX2/AVX-VNNI still justifies INT8 for this architecture, and
+whether the dynamic quantization group-size choices (0/32/64) remain appropriate.
 
 ## Milestone 3: INT8 Weight Compression and Runtime Tuning
 
@@ -495,6 +518,20 @@ verify state count and reset behavior. With recognized stateful KV-cache graphs,
 Compare stateful FP32-cache and U8-cache output quality before selecting the deployment
 setting. The expected benefit is lower per-token cache transfer and allocation overhead;
 measure it rather than assuming it.
+
+[IRIS NOTE] Because stateful OpenVINO for custom graphs is less robust than for known
+architectures, treat stateful as optional (controlled by an env var) rather than mandatory.
+Frontier model should review whether stateful KV-cache is worth the complexity once
+explicit-cache runtime is stable and meeting latency goals.
+
+## 1.7B feasibility note
+
+[IRIS NOTE] The 1.7B checkpoint must be treated as its own experiment. On 8 vCPUs with
+7 GiB container, it will push both memory and latency; consider:
+- (a) looser latency gates (e.g., 1.5x as acceptable),
+- (b) mandatory memory budgeting before enabling INT8.
+Ask a frontier model to propose concrete memory/latency thresholds for 1.7B on this
+profile and whether any of the current release gates are unrealistic at this scale.
 
 ## Milestone 6: Memory Reduction
 
@@ -621,6 +658,10 @@ Ship the OpenVINO backend only when all gates pass:
 7. The container remains below its memory limit without increasing host swap pressure.
 8. `/generate`, `/infer`, `/health`, MP3 output, WAV output, and serialized concurrency pass.
 9. `TTS_BACKEND=pytorch` provides a tested one-setting rollback.
+
+[IRIS NOTE] Gate 5 (2x improvement) should probably be model-size-specific: 2x for 0.6B is
+reasonable; for 1.7B on this hardware, 1.5x might be more honest. Ask frontier model to
+clarify thresholds and whether we should call this out explicitly here.
 
 ## First Commands for the Implementation Session
 
