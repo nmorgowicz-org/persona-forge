@@ -34,7 +34,7 @@ from model_config import configure_hf_token, resolve_model_repo
 COMPRESSION_CHOICES = ("fp32", "int8", "both")
 
 # Graph names match the plan's output layout.
-GRAPHS = ("main_prefill", "main_decode", "predictor_prefill", "predictor_decode")
+GRAPHS = ("main_prefill", "main_decode", "predictor_prefill", "predictor_decode", "vocoder_decoder")
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,6 +44,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--validate", action="store_true", help="run the FP32 parity gate before publishing")
     parser.add_argument("--prefill-seq", type=int, default=8, help="example prefill length for tracing")
     parser.add_argument("--decode-prior", type=int, default=4, help="example prior cache length for the decode graph")
+    parser.add_argument("--vocoder-chunk", type=int, default=300, help="example vocoder chunk length in frames for tracing")
+    parser.add_argument("--skip-vocoder", action="store_true", help="skip vocoder decoder export (transformer cores only)")
     return parser.parse_args()
 
 
@@ -53,11 +55,16 @@ def _versioned_dirname(qwen_version: str, model_repo: str, revision: str, ov_ver
     return f"qwen-tts-{qwen_version}_{size}_{rev}_ov-{ov_version}"
 
 
-def _example_inputs(dims: dict[str, int], *, seq: int, prior: int, predictor: bool, torch):
+def _example_inputs(dims: dict[str, int], *, torch, vocoder_chunk: int = 0, seq: int = 0, prior: int = 0, predictor: bool = False):
     """Build a positional example-input tuple matching the wrapper forward signature.
 
+    Pass vocoder_chunk>0 for the vocoder decoder (codes-only forward).
+    Pass seq/prior/predictor for the transformer cores.
     prior=0 produces the prefill example (no past K/V); prior>0 produces the decode example.
     """
+    if vocoder_chunk:
+        # codes: [batch=1, num_quantizers, seq_len]  int64
+        return (torch.randint(0, dims["codebook_size"], (1, dims["num_quantizers"], vocoder_chunk)),)
 
     b, h = 1, dims["hidden_size"]
     kv, hd, layers = dims["num_kv_heads"], dims["head_dim"], dims["num_layers"]
@@ -119,16 +126,20 @@ def run() -> int:
 
     main_dims = wrappers.core_dims(talker.model.config)
     pred_dims = wrappers.core_dims(talker.code_predictor.model.config)
+    voc_dims = wrappers.vocoder_dims(wrapped.model.speech_tokenizer.decoder.config)
 
     main = wrappers.MainCoreWrapper(talker.model, main_dims["num_layers"])
     predictor = wrappers.PredictorCoreWrapper(talker.code_predictor.model, pred_dims["num_layers"])
+    vocoder = wrappers.VocoderDecoderWrapper(wrapped.model.speech_tokenizer.decoder)
 
-    plan = {
+    plan: dict[str, tuple] = {
         "main_prefill": (main, main_dims, dict(seq=args.prefill_seq, prior=0, predictor=False)),
         "main_decode": (main, main_dims, dict(seq=1, prior=args.decode_prior, predictor=False)),
         "predictor_prefill": (predictor, pred_dims, dict(seq=args.prefill_seq, prior=0, predictor=True)),
         "predictor_decode": (predictor, pred_dims, dict(seq=1, prior=args.decode_prior, predictor=True)),
     }
+    if not args.skip_vocoder:
+        plan["vocoder_decoder"] = (vocoder, voc_dims, dict(vocoder_chunk=args.vocoder_chunk))
 
     out_parent = Path(args.output_dir)
     out_parent.mkdir(parents=True, exist_ok=True)
@@ -151,8 +162,13 @@ def run() -> int:
                 print(f"[export] converting {name} ...", flush=True)
                 example = _example_inputs(dims, torch=torch, **kw)
                 ov_model = _convert(wrapper, example, ov)
-                # TODO(parity): mark dynamic seq / prior axes via ov_model.reshape once the
-                # eager position_ids/cache_position contract is confirmed on dockermisc1.
+                if name == "vocoder_decoder":
+                    # codes dim-2 (seq_len) is dynamic: different chunk sizes at runtime.
+                    # Input 0 = codes [1, 16, seq_len]; mark only the seq dim dynamic.
+                    ov_model.reshape({0: ov.PartialShape([1, dims["num_quantizers"], -1])})
+                # TODO(parity): mark dynamic seq / prior axes for transformer cores via
+                # ov_model.reshape once the eager position_ids/cache_position contract is
+                # confirmed on dockermisc1.
                 if want_fp32:
                     ov.save_model(ov_model, tmp_dir / f"{name}.xml")
                 if want_int8:
@@ -173,10 +189,11 @@ def run() -> int:
             "compression": args.compression,
             "main_dims": main_dims,
             "predictor_dims": pred_dims,
+            "vocoder_dims": voc_dims,
             "num_code_groups": getattr(talker.model.config, "num_code_groups", None)
             or getattr(wrapped.model.config.talker_config, "num_code_groups", None),
             "source_hash": _source_hash(),
-            "graphs": list(GRAPHS),
+            "graphs": list(plan.keys()),
             "exported_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         (tmp_dir / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")

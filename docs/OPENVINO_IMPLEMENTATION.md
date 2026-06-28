@@ -434,6 +434,60 @@ This spike is successful only if:
 Time-box this spike. If cache objects or dynamic shapes cause repeated graph breaks, proceed
 to explicit OpenVINO IR export.
 
+## Milestone 1.5: Vocoder Decoder Export
+
+Export `speech_tokenizer.decoder` (`Qwen3TTSTokenizerV2Decoder`) before tackling the
+transformer cores. It is the simplest of the three models — no KV cache, no autoregressive
+loop, single feed-forward call — and it contributes ~29% of end-to-end latency (Milestone 0).
+Doing it first exercises `export_openvino.py` end-to-end (convert → INT8 → dynamic-axis →
+metadata) on clean footing before the cache/mRoPE complexity of Milestone 2.
+
+### Export contract (verified qwen-tts==0.1.1)
+
+Access path: `wrapped.model.speech_tokenizer.decoder` — `Qwen3TTSTokenizerV2Decoder` instance.
+`VocoderDecoderWrapper` in `ov_export_wrappers.py` wraps it for `openvino.convert_model`.
+
+```
+forward(codes) -> wav
+
+codes:  [batch=1, num_quantizers=16, seq_len]  int64  (VQ indices, 0..codebook_size-1=2047)
+wav:    [batch=1, 1, audio_samples]            float32 (clamped [-1, 1])
+```
+
+Decoder config defaults (Qwen3-TTS-12Hz-0.6B-Base, also 1.7B — both use same vocoder):
+
+```
+num_quantizers=16, codebook_size=2048
+upsample_rates=(8, 5, 4, 3), upsampling_ratios=(2, 2)
+total_upsample = prod([8, 5, 4, 3, 2, 2]) = 1920  (samples per input frame at 24 kHz)
+```
+
+**What to export**: `Decoder.forward` (the per-chunk call). The `chunked_decode` loop
+(`chunk_size=300, left_context_size=25`) stays in Python. Only one graph needed: no
+prefill/decode split, no cache tensors.
+
+**Dynamic axis**: `seq_len` (codes dim 2) varies per chunk. After conversion, reshape:
+```python
+ov_model.reshape({0: ov.PartialShape([1, 16, -1])})
+```
+
+### FP32 parity gate
+
+Run `Decoder.forward` in PyTorch and through the compiled FP32 IR on the same random codes
+tensor. Accept if max absolute error < 1e-4 on the output waveform.
+
+### INT8 acceptance gate
+
+- Waveform max absolute error vs FP32 IR < 5e-3.
+- A/B listening on all three benchmark prompts (short, paragraph, Hermes).
+- Warm median decoder-only latency improves relative to PyTorch baseline.
+
+### Performance target
+
+Baseline: `speech_tokenizer.decode` = ~8.1 s per utterance (29% of 27.8 s end-to-end).
+Target: ≥ 1.5× speedup on vocoder-only latency with INT8 IR, measured in isolation using
+`profile_tts.py` before and after the backend swap.
+
 ## Milestone 2: Export the Two Transformer Cores
 
 Create `export_openvino.py`. CI places this script in the exporter image. After that image is

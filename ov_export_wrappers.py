@@ -126,3 +126,41 @@ def core_dims(core_config) -> dict[str, int]:
         "num_kv_heads": core_config.num_key_value_heads,
         "head_dim": head_dim,
     }
+
+
+class VocoderDecoderWrapper(nn.Module):
+    """Wraps `speech_tokenizer.decoder` (Qwen3TTSTokenizerV2Decoder) for OpenVINO export.
+
+    Verified against qwen-tts==0.1.1 (Milestone 1.5):
+
+        forward(codes) -> wav
+
+        codes:  [batch, num_quantizers=16, seq_len]  int64   (VQ codebook indices, 0..2047)
+        wav:    [batch, 1, audio_samples]             float32 (clamped to [-1, 1])
+
+    seq_len is dynamic — different audio durations produce different lengths. Mark codes
+    dim-2 as dynamic after conversion via ov_model.reshape().
+
+    The chunked_decode loop (chunk_size=300, left_context=25) stays in Python; only the
+    per-chunk Decoder.forward call is exported. total_upsample = prod((8,5,4,3)+(2,2)) = 1920
+    samples per input frame at 24 kHz output.
+
+    No KV cache, no position IDs — the VQ lookup and conv/GAN decoder are fully feed-forward.
+    """
+
+    def __init__(self, decoder: nn.Module) -> None:
+        super().__init__()
+        self.decoder = decoder
+
+    def forward(self, codes: torch.Tensor) -> torch.Tensor:
+        return self.decoder(codes)
+
+
+def vocoder_dims(decoder_config) -> dict[str, int]:
+    """Derive export-relevant dimensions from Qwen3TTSTokenizerV2DecoderConfig."""
+    import numpy as np
+    return {
+        "num_quantizers": decoder_config.num_quantizers,
+        "codebook_size": decoder_config.codebook_size,
+        "total_upsample": int(np.prod(list(decoder_config.upsample_rates) + list(decoder_config.upsampling_ratios))),
+    }
