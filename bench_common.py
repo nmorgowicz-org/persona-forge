@@ -134,12 +134,36 @@ def load_model() -> LoadedModel:
     revision = os.getenv("MODEL_REVISION") or None
     device = os.getenv("DEVICE", "cpu")
 
-    print(f"[bench] loading {model_repo} (rev={revision}) on {device} at float32...", flush=True)
+    # low_cpu_mem_usage is best-practice but does NOT move the 1.7B lifetime peak
+    # (measured: device_map already implies it). The peak is the bf16->fp32 upcast:
+    # the checkpoint is BF16, and forcing fp32 makes the mmap'd bf16 file (~3.9 GiB)
+    # and the fp32 weights (~7.7 GiB) briefly coexist (~11.6 GiB), then the mmap
+    # drops to ~8.5 GiB settled. OPENVINO_TORCH_DTYPE lets the *serving* path load in
+    # native bf16 to skip that upcast; the exporter MUST stay fp32 for convert parity
+    # (do not set the env in export). See docs/OPENVINO_RESULTS.md (M9).
+    low_cpu_mem_usage = os.getenv("OPENVINO_LOW_CPU_MEM_USAGE", "1").strip() != "0"
+    dtype_name = os.getenv("OPENVINO_TORCH_DTYPE", "float32").strip().lower()
+    torch_dtype = {
+        "float32": torch.float32,
+        "fp32": torch.float32,
+        "bfloat16": torch.bfloat16,
+        "bf16": torch.bfloat16,
+        "float16": torch.float16,
+        "fp16": torch.float16,
+    }.get(dtype_name)
+    if torch_dtype is None:
+        raise ValueError(f"unsupported OPENVINO_TORCH_DTYPE={dtype_name!r}")
+    print(
+        f"[bench] loading {model_repo} (rev={revision}) on {device} at {dtype_name} "
+        f"(low_cpu_mem_usage={low_cpu_mem_usage})...",
+        flush=True,
+    )
     model = Qwen3TTSModel.from_pretrained(
         model_repo,
         revision=revision,
         device_map=device,
-        dtype=torch.float32,
+        dtype=torch_dtype,
+        low_cpu_mem_usage=low_cpu_mem_usage,
     )
 
     ref_audio = os.getenv("REF_AUDIO", DEFAULT_REF_AUDIO)

@@ -63,7 +63,15 @@ def _to_numpy(tensor, dtype) -> np.ndarray:
 
     - If already the correct dtype and C-contiguous, returns the array directly.
     - Otherwise applies minimal conversions (astype, ascontiguousarray) as needed.
+
+    bfloat16 has no numpy equivalent, so ``.numpy()`` raises ``Got unsupported
+    ScalarType BFloat16``. When the serving model is loaded in bf16
+    (``OPENVINO_TORCH_DTYPE=bfloat16``) the PyTorch glue emits bf16 tensors at the
+    OV seam; upcast them to fp32 on the torch side first (the IR's float inputs are
+    fp32 regardless). ``.float()`` avoids importing torch in this module.
     """
+    if "bfloat16" in str(getattr(tensor, "dtype", "")):
+        tensor = tensor.float()
     array = tensor.detach().cpu().numpy()
     if array.dtype == dtype and array.flags["C_CONTIGUOUS"]:
         return array
@@ -671,27 +679,40 @@ class OVTalkerRuntime:
         self._orig_main_forward = main_module.forward
         self._orig_pred_forward = pred_module.forward
 
+        def _match_dtype(out, inputs_embeds):
+            # OV rebuilds hidden states as fp32. When the serving model is loaded in
+            # bf16 (OPENVINO_TORCH_DTYPE=bfloat16) the downstream PyTorch heads hold
+            # bf16 weights, so the fp32 hidden must be cast back to the model dtype to
+            # avoid a matmul dtype mismatch. No-op under fp32 serving.
+            if (
+                inputs_embeds is not None
+                and out.last_hidden_state is not None
+                and out.last_hidden_state.dtype != inputs_embeds.dtype
+            ):
+                out.last_hidden_state = out.last_hidden_state.to(inputs_embeds.dtype)
+            return out
+
         def main_forward(
             input_ids=None, attention_mask=None, position_ids=None, past_key_values=None,
             inputs_embeds=None, use_cache=None, output_attentions=None,
             output_hidden_states=None, cache_position=None, **kwargs,
         ):
-            return main_runner.run(
+            return _match_dtype(main_runner.run(
                 inputs_embeds=inputs_embeds, attention_mask=attention_mask,
                 position_ids=position_ids, cache_position=cache_position,
                 past_key_values=past_key_values,
-            )
+            ), inputs_embeds)
 
         def predictor_forward(
             input_ids=None, attention_mask=None, position_ids=None, past_key_values=None,
             inputs_embeds=None, use_cache=None, output_attentions=None,
             output_hidden_states=None, cache_position=None, generation_steps=None, **kwargs,
         ):
-            return pred_runner.run(
+            return _match_dtype(pred_runner.run(
                 inputs_embeds=inputs_embeds, attention_mask=attention_mask,
                 position_ids=position_ids, cache_position=cache_position,
                 past_key_values=past_key_values, generation_steps=generation_steps,
-            )
+            ), inputs_embeds)
 
         main_module.forward = main_forward
         pred_module.forward = predictor_forward
