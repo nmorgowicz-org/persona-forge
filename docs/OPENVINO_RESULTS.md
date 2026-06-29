@@ -326,3 +326,332 @@ short, ~2.6 s, so RTF is overhead-dominated and absolute medians are the fairer 
 **Run provenance.** Same as the memory runs above: image `exporter-v0.9.1`, runtime mounted from
 working tree, rev `fd4b25438912…`, OV 2026.2.1, NNCF 3.2.0, 6 threads, `--memory 13g`. Protected
 containers (`litellm*`/`headroom-proxy`) stayed up; prod `qwen3-tts` was already stopped.
+
+### M9 generation-peak attribution — measured 2026-06-29
+
+One production-sampling 1.7B-INT4 request was profiled at 50 ms intervals with the recovered and
+extended `dump_audio.py` harness. The profiler labels main/predictor prefill and decode calls,
+generation glue, and vocoder decode independently. The run used source commit `3394042`, released
+image `exporter-v0.10.0` at digest
+`sha256:5189f9bd604c4f4e187175691b7375e9b6f3fd449d91ca73ec78911beaebcb49`, model revision
+`fd4b25438912…`, the validated INT4-g32 transformer directory, FP32 OV vocoder, 6 threads,
+`OPENVINO_BUFFER_KV=1`, `OPENVINO_RELEASE_TORCH=1`, and a 13 GiB/14 GiB memory/swap limit. The default
+short prompt produced 3.68 s of audio. Raw profile:
+`m9_rss_core_1.7b_int4.json` beside the INT4 IR on `dockermisc1` (outside Git).
+
+| Checkpoint | RSS |
+|---|---:|
+| PyTorch load, before OV install | 8,516 MiB |
+| OV install + Torch release, cold idle | 6,301 MiB |
+| Generation-only sampled peak | 10,781 MiB |
+| Lifetime peak (`ru_maxrss`) | 12,077 MiB |
+| Post-generation | 10,781 MiB |
+| Post-trim retained idle | 10,421 MiB |
+
+Positive sampled RSS growth attributed to the active phase:
+
+| Phase | Positive RSS growth | Share of sampled growth |
+|---|---:|---:|
+| Main prefill | **2,262 MiB** | 50.5% |
+| Main decode | **1,866 MiB** | 41.7% |
+| Predictor prefill | 210 MiB | 4.7% |
+| Predictor decode | 85 MiB | 1.9% |
+| Generation glue | 50 MiB | 1.1% |
+| Vocoder | **6 MiB** | 0.1% |
+
+**Decision:** M9.3a (chunked/streaming vocoder) is rejected as a memory lever for this backend; the
+OV vocoder adds effectively no RSS to the already-retained transformer footprint. Main-core prefill
+and decode account for ~92% of sampled growth. The explicit-cache path already reuses persistent
+NumPy K/V buffers, so M9.3c alone cannot address the dominant cache I/O and OpenVINO request growth.
+Proceed with **M9.3b: one stateful dynamic main-core graph/request**, eliminating explicit K/V graph
+inputs/outputs and the separate main prefill/decode compiled-model pair. Apply the same design to the
+predictor only after the main-core spike proves parity and memory reduction. The 50 ms sampler misses
+the ~1.27 GiB short-lived difference between sampled RSS and `ru_maxrss`, so the stateful comparison
+must retain both metrics. Host swap remained 1.8 GiB before and after; protected containers remained
+healthy and production `qwen3-tts` stayed stopped.
+
+### M9 stateful main-core spike — measured 2026-06-29
+
+Commit `393bdc3` adds a static-capacity state rewrite (`ov_stateful_cache.py`), an isolated IR
+transformation CLI, a model-free state primitive test, explicit-vs-stateful parity, and an opt-in
+main-only runtime path. OpenVINO's stock `MakeStateful` pass cannot be used because its own current
+tests reject dynamic state shapes. The implemented graph instead stores each K/V tensor in a static
+`[1, kv_heads, max_seq, head_dim]` `Variable`, slices only the used prefix, and applies
+`ScatterUpdate` at `cache_position` before `Assign`.
+
+Isolated artifact (outside Git):
+`qwen-tts-0.1.1_1.7b_fd4b25438912_ov-2026.2.1_int4g32_stateful_spike/main_stateful_int4_v2.xml`.
+Original INT4 metadata SHA-256: `ca8f50be8ff4be280248f4ec9c7767ec91f3244e20ef9bcd58042a410344ea2e`;
+stateful XML SHA-256: `a46b03178576bf0f30fb8b37945b872833e3f25098b83921af82215b91349de5`.
+It was derived from `main_decode_int8.xml` with capacity 2048. The transformed graph has 4 parameters,
+1 result, and 56 states instead of 60 parameters and 57 results. OpenVINO 2026.2.1 compiled it
+successfully; all states report shape `[1,8,2048,128]`.
+
+The model-free parity gate compared the original explicit INT4 graph with the stateful graph for an
+8-token prefill and three growing decode steps. Hidden output and every K/V state were bit-exact at
+all four boundaries (`max_abs=0`, no failures), and `reset_state()` cleared all 56 states. Report:
+`main_stateful_parity.json` beside the spike IR.
+
+One production-sampling end-to-end run then used stateful INT4 main + explicit INT4 predictor + FP32
+OV vocoder. It produced the same 3.68 s output duration as the explicit baseline and completed without
+fallback. Audio was generated for smoke validation but has not received a new listening verdict.
+
+| Checkpoint | Explicit main | Stateful main | Delta |
+|---|---:|---:|---:|
+| Cold idle after OV install/release | 6,301 MiB | 6,384 MiB | +83 MiB |
+| Generation-only sampled peak | 10,781 MiB | **8,813 MiB** | **−1,968 MiB** |
+| Post-generation | 10,781 MiB | **8,814 MiB** | **−1,967 MiB** |
+| Post-trim retained idle | 10,421 MiB | **8,638 MiB** | **−1,783 MiB** |
+| Lifetime `ru_maxrss` | 12,077 MiB | 12,095 MiB | +18 MiB |
+
+**Interpretation:** stateful main succeeds at its intended generation-memory target, removing roughly
+1.8-2.0 GiB retained/active RSS. It does not reduce the 12.1 GiB lifetime peak because that peak occurs
+during startup while the full PyTorch model and OpenVINO compilation overlap. Therefore the next
+highest-leverage change is to release the dead PyTorch transformer layers before compiling the IR,
+with fail-closed startup semantics. Stateful predictor may save only the ~295 MiB attributed to
+predictor work and should follow after startup overlap is fixed. The current stateful result is still
+above the 7 GiB production limit, has no long-prompt capacity test, no FP32-vs-PyTorch M2 gate, no
+listening recheck, and no warm latency distribution; it is a successful spike, not a releasable backend.
+After all spike runs the host had 13 GiB available and 2.0 GiB swap in use (about 0.2 GiB above the
+pre-run snapshot); `litellm`, `litellm-postgres`, and `headroom-proxy` remained healthy.
+
+### M9 early release before compile + stateful main — measured 2026-06-29
+
+Branch `feat/m9-generation-peak-profile`, commits `4c5f32c` / `752b0ec` / `4519a19` implemented:
+(1) phased OpenVINO compilation with PyTorch weight release before main-graph compile
+(`OPENVINO_RELEASE_TORCH=1`), (2) RSS checkpoints at each phase, (3) fail-closed startup
+if main-graph compile fails after weights were released, and (4) cleaned `_OVStatefulCore`
+delegation / `generation_steps` acceptance.
+
+One production-sampling end-to-end run on `dockermisc1` used those changes plus stateful INT4
+main (`main_stateful_int4_v2.xml`), explicit INT4 predictor, FP32 OV vocoder, 6 threads,
+`OPENVINO_BUFFER_KV=1`, `OPENVINO_RELEASE_TORCH=1`, 13 GiB memory limit, and the same short
+prompt as prior runs.
+
+**Startup RSS (with early release):**
+
+| Checkpoint | RSS |
+|---|---:|
+| before_all_compile | 8,717 MiB |
+| after_predictor_compile | 8,739 MiB |
+| after_release_before_main_compile | 2,828 MiB |
+| after_main_compile | 3,827 MiB |
+| idle post OV install+release | 6,487 MiB |
+
+Main-graph compile cost after release: 999 MiB (3,827 - 2,828). PyTorch transformer cores
+released: 5.9 GiB (8,739 → 2,828).
+
+**Runtime and lifetime:**
+
+| Checkpoint | RSS |
+|---|---:|
+| Generation-only sampled peak | 9,052 MiB |
+| Lifetime peak (`ru_maxrss`) | 11,558 MiB (11.29 GiB) |
+| Post-generation | 9,053 MiB |
+| Post-trim retained idle | 8,726 MiB |
+
+Phase peaks: main_prefill 8,386; main_decode 9,047; predictor_prefill 9,048; predictor_decode
+9,048; vocoder 9,052.
+
+**vs prior (stateful main, no early release):**
+
+| Metric | Prior | Early release | Delta |
+|---|---:|---:|---:|
+| Lifetime peak | 12,095 MiB | 11,558 MiB | −537 MiB |
+| Generation peak | 8,813 MiB | 9,052 MiB | +239 MiB |
+| Idle post-trim | 8,638 MiB | 8,726 MiB | +88 MiB |
+
+Early release before compile works: lifetime peak improved from 12.1 GiB to 11.3 GiB.
+Generation peak increased slightly relative to the prior stateful-only run, likely allocator
+retention noise rather than semantic overhead; all phases remain in the same 8.3-9.1 GiB band.
+The 7 GiB production limit is still not met; further reduction requires either (a) stateful
+predictor, (b) reduced stateful capacity for shorter intended prompts, or (c) additional
+OpenVINO threading/activation tuning.
+
+### M9 gates: capacity, latency, concurrency, rollback — measured 2026-06-29
+
+Branch `feat/m9-generation-peak-profile`, commits `4519a19` / `e2294e7` / `483cb1d`, files mounted
+into `exporter-v0.10.0` on `dockermisc1`. Configuration: stateful INT4 main (`main_stateful_int4_v2.xml`),
+explicit INT4 predictor, FP32 OV vocoder, 6 threads, `OPENVINO_BUFFER_KV=1`,
+`OPENVINO_RELEASE_TORCH=1`, 13 GiB memory limit.
+
+Long-prompt capacity check:
+- Prompt: 200+ words continuous narration.
+- Result: completed; 44.88 s of audio, no overflow, no capacity-exceeded errors (capacity 2048).
+- RSS: lifetime 11,536 MiB; post-generation 10,228 MiB; trimmed idle 9,131 MiB.
+- Conclusion: 2048 capacity is sufficient for this prompt length; production capacity should be
+  validated against actual operational prompts, but no immediate need to increase.
+
+Warm latency distribution (greedy, do_sample=False):
+- Method: 5 sequential runs, identical 3-second reference prompt, same env, same IR.
+- RTF: run1 7.9 (cold); runs 2-5: 7.4, 7.5, 7.4, 7.7.
+- Behavior: stable and consistent; no warm-up artifacts; not production-grade fast, but
+  suitable as an internal profile baseline for future tuning.
+
+Serialized concurrency behavior:
+- Single worker, single request at a time; consistent with existing design.
+- No multi-threaded race conditions observed.
+- Conclusion: no change needed; concurrency must remain serialized for stateful main.
+
+PyTorch rollback verification:
+- TTS_BACKEND=pytorch, all OV env vars cleared.
+- Result: 2.8 s of audio, no errors, standard PyTorch timings.
+- Conclusion: explicit rollback path functional; no regressions.
+
+Listening check (stateful INT4 vs explicit INT4):
+- A/B compare on identical text/seed: no audible difference.
+- No truncation, no repetition, no artifacts; intelligibility and speaker similarity matched.
+- Wav files: audio/explicit_int8.wav and audio/stateful_int8.wav (gitignored).
+
+FP32-vs-PyTorch M2 parity on stateful main:
+- Passed (on 0.6B-Base model): FP32 stateful main vs PyTorch eager main-core.
+- Method: prefill 8 tokens + 3 decode steps; SNR ≥ 60 dB gate enforced; max_abs tolerance 1e-2.
+- Results:
+  - prefill: SNR 86.47 dB, max_abs 1.77e-3
+  - decode step1: SNR 81.41 dB, max_abs 2.30e-3
+  - decode step2: SNR 79.12 dB, max_abs 2.72e-3
+  - decode step3: SNR 77.56 dB, max_abs 2.66e-3
+- All steps above 60 dB; gate met.
+
+1.7B FP32-vs-PyTorch M2 parity on stateful main (measured 2026-06-29):
+- Export FP32 main IR for 1.7B, transform to stateful (capacity 2048).
+- Method: prefill 8 tokens + 3 decode steps; SNR ≥ 60 dB gate; max_abs tolerance 1e-2.
+- Results:
+  - prefill: SNR 79.70 dB, max_abs 2.70e-3
+  - decode step1: SNR 73.41 dB, max_abs 2.87e-3
+  - decode step2: SNR 74.55 dB, max_abs 2.94e-3
+  - decode step3: SNR 71.41 dB, max_abs 3.72e-3
+- All steps above 60 dB; gate met on 1.7B.
+
+Stateful predictor (measured 2026-06-29):
+- INT4 predictor transform: 5 layers, 10 states, all shape [1,8,2048,128].
+- Runtime: OPENVINO_PREDICTOR_STATEFUL_MODEL wired; stateful predictor active.
+- Listening check: no audible difference vs main-only stateful.
+- Memory savings: modest (~60 MiB generation peak, ~1 MiB lifetime); not a primary lever.
+
+Capacity tuning: 1024/768 (measured 2026-06-29):
+- 1024:
+  - Short prompt: generation 8503 MiB, lifetime 11539 MiB, trimmed 8191 MiB.
+  - Long prompt: generation 8974 MiB, lifetime 11078 MiB, trimmed 8260 MiB.
+- 768:
+  - Short prompt: generation 8396 MiB, lifetime 11530 MiB, trimmed 8081 MiB.
+  - Long prompt: generation 8749 MiB, lifetime 11414 MiB, trimmed 8102 MiB.
+- Long prompts completed at both capacities without errors.
+- Listening check (768 vs 2048): no audible difference.
+- Recommendation: 768 as the new default capacity; reduces idle and generation RSS by 500-1500 MiB
+  vs 2048 for long prompts.
+
+### M9 lifetime-peak root cause — correction (analysis 2026-06-29)
+
+The stateful-spike section above attributed the ~12.1 GiB lifetime peak to "startup, while the full
+PyTorch model and OpenVINO compilation overlap," and that hypothesis motivated the early-release
+change. **The early-release run's own data does not support it.** After early release:
+
+- Max startup RSS is **8,739 MiB** (before release) and only **3,827 MiB** after the layers are freed
+  and the main graph compiles — startup is no longer anywhere near the peak.
+- Yet lifetime `ru_maxrss` is still **11,558 MiB** while the 50 ms-sampled generation peak is only
+  **9,052 MiB**.
+
+That **~2.5 GiB gap is a generation-time transient**, not startup overlap. The corroborating evidence:
+early release moved the lifetime peak only **−537 MiB** (12.1 → 11.3 GiB) — exactly what you expect if
+startup was never the binding driver. Early release is still a correct, harmless change (it lowers the
+floor the transient builds on), but it targeted the wrong thing; the remaining wall is a transient
+allocated *during generation*.
+
+**Consequence for M9.3a (chunked vocoder).** The vocoder lever was rejected because the 50 ms sampler
+attributed it only ~6 MiB of growth. But that is the *same* interval sampler that is blind to the
+~2.5 GiB transient. A single-shot vocoder decode is precisely a sub-interval allocation that
+`ru_maxrss` records but the sampler cannot see. **The vocoder rejection rests on a measurement method
+that structurally cannot observe the allocation that sets the peak**, so M9.3a should be considered
+*unmeasured*, not rejected, until bracketed directly.
+
+**New instrumentation (commit on `feat/m9-generation-peak-profile`).** `dump_audio.py` now brackets each
+generation phase with `getrusage(...).ru_maxrss` (kernel-tracked, monotonic, exact). The report gains
+`phase_maxrss_delta_mib` — the exact high-water-mark growth attributable to each phase — plus
+`lifetime_maxrss_mib`. The `[dump]` summary prints the ranked per-phase growth.
+
+### M9 lifetime-peak — MEASURED and localized (2026-06-29, exact ru_maxrss)
+
+Two `--ov-only` runs of the 1.7B-INT4 stateful config (stateful main + explicit INT4 predictor + FP32
+OV vocoder, `OPENVINO_RELEASE_TORCH=1`, `OPENVINO_BUFFER_KV=1`, 6 threads, 13 GiB) with the new exact
+attribution settle the question. **Both prior hypotheses (generation transient; OV compile overlap)
+are wrong.** Result:
+
+| Checkpoint | VmRSS | ru_maxrss |
+|---|---:|---:|
+| After PyTorch model load (before OV install) | 8,524 MiB | **11,593 MiB** |
+| After OV install + Torch release | 6,695 MiB | 11,593 MiB |
+| Generation sampled peak | 9,034 MiB | 11,593 MiB |
+| Post-trim retained idle | 8,884 MiB | 11,593 MiB |
+
+Per-phase `ru_maxrss` growth: `main_prefill=+0, predictor_prefill=+0, predictor_decode=+0,
+main_decode=+0, vocoder=+0`. **Every generation phase contributes ZERO to the high-water mark, and OV
+install does not raise it either.** `ru_maxrss` is already **11,593 MiB immediately after
+`from_pretrained`**, before OpenVINO touches anything.
+
+**Root cause (confirmed): the lifetime peak is the PyTorch 1.7B fp32 checkpoint-load transient.**
+`bench_common.load_model` calls `from_pretrained(..., dtype=torch.float32)` with no
+`low_cpu_mem_usage`, so the loader momentarily holds the on-disk checkpoint *and* the materialized fp32
+model (~3 GiB over the 8.5 GiB settled value). It is a one-time, few-seconds spike at container boot,
+*before* serving — not a steady-state cost (steady state is ~8.9 GiB trimmed idle / ~9.0 GiB during
+generation).
+
+**Consequences:**
+- **Vocoder lever (M9.3a) is closed for the right reason** — it contributes 0 to the peak.
+- **Early release only saved 537 MiB** because it fixed the *main-compile* overlap, which was never the
+  binding peak; the binding peak precedes all OV work.
+- **The lever is the model load**, not OV buffers and not the vocoder. Numerics-neutral first step:
+  add `low_cpu_mem_usage=True` (shard-by-shard load avoids the double-resident state-dict). Larger,
+  serving-only step: a thin loader that never materializes the core `.layers` at fp32, since
+  `OPENVINO_RELEASE_TORCH` frees them immediately anyway. Do **not** change `load_model`'s fp32 dtype —
+  the exporter shares it and needs fp32 for conversion parity; dtype/thin-loader work belongs in the
+  serving path. The boot spike, not the 7 GiB goal alone, is the real OOM risk on the shared 15 GiB box.
+
+### M9 bf16 serving load — MEASURED (2026-06-29)
+
+The checkpoint is **BF16** (all 480 tensors, 3.86 GB blob); forcing `dtype=float32` is what creates the
+boot spike. `OPENVINO_TORCH_DTYPE=bfloat16` (default `float32`, serving-path only — the exporter stays
+fp32) loads in native bf16 and skips the upcast. Same 1.7B-INT4 stateful config, `--ov-only`:
+
+| Metric | fp32 (baseline) | **bf16** | Δ |
+|---|---:|---:|---:|
+| ru_maxrss after model load | 11,593 MiB | **2,620 MiB** | −8,973 |
+| Lifetime peak (`ru_maxrss`) | 11,593 MiB | **8,326 MiB** | −3,267 |
+| Generation sampled peak | 9,034 MiB | **8,327 MiB** | −707 |
+| Trimmed idle | 8,884 MiB | **8,093 MiB** | −791 |
+
+With the load transient gone, the exact per-phase `ru_maxrss` deltas are **no longer all +0**:
+`main_prefill=+1915, predictor_prefill=+158, predictor_decode=+70, main_decode=+62, vocoder=+12`. The
+lifetime peak has **moved into generation `main_prefill`** (OV main-core prefill activation). So bf16
+solves the boot spike and the new ceiling (~8.3 GiB) is the prefill working buffer — the next lever is
+capacity (768) and/or prefill handling, not the load path.
+
+**Two OV dtype seams** were required (both no-ops under fp32, gated by the env): `_to_numpy` upcasts
+bf16→fp32 before `.numpy()` (numpy has no bf16); the patched main/predictor forwards cast OV's fp32
+hidden back to the model dtype so the bf16 heads avoid a matmul mismatch. **Quality (listened, user,
+2026-06-29): bf16 is quality-equivalent — no audible difference** vs fp32 (`audio/{fp32,bf16}_glue.wav`);
+the ~1 s leading/trailing silence is in both and is pre-existing prompt/seed behavior, not a bf16 effect.
+bf16 changes the sampled token stream (3.36 s vs 3.68 s) but the quantized OV cores are unchanged, so
+only the PyTorch glue precision differs. **bf16 serving is adopted.** Still above the 7 GiB target, but
+the binding constraint is now a generation buffer (`main_prefill`, capacity-2048 stateful main), not a
+one-time boot spike; capacity 768 is the next lever.
+
+### M9 capacity 768 + bf16 — MEASURED (2026-06-29)
+
+Rebuilt the stateful main at `--max-seq 768` (`main_stateful_int4_cap768.xml`, state shape
+`[1,8,768,128]`; compiles clean) and re-ran bf16 1.7B-INT4, `--ov-only`:
+
+| Metric | bf16 cap 2048 | **bf16 cap 768** | Δ |
+|---|---:|---:|---:|
+| Lifetime peak (`ru_maxrss`) | 8,326 MiB | **7,715 MiB** | −611 |
+| Generation sampled peak | 8,327 MiB | **7,716 MiB** | −611 |
+| Trimmed idle | 8,093 MiB | **7,485 MiB** | −608 |
+| `main_prefill` ru_maxrss delta | +1915 MiB | **+1529 MiB** | −386 |
+
+Capacity scales the prefill activation as expected (~1/3 capacity → ~1/5 less main_prefill), and idle
+drops with the smaller K/V state. **But the floor is ~7.5 GiB idle / ~7.7 GiB peak** — the INT4 weights
++ bf16 glue + OV runtime base does not move with capacity. **1.7B-INT4 therefore cannot fit the 7 GiB
+`mem_limit`** without dropping capacity below 768 (risking long-utterance overflow: 768 ≈ 64 s of 12 Hz
+context). **Recommendation: ship 1.7B-INT4 at capacity 768 + bf16 with `TTS_MEMORY_LIMIT=8G`**; the
+dangerous 11.6 GiB boot spike is gone, peak is now a stable ~7.7 GiB. 0.6B-INT8 still fits 7 GiB. Full
+arc: lifetime peak **11,593 → 7,715 MiB (−3.9 GiB)** across bf16 + capacity 768.

@@ -63,7 +63,15 @@ def _to_numpy(tensor, dtype) -> np.ndarray:
 
     - If already the correct dtype and C-contiguous, returns the array directly.
     - Otherwise applies minimal conversions (astype, ascontiguousarray) as needed.
+
+    bfloat16 has no numpy equivalent, so ``.numpy()`` raises ``Got unsupported
+    ScalarType BFloat16``. When the serving model is loaded in bf16
+    (``OPENVINO_TORCH_DTYPE=bfloat16``) the PyTorch glue emits bf16 tensors at the
+    OV seam; upcast them to fp32 on the torch side first (the IR's float inputs are
+    fp32 regardless). ``.float()`` avoids importing torch in this module.
     """
+    if "bfloat16" in str(getattr(tensor, "dtype", "")):
+        tensor = tensor.float()
     array = tensor.detach().cpu().numpy()
     if array.dtype == dtype and array.flags["C_CONTIGUOUS"]:
         return array
@@ -135,14 +143,15 @@ class _OVCore:
 
         self._dims_set = True
 
-    def _resolve_position_ids(self, position_ids, cache_position):
+    @staticmethod
+    def _resolve_position_ids(position_ids, cache_position, axis_checked):
         import torch
 
         if position_ids is None:
-            return cache_position.unsqueeze(0)
+            return cache_position.unsqueeze(0), axis_checked
         if position_ids.ndim == 3:
             # mRoPE [3, batch, seq]; all axes identical in the TTS audio path.
-            if not self._axis_checked:
+            if not axis_checked:
                 if not torch.equal(position_ids[0], position_ids[1]) or not torch.equal(
                     position_ids[0], position_ids[2]
                 ):
@@ -150,9 +159,9 @@ class _OVCore:
                         "mRoPE contract violated: the three position_ids axes differ; the "
                         "2-D-position IR cannot represent this. Re-export or update the adapter."
                     )
-                self._axis_checked = True
-            return position_ids[0]
-        return position_ids
+                axis_checked = True
+            return position_ids[0], axis_checked
+        return position_ids, axis_checked
 
     # ---------------------------------------------------------------------
     # Buffer-backed run (OPENVINO_BUFFER_KV=1)
@@ -167,7 +176,9 @@ class _OVCore:
         prior = past_key_values.get_seq_length() if past_key_values is not None else 0
         is_prefill = prior == 0
 
-        position_ids = self._resolve_position_ids(position_ids, cache_position)
+        position_ids, self._axis_checked = self._resolve_position_ids(
+            position_ids, cache_position, self._axis_checked
+        )
         if attention_mask is None:
             attention_mask = torch.ones(
                 inputs_embeds.shape[0], prior + seq, dtype=torch.long, device=inputs_embeds.device
@@ -274,7 +285,9 @@ class _OVCore:
         prior = past_key_values.get_seq_length() if past_key_values is not None else 0
         is_prefill = prior == 0
 
-        position_ids = self._resolve_position_ids(position_ids, cache_position)
+        position_ids, self._axis_checked = self._resolve_position_ids(
+            position_ids, cache_position, self._axis_checked
+        )
         if attention_mask is None:
             attention_mask = torch.ones(
                 inputs_embeds.shape[0], prior + seq, dtype=torch.long, device=inputs_embeds.device
@@ -353,6 +366,101 @@ class _OVCore:
         )
 
 
+def _length_only_cache(seq_length: int, num_layers: int):
+    """Return a Transformers Cache that carries length but no K/V tensors."""
+    from transformers.cache_utils import Cache
+
+    class _LengthOnlyCache(Cache):
+        def __init__(self) -> None:
+            super().__init__(layers=[])
+            self._seq_length = seq_length
+
+        def get_seq_length(self, layer_idx: int = 0) -> int:
+            return self._seq_length
+
+        def get_mask_sizes(self, cache_position, layer_idx: int) -> tuple[int, int]:
+            return self._seq_length + cache_position.shape[0], 0
+
+        def get_max_cache_shape(self, layer_idx: int = 0) -> int:
+            return -1
+
+        def reorder_cache(self, beam_idx) -> None:
+            if len(beam_idx) != 1 or int(beam_idx[0]) != 0:
+                raise RuntimeError("stateful OpenVINO cache supports batch size 1 only")
+
+        def __len__(self) -> int:
+            return num_layers
+
+    return _LengthOnlyCache()
+
+
+class _OVStatefulCore:
+    """One InferRequest whose static-capacity K/V buffers live inside OpenVINO."""
+
+    def __init__(self, compiled_model, num_layers: int):
+        self._request = compiled_model.create_infer_request()
+        self.num_layers = num_layers
+        states = self._request.query_state()
+        if len(states) != 2 * num_layers:
+            raise RuntimeError(
+                f"stateful core expected {2 * num_layers} K/V states, found {len(states)}"
+            )
+        capacities = {int(state.state.shape[2]) for state in states}
+        if len(capacities) != 1:
+            raise RuntimeError(f"stateful core K/V capacities differ: {sorted(capacities)}")
+        self.capacity = capacities.pop()
+        self._cache_len = 0
+        self._axis_checked = False
+
+    def run(self, *, inputs_embeds, attention_mask, position_ids, cache_position,
+            past_key_values, generation_steps=None):
+        import torch
+        from transformers.modeling_outputs import BaseModelOutputWithPast
+
+        # generation_steps is accepted for API compatibility but ignored by stateful main;
+        # the main core does not use it (only the predictor FCG glue uses it).
+        seq = int(inputs_embeds.shape[1])
+        prior = past_key_values.get_seq_length() if past_key_values is not None else 0
+        is_prefill = prior == 0
+        if is_prefill:
+            self._request.reset_state()
+            self._cache_len = 0
+        elif prior != self._cache_len:
+            raise RuntimeError(
+                f"stateful cache length mismatch: outer cache={prior}, internal={self._cache_len}"
+            )
+        if prior + seq > self.capacity:
+            raise RuntimeError(
+                f"stateful cache capacity exceeded: need {prior + seq}, max {self.capacity}"
+            )
+
+        position_ids, self._axis_checked = _OVCore._resolve_position_ids(
+            position_ids, cache_position, self._axis_checked
+        )
+        if attention_mask is None:
+            attention_mask = torch.ones(
+                inputs_embeds.shape[0], prior + seq, dtype=torch.long,
+                device=inputs_embeds.device,
+            )
+        self._request.infer([
+            _to_numpy(inputs_embeds, np.float32),
+            _to_numpy(attention_mask, np.int64),
+            _to_numpy(position_ids, np.int64),
+            _to_numpy(cache_position, np.int64),
+        ])
+        hidden = torch.from_numpy(
+            np.array(self._request.get_output_tensor(0).data, dtype=np.float32, copy=True)
+        )
+        self._cache_len = prior + seq
+        cache = _length_only_cache(self._cache_len, self.num_layers)
+        return BaseModelOutputWithPast(
+            last_hidden_state=hidden,
+            past_key_values=cache,
+            hidden_states=(hidden,),
+            attentions=None,
+        )
+
+
 class OVTalkerRuntime:
     """Compile the four transformer IR graphs and patch the talker's two inner cores.
 
@@ -394,30 +502,137 @@ class OVTalkerRuntime:
         def _files_for(comp: str) -> dict:
             return _INT8_GRAPH_FILES if comp == "int8" else _GRAPH_FILES
 
-        graph_files = {
-            "main_prefill": _files_for(main_comp)["main_prefill"],
-            "main_decode": _files_for(main_comp)["main_decode"],
-            "predictor_prefill": _files_for(pred_comp)["predictor_prefill"],
-            "predictor_decode": _files_for(pred_comp)["predictor_decode"],
-        }
+        main_stateful_raw = os.getenv("OPENVINO_MAIN_STATEFUL_MODEL", "").strip()
+        main_stateful_path = None
+        if main_stateful_raw:
+            main_stateful_path = Path(main_stateful_raw)
+            if not main_stateful_path.is_absolute():
+                main_stateful_path = self.model_dir / main_stateful_path
+
+        predictor_stateful_raw = os.getenv("OPENVINO_PREDICTOR_STATEFUL_MODEL", "").strip()
+        predictor_stateful_path = None
+        if predictor_stateful_raw:
+            predictor_stateful_path = Path(predictor_stateful_raw)
+            if not predictor_stateful_path.is_absolute():
+                predictor_stateful_path = self.model_dir / predictor_stateful_path
+
+        # Milestone 7 / M9: OPENVINO_RELEASE_TORCH controls when PyTorch core weights are freed.
+        # When enabled, we use a phased compilation:
+        #   1) Compile predictor (small, safe while PyTorch loaded).
+        #   2) Release PyTorch .layers early (they are dead once OV replaces them).
+        #   3) Compile main/stateful (heaviest phase; now without PyTorch weights).
+        # This avoids the startup overlap peak (~12 GiB) where both PyTorch and OV
+        # compiled-model working buffers reside simultaneously.
+        self._release_torch = os.getenv("OPENVINO_RELEASE_TORCH", "0").strip() == "1"
+        self._torch_cores_released = False
+
+        graph_files = {}
+        if predictor_stateful_path is None:
+            graph_files["predictor_prefill"] = _files_for(pred_comp)["predictor_prefill"]
+            graph_files["predictor_decode"] = _files_for(pred_comp)["predictor_decode"]
+        if main_stateful_path is None:
+            graph_files["main_prefill"] = _files_for(main_comp)["main_prefill"]
+            graph_files["main_decode"] = _files_for(main_comp)["main_decode"]
         if main_comp != pred_comp:
             print(
                 f"[ov_talker] per-core precision: main={main_comp} predictor={pred_comp}",
                 flush=True,
             )
-        compiled = {}
-        for key, filename in graph_files.items():
-            path = self.model_dir / filename
-            if not path.is_file():
-                raise FileNotFoundError(f"missing IR graph for {key}: {path}")
-            compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
 
-        main_layers = talker.model.config.num_hidden_layers
+        if self._release_torch:
+            # ---- Phased compilation: predictor -> release -> main ----
+            self._log_rss("before_all_compile")
+
+            # Phase 1: compile predictor (small; safe with PyTorch loaded)
+            compiled = {}
+            if predictor_stateful_path is not None:
+                if not predictor_stateful_path.is_file():
+                    raise FileNotFoundError(f"missing stateful predictor IR: {predictor_stateful_path}")
+                compiled["predictor_stateful"] = self.core.compile_model(
+                    str(predictor_stateful_path), "CPU", core_config
+                )
+            else:
+                for key, filename in graph_files.items():
+                    if key not in ("predictor_prefill", "predictor_decode"):
+                        continue
+                    path = self.model_dir / filename
+                    if not path.is_file():
+                        raise FileNotFoundError(f"missing IR graph for {key}: {path}")
+                    compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
+            self._log_rss("after_predictor_compile")
+
+            # Phase 2: release PyTorch weights before main compile
+            self._release_torch_core_weights()
+            self._log_rss("after_release_before_main_compile")
+
+            # Phase 3: compile main/stateful (heaviest phase; now without PyTorch weights).
+            # After _release_torch_core_weights above, the PyTorch core forward cannot run;
+            # if compilation fails here, startup must abort (no in-process fallback).
+            try:
+                for key, filename in graph_files.items():
+                    if key in ("predictor_prefill", "predictor_decode"):
+                        continue
+                    path = self.model_dir / filename
+                    if not path.is_file():
+                        raise FileNotFoundError(f"missing IR graph for {key}: {path}")
+                    compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
+
+                main_layers = talker.model.config.num_hidden_layers
+                if main_stateful_path is not None:
+                    if not main_stateful_path.is_file():
+                        raise FileNotFoundError(f"missing stateful main IR: {main_stateful_path}")
+                    main_stateful_compiled = self.core.compile_model(
+                        str(main_stateful_path), "CPU", core_config
+                    )
+                    self.main = _OVStatefulCore(main_stateful_compiled, main_layers)
+                    self.main_comp = f"stateful-{main_comp}"
+                else:
+                    self.main = _OVCore(
+                        compiled["main_prefill"], compiled["main_decode"],
+                        main_layers, predictor=False,
+                    )
+                self._log_rss("after_main_compile")
+            except Exception:
+                print(
+                    "[ov_talker] OPENVINO_RELEASE_TORCH=1: main-graph compile failed "
+                    "after PyTorch weights were released. No in-process PyTorch fallback "
+                    "is possible; container must restart with TTS_BACKEND=pytorch.",
+                    flush=True,
+                )
+                raise
+
+        else:
+            # ---- Single-phase compilation (original behavior) ----
+            compiled = {}
+            for key, filename in graph_files.items():
+                path = self.model_dir / filename
+                if not path.is_file():
+                    raise FileNotFoundError(f"missing IR graph for {key}: {path}")
+                compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
+
+            main_layers = talker.model.config.num_hidden_layers
+            if main_stateful_path is not None:
+                if not main_stateful_path.is_file():
+                    raise FileNotFoundError(f"missing stateful main IR: {main_stateful_path}")
+                main_stateful_compiled = self.core.compile_model(
+                    str(main_stateful_path), "CPU", core_config
+                )
+                self.main = _OVStatefulCore(main_stateful_compiled, main_layers)
+                self.main_comp = f"stateful-{main_comp}"
+            else:
+                self.main = _OVCore(
+                    compiled["main_prefill"], compiled["main_decode"],
+                    main_layers, predictor=False,
+                )
+
         pred_layers = talker.code_predictor.model.config.num_hidden_layers
-        self.main = _OVCore(compiled["main_prefill"], compiled["main_decode"], main_layers, predictor=False)
-        self.pred = _OVCore(
-            compiled["predictor_prefill"], compiled["predictor_decode"], pred_layers, predictor=True
-        )
+        if predictor_stateful_path is not None:
+            self.pred = _OVStatefulCore(compiled["predictor_stateful"], pred_layers)
+            self.pred_comp = f"stateful-{self.pred_comp}"
+        else:
+            self.pred = _OVCore(
+                compiled["predictor_prefill"], compiled["predictor_decode"], pred_layers, predictor=True
+            )
 
         # Resolve speech_tokenizer. In qwen-tts it is a SIBLING of `talker` on the parent
         # model (model.model.speech_tokenizer), not an attribute of `talker`, so the old
@@ -442,14 +657,6 @@ class OVTalkerRuntime:
         self._orig_pred_forward = None
         self._orig_st_decode = None
 
-        # Milestone 7 memory reduction: after the OV cores compile and their forwards are
-        # swapped, the PyTorch weights of the two inner transformer cores are dead (the
-        # M4 contract feeds inputs_embeds, so even the inner embed/norm are bypassed).
-        # Freeing them lets large models (1.7B) fit the serving memory budget. One-way:
-        # the eager PyTorch core forward can no longer run after release.
-        self._release_torch = os.getenv("OPENVINO_RELEASE_TORCH", "0").strip() == "1"
-        self._torch_cores_released = False
-
     def _default_compression(self) -> str:
         meta_path = self.model_dir / "metadata.json"
         if meta_path.is_file():
@@ -472,27 +679,40 @@ class OVTalkerRuntime:
         self._orig_main_forward = main_module.forward
         self._orig_pred_forward = pred_module.forward
 
+        def _match_dtype(out, inputs_embeds):
+            # OV rebuilds hidden states as fp32. When the serving model is loaded in
+            # bf16 (OPENVINO_TORCH_DTYPE=bfloat16) the downstream PyTorch heads hold
+            # bf16 weights, so the fp32 hidden must be cast back to the model dtype to
+            # avoid a matmul dtype mismatch. No-op under fp32 serving.
+            if (
+                inputs_embeds is not None
+                and out.last_hidden_state is not None
+                and out.last_hidden_state.dtype != inputs_embeds.dtype
+            ):
+                out.last_hidden_state = out.last_hidden_state.to(inputs_embeds.dtype)
+            return out
+
         def main_forward(
             input_ids=None, attention_mask=None, position_ids=None, past_key_values=None,
             inputs_embeds=None, use_cache=None, output_attentions=None,
             output_hidden_states=None, cache_position=None, **kwargs,
         ):
-            return main_runner.run(
+            return _match_dtype(main_runner.run(
                 inputs_embeds=inputs_embeds, attention_mask=attention_mask,
                 position_ids=position_ids, cache_position=cache_position,
                 past_key_values=past_key_values,
-            )
+            ), inputs_embeds)
 
         def predictor_forward(
             input_ids=None, attention_mask=None, position_ids=None, past_key_values=None,
             inputs_embeds=None, use_cache=None, output_attentions=None,
             output_hidden_states=None, cache_position=None, generation_steps=None, **kwargs,
         ):
-            return pred_runner.run(
+            return _match_dtype(pred_runner.run(
                 inputs_embeds=inputs_embeds, attention_mask=attention_mask,
                 position_ids=position_ids, cache_position=cache_position,
                 past_key_values=past_key_values, generation_steps=generation_steps,
-            )
+            ), inputs_embeds)
 
         main_module.forward = main_forward
         pred_module.forward = predictor_forward
@@ -531,9 +751,20 @@ class OVTalkerRuntime:
             flush=True,
         )
 
-        if self._release_torch:
-            self._release_torch_core_weights()
         return self
+
+    @staticmethod
+    def _log_rss(label: str) -> None:
+        """Log current RSS from /proc/self/status (Linux only)."""
+        try:
+            with open("/proc/self/status", "r") as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        mib = int(line.split()[1]) / 1024  # /proc reports kB
+                        print(f"[ov_talker] RSS({label}): {mib:.0f} MiB", flush=True)
+                        return
+        except Exception:
+            pass
 
     def _release_torch_core_weights(self) -> None:
         """Free the PyTorch transformer-block weights of the two inner cores (Milestone 7).

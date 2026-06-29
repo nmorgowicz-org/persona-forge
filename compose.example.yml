@@ -16,12 +16,60 @@ services:
     environment:
       <<: *model-environment
       DEVICE: cpu
+      TTS_BACKEND: ${TTS_BACKEND:-pytorch}
+      OV_MODEL_DIR: ${OV_MODEL_DIR:-}
+      OPENVINO_BUFFER_KV: ${OPENVINO_BUFFER_KV:-}
+      OPENVINO_RELEASE_TORCH: ${OPENVINO_RELEASE_TORCH:-}
+      # Serving-only: load the PyTorch glue in the checkpoint's native bf16 instead
+      # of upcasting to fp32. Cuts the 1.7B load-time memory peak by ~3 GiB with no
+      # audible quality change. Leave UNSET (fp32) for the exporter — convert parity
+      # needs fp32. See docs/OPENVINO_RESULTS.md "M9 bf16 serving load".
+      OPENVINO_TORCH_DTYPE: ${OPENVINO_TORCH_DTYPE:-}
+      # Static-capacity stateful K/V cores. The capacity (max token positions per
+      # request) is BAKED INTO the .xml at export time, not set here — see the
+      # "Capacity tuning" note below. Point these at the desired-capacity IR.
+      OPENVINO_MAIN_STATEFUL_MODEL: ${OPENVINO_MAIN_STATEFUL_MODEL:-}
+      OPENVINO_PREDICTOR_STATEFUL_MODEL: ${OPENVINO_PREDICTOR_STATEFUL_MODEL:-}
+      OPENVINO_VOCODER_ENABLED: ${OPENVINO_VOCODER_ENABLED:-}
+      OPENVINO_VOCODER_DIR: ${OPENVINO_VOCODER_DIR:-}
+      # Strip the ~1 s of leading/trailing silence the talker emits around speech
+      # (on by default). SILENCE_TRIM=0 disables; tune SILENCE_TRIM_THRESH (fraction
+      # of clip peak, default 0.01) and SILENCE_TRIM_PAD_MS (default 30).
+      SILENCE_TRIM: ${SILENCE_TRIM:-}
+      SILENCE_TRIM_THRESH: ${SILENCE_TRIM_THRESH:-}
+      SILENCE_TRIM_PAD_MS: ${SILENCE_TRIM_PAD_MS:-}
       REF_AUDIO: /voice/reference.wav
       REF_TEXT: ${REF_TEXT:?Set REF_TEXT to the exact transcript of the reference audio}
       TZ: ${TZ:-America/Detroit}
     volumes:
       - ${MODEL_CACHE_PATH:-./data/model}:/root/.cache/huggingface/hub:rw
       - ${REF_AUDIO_PATH:?Set REF_AUDIO_PATH to the reference WAV file}:/voice/reference.wav:ro
+      # Mount OpenVINO IR directory when TTS_BACKEND=openvino
+      # - ${OV_MODEL_HOST_PATH:-}:/ov_model:ro
+    # Memory: the 1.7B-INT4 stateful + bf16 serving config runs at ~7.5 GiB idle /
+    # ~7.7 GiB peak with a capacity-768 main (~8.1/8.3 GiB at capacity 2048). The
+    # ~7.5 GiB floor (INT4 weights + bf16 glue + runtime) means 1.7B does NOT fit the
+    # 7G default — set TTS_MEMORY_LIMIT=8G for 1.7B. 0.6B-INT8 fits 7G comfortably.
+    # If you raise capacity or run longer utterances, raise the limit to peak + headroom.
+    #
+    # --- Capacity tuning (stateful K/V cores) ---------------------------------
+    # OpenVINO cannot resize state tensors at run time, so each stateful core
+    # reserves a fixed window of `capacity` token positions (prompt + generated
+    # audio codes). The capacity is BAKED INTO the .xml at export, not set by env.
+    #   * Bigger capacity  -> longer max utterance, more idle RAM + a larger prefill
+    #     activation buffer (the main_prefill peak).
+    #   * Smaller capacity -> less RAM, but a request that needs more positions than
+    #     `capacity` raises "stateful cache capacity exceeded".
+    # At 12 Hz audio, capacity N ~= N/12 seconds of context (768 ~= 64 s, 2048
+    # ~= 170 s). To rebuild the main core at a different capacity:
+    #   python scripts/transform_stateful_ir.py \
+    #     --input  <ir-dir>/main_decode_int8.xml \
+    #     --output <ir-dir>/main_stateful_int4_cap<N>.xml \
+    #     --num-layers 28 --base-input-count 4 --cache-position-index 3 \
+    #     --max-seq <N> --state-prefix main --compile-smoke
+    # then point OPENVINO_MAIN_STATEFUL_MODEL at the new .xml. Validate bit-exact
+    # parity with scripts/test_stateful_main_parity.py before deploying.
+    # --------------------------------------------------------------------------
     mem_limit: ${TTS_MEMORY_LIMIT:-7G}
     memswap_limit: ${TTS_MEMORY_SWAP_LIMIT:-8G}
     stop_grace_period: 45s

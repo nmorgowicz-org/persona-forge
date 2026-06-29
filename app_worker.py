@@ -40,6 +40,8 @@ REF_TEXT = os.getenv(
 
 TTS_BACKEND = (os.getenv("TTS_BACKEND", "pytorch") or "pytorch").strip().lower()
 OV_MODEL_DIR = os.getenv("OV_MODEL_DIR")
+OPENVINO_RELEASE_TORCH = os.getenv("OPENVINO_RELEASE_TORCH", "0").strip() == "1"
+OPENVINO_MAIN_STATEFUL_MODEL = (os.getenv("OPENVINO_MAIN_STATEFUL_MODEL") or "").strip() or None
 
 torch.set_num_threads(6)
 
@@ -163,6 +165,20 @@ def load_model():
         )
         ov_runtime.install()
 
+        # Startup policy logs
+        if OPENVINO_RELEASE_TORCH:
+            print(
+                "[app_worker] OPENVINO_RELEASE_TORCH active: "
+                "PyTorch core weights may be released during OpenVINO compilation.",
+                flush=True,
+            )
+        if OPENVINO_MAIN_STATEFUL_MODEL:
+            print(
+                f"[app_worker] OPENVINO_MAIN_STATEFUL_MODEL active: "
+                f"{OPENVINO_MAIN_STATEFUL_MODEL}",
+                flush=True,
+            )
+
         vocoder_status = (
             f"vocoder={'OV' if (ov_runtime.vocoder_runtime and ov_runtime.vocoder_runtime.enabled) else 'PyTorch'}"
         )
@@ -214,12 +230,42 @@ def health():
                     "active_compression": (
                         ov_runtime.compression if ov_runtime is not None else None
                     ),
+                    "stateful_main": bool(OPENVINO_MAIN_STATEFUL_MODEL),
+                    "release_torch": OPENVINO_RELEASE_TORCH,
                     "vocoder": vocoder_info,
                 }
             }
         )
 
     return jsonify(base)
+
+
+def _trim_silence(wav, sr):
+    """Strip the leading/trailing near-silence the model emits around speech.
+
+    The talker naturally pads utterances with up to ~1 s of dead air at the head
+    and tail (present identically in PyTorch and OpenVINO output — it is a
+    generation behavior, not a backend artifact). This energy-gates relative to
+    the clip's own peak and keeps a small pad so the onset/offset is never
+    clipped. Gated by SILENCE_TRIM (default on); SILENCE_TRIM_THRESH (fraction of
+    peak) and SILENCE_TRIM_PAD_MS tune it. No-op on an essentially silent clip.
+    """
+    if os.getenv("SILENCE_TRIM", "1").strip() == "0":
+        return wav
+    import numpy as np
+
+    arr = np.asarray(wav, dtype=np.float32).ravel()
+    peak = float(np.max(np.abs(arr))) if arr.size else 0.0
+    if peak <= 0.0:
+        return wav
+    thresh = peak * float(os.getenv("SILENCE_TRIM_THRESH", "0.01"))
+    above = np.nonzero(np.abs(arr) >= thresh)[0]
+    if above.size == 0:
+        return wav
+    pad = int(sr * float(os.getenv("SILENCE_TRIM_PAD_MS", "30")) / 1000.0)
+    start = max(0, int(above[0]) - pad)
+    end = min(arr.size, int(above[-1]) + 1 + pad)
+    return arr[start:end]
 
 
 def _run_generate(text: str, language: str):
@@ -235,7 +281,7 @@ def _run_generate(text: str, language: str):
     except Exception:
         _tb.print_exc()
         raise
-    return wavs[0], sr
+    return _trim_silence(wavs[0], sr), sr
 
 
 @app.route("/infer", methods=["POST"])

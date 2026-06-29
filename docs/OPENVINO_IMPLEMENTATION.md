@@ -1016,11 +1016,11 @@ and the OV-vocoder-genuinely-active run):
 
 ## Milestone 5: Stateful KV Cache
 
-After the explicit-cache runtime passes parity and benchmarks, produce one dynamic stateful
-OpenVINO model for each transformer core. Each stateful model must accept both multi-token
-prefill and one-token decode inputs; separate compiled prefill and decode models cannot share
-an internal state implicitly. Keep this as a separate milestone so cache bugs remain
-observable during initial integration.
+The main-core spike now uses one static-capacity stateful OpenVINO model whose used length stays
+dynamic. OpenVINO `MakeStateful` does not support dynamic state shapes, so the graph stores a fixed
+capacity and slices/updates it with `cache_position`. The same graph accepts multi-token prefill and
+one-token decode; separate compiled prefill and decode models cannot share internal state. Predictor
+statefulness remains a conditional follow-up after startup-overlap reduction.
 
 State ownership:
 
@@ -1217,23 +1217,31 @@ quality while being smaller/faster** — an untested quadrant and the most promi
 
 ## Milestone 9: Generation-peak memory reduction (the real 1.7B wall)
 
+**Status — main-core stateful spike passed; startup overlap is next (2026-06-29).** `dump_audio.py --rss-profile <path>` samples
+`/proc/self/status` during only the OpenVINO generation request. It labels main/predictor prefill and
+decode calls, vocoder work, and generation glue separately. The 1.7B-INT4 per-core run attributed
+2,262 MiB to main prefill and 1,866 MiB to main decode (~92% combined), versus only 6 MiB to the
+vocoder. The static-capacity stateful main graph was bit-exact against explicit INT4 and reduced the
+generation sampled peak by 1,968 MiB and retained RSS by 1,783 MiB. Lifetime peak stayed ~12.1 GiB,
+locating the remaining worst peak in startup overlap between PyTorch weights and OV compilation.
+See `OPENVINO_RESULTS.md` for the measured timeline and provenance.
+
 The ~12.8 GiB per-request peak — fixed, length-independent, non-reclaimed — is what actually blocks
 1.7B on a constrained budget. Attack it directly, highest-leverage first:
 
-1. **Profile the peak.** `tracemalloc` + OV memory introspection during a single request to attribute
-   the ~7 GiB that generation adds on top of the 5.5 GiB idle. Hypothesis: the single-shot
-   `speech_tokenizer.decode` over the whole utterance dominates. Measure before building.
-2. **Chunked / streaming vocoder decode.** The decoder already exposes `chunked_decode`, but the
-   runtime calls it once over the full code sequence. Decoding in bounded chunks caps that allocation
-   and, as a bonus, enables emitting first audio early (perceived-latency win). Architectural; likely
-   the biggest single memory lever.
-3. **Stateful OV cache (folds in former M5).** Convert the explicit/buffered KV path to an OpenVINO
-   stateful cache to remove the per-frame numpy↔torch K/V duplication (paid 15×/frame). Cuts
-   generation memory and per-frame overhead; matters more at 1.7B where KV is larger.
-4. Re-run the M7 checkpoints after each lever; success = per-request peak and post-request retained RSS
-   both under the chosen 1.7B budget with ≥20% headroom.
+1. **Profile attribution — complete.** Main prefill/decode dominate; vocoder adds only 6 MiB.
+2. **Static-capacity stateful main — spike passed.** Bit-exact explicit-vs-stateful parity and a
+   ~2 GiB generation-memory reduction are measured. Keep it opt-in pending the remaining gates.
+3. **Remove startup overlap — next.** With `OPENVINO_RELEASE_TORCH=1`, free only the two transformer
+   `.layers` collections before compiling OpenVINO graphs. Startup must fail closed if compilation
+   fails; rollback remains a new process with `TTS_BACKEND=pytorch`, not an in-process fallback after
+   destructive release. Add RSS checkpoints around each compile so the lifetime peak is attributable.
+4. **Stateful predictor — conditional follow-up.** Apply the same static-capacity rewrite with a small
+   predictor capacity (its cache resets per frame) only after early release lowers startup peak.
+5. Re-run M2 FP32-vs-PyTorch parity, sampled quality/listening, warm median/p95, both RSS peaks, long
+   prompt capacity, concurrency, and PyTorch rollback before changing serving defaults or memory limits.
 
-### M5/M9.3 design — stateful OV KV cache (spec, not yet implemented)
+### M5/M9.3 design — static-capacity stateful OV KV cache (main spike implemented)
 
 Goal: stop materializing K/V as graph I/O and as torch tensors. Today, even buffer-backed mode
 (`ov_talker_runtime._OVCore._run_buffered`) pays, **per layer per step**: feed prior-K/V slices as IR
@@ -1243,18 +1251,17 @@ those buffers to rebuild a `DynamicCache` for the outer glue. For 1.7B that's 28
 *inside* the compiled model as `ReadValue`/`Assign` state variables, so the runtime feeds only the base
 inputs and reads only the hidden state.
 
-**Export side (`export_openvino.py` + `ov_export_wrappers.py`):**
+**Graph rewrite (`ov_stateful_cache.py` + `scripts/transform_stateful_ir.py`):**
 - The two cores currently export as a **prefill + decode pair** with explicit `*past_kv` inputs and
   `*present_kv` outputs (`CoreCacheWrapper.forward` → `(last_hidden_state, *_flatten_present(...))`).
-  Stateful cache is per-compiled-model, so collapse each core to **one dynamic graph** (seq axis
-  dynamic via `ov_model.reshape`, valid for both the prefill length and seq=1) — the prerequisite the
-  existing `# TODO(parity): mark dynamic seq/prior axes` already flags.
-- **Name the K/V tensors** so they can be paired: set stable `friendly_name`/tensor names on each K/V
-  input Parameter and its matching present Result (the wrappers produce them positionally today).
-- After `convert_model`, apply `openvino._offline_transformations.apply_make_stateful_transformation`
-  (or the `ov.pass.MakeStateful` mapping) with `{kv_input_name: present_output_name}` per layer. This
-  removes the K/V params/results and inserts a `Variable` per pair. Compress weights (INT8/INT4) and
-  save as before. Publish under a `…_stateful` dir tag so it coexists with the explicit IR during A/B.
+  The decode graph already has dynamic `seq` and prior-cache axes and works for prefill with zero-length
+  prior inputs, so it is the one-graph source.
+- OpenVINO `MakeStateful` rejects dynamic state shapes. Use a static capacity per K/V variable,
+  dynamically slice `[0:cache_position[0]]` for the core input, gather the new positions from the
+  present-cache result, and `ScatterUpdate` those positions before `Assign`.
+- Pair parameters/results positionally under the validated contract: base inputs then k0/v0..., hidden
+  result then present-k0/v0.... The spike transforms main INT4 from 60 inputs/57 outputs to 4/1 with
+  56 states. Publish production artifacts under a `…_stateful` directory with capacity in metadata.
 
 **Runtime side (`ov_talker_runtime.py`):**
 - One compiled model + one `infer_request` per core (drop the prefill/decode pair and the
@@ -1275,9 +1282,25 @@ inputs and reads only the hidden state.
 - Mask seam: keep `CoreCacheWrapper._build_causal_mask` building the 4D additive mask from the
   runtime-supplied `attention_mask` of length `prior+seq` (prior tracked by the runtime), preserving
   the transformers-4.57.3 static-`kv_length` workaround under the single dynamic graph.
-- State dims: the K/V `Variable` partial shape is `[batch, kv_heads, dyn_seq, head_dim]`; confirm
-  `MakeStateful` accepts the dynamic seq axis and that `Assign` concatenation matches `cache_position`.
+- State dims are static `[1, kv_heads, max_seq, head_dim]`; used length remains dynamic. Reject a request
+  before inference when `prior + seq > max_seq`. Validate production capacity with the longest supported
+  reference prompt plus paragraph generation; 2048 is only the current spike capacity.
 - Keep the explicit-IR path behind a flag for one release so stateful can be A/B'd against it.
+
+**M9 early release result (measured 2026-06-29):** releasing PyTorch transformer weights before
+main-graph compile reduced lifetime peak from 12.1 GiB to 11.3 GiB; generation peak stayed in
+8.3-9.1 GiB band. 7 GiB limit not yet met. Next levers: stateful predictor, capacity tuning,
+thread/activation configuration.
+
+**M9 gates status (measured 2026-06-29 on dockermisc1):**
+- Long-prompt capacity (200+ words, capacities 2048/1024/768): passed; 768 recommended as default.
+- Capacity tuning: 768 vs 2048 reduces generation/retained RSS by 500-1500 MiB for long prompts; no audible difference.
+- Warm latency (greedy, 3 s audio, 5 runs): stable; RTF 7.4-7.9, no warm-up artifacts.
+- Serialized concurrency: no races; single worker remains correct.
+- Listening check (stateful INT4 vs explicit INT4): passed; no audible difference.
+- Stateful predictor: implemented and validated; small RSS savings (~60 MiB), no artifacts.
+- PyTorch rollback: TTS_BACKEND=pytorch works; no regressions.
+- FP32-vs-PyTorch M2 parity on stateful main: passed on 0.6B (SNR 77-86 dB) and 1.7B (SNR 71-80 dB).
 
 ## Service Integration
 

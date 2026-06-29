@@ -227,6 +227,12 @@ openvino_model*.xml
 *.wav
 /audio/
 
+# Raw RSS / generation profiles — large, machine-specific, live on the box (not in-repo).
+# Curated numbers belong in docs/OPENVINO_RESULTS.md, not the raw timelines.
+m9_rss_*.json
+*_rss_profile*.json
+main_stateful_parity.json
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
