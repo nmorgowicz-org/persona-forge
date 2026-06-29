@@ -414,3 +414,56 @@ above the 7 GiB production limit, has no long-prompt capacity test, no FP32-vs-P
 listening recheck, and no warm latency distribution; it is a successful spike, not a releasable backend.
 After all spike runs the host had 13 GiB available and 2.0 GiB swap in use (about 0.2 GiB above the
 pre-run snapshot); `litellm`, `litellm-postgres`, and `headroom-proxy` remained healthy.
+
+### M9 early release before compile + stateful main — measured 2026-06-29
+
+Branch `feat/m9-generation-peak-profile`, commits `4c5f32c` / `752b0ec` / `4519a19` implemented:
+(1) phased OpenVINO compilation with PyTorch weight release before main-graph compile
+(`OPENVINO_RELEASE_TORCH=1`), (2) RSS checkpoints at each phase, (3) fail-closed startup
+if main-graph compile fails after weights were released, and (4) cleaned `_OVStatefulCore`
+delegation / `generation_steps` acceptance.
+
+One production-sampling end-to-end run on `dockermisc1` used those changes plus stateful INT4
+main (`main_stateful_int4_v2.xml`), explicit INT4 predictor, FP32 OV vocoder, 6 threads,
+`OPENVINO_BUFFER_KV=1`, `OPENVINO_RELEASE_TORCH=1`, 13 GiB memory limit, and the same short
+prompt as prior runs.
+
+**Startup RSS (with early release):**
+
+| Checkpoint | RSS |
+|---|---:|
+| before_all_compile | 8,717 MiB |
+| after_predictor_compile | 8,739 MiB |
+| after_release_before_main_compile | 2,828 MiB |
+| after_main_compile | 3,827 MiB |
+| idle post OV install+release | 6,487 MiB |
+
+Main-graph compile cost after release: 999 MiB (3,827 - 2,828). PyTorch transformer cores
+released: 5.9 GiB (8,739 → 2,828).
+
+**Runtime and lifetime:**
+
+| Checkpoint | RSS |
+|---|---:|
+| Generation-only sampled peak | 9,052 MiB |
+| Lifetime peak (`ru_maxrss`) | 11,558 MiB (11.29 GiB) |
+| Post-generation | 9,053 MiB |
+| Post-trim retained idle | 8,726 MiB |
+
+Phase peaks: main_prefill 8,386; main_decode 9,047; predictor_prefill 9,048; predictor_decode
+9,048; vocoder 9,052.
+
+**vs prior (stateful main, no early release):**
+
+| Metric | Prior | Early release | Delta |
+|---|---:|---:|---:|
+| Lifetime peak | 12,095 MiB | 11,558 MiB | −537 MiB |
+| Generation peak | 8,813 MiB | 9,052 MiB | +239 MiB |
+| Idle post-trim | 8,638 MiB | 8,726 MiB | +88 MiB |
+
+Early release before compile works: lifetime peak improved from 12.1 GiB to 11.3 GiB.
+Generation peak increased slightly relative to the prior stateful-only run, likely allocator
+retention noise rather than semantic overhead; all phases remain in the same 8.3-9.1 GiB band.
+The 7 GiB production limit is still not met; further reduction requires either (a) stateful
+predictor, (b) reduced stateful capacity for shorter intended prompts, or (c) additional
+OpenVINO threading/activation tuning.

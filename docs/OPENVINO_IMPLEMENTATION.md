@@ -1287,6 +1287,11 @@ inputs and reads only the hidden state.
   reference prompt plus paragraph generation; 2048 is only the current spike capacity.
 - Keep the explicit-IR path behind a flag for one release so stateful can be A/B'd against it.
 
+**M9 early release result (measured 2026-06-29):** releasing PyTorch transformer weights before
+main-graph compile reduced lifetime peak from 12.1 GiB to 11.3 GiB; generation peak stayed in
+8.3-9.1 GiB band. 7 GiB limit not yet met. Next levers: stateful predictor, capacity tuning,
+thread/activation configuration.
+
 ## Service Integration
 
 Keep `app_api.py` and the external HTTP contract unchanged. Update `app_worker.py` to select

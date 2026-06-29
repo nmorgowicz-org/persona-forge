@@ -16,12 +16,21 @@ services:
     environment:
       <<: *model-environment
       DEVICE: cpu
+      TTS_BACKEND: ${TTS_BACKEND:-pytorch}
+      OV_MODEL_DIR: ${OV_MODEL_DIR:-}
+      OPENVINO_BUFFER_KV: ${OPENVINO_BUFFER_KV:-}
+      OPENVINO_RELEASE_TORCH: ${OPENVINO_RELEASE_TORCH:-}
+      OPENVINO_MAIN_STATEFUL_MODEL: ${OPENVINO_MAIN_STATEFUL_MODEL:-}
+      OPENVINO_VOCODER_ENABLED: ${OPENVINO_VOCODER_ENABLED:-}
+      OPENVINO_VOCODER_DIR: ${OPENVINO_VOCODER_DIR:-}
       REF_AUDIO: /voice/reference.wav
       REF_TEXT: ${REF_TEXT:?Set REF_TEXT to the exact transcript of the reference audio}
       TZ: ${TZ:-America/Detroit}
     volumes:
       - ${MODEL_CACHE_PATH:-./data/model}:/root/.cache/huggingface/hub:rw
       - ${REF_AUDIO_PATH:?Set REF_AUDIO_PATH to the reference WAV file}:/voice/reference.wav:ro
+      # Mount OpenVINO IR directory when TTS_BACKEND=openvino
+      # - ${OV_MODEL_HOST_PATH:-}:/ov_model:ro
     mem_limit: ${TTS_MEMORY_LIMIT:-7G}
     memswap_limit: ${TTS_MEMORY_SWAP_LIMIT:-8G}
     stop_grace_period: 45s
