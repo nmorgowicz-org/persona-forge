@@ -353,6 +353,99 @@ class _OVCore:
         )
 
 
+def _length_only_cache(seq_length: int, num_layers: int):
+    """Return a Transformers Cache that carries length but no K/V tensors."""
+    from transformers.cache_utils import Cache
+
+    class _LengthOnlyCache(Cache):
+        def __init__(self) -> None:
+            super().__init__(layers=[])
+            self._seq_length = seq_length
+
+        def get_seq_length(self, layer_idx: int = 0) -> int:
+            return self._seq_length
+
+        def get_mask_sizes(self, cache_position, layer_idx: int) -> tuple[int, int]:
+            return self._seq_length + cache_position.shape[0], 0
+
+        def get_max_cache_shape(self, layer_idx: int = 0) -> int:
+            return -1
+
+        def reorder_cache(self, beam_idx) -> None:
+            if len(beam_idx) != 1 or int(beam_idx[0]) != 0:
+                raise RuntimeError("stateful OpenVINO cache supports batch size 1 only")
+
+        def __len__(self) -> int:
+            return num_layers
+
+    return _LengthOnlyCache()
+
+
+class _OVStatefulCore:
+    """One InferRequest whose static-capacity K/V buffers live inside OpenVINO."""
+
+    def __init__(self, compiled_model, num_layers: int):
+        self._request = compiled_model.create_infer_request()
+        self.num_layers = num_layers
+        states = self._request.query_state()
+        if len(states) != 2 * num_layers:
+            raise RuntimeError(
+                f"stateful core expected {2 * num_layers} K/V states, found {len(states)}"
+            )
+        capacities = {int(state.state.shape[2]) for state in states}
+        if len(capacities) != 1:
+            raise RuntimeError(f"stateful core K/V capacities differ: {sorted(capacities)}")
+        self.capacity = capacities.pop()
+        self._cache_len = 0
+        self._axis_checked = False
+
+    def run(self, *, inputs_embeds, attention_mask, position_ids, cache_position,
+            past_key_values, generation_steps=None):
+        import torch
+        from transformers.modeling_outputs import BaseModelOutputWithPast
+
+        if generation_steps is not None:
+            raise RuntimeError("generation_steps is unsupported by the main-only stateful spike")
+        seq = int(inputs_embeds.shape[1])
+        prior = past_key_values.get_seq_length() if past_key_values is not None else 0
+        is_prefill = prior == 0
+        if is_prefill:
+            self._request.reset_state()
+            self._cache_len = 0
+        elif prior != self._cache_len:
+            raise RuntimeError(
+                f"stateful cache length mismatch: outer cache={prior}, internal={self._cache_len}"
+            )
+        if prior + seq > self.capacity:
+            raise RuntimeError(
+                f"stateful cache capacity exceeded: need {prior + seq}, max {self.capacity}"
+            )
+
+        position_ids = _OVCore._resolve_position_ids(self, position_ids, cache_position)
+        if attention_mask is None:
+            attention_mask = torch.ones(
+                inputs_embeds.shape[0], prior + seq, dtype=torch.long,
+                device=inputs_embeds.device,
+            )
+        self._request.infer([
+            _to_numpy(inputs_embeds, np.float32),
+            _to_numpy(attention_mask, np.int64),
+            _to_numpy(position_ids, np.int64),
+            _to_numpy(cache_position, np.int64),
+        ])
+        hidden = torch.from_numpy(
+            np.array(self._request.get_output_tensor(0).data, dtype=np.float32, copy=True)
+        )
+        self._cache_len = prior + seq
+        cache = _length_only_cache(self._cache_len, self.num_layers)
+        return BaseModelOutputWithPast(
+            last_hidden_state=hidden,
+            past_key_values=cache,
+            hidden_states=(hidden,),
+            attentions=None,
+        )
+
+
 class OVTalkerRuntime:
     """Compile the four transformer IR graphs and patch the talker's two inner cores.
 
@@ -394,12 +487,21 @@ class OVTalkerRuntime:
         def _files_for(comp: str) -> dict:
             return _INT8_GRAPH_FILES if comp == "int8" else _GRAPH_FILES
 
+        main_stateful_raw = os.getenv("OPENVINO_MAIN_STATEFUL_MODEL", "").strip()
+        main_stateful_path = None
+        if main_stateful_raw:
+            main_stateful_path = Path(main_stateful_raw)
+            if not main_stateful_path.is_absolute():
+                main_stateful_path = self.model_dir / main_stateful_path
         graph_files = {
-            "main_prefill": _files_for(main_comp)["main_prefill"],
-            "main_decode": _files_for(main_comp)["main_decode"],
             "predictor_prefill": _files_for(pred_comp)["predictor_prefill"],
             "predictor_decode": _files_for(pred_comp)["predictor_decode"],
         }
+        if main_stateful_path is None:
+            graph_files.update({
+                "main_prefill": _files_for(main_comp)["main_prefill"],
+                "main_decode": _files_for(main_comp)["main_decode"],
+            })
         if main_comp != pred_comp:
             print(
                 f"[ov_talker] per-core precision: main={main_comp} predictor={pred_comp}",
@@ -414,7 +516,19 @@ class OVTalkerRuntime:
 
         main_layers = talker.model.config.num_hidden_layers
         pred_layers = talker.code_predictor.model.config.num_hidden_layers
-        self.main = _OVCore(compiled["main_prefill"], compiled["main_decode"], main_layers, predictor=False)
+        if main_stateful_path is not None:
+            if not main_stateful_path.is_file():
+                raise FileNotFoundError(f"missing stateful main IR: {main_stateful_path}")
+            main_stateful_compiled = self.core.compile_model(
+                str(main_stateful_path), "CPU", core_config
+            )
+            self.main = _OVStatefulCore(main_stateful_compiled, main_layers)
+            self.main_comp = f"stateful-{main_comp}"
+        else:
+            self.main = _OVCore(
+                compiled["main_prefill"], compiled["main_decode"],
+                main_layers, predictor=False,
+            )
         self.pred = _OVCore(
             compiled["predictor_prefill"], compiled["predictor_decode"], pred_layers, predictor=True
         )

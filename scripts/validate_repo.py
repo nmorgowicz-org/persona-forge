@@ -69,12 +69,16 @@ def validate_python() -> None:
         ROOT / "export_openvino.py",
         ROOT / "model_config.py",
         ROOT / "ov_export_wrappers.py",
+        ROOT / "ov_stateful_cache.py",
         ROOT / "serve.py",
         ROOT / "test_vocoder_parity.py",
         ROOT / "test_transformer_parity.py",
+        ROOT / "test_stateful_main_parity.py",
         ROOT / "calibration_capture.py",
         ROOT / "dump_audio.py",
         ROOT / "scripts" / "download_model.py",
+        ROOT / "scripts" / "stateful_cache_spike.py",
+        ROOT / "scripts" / "transform_stateful_ir.py",
     )
     for path in paths:
         ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -158,6 +162,8 @@ def validate_dockerfile() -> None:
         "test_vocoder_parity.py",
         "benchmark_vocoder.py",
         "test_transformer_parity.py",
+        "test_stateful_main_parity.py",
+        "ov_stateful_cache.py",
         "calibration_capture.py",
         "dump_audio.py",
     }
