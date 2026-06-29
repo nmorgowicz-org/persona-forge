@@ -37,8 +37,20 @@ class OpenVinoVocoderRuntime:
             self.enabled = False
             return
 
-        xml_path = Path(model_path) / "vocoder.xml"
-        if not xml_path.is_file():
+        # The exporter writes "vocoder_decoder.xml"; older docs/tooling referred to
+        # "vocoder.xml". Accept either so a name skew can't silently disable the IR.
+        xml_path = None
+        for candidate in ("vocoder.xml", "vocoder_decoder.xml"):
+            p = Path(model_path) / candidate
+            if p.is_file():
+                xml_path = p
+                break
+        if xml_path is None:
+            print(
+                f"[ov_vocoder] no vocoder IR (vocoder.xml / vocoder_decoder.xml) in "
+                f"{model_path}; falling back to PyTorch vocoder.",
+                flush=True,
+            )
             self.enabled = False
             return
 

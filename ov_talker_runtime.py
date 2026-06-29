@@ -39,6 +39,7 @@ from real tensors via `DynamicCache.from_legacy_cache`, so lazy init never runs.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -381,7 +382,26 @@ class OVTalkerRuntime:
         # "vocoder" is internal config; OpenVINO CPU plugin doesn't understand it.
         core_config = {k: v for k, v in self._ov_config.items() if k != "vocoder"}
 
-        graph_files = _INT8_GRAPH_FILES if self.compression == "int8" else _GRAPH_FILES
+        # Per-core precision override (diagnostic): localize INT8 quality loss by
+        # running one core INT8 and the other FP32. Defaults to the global compression
+        # so normal runs are unaffected.
+        main_comp = os.getenv("OV_MAIN_COMPRESSION", self.compression).lower()
+        pred_comp = os.getenv("OV_PREDICTOR_COMPRESSION", self.compression).lower()
+
+        def _files_for(comp: str) -> dict:
+            return _INT8_GRAPH_FILES if comp == "int8" else _GRAPH_FILES
+
+        graph_files = {
+            "main_prefill": _files_for(main_comp)["main_prefill"],
+            "main_decode": _files_for(main_comp)["main_decode"],
+            "predictor_prefill": _files_for(pred_comp)["predictor_prefill"],
+            "predictor_decode": _files_for(pred_comp)["predictor_decode"],
+        }
+        if main_comp != pred_comp:
+            print(
+                f"[ov_talker] per-core precision: main={main_comp} predictor={pred_comp}",
+                flush=True,
+            )
         compiled = {}
         for key, filename in graph_files.items():
             path = self.model_dir / filename

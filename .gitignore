@@ -220,6 +220,10 @@ tempCodeRunnerFile.py
 openvino_model*.bin
 openvino_model*.xml
 
+# Generated / benchmark audio (reference WAV lives on the box, never in-repo)
+*.wav
+/audio/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
