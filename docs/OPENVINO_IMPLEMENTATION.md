@@ -1217,29 +1217,38 @@ quality while being smaller/faster** — an untested quadrant and the most promi
 
 ## Milestone 9: Generation-peak memory reduction (the real 1.7B wall)
 
-**Status — main-core stateful spike passed; startup overlap is next (2026-06-29).** `dump_audio.py --rss-profile <path>` samples
-`/proc/self/status` during only the OpenVINO generation request. It labels main/predictor prefill and
-decode calls, vocoder work, and generation glue separately. The 1.7B-INT4 per-core run attributed
-2,262 MiB to main prefill and 1,866 MiB to main decode (~92% combined), versus only 6 MiB to the
-vocoder. The static-capacity stateful main graph was bit-exact against explicit INT4 and reduced the
-generation sampled peak by 1,968 MiB and retained RSS by 1,783 MiB. Lifetime peak stayed ~12.1 GiB,
-locating the remaining worst peak in startup overlap between PyTorch weights and OV compilation.
-See `OPENVINO_RESULTS.md` for the measured timeline and provenance.
+**Status — CLOSED and SHIPPED in v0.11.0 (2026-06-29).** Full memory arc complete: lifetime peak
+**11,593 → 7,715 MiB**, trimmed idle **8,884 → 7,485 MiB**, and the dangerous boot spike (real OOM
+risk) is eliminated. The peak is now a stable ~7.7 GiB. The 1.7B-INT4 stateful + bf16 serving config
+ships at **`TTS_MEMORY_LIMIT=8G`** (the ~7.5 GiB floor — INT4 weights + bf16 glue + OV runtime —
+does not fit the 7G default; 0.6B-INT8 still fits 7G). See `OPENVINO_RESULTS.md` for the measured
+timeline and provenance.
 
-The ~12.8 GiB per-request peak — fixed, length-independent, non-reclaimed — is what actually blocks
-1.7B on a constrained budget. Attack it directly, highest-leverage first:
+The path that got there, highest-leverage first (all done):
 
-1. **Profile attribution — complete.** Main prefill/decode dominate; vocoder adds only 6 MiB.
-2. **Static-capacity stateful main — spike passed.** Bit-exact explicit-vs-stateful parity and a
-   ~2 GiB generation-memory reduction are measured. Keep it opt-in pending the remaining gates.
-3. **Remove startup overlap — next.** With `OPENVINO_RELEASE_TORCH=1`, free only the two transformer
-   `.layers` collections before compiling OpenVINO graphs. Startup must fail closed if compilation
-   fails; rollback remains a new process with `TTS_BACKEND=pytorch`, not an in-process fallback after
-   destructive release. Add RSS checkpoints around each compile so the lifetime peak is attributable.
-4. **Stateful predictor — conditional follow-up.** Apply the same static-capacity rewrite with a small
-   predictor capacity (its cache resets per frame) only after early release lowers startup peak.
-5. Re-run M2 FP32-vs-PyTorch parity, sampled quality/listening, warm median/p95, both RSS peaks, long
-   prompt capacity, concurrency, and PyTorch rollback before changing serving defaults or memory limits.
+1. **Profile attribution — complete.** `dump_audio.py --rss-profile` labels main/predictor
+   prefill+decode, vocoder, and glue separately. Per-core 1.7B-INT4 attributed ~92% of sampled growth
+   to main prefill (2,262 MiB) + main decode (1,866 MiB); vocoder only 6 MiB. **Vocoder lever closed
+   for the right reason.**
+2. **Static-capacity stateful main — done.** Bit-exact explicit-vs-stateful parity; moves K/V inside
+   the compiled graph (60 in/57 out → 4 in/1 out + 56 states). Cut generation sampled peak ~2 GiB.
+3. **Early PyTorch weight release — done.** `OPENVINO_RELEASE_TORCH=1` frees each core's `.layers`
+   before compile (lifetime 12.1 → 11.3 GiB). This run FALSIFIED "lifetime peak = startup overlap":
+   exact `ru_maxrss` attribution showed the peak was already **11,593 MiB right after
+   `from_pretrained`**, before OV install — the fp32 checkpoint-load transient, not startup overlap.
+4. **bf16 serving load — done and adopted (the big lever).** Checkpoint is BF16; `OPENVINO_TORCH_DTYPE=bfloat16`
+   (serving only; exporter stays fp32 for convert parity) skips the fp32 upcast that caused the spike.
+   **Lifetime peak 11,593 → 8,326 MiB.** Two OV dtype seams fixed (`_to_numpy` bf16→fp32; forwards cast
+   hidden back to model dtype), both no-ops under fp32. Listening A/B: quality-equivalent (user).
+5. **Capacity 768 — done and shipped as default.** Rebuilt the main at `--max-seq 768`. **Lifetime
+   8,326 → 7,715; idle 8,093 → 7,485; main_prefill +1915 → +1529.** Capacity scales the prefill buffer,
+   but the floor is ~7.5 GiB and does not move with capacity.
+6. **Stateful predictor — done.** Same static-capacity rewrite, small predictor capacity (~60 MiB
+   savings). Opt-in via `OPENVINO_PREDICTOR_STATEFUL_MODEL`.
+7. **Silence trim — done.** `app_worker._trim_silence` strips the pre-existing ~1 s leading/trailing
+   silence (`SILENCE_TRIM*`, on by default); confirmed present in both fp32 and bf16, not a bf16 effect.
+
+All M9 gates passed (parity, capacity, warm latency, listening, concurrency, rollback). No open M9 work.
 
 ### M5/M9.3 design — static-capacity stateful OV KV cache (main spike implemented)
 
@@ -1287,10 +1296,11 @@ inputs and reads only the hidden state.
   reference prompt plus paragraph generation; 2048 is only the current spike capacity.
 - Keep the explicit-IR path behind a flag for one release so stateful can be A/B'd against it.
 
-**M9 early release result (measured 2026-06-29):** releasing PyTorch transformer weights before
-main-graph compile reduced lifetime peak from 12.1 GiB to 11.3 GiB; generation peak stayed in
-8.3-9.1 GiB band. 7 GiB limit not yet met. Next levers: stateful predictor, capacity tuning,
-thread/activation configuration.
+**M9 final result (measured 2026-06-29, shipped v0.11.0):** the binding peak was the fp32
+checkpoint-load transient, not startup overlap. Loading the native-bf16 checkpoint
+(`OPENVINO_TORCH_DTYPE=bfloat16`) plus a capacity-768 stateful main cut lifetime peak **11,593 →
+7,715 MiB** and trimmed idle to **7,485 MiB**. Early release (12.1 → 11.3 GiB) and the stateful
+predictor (~60 MiB) are kept but are minor next to bf16. Shipped at `TTS_MEMORY_LIMIT=8G` for 1.7B.
 
 **M9 gates status (measured 2026-06-29 on dockermisc1):**
 - Long-prompt capacity (200+ words, capacities 2048/1024/768): passed; 768 recommended as default.
@@ -1350,7 +1360,8 @@ volumes:
   - /var/data/autopirate/qwen3-tts/openvino:/ov_model:ro
 ```
 
-Keep `mem_limit: 7G` and `memswap_limit: 8G` until Milestone 7 is complete.
+For 0.6B-INT8 keep `mem_limit: 7G` and `memswap_limit: 8G`. For 1.7B-INT4 stateful + bf16 set
+`TTS_MEMORY_LIMIT=8G` (M9 closed: ~7.5 GiB idle / ~7.7 GiB peak floor does not fit 7G).
 
 ### Private GHCR authentication on `dockermisc1`
 

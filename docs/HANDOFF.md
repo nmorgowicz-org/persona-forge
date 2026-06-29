@@ -1,4 +1,4 @@
-# Handoff — qwen3-tts OpenVINO optimization (2026-06-29)
+# Handoff — qwen3-tts OpenVINO optimization (2026-06-29, after v0.11.0)
 
 Self-contained brief for the next agent. Deeper detail lives in `OPENVINO_IMPLEMENTATION.md` (design +
 milestones) and `OPENVINO_RESULTS.md` (every measured number). Memory file:
@@ -6,84 +6,55 @@ milestones) and `OPENVINO_RESULTS.md` (every measured number). Memory file:
 
 ## Where we are (one paragraph)
 
-0.6B ships weight-only **INT8 at ~1.40×** (M6 CLOSED — every quality-recovery path was tried and
-rejected). The active work is the **1.7B track**, pursued as a *quality* upgrade, not a speed one. As of
-today all three 1.7B decision gates are answered:
+**Everything is merged to `main` and released as v0.11.0** (tag `qwen3-tts-openvino-v0.11.0`,
+commit `f8b7e5e`; PR #59 squashed in `08415a5`). 0.6B ships weight-only **INT8 at ~1.40×** (M6
+CLOSED). The **1.7B-INT4 track is functionally complete** — a validated *quality* win at near-0.6B
+latency, with the memory wall (M9) now CLOSED. All three 1.7B decision gates are answered and shipped:
 
-- **Quality (listened):** 1.7B-INT8 "very very clear"; 1.7B-INT4 (g32) "slight comma pause but 100%
-  good". Both beat 0.6B-INT8, whose comma artifact the user dislikes. → **INT4 is the chosen 1.7B
-  precision.**
-- **Speed (M1.7B-A, measured):** PyTorch 1.7B 25.05 s median → OV INT8 **1.27×**, OV INT4 **1.35×**.
-  Same CPU ceiling as 0.6B; neither hits 2×. Crucially **1.7B-INT4 at 18.6 s ≈ 0.6B-INT8 (~17.4 s)** in
-  absolute latency while sounding clearly better.
-- **Memory (M9 spike + early release, measured):** per-core profiling rejected the vocoder hypothesis
-    and attributed ~92% of sampled growth to main prefill/decode. Static-capacity stateful main is
-    bit-exact against explicit INT4 and cuts generation peak **10.78 → 8.81 GiB**; retained RSS
-    **10.42 → 8.64 GiB**. Early PyTorch weight release before main-graph compile further reduced
-    lifetime peak from 12.1 GiB to 11.3 GiB. All M9 gates now passed: capacity tuning, warm latency,
-    listening, concurrency, rollback, stateful predictor, and FP32-vs-PyTorch parity (on 0.6B and
-    1.7B). Capacity 768 is validated and recommended. The 7 GiB limit is not yet met; M9 is a
-    substantial step, not final.
+- **Quality (listened):** 1.7B-INT4 (g32) "slight comma pause but 100% good", beats 0.6B-INT8 whose
+  comma artifact the user dislikes. → **INT4 is the chosen 1.7B precision.**
+- **Speed (M1.7B-A, measured):** OV INT4 **1.35×** (18.6 s ≈ 0.6B-INT8's ~17.4 s) while sounding
+  clearly better. CPU-bound; neither size hits 2×.
+- **Memory (M9, CLOSED):** full arc **lifetime peak 11,593 → 7,715 MiB, trimmed idle 8,884 →
+  7,485 MiB**, dangerous boot spike eliminated. Driven by (1) **bf16 serving load** — the binding peak
+  was the fp32 checkpoint-load transient, and loading the native-bf16 checkpoint skips the upcast
+  (11,593 → 8,326); (2) **capacity-768 stateful main** (8,326 → 7,715); plus stateful predictor, early
+  weight release, and a serving silence-trim. The ~7.5 GiB floor (INT4 weights + bf16 glue + runtime)
+  does not move with capacity, so **1.7B ships at `TTS_MEMORY_LIMIT=8G`** (0.6B-INT8 still fits 7G).
 
-**Bottom line for the next agent:** 1.7B-INT4 is a real, validated quality win at near-0.6B latency.
-The 7 GiB limit is **not** met (idle ~8.1 GiB at cap 768, lifetime ~11.3 GiB) and — per the analysis
-below — the binding ~2.5 GiB is an **unattributed generation transient**, not the startup overlap the
-early-release change targeted. The next move is to measure that transient, not to start cutting blind.
-
-> **Correction recorded 2026-06-29 (see RESULTS.md "M9 lifetime-peak root cause — correction").** The
-> early-release run falsified the "lifetime peak = startup overlap" hypothesis: post-release startup
-> tops out at 8.7 GiB yet lifetime `ru_maxrss` is 11.56 GiB while the 50 ms-sampled gen peak is only
-> 9.05 GiB. That ~2.5 GiB gap is a generation transient the interval sampler is blind to. Because the
-> vocoder was rejected (M9.3a) on that same blind sampler (~6 MiB), **the vocoder lever is unmeasured,
-> not rejected.**
+**Bottom line for the next agent:** the 1.7B-INT4 quality track is DONE and shipped. There is no open
+blocker. Remaining work is *enablement and polish*, not core engineering — see next steps. The one
+honest caveat: all M9 numbers were measured with PR-#59 runtime files mounted over the released
+`exporter-v0.10.0` image; **a v0.11.0 image that bakes those runtime files has not yet been built and
+smoke-tested end-to-end** (the code is on `main`, the image is not yet published).
 
 ## Immediate next steps, in priority order
 
-1. **Lifetime peak is MEASURED — it is the PyTorch model-load transient (done; act on it).**
-   Exact `ru_maxrss` attribution (RESULTS.md "M9 lifetime-peak — MEASURED and localized") shows
-   `ru_maxrss` is already **11,593 MiB right after `from_pretrained`**, before OV install, and every
-   generation phase (incl. vocoder) adds **+0**. The peak is the 1.7B fp32 checkpoint-load transient in
-   `bench_common.load_model` (`from_pretrained(..., dtype=torch.float32)`, no `low_cpu_mem_usage`),
-   ~3 GiB over the 8.5 GiB settled value — a one-time boot spike, not steady state (~8.9 GiB idle).
-   The vocoder lever (M9.3a) is closed for the right reason. **Status:**
-   - **(a) `low_cpu_mem_usage=True`: tried, no effect** (device_map already implied it). Kept as
-     best-practice.
-   - **(b) bf16 serving load: DONE and measured** — `OPENVINO_TORCH_DTYPE=bfloat16` (default float32,
-     serving-only; exporter stays fp32). Checkpoint is BF16, so loading native bf16 skips the upcast.
-     **Lifetime peak 11,593 → 8,326 MiB; after-load ru_maxrss 11,593 → 2,620; trimmed idle 8,884 →
-     8,093.** Two OV dtype seams fixed (`_to_numpy` bf16→fp32; forwards cast hidden back to model dtype),
-     both no-ops under fp32. See RESULTS "M9 bf16 serving load".
-   **Listening A/B: DONE — bf16 is quality-equivalent** (user, 2026-06-29): no audible difference vs
-   fp32 (`audio/{fp32,bf16}_glue.wav`); the ~1 s leading/trailing silence is present in *both* and is
-   pre-existing prompt/seed behavior, not a bf16 effect (a serving silence-trim was added —
-   `app_worker._trim_silence`, `SILENCE_TRIM*`). bf16 serving is **adopted**.
-   **Capacity 768: DONE and measured** — rebuilt the main at `--max-seq 768`
-   (`main_stateful_int4_cap768.xml`) and re-ran bf16: **lifetime peak 8,326 → 7,715; idle 8,093 → 7,485;
-   main_prefill +1915 → +1529.** Capacity scales the prefill buffer, but the **floor is ~7.5 GiB** (INT4
-   weights + bf16 glue + runtime) and does not move with capacity. **1.7B-INT4 cannot fit a 7 GiB
-   `mem_limit`** without dropping capacity below 768 (long-utterance overflow risk). **Decision shipped:
-   capacity 768 + bf16, `TTS_MEMORY_LIMIT=8G` for 1.7B** (0.6B-INT8 still fits 7G). Full arc: lifetime
-   peak **11,593 → 7,715 MiB**, and the dangerous boot spike is gone — peak is now a stable ~7.7 GiB.
+1. **Build + publish the v0.11.0 runtime/exporter image and smoke-test it (the only real loose end).**
+   The M9 runtime changes (`app_worker.py`, `ov_talker_runtime.py`, `bench_common.py`, stateful
+   transforms) are on `main` but were validated by *mounting* them over `exporter-v0.10.0`. Build the
+   image at the v0.11.0 tag and confirm the 1.7B-INT4 config is reproducible **from the image alone**:
+   `OPENVINO_TORCH_DTYPE=bfloat16`, `OPENVINO_RELEASE_TORCH=1`, `OPENVINO_MAIN_STATEFUL_MODEL`
+   (capacity-768 main), `OPENVINO_PREDICTOR_STATEFUL_MODEL` (opt-in, small), `OPENVINO_VOCODER_ENABLED=1`
+   /`OPENVINO_VOCODER_DIR`, `SILENCE_TRIM=1`, `TTS_MEMORY_LIMIT=8G`. Re-confirm the headline numbers
+   (lifetime ~7,715 / idle ~7,485 MiB) hold from the baked image, then this track is fully closed.
+   *This is an outward-facing GHCR publish — confirm with the user before pushing.*
 
-2. **Review PR #59.** Branch `feat/m9-generation-peak-profile`; tip is the commit following this
-   handoff. Contains: Release Please fix, RSS profiler (+ exact `ru_maxrss` attribution), stateful
-   main graph rewrite, parity gates, early weight release, app_worker wiring, stateful predictor
-   wiring, capacity tuning, M9 gate measurements, and the repo-hygiene cleanup (removed the committed
-   501 KB `m9_rss_*.json`; gitignore + `scripts/validate_repo.py` now reject raw profile JSONs). All
-   M9 gates pass but the 7 GiB limit is not met — keep it draft until step 1 settles the path.
+2. **Ship a capacity-768 main IR as a first-class production artifact.** Today the cap-768 main lives in
+   the spike dir as `main_stateful_int4_cap768.xml`. Promote it into the released INT4 IR directory with
+   capacity recorded in metadata, and document the `transform_stateful_ir.py` rebuild recipe (already in
+   `compose.example.yml`'s "Capacity tuning" block) in the user-facing README/quickstart so operators
+   can retune. Validate bit-exact parity with `scripts/test_stateful_main_parity.py` after the rebuild.
 
-3. **Pick the memory lever from step 1's result.**
-   - **3a (if vocoder-bound):** chunked/streaming vocoder decode to cap the single-shot decode buffer.
-   - **3b (if transformer-bound):** OV activation/buffer reuse + threading/activation tuning; evaluate
-     a thin selective loader to avoid materializing the full talker upfront.
-   - Either way, re-confirm 768 capacity holds under the longest operational prompt.
+3. **Optional further memory headroom (only if a 7G 1.7B target is ever required).** The floor is
+   ~7.5 GiB; the largest remaining single contributor is the `main_prefill` activation (+1,529 MiB at
+   cap 768). Levers, in order: drop capacity to 512 (~42 s max utterance — risky for paragraphs), OV
+   activation/buffer reuse, thread/activation tuning. Not needed for the shipped 8G target; pursue only
+   on explicit request. Re-confirm 768 holds under the longest operational prompt either way.
 
-4. **Bake a built image + finalize M9 in serving** (after a lever lands, or now if the team accepts
-   ~8.1 GiB idle as good enough on the 15 GiB box). Runtime changes are wired in `app_worker.py` and
-   `compose.example.yml` but not yet imaged. Build a new exporter/runtime image (next tag v0.11.0+) and
-   confirm: `OPENVINO_RELEASE_TORCH=1`, `OPENVINO_VOCODER_ENABLED=1`/`OPENVINO_VOCODER_DIR`,
-   `OPENVINO_MAIN_STATEFUL_MODEL` (opt-in), `OPENVINO_PREDICTOR_STATEFUL_MODEL` (opt-in, small),
-   capacity 768 default, and that the 1.7B-INT4 config is reproducible from the image alone.
+4. **Decide 1.7B's release role vs 0.6B.** 1.7B-INT4 is the quality leader but needs 8G and is ~1.07×
+   slower in absolute latency than nothing-special; 0.6B-INT8 is the lean 7G default. This is a
+   product/positioning call for the user, not an engineering one — surface it, don't decide it.
 
 ## How to run benchmarks on the box (copy-paste ready)
 
@@ -97,9 +68,11 @@ early-release change targeted. The next move is to measure that transient, not t
   - FP32 vocoder: `qwen-tts-0.1.1_1.7b_fd4b25438912_ov-2026.2.1_vocoder` (set `OPENVINO_VOCODER_DIR` to
     this for both INT8 and INT4; the INT8 dir's own `vocoder_decoder_int8.xml` is unused — INT8 vocoder
     was rejected at 16 dB).
-- Released image used for M9: `exporter-v0.10.0` at
-  `sha256:5189f9bd604c4f4e187175691b7375e9b6f3fd449d91ca73ec78911beaebcb49`. Mount PR #59 files over
-  `/app/` (runtime patches not yet imaged). Ref WAV: `/var/data/autopirate/qwen3-tts/voice/voice_A.wav`.
+- Image used for all M9 measurements: `exporter-v0.10.0` at
+  `sha256:5189f9bd604c4f4e187175691b7375e9b6f3fd449d91ca73ec78911beaebcb49`, with the (now-merged) M9
+  runtime files **mounted over `/app/`** — they are on `main` but **not yet baked into a v0.11.0 image**
+  (step 1). The cap-768 bf16 run script + log on the box: `/tmp/ov-m9/run_bf16_cap768.sh`,
+  `bf16_cap768.log`. Ref WAV: `/var/data/autopirate/qwen3-tts/voice/voice_A.wav`.
 - The speed-bench driver is `/tmp/ov-bench/speed_1.7b.sh` on the box (and `bench_speed.py` in the repo).
   Memory harness is `dump_audio.py --ov-only` (3-checkpoint RSS). Parity/quality harness is
   `test_ov_generation.py` (`--mode sampled-quality`); its coupled greedy block OOMs at 1.7B, so use
@@ -142,4 +115,6 @@ M1.7B-A speed gate; M9: attribution, static state primitive, main INT4 graph rew
 bit-exact explicit-vs-stateful main parity, end-to-end memory run, early release before compile,
 stateful predictor wiring and listening check, capacity tuning (768/1024 validated),
 M9 gates (capacity, warm latency, listening, concurrency, rollback, FP32-vs-PyTorch 0.6B and 1.7B
-parity). M9 is not production-ready (7 GiB limit not met).
+parity); M9 bf16 serving load + capacity-768 + silence-trim + capacity-tuning docs. **M9 CLOSED and
+shipped in v0.11.0** (lifetime peak 7,715 / idle 7,485 MiB at 8G). Only remaining task: bake +
+smoke-test the v0.11.0 image (step 1 above).
