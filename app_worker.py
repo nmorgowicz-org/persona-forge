@@ -251,7 +251,16 @@ def health():
             }
         )
 
-    return jsonify(base)
+    def _json_safe(obj):
+        if isinstance(obj, Path):
+            return obj.as_posix()
+        if isinstance(obj, dict):
+            return {k: _json_safe(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_json_safe(v) for v in obj]
+        return obj
+
+    return jsonify(_json_safe(base))
 
 
 def _trim_silence(wav, sr):
