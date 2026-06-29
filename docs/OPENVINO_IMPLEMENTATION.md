@@ -1217,6 +1217,12 @@ quality while being smaller/faster** — an untested quadrant and the most promi
 
 ## Milestone 9: Generation-peak memory reduction (the real 1.7B wall)
 
+**Status — profiling harness started (2026-06-29).** `dump_audio.py --rss-profile <path>` now samples
+`/proc/self/status` during only the OpenVINO generation request and labels samples as transformer or
+vocoder work by wrapping `speech_tokenizer.decode`. This separates the generation peak from the
+earlier model-load transient and gives the first coarse attribution needed before selecting a lever.
+The required 1.7B-INT4 run on `dockermisc1` is not yet recorded; no M9 implementation lever is chosen.
+
 The ~12.8 GiB per-request peak — fixed, length-independent, non-reclaimed — is what actually blocks
 1.7B on a constrained budget. Attack it directly, highest-leverage first:
 

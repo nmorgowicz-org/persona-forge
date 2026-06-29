@@ -27,11 +27,12 @@ The *only* thing standing between it and shipping is the ~12 GiB generation peak
 
 ## Immediate next steps, in priority order
 
-1. **Land PR #57.** Branch `feat/m7-release-torch`, 5 commits, all green-ish docs+M7 code+speed bench.
-   It carries: M7 weight-release runtime code, `bench_speed.py`, all 1.7B docs (M7/M8/M1.7B-A/M9 + M5
-   design spec), exporter INT4 dir-naming, raw bench JSONs. Review + merge. Keep the
-   BEGIN/END_COMMIT_OVERRIDE block in the body synced if you add commits (see
-   `pr-commit-override-block` memory).
+1. **Release baseline landed.** PR #57 merged as `679799d8`; Release Please produced v0.10.0 and the
+   container workflow completed. New work must branch from v0.10.0-era `main`. The PR override block
+   placed entries on adjacent lines, so Release Please parsed only the first entry; it also used
+   hidden `docs` types and invalid composite headers such as `docs+export:` and `feat(bench)+docs:`.
+   The M9 follow-up requires blank-line-separated, single-type entries and makes every supported
+   project commit type visible so future override blocks retain all intended entries.
 
 2. **M9 — profile the generation peak (do this before building anything).** Run one generation under a
    memory profiler (e.g. `tracemalloc` around `generate_voice_clone`, or sample `/proc/self/status`
@@ -79,6 +80,11 @@ The *only* thing standing between it and shipping is the ~12 GiB generation peak
   Memory harness is `dump_audio.py --ov-only` (3-checkpoint RSS). Parity/quality harness is
   `test_ov_generation.py` (`--mode sampled-quality`); its coupled greedy block OOMs at 1.7B, so use
   `bench_speed.py` for latency.
+- The M9 branch extends `dump_audio.py` with a generation-only RSS sampler. Run with
+  `--rss-profile /ov_output/m9_rss_1.7b_int4.json --rss-sample-ms 50`; the JSON labels every sample
+  as `transformer` or `vocoder` and reports per-phase peaks. Store the JSON outside Git and compare
+  its generation-only peak with the three-checkpoint/lifetime RSS report before choosing M9.3a,
+  M9.3b, or M9.3c.
 
 ## Hard-won gotchas (don't relearn these)
 
