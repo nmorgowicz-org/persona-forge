@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.9.0...qwen3-tts-openvino-v0.9.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **export:** reject unsupported INT8 calibration ([08e1c58](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08e1c58c0413596fa10d75ffb6a435ede4021662))
+
 ## [0.9.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.8.0...qwen3-tts-openvino-v0.9.0) (2026-06-29)
 
 
