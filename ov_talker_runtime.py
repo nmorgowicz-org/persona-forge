@@ -493,6 +493,17 @@ class OVTalkerRuntime:
             main_stateful_path = Path(main_stateful_raw)
             if not main_stateful_path.is_absolute():
                 main_stateful_path = self.model_dir / main_stateful_path
+
+        # Milestone 7 / M9: OPENVINO_RELEASE_TORCH controls when PyTorch core weights are freed.
+        # When enabled, we use a phased compilation:
+        #   1) Compile predictor (small, safe while PyTorch loaded).
+        #   2) Release PyTorch .layers early (they are dead once OV replaces them).
+        #   3) Compile main/stateful (heaviest phase; now without PyTorch weights).
+        # This avoids the startup overlap peak (~12 GiB) where both PyTorch and OV
+        # compiled-model working buffers reside simultaneously.
+        self._release_torch = os.getenv("OPENVINO_RELEASE_TORCH", "0").strip() == "1"
+        self._torch_cores_released = False
+
         graph_files = {
             "predictor_prefill": _files_for(pred_comp)["predictor_prefill"],
             "predictor_decode": _files_for(pred_comp)["predictor_decode"],
@@ -507,28 +518,76 @@ class OVTalkerRuntime:
                 f"[ov_talker] per-core precision: main={main_comp} predictor={pred_comp}",
                 flush=True,
             )
-        compiled = {}
-        for key, filename in graph_files.items():
-            path = self.model_dir / filename
-            if not path.is_file():
-                raise FileNotFoundError(f"missing IR graph for {key}: {path}")
-            compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
 
-        main_layers = talker.model.config.num_hidden_layers
-        pred_layers = talker.code_predictor.model.config.num_hidden_layers
-        if main_stateful_path is not None:
-            if not main_stateful_path.is_file():
-                raise FileNotFoundError(f"missing stateful main IR: {main_stateful_path}")
-            main_stateful_compiled = self.core.compile_model(
-                str(main_stateful_path), "CPU", core_config
-            )
-            self.main = _OVStatefulCore(main_stateful_compiled, main_layers)
-            self.main_comp = f"stateful-{main_comp}"
+        if self._release_torch:
+            # ---- Phased compilation: predictor -> release -> main ----
+            self._log_rss("before_all_compile")
+
+            # Phase 1: compile predictor (small; safe with PyTorch loaded)
+            compiled = {}
+            for key, filename in graph_files.items():
+                if key not in ("predictor_prefill", "predictor_decode"):
+                    continue
+                path = self.model_dir / filename
+                if not path.is_file():
+                    raise FileNotFoundError(f"missing IR graph for {key}: {path}")
+                compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
+            self._log_rss("after_predictor_compile")
+
+            # Phase 2: release PyTorch weights before main compile
+            self._release_torch_core_weights()
+            self._log_rss("after_release_before_main_compile")
+
+            # Phase 3: compile main/stateful (heaviest phase; now without PyTorch weights)
+            for key, filename in graph_files.items():
+                if key in ("predictor_prefill", "predictor_decode"):
+                    continue
+                path = self.model_dir / filename
+                if not path.is_file():
+                    raise FileNotFoundError(f"missing IR graph for {key}: {path}")
+                compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
+
+            main_layers = talker.model.config.num_hidden_layers
+            if main_stateful_path is not None:
+                if not main_stateful_path.is_file():
+                    raise FileNotFoundError(f"missing stateful main IR: {main_stateful_path}")
+                main_stateful_compiled = self.core.compile_model(
+                    str(main_stateful_path), "CPU", core_config
+                )
+                self.main = _OVStatefulCore(main_stateful_compiled, main_layers)
+                self.main_comp = f"stateful-{main_comp}"
+            else:
+                self.main = _OVCore(
+                    compiled["main_prefill"], compiled["main_decode"],
+                    main_layers, predictor=False,
+                )
+            self._log_rss("after_main_compile")
+
         else:
-            self.main = _OVCore(
-                compiled["main_prefill"], compiled["main_decode"],
-                main_layers, predictor=False,
-            )
+            # ---- Single-phase compilation (original behavior) ----
+            compiled = {}
+            for key, filename in graph_files.items():
+                path = self.model_dir / filename
+                if not path.is_file():
+                    raise FileNotFoundError(f"missing IR graph for {key}: {path}")
+                compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
+
+            main_layers = talker.model.config.num_hidden_layers
+            if main_stateful_path is not None:
+                if not main_stateful_path.is_file():
+                    raise FileNotFoundError(f"missing stateful main IR: {main_stateful_path}")
+                main_stateful_compiled = self.core.compile_model(
+                    str(main_stateful_path), "CPU", core_config
+                )
+                self.main = _OVStatefulCore(main_stateful_compiled, main_layers)
+                self.main_comp = f"stateful-{main_comp}"
+            else:
+                self.main = _OVCore(
+                    compiled["main_prefill"], compiled["main_decode"],
+                    main_layers, predictor=False,
+                )
+
+        pred_layers = talker.code_predictor.model.config.num_hidden_layers
         self.pred = _OVCore(
             compiled["predictor_prefill"], compiled["predictor_decode"], pred_layers, predictor=True
         )
@@ -555,14 +614,6 @@ class OVTalkerRuntime:
         self._orig_main_forward = None
         self._orig_pred_forward = None
         self._orig_st_decode = None
-
-        # Milestone 7 memory reduction: after the OV cores compile and their forwards are
-        # swapped, the PyTorch weights of the two inner transformer cores are dead (the
-        # M4 contract feeds inputs_embeds, so even the inner embed/norm are bypassed).
-        # Freeing them lets large models (1.7B) fit the serving memory budget. One-way:
-        # the eager PyTorch core forward can no longer run after release.
-        self._release_torch = os.getenv("OPENVINO_RELEASE_TORCH", "0").strip() == "1"
-        self._torch_cores_released = False
 
     def _default_compression(self) -> str:
         meta_path = self.model_dir / "metadata.json"
@@ -645,9 +696,20 @@ class OVTalkerRuntime:
             flush=True,
         )
 
-        if self._release_torch:
-            self._release_torch_core_weights()
         return self
+
+    @staticmethod
+    def _log_rss(label: str) -> None:
+        """Log current RSS from /proc/self/status (Linux only)."""
+        try:
+            with open("/proc/self/status", "r") as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        mib = int(line.split()[1])
+                        print(f"[ov_talker] RSS({label}): {mib} MiB", flush=True)
+                        return
+        except Exception:
+            pass
 
     def _release_torch_core_weights(self) -> None:
         """Free the PyTorch transformer-block weights of the two inner cores (Milestone 7).
