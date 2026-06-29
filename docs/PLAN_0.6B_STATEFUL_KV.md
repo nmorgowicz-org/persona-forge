@@ -1,4 +1,7 @@
-# Plan — apply the M9 stateful-KV cache to 0.6B (a *speed* lever)
+# Plan — apply the M9 levers to 0.6B (footprint reduction, speed bonus)
+
+> **Primary goal: reduce the 0.6B memory footprint.** The M9 levers that shrank 1.7B do the same for
+> 0.6B; a possible warm-latency win from removing per-frame K/V marshalling is a bonus, not the point.
 
 Branch: `feat/0.6b-stateful-kv`. Status: **framework only, nothing measured yet.** This doc is the
 self-contained brief; deeper design lives in `OPENVINO_IMPLEMENTATION.md` § "M5/M9.3 design" and every
@@ -6,28 +9,31 @@ self-contained brief; deeper design lives in `OPENVINO_IMPLEMENTATION.md` § "M5
 
 ## Why this, and why only this, carries over from 1.7B
 
-The 1.7B work bundled several levers. Most do **not** help 0.6B; one does. Be honest about which:
+The 1.7B work bundled several levers. For a **footprint** goal, three of them help 0.6B and two don't:
 
-| 1.7B lever | Helps 0.6B? | Verdict |
+| 1.7B lever | Footprint effect on 0.6B | Verdict |
 | --- | --- | --- |
-| **INT4 weights (g32)** | **No.** 0.6B can't absorb INT4 damage — INT8 is already at the quality edge (the comma artifact the user dislikes); INT4 would be worse. | Skip. |
-| **bf16 serving load** (`OPENVINO_TORCH_DTYPE`) | Marginal. Frees ~load-time memory, but 0.6B already fits 7G comfortably, so it buys nothing operationally. The code path is shared, so it's free if wanted. | Low value; optional. |
-| **Early weight release** (`OPENVINO_RELEASE_TORCH`) | Same — free, low value at 0.6B's memory headroom. | Optional. |
-| **Silence trim** (`SILENCE_TRIM*`) | Already size-agnostic; lives in `app_worker` and is on for 0.6B today. | Done already. |
-| **Stateful MAIN KV cache** | **Yes — as a latency lever.** Removes the per-step K/V marshalling (feed prior slices as IR inputs, `np.copyto` each present-K/V out into a numpy buffer, `torch.from_numpy` to rebuild a `DynamicCache`). | **Pursue.** |
-| **Stateful PREDICTOR KV cache** | **Yes — likely the bigger win.** The predictor runs ~15 forwards per audio frame, so the per-frame copy overhead concentrates here. | **Pursue.** |
+| **bf16 serving load** (`OPENVINO_TORCH_DTYPE=bfloat16`) | **Lowers the load-time peak** — skips the fp32 upcast of the bf16 checkpoint (the lever that cut 1.7B's lifetime peak 11.6→8.3 GiB). Already-built, shared code. | **Pursue.** |
+| **Early weight release** (`OPENVINO_RELEASE_TORCH=1`) | **Lowers steady idle** — frees each core's `.layers` after OV install. Already-built. | **Pursue.** |
+| **Stateful MAIN + PREDICTOR KV cache** | **Lowers generation peak** — moves K/V inside the compiled graph, so no torch K/V is allocated and the per-step `np.copyto`/`torch.from_numpy` buffers disappear (cut 1.7B generation peak ~2 GiB). *Also* a possible latency win (predictor runs ~15×/frame, where the copy overhead concentrates). | **Pursue.** |
+| **INT4 weights (g32)** | Would shrink weights further, but 0.6B can't absorb INT4 damage — INT8 is already at the quality edge (the comma artifact the user dislikes). | **Skip** (quality, not footprint). |
+| **Silence trim** (`SILENCE_TRIM*`) | Not a footprint lever; already on for 0.6B. | Done already. |
 
-**Bottom line:** for 0.6B the stateful KV cache is a *speed* experiment, not a memory one. The
-shipped 0.6B-INT8 is ~1.40×; the open question is whether removing per-frame K/V copy/marshalling on
-both transformer cores moves warm latency on the *default* model.
+**Bottom line:** the same three levers that shrank 1.7B (bf16 load, early release, stateful KV) shrink
+0.6B too — bf16 cuts the load peak, release cuts idle, stateful KV cuts the generation peak. The
+catch: **0.6B is already small, so the absolute savings are smaller in GiB** than on 1.7B, and we have
+**no measured 0.6B baseline yet** (step 0 below). The latency question rides along for free.
 
 ## Honest expectation (set this before measuring)
 
-- RTF here is **overhead-dominated** (test utterances ~2.6 s) and the **vocoder is ~29% of wall time
-  and is untouched** by this change. So the ceiling is the transformer-core share only.
-- The win is real but its **magnitude is uncertain** — could be a few percent or meaningful. The
-  predictor (15×/frame) is where to expect most of it. Treat this as a measured go/no-go, not a
-  guaranteed ship. **Gate: keep it only if warm median improves with zero audible/parity regression.**
+- **Footprint:** the savings are *directional certainties* (these levers provably reduced 1.7B) but the
+  **absolute GiB is unknown for 0.6B and will be smaller** than 1.7B's because 0.6B's weights, glue, and
+  K/V are all smaller to begin with. Step 0 measures the baseline so the win is quantified, not assumed.
+- **Latency:** RTF is **overhead-dominated** (~2.6 s utterances) and the **vocoder (~29% of wall time)
+  is untouched**, so the ceiling is the transformer-core share only. Magnitude uncertain — a few percent
+  or meaningful, most likely from the predictor (15×/frame). Treat as a bonus, measured not assumed.
+- **Gate:** ship the new config if footprint drops with **zero audible/parity regression**; a latency
+  win is upside, not a requirement.
 
 ## What to reuse vs. what is 0.6B-specific
 
@@ -58,6 +64,12 @@ both transformer cores moves warm latency on the *default* model.
 0.6B INT8 IR on the box:
 `/var/data/autopirate/qwen3-tts/openvino/qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1/`
 (INT4 graphs are named `*_int8.xml` by convention — for 0.6B these are genuinely INT8).
+
+0. **Measure the 0.6B baseline footprint first (so the win is quantified, not assumed).** Run the
+   explicit-cache 0.6B-INT8 serving config through `dump_audio.py --ov-only` and record lifetime peak,
+   trimmed idle, and per-phase `ru_maxrss` deltas — exactly the harness used for 1.7B M9. Without this
+   number, "reduced footprint" is unfalsifiable. Then measure again after each lever (bf16 → release →
+   stateful) so each lever's contribution is attributable, as was done for 1.7B.
 
 1. **Inspect the 0.6B decode graphs** to confirm layer count + input layout:
    - Count `*present` K/V outputs in `main_decode_int8.xml` and `predictor_decode_int8.xml`
@@ -98,11 +110,14 @@ both transformer cores moves warm latency on the *default* model.
 
 ## Decision gate
 
-- **Ship** the 0.6B stateful cores (make them the 0.6B default, opt-out via unset env) **only if** warm
-  median improves and parity + listening pass.
-- **If the latency win is within noise**, keep the explicit path as 0.6B's default and record the
-  negative result in `OPENVINO_RESULTS.md` (so this isn't re-litigated). Even a null result is worth
-  documenting — it tells us 0.6B latency is fully vocoder/compute-bound, not marshalling-bound.
+- **Ship** the new 0.6B config (bf16 + release as defaults; stateful cores opt-out via unset env)
+  **if footprint drops vs. the step-0 baseline with zero parity/listening regression.** A latency win
+  is upside, not required.
+- **Per-lever, not all-or-nothing:** bf16 + release are cheap, shared, and almost certainly net
+  positive — adopt them even if stateful KV turns out marginal. Keep stateful only if its
+  generation-peak saving is worth the added IR artifacts to maintain.
+- **Record the numbers in `OPENVINO_RESULTS.md`** either way. A small or null footprint saving is still
+  worth documenting — it tells us 0.6B is already near its floor and closes the question.
 
 ## Guardrails (carried from M9)
 
