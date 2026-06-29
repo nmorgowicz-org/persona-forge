@@ -1,0 +1,16 @@
+{
+  "backend": "pytorch",
+  "compression": "fp32-pytorch",
+  "median_s": 25.051,
+  "mean_s": 24.971,
+  "audio_median_s": 2.64,
+  "rtf": 9.489,
+  "iters": 4,
+  "times_s": [
+    21.987,
+    27.795,
+    26.563,
+    23.54
+  ],
+  "release_torch": false
+}

@@ -232,3 +232,97 @@ exactly where quality dies. Every mix used more memory than all-INT8. → A *sma
 **Run provenance.** Release commit `f224124c…`; image `exporter-v0.9.0` @
 `sha256:1cd60cc8…224fa`; model revision `5d83992436ea…`; OpenVINO 2026.2.1; NNCF 3.2.0; 6 threads.
 Protected containers (`litellm*`, `headroom-proxy`) stayed healthy throughout.
+
+## 1.7B track — first export + M7 memory characterization (2026-06-29)
+
+First 1.7B run on dockermisc1. IR exported with `exporter-v0.9.1`:
+- Transformer cores INT8_ASYM: `qwen-tts-0.1.1_1.7b_fd4b25438912_ov-2026.2.1`
+- Vocoder FP32 (separate dir): `qwen-tts-0.1.1_1.7b_fd4b25438912_ov-2026.2.1_vocoder`
+
+`dump_audio.py --ov-only --compression int8` with `OPENVINO_RELEASE_TORCH=1`, OV vocoder + buffer-KV,
+6 threads, `--memory 13g`. The 1.7B IR **runs and produces audio** (sample saved at
+`audio/m7-1.7b/ov_int8_1.7b.wav`). **Listening verdict (2026-06-29): 1.7B-INT8 is "very very clear"
+with obvious quality headroom** — i.e. room to trade quality for size/speed. This is the empirical
+green light for the M8 INT4 experiment: 1.7B can likely absorb INT4 weight damage that 0.6B could not.
+M7 weight-release freed **~5.54 GiB** of PyTorch decoder-block weights. RSS at three checkpoints:
+
+| Checkpoint | RSS | Note |
+|---|---:|---|
+| After PyTorch load (pre-OV-install) | **8.49 GiB** | load transient — full FP32 1.7B + OV vocoder |
+| After OV install + release (cold idle) | **5.47 GiB** | ✅ M7 works; under a 7 GiB / ~5.6 GiB target |
+| Per-request lifetime peak | **12.84 GiB** | ❌ generation peak (two utterances: 12.84 @ 5.68s, 12.76 @ 7.36s) |
+| Post-generation, trimmed idle | **12.43 GiB** | ❌ **does not release** after the request |
+
+**Two findings that reframe M7:**
+
+1. **The per-request peak is ~fixed, not utterance-length-driven.** 5.68s → 12.84 GiB and 7.36s →
+   12.76 GiB are within noise. So the ~12.8 GiB peak is dominated by *fixed* generation-time overhead
+   (OV compiled-model working buffers + a large one-shot allocation, likely the single-shot vocoder
+   decode), **not** KV-cache growth.
+2. **Generation memory is not reclaimed.** After `gc.collect()` + `malloc_trim(0)`, RSS stays at
+   **12.43 GiB** (vs 5.47 GiB cold idle). A long-running worker therefore balloons to ~12.4 GiB on its
+   first request and holds it. M7 release fixes *cold* idle only; it does **not** make 1.7B fit a 7 GiB
+   serving budget, because a single request needs ~12.8 GiB and retains ~12.4 GiB.
+
+### 1.7B INT4 weights (M8) — measured 2026-06-29
+
+Exported `..._int4g32` (NNCF `INT4_ASYM`, group_size 32, layers only; FP32 vocoder reused). Same
+`--ov-only` harness. Audio at `audio/m7-1.7b/ov_int4_1.7b.wav` (A/B vs the INT8 clip).
+
+| Metric | 1.7B INT8 | 1.7B INT4 (g32) | Δ |
+|---|---:|---:|---:|
+| Per-request peak | 12.84 GiB | **12.06 GiB** | −0.78 |
+| Post-generation | 12.84 GiB | 10.86 GiB | −1.98 |
+| Trimmed idle (retained) | 12.43 GiB | **10.43 GiB** | −2.00 |
+
+**Reading:** INT4 cuts *retained* memory ~2 GiB (and, unlike INT8, releases some after the request),
+but the **per-request peak barely moves (−0.78 GiB)**. Halving the layer weights shaving so little off
+the peak is direct evidence the peak is **generation-allocation-dominated** (OV working buffers + the
+single-shot vocoder decode), not weight-dominated. So INT4 is a worthwhile *retained-memory* win and a
+likely CPU-matmul speed win, but it does **not** by itself crack the 7 GiB budget — the generation
+peak (M9) is the real wall.
+
+**Quality A/B verdict (2026-06-29, listened):** 1.7B-INT4 has a "slight pausing difference at the
+comma but is 100% good" — i.e. the same mild duration-token artifact seen on 0.6B-INT8, and fully
+acceptable. So **INT4 is the preferred 1.7B weight precision**: equal-to-INT8 perceived quality at
+~2 GiB less retained memory (and likely faster memory-bound matmuls). The remaining blocker is the
+generation peak, not weights or quality.
+
+**Conclusion.** On this 15 GiB box (with `litellm*`/`headroom-proxy` resident), 1.7B at the planned
+"<7 GiB" budget is **not reachable by weight-release or INT4 alone**. The binding constraint moved from idle
+weights to generation-time allocation. Levers to pursue next (see implementation doc M8/M9): INT4
+weights (1.7B can absorb the damage; halves graph memory), chunked/streaming vocoder decode (caps the
+one-shot allocation), and a stateful OV cache (removes duplicated KV copies). Speed and the
+1.7B-vs-0.6B quality A/B are still unmeasured and gate whether any of this is worth building.
+
+**Run provenance.** Image `exporter-v0.9.1`; runtime files mounted from working tree (M7 patch not yet
+in a built image); model revision `fd4b25438912…`; OpenVINO 2026.2.1; NNCF 3.2.0; 6 threads;
+`--memory 13g`. Protected containers stayed healthy throughout.
+
+### 1.7B speed — M1.7B-A go/no-go gate, measured 2026-06-29
+
+Warm latency under production sampling (`do_sample=True`, fixed seed/iter), median of 4 iters after 1
+warm-up. Measured **one backend per process** (`bench_speed.py`) so the box never holds the PyTorch
+1.7B model and the OV graphs generating at once — the coupled greedy block in `test_ov_generation.py`
+would OOM at 1.7B on 15 GiB. OV runs used `OPENVINO_RELEASE_TORCH` + FP32 OV vocoder. JSONs saved
+beside each IR (`speed_{pytorch,ov_int8}_1.7b.json`, `speed_ov_int4_1.7b.json`).
+
+| Backend | Median compute | RTF (compute / audio) | Speedup vs PyTorch 1.7B |
+|---|---:|---:|---:|
+| PyTorch 1.7B FP32 | 25.05 s | 9.49 | 1.00× |
+| OV INT8 1.7B | 19.71 s | 7.70 | **1.27×** |
+| OV INT4 1.7B (g32) | 18.62 s | 7.05 | **1.35×** |
+
+**Reading.** INT4 is the faster *and* lighter 1.7B precision — **1.35×** over PyTorch, essentially the
+same CPU ceiling as 0.6B-INT8 (~1.40×). Neither 1.7B precision reaches Gate 5's 2× (expected: same
+two-core-swap limit + sequential predictor + non-accelerated vocoder decode as 0.6B). The decisive
+cross-model number: **1.7B-INT4 at 18.6 s median is nearly as fast in absolute terms as 0.6B-INT8
+(~17.4 s)** while sounding clearly better (user: 0.6B-INT8 has the comma artifact; 1.7B-INT8 "very very
+clear", 1.7B-INT4 "100% good"). Per-second-of-audio, 1.7B-INT4 (RTF 7.05) is ~20% slower than
+0.6B-INT8 (RTF 5.86). **Verdict: 1.7B-INT4 clears the speed gate as a quality upgrade at near-parity
+latency — the open blocker is memory (generation peak, M9), not speed or quality.** (Utterances are
+short, ~2.6 s, so RTF is overhead-dominated and absolute medians are the fairer cross-precision read.)
+
+**Run provenance.** Same as the memory runs above: image `exporter-v0.9.1`, runtime mounted from
+working tree, rev `fd4b25438912…`, OV 2026.2.1, NNCF 3.2.0, 6 threads, `--memory 13g`. Protected
+containers (`litellm*`/`headroom-proxy`) stayed up; prod `qwen3-tts` was already stopped.

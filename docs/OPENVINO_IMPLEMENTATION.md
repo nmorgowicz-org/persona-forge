@@ -1115,20 +1115,169 @@ certify it. On 8 vCPUs with a 7 GiB container it pushes both memory and latency,
 The first working backend may temporarily hold both PyTorch transformer weights and OpenVINO
 weights. Do not lower the Compose memory limit in that state.
 
-After parity:
+**Implemented (2026-06-29): `OPENVINO_RELEASE_TORCH=1`.** After `OVTalkerRuntime.install()` compiles
+the OpenVINO cores and swaps both inner-core forwards, `_release_torch_core_weights()` frees the
+PyTorch weights of each core's `.layers` (the decoder blocks) — which the OV graphs fully replace and
+which hold ~all of the parameters. The inner `embed_tokens` and `norm` are deliberately **kept**: the
+outer generation glue calls `talker.get_text_embeddings()` (== `talker.model.embed_tokens`) to build
+the `inputs_embeds` it feeds to OV, so freeing the embedding table breaks generation (`'weight' must
+be 2-D`). Implementation: replace each block param/buffer tensor with empty storage, `gc.collect()`,
+then `malloc_trim(0)` (glibc) to return arena pages to the OS. **One-way:** the eager PyTorch core
+forward cannot run afterward, so `uninstall()` deliberately leaves the OpenVINO forwards in place
+rather than restoring empty tensors. The codec/text embeddings, output heads, prompt logic, and speech
+tokenizer are untouched and keep working.
 
-1. Keep PyTorch text/codec embeddings, text projection, codebook output heads, prompt logic,
-   and ONNX speech components.
-2. Release only the PyTorch main-transformer and predictor-transformer layers after OpenVINO
-   models compile successfully.
-3. Verify that voice-prompt creation and every embedding lookup still work.
-4. Measure RSS after garbage collection and, on glibc, an optional `malloc_trim(0)`.
-5. If allocator retention remains high, add a thin runtime loader that selectively loads only
-   the PyTorch tensors still used at inference rather than loading and deleting the full model.
+**Why this is the lever for 1.7B:** the serving runtime (`app_worker.py`) is OV-only and never invokes
+the PyTorch core forward, so releasing those weights is pure win there. Set `OPENVINO_RELEASE_TORCH=1`
+in the 1.7B serving environment.
+
+**Validation.** The parity harness and the default `dump_audio.py` both run the PyTorch core (for the
+reference), so they cannot measure the released footprint. Use `dump_audio.py --ov-only` (with
+`OPENVINO_RELEASE_TORCH=1`): it skips the PyTorch reference, generates on OV only, and prints peak RSS —
+the serving-representative number. Acceptance: 1.7B peak RSS under ~5.6 GiB (≥20% headroom below the
+7 GiB limit), validated across cold start, warm inference, and a long utterance.
+
+If allocator retention stays high despite `malloc_trim`, the next step is a thin loader that loads only
+the PyTorch tensors still used at inference rather than loading the full model and freeing it.
 
 Reduce `mem_limit` only after measuring cold start, warm inference, a long utterance, and
 failure behavior under the proposed limit. Maintain at least 20% headroom above observed
 peak RSS.
+
+### M7 measured on 1.7B — release works for idle, not for serving (2026-06-29)
+
+First 1.7B characterization (full numbers in `OPENVINO_RESULTS.md` → "1.7B track"). The release
+freed ~5.54 GiB and **cold idle dropped to 5.47 GiB** — M7 does its job. But the measurement
+**falsified the original M7 plan as a sufficient condition for 1.7B at 7 GiB**:
+
+- **Per-request peak ≈ 12.8 GiB**, and it is **~independent of utterance length** (12.84 GiB @ 5.68 s
+  vs 12.76 GiB @ 7.36 s). The peak is fixed generation-time overhead (OV working buffers + a large
+  one-shot allocation, most likely the single-shot vocoder decode), not KV growth.
+- **Generation memory is not reclaimed**: after `gc` + `malloc_trim`, RSS stays at ~12.4 GiB, not the
+  5.47 GiB cold idle. A worker balloons on its first request and holds it.
+
+So the binding constraint moved from *idle weights* (solved) to *generation-time allocation*
+(unsolved). Weight-release alone cannot fit 1.7B in 7 GiB. The thin loader would only cut the 8.5 GiB
+*load* transient, not the 12.8 GiB *generation* peak — so it is **deprioritized** until the generation
+peak is reduced (see M9). The honest near-term target for 1.7B serving on this box is **~13 GiB per
+request**; whether that is acceptable (co-located with `litellm*`/`headroom-proxy` on a 15 GiB box) is
+a product decision that the speed and quality A/B should inform first.
+
+## Milestone 1.7B-A: Speed + quality A/B (the go/no-go gate)
+
+**Status — gate PASSED (2026-06-29).** Speed measured (`bench_speed.py`, one backend per process to
+dodge the 1.7B both-models OOM): PyTorch 1.7B 25.05 s median → **OV INT8 1.27×, OV INT4 1.35×** (RTF
+7.70 / 7.05). Same CPU ceiling as 0.6B-INT8 (~1.40×), neither hits 2×. Decisive cross-model read:
+**1.7B-INT4 at 18.6 s median ≈ 0.6B-INT8 (~17.4 s) in absolute latency** but audibly better
+(0.6B-INT8 comma artifact; 1.7B-INT4 "100% good"). → **1.7B-INT4 is the recommended quality upgrade;
+the only open blocker is the generation-peak memory (M9), not speed or quality.** Full table in
+`OPENVINO_RESULTS.md` → "1.7B speed". The four-clip quality quadrant below is superseded by the direct
+listens already done (0.6B-INT8, 1.7B-INT8, 1.7B-INT4); only the 0.6B-FP32 control remains optional.
+
+Original gate definition (for reference):
+We exported 1.7B straight to INT8 and went to memory, skipping the 1.7B equivalents of the M2 parity
+and M4 latency gates. Required runs (existing IR, no new code):
+
+1. **Latency + parity** — `test_ov_generation.py --mode all` (PyTorch 1.7B vs OV-INT8 1.7B), `--memory
+   13g`. Produces end-to-end speedup, RTF, and codebook match. We currently have **zero** 1.7B speed
+   data. Expect <1x relative to 0.6B in absolute latency; the question is the OV-vs-PyTorch ratio and
+   whether 1.7B is usable at all on this CPU.
+2. **Quality quadrant A/B** — same text + seed, four clips for listening:
+   `0.6B-INT8` (shipping), `1.7B-INT8`, `1.7B-PyTorch` (ceiling), and `0.6B-FP32` (no-quant control).
+   **The deciding question is not "is 1.7B-INT8 clean" but "is 1.7B-INT8 audibly better than
+   0.6B-INT8."** Include `0.6B-FP32` because if the only 0.6B complaint is the INT8 comma-pause, plain
+   0.6B-FP32 may be a better quality/speed trade than fighting 1.7B memory.
+
+If 1.7B-INT8 does not clearly beat 0.6B, **stop the 1.7B track here** and do not build M8/M9.
+
+## Milestone 8: INT4 weights for 1.7B (quality-headroom quantization)
+
+**Status — exported + validated (2026-06-29).** `INT4_ASYM` g32, layers only, dir `…_int4g32`.
+Listened: "slight comma pause but 100% good" — same mild artifact as 0.6B-INT8, acceptable. Memory:
+retained idle 12.43 → **10.43 GiB** (−2.0), but per-request peak only 12.84 → **12.06 GiB** (−0.78),
+confirming the peak is generation-bound (→ M9), not weight-bound. **INT4 is the preferred 1.7B
+precision.** Numbers in `OPENVINO_RESULTS.md` → "1.7B INT4 weights". Still to do: speed/RTF vs INT8
+(M1.7B-A), and the direct 1.7B-INT4 vs 0.6B-INT8 quality A/B.
+
+Hypothesis (confirmed): 1.7B has enough quality headroom to absorb INT4 weight damage that 0.6B could not, while
+INT4 ~halves OV graph memory and speeds up memory-bound CPU matmuls. **1.7B-INT4 may beat 0.6B-INT8 on
+quality while being smaller/faster** — an untested quadrant and the most promising new lever.
+
+- Scope INT4 to the transformer **layers** only (per the M7 finding that layers hold ~all the weight);
+  keep embeddings/heads/vocoder at their current precision.
+- Use NNCF `INT4_ASYM` with `group_size` (start 32, ratio 1.0); `INT4` is the one mode pinned NNCF
+  3.2.0 lets us tune (data-aware options remain rejected — see M6).
+- **Exporter code gap to fix first:** `export_openvino.py` writes every compressed graph as
+  `{name}_int8.xml` and the versioned dir name encodes neither compression mode nor precision, so an
+  INT4 export collides with the existing INT8 IR dir ("refusing to overwrite") and would mislabel
+  files. Add a precision tag to the output dir name (e.g. `…_int4`) and/or the graph filenames before
+  running INT4.
+- Gate: characterize like M3/M6 (codebook match, duration ratio, listening A/B vs 0.6B-INT8 and
+  1.7B-INT8) plus the M7 memory checkpoints.
+
+## Milestone 9: Generation-peak memory reduction (the real 1.7B wall)
+
+The ~12.8 GiB per-request peak — fixed, length-independent, non-reclaimed — is what actually blocks
+1.7B on a constrained budget. Attack it directly, highest-leverage first:
+
+1. **Profile the peak.** `tracemalloc` + OV memory introspection during a single request to attribute
+   the ~7 GiB that generation adds on top of the 5.5 GiB idle. Hypothesis: the single-shot
+   `speech_tokenizer.decode` over the whole utterance dominates. Measure before building.
+2. **Chunked / streaming vocoder decode.** The decoder already exposes `chunked_decode`, but the
+   runtime calls it once over the full code sequence. Decoding in bounded chunks caps that allocation
+   and, as a bonus, enables emitting first audio early (perceived-latency win). Architectural; likely
+   the biggest single memory lever.
+3. **Stateful OV cache (folds in former M5).** Convert the explicit/buffered KV path to an OpenVINO
+   stateful cache to remove the per-frame numpy↔torch K/V duplication (paid 15×/frame). Cuts
+   generation memory and per-frame overhead; matters more at 1.7B where KV is larger.
+4. Re-run the M7 checkpoints after each lever; success = per-request peak and post-request retained RSS
+   both under the chosen 1.7B budget with ≥20% headroom.
+
+### M5/M9.3 design — stateful OV KV cache (spec, not yet implemented)
+
+Goal: stop materializing K/V as graph I/O and as torch tensors. Today, even buffer-backed mode
+(`ov_talker_runtime._OVCore._run_buffered`) pays, **per layer per step**: feed prior-K/V slices as IR
+inputs, `np.copyto` each present-K/V IR output into a persistent numpy buffer, then `torch.from_numpy`
+those buffers to rebuild a `DynamicCache` for the outer glue. For 1.7B that's 28 layers × 2 tensors ×
+(copy-in + copy-out) on every one of the ~15 predictor steps per frame. Stateful cache moves K/V
+*inside* the compiled model as `ReadValue`/`Assign` state variables, so the runtime feeds only the base
+inputs and reads only the hidden state.
+
+**Export side (`export_openvino.py` + `ov_export_wrappers.py`):**
+- The two cores currently export as a **prefill + decode pair** with explicit `*past_kv` inputs and
+  `*present_kv` outputs (`CoreCacheWrapper.forward` → `(last_hidden_state, *_flatten_present(...))`).
+  Stateful cache is per-compiled-model, so collapse each core to **one dynamic graph** (seq axis
+  dynamic via `ov_model.reshape`, valid for both the prefill length and seq=1) — the prerequisite the
+  existing `# TODO(parity): mark dynamic seq/prior axes` already flags.
+- **Name the K/V tensors** so they can be paired: set stable `friendly_name`/tensor names on each K/V
+  input Parameter and its matching present Result (the wrappers produce them positionally today).
+- After `convert_model`, apply `openvino._offline_transformations.apply_make_stateful_transformation`
+  (or the `ov.pass.MakeStateful` mapping) with `{kv_input_name: present_output_name}` per layer. This
+  removes the K/V params/results and inserts a `Variable` per pair. Compress weights (INT8/INT4) and
+  save as before. Publish under a `…_stateful` dir tag so it coexists with the explicit IR during A/B.
+
+**Runtime side (`ov_talker_runtime.py`):**
+- One compiled model + one `infer_request` per core (drop the prefill/decode pair and the
+  `_kv_buf`/`_ensure_buffers` machinery).
+- On prefill (`prior == 0`) call `infer_request.reset_state()`; each step feed only
+  `[inputs_embeds, attention_mask, position_ids, cache_position, (generation_steps)]` and read output 0
+  (hidden). No K/V in/out.
+- The outer glue still expects `BaseModelOutputWithPast.past_key_values` and reads
+  `.get_seq_length()` for mask/position bookkeeping but **never reads K/V tensors** (those now live in
+  OV state). Return a **length-only cache shim** (tracks `prior += seq`, exposes `get_seq_length()` /
+  `get_mask_sizes()`), so no torch K/V is ever allocated — this is where the generation-memory and
+  per-frame-copy wins come from.
+
+**Validation & risks:**
+- Re-run the **M2 FP32 parity gate** on both stateful cores (SNR ≥ 60 dB) before trusting it — this is
+  the parity-critical change; do not skip.
+- Re-run M4 latency + M7 memory: expect lower per-frame overhead and lower generation memory.
+- Mask seam: keep `CoreCacheWrapper._build_causal_mask` building the 4D additive mask from the
+  runtime-supplied `attention_mask` of length `prior+seq` (prior tracked by the runtime), preserving
+  the transformers-4.57.3 static-`kv_length` workaround under the single dynamic graph.
+- State dims: the K/V `Variable` partial shape is `[batch, kv_heads, dyn_seq, head_dim]`; confirm
+  `MakeStateful` accepts the dynamic seq axis and that `Assign` concatenation matches `cache_position`.
+- Keep the explicit-IR path behind a flag for one release so stateful can be A/B'd against it.
 
 ## Service Integration
 
