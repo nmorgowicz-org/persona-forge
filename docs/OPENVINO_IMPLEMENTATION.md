@@ -1336,6 +1336,11 @@ mid-utterance pause; listening remains required before attributing that artifact
    | `predictor_prefill.pkl` | 394 KiB | `afc2475ca58b5c9920cbfb9a35b27055e9c30908859056100042b0cdc9d79c4e` |
    | `predictor_decode.pkl` | 16 MiB | `1e11ce43062ec710d360e8ec54602310785aacccc5b532a02715dd55cc52aed7` |
 
+   Capture command inside the pinned exporter image:
+   `python calibration_capture.py --out-dir /ov_output/calib_0.6b --max-prefill 48
+   --max-decode 48 --decode-stride 6`. The default corpus contains 24 texts, so main prefill
+   correctly stopped at 24 while the other buckets reached their 48-record caps.
+
 2. **Data-aware weight-only INT8 is unsupported.** The attempted first graph failed before NNCF
    backend dispatch with `ParameterNotSupportedError: INT8 modes do not support dataset,
    scale_estimation option(s)`. Inspection of pinned NNCF 3.2.0's
@@ -1350,6 +1355,9 @@ mid-utterance pause; listening remains required before attributing that artifact
    samples, while calibrated W8A8 scored only **7.320–7.397 dB**. W8A8 maximum absolute error was
    **24.65–25.95** versus **1.45–1.66** for weight-only INT8, and many cache outputs also regressed by
    more than 20 dB. This is too inaccurate to justify a four-graph export or listening run.
+   This result is a code-path and tensor-accuracy rejection only: no complete W8A8 generation,
+   sampled-quality benchmark, or listening test was run because the candidate failed the earlier
+   boundary gate.
 
    The rejected spike remains outside Git at
    `/var/data/autopirate/qwen3-tts/openvino/m6-calibrated/spike_main_prefill_w8a8.{xml,bin}` for audit:
