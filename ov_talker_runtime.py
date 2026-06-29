@@ -135,14 +135,15 @@ class _OVCore:
 
         self._dims_set = True
 
-    def _resolve_position_ids(self, position_ids, cache_position):
+    @staticmethod
+    def _resolve_position_ids(position_ids, cache_position, axis_checked):
         import torch
 
         if position_ids is None:
-            return cache_position.unsqueeze(0)
+            return cache_position.unsqueeze(0), axis_checked
         if position_ids.ndim == 3:
             # mRoPE [3, batch, seq]; all axes identical in the TTS audio path.
-            if not self._axis_checked:
+            if not axis_checked:
                 if not torch.equal(position_ids[0], position_ids[1]) or not torch.equal(
                     position_ids[0], position_ids[2]
                 ):
@@ -150,9 +151,9 @@ class _OVCore:
                         "mRoPE contract violated: the three position_ids axes differ; the "
                         "2-D-position IR cannot represent this. Re-export or update the adapter."
                     )
-                self._axis_checked = True
-            return position_ids[0]
-        return position_ids
+                axis_checked = True
+            return position_ids[0], axis_checked
+        return position_ids, axis_checked
 
     # ---------------------------------------------------------------------
     # Buffer-backed run (OPENVINO_BUFFER_KV=1)
@@ -167,7 +168,9 @@ class _OVCore:
         prior = past_key_values.get_seq_length() if past_key_values is not None else 0
         is_prefill = prior == 0
 
-        position_ids = self._resolve_position_ids(position_ids, cache_position)
+        position_ids, self._axis_checked = self._resolve_position_ids(
+            position_ids, cache_position, self._axis_checked
+        )
         if attention_mask is None:
             attention_mask = torch.ones(
                 inputs_embeds.shape[0], prior + seq, dtype=torch.long, device=inputs_embeds.device
@@ -274,7 +277,9 @@ class _OVCore:
         prior = past_key_values.get_seq_length() if past_key_values is not None else 0
         is_prefill = prior == 0
 
-        position_ids = self._resolve_position_ids(position_ids, cache_position)
+        position_ids, self._axis_checked = self._resolve_position_ids(
+            position_ids, cache_position, self._axis_checked
+        )
         if attention_mask is None:
             attention_mask = torch.ones(
                 inputs_embeds.shape[0], prior + seq, dtype=torch.long, device=inputs_embeds.device
@@ -404,8 +409,8 @@ class _OVStatefulCore:
         import torch
         from transformers.modeling_outputs import BaseModelOutputWithPast
 
-        if generation_steps is not None:
-            raise RuntimeError("generation_steps is unsupported by the main-only stateful spike")
+        # generation_steps is accepted for API compatibility but ignored by stateful main;
+        # the main core does not use it (only the predictor FCG glue uses it).
         seq = int(inputs_embeds.shape[1])
         prior = past_key_values.get_seq_length() if past_key_values is not None else 0
         is_prefill = prior == 0
@@ -421,7 +426,9 @@ class _OVStatefulCore:
                 f"stateful cache capacity exceeded: need {prior + seq}, max {self.capacity}"
             )
 
-        position_ids = _OVCore._resolve_position_ids(self, position_ids, cache_position)
+        position_ids, self._axis_checked = _OVCore._resolve_position_ids(
+            position_ids, cache_position, self._axis_checked
+        )
         if attention_mask is None:
             attention_mask = torch.ones(
                 inputs_embeds.shape[0], prior + seq, dtype=torch.long,
