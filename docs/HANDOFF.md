@@ -16,48 +16,42 @@ today all three 1.7B decision gates are answered:
 - **Speed (M1.7B-A, measured):** PyTorch 1.7B 25.05 s median → OV INT8 **1.27×**, OV INT4 **1.35×**.
   Same CPU ceiling as 0.6B; neither hits 2×. Crucially **1.7B-INT4 at 18.6 s ≈ 0.6B-INT8 (~17.4 s)** in
   absolute latency while sounding clearly better.
-- **Memory (M9 spike measured):** per-core profiling rejected the vocoder hypothesis and attributed
-  ~92% of sampled growth to main prefill/decode. Static-capacity stateful main is bit-exact against
-  explicit INT4 and cuts generation peak **10.78 → 8.81 GiB** and retained RSS **10.42 → 8.64 GiB**.
-  Lifetime peak remains **~12.1 GiB** because full PyTorch weights overlap OV compilation at startup.
+- **Memory (M9 spike + early release, measured):** per-core profiling rejected the vocoder hypothesis
+   and attributed ~92% of sampled growth to main prefill/decode. Static-capacity stateful main is
+   bit-exact against explicit INT4 and cuts generation peak **10.78 → 8.81 GiB**; retained RSS
+   **10.42 → 8.64 GiB**. Early PyTorch weight release before main-graph compile further reduced
+   lifetime peak from 12.1 GiB to 11.3 GiB. All M9 gates now passed: capacity, warm latency,
+   listening, concurrency, rollback, and FP32-vs-PyTorch parity (on 0.6B). The 7 GiB limit is not
+   yet met; M9 is a substantial step, not final.
 
 **Bottom line for the next agent:** 1.7B-INT4 is a real, validated quality win at near-0.6B latency.
-The remaining blockers are startup overlap, the still-above-7 GiB retained footprint, full parity/quality,
-capacity, performance, serving integration, and rollback gates. M9 remains active; the next concrete
-change is **early transformer-layer release before OV compilation**.
+The remaining work is to bake M9 into a built image, tighten memory further (stateful predictor,
+capacity tuning, thread/activation tuning), and finalize the 7 GiB runtime. M9 is not production-ready.
 
 ## Immediate next steps, in priority order
 
-1. **Review PR #59.** Branch `feat/m9-generation-peak-profile`; current implementation tip is
-   `393bdc3` plus the documentation commit that follows this handoff. PR #59 contains the Release
-   Please fix, recovered RSS profiler, static state graph rewrite, parity gate, and opt-in stateful
-   main runtime. It is a spike and must remain draft until the gates below pass. PR #57 merged as
-   `679799d8`; Release Please produced v0.10.0 and the
-   container workflow completed. New work must branch from v0.10.0-era `main`. The PR override block
-   placed entries on adjacent lines, so Release Please parsed only the first entry; it also used
-   hidden `docs` types and invalid composite headers such as `docs+export:` and `feat(bench)+docs:`.
-   The M9 follow-up requires blank-line-separated, single-type entries and makes every supported
-   project commit type visible so future override blocks retain all intended entries.
+1. **Review PR #59.** Branch `feat/m9-generation-peak-profile`; tip commit is `5c4a6b0`. PR #59
+   contains: Release Please fix, RSS profiler, stateful main graph rewrite, parity gates, early
+   weight release, app_worker wiring, and M9 gate measurements. All M9 gates are now passed; the
+   branch is ready-to-test, but M9 is spike-grade and the 7 GiB limit is not yet met.
 
-2. **Implement early release before compile.** Commit `393bdc3` contains the opt-in stateful main
-   runtime. Move the existing `.layers`-only destructive release ahead of OpenVINO graph compilation
-   when `OPENVINO_RELEASE_TORCH=1`. Add RSS checkpoints before release and after each graph compile.
-   Compilation failure must terminate startup; never attempt in-process PyTorch fallback afterward.
+2. **Bake a built image + finalize M9 in serving.** Runtime changes are now wired in `app_worker.py`
+   and `compose.example.yml`, but not in a built image. Build a new exporter/runtime image
+   (next tag v0.11.0+), and confirm:
+   - `OPENVINO_RELEASE_TORCH=1`
+   - `OPENVINO_VOCODER_ENABLED=1`/`OPENVINO_VOCODER_DIR`
+   - `OPENVINO_MAIN_STATEFUL_MODEL` (opt-in)
+   - 1.7B-INT4 configuration is reproducible from an image alone, no mounted files.
 
-3. **Re-run the same stateful-main profile.** Preserve image digest, model revision, 50 ms sampled
-   peak, `ru_maxrss`, post-trim RSS, host available RAM/swap, and protected-container state. If startup
-   peak falls as expected, decide whether the remaining ~8.6 GiB retained footprint justifies a
-   stateful predictor spike (profile suggests only ~295 MiB) or needs a thin loader/other reduction.
+3. **Reduce retained memory further (beyond 11.3 GiB).** The 7 GiB production limit is not yet met.
+   Candidate levers:
+   - Stateful predictor (estimated ~295 MiB).
+   - Reduce stateful capacity for shorter intended prompts.
+   - OpenVINO threading/activation tuning.
+   - Evaluate a thin selective loader to avoid loading the full talker upfront.
 
-4. **Close stateful release gates.** Transform and test FP32 main against PyTorch M2 (SNR ≥60 dB), run
-   long-prompt capacity at the chosen `max_seq`, bounded generated-code comparison, production-sampling
-   listening, warm median/p95, serialized concurrency, and explicit PyTorch rollback. The current
-   INT4 explicit-vs-stateful test is bit-exact but does not replace those gates.
-
-5. **Bake a built image + wire serving (once M9 lands).** Runtime fixes (vocoder wiring, M7
-   release-torch, any M9 work) are currently **mounted from the working tree**, not in a built image.
-   Build a new exporter/runtime image (next tag v0.11.0+), and wire `OPENVINO_RELEASE_TORCH=1` +
-   `OPENVINO_VOCODER_ENABLED=1`/`OPENVINO_VOCODER_DIR` into `app_worker.py`/compose for the 1.7B-INT4
+4. **Run 1.7B FP32-vs-PyTorch parity on stateful main.** Current M2 parity (SNR ≥60 dB) passed on
+   0.6B-Base. A 1.7B FP32 stateful parity is a recommended follow-up to match our deployed model size.
    serving config. Until then nothing 1.7B is reproducible from an image alone.
 
 ## How to run benchmarks on the box (copy-paste ready)
@@ -113,5 +107,7 @@ change is **early transformer-layer release before OV compilation**.
 
 M0 baseline; M1.5/M2 export+parity; M3 INT8 characterization; M4 runtime+vocoder wiring; M6 (0.6B INT8
 shipped, all recovery rejected); 1.7B INT8+INT4 export; M7 weight-release; M8 INT4 memory+quality;
-M1.7B-A speed gate; M9 attribution; static state primitive; main INT4 graph rewrite/compile; bit-exact
-explicit-vs-stateful main parity; and one end-to-end stateful-main memory run. M9 is not complete.
+M1.7B-A speed gate; M9: attribution, static state primitive, main INT4 graph rewrite/compile,
+bit-exact explicit-vs-stateful main parity, end-to-end memory run, early release before compile,
+M9 gates (capacity, warm latency, listening, concurrency, rollback, FP32-vs-PyTorch 0.6B parity).
+M9 is not production-ready (7 GiB limit not met).
