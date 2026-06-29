@@ -45,13 +45,18 @@ early-release change targeted. The next move is to measure that transient, not t
    generation phase (incl. vocoder) adds **+0**. The peak is the 1.7B fp32 checkpoint-load transient in
    `bench_common.load_model` (`from_pretrained(..., dtype=torch.float32)`, no `low_cpu_mem_usage`),
    ~3 GiB over the 8.5 GiB settled value — a one-time boot spike, not steady state (~8.9 GiB idle).
-   The vocoder lever (M9.3a) is closed for the right reason. **Levers, cheapest first:**
-   - **(a) `low_cpu_mem_usage=True`** in `load_model` — numerics-neutral, shard-by-shard load avoids the
-     double-resident state-dict. Validate in one `--ov-only` run; re-read `ru_maxrss` after model load.
-   - **(b) serving-only thin loader** — never materialize the core `.layers` at fp32 (they are released
-     immediately under `OPENVINO_RELEASE_TORCH`). Biggest win, more invasive. **Do not** change
-     `load_model`'s fp32 dtype — the exporter shares it and needs fp32 for conversion parity.
-   The boot spike (not the 7 GiB goal alone) is the real OOM risk on the shared 15 GiB box.
+   The vocoder lever (M9.3a) is closed for the right reason. **Status:**
+   - **(a) `low_cpu_mem_usage=True`: tried, no effect** (device_map already implied it). Kept as
+     best-practice.
+   - **(b) bf16 serving load: DONE and measured** — `OPENVINO_TORCH_DTYPE=bfloat16` (default float32,
+     serving-only; exporter stays fp32). Checkpoint is BF16, so loading native bf16 skips the upcast.
+     **Lifetime peak 11,593 → 8,326 MiB; after-load ru_maxrss 11,593 → 2,620; trimmed idle 8,884 →
+     8,093.** Two OV dtype seams fixed (`_to_numpy` bf16→fp32; forwards cast hidden back to model dtype),
+     both no-ops under fp32. See RESULTS "M9 bf16 serving load".
+   **Two things remain on bf16:** (i) a **listening A/B** (`audio/{fp32,bf16}_glue.wav`) — bf16 changes
+   the sampled stream (3.36 s vs 3.68 s); the OV cores are unchanged so only glue precision differs;
+   (ii) it is **~8.3 GiB, still above 7 GiB** — the new ceiling is generation `main_prefill` (+1915 MiB
+   exact), so the next lever is **stateful capacity 768 and/or prefill handling**, not the load path.
 
 2. **Review PR #59.** Branch `feat/m9-generation-peak-profile`; tip is the commit following this
    handoff. Contains: Release Please fix, RSS profiler (+ exact `ru_maxrss` attribution), stateful

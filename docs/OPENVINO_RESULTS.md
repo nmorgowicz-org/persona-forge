@@ -606,3 +606,30 @@ generation).
   `OPENVINO_RELEASE_TORCH` frees them immediately anyway. Do **not** change `load_model`'s fp32 dtype —
   the exporter shares it and needs fp32 for conversion parity; dtype/thin-loader work belongs in the
   serving path. The boot spike, not the 7 GiB goal alone, is the real OOM risk on the shared 15 GiB box.
+
+### M9 bf16 serving load — MEASURED (2026-06-29)
+
+The checkpoint is **BF16** (all 480 tensors, 3.86 GB blob); forcing `dtype=float32` is what creates the
+boot spike. `OPENVINO_TORCH_DTYPE=bfloat16` (default `float32`, serving-path only — the exporter stays
+fp32) loads in native bf16 and skips the upcast. Same 1.7B-INT4 stateful config, `--ov-only`:
+
+| Metric | fp32 (baseline) | **bf16** | Δ |
+|---|---:|---:|---:|
+| ru_maxrss after model load | 11,593 MiB | **2,620 MiB** | −8,973 |
+| Lifetime peak (`ru_maxrss`) | 11,593 MiB | **8,326 MiB** | −3,267 |
+| Generation sampled peak | 9,034 MiB | **8,327 MiB** | −707 |
+| Trimmed idle | 8,884 MiB | **8,093 MiB** | −791 |
+
+With the load transient gone, the exact per-phase `ru_maxrss` deltas are **no longer all +0**:
+`main_prefill=+1915, predictor_prefill=+158, predictor_decode=+70, main_decode=+62, vocoder=+12`. The
+lifetime peak has **moved into generation `main_prefill`** (OV main-core prefill activation). So bf16
+solves the boot spike and the new ceiling (~8.3 GiB) is the prefill working buffer — the next lever is
+capacity (768) and/or prefill handling, not the load path.
+
+**Two OV dtype seams** were required (both no-ops under fp32, gated by the env): `_to_numpy` upcasts
+bf16→fp32 before `.numpy()` (numpy has no bf16); the patched main/predictor forwards cast OV's fp32
+hidden back to the model dtype so the bf16 heads avoid a matmul mismatch. **Quality:** bf16 changes the
+sampled token stream (3.36 s vs 3.68 s audio for the same text+seed) — expected, but **requires a
+listening A/B** (`audio/{fp32,bf16}_glue.wav`) before adoption; the quantized OV cores are unchanged, so
+only the PyTorch glue precision differs. Still above the 7 GiB target, but the binding constraint is now
+a generation buffer, not a one-time boot spike.
