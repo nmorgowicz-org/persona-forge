@@ -46,6 +46,21 @@ class ExportOpenVINOTests(unittest.TestCase):
         ), self.assertRaises(SystemExit):
             parse_args()
 
+    def test_rejects_unsupported_int8_calibration_before_export(self):
+        with mock.patch(
+            "sys.argv",
+            [
+                "export_openvino.py",
+                "--output-dir",
+                "/tmp/ov",
+                "--compression",
+                "int8",
+                "--calibration",
+                "/tmp/calib",
+            ],
+        ), self.assertRaises(SystemExit):
+            parse_args()
+
     def test_sets_each_nested_attention_config_once(self):
         eager = SimpleNamespace(_attn_implementation="sdpa")
         untouched = SimpleNamespace()

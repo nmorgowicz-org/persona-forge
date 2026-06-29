@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import ast
 import json
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -23,6 +24,8 @@ def validate_python() -> None:
         ROOT / "serve.py",
         ROOT / "test_vocoder_parity.py",
         ROOT / "test_transformer_parity.py",
+        ROOT / "calibration_capture.py",
+        ROOT / "dump_audio.py",
         ROOT / "scripts" / "download_model.py",
     )
     for path in paths:
@@ -100,6 +103,8 @@ def validate_dockerfile() -> None:
         "test_vocoder_parity.py",
         "benchmark_vocoder.py",
         "test_transformer_parity.py",
+        "calibration_capture.py",
+        "dump_audio.py",
     }
     exporter_copy_lines = [
         line for line in dockerfile.splitlines()
@@ -120,10 +125,15 @@ def validate_dockerfile() -> None:
 
 def validate_artifact_policy() -> None:
     forbidden = {".onnx", ".safetensors", ".wav", ".mp3"}
+    tracked = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "-z"],
+        check=True,
+        capture_output=True,
+    ).stdout.split(b"\0")
     offenders = [
-        path.relative_to(ROOT)
-        for path in ROOT.rglob("*")
-        if path.is_file() and ".git" not in path.parts and path.suffix.lower() in forbidden
+        Path(raw.decode("utf-8"))
+        for raw in tracked
+        if raw and Path(raw.decode("utf-8")).suffix.lower() in forbidden
     ]
     if offenders:
         raise RuntimeError(f"Model or voice artifacts must not be committed: {offenders}")

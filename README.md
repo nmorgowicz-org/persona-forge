@@ -14,15 +14,17 @@ the expensive transformer work into OpenVINO.
 | PyTorch voice-cloning service | Working baseline |
 | Docker runtime/exporter targets | Working and CI-tested |
 | HTTP `/generate` API | Working |
-| OpenVINO core export | Planned |
-| FP32 OpenVINO parity | Planned |
-| INT8 compression | Planned |
+| OpenVINO core export | Implemented for both transformer cores and vocoder |
+| FP32 OpenVINO parity | Passed on `dockermisc1` |
+| INT8 compression | Weight-only INT8 implemented; selective quality recovery in progress |
+| Explicit-cache OpenVINO generation | Implemented and measured |
 | Stateful OpenVINO K/V cache | Planned |
 | Thin runtime memory loader | Planned |
 
-The current `app_worker.py` still performs model inference with PyTorch float32. Installing
-OpenVINO in the image does not by itself activate an OpenVINO backend. Progress and release
-gates are defined in the [implementation plan](docs/OPENVINO_IMPLEMENTATION.md).
+`app_worker.py` selects PyTorch or the explicit-cache OpenVINO backend with `TTS_BACKEND`.
+OpenVINO is not activated merely by installing the dependency: the worker also requires matching,
+validated IR and metadata. Progress and release gates are defined in the
+[implementation plan](docs/OPENVINO_IMPLEMENTATION.md).
 
 ## Goals
 
@@ -289,11 +291,11 @@ docker run --rm --init \
     --validate
 ```
 
-This quantization command is an implementation contract, not current functionality. The
-first PR provides the exporter dependencies and working pre-download command; Milestones 2
-and 3 add `export_openvino.py`, FP32 parity, and INT8 generation. Until then, use only the
-download command above. The completed exporter must exit nonzero without publishing an
-artifact when export, parity, or compression validation fails.
+The exporter now performs FP32 conversion and weight-only INT8 compression. Full-model parity
+and generation validation still run as separate target-host gates; `--validate` is not a one-shot
+replacement for those harnesses. Pinned NNCF 3.2.0 does not support calibration datasets or
+data-aware algorithms for INT8 `compress_weights`; do not pass `--calibration`. See Milestone 6
+in the implementation plan for the captured-data results and selective-INT8 next steps.
 
 ### Target OpenVINO additions
 
@@ -422,7 +424,8 @@ guaranteed memory. The intended lifecycle is:
 Export and release gates are run independently for 0.6B and 1.7B. Passing the 0.6B gates
 does not certify a 1.7B artifact.
 
-The exporter code and commands will land during the corresponding implementation milestones.
+The exporter and explicit-cache runtime are implemented. Stateful cache, selective INT8 quality
+recovery, final memory reduction, and the 1.7B validation remain open milestones.
 
 ## CI and repository automation
 
