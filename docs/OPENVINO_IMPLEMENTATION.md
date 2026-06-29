@@ -1115,16 +1115,30 @@ certify it. On 8 vCPUs with a 7 GiB container it pushes both memory and latency,
 The first working backend may temporarily hold both PyTorch transformer weights and OpenVINO
 weights. Do not lower the Compose memory limit in that state.
 
-After parity:
+**Implemented (2026-06-29): `OPENVINO_RELEASE_TORCH=1`.** After `OVTalkerRuntime.install()` compiles
+the OpenVINO cores and swaps both inner-core forwards, `_release_torch_core_weights()` frees the
+PyTorch weights of each core's `.layers` (the decoder blocks) — which the OV graphs fully replace and
+which hold ~all of the parameters. The inner `embed_tokens` and `norm` are deliberately **kept**: the
+outer generation glue calls `talker.get_text_embeddings()` (== `talker.model.embed_tokens`) to build
+the `inputs_embeds` it feeds to OV, so freeing the embedding table breaks generation (`'weight' must
+be 2-D`). Implementation: replace each block param/buffer tensor with empty storage, `gc.collect()`,
+then `malloc_trim(0)` (glibc) to return arena pages to the OS. **One-way:** the eager PyTorch core
+forward cannot run afterward, so `uninstall()` deliberately leaves the OpenVINO forwards in place
+rather than restoring empty tensors. The codec/text embeddings, output heads, prompt logic, and speech
+tokenizer are untouched and keep working.
 
-1. Keep PyTorch text/codec embeddings, text projection, codebook output heads, prompt logic,
-   and ONNX speech components.
-2. Release only the PyTorch main-transformer and predictor-transformer layers after OpenVINO
-   models compile successfully.
-3. Verify that voice-prompt creation and every embedding lookup still work.
-4. Measure RSS after garbage collection and, on glibc, an optional `malloc_trim(0)`.
-5. If allocator retention remains high, add a thin runtime loader that selectively loads only
-   the PyTorch tensors still used at inference rather than loading and deleting the full model.
+**Why this is the lever for 1.7B:** the serving runtime (`app_worker.py`) is OV-only and never invokes
+the PyTorch core forward, so releasing those weights is pure win there. Set `OPENVINO_RELEASE_TORCH=1`
+in the 1.7B serving environment.
+
+**Validation.** The parity harness and the default `dump_audio.py` both run the PyTorch core (for the
+reference), so they cannot measure the released footprint. Use `dump_audio.py --ov-only` (with
+`OPENVINO_RELEASE_TORCH=1`): it skips the PyTorch reference, generates on OV only, and prints peak RSS —
+the serving-representative number. Acceptance: 1.7B peak RSS under ~5.6 GiB (≥20% headroom below the
+7 GiB limit), validated across cold start, warm inference, and a long utterance.
+
+If allocator retention stays high despite `malloc_trim`, the next step is a thin loader that loads only
+the PyTorch tensors still used at inference rather than loading the full model and freeing it.
 
 Reduce `mem_limit` only after measuring cold start, warm inference, a long utterance, and
 failure behavior under the proposed limit. Maintain at least 20% headroom above observed
