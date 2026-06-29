@@ -37,8 +37,20 @@ class OpenVinoVocoderRuntime:
             self.enabled = False
             return
 
-        xml_path = Path(model_path) / "vocoder.xml"
-        if not xml_path.is_file():
+        # The exporter writes "vocoder_decoder.xml"; older docs/tooling referred to
+        # "vocoder.xml". Accept either so a name skew can't silently disable the IR.
+        xml_path = None
+        for candidate in ("vocoder.xml", "vocoder_decoder.xml"):
+            p = Path(model_path) / candidate
+            if p.is_file():
+                xml_path = p
+                break
+        if xml_path is None:
+            print(
+                f"[ov_vocoder] no vocoder IR (vocoder.xml / vocoder_decoder.xml) in "
+                f"{model_path}; falling back to PyTorch vocoder.",
+                flush=True,
+            )
             self.enabled = False
             return
 
@@ -60,6 +72,8 @@ class OpenVinoVocoderRuntime:
         meta_cfg = cfg.get("meta") or {}
         self._num_quantizers = meta_cfg.get("num_quantizers") or self._resolve_num_quantizers()
         self._total_upsample = meta_cfg.get("total_upsample") or self._resolve_total_upsample()
+        # The replaced speech_tokenizer.decode returns (wavs, sample_rate); match it.
+        self._sample_rate = self._resolve_sample_rate()
 
         # Validate input/output layers.
         self._validate_io()
@@ -79,6 +93,24 @@ class OpenVinoVocoderRuntime:
         dec = getattr(m, "decoder", None)
         cfg = getattr(dec, "config", None) if dec is not None else None
         return int(getattr(cfg, "num_quantizers", 16))
+
+    def _resolve_sample_rate(self) -> int:
+        """Output sample rate, to match speech_tokenizer.decode's (wavs, fs) return."""
+        st = self._speech_tokenizer
+        getter = getattr(st, "get_output_sample_rate", None)
+        if callable(getter):
+            try:
+                return int(getter())
+            except Exception:
+                pass
+        m = getattr(st, "model", None)
+        getter = getattr(m, "get_output_sample_rate", None)
+        if callable(getter):
+            try:
+                return int(getter())
+            except Exception:
+                pass
+        return 24000  # safe default
 
     def _resolve_total_upsample(self) -> int:
         """Extract total_upsample (samples per 12 Hz frame) from config."""
@@ -101,33 +133,26 @@ class OpenVinoVocoderRuntime:
         """Validate IR I/O shapes match expectations."""
         input_layer = self.compiled_model.input(0)
         output_layer = self.compiled_model.output(0)
-        self.input_name = input_layer.any_name
-        self.output_name = output_layer.any_name
+        # Bind by port object, not by name: convert_model exports can leave tensors
+        # unnamed, and `.any_name` raises in that case. The port works positionally.
+        self.input_port = input_layer
+        self.output_port = output_layer
 
-        in_shape = input_layer.get_shape()       # e.g. [1, 16, 325] or [1, 16, -1]
-        out_shape = output_layer.get_shape()     # e.g. [1, 1, -1]
-
-        # Input name sanity check (heuristic, not strict).
-        in_lower = self.input_name.lower()
-        has_codes_hint = any(tok in in_lower for tok in ("codes", "code", "input"))
-        if not has_codes_hint:
-            # Warn but don't fail; some exports use generic names.
-            print(
-                f"[ov_vocoder] input name {self.input_name!r} does not contain 'codes' hint; "
-                f"proceeding if shape is correct.",
-                flush=True,
-            )
+        # Use partial shapes: the IR has dynamic axes (frames / samples = -1), and
+        # get_shape() raises on a dynamic shape. PartialShape exposes rank safely.
+        in_shape = input_layer.get_partial_shape()   # e.g. [1, 16, ?]
+        out_shape = output_layer.get_partial_shape()  # e.g. [1, 1, ?]
 
         # Input must be rank 3: [batch, quantizers, frames].
-        if in_shape.rank != 3:
+        if in_shape.rank.get_length() != 3:
             raise RuntimeError(
-                f"vocoder IR input rank {in_shape.rank} != 3; cannot use: {in_shape}"
+                f"vocoder IR input rank != 3; cannot use: {in_shape}"
             )
 
         # Output must be rank 3: [batch, 1, samples].
-        if out_shape.rank != 3:
+        if out_shape.rank.get_length() != 3:
             raise RuntimeError(
-                f"vocoder IR output rank {out_shape.rank} != 3; cannot use: {out_shape}"
+                f"vocoder IR output rank != 3; cannot use: {out_shape}"
             )
 
         print(
@@ -148,8 +173,8 @@ class OpenVinoVocoderRuntime:
             seq_dim = 325
 
         codes = np.random.randint(0, 2048, (1, self._num_quantizers, seq_dim), dtype=np.int64)
-        self.req.infer({self.input_name: codes})
-        wav = self.req.get_tensor(self.output_name).data
+        self.req.infer([codes])
+        wav = self.req.get_output_tensor(0).data
         if wav.size == 0:
             raise RuntimeError("vocoder IR sanity check produced empty output")
 
@@ -164,29 +189,21 @@ class OpenVinoVocoderRuntime:
           - raw codes: a [frames, Q] tensor or numpy array (for direct calls).
 
         Returns:
-            For list-of-dict input: list of 1-D float32 waveforms as torch tensors (one per item).
-            For raw input: single 1-D float32 waveform as torch tensor.
+            For list-of-dict input: (list[np.ndarray] waveforms, sample_rate) — matching
+            qwen_tts speech_tokenizer.decode's (wavs, fs) contract exactly.
+            For raw input: single 1-D float32 numpy waveform.
         Raises:
             RuntimeError on failure so caller can fall back.
         """
-        import torch
-
         # Handle list-of-dict format used by speech_tokenizer.decode.
         if isinstance(inputs, (list, tuple)) and len(inputs) > 0:
             if isinstance(inputs[0], dict):
                 # speech_tokenizer.decode style: [{"audio_codes": tensor}, ...]
-                results = []
-                for item in inputs:
-                    c = item["audio_codes"]
-                    wav = self._decode_codes_tensor(c)
-                    results.append(
-                        torch.from_numpy(wav) if isinstance(wav, np.ndarray) else wav
-                    )
-                return results
+                results = [self._decode_codes_tensor(item["audio_codes"]) for item in inputs]
+                return results, self._sample_rate
 
-        # Fallback: treat inputs as raw codes tensor/array.
-        wav = self._decode_codes_tensor(inputs)
-        return torch.from_numpy(wav) if isinstance(wav, np.ndarray) else wav
+        # Fallback: treat inputs as raw codes tensor/array (direct/test calls).
+        return self._decode_codes_tensor(inputs)
 
     def _decode_codes_tensor(self, codes):
         """Core decode path for a single [frames, Q] codes tensor/array."""
@@ -293,10 +310,10 @@ class OpenVinoVocoderRuntime:
         Output: [1, 1, samples]; returns 1-D float32.
         """
         frames, q = codes_2d.shape
-        codes_input = codes_2d.T.reshape(1, q, frames)
+        codes_input = np.ascontiguousarray(codes_2d.T.reshape(1, q, frames))
 
-        self.req.infer({self.input_name: codes_input})
-        out = self.req.get_tensor(self.output_name)
+        self.req.infer([codes_input])
+        out = self.req.get_output_tensor(0)
         wav = out.data
         # Squeeze batch and channel dims.
         wav = wav.reshape(-1)

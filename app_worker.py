@@ -155,7 +155,12 @@ def load_model():
         from ov_talker_runtime import OVTalkerRuntime
 
         talker = model.model.talker
-        ov_runtime = OVTalkerRuntime(OV_MODEL_DIR, talker, ov_config=ov_config)
+        # speech_tokenizer is a sibling of talker on the parent model, not a child of it;
+        # pass it explicitly so the OV vocoder patch can find it.
+        ov_runtime = OVTalkerRuntime(
+            OV_MODEL_DIR, talker, ov_config=ov_config,
+            speech_tokenizer=model.model.speech_tokenizer,
+        )
         ov_runtime.install()
 
         vocoder_status = (

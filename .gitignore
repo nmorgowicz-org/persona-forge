@@ -1,3 +1,6 @@
+# macOS
+.DS_Store
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -219,6 +222,10 @@ tempCodeRunnerFile.py
 *.safetensors
 openvino_model*.bin
 openvino_model*.xml
+
+# Generated / benchmark audio (reference WAV lives on the box, never in-repo)
+*.wav
+/audio/
 
 # Marimo
 marimo/_static/

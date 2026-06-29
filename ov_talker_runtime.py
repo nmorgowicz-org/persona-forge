@@ -39,6 +39,7 @@ from real tensors via `DynamicCache.from_legacy_cache`, so lazy init never runs.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -367,7 +368,8 @@ class OVTalkerRuntime:
     declared compression when available.
     """
 
-    def __init__(self, model_dir, talker, ov_config=None, *, compression: str | None = None, core=None):
+    def __init__(self, model_dir, talker, ov_config=None, *, compression: str | None = None,
+                 core=None, speech_tokenizer=None):
         import openvino as ov
 
         from ov_runtime_config import get_ov_config
@@ -381,7 +383,28 @@ class OVTalkerRuntime:
         # "vocoder" is internal config; OpenVINO CPU plugin doesn't understand it.
         core_config = {k: v for k, v in self._ov_config.items() if k != "vocoder"}
 
-        graph_files = _INT8_GRAPH_FILES if self.compression == "int8" else _GRAPH_FILES
+        # Per-core precision override (diagnostic): localize INT8 quality loss by
+        # running one core INT8 and the other FP32. Defaults to the global compression
+        # so normal runs are unaffected.
+        main_comp = os.getenv("OV_MAIN_COMPRESSION", self.compression).lower()
+        pred_comp = os.getenv("OV_PREDICTOR_COMPRESSION", self.compression).lower()
+        self.main_comp = main_comp
+        self.pred_comp = pred_comp
+
+        def _files_for(comp: str) -> dict:
+            return _INT8_GRAPH_FILES if comp == "int8" else _GRAPH_FILES
+
+        graph_files = {
+            "main_prefill": _files_for(main_comp)["main_prefill"],
+            "main_decode": _files_for(main_comp)["main_decode"],
+            "predictor_prefill": _files_for(pred_comp)["predictor_prefill"],
+            "predictor_decode": _files_for(pred_comp)["predictor_decode"],
+        }
+        if main_comp != pred_comp:
+            print(
+                f"[ov_talker] per-core precision: main={main_comp} predictor={pred_comp}",
+                flush=True,
+            )
         compiled = {}
         for key, filename in graph_files.items():
             path = self.model_dir / filename
@@ -396,14 +419,24 @@ class OVTalkerRuntime:
             compiled["predictor_prefill"], compiled["predictor_decode"], pred_layers, predictor=True
         )
 
+        # Resolve speech_tokenizer. In qwen-tts it is a SIBLING of `talker` on the parent
+        # model (model.model.speech_tokenizer), not an attribute of `talker`, so the old
+        # getattr(talker, ...) always returned None and silently disabled the OV vocoder.
+        # Prefer the explicitly passed handle; fall back to the legacy lookup.
+        self._speech_tokenizer = speech_tokenizer or getattr(self._talker, "speech_tokenizer", None)
+
         # Vocoder runtime: loads vocoder IR and patches speech_tokenizer.decode.
         self.vocoder_runtime = None
         vocoder_cfg = (self._ov_config or {}).get("vocoder")
-        if vocoder_cfg:
+        if vocoder_cfg and self._speech_tokenizer is not None:
             from ov_vocoder_runtime import OpenVinoVocoderRuntime
-            speech_tokenizer = getattr(self._talker, "speech_tokenizer", None)
-            if speech_tokenizer is not None:
-                self.vocoder_runtime = OpenVinoVocoderRuntime(speech_tokenizer, vocoder_cfg)
+            self.vocoder_runtime = OpenVinoVocoderRuntime(self._speech_tokenizer, vocoder_cfg)
+        elif vocoder_cfg and vocoder_cfg.get("enabled"):
+            print(
+                "[ov_talker] vocoder enabled but speech_tokenizer not found; "
+                "using PyTorch vocoder.",
+                flush=True,
+            )
 
         self._orig_main_forward = None
         self._orig_pred_forward = None
@@ -458,7 +491,7 @@ class OVTalkerRuntime:
 
         # Patch speech_tokenizer.decode to use vocoder_runtime (if enabled).
         if self.vocoder_runtime and self.vocoder_runtime.enabled:
-            st = getattr(self._talker, "speech_tokenizer", None)
+            st = self._speech_tokenizer
             if st is not None:
                 self._orig_st_decode = st.decode
 
@@ -481,6 +514,14 @@ class OVTalkerRuntime:
 
                 st.decode = _ov_decode
 
+        # Loud backend provenance so a run self-documents what actually executed
+        # (silent PyTorch fallbacks previously hid that the vocoder never ran).
+        voc = "OV" if (self.vocoder_runtime and self.vocoder_runtime.enabled) else "PyTorch"
+        print(
+            f"[ov_talker] backends: main={self.main_comp} "
+            f"predictor={self.pred_comp} vocoder={voc}",
+            flush=True,
+        )
         return self
 
     def uninstall(self) -> None:
@@ -491,7 +532,8 @@ class OVTalkerRuntime:
             self._talker.code_predictor.model.forward = self._orig_pred_forward
             self._orig_pred_forward = None
         if self._orig_st_decode is not None:
-            st = getattr(self._talker, "speech_tokenizer", None)
+            # Use the resolved sibling handle, not getattr(talker, ...) which is always None.
+            st = self._speech_tokenizer
             if st is not None:
                 st.decode = self._orig_st_decode
             self._orig_st_decode = None
@@ -524,7 +566,7 @@ class OVTalkerRuntime:
                         flush=True,
                     )
         # PyTorch fallback.
-        st = getattr(self._talker, "speech_tokenizer", None)
+        st = self._speech_tokenizer
         if st is not None:
             return st.decode(codes)
         raise RuntimeError("No vocoder available (no speech_tokenizer).")
@@ -536,9 +578,11 @@ class OVTalkerRuntime:
         self.uninstall()
 
 
-def build_runtime(model_dir, talker, *, ov_config=None, compression=None, install=True) -> OVTalkerRuntime:
+def build_runtime(model_dir, talker, *, ov_config=None, compression=None, install=True,
+                  speech_tokenizer=None) -> OVTalkerRuntime:
     """Construct an OVTalkerRuntime and (by default) install it on the talker."""
-    runtime = OVTalkerRuntime(model_dir, talker, ov_config=ov_config, compression=compression)
+    runtime = OVTalkerRuntime(model_dir, talker, ov_config=ov_config, compression=compression,
+                              speech_tokenizer=speech_tokenizer)
     if install:
         runtime.install()
     return runtime

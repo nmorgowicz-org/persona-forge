@@ -1147,6 +1147,216 @@ This run confirms the harness and runtime are operational with OPENVINO_BUFFER_K
 - The 15 dB SNR acceptance criterion for INT8.
 - The logits-parity interpretation when INT8 is used.
 
+**M4 FP32 re-validation (2026-06-28, dockermisc1, runtime-v0.8.0, FP32, OPENVINO_BUFFER_KV=1, OPENVINO_VOCODER_ENABLED=1):**
+
+Configuration:
+
+- runtime-v0.8.0 (exporter-v0.8.0 image used as harness runner).
+- FP32 transformer cores (compression: fp32), vocoder FP32 IR enabled.
+- OPENVINO_BUFFER_KV=1.
+- 6 threads; seed 20260628; --mode all; --code-steps 96; --sampled-iters 5.
+
+Results (from ov_generation_report_v080_all_fp32_20260628T203102.json on dockermisc1):
+
+- Greedy:
+  - frames_compared: 196
+  - first_divergence: -1 (no divergence)
+  - waveform SNR: 220.83 dB
+  - speedup_median: 0.97x (PyTorch 22.45s → OV 23.24s; no speedup, as expected for FP32)
+  - peak RSS: ~12128 MiB (~11.8 GiB)
+- Sampled-quality:
+  - median_waveform_snr_db: 220.62
+  - mean_overall_codebook_match_rate: 0.9405
+  - min_per_codebook_match_rate: 0.8109
+  - mean_duration_ratio: 1.0244
+  - mean_energy_ratio: 1.002
+- Logits-parity:
+  - steps_compared: 37
+  - first_argmax_mismatch_frame: none (no argmax divergence within 37 frames)
+
+Interpretation:
+
+- This FP32 run confirms:
+  - The M4 runtime (FP32, with vocoder and buffer KV) is numerically correct and stable.
+  - The earlier INT8 issues (frame-160 divergence, very low SNR, logits-parity mismatch at frame 0) are INT8-specific, not a general OV-vs-PyTorch bug.
+- FP32 meets the conceptual quality expectations:
+  - Greedy: perfect agreement, very high SNR.
+  - Sampled-quality: extremely high SNR; codebook match, duration, and energy all excellent.
+  - Logits-parity: no argmax divergence.
+- FP32 does not provide speedup and remains expensive on memory; INT8 is still required for practical latency and memory on 0.6B/1.7B.
+
+**M4 INT8 re-validation (2026-06-28, dockermisc1, runtime-v0.8.0, INT8, OPENVINO_BUFFER_KV=1, OPENVINO_VOCODER_ENABLED=1):**
+
+Configuration:
+
+- runtime-v0.8.0 (exporter-v0.8.0 image used as harness runner).
+- INT8 transformer cores (compression: int8), vocoder FP32 IR enabled.
+- OPENVINO_BUFFER_KV=1.
+- 6 threads; seed 20260628; --mode all; --code-steps 96; --sampled-iters 5; --compression int8.
+
+Results (from ov_generation_report_v080_all_int8_20260628T204959.json on dockermisc1):
+
+- Greedy:
+  - frames_compared: 194
+  - first_divergence: 160
+  - frame_agreement: 0.825
+  - waveform SNR: -3.45 dB
+  - speedup_median: 1.40x (PyTorch 21.79s → OV 15.55s)
+  - peak RSS: ~9817 MiB (~9.6 GiB)
+- Sampled-quality:
+  - median_waveform_snr_db: -2.66
+  - mean_overall_codebook_match_rate: 0.8165
+  - min_per_codebook_match_rate: 0.7656
+  - mean_duration_ratio: 0.9642
+  - mean_energy_ratio: 1.0108
+- Logits-parity:
+  - steps_compared: 35
+  - first_argmax_mismatch_frame: 0
+  - NOTE: “Consistent with accumulated FP32 drift; sampled-audio quality is the correct ship gate.”
+
+Interpretation:
+
+- This INT8 run confirms the prior findings:
+  - INT8 causes:
+    - Early logits-parity divergence at frame 0.
+    - Greedy divergence at frame 160.
+    - Very low waveform SNR (~-2.66 dB).
+  - Despite this:
+    - Codebook match is solid (mean 0.8165, min 0.7656).
+    - Duration and energy are within spec.
+- The 15 dB median_waveform_snr_db gate is unrealistic for this INT8 configuration and will systematically fail.
+- For INT8 ship decisions, we should:
+  - Relax or redefine the waveform SNR criterion (e.g., ≥ -5 dB as a coarse guard, or treat it as secondary).
+  - Treat:
+    - Codebook match, duration/energy ratios, and listening tests as primary.
+    - Greedy and logits-parity as diagnostics, not as direct quality gates.
+- INT8 speedup (1.40x) and lower RSS (~9.6 GiB vs ~11.8 GiB for FP32) make it necessary for practical deployment, even though it is not bit-for-bit identical to PyTorch.
+
+**CORRECTION — the v0.8.0 runs above ran the PyTorch vocoder, not the OV vocoder (2026-06-28, runtime-v0.8.1):**
+
+Despite `OPENVINO_VOCODER_ENABLED=1`, the OpenVINO vocoder IR **never loaded** in the v0.8.0 runs.
+Four stacked bugs each silently fell through to the PyTorch `speech_tokenizer.decode`:
+
+1. **Filename** — `ov_vocoder_runtime` looked for `vocoder.xml`; the exporter writes `vocoder_decoder.xml`.
+2. **`speech_tokenizer` lookup** — resolved via `getattr(talker, "speech_tokenizer")`, but it is a *sibling*
+   of `talker` on the parent model (`model.model.speech_tokenizer`), so it was always `None` → the
+   vocoder runtime was never constructed. This was the decisive blocker.
+3. **IR I/O binding** — `_validate_io` used `.any_name` (the IR's tensors are unnamed) and `.get_shape()`
+   (the IR's axes are dynamic); both raise. Fixed to bind by port index and use `get_partial_shape()`.
+4. **Return contract** — the patched `decode` returned only the waveform list; the real contract is
+   `(wavs: list[np.ndarray], sample_rate)`. Fixed to return the tuple and resolve the sample rate from
+   `speech_tokenizer.get_output_sample_rate()`.
+
+So "wiring the vocoder added no speedup" was true, but for the wrong reason — it was never wired.
+To prevent recurrence, the runtime now prints a loud backend-provenance line at install
+(`[ov_talker] backends: main=… predictor=… vocoder=OV|PyTorch`), the report JSON carries a `backends`
+block, and the `_ov_decode` fallback warns once instead of silently swapping to PyTorch.
+
+**M4 INT8 re-validation with the OV vocoder GENUINELY active (2026-06-28, runtime-v0.8.1, INT8, vocoder OV IR, OPENVINO_BUFFER_KV=1, 6 threads, seed 20260628, --mode all, --code-steps 96, --sampled-iters 5):**
+
+Results (`vocON_verify_int8.json` beside the IR; box was sharing CPU with litellm, so absolute times are noisier than v0.8.0):
+
+- Greedy: frames 194, first_divergence 160, waveform SNR −3.5 dB
+- speedup_median: **1.35x** (PyTorch 23.48s → OV 17.35s), OV RTF 5.86, peak RSS ~10.3 GiB
+- Sampled-quality: median_waveform_snr_db −2.66, mean_overall_codebook_match_rate **0.8165**,
+  min_per_codebook_match_rate 0.7656, mean_duration_ratio 0.9642, mean_energy_ratio 1.0108
+
+Interpretation:
+
+- The sampled-quality numbers are **identical** to the v0.8.0 PyTorch-vocoder run (0.8165 / 0.7656 /
+  0.9642 / 1.0108 / −2.66). Expected: the codes come from the transformer cores, and the FP32 vocoder
+  IR (46.4 dB) renders them faithfully — swapping vocoder backend does not move code-quality metrics.
+- The speedup did **not** rise when the OV vocoder was genuinely enabled (1.40x → 1.35x, within
+  box-load variance). **The ~29% tokenizer-decode chunk does not accelerate under OpenVINO IR on this
+  CPU** — the PyTorch conv decoder is already efficient and per-chunk IR marshalling roughly cancels any
+  matmul gain. The vocoder is therefore quality-neutral and speed-neutral here; it is *not* the lever to 2x.
+- The remaining lever toward both speed and the mid-utterance INT8 artifact (a duration-token divergence
+  that a listener heard as a slight pause) is **data-aware INT8 calibration** (NNCF `scale_estimation`/AWQ)
+  on the two transformer cores, validated by codebook-match + duration_ratio + listening — not the vocoder.
+- The frame-0 logits-parity mismatch NOTE in the v0.8.0 INT8 block ("consistent with accumulated FP32
+  drift") is **wrong**: a frame-0 mismatch cannot be accumulated drift. It is the expected first-step
+  effect of quantized body matmuls perturbing the hidden state; sampled-audio quality remains the ship gate.
+
+## Milestone 6: Data-aware INT8 calibration (the real quality lever)
+
+**Motivation.** INT8 today uses weight-only `nncf.compress_weights(mode=INT8_ASYM)` with **no
+calibration data**. Each weight is quantized in isolation to minimize *its own* round-trip error,
+ignoring how that error propagates through activations. The result: quantized body matmuls perturb
+the hidden state enough to flip codebook-1 argmax at frame 0 (logits-parity), and over a full
+utterance the talker emits a divergent duration token — the "slight pause" a listener heard. The
+vocoder is faithful (FP32 IR, 46 dB) and is NOT involved; the codes themselves diverge.
+
+**Why this is the right lever (not vocoder, not head protection).** The per-core diagnostic
+(`OV_MAIN_COMPRESSION`/`OV_PREDICTOR_COMPRESSION`) showed the damage is *distributed* across both
+transformer cores — no clean single-core swap recovers quality. The M4 design already keeps every
+output head in FP32 PyTorch glue (only the inner transformer bodies are swapped to IR), so there is
+no head to protect. What remains is the body matmuls, and the principled fix for those is
+**data-aware weight calibration**, which preserves INT8 speed/memory while tightening the
+activation-level error.
+
+**NNCF API constraint (verified, NNCF 3.2.0).** `compress_weights`' data-aware algorithms
+(`scale_estimation`, `awq`, `gptq`, `lora_correction`) are **rejected for INT8 on the torch /
+torch-fx backends** (the code forces `dataset=None` for INT8 there). But we compress the
+`openvino.convert_model` output — the **OpenVINO backend** — and there INT8_ASYM is *not* in the
+rejected-mode list, so `mode=INT8_ASYM, dataset=<calib>, scale_estimation=True` is permitted and
+effective. This is the linchpin that makes calibrated INT8 (rather than a drop to INT4) possible.
+
+**Plan.**
+
+1. **Capture real calibration inputs** (`calibration_capture.py`). Load the FP32 model, monkeypatch
+   the two inner core forwards (`talker.model`, `talker.code_predictor.model`) to record their
+   inputs, run a handful of representative voice-clone generations, and bucket each call into one of
+   the four graphs by phase: `prior == 0` → prefill, `prior > 0` → decode. Serialize each record as
+   the wrapper's positional contract `[inputs_embeds, attention_mask, position_ids, cache_position,
+   (generation_steps if predictor), k0, v0, …]` so it can be replayed straight into the IR. Decode
+   records should span a range of `prior` lengths (the IR axes are dynamic). Target ~64–128 records
+   per graph (NNCF default `subset_size=128`).
+2. **Wire calibration into the export** (`export_openvino.py`). Add `--calibration <dir>`; when
+   present and the graph has captured inputs, `_compress` builds a per-graph `nncf.Dataset` and calls
+   `compress_weights(mode=INT8_ASYM, dataset=ds, scale_estimation=True, subset_size=…)`. The vocoder
+   stays FP32. Each of the four transformer graphs gets its **own** dataset (distinct input
+   signatures).
+3. **Re-export + re-validate** on dockermisc1 with the existing harness (`--mode all`): compare
+   calibrated-INT8 vs the weight-only INT8 baseline on logits-parity (does frame-0 / first-divergence
+   move later?), sampled `mean_overall_codebook_match_rate` and `mean_duration_ratio`, and a fresh
+   `dump_audio.py` A/B (does the pause go away?). Ship gate = codebook-match + duration_ratio +
+   listening; SNR stays a diagnostic.
+
+**Expected outcome / fallbacks.** Scale estimation is the lightest data-aware method and directly
+targets weight→activation error, so it is the first try. If it under-delivers, escalate to `awq`
+(also OV-INT8 compatible) and/or raise `subset_size`. Speed is expected to be unchanged (still INT8
+weights); the win is purely quality — fewer divergent duration codes.
+
+**Status (2026-06-28): code written + committed, NOT yet run.** `calibration_capture.py` (new) and
+the `export_openvino.py` `--calibration`/`--calibration-subset` wiring + `_compress(dataset=…,
+scale_estimation=True)` are implemented and syntax-clean. The capture hook mirrors
+`ov_talker_runtime._OVCore._run_non_buffered` exactly so records replay byte-identically into the IR.
+**Not executed** (capture run + calibrated export + re-validate are the remaining steps). The plain
+weight-only INT8 IR `qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1` and the FP32 vocoder IR
+(`..._vocoder`) already exist beside it on dockermisc1.
+
+**How to run (dockermisc1, exporter image `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-latest`,
+patched files staged in `/tmp/ov-patch/`, model cache + ref WAV mounts as in `scripts/run-m4-on-dockermisc1.sh`):**
+
+1. **Capture** (~few min; mount `calibration_capture.py`, `ov_talker_runtime.py`, model cache, ref WAV):
+   `python calibration_capture.py --out-dir /ov_output/calib_0.6b --max-prefill 48 --max-decode 48 --decode-stride 6`
+   → writes `main_prefill.pkl`, `main_decode.pkl`, `predictor_prefill.pkl`, `predictor_decode.pkl`.
+   Watch disk: `main_decode` records carry full KV (28 layers); if too large, lower `--max-decode`.
+2. **Calibrated export** (mount patched `export_openvino.py`, `ov_export_wrappers.py` if changed, the
+   calib dir, model cache; `--memory 13g`): `python export_openvino.py --output-dir /ov_output
+   --compression int8 --int8-mode int8_asym --calibration /ov_output/calib_0.6b --calibration-subset 128`
+   → new versioned IR dir; metadata `int8_config.scale_estimation=true`. Note: export refuses to
+   overwrite an existing IR dir, and this build has NO vocoder graph (export the vocoder separately /
+   reuse the existing `..._vocoder` dir; point the runtime's `OPENVINO_VOCODER_DIR` at it).
+3. **Re-validate** with the harness (same docker run as the v0.8.1 verify, `--mode all --compression
+   int8`, `OPENVINO_VOCODER_ENABLED=1`, vocoder dir = existing `..._vocoder`): compare to the
+   weight-only baseline — logits-parity `first_argmax_mismatch_frame` (did it move past 0?), greedy
+   `first_divergence` (past 160?), sampled `mean_overall_codebook_match_rate` (> 0.8165?) and
+   `mean_duration_ratio` (→ 1.0?). Then `dump_audio.py` and listen for the pause.
+
+Baseline to beat (weight-only INT8, OV vocoder on): speedup 1.35x, codebook match 0.8165,
+dur_ratio 0.9642, logits first-mismatch frame 0, greedy first_divergence 160.
+
 ## Milestone 5: Stateful KV Cache
 
 After the explicit-cache runtime passes parity and benchmarks, produce one dynamic stateful
