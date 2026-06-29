@@ -15,7 +15,7 @@ class RssSamplerTests(unittest.TestCase):
 
         report = sampler.report()
         self.assertEqual(report["generation_peak_rss_mib"], 180.0)
-        self.assertEqual(report["phase_peak_rss_mib"]["transformer"], 150.0)
+        self.assertEqual(report["phase_peak_rss_mib"]["generation_glue"], 150.0)
         self.assertEqual(report["phase_peak_rss_mib"]["vocoder"], 180.0)
 
     def test_rejects_non_positive_interval(self):

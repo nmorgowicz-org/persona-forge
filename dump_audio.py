@@ -56,7 +56,7 @@ class _RssSampler:
             raise ValueError("RSS sample interval must be positive")
         self.interval_seconds = interval_ms / 1000
         self._rss_reader = rss_reader
-        self._phase = "transformer"
+        self._phase = "generation_glue"
         self._phase_lock = threading.Lock()
         self._samples_lock = threading.Lock()
         self._stop = threading.Event()
@@ -210,8 +210,22 @@ def main() -> None:
     sampler = _RssSampler(args.rss_sample_ms) if args.rss_profile else None
     speech_tokenizer = model.model.speech_tokenizer
     decode_before_profile = speech_tokenizer.decode
+    core_runs_before_profile = []
 
     if sampler is not None:
+        for core_name, core in (("main", runtime.main), ("predictor", runtime.pred)):
+            run_before_profile = core.run
+
+            def profiled_core_run(*, _core_name=core_name, _run=run_before_profile, **kwargs):
+                past = kwargs.get("past_key_values")
+                prior = past.get_seq_length() if past is not None else 0
+                step = "prefill" if prior == 0 else "decode"
+                with sampler.phase(f"{_core_name}_{step}"):
+                    return _run(**kwargs)
+
+            core_runs_before_profile.append((core, run_before_profile))
+            core.run = profiled_core_run
+
         def profiled_decode(*decode_args, **decode_kwargs):
             with sampler.phase("vocoder"):
                 return decode_before_profile(*decode_args, **decode_kwargs)
@@ -235,6 +249,8 @@ def main() -> None:
     finally:
         if sampler is not None:
             speech_tokenizer.decode = decode_before_profile
+            for core, run_before_profile in core_runs_before_profile:
+                core.run = run_before_profile
         runtime.uninstall()
     _write_wav(args.out_dir / f"ov_{args.compression}.wav", ov_wavs[0], ov_sr)
 
