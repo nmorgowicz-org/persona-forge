@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.8.0...qwen3-tts-openvino-v0.9.0) (2026-06-29)
+
+
+### Features
+
+* **export:** data-aware INT8 calibration (scale_estimation) scaffold ([8739289](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/87392896d8db155ea541ad8cc70251926c4e429b))
+
+
+### Bug Fixes
+
+* **runtime:** resolve vocoder IR filename; add per-core precision + audio dump ([8739289](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/87392896d8db155ea541ad8cc70251926c4e429b))
+* **vocoder:** actually wire the OpenVINO vocoder + add backend provenance ([8739289](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/87392896d8db155ea541ad8cc70251926c4e429b))
+
 ## [0.8.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.7.1...qwen3-tts-openvino-v0.8.0) (2026-06-29)
 
 
