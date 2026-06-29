@@ -186,18 +186,32 @@ def validate_dockerfile() -> None:
 
 def validate_artifact_policy() -> None:
     forbidden = {".onnx", ".safetensors", ".wav", ".mp3"}
+    # Raw RSS / generation-profile timelines are large and machine-specific; only the
+    # curated numbers belong in docs. Match by name so legitimate JSON (renovate.json,
+    # release manifests, bench_results/*) stays allowed.
+    forbidden_name_res = (
+        re.compile(r"^m9_rss_.*\.json$"),
+        re.compile(r".*_rss_profile.*\.json$"),
+        re.compile(r"^main_stateful_parity\.json$"),
+    )
     tracked = subprocess.run(
         ["git", "-C", str(ROOT), "ls-files", "-z"],
         check=True,
         capture_output=True,
     ).stdout.split(b"\0")
-    offenders = [
-        Path(raw.decode("utf-8"))
-        for raw in tracked
-        if raw and Path(raw.decode("utf-8")).suffix.lower() in forbidden
-    ]
+    offenders = []
+    for raw in tracked:
+        if not raw:
+            continue
+        path = Path(raw.decode("utf-8"))
+        if path.suffix.lower() in forbidden:
+            offenders.append(path)
+        elif any(pattern.match(path.name) for pattern in forbidden_name_res):
+            offenders.append(path)
     if offenders:
-        raise RuntimeError(f"Model or voice artifacts must not be committed: {offenders}")
+        raise RuntimeError(
+            f"Model, voice, or raw-profile artifacts must not be committed: {offenders}"
+        )
 
 
 def main() -> None:
