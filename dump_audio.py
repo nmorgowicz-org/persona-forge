@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import threading
 import time
 import wave
@@ -26,6 +27,11 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 import numpy as np
+
+try:
+    import resource as _resource
+except ImportError:  # non-POSIX; ru_maxrss bracketing simply unavailable
+    _resource = None
 
 # Sets thread env before torch/openvino import (import side effect).
 import ov_runtime_config  # noqa: F401
@@ -44,6 +50,21 @@ def _vmrss_mib() -> float:
     return -1.0
 
 
+def _maxrss_mib() -> float:
+    """Process lifetime peak RSS in MiB from getrusage, or -1 if unavailable.
+
+    Unlike VmRSS interval sampling, ru_maxrss is a kernel-tracked monotonic
+    high-water mark: it catches sub-sample-interval transients (e.g. a
+    single-shot vocoder decode) that the 50 ms RSS sampler misses entirely.
+    On Linux ru_maxrss is in kB; on macOS/BSD it is in bytes.
+    """
+    if _resource is None:
+        return -1.0
+    raw = _resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss
+    divisor = 1024 * 1024 if sys.platform == "darwin" else 1024  # bytes vs kB -> MiB
+    return raw / divisor
+
+
 class _RssSampler:
     """Sample process RSS and label samples by generation phase."""
 
@@ -51,11 +72,13 @@ class _RssSampler:
         self,
         interval_ms: int,
         rss_reader: Callable[[], float] = _vmrss_mib,
+        maxrss_reader: Callable[[], float] = _maxrss_mib,
     ) -> None:
         if interval_ms <= 0:
             raise ValueError("RSS sample interval must be positive")
         self.interval_seconds = interval_ms / 1000
         self._rss_reader = rss_reader
+        self._maxrss_reader = maxrss_reader
         self._phase = "generation_glue"
         self._phase_lock = threading.Lock()
         self._samples_lock = threading.Lock()
@@ -63,6 +86,10 @@ class _RssSampler:
         self._thread: threading.Thread | None = None
         self._started_at = 0.0
         self.samples: list[dict[str, float | str]] = []
+        # Exact per-phase high-water-mark growth via ru_maxrss; catches transients
+        # the interval sampler misses. {phase: max ru_maxrss delta observed across
+        # any single entry/exit of that phase}.
+        self._phase_maxrss_delta: dict[str, float] = {}
 
     def __enter__(self) -> "_RssSampler":
         self._started_at = time.monotonic()
@@ -102,9 +129,20 @@ class _RssSampler:
             previous = self._phase
             self._phase = name
         self.snapshot()
+        maxrss_before = self._maxrss_reader()
         try:
             yield
         finally:
+            maxrss_after = self._maxrss_reader()
+            if maxrss_before >= 0 and maxrss_after >= 0:
+                # New high-water mark set while this phase was active. Because
+                # ru_maxrss is monotonic, a positive delta is an exact lower bound
+                # on the transient this phase allocated — independent of sampling.
+                delta = max(0.0, maxrss_after - maxrss_before)
+                with self._samples_lock:
+                    self._phase_maxrss_delta[name] = max(
+                        self._phase_maxrss_delta.get(name, 0.0), delta
+                    )
             self.snapshot()
             with self._phase_lock:
                 self._phase = previous
@@ -118,11 +156,18 @@ class _RssSampler:
             rss_mib = float(sample["rss_mib"])
             phase_peaks[phase] = max(phase_peaks.get(phase, 0.0), rss_mib)
         peak = max((float(sample["rss_mib"]) for sample in samples), default=-1.0)
+        with self._samples_lock:
+            phase_maxrss_delta = dict(self._phase_maxrss_delta)
         return {
             "sample_interval_ms": int(self.interval_seconds * 1000),
             "sample_count": len(samples),
             "generation_peak_rss_mib": peak,
             "phase_peak_rss_mib": phase_peaks,
+            # Exact (ru_maxrss-based) high-water-mark growth per phase. Compare with
+            # phase_peak_rss_mib: where this is large but the sampled peak is flat,
+            # the phase allocated a transient shorter than the sample interval.
+            "phase_maxrss_delta_mib": phase_maxrss_delta,
+            "lifetime_maxrss_mib": self._maxrss_reader(),
             "samples": samples,
         }
 
@@ -266,6 +311,19 @@ def main() -> None:
             f"[dump] wrote RSS profile {args.rss_profile} "
             f"(generation peak: {report['generation_peak_rss_mib']:.0f} MiB; "
             f"phase peaks: {report['phase_peak_rss_mib']})",
+            flush=True,
+        )
+        # The exact high-water-mark attribution is the point: it sees the transients
+        # the 50 ms sampled phase peaks cannot. Whichever phase shows the largest
+        # ru_maxrss delta is the real driver of the lifetime peak.
+        delta = report.get("phase_maxrss_delta_mib") or {}
+        ranked = ", ".join(
+            f"{phase}=+{value:.0f}"
+            for phase, value in sorted(delta.items(), key=lambda kv: kv[1], reverse=True)
+        )
+        print(
+            f"[dump] exact per-phase ru_maxrss growth (MiB): {ranked or 'unavailable'}; "
+            f"lifetime ru_maxrss: {report.get('lifetime_maxrss_mib', -1):.0f} MiB",
             flush=True,
         )
 
