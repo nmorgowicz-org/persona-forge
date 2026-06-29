@@ -78,6 +78,13 @@ only valid for bounded short requests. See `PLAN_0.6B_STATEFUL_KV.md` and the re
 
 **Milestone 1.5 — Vocoder decoder export: COMPLETE (2026-06-28)**
 
+**Streaming-vocoder follow-up: IN PROGRESS (2026-06-29).** The existing FP32 IR is reused; no graph
+export change is planned. `OpenVinoVocoderRuntime.iter_decode_chunks` now exposes the stock
+300-frame/25-frame-context decode boundary, and batch decode consumes the same iterator. Model-free tests
+prove exact concatenation parity. This is foundation only: the autoregressive talker still returns the
+complete code sequence before vocoder decode begins. CPU-headroom measurement and a generation-loop code
+producer must precede pipelining or a streaming HTTP endpoint. See `PLAN_STREAMING_VOCODER.md`.
+
 - FP32 IR exported and validated: SNR **46.4 dB** vs PyTorch (mean_abs 1.76e-4, p99.9 6.8e-3).
   The 1e-4 max_abs gate is not the right criterion for a GAN conv decoder where floating-point
   accumulation reordering produces single-sample outliers; SNR ≥ 40 dB is the accepted gate.

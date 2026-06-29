@@ -1,11 +1,41 @@
 # Plan — streaming / pipelined vocoder decode
 
-Branch: `feat/streaming-vocoder`. Status: **framework only, nothing built or measured.** Self-contained
+Branch: `feat/streaming-vocoder`. Status: **implementation started; chunk iterator foundation built,
+CPU headroom and live streaming not measured.** Self-contained
 brief for a fresh agent. Design context: `OPENVINO_IMPLEMENTATION.md` § "Milestone 1.5" (vocoder export)
 and § "Milestone 4" (runtime). Numbers: `OPENVINO_RESULTS.md`.
 
 > **v0.11.1 is already shipped.** This is a NEW, independent track — it must stand on its own and not
 > assume any in-flight integration work. Do not couple it to the 0.6B footprint branch.
+
+## Implementation progress / resume point
+
+Completed after rebasing onto released `main` commit `9bf0848`:
+
+- `OpenVinoVocoderRuntime.iter_decode_chunks(codes)` now exposes the existing 300-frame / 25-frame
+  left-context boundary as an iterator of cropped float32 PCM chunks.
+- `_decode_codes_tensor` consumes that iterator, so the existing batch API and waveform assembly use
+  the same path that future streaming transport will use.
+- Code normalization no longer imports Torch just to recognize a tensor; Torch-like inputs and numpy
+  inputs share the same `[frames, quantizers]` validation.
+- `tests/test_ov_vocoder_runtime.py` covers empty, single-chunk, exact-boundary, multi-chunk, chunk-size,
+  and wrong-quantizer cases. Concatenated iterator output equals batch output exactly in the deterministic
+  model-free harness.
+
+**Important limitation:** this does not yet improve TTFB. The current Qwen generation call returns audio
+codes only after the complete autoregressive sequence, then calls `speech_tokenizer.decode`. The next
+implementation step is to locate/instrument the talker generation loop and emit each completed 300-frame
+code block to a callback/queue without changing the existing terminal return structure. Do not add a
+`/generate/stream` endpoint until that producer seam can deliver codes before generation completes.
+
+Next actions, in order:
+
+1. Run Step 0 CPU utilization on both 0.6B and 1.7B; record whether overlap deliverable B is viable.
+2. Trace the exact point where each full 16-codebook audio frame is appended in the stock talker loop.
+3. Add an opt-in callback/iterator adapter there and feed completed 300-frame blocks into
+   `iter_decode_chunks`-equivalent incremental state. Preserve terminal batch output for all existing APIs.
+4. Only then add transport and TTFB timing. The 300-frame threshold means first audio cannot arrive
+   before roughly 24 seconds of generated audio unless a smaller vocoder chunk is separately parity-gated.
 
 ## Read this first: what is and isn't true about the vocoder
 
