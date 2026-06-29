@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.11.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.10.0...qwen3-tts-openvino-v0.11.0) (2026-06-29)
+
+
+### Features
+
+* **m9:** add exact ru_maxrss per-phase attribution to find the generation transient$'\n\n'feat(m9): localize lifetime peak to PyTorch model-load transient$'\n\n'feat(m9): bf16 serving load to eliminate the fp32 load-transient boot spike ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+* **m9:** add pytorch-vs-stateful parity mode to test_stateful_main_parity ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+* **m9:** add static stateful main cache spike with parity test ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+* **m9:** FP32-vs-PyTorch parity (0.6B) and per-mode max_abs tolerance ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+* **m9:** reduce 1.7B generation memory with stateful main cache and early PyTorch weight release ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+* **m9:** wire OPENVINO_MAIN_STATEFUL_MODEL and OPENVINO_RELEASE_TORCH in app_worker ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+
+
+### Bug Fixes
+
+* **ci:** install NumPy for dump-audio unit tests ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+* **m9:** clean up _OVStatefulCore delegation and accept generation_steps ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+* **m9:** fail-closed startup when OPENVINO_RELEASE_TORCH=1 ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+* **release:** preserve every commit override entry ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+
+
+### Performance Improvements
+
+* **m9:** release PyTorch weights before main-graph compile ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+
+
+### Documentation
+
+* **m9:** correct lifetime-peak root cause and refocus next steps on measuring it ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+* **m9:** listening check passed; update M9 gates status ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+* **m9:** record bf16 serving result (lifetime peak 11.6 to 8.3 GiB)$'\n\n'docs(m9): record bf16 quality-equivalent verdict; bf16 serving adopted$'\n\n'feat(serving): capacity-768 stateful main, silence trim, capacity-tuning docs ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+* **m9:** record M9 gate results (capacity, latency, concurrency, rollback) ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+
+
+### Miscellaneous Chores
+
+* **m9:** drop committed raw RSS profile and reject raw profiles in repo guard ([08415a5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/08415a58c87460db01cf06f7d30b9069feec33cd))
+
 ## [0.10.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.9.1...qwen3-tts-openvino-v0.10.0) (2026-06-29)
 
 
