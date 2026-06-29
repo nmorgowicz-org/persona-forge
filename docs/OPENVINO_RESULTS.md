@@ -264,8 +264,32 @@ M7 weight-release freed **~5.54 GiB** of PyTorch decoder-block weights. RSS at t
    first request and holds it. M7 release fixes *cold* idle only; it does **not** make 1.7B fit a 7 GiB
    serving budget, because a single request needs ~12.8 GiB and retains ~12.4 GiB.
 
+### 1.7B INT4 weights (M8) — measured 2026-06-29
+
+Exported `..._int4g32` (NNCF `INT4_ASYM`, group_size 32, layers only; FP32 vocoder reused). Same
+`--ov-only` harness. Audio at `audio/m7-1.7b/ov_int4_1.7b.wav` (A/B vs the INT8 clip).
+
+| Metric | 1.7B INT8 | 1.7B INT4 (g32) | Δ |
+|---|---:|---:|---:|
+| Per-request peak | 12.84 GiB | **12.06 GiB** | −0.78 |
+| Post-generation | 12.84 GiB | 10.86 GiB | −1.98 |
+| Trimmed idle (retained) | 12.43 GiB | **10.43 GiB** | −2.00 |
+
+**Reading:** INT4 cuts *retained* memory ~2 GiB (and, unlike INT8, releases some after the request),
+but the **per-request peak barely moves (−0.78 GiB)**. Halving the layer weights shaving so little off
+the peak is direct evidence the peak is **generation-allocation-dominated** (OV working buffers + the
+single-shot vocoder decode), not weight-dominated. So INT4 is a worthwhile *retained-memory* win and a
+likely CPU-matmul speed win, but it does **not** by itself crack the 7 GiB budget — the generation
+peak (M9) is the real wall.
+
+**Quality A/B verdict (2026-06-29, listened):** 1.7B-INT4 has a "slight pausing difference at the
+comma but is 100% good" — i.e. the same mild duration-token artifact seen on 0.6B-INT8, and fully
+acceptable. So **INT4 is the preferred 1.7B weight precision**: equal-to-INT8 perceived quality at
+~2 GiB less retained memory (and likely faster memory-bound matmuls). The remaining blocker is the
+generation peak, not weights or quality.
+
 **Conclusion.** On this 15 GiB box (with `litellm*`/`headroom-proxy` resident), 1.7B at the planned
-"<7 GiB" budget is **not reachable by weight-release alone**. The binding constraint moved from idle
+"<7 GiB" budget is **not reachable by weight-release or INT4 alone**. The binding constraint moved from idle
 weights to generation-time allocation. Levers to pursue next (see implementation doc M8/M9): INT4
 weights (1.7B can absorb the damage; halves graph memory), chunked/streaming vocoder decode (caps the
 one-shot allocation), and a stateful OV cache (removes duplicated KV copies). Speed and the

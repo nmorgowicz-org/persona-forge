@@ -1183,7 +1183,14 @@ If 1.7B-INT8 does not clearly beat 0.6B, **stop the 1.7B track here** and do not
 
 ## Milestone 8: INT4 weights for 1.7B (quality-headroom quantization)
 
-Hypothesis: 1.7B has enough quality headroom to absorb INT4 weight damage that 0.6B could not, while
+**Status — exported + validated (2026-06-29).** `INT4_ASYM` g32, layers only, dir `…_int4g32`.
+Listened: "slight comma pause but 100% good" — same mild artifact as 0.6B-INT8, acceptable. Memory:
+retained idle 12.43 → **10.43 GiB** (−2.0), but per-request peak only 12.84 → **12.06 GiB** (−0.78),
+confirming the peak is generation-bound (→ M9), not weight-bound. **INT4 is the preferred 1.7B
+precision.** Numbers in `OPENVINO_RESULTS.md` → "1.7B INT4 weights". Still to do: speed/RTF vs INT8
+(M1.7B-A), and the direct 1.7B-INT4 vs 0.6B-INT8 quality A/B.
+
+Hypothesis (confirmed): 1.7B has enough quality headroom to absorb INT4 weight damage that 0.6B could not, while
 INT4 ~halves OV graph memory and speeds up memory-bound CPU matmuls. **1.7B-INT4 may beat 0.6B-INT8 on
 quality while being smaller/faster** — an untested quadrant and the most promising new lever.
 
@@ -1216,6 +1223,52 @@ The ~12.8 GiB per-request peak — fixed, length-independent, non-reclaimed — 
    generation memory and per-frame overhead; matters more at 1.7B where KV is larger.
 4. Re-run the M7 checkpoints after each lever; success = per-request peak and post-request retained RSS
    both under the chosen 1.7B budget with ≥20% headroom.
+
+### M5/M9.3 design — stateful OV KV cache (spec, not yet implemented)
+
+Goal: stop materializing K/V as graph I/O and as torch tensors. Today, even buffer-backed mode
+(`ov_talker_runtime._OVCore._run_buffered`) pays, **per layer per step**: feed prior-K/V slices as IR
+inputs, `np.copyto` each present-K/V IR output into a persistent numpy buffer, then `torch.from_numpy`
+those buffers to rebuild a `DynamicCache` for the outer glue. For 1.7B that's 28 layers × 2 tensors ×
+(copy-in + copy-out) on every one of the ~15 predictor steps per frame. Stateful cache moves K/V
+*inside* the compiled model as `ReadValue`/`Assign` state variables, so the runtime feeds only the base
+inputs and reads only the hidden state.
+
+**Export side (`export_openvino.py` + `ov_export_wrappers.py`):**
+- The two cores currently export as a **prefill + decode pair** with explicit `*past_kv` inputs and
+  `*present_kv` outputs (`CoreCacheWrapper.forward` → `(last_hidden_state, *_flatten_present(...))`).
+  Stateful cache is per-compiled-model, so collapse each core to **one dynamic graph** (seq axis
+  dynamic via `ov_model.reshape`, valid for both the prefill length and seq=1) — the prerequisite the
+  existing `# TODO(parity): mark dynamic seq/prior axes` already flags.
+- **Name the K/V tensors** so they can be paired: set stable `friendly_name`/tensor names on each K/V
+  input Parameter and its matching present Result (the wrappers produce them positionally today).
+- After `convert_model`, apply `openvino._offline_transformations.apply_make_stateful_transformation`
+  (or the `ov.pass.MakeStateful` mapping) with `{kv_input_name: present_output_name}` per layer. This
+  removes the K/V params/results and inserts a `Variable` per pair. Compress weights (INT8/INT4) and
+  save as before. Publish under a `…_stateful` dir tag so it coexists with the explicit IR during A/B.
+
+**Runtime side (`ov_talker_runtime.py`):**
+- One compiled model + one `infer_request` per core (drop the prefill/decode pair and the
+  `_kv_buf`/`_ensure_buffers` machinery).
+- On prefill (`prior == 0`) call `infer_request.reset_state()`; each step feed only
+  `[inputs_embeds, attention_mask, position_ids, cache_position, (generation_steps)]` and read output 0
+  (hidden). No K/V in/out.
+- The outer glue still expects `BaseModelOutputWithPast.past_key_values` and reads
+  `.get_seq_length()` for mask/position bookkeeping but **never reads K/V tensors** (those now live in
+  OV state). Return a **length-only cache shim** (tracks `prior += seq`, exposes `get_seq_length()` /
+  `get_mask_sizes()`), so no torch K/V is ever allocated — this is where the generation-memory and
+  per-frame-copy wins come from.
+
+**Validation & risks:**
+- Re-run the **M2 FP32 parity gate** on both stateful cores (SNR ≥ 60 dB) before trusting it — this is
+  the parity-critical change; do not skip.
+- Re-run M4 latency + M7 memory: expect lower per-frame overhead and lower generation memory.
+- Mask seam: keep `CoreCacheWrapper._build_causal_mask` building the 4D additive mask from the
+  runtime-supplied `attention_mask` of length `prior+seq` (prior tracked by the runtime), preserving
+  the transformers-4.57.3 static-`kv_length` workaround under the single dynamic graph.
+- State dims: the K/V `Variable` partial shape is `[batch, kv_heads, dyn_seq, head_dim]`; confirm
+  `MakeStateful` accepts the dynamic seq axis and that `Assign` concatenation matches `cache_position`.
+- Keep the explicit-IR path behind a flag for one release so stateful can be A/B'd against it.
 
 ## Service Integration
 
