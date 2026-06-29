@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.7.1...qwen3-tts-openvino-v0.8.0) (2026-06-29)
+
+
+### Features
+
+* **runtime:** add run_bench.sh for simpler harness invocation ([0e3d13c](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/0e3d13c180c5e308fd84302823f028fc6f6bc8ad))
+* **runtime:** improve test_ov_generation.py reporting and output path safety ([0e3d13c](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/0e3d13c180c5e308fd84302823f028fc6f6bc8ad))
+
+
+### Bug Fixes
+
+* **runtime:** include ov_vocoder_runtime.py in runtime image ([0e3d13c](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/0e3d13c180c5e308fd84302823f028fc6f6bc8ad))
+
 ## [0.7.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.7.0...qwen3-tts-openvino-v0.7.1) (2026-06-28)
 
 
