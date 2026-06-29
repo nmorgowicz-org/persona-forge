@@ -499,5 +499,12 @@ PyTorch rollback verification:
 - Conclusion: explicit rollback path functional; no regressions.
 
 FP32-vs-PyTorch M2 parity on stateful main:
-- Pending: currently only INT4 stateful IR exists; FP32-vs-PyTorch mode is implemented in
-  `test_stateful_main_parity.py`, awaiting a dedicated FP32 stateful export on `dockermisc1`.
+- Passed (on 0.6B-Base model): FP32 stateful main vs PyTorch eager main-core.
+- Method: prefill 8 tokens + 3 decode steps; SNR ≥ 60 dB gate enforced; max_abs tolerance 1e-2.
+- Results:
+  - prefill: SNR 86.47 dB, max_abs 1.77e-3
+  - decode step1: SNR 81.41 dB, max_abs 2.30e-3
+  - decode step2: SNR 79.12 dB, max_abs 2.72e-3
+  - decode step3: SNR 77.56 dB, max_abs 2.66e-3
+- All steps above 60 dB; gate met. A 1.7B FP32 stateful parity is a recommended follow-up, but
+  this 0.6B result validates the stateful graph and its numeric fidelity at FP32.

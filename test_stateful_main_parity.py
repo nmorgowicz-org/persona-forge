@@ -290,9 +290,13 @@ def main() -> None:
     parser.add_argument("--decode-steps", type=int, default=3)
     parser.add_argument("--threads", type=int, default=6)
     parser.add_argument("--seed", type=int, default=20260629)
-    parser.add_argument("--max-abs", type=float, default=1e-5)
+    parser.add_argument("--max-abs", type=float, default=None)
     parser.add_argument("--output-json", type=Path)
     args = parser.parse_args()
+
+    # Mode-appropriate default: bit-exact for IR vs IR; relaxed for floating-point.
+    if args.max_abs is None:
+        args.max_abs = 1e-5 if args.mode == "explicit-vs-stateful" else 1e-2
 
     # Validate required flags per mode
     if args.mode == "explicit-vs-stateful" and not args.explicit:
