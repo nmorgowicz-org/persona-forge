@@ -545,30 +545,41 @@ class OVTalkerRuntime:
             self._release_torch_core_weights()
             self._log_rss("after_release_before_main_compile")
 
-            # Phase 3: compile main/stateful (heaviest phase; now without PyTorch weights)
-            for key, filename in graph_files.items():
-                if key in ("predictor_prefill", "predictor_decode"):
-                    continue
-                path = self.model_dir / filename
-                if not path.is_file():
-                    raise FileNotFoundError(f"missing IR graph for {key}: {path}")
-                compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
+            # Phase 3: compile main/stateful (heaviest phase; now without PyTorch weights).
+            # After _release_torch_core_weights above, the PyTorch core forward cannot run;
+            # if compilation fails here, startup must abort (no in-process fallback).
+            try:
+                for key, filename in graph_files.items():
+                    if key in ("predictor_prefill", "predictor_decode"):
+                        continue
+                    path = self.model_dir / filename
+                    if not path.is_file():
+                        raise FileNotFoundError(f"missing IR graph for {key}: {path}")
+                    compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
 
-            main_layers = talker.model.config.num_hidden_layers
-            if main_stateful_path is not None:
-                if not main_stateful_path.is_file():
-                    raise FileNotFoundError(f"missing stateful main IR: {main_stateful_path}")
-                main_stateful_compiled = self.core.compile_model(
-                    str(main_stateful_path), "CPU", core_config
+                main_layers = talker.model.config.num_hidden_layers
+                if main_stateful_path is not None:
+                    if not main_stateful_path.is_file():
+                        raise FileNotFoundError(f"missing stateful main IR: {main_stateful_path}")
+                    main_stateful_compiled = self.core.compile_model(
+                        str(main_stateful_path), "CPU", core_config
+                    )
+                    self.main = _OVStatefulCore(main_stateful_compiled, main_layers)
+                    self.main_comp = f"stateful-{main_comp}"
+                else:
+                    self.main = _OVCore(
+                        compiled["main_prefill"], compiled["main_decode"],
+                        main_layers, predictor=False,
+                    )
+                self._log_rss("after_main_compile")
+            except Exception:
+                print(
+                    "[ov_talker] OPENVINO_RELEASE_TORCH=1: main-graph compile failed "
+                    "after PyTorch weights were released. No in-process PyTorch fallback "
+                    "is possible; container must restart with TTS_BACKEND=pytorch.",
+                    flush=True,
                 )
-                self.main = _OVStatefulCore(main_stateful_compiled, main_layers)
-                self.main_comp = f"stateful-{main_comp}"
-            else:
-                self.main = _OVCore(
-                    compiled["main_prefill"], compiled["main_decode"],
-                    main_layers, predictor=False,
-                )
-            self._log_rss("after_main_compile")
+                raise
 
         else:
             # ---- Single-phase compilation (original behavior) ----
