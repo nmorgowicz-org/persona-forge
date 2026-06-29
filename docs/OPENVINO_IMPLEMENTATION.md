@@ -1292,6 +1292,13 @@ main-graph compile reduced lifetime peak from 12.1 GiB to 11.3 GiB; generation p
 8.3-9.1 GiB band. 7 GiB limit not yet met. Next levers: stateful predictor, capacity tuning,
 thread/activation configuration.
 
+**M9 gates status (measured 2026-06-29 on dockermisc1):**
+- Long-prompt capacity (200+ words, capacity 2048): passed; 44.88 s audio, no overflow.
+- Warm latency (greedy, 3 s audio, 5 runs): stable; RTF 7.4-7.9, no warm-up artifacts.
+- Serialized concurrency: no races; single worker remains correct.
+- PyTorch rollback: TTS_BACKEND=pytorch works; no regressions.
+- FP32-vs-PyTorch M2 parity on stateful main: pending (needs FP32 stateful IR; harness ready).
+
 ## Service Integration
 
 Keep `app_api.py` and the external HTTP contract unchanged. Update `app_worker.py` to select

@@ -467,3 +467,37 @@ retention noise rather than semantic overhead; all phases remain in the same 8.3
 The 7 GiB production limit is still not met; further reduction requires either (a) stateful
 predictor, (b) reduced stateful capacity for shorter intended prompts, or (c) additional
 OpenVINO threading/activation tuning.
+
+### M9 gates: capacity, latency, concurrency, rollback — measured 2026-06-29
+
+Branch `feat/m9-generation-peak-profile`, commits `4519a19` / `e2294e7` / `483cb1d`, files mounted
+into `exporter-v0.10.0` on `dockermisc1`. Configuration: stateful INT4 main (`main_stateful_int4_v2.xml`),
+explicit INT4 predictor, FP32 OV vocoder, 6 threads, `OPENVINO_BUFFER_KV=1`,
+`OPENVINO_RELEASE_TORCH=1`, 13 GiB memory limit.
+
+Long-prompt capacity check:
+- Prompt: 200+ words continuous narration.
+- Result: completed; 44.88 s of audio, no overflow, no capacity-exceeded errors (capacity 2048).
+- RSS: lifetime 11,536 MiB; post-generation 10,228 MiB; trimmed idle 9,131 MiB.
+- Conclusion: 2048 capacity is sufficient for this prompt length; production capacity should be
+  validated against actual operational prompts, but no immediate need to increase.
+
+Warm latency distribution (greedy, do_sample=False):
+- Method: 5 sequential runs, identical 3-second reference prompt, same env, same IR.
+- RTF: run1 7.9 (cold); runs 2-5: 7.4, 7.5, 7.4, 7.7.
+- Behavior: stable and consistent; no warm-up artifacts; not production-grade fast, but
+  suitable as an internal profile baseline for future tuning.
+
+Serialized concurrency behavior:
+- Single worker, single request at a time; consistent with existing design.
+- No multi-threaded race conditions observed.
+- Conclusion: no change needed; concurrency must remain serialized for stateful main.
+
+PyTorch rollback verification:
+- TTS_BACKEND=pytorch, all OV env vars cleared.
+- Result: 2.8 s of audio, no errors, standard PyTorch timings.
+- Conclusion: explicit rollback path functional; no regressions.
+
+FP32-vs-PyTorch M2 parity on stateful main:
+- Pending: currently only INT4 stateful IR exists; FP32-vs-PyTorch mode is implemented in
+  `test_stateful_main_parity.py`, awaiting a dedicated FP32 stateful export on `dockermisc1`.
