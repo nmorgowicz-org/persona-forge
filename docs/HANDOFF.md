@@ -1,61 +1,35 @@
-# Handoff — 0.6B stateful-KV footprint work (2026-06-29)
+# Handoff — streaming vocoder implementation (2026-06-29)
 
 Self-contained brief for the next agent. Deeper detail lives in `OPENVINO_IMPLEMENTATION.md` (design +
 milestones) and `OPENVINO_RESULTS.md` (every measured number). Memory file:
 `validate-openvino-plan-status.md`.
 
-## Where we are (one paragraph)
+## Where we are
 
-`main` is released as v0.11.0 (tag `qwen3-tts-openvino-v0.11.0`, commit `f8b7e5e`; PR #59 squashed
-in `08415a5`). Current work is on **`feat/0.6b-stateful-kv` and is not merged/released**. The 0.6B
-implementation source commit is **`e5ab3cc`**. The
-INT8 stateful profile is implemented and passes its footprint/quality gates: cap-768 main + cap-32
-predictor, bf16 serving glue, and early release cut the short peak **8,623 → 6,635 MiB** and retained
-RSS **8,247 → 6,394 MiB**. Explicit/stateful INT8 output is bit-exact at both cores and the rendered
-WAV is byte-identical. Warm median is 3.8% slower, and a 45.28-second request peaks at 7,845 MiB, so
-long-prompt deployments still need 8 GiB. The 1.7B-INT4 track remains closed and released:
+PR #64 was user-tested and merged; `main` is released as v0.12.0 at `9bf0848`. Active branch
+**`feat/streaming-vocoder`** was rebased onto that commit. Streaming foundation commit **`4bc18d9`**
+adds `OpenVinoVocoderRuntime.iter_decode_chunks`, makes batch decode consume it, and adds model-free
+boundary/parity tests. All 39 unit tests, repository validation, Compose validation, and diff checks pass.
 
-- **Quality (listened):** 1.7B-INT4 (g32) "slight comma pause but 100% good", beats 0.6B-INT8 whose
-  comma artifact the user dislikes. → **INT4 is the chosen 1.7B precision.**
-- **Speed (M1.7B-A, measured):** OV INT4 **1.35×** (18.6 s ≈ 0.6B-INT8's ~17.4 s) while sounding
-  clearly better. CPU-bound; neither size hits 2×.
-- **Memory (M9, CLOSED):** full arc **lifetime peak 11,593 → 7,715 MiB, trimmed idle 8,884 →
-  7,485 MiB**, dangerous boot spike eliminated. Driven by (1) **bf16 serving load** — the binding peak
-  was the fp32 checkpoint-load transient, and loading the native-bf16 checkpoint skips the upcast
-  (11,593 → 8,326); (2) **capacity-768 stateful main** (8,326 → 7,715); plus stateful predictor, early
-  weight release, and a serving silence-trim. The ~7.5 GiB floor (INT4 weights + bf16 glue + runtime)
-  does not move with capacity, so **1.7B ships at `TTS_MEMORY_LIMIT=8G`** (0.6B-INT8 still fits 7G).
-
-**Bottom line for the next agent:** core 0.6B stateful engineering and target-host validation are
-done. Remaining work is packaging/publish validation: commit/push/PR this branch, bake the runtime,
-promote the generated IRs with their provenance sidecars, and smoke-test without bind-mounted code.
-Do not claim 7 GiB support for unrestricted paragraph generation.
+No TTFB improvement exists yet. Qwen generation still returns the entire code sequence before calling
+the vocoder. The iterator only establishes one shared, tested decode seam for future batch and streaming
+paths. No CPU-headroom measurement, endpoint, pipelining, target-host parity, or listening test has run.
 
 ## Immediate next steps, in priority order
 
-1. **Publish this branch through a PR, then bake and smoke-test the next image.** The measured run used
-   `exporter-v0.10.0` with branch files mounted over `/app`. Rebuild both container targets and test
-   from the image alone with `MODEL_SIZE=0.6B`, `OPENVINO_TORCH_DTYPE=bfloat16`,
-   `OPENVINO_RELEASE_TORCH=1`, cap-768 `OPENVINO_MAIN_STATEFUL_MODEL`, cap-32
-   `OPENVINO_PREDICTOR_STATEFUL_MODEL`, and the FP32 OV vocoder. Apply `ready-to-test` only after the
-   repository tests pass. Repeat `/health`, serialized serving, explicit-cache opt-out, and a fresh
-   `TTS_BACKEND=pytorch` rollback process; those were not rerun on this branch. Publishing GHCR
-   artifacts is outward-facing; confirm before manual publish.
-
-2. **Promote the 0.6B stateful IRs as versioned production artifacts.** Source directory:
-   `qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1`; generated directory adds `_stateful`. Promote
-   `main_stateful_int8_cap768.{xml,bin}` and `predictor_stateful_int8_cap32.{xml,bin}` plus their
-   `*.transform.json` provenance. Do not put them in Git or bake weights into an image. Re-run both
-   explicit-vs-stateful parity commands after promotion.
-
-3. **Choose and document the 0.6B memory policy.** Short requests peak at 6,635 MiB and fit 7 GiB with
-   only 7.4% headroom; the 45.28-second run peaks at 7,845 MiB. Prefer 8 GiB unless the API enforces a
-   bounded short text/request policy. Do not lower capacity below 768 without a replacement long-prompt
-   gate; the current 177-word prompt completed at that capacity.
-
-4. **Keep rollback explicit.** Unset both stateful-model variables for explicit-cache A/B. Restart a
-   fresh process with `TTS_BACKEND=pytorch` for full rollback; early release makes in-process fallback
-   impossible by design.
+1. **Run CPU-headroom Step 0 on `dockermisc1` for 0.6B and 1.7B.** Separate autoregressive generation
+   from vocoder utilization. If all eight CPUs are saturated, explicitly reject overlap deliverable B
+   and continue only with streaming-output deliverable A.
+2. **Trace the stock talker loop where each complete 16-codebook frame is appended.** Add an opt-in
+   callback/queue adapter that emits complete frame blocks while preserving the stock terminal return.
+   Do not fork or replace the sampling loop without bounded generated-code parity.
+3. **Accumulate 300 frames and decode through the shared chunk seam.** Preserve exactly 25 frames of
+   left context. The current iterator accepts a completed tensor; incremental state/flush behavior still
+   needs design. A final partial block must match batch output exactly.
+4. **Only after producer parity, add `/generate/stream`.** Keep `/generate` and `/infer` unchanged.
+   Define PCM/container framing and mid-stream failure semantics before emitting bytes.
+5. Run target-host concatenation SNR, seam listening, TTFB, serialized-concurrency, batch regression,
+   and fresh-process PyTorch rollback gates. Store audio and raw profiles outside Git.
 
 ## How to run benchmarks on the box (copy-paste ready)
 
