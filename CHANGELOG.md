@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.9.1...qwen3-tts-openvino-v0.10.0) (2026-06-29)
+
+
+### Features
+
+* **runtime:** release PyTorch core weights post-install (M7 memory) ([679799d](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/679799d8e2b6166fb5bb1261a83337e18b917abd))
+
 ## [0.9.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.9.0...qwen3-tts-openvino-v0.9.1) (2026-06-29)
 
 
