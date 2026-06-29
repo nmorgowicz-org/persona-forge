@@ -15,7 +15,7 @@ Modes:
   all:
     - Runs both greedy and sampled-quality.
 
-Writes ov_generation_report.json beside the IR files.
+Writes ov_generation_report.json to /tmp or --output-json (never into the IR directory).
 """
 
 from __future__ import annotations
@@ -23,9 +23,12 @@ from __future__ import annotations
 import argparse
 import gc
 import json
+import os
 import statistics
 import time
 from pathlib import Path
+
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 
 import numpy as np
 
@@ -659,6 +662,7 @@ def run() -> int:
         print(f"[logits-parity] {logits_section['NOTE']}", flush=True)
 
     # ── Compose report ──────────────────────────────────────────────────────────
+    import shutil
     report = {
         "mode": args.mode,
         "model_repo": metadata["model_repo"],
@@ -669,6 +673,10 @@ def run() -> int:
         "seed": args.seed,
         "prompt": args.text,
         "code_steps": args.code_steps,
+        "env": {
+            "OPENVINO_BUFFER_KV": os.getenv("OPENVINO_BUFFER_KV"),
+            "OPENVINO_VOCODER_ENABLED": os.getenv("OPENVINO_VOCODER_ENABLED"),
+        },
     }
 
     if greedy_section:
@@ -689,17 +697,84 @@ def run() -> int:
         "For diagnosing frame-160 divergence, use mode=logits-parity."
     )
 
-    output_path = args.output_json or args.model_dir / "ov_generation_report.json"
+    # Safe default output path: prefer /tmp; never try to write into likely-readonly IR dir.
+    if args.output_json:
+        output_path = args.output_json
+    else:
+        # Build a sensible default name.
+        safe_mode = str(args.mode).replace("/", "-")
+        compression = report.get("compression", "auto")
+        ts = time.strftime("%Y%m%dT%H%M%S")
+        default_name = f"ov_generation_report_{safe_mode}_{compression}_{ts}.json"
+        candidate = Path("/tmp") / default_name
+        # If /tmp is not writable, fall back near cwd.
+        try:
+            if not (Path("/tmp") / "test_write").parent.is_dir():
+                raise RuntimeError
+            (Path("/tmp") / "test_write").touch()
+            (Path("/tmp") / "test_write").unlink()
+            output_path = candidate
+        except Exception:
+            output_path = Path.cwd() / default_name
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps(report, indent=2))
 
+    # Concise human-readable summary
+    print("\n" + "=" * 60, flush=True)
+    print("SUMMARY (for humans; full JSON written to:)", flush=True)
+    print(f"  {output_path}", flush=True)
+    print("=" * 60, flush=True)
+
+    if "latency" in report:
+        lat = report["latency"]
+        print(f"Mode: {report['mode']}  Compression: {report['compression']}", flush=True)
+        if "greedy_code_agreement" in report:
+            ca = report["greedy_code_agreement"]
+            print(
+                f"Greedy: frames_compared={ca['frames_compared']}, "
+                f"first_divergence={ca['first_divergence_frame']}, "
+                f"agreement_before_divergence={ca['agreement_before_divergence']:.3f}",
+                flush=True,
+            )
+        print(
+            f"Latency: PyTorch median={lat['pytorch']['median_s']:.2f}s  "
+            f"OV median={lat['openvino']['median_s']:.2f}s  "
+            f"speedup={lat['speedup_median']:.2f}x",
+            flush=True,
+        )
+        print(f"Peak RSS: {report['peak_rss_mib']:.0f} MiB", flush=True)
+
+    if "sampled_quality" in report:
+        sq = report["sampled_quality"]
+        print(
+            f"Sampled-quality: "
+            f"median_waveform_snr_db={sq['median_waveform_snr_db']:.2f}, "
+            f"mean_codebook_match={sq['mean_overall_codebook_match_rate']:.3f}, "
+            f"min_per_codebook_match={sq['min_per_codebook_match_rate']:.3f}",
+            flush=True,
+        )
+
+    if "logits_parity" in report:
+        lp = report["logits_parity"]
+        print(
+            f"Logits-parity: steps={lp['steps_compared']}, "
+            f"first_argmax_mismatch_frame={lp['first_argmax_mismatch_frame']}",
+            flush=True,
+        )
+        if lp["NOTE"]:
+            print(f"  NOTE: {lp['NOTE']}", flush=True)
+
+    print("=" * 60, flush=True)
     if all_failures:
-        print("\n[FAILURES]", flush=True)
+        print("[RED] FAILURES", flush=True)
         for f in all_failures:
             print(f"  - {f}", flush=True)
         exit_code = 1
     else:
-        print("\n[OK] all active gates passed (listening tests still required)", flush=True)
+        print("[GREEN] All active gates passed (listening tests still required)", flush=True)
+    print("=" * 60, flush=True)
 
     return exit_code
 
