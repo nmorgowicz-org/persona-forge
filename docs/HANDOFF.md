@@ -55,12 +55,15 @@ early-release change targeted. The next move is to measure that transient, not t
      both no-ops under fp32. See RESULTS "M9 bf16 serving load".
    **Listening A/B: DONE — bf16 is quality-equivalent** (user, 2026-06-29): no audible difference vs
    fp32 (`audio/{fp32,bf16}_glue.wav`); the ~1 s leading/trailing silence is present in *both* and is
-   pre-existing prompt/seed behavior, not a bf16 effect. bf16 serving is therefore **adopted**. **One
-   thing remains:** it is **~8.3 GiB, still above 7 GiB** — the new ceiling is generation `main_prefill`
-   (+1915 MiB exact). The spike run used a **capacity-2048** stateful main; since the stateful prefill
-   attends over the static-capacity window, rebuilding the main graph at **capacity 768** is the next
-   lever to test (also cuts idle). Needs a 768 stateful-main export — the spike dir only has the 2048
-   `main_stateful_int4_v2.xml`.
+   pre-existing prompt/seed behavior, not a bf16 effect (a serving silence-trim was added —
+   `app_worker._trim_silence`, `SILENCE_TRIM*`). bf16 serving is **adopted**.
+   **Capacity 768: DONE and measured** — rebuilt the main at `--max-seq 768`
+   (`main_stateful_int4_cap768.xml`) and re-ran bf16: **lifetime peak 8,326 → 7,715; idle 8,093 → 7,485;
+   main_prefill +1915 → +1529.** Capacity scales the prefill buffer, but the **floor is ~7.5 GiB** (INT4
+   weights + bf16 glue + runtime) and does not move with capacity. **1.7B-INT4 cannot fit a 7 GiB
+   `mem_limit`** without dropping capacity below 768 (long-utterance overflow risk). **Decision shipped:
+   capacity 768 + bf16, `TTS_MEMORY_LIMIT=8G` for 1.7B** (0.6B-INT8 still fits 7G). Full arc: lifetime
+   peak **11,593 → 7,715 MiB**, and the dangerous boot spike is gone — peak is now a stable ~7.7 GiB.
 
 2. **Review PR #59.** Branch `feat/m9-generation-peak-profile`; tip is the commit following this
    handoff. Contains: Release Please fix, RSS profiler (+ exact `ru_maxrss` attribution), stateful

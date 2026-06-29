@@ -635,3 +635,23 @@ bf16 changes the sampled token stream (3.36 s vs 3.68 s) but the quantized OV co
 only the PyTorch glue precision differs. **bf16 serving is adopted.** Still above the 7 GiB target, but
 the binding constraint is now a generation buffer (`main_prefill`, capacity-2048 stateful main), not a
 one-time boot spike; capacity 768 is the next lever.
+
+### M9 capacity 768 + bf16 — MEASURED (2026-06-29)
+
+Rebuilt the stateful main at `--max-seq 768` (`main_stateful_int4_cap768.xml`, state shape
+`[1,8,768,128]`; compiles clean) and re-ran bf16 1.7B-INT4, `--ov-only`:
+
+| Metric | bf16 cap 2048 | **bf16 cap 768** | Δ |
+|---|---:|---:|---:|
+| Lifetime peak (`ru_maxrss`) | 8,326 MiB | **7,715 MiB** | −611 |
+| Generation sampled peak | 8,327 MiB | **7,716 MiB** | −611 |
+| Trimmed idle | 8,093 MiB | **7,485 MiB** | −608 |
+| `main_prefill` ru_maxrss delta | +1915 MiB | **+1529 MiB** | −386 |
+
+Capacity scales the prefill activation as expected (~1/3 capacity → ~1/5 less main_prefill), and idle
+drops with the smaller K/V state. **But the floor is ~7.5 GiB idle / ~7.7 GiB peak** — the INT4 weights
++ bf16 glue + OV runtime base does not move with capacity. **1.7B-INT4 therefore cannot fit the 7 GiB
+`mem_limit`** without dropping capacity below 768 (risking long-utterance overflow: 768 ≈ 64 s of 12 Hz
+context). **Recommendation: ship 1.7B-INT4 at capacity 768 + bf16 with `TTS_MEMORY_LIMIT=8G`**; the
+dangerous 11.6 GiB boot spike is gone, peak is now a stable ~7.7 GiB. 0.6B-INT8 still fits 7 GiB. Full
+arc: lifetime peak **11,593 → 7,715 MiB (−3.9 GiB)** across bf16 + capacity 768.
