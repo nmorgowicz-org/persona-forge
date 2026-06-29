@@ -1165,7 +1165,16 @@ a product decision that the speed and quality A/B should inform first.
 
 ## Milestone 1.7B-A: Speed + quality A/B (the go/no-go gate)
 
-**This is the decision gate and it is still unmeasured — do it before any further 1.7B engineering.**
+**Status — gate PASSED (2026-06-29).** Speed measured (`bench_speed.py`, one backend per process to
+dodge the 1.7B both-models OOM): PyTorch 1.7B 25.05 s median → **OV INT8 1.27×, OV INT4 1.35×** (RTF
+7.70 / 7.05). Same CPU ceiling as 0.6B-INT8 (~1.40×), neither hits 2×. Decisive cross-model read:
+**1.7B-INT4 at 18.6 s median ≈ 0.6B-INT8 (~17.4 s) in absolute latency** but audibly better
+(0.6B-INT8 comma artifact; 1.7B-INT4 "100% good"). → **1.7B-INT4 is the recommended quality upgrade;
+the only open blocker is the generation-peak memory (M9), not speed or quality.** Full table in
+`OPENVINO_RESULTS.md` → "1.7B speed". The four-clip quality quadrant below is superseded by the direct
+listens already done (0.6B-INT8, 1.7B-INT8, 1.7B-INT4); only the 0.6B-FP32 control remains optional.
+
+Original gate definition (for reference):
 We exported 1.7B straight to INT8 and went to memory, skipping the 1.7B equivalents of the M2 parity
 and M4 latency gates. Required runs (existing IR, no new code):
 

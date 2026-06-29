@@ -298,3 +298,31 @@ one-shot allocation), and a stateful OV cache (removes duplicated KV copies). Sp
 **Run provenance.** Image `exporter-v0.9.1`; runtime files mounted from working tree (M7 patch not yet
 in a built image); model revision `fd4b25438912…`; OpenVINO 2026.2.1; NNCF 3.2.0; 6 threads;
 `--memory 13g`. Protected containers stayed healthy throughout.
+
+### 1.7B speed — M1.7B-A go/no-go gate, measured 2026-06-29
+
+Warm latency under production sampling (`do_sample=True`, fixed seed/iter), median of 4 iters after 1
+warm-up. Measured **one backend per process** (`bench_speed.py`) so the box never holds the PyTorch
+1.7B model and the OV graphs generating at once — the coupled greedy block in `test_ov_generation.py`
+would OOM at 1.7B on 15 GiB. OV runs used `OPENVINO_RELEASE_TORCH` + FP32 OV vocoder. JSONs saved
+beside each IR (`speed_{pytorch,ov_int8}_1.7b.json`, `speed_ov_int4_1.7b.json`).
+
+| Backend | Median compute | RTF (compute / audio) | Speedup vs PyTorch 1.7B |
+|---|---:|---:|---:|
+| PyTorch 1.7B FP32 | 25.05 s | 9.49 | 1.00× |
+| OV INT8 1.7B | 19.71 s | 7.70 | **1.27×** |
+| OV INT4 1.7B (g32) | 18.62 s | 7.05 | **1.35×** |
+
+**Reading.** INT4 is the faster *and* lighter 1.7B precision — **1.35×** over PyTorch, essentially the
+same CPU ceiling as 0.6B-INT8 (~1.40×). Neither 1.7B precision reaches Gate 5's 2× (expected: same
+two-core-swap limit + sequential predictor + non-accelerated vocoder decode as 0.6B). The decisive
+cross-model number: **1.7B-INT4 at 18.6 s median is nearly as fast in absolute terms as 0.6B-INT8
+(~17.4 s)** while sounding clearly better (user: 0.6B-INT8 has the comma artifact; 1.7B-INT8 "very very
+clear", 1.7B-INT4 "100% good"). Per-second-of-audio, 1.7B-INT4 (RTF 7.05) is ~20% slower than
+0.6B-INT8 (RTF 5.86). **Verdict: 1.7B-INT4 clears the speed gate as a quality upgrade at near-parity
+latency — the open blocker is memory (generation peak, M9), not speed or quality.** (Utterances are
+short, ~2.6 s, so RTF is overhead-dominated and absolute medians are the fairer cross-precision read.)
+
+**Run provenance.** Same as the memory runs above: image `exporter-v0.9.1`, runtime mounted from
+working tree, rev `fd4b25438912…`, OV 2026.2.1, NNCF 3.2.0, 6 threads, `--memory 13g`. Protected
+containers (`litellm*`/`headroom-proxy`) stayed up; prod `qwen3-tts` was already stopped.
