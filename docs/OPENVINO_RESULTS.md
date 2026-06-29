@@ -232,3 +232,45 @@ exactly where quality dies. Every mix used more memory than all-INT8. → A *sma
 **Run provenance.** Release commit `f224124c…`; image `exporter-v0.9.0` @
 `sha256:1cd60cc8…224fa`; model revision `5d83992436ea…`; OpenVINO 2026.2.1; NNCF 3.2.0; 6 threads.
 Protected containers (`litellm*`, `headroom-proxy`) stayed healthy throughout.
+
+## 1.7B track — first export + M7 memory characterization (2026-06-29)
+
+First 1.7B run on dockermisc1. IR exported with `exporter-v0.9.1`:
+- Transformer cores INT8_ASYM: `qwen-tts-0.1.1_1.7b_fd4b25438912_ov-2026.2.1`
+- Vocoder FP32 (separate dir): `qwen-tts-0.1.1_1.7b_fd4b25438912_ov-2026.2.1_vocoder`
+
+`dump_audio.py --ov-only --compression int8` with `OPENVINO_RELEASE_TORCH=1`, OV vocoder + buffer-KV,
+6 threads, `--memory 13g`. The 1.7B IR **runs and produces audio** (sample saved at
+`audio/m7-1.7b/ov_int8_1.7b.wav`). **Listening verdict (2026-06-29): 1.7B-INT8 is "very very clear"
+with obvious quality headroom** — i.e. room to trade quality for size/speed. This is the empirical
+green light for the M8 INT4 experiment: 1.7B can likely absorb INT4 weight damage that 0.6B could not.
+M7 weight-release freed **~5.54 GiB** of PyTorch decoder-block weights. RSS at three checkpoints:
+
+| Checkpoint | RSS | Note |
+|---|---:|---|
+| After PyTorch load (pre-OV-install) | **8.49 GiB** | load transient — full FP32 1.7B + OV vocoder |
+| After OV install + release (cold idle) | **5.47 GiB** | ✅ M7 works; under a 7 GiB / ~5.6 GiB target |
+| Per-request lifetime peak | **12.84 GiB** | ❌ generation peak (two utterances: 12.84 @ 5.68s, 12.76 @ 7.36s) |
+| Post-generation, trimmed idle | **12.43 GiB** | ❌ **does not release** after the request |
+
+**Two findings that reframe M7:**
+
+1. **The per-request peak is ~fixed, not utterance-length-driven.** 5.68s → 12.84 GiB and 7.36s →
+   12.76 GiB are within noise. So the ~12.8 GiB peak is dominated by *fixed* generation-time overhead
+   (OV compiled-model working buffers + a large one-shot allocation, likely the single-shot vocoder
+   decode), **not** KV-cache growth.
+2. **Generation memory is not reclaimed.** After `gc.collect()` + `malloc_trim(0)`, RSS stays at
+   **12.43 GiB** (vs 5.47 GiB cold idle). A long-running worker therefore balloons to ~12.4 GiB on its
+   first request and holds it. M7 release fixes *cold* idle only; it does **not** make 1.7B fit a 7 GiB
+   serving budget, because a single request needs ~12.8 GiB and retains ~12.4 GiB.
+
+**Conclusion.** On this 15 GiB box (with `litellm*`/`headroom-proxy` resident), 1.7B at the planned
+"<7 GiB" budget is **not reachable by weight-release alone**. The binding constraint moved from idle
+weights to generation-time allocation. Levers to pursue next (see implementation doc M8/M9): INT4
+weights (1.7B can absorb the damage; halves graph memory), chunked/streaming vocoder decode (caps the
+one-shot allocation), and a stateful OV cache (removes duplicated KV copies). Speed and the
+1.7B-vs-0.6B quality A/B are still unmeasured and gate whether any of this is worth building.
+
+**Run provenance.** Image `exporter-v0.9.1`; runtime files mounted from working tree (M7 patch not yet
+in a built image); model revision `fd4b25438912…`; OpenVINO 2026.2.1; NNCF 3.2.0; 6 threads;
+`--memory 13g`. Protected containers stayed healthy throughout.

@@ -1144,6 +1144,79 @@ Reduce `mem_limit` only after measuring cold start, warm inference, a long utter
 failure behavior under the proposed limit. Maintain at least 20% headroom above observed
 peak RSS.
 
+### M7 measured on 1.7B — release works for idle, not for serving (2026-06-29)
+
+First 1.7B characterization (full numbers in `OPENVINO_RESULTS.md` → "1.7B track"). The release
+freed ~5.54 GiB and **cold idle dropped to 5.47 GiB** — M7 does its job. But the measurement
+**falsified the original M7 plan as a sufficient condition for 1.7B at 7 GiB**:
+
+- **Per-request peak ≈ 12.8 GiB**, and it is **~independent of utterance length** (12.84 GiB @ 5.68 s
+  vs 12.76 GiB @ 7.36 s). The peak is fixed generation-time overhead (OV working buffers + a large
+  one-shot allocation, most likely the single-shot vocoder decode), not KV growth.
+- **Generation memory is not reclaimed**: after `gc` + `malloc_trim`, RSS stays at ~12.4 GiB, not the
+  5.47 GiB cold idle. A worker balloons on its first request and holds it.
+
+So the binding constraint moved from *idle weights* (solved) to *generation-time allocation*
+(unsolved). Weight-release alone cannot fit 1.7B in 7 GiB. The thin loader would only cut the 8.5 GiB
+*load* transient, not the 12.8 GiB *generation* peak — so it is **deprioritized** until the generation
+peak is reduced (see M9). The honest near-term target for 1.7B serving on this box is **~13 GiB per
+request**; whether that is acceptable (co-located with `litellm*`/`headroom-proxy` on a 15 GiB box) is
+a product decision that the speed and quality A/B should inform first.
+
+## Milestone 1.7B-A: Speed + quality A/B (the go/no-go gate)
+
+**This is the decision gate and it is still unmeasured — do it before any further 1.7B engineering.**
+We exported 1.7B straight to INT8 and went to memory, skipping the 1.7B equivalents of the M2 parity
+and M4 latency gates. Required runs (existing IR, no new code):
+
+1. **Latency + parity** — `test_ov_generation.py --mode all` (PyTorch 1.7B vs OV-INT8 1.7B), `--memory
+   13g`. Produces end-to-end speedup, RTF, and codebook match. We currently have **zero** 1.7B speed
+   data. Expect <1x relative to 0.6B in absolute latency; the question is the OV-vs-PyTorch ratio and
+   whether 1.7B is usable at all on this CPU.
+2. **Quality quadrant A/B** — same text + seed, four clips for listening:
+   `0.6B-INT8` (shipping), `1.7B-INT8`, `1.7B-PyTorch` (ceiling), and `0.6B-FP32` (no-quant control).
+   **The deciding question is not "is 1.7B-INT8 clean" but "is 1.7B-INT8 audibly better than
+   0.6B-INT8."** Include `0.6B-FP32` because if the only 0.6B complaint is the INT8 comma-pause, plain
+   0.6B-FP32 may be a better quality/speed trade than fighting 1.7B memory.
+
+If 1.7B-INT8 does not clearly beat 0.6B, **stop the 1.7B track here** and do not build M8/M9.
+
+## Milestone 8: INT4 weights for 1.7B (quality-headroom quantization)
+
+Hypothesis: 1.7B has enough quality headroom to absorb INT4 weight damage that 0.6B could not, while
+INT4 ~halves OV graph memory and speeds up memory-bound CPU matmuls. **1.7B-INT4 may beat 0.6B-INT8 on
+quality while being smaller/faster** — an untested quadrant and the most promising new lever.
+
+- Scope INT4 to the transformer **layers** only (per the M7 finding that layers hold ~all the weight);
+  keep embeddings/heads/vocoder at their current precision.
+- Use NNCF `INT4_ASYM` with `group_size` (start 32, ratio 1.0); `INT4` is the one mode pinned NNCF
+  3.2.0 lets us tune (data-aware options remain rejected — see M6).
+- **Exporter code gap to fix first:** `export_openvino.py` writes every compressed graph as
+  `{name}_int8.xml` and the versioned dir name encodes neither compression mode nor precision, so an
+  INT4 export collides with the existing INT8 IR dir ("refusing to overwrite") and would mislabel
+  files. Add a precision tag to the output dir name (e.g. `…_int4`) and/or the graph filenames before
+  running INT4.
+- Gate: characterize like M3/M6 (codebook match, duration ratio, listening A/B vs 0.6B-INT8 and
+  1.7B-INT8) plus the M7 memory checkpoints.
+
+## Milestone 9: Generation-peak memory reduction (the real 1.7B wall)
+
+The ~12.8 GiB per-request peak — fixed, length-independent, non-reclaimed — is what actually blocks
+1.7B on a constrained budget. Attack it directly, highest-leverage first:
+
+1. **Profile the peak.** `tracemalloc` + OV memory introspection during a single request to attribute
+   the ~7 GiB that generation adds on top of the 5.5 GiB idle. Hypothesis: the single-shot
+   `speech_tokenizer.decode` over the whole utterance dominates. Measure before building.
+2. **Chunked / streaming vocoder decode.** The decoder already exposes `chunked_decode`, but the
+   runtime calls it once over the full code sequence. Decoding in bounded chunks caps that allocation
+   and, as a bonus, enables emitting first audio early (perceived-latency win). Architectural; likely
+   the biggest single memory lever.
+3. **Stateful OV cache (folds in former M5).** Convert the explicit/buffered KV path to an OpenVINO
+   stateful cache to remove the per-frame numpy↔torch K/V duplication (paid 15×/frame). Cuts
+   generation memory and per-frame overhead; matters more at 1.7B where KV is larger.
+4. Re-run the M7 checkpoints after each lever; success = per-request peak and post-request retained RSS
+   both under the chosen 1.7B budget with ≥20% headroom.
+
 ## Service Integration
 
 Keep `app_api.py` and the external HTTP contract unchanged. Update `app_worker.py` to select

@@ -351,6 +351,12 @@ def run() -> int:
     out_parent = Path(args.output_dir)
     out_parent.mkdir(parents=True, exist_ok=True)
     final_name = _versioned_dirname(qwen_version, model_repo, resolved_revision, ov_version)
+    # INT4 weight compression gets its own directory so it never collides with the INT8 IR
+    # (the dir name otherwise encodes neither compression nor precision, and graph files are
+    # written as {name}_int8.xml for any weight compression). The runtime loads INT4 graphs
+    # via --compression int8 pointed at this dir; precision is transparent at load time.
+    if args.compression in ("int8", "both") and "int4" in args.int8_mode:
+        final_name = f"{final_name}_int4g{args.int8_group_size}"
     if args.vocoder_only:
         final_name = f"{final_name}_vocoder"
     final_dir = out_parent / final_name
