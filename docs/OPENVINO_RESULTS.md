@@ -326,3 +326,91 @@ short, ~2.6 s, so RTF is overhead-dominated and absolute medians are the fairer 
 **Run provenance.** Same as the memory runs above: image `exporter-v0.9.1`, runtime mounted from
 working tree, rev `fd4b25438912…`, OV 2026.2.1, NNCF 3.2.0, 6 threads, `--memory 13g`. Protected
 containers (`litellm*`/`headroom-proxy`) stayed up; prod `qwen3-tts` was already stopped.
+
+### M9 generation-peak attribution — measured 2026-06-29
+
+One production-sampling 1.7B-INT4 request was profiled at 50 ms intervals with the recovered and
+extended `dump_audio.py` harness. The profiler labels main/predictor prefill and decode calls,
+generation glue, and vocoder decode independently. The run used source commit `3394042`, released
+image `exporter-v0.10.0` at digest
+`sha256:5189f9bd604c4f4e187175691b7375e9b6f3fd449d91ca73ec78911beaebcb49`, model revision
+`fd4b25438912…`, the validated INT4-g32 transformer directory, FP32 OV vocoder, 6 threads,
+`OPENVINO_BUFFER_KV=1`, `OPENVINO_RELEASE_TORCH=1`, and a 13 GiB/14 GiB memory/swap limit. The default
+short prompt produced 3.68 s of audio. Raw profile:
+`m9_rss_core_1.7b_int4.json` beside the INT4 IR on `dockermisc1` (outside Git).
+
+| Checkpoint | RSS |
+|---|---:|
+| PyTorch load, before OV install | 8,516 MiB |
+| OV install + Torch release, cold idle | 6,301 MiB |
+| Generation-only sampled peak | 10,781 MiB |
+| Lifetime peak (`ru_maxrss`) | 12,077 MiB |
+| Post-generation | 10,781 MiB |
+| Post-trim retained idle | 10,421 MiB |
+
+Positive sampled RSS growth attributed to the active phase:
+
+| Phase | Positive RSS growth | Share of sampled growth |
+|---|---:|---:|
+| Main prefill | **2,262 MiB** | 50.5% |
+| Main decode | **1,866 MiB** | 41.7% |
+| Predictor prefill | 210 MiB | 4.7% |
+| Predictor decode | 85 MiB | 1.9% |
+| Generation glue | 50 MiB | 1.1% |
+| Vocoder | **6 MiB** | 0.1% |
+
+**Decision:** M9.3a (chunked/streaming vocoder) is rejected as a memory lever for this backend; the
+OV vocoder adds effectively no RSS to the already-retained transformer footprint. Main-core prefill
+and decode account for ~92% of sampled growth. The explicit-cache path already reuses persistent
+NumPy K/V buffers, so M9.3c alone cannot address the dominant cache I/O and OpenVINO request growth.
+Proceed with **M9.3b: one stateful dynamic main-core graph/request**, eliminating explicit K/V graph
+inputs/outputs and the separate main prefill/decode compiled-model pair. Apply the same design to the
+predictor only after the main-core spike proves parity and memory reduction. The 50 ms sampler misses
+the ~1.27 GiB short-lived difference between sampled RSS and `ru_maxrss`, so the stateful comparison
+must retain both metrics. Host swap remained 1.8 GiB before and after; protected containers remained
+healthy and production `qwen3-tts` stayed stopped.
+
+### M9 stateful main-core spike — measured 2026-06-29
+
+Commit `393bdc3` adds a static-capacity state rewrite (`ov_stateful_cache.py`), an isolated IR
+transformation CLI, a model-free state primitive test, explicit-vs-stateful parity, and an opt-in
+main-only runtime path. OpenVINO's stock `MakeStateful` pass cannot be used because its own current
+tests reject dynamic state shapes. The implemented graph instead stores each K/V tensor in a static
+`[1, kv_heads, max_seq, head_dim]` `Variable`, slices only the used prefix, and applies
+`ScatterUpdate` at `cache_position` before `Assign`.
+
+Isolated artifact (outside Git):
+`qwen-tts-0.1.1_1.7b_fd4b25438912_ov-2026.2.1_int4g32_stateful_spike/main_stateful_int4_v2.xml`.
+Original INT4 metadata SHA-256: `ca8f50be8ff4be280248f4ec9c7767ec91f3244e20ef9bcd58042a410344ea2e`;
+stateful XML SHA-256: `a46b03178576bf0f30fb8b37945b872833e3f25098b83921af82215b91349de5`.
+It was derived from `main_decode_int8.xml` with capacity 2048. The transformed graph has 4 parameters,
+1 result, and 56 states instead of 60 parameters and 57 results. OpenVINO 2026.2.1 compiled it
+successfully; all states report shape `[1,8,2048,128]`.
+
+The model-free parity gate compared the original explicit INT4 graph with the stateful graph for an
+8-token prefill and three growing decode steps. Hidden output and every K/V state were bit-exact at
+all four boundaries (`max_abs=0`, no failures), and `reset_state()` cleared all 56 states. Report:
+`main_stateful_parity.json` beside the spike IR.
+
+One production-sampling end-to-end run then used stateful INT4 main + explicit INT4 predictor + FP32
+OV vocoder. It produced the same 3.68 s output duration as the explicit baseline and completed without
+fallback. Audio was generated for smoke validation but has not received a new listening verdict.
+
+| Checkpoint | Explicit main | Stateful main | Delta |
+|---|---:|---:|---:|
+| Cold idle after OV install/release | 6,301 MiB | 6,384 MiB | +83 MiB |
+| Generation-only sampled peak | 10,781 MiB | **8,813 MiB** | **−1,968 MiB** |
+| Post-generation | 10,781 MiB | **8,814 MiB** | **−1,967 MiB** |
+| Post-trim retained idle | 10,421 MiB | **8,638 MiB** | **−1,783 MiB** |
+| Lifetime `ru_maxrss` | 12,077 MiB | 12,095 MiB | +18 MiB |
+
+**Interpretation:** stateful main succeeds at its intended generation-memory target, removing roughly
+1.8-2.0 GiB retained/active RSS. It does not reduce the 12.1 GiB lifetime peak because that peak occurs
+during startup while the full PyTorch model and OpenVINO compilation overlap. Therefore the next
+highest-leverage change is to release the dead PyTorch transformer layers before compiling the IR,
+with fail-closed startup semantics. Stateful predictor may save only the ~295 MiB attributed to
+predictor work and should follow after startup overlap is fixed. The current stateful result is still
+above the 7 GiB production limit, has no long-prompt capacity test, no FP32-vs-PyTorch M2 gate, no
+listening recheck, and no warm latency distribution; it is a successful spike, not a releasable backend.
+After all spike runs the host had 13 GiB available and 2.0 GiB swap in use (about 0.2 GiB above the
+pre-run snapshot); `litellm`, `litellm-postgres`, and `headroom-proxy` remained healthy.
