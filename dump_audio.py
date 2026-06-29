@@ -54,6 +54,15 @@ def main() -> None:
     p.add_argument("--language", default="English")
     p.add_argument("--threads", type=int, default=6)
     p.add_argument("--seed", type=int, default=20260628)
+    p.add_argument(
+        "--ov-only",
+        action="store_true",
+        help=(
+            "skip the PyTorch reference and generate only on OpenVINO. Required to validate "
+            "OPENVINO_RELEASE_TORCH (Milestone 7): the released footprint is meaningful only "
+            "when the PyTorch core forward is never invoked. Reports peak RSS at exit."
+        ),
+    )
     args = p.parse_args()
 
     torch.set_num_threads(args.threads)
@@ -62,14 +71,15 @@ def main() -> None:
     model, prompt = loaded.model, loaded.voice_clone_prompt
     talker = model.model.talker
 
-    # PyTorch baseline (only needs writing once; identical across compressions).
-    pt_path = args.out_dir / "pytorch.wav"
-    print("[dump] PyTorch reference ...", flush=True)
-    torch.manual_seed(args.seed)
-    pt_wavs, sr = model.generate_voice_clone(
-        text=args.text, language=args.language, voice_clone_prompt=prompt, do_sample=True
-    )
-    _write_wav(pt_path, pt_wavs[0], sr)
+    if not args.ov_only:
+        # PyTorch baseline (only needs writing once; identical across compressions).
+        pt_path = args.out_dir / "pytorch.wav"
+        print("[dump] PyTorch reference ...", flush=True)
+        torch.manual_seed(args.seed)
+        pt_wavs, sr = model.generate_voice_clone(
+            text=args.text, language=args.language, voice_clone_prompt=prompt, do_sample=True
+        )
+        _write_wav(pt_path, pt_wavs[0], sr)
 
     # OpenVINO candidate.
     from ov_talker_runtime import OVTalkerRuntime
@@ -88,6 +98,33 @@ def main() -> None:
     finally:
         runtime.uninstall()
     _write_wav(args.out_dir / f"ov_{args.compression}.wav", ov_wavs[0], ov_sr)
+
+    # M7 memory signals. ru_maxrss is the process high-water mark, so it captures the
+    # PyTorch load transient (which precedes release) — the number that decides whether the
+    # model fits the cgroup at startup. Current VmRSS after generation reflects the released
+    # steady-state footprint the serving worker holds. Report both.
+    import gc
+    import resource
+
+    gc.collect()
+    peak_mib = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    current_mib = None
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    current_mib = int(line.split()[1]) / 1024  # kB -> MiB
+                    break
+    except OSError:
+        pass
+    released = getattr(runtime, "_torch_cores_released", False)
+    cur = f"{current_mib:.0f} MiB" if current_mib is not None else "n/a"
+    print(
+        f"[dump] RSS peak (incl. load transient): {peak_mib:.0f} MiB | "
+        f"current (post-release steady state): {cur}  "
+        f"(torch cores released: {released}; ov-only: {args.ov_only})",
+        flush=True,
+    )
 
     print("[dump] done.", flush=True)
 

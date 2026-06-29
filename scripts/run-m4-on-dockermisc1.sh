@@ -45,6 +45,10 @@ MODEL_SIZE="${MODEL_SIZE:-0.6B}"
 REF_AUDIO_PATH="${REF_AUDIO_PATH:-/var/data/autopirate/qwen3-tts/voice/voice_A.wav}"
 REF_TEXT="${REF_TEXT:-}"
 THREADS="${THREADS:-6}"
+# The harness holds the full PyTorch model AND the OpenVINO graphs at once, so 7g OOM-kills
+# (exit 137). 13g is the validated default for 0.6B; bump for 1.7B.
+MEMORY="${MEMORY:-13g}"
+MEMORY_SWAP="${MEMORY_SWAP:-14g}"
 
 if [[ ! -d "$OV_ROOT/$IR_DIR_NAME" ]]; then
   echo "error: IR directory not found: $OV_ROOT/$IR_DIR_NAME" >&2
@@ -77,12 +81,16 @@ fi
 
 echo ">> running M4 harness in $EXPORTER_IMAGE against $IR_DIR_NAME ..."
 docker run --rm \
-  --memory 7g --memory-swap 8g \
+  --memory "$MEMORY" --memory-swap "$MEMORY_SWAP" \
   -e "MODEL_SIZE=$MODEL_SIZE" \
   -e "OMP_NUM_THREADS=$THREADS" \
   -e "MKL_NUM_THREADS=$THREADS" \
   -e "REF_AUDIO=/voice/voice_A.wav" \
   ${REF_TEXT:+-e "REF_TEXT=$REF_TEXT"} \
+  ${OPENVINO_BUFFER_KV:+-e "OPENVINO_BUFFER_KV=$OPENVINO_BUFFER_KV"} \
+  ${OPENVINO_VOCODER_ENABLED:+-e "OPENVINO_VOCODER_ENABLED=$OPENVINO_VOCODER_ENABLED"} \
+  ${OPENVINO_VOCODER_DIR:+-e "OPENVINO_VOCODER_DIR=$OPENVINO_VOCODER_DIR"} \
+  ${OPENVINO_RELEASE_TORCH:+-e "OPENVINO_RELEASE_TORCH=$OPENVINO_RELEASE_TORCH"} \
   -v "$MODEL_CACHE:/root/.cache/huggingface/hub:rw" \
   -v "$OV_ROOT:/ov_output:rw" \
   -v "$REF_AUDIO_PATH:/voice/voice_A.wav:ro" \

@@ -442,6 +442,14 @@ class OVTalkerRuntime:
         self._orig_pred_forward = None
         self._orig_st_decode = None
 
+        # Milestone 7 memory reduction: after the OV cores compile and their forwards are
+        # swapped, the PyTorch weights of the two inner transformer cores are dead (the
+        # M4 contract feeds inputs_embeds, so even the inner embed/norm are bypassed).
+        # Freeing them lets large models (1.7B) fit the serving memory budget. One-way:
+        # the eager PyTorch core forward can no longer run after release.
+        self._release_torch = os.getenv("OPENVINO_RELEASE_TORCH", "0").strip() == "1"
+        self._torch_cores_released = False
+
     def _default_compression(self) -> str:
         meta_path = self.model_dir / "metadata.json"
         if meta_path.is_file():
@@ -522,9 +530,66 @@ class OVTalkerRuntime:
             f"predictor={self.pred_comp} vocoder={voc}",
             flush=True,
         )
+
+        if self._release_torch:
+            self._release_torch_core_weights()
         return self
 
+    def _release_torch_core_weights(self) -> None:
+        """Free the PyTorch transformer-block weights of the two inner cores (Milestone 7).
+
+        Scoped to each core's ``.layers`` (the decoder blocks), which the OpenVINO graphs fully
+        replace and which hold ~all of the parameters. The inner ``embed_tokens`` and ``norm``
+        are deliberately kept: the outer generation glue calls ``talker.get_text_embeddings()``
+        (== ``talker.model.embed_tokens``) to build the ``inputs_embeds`` it feeds to OV, so
+        freeing the embedding table breaks generation. Block tensors are replaced with empty
+        storage, then the allocator is asked to return pages to the OS (glibc malloc_trim).
+        One-way: the eager PyTorch core forward cannot run after this, so uninstall() will not
+        restore it.
+        """
+        import gc
+
+        import torch
+
+        freed_bytes = 0
+        cores = (self._talker.model, self._talker.code_predictor.model)
+        with torch.no_grad():
+            for core in cores:
+                layers = getattr(core, "layers", None)
+                if layers is None:
+                    continue
+                for param in layers.parameters(recurse=True):
+                    freed_bytes += param.numel() * param.element_size()
+                    param.data = torch.empty(0, dtype=param.dtype, device=param.device)
+                for buf in layers.buffers(recurse=True):
+                    freed_bytes += buf.numel() * buf.element_size()
+                    buf.data = torch.empty(0, dtype=buf.dtype, device=buf.device)
+        self._torch_cores_released = True
+        gc.collect()
+        # Return freed arena pages to the OS where the allocator supports it (glibc only).
+        try:
+            import ctypes
+
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
+        print(
+            f"[ov_talker] released ~{freed_bytes / 2**30:.2f} GiB of PyTorch transformer "
+            "core weights (OPENVINO_RELEASE_TORCH=1); eager PyTorch core forward is now "
+            "unavailable for this process.",
+            flush=True,
+        )
+
     def uninstall(self) -> None:
+        if self._torch_cores_released:
+            # Weights were freed for memory; restoring the eager forwards would only expose
+            # empty tensors. Leave the OV-backed forwards in place and skip restoration.
+            print(
+                "[ov_talker] uninstall(): PyTorch core weights were released "
+                "(OPENVINO_RELEASE_TORCH); leaving OpenVINO forwards installed.",
+                flush=True,
+            )
+            return
         if self._orig_main_forward is not None:
             self._talker.model.forward = self._orig_main_forward
             self._orig_main_forward = None
