@@ -42,6 +42,9 @@ TTS_BACKEND = (os.getenv("TTS_BACKEND", "pytorch") or "pytorch").strip().lower()
 OV_MODEL_DIR = os.getenv("OV_MODEL_DIR")
 OPENVINO_RELEASE_TORCH = os.getenv("OPENVINO_RELEASE_TORCH", "0").strip() == "1"
 OPENVINO_MAIN_STATEFUL_MODEL = (os.getenv("OPENVINO_MAIN_STATEFUL_MODEL") or "").strip() or None
+OPENVINO_PREDICTOR_STATEFUL_MODEL = (
+    (os.getenv("OPENVINO_PREDICTOR_STATEFUL_MODEL") or "").strip() or None
+)
 
 torch.set_num_threads(6)
 
@@ -178,6 +181,12 @@ def load_model():
                 f"{OPENVINO_MAIN_STATEFUL_MODEL}",
                 flush=True,
             )
+        if OPENVINO_PREDICTOR_STATEFUL_MODEL:
+            print(
+                f"[app_worker] OPENVINO_PREDICTOR_STATEFUL_MODEL active: "
+                f"{OPENVINO_PREDICTOR_STATEFUL_MODEL}",
+                flush=True,
+            )
 
         vocoder_status = (
             f"vocoder={'OV' if (ov_runtime.vocoder_runtime and ov_runtime.vocoder_runtime.enabled) else 'PyTorch'}"
@@ -231,6 +240,11 @@ def health():
                         ov_runtime.compression if ov_runtime is not None else None
                     ),
                     "stateful_main": bool(OPENVINO_MAIN_STATEFUL_MODEL),
+                    "stateful_predictor": bool(OPENVINO_PREDICTOR_STATEFUL_MODEL),
+                    "stateful_capacity": {
+                        "main": getattr(getattr(ov_runtime, "main", None), "capacity", None),
+                        "predictor": getattr(getattr(ov_runtime, "pred", None), "capacity", None),
+                    },
                     "release_torch": OPENVINO_RELEASE_TORCH,
                     "vocoder": vocoder_info,
                 }

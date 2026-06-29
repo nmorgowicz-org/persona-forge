@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Compare a rewritten stateful main-core IR with another implementation.
+"""Compare a rewritten stateful main or predictor IR with another implementation.
 
 Modes:
 - explicit-vs-stateful (default):
     explicit-cache IR vs stateful-cache IR (synthetic inputs).
 - pytorch-vs-stateful:
-    PyTorch eager main-core vs FP32 stateful-cache IR (synthetic inputs).
+    PyTorch eager core vs FP32 stateful-cache IR (synthetic inputs).
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ def run_explicit_vs_stateful(args: argparse.Namespace) -> dict[str, object]:
     import openvino as ov
 
     metadata = json.loads(args.metadata.read_text(encoding="utf-8"))
-    dims = metadata["main_dims"]
+    dims = metadata[f"{args.core}_dims"]
     hidden = int(dims["hidden_size"])
     kv_heads = int(dims["num_kv_heads"])
     head_dim = int(dims["head_dim"])
@@ -108,6 +108,9 @@ def run_explicit_vs_stateful(args: argparse.Namespace) -> dict[str, object]:
         position_ids = np.arange(prior, prior + seq, dtype=np.int64)[None, :]
         cache_position = np.arange(prior, prior + seq, dtype=np.int64)
         base_inputs = [inputs_embeds, attention_mask, position_ids, cache_position]
+        if args.core == "predictor":
+            generation_step = 0 if is_prefill else step
+            base_inputs.append(np.array([generation_step], dtype=np.int64))
 
         explicit_outputs = _infer(
             explicit_request,
@@ -147,6 +150,7 @@ def run_explicit_vs_stateful(args: argparse.Namespace) -> dict[str, object]:
     return {
         "openvino_version": ov.__version__,
         "mode": "explicit-vs-stateful",
+        "core": args.core,
         "explicit_ir": str(args.explicit),
         "stateful_ir": str(args.stateful),
         "model_revision": metadata["model_revision"],
@@ -168,7 +172,7 @@ def run_pytorch_vs_stateful(args: argparse.Namespace) -> dict[str, object]:
     from qwen_tts import Qwen3TTSModel
 
     metadata = json.loads(args.metadata.read_text(encoding="utf-8"))
-    dims = metadata["main_dims"]
+    dims = metadata[f"{args.core}_dims"]
     hidden = int(dims["hidden_size"])
 
     # Load PyTorch main core
@@ -181,8 +185,9 @@ def run_pytorch_vs_stateful(args: argparse.Namespace) -> dict[str, object]:
         attn_implementation="eager",
     )
     talker = wrapped.model.talker
-    talker.model.eval()
-    device = next(talker.model.parameters()).device
+    core_model = talker.model if args.core == "main" else talker.code_predictor.model
+    core_model.eval()
+    device = next(core_model.parameters()).device
 
     # Load stateful FP32 IR
     config = {
@@ -214,6 +219,11 @@ def run_pytorch_vs_stateful(args: argparse.Namespace) -> dict[str, object]:
         position_ids_np = np.arange(prior, prior + seq, dtype=np.int64)[None, :]
         cache_position_np = np.arange(prior, prior + seq, dtype=np.int64)
         base_inputs_ov = [inputs_embeds_np, attention_mask_np, position_ids_np, cache_position_np]
+        generation_steps_np = None
+        if args.core == "predictor":
+            generation_step = 0 if is_prefill else step
+            generation_steps_np = np.array([generation_step], dtype=np.int64)
+            base_inputs_ov.append(generation_steps_np)
 
         # PyTorch forward
         inputs_embeds_pt = torch.from_numpy(inputs_embeds_np).to(device)
@@ -226,7 +236,7 @@ def run_pytorch_vs_stateful(args: argparse.Namespace) -> dict[str, object]:
         )
 
         with torch.no_grad():
-            pt_out = talker.model(
+            forward_kwargs = dict(
                 inputs_embeds=inputs_embeds_pt,
                 attention_mask=mask_4d,
                 position_ids=position_ids_pt,
@@ -234,6 +244,11 @@ def run_pytorch_vs_stateful(args: argparse.Namespace) -> dict[str, object]:
                 past_key_values=cache,
                 use_cache=True,
             )
+            if generation_steps_np is not None:
+                forward_kwargs["generation_steps"] = torch.from_numpy(
+                    generation_steps_np
+                ).to(device)
+            pt_out = core_model(**forward_kwargs)
         pt_hidden = pt_out.last_hidden_state.detach().cpu().numpy()
 
         # Stateful IR forward
@@ -261,6 +276,7 @@ def run_pytorch_vs_stateful(args: argparse.Namespace) -> dict[str, object]:
     return {
         "openvino_version": ov.__version__,
         "mode": "pytorch-vs-stateful",
+        "core": args.core,
         "stateful_ir": str(args.stateful),
         "model_repo": metadata["model_repo"],
         "model_revision": metadata["model_revision"],
@@ -282,10 +298,14 @@ def main() -> None:
         default="explicit-vs-stateful",
         help="parity mode (default: explicit-vs-stateful)",
     )
+    parser.add_argument("--core", choices=["main", "predictor"], default="main")
     parser.add_argument("--explicit", type=Path, help="explicit-cache IR (for explicit-vs-stateful)")
     parser.add_argument("--stateful", type=Path, required=True)
     parser.add_argument("--metadata", type=Path, required=True)
-    parser.add_argument("--state-prefix", default="main")
+    parser.add_argument(
+        "--state-prefix",
+        help="state variable prefix (defaults to the selected --core)",
+    )
     parser.add_argument("--prefill-seq", type=int, default=8)
     parser.add_argument("--decode-steps", type=int, default=3)
     parser.add_argument("--threads", type=int, default=6)
@@ -293,6 +313,8 @@ def main() -> None:
     parser.add_argument("--max-abs", type=float, default=None)
     parser.add_argument("--output-json", type=Path)
     args = parser.parse_args()
+    if args.state_prefix is None:
+        args.state_prefix = args.core
 
     # Mode-appropriate default: bit-exact for IR vs IR; relaxed for floating-point.
     if args.max_abs is None:

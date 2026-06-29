@@ -70,9 +70,12 @@ def _to_numpy(tensor, dtype) -> np.ndarray:
     OV seam; upcast them to fp32 on the torch side first (the IR's float inputs are
     fp32 regardless). ``.float()`` avoids importing torch in this module.
     """
-    if "bfloat16" in str(getattr(tensor, "dtype", "")):
-        tensor = tensor.float()
-    array = tensor.detach().cpu().numpy()
+    if isinstance(tensor, np.ndarray):
+        array = tensor
+    else:
+        if "bfloat16" in str(getattr(tensor, "dtype", "")):
+            tensor = tensor.float()
+        array = tensor.detach().cpu().numpy()
     if array.dtype == dtype and array.flags["C_CONTIGUOUS"]:
         return array
     if array.dtype != dtype:
@@ -80,6 +83,15 @@ def _to_numpy(tensor, dtype) -> np.ndarray:
     if not array.flags["C_CONTIGUOUS"]:
         array = np.ascontiguousarray(array)
     return array
+
+
+def _stateful_generation_steps(generation_steps, expects_generation_steps: bool):
+    """Mirror the explicit predictor's optional generation_steps contract."""
+    if not expects_generation_steps:
+        return None
+    if generation_steps is None:
+        return np.zeros(1, dtype=np.int64)
+    return generation_steps
 
 
 class _OVCore:
@@ -400,6 +412,13 @@ class _OVStatefulCore:
     def __init__(self, compiled_model, num_layers: int):
         self._request = compiled_model.create_infer_request()
         self.num_layers = num_layers
+        input_count = len(compiled_model.inputs)
+        if input_count not in (4, 5):
+            raise RuntimeError(
+                "stateful core expected four main inputs or five predictor inputs, "
+                f"found {input_count}"
+            )
+        self._expects_generation_steps = input_count == 5
         states = self._request.query_state()
         if len(states) != 2 * num_layers:
             raise RuntimeError(
@@ -417,8 +436,8 @@ class _OVStatefulCore:
         import torch
         from transformers.modeling_outputs import BaseModelOutputWithPast
 
-        # generation_steps is accepted for API compatibility but ignored by stateful main;
-        # the main core does not use it (only the predictor FCG glue uses it).
+        # The predictor IR retains generation_steps as its fifth base input. The
+        # main IR has only the first four inputs.
         seq = int(inputs_embeds.shape[1])
         prior = past_key_values.get_seq_length() if past_key_values is not None else 0
         is_prefill = prior == 0
@@ -442,12 +461,20 @@ class _OVStatefulCore:
                 inputs_embeds.shape[0], prior + seq, dtype=torch.long,
                 device=inputs_embeds.device,
             )
-        self._request.infer([
+        infer_inputs = [
             _to_numpy(inputs_embeds, np.float32),
             _to_numpy(attention_mask, np.int64),
             _to_numpy(position_ids, np.int64),
             _to_numpy(cache_position, np.int64),
-        ])
+        ]
+        generation_steps = _stateful_generation_steps(
+            generation_steps, self._expects_generation_steps
+        )
+        if generation_steps is not None:
+            # Match _OVCore: the live nested GenerationMixin path does not
+            # always forward this optional argument to the predictor core.
+            infer_inputs.append(_to_numpy(generation_steps, np.int64))
+        self._request.infer(infer_inputs)
         hidden = torch.from_numpy(
             np.array(self._request.get_output_tensor(0).data, dtype=np.float32, copy=True)
         )
