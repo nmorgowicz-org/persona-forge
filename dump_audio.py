@@ -244,12 +244,24 @@ def main() -> None:
     from ov_talker_runtime import OVTalkerRuntime
 
     print(f"[dump] OpenVINO ({args.compression}) ...", flush=True)
-    print(f"[dump] RSS after model load (before OV install): {_vmrss_mib():.0f} MiB", flush=True)
+    # Startup ru_maxrss brackets: isolate whether the lifetime peak is the PyTorch
+    # model-load transient or the OV install/compile transient (generation phases
+    # already shown to contribute +0 to the high-water mark).
+    print(
+        f"[dump] after model load: VmRSS={_vmrss_mib():.0f} MiB "
+        f"ru_maxrss={_maxrss_mib():.0f} MiB",
+        flush=True,
+    )
     runtime = OVTalkerRuntime(
         args.model_dir, talker, compression=args.compression,
         speech_tokenizer=model.model.speech_tokenizer,
     )
     runtime.install()
+    print(
+        f"[dump] after OV install: VmRSS={_vmrss_mib():.0f} MiB "
+        f"ru_maxrss={_maxrss_mib():.0f} MiB",
+        flush=True,
+    )
     _trim()
     print(f"[dump] RSS after OV install+release (idle): {_vmrss_mib():.0f} MiB", flush=True)
     sampler = _RssSampler(args.rss_sample_ms) if args.rss_profile else None

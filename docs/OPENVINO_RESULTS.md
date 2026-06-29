@@ -568,10 +568,41 @@ that structurally cannot observe the allocation that sets the peak**, so M9.3a s
 **New instrumentation (commit on `feat/m9-generation-peak-profile`).** `dump_audio.py` now brackets each
 generation phase with `getrusage(...).ru_maxrss` (kernel-tracked, monotonic, exact). The report gains
 `phase_maxrss_delta_mib` — the exact high-water-mark growth attributable to each phase — plus
-`lifetime_maxrss_mib`. Whichever phase shows the largest delta is the true driver of the lifetime peak,
-independent of the sample interval. The `[dump]` summary line now prints the ranked per-phase growth.
-Re-run the standard 1.7B-INT4 profile (`--rss-profile … --rss-sample-ms 50`) and read
-`phase_maxrss_delta_mib`: if `vocoder` dominates, re-open chunked/streaming decode (M9.3a); if
-`main_*`/`predictor_*` dominate, the transient is OV per-infer working buffers and the lever is
-activation/buffer reuse, not the vocoder. Until that run exists, the 7 GiB gate is blocked on an
-*unattributed* ~2.5 GiB, not on any rejected lever.
+`lifetime_maxrss_mib`. The `[dump]` summary prints the ranked per-phase growth.
+
+### M9 lifetime-peak — MEASURED and localized (2026-06-29, exact ru_maxrss)
+
+Two `--ov-only` runs of the 1.7B-INT4 stateful config (stateful main + explicit INT4 predictor + FP32
+OV vocoder, `OPENVINO_RELEASE_TORCH=1`, `OPENVINO_BUFFER_KV=1`, 6 threads, 13 GiB) with the new exact
+attribution settle the question. **Both prior hypotheses (generation transient; OV compile overlap)
+are wrong.** Result:
+
+| Checkpoint | VmRSS | ru_maxrss |
+|---|---:|---:|
+| After PyTorch model load (before OV install) | 8,524 MiB | **11,593 MiB** |
+| After OV install + Torch release | 6,695 MiB | 11,593 MiB |
+| Generation sampled peak | 9,034 MiB | 11,593 MiB |
+| Post-trim retained idle | 8,884 MiB | 11,593 MiB |
+
+Per-phase `ru_maxrss` growth: `main_prefill=+0, predictor_prefill=+0, predictor_decode=+0,
+main_decode=+0, vocoder=+0`. **Every generation phase contributes ZERO to the high-water mark, and OV
+install does not raise it either.** `ru_maxrss` is already **11,593 MiB immediately after
+`from_pretrained`**, before OpenVINO touches anything.
+
+**Root cause (confirmed): the lifetime peak is the PyTorch 1.7B fp32 checkpoint-load transient.**
+`bench_common.load_model` calls `from_pretrained(..., dtype=torch.float32)` with no
+`low_cpu_mem_usage`, so the loader momentarily holds the on-disk checkpoint *and* the materialized fp32
+model (~3 GiB over the 8.5 GiB settled value). It is a one-time, few-seconds spike at container boot,
+*before* serving — not a steady-state cost (steady state is ~8.9 GiB trimmed idle / ~9.0 GiB during
+generation).
+
+**Consequences:**
+- **Vocoder lever (M9.3a) is closed for the right reason** — it contributes 0 to the peak.
+- **Early release only saved 537 MiB** because it fixed the *main-compile* overlap, which was never the
+  binding peak; the binding peak precedes all OV work.
+- **The lever is the model load**, not OV buffers and not the vocoder. Numerics-neutral first step:
+  add `low_cpu_mem_usage=True` (shard-by-shard load avoids the double-resident state-dict). Larger,
+  serving-only step: a thin loader that never materializes the core `.layers` at fp32, since
+  `OPENVINO_RELEASE_TORCH` frees them immediately anyway. Do **not** change `load_model`'s fp32 dtype —
+  the exporter shares it and needs fp32 for conversion parity; dtype/thin-loader work belongs in the
+  serving path. The boot spike, not the 7 GiB goal alone, is the real OOM risk on the shared 15 GiB box.

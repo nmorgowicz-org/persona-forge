@@ -39,17 +39,19 @@ early-release change targeted. The next move is to measure that transient, not t
 
 ## Immediate next steps, in priority order
 
-1. **Measure the ~2.5 GiB transient directly (do this first — it decides the next lever).**
-   `dump_audio.py` now brackets every generation phase with exact `ru_maxrss` and reports
-   `phase_maxrss_delta_mib` + `lifetime_maxrss_mib`; the `[dump]` summary prints the ranked per-phase
-   growth. Re-run the standard 1.7B-INT4 stateful profile
-   (`--rss-profile /ov_output/m9_rss_1.7b_int4.json --rss-sample-ms 50`) and read which phase owns the
-   high-water mark:
-   - If `vocoder` dominates → **re-open M9.3a** (chunked/streaming vocoder decode); likely the cheapest
-     path under 7 GiB.
-   - If `main_*` / `predictor_*` dominate → the transient is OV per-infer working buffers; the lever is
-     activation/buffer reuse or `ov::hint` tuning, not the vocoder.
-   This run gates the choice between steps 3a/3b below — don't pick a lever before it exists.
+1. **Lifetime peak is MEASURED — it is the PyTorch model-load transient (done; act on it).**
+   Exact `ru_maxrss` attribution (RESULTS.md "M9 lifetime-peak — MEASURED and localized") shows
+   `ru_maxrss` is already **11,593 MiB right after `from_pretrained`**, before OV install, and every
+   generation phase (incl. vocoder) adds **+0**. The peak is the 1.7B fp32 checkpoint-load transient in
+   `bench_common.load_model` (`from_pretrained(..., dtype=torch.float32)`, no `low_cpu_mem_usage`),
+   ~3 GiB over the 8.5 GiB settled value — a one-time boot spike, not steady state (~8.9 GiB idle).
+   The vocoder lever (M9.3a) is closed for the right reason. **Levers, cheapest first:**
+   - **(a) `low_cpu_mem_usage=True`** in `load_model` — numerics-neutral, shard-by-shard load avoids the
+     double-resident state-dict. Validate in one `--ov-only` run; re-read `ru_maxrss` after model load.
+   - **(b) serving-only thin loader** — never materialize the core `.layers` at fp32 (they are released
+     immediately under `OPENVINO_RELEASE_TORCH`). Biggest win, more invasive. **Do not** change
+     `load_model`'s fp32 dtype — the exporter shares it and needs fp32 for conversion parity.
+   The boot spike (not the 7 GiB goal alone) is the real OOM risk on the shared 15 GiB box.
 
 2. **Review PR #59.** Branch `feat/m9-generation-peak-profile`; tip is the commit following this
    handoff. Contains: Release Please fix, RSS profiler (+ exact `ru_maxrss` attribution), stateful

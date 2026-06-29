@@ -739,8 +739,8 @@ class OVTalkerRuntime:
             with open("/proc/self/status", "r") as f:
                 for line in f:
                     if line.startswith("VmRSS:"):
-                        mib = int(line.split()[1])
-                        print(f"[ov_talker] RSS({label}): {mib} MiB", flush=True)
+                        mib = int(line.split()[1]) / 1024  # /proc reports kB
+                        print(f"[ov_talker] RSS({label}): {mib:.0f} MiB", flush=True)
                         return
         except Exception:
             pass
