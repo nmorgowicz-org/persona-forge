@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.12.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.11.1...qwen3-tts-openvino-v0.12.0) (2026-06-29)
+
+
+### Features
+
+* **export:** infer stateful IR layout and record artifact provenance ([7a7b091](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/7a7b091d020ba2bf5ec79f99c8e86e4bc7a41af0))
+* **health:** report active stateful cores and cache capacities ([7a7b091](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/7a7b091d020ba2bf5ec79f99c8e86e4bc7a41af0))
+* **runtime:** add stateful KV cache support for the 0.6B main and predictor cores ([7a7b091](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/7a7b091d020ba2bf5ec79f99c8e86e4bc7a41af0))
+
+
+### Tests
+
+* **runtime:** cover stateful predictor generation-step defaults ([7a7b091](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/7a7b091d020ba2bf5ec79f99c8e86e4bc7a41af0))
+
+
+### Documentation
+
+* **results:** record 0.6B stateful footprint and quality gates ([7a7b091](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/7a7b091d020ba2bf5ec79f99c8e86e4bc7a41af0))
+
 ## [0.11.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.11.0...qwen3-tts-openvino-v0.11.1) (2026-06-29)
 
 
