@@ -26,32 +26,50 @@ today all three 1.7B decision gates are answered:
     substantial step, not final.
 
 **Bottom line for the next agent:** 1.7B-INT4 is a real, validated quality win at near-0.6B latency.
-The remaining work is to bake M9 into a built image with capacity 768, tune thread/activation config,
-and finalize the 7 GiB runtime. M9 is not production-ready.
+The 7 GiB limit is **not** met (idle ~8.1 GiB at cap 768, lifetime ~11.3 GiB) and — per the analysis
+below — the binding ~2.5 GiB is an **unattributed generation transient**, not the startup overlap the
+early-release change targeted. The next move is to measure that transient, not to start cutting blind.
+
+> **Correction recorded 2026-06-29 (see RESULTS.md "M9 lifetime-peak root cause — correction").** The
+> early-release run falsified the "lifetime peak = startup overlap" hypothesis: post-release startup
+> tops out at 8.7 GiB yet lifetime `ru_maxrss` is 11.56 GiB while the 50 ms-sampled gen peak is only
+> 9.05 GiB. That ~2.5 GiB gap is a generation transient the interval sampler is blind to. Because the
+> vocoder was rejected (M9.3a) on that same blind sampler (~6 MiB), **the vocoder lever is unmeasured,
+> not rejected.**
 
 ## Immediate next steps, in priority order
 
-1. **Review PR #59.** Branch `feat/m9-generation-peak-profile`; tip commit is `bfed880`. PR #59
-   contains: Release Please fix, RSS profiler, stateful main graph rewrite, parity gates, early
-   weight release, app_worker wiring, stateful predictor wiring, capacity tuning, and M9 gate
-   measurements. All M9 gates are now passed; the branch is ready-to-test, but M9 is spike-grade
-   and the 7 GiB limit is not yet met.
+1. **Measure the ~2.5 GiB transient directly (do this first — it decides the next lever).**
+   `dump_audio.py` now brackets every generation phase with exact `ru_maxrss` and reports
+   `phase_maxrss_delta_mib` + `lifetime_maxrss_mib`; the `[dump]` summary prints the ranked per-phase
+   growth. Re-run the standard 1.7B-INT4 stateful profile
+   (`--rss-profile /ov_output/m9_rss_1.7b_int4.json --rss-sample-ms 50`) and read which phase owns the
+   high-water mark:
+   - If `vocoder` dominates → **re-open M9.3a** (chunked/streaming vocoder decode); likely the cheapest
+     path under 7 GiB.
+   - If `main_*` / `predictor_*` dominate → the transient is OV per-infer working buffers; the lever is
+     activation/buffer reuse or `ov::hint` tuning, not the vocoder.
+   This run gates the choice between steps 3a/3b below — don't pick a lever before it exists.
 
-2. **Bake a built image + finalize M9 in serving.** Runtime changes are wired in `app_worker.py`
-   and `compose.example.yml`, but not in a built image. Build a new exporter/runtime image
-   (next tag v0.11.0+), and confirm:
-   - `OPENVINO_RELEASE_TORCH=1`
-   - `OPENVINO_VOCODER_ENABLED=1`/`OPENVINO_VOCODER_DIR`
-   - `OPENVINO_MAIN_STATEFUL_MODEL` (opt-in)
-   - `OPENVINO_PREDICTOR_STATEFUL_MODEL` (opt-in, small savings)
-   - Capacity 768 as the new default (stateful main and predictor)
-   - 1.7B-INT4 configuration is reproducible from an image alone, no mounted files.
+2. **Review PR #59.** Branch `feat/m9-generation-peak-profile`; tip is the commit following this
+   handoff. Contains: Release Please fix, RSS profiler (+ exact `ru_maxrss` attribution), stateful
+   main graph rewrite, parity gates, early weight release, app_worker wiring, stateful predictor
+   wiring, capacity tuning, M9 gate measurements, and the repo-hygiene cleanup (removed the committed
+   501 KB `m9_rss_*.json`; gitignore + `scripts/validate_repo.py` now reject raw profile JSONs). All
+   M9 gates pass but the 7 GiB limit is not met — keep it draft until step 1 settles the path.
 
-3. **Reduce retained memory further (beyond 11.3 GiB).** The 7 GiB production limit is not yet met.
-   Candidate levers:
-   - OpenVINO threading/activation tuning.
-   - Evaluate a thin selective loader to avoid loading the full talker upfront.
-   - Profile under longer/shorter prompts to confirm 768 capacity remains viable.
+3. **Pick the memory lever from step 1's result.**
+   - **3a (if vocoder-bound):** chunked/streaming vocoder decode to cap the single-shot decode buffer.
+   - **3b (if transformer-bound):** OV activation/buffer reuse + threading/activation tuning; evaluate
+     a thin selective loader to avoid materializing the full talker upfront.
+   - Either way, re-confirm 768 capacity holds under the longest operational prompt.
+
+4. **Bake a built image + finalize M9 in serving** (after a lever lands, or now if the team accepts
+   ~8.1 GiB idle as good enough on the 15 GiB box). Runtime changes are wired in `app_worker.py` and
+   `compose.example.yml` but not yet imaged. Build a new exporter/runtime image (next tag v0.11.0+) and
+   confirm: `OPENVINO_RELEASE_TORCH=1`, `OPENVINO_VOCODER_ENABLED=1`/`OPENVINO_VOCODER_DIR`,
+   `OPENVINO_MAIN_STATEFUL_MODEL` (opt-in), `OPENVINO_PREDICTOR_STATEFUL_MODEL` (opt-in, small),
+   capacity 768 default, and that the 1.7B-INT4 config is reproducible from the image alone.
 
 ## How to run benchmarks on the box (copy-paste ready)
 

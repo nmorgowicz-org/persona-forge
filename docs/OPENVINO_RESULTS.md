@@ -540,3 +540,38 @@ Capacity tuning: 1024/768 (measured 2026-06-29):
 - Listening check (768 vs 2048): no audible difference.
 - Recommendation: 768 as the new default capacity; reduces idle and generation RSS by 500-1500 MiB
   vs 2048 for long prompts.
+
+### M9 lifetime-peak root cause — correction (analysis 2026-06-29)
+
+The stateful-spike section above attributed the ~12.1 GiB lifetime peak to "startup, while the full
+PyTorch model and OpenVINO compilation overlap," and that hypothesis motivated the early-release
+change. **The early-release run's own data does not support it.** After early release:
+
+- Max startup RSS is **8,739 MiB** (before release) and only **3,827 MiB** after the layers are freed
+  and the main graph compiles — startup is no longer anywhere near the peak.
+- Yet lifetime `ru_maxrss` is still **11,558 MiB** while the 50 ms-sampled generation peak is only
+  **9,052 MiB**.
+
+That **~2.5 GiB gap is a generation-time transient**, not startup overlap. The corroborating evidence:
+early release moved the lifetime peak only **−537 MiB** (12.1 → 11.3 GiB) — exactly what you expect if
+startup was never the binding driver. Early release is still a correct, harmless change (it lowers the
+floor the transient builds on), but it targeted the wrong thing; the remaining wall is a transient
+allocated *during generation*.
+
+**Consequence for M9.3a (chunked vocoder).** The vocoder lever was rejected because the 50 ms sampler
+attributed it only ~6 MiB of growth. But that is the *same* interval sampler that is blind to the
+~2.5 GiB transient. A single-shot vocoder decode is precisely a sub-interval allocation that
+`ru_maxrss` records but the sampler cannot see. **The vocoder rejection rests on a measurement method
+that structurally cannot observe the allocation that sets the peak**, so M9.3a should be considered
+*unmeasured*, not rejected, until bracketed directly.
+
+**New instrumentation (commit on `feat/m9-generation-peak-profile`).** `dump_audio.py` now brackets each
+generation phase with `getrusage(...).ru_maxrss` (kernel-tracked, monotonic, exact). The report gains
+`phase_maxrss_delta_mib` — the exact high-water-mark growth attributable to each phase — plus
+`lifetime_maxrss_mib`. Whichever phase shows the largest delta is the true driver of the lifetime peak,
+independent of the sample interval. The `[dump]` summary line now prints the ranked per-phase growth.
+Re-run the standard 1.7B-INT4 profile (`--rss-profile … --rss-sample-ms 50`) and read
+`phase_maxrss_delta_mib`: if `vocoder` dominates, re-open chunked/streaming decode (M9.3a); if
+`main_*`/`predictor_*` dominate, the transient is OV per-infer working buffers and the lever is
+activation/buffer reuse, not the vocoder. Until that run exists, the 7 GiB gate is blocked on an
+*unattributed* ~2.5 GiB, not on any rejected lever.
