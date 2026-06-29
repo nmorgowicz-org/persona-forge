@@ -1293,12 +1293,14 @@ main-graph compile reduced lifetime peak from 12.1 GiB to 11.3 GiB; generation p
 thread/activation configuration.
 
 **M9 gates status (measured 2026-06-29 on dockermisc1):**
-- Long-prompt capacity (200+ words, capacity 2048): passed; 44.88 s audio, no overflow.
+- Long-prompt capacity (200+ words, capacities 2048/1024/768): passed; 768 recommended as default.
+- Capacity tuning: 768 vs 2048 reduces generation/retained RSS by 500-1500 MiB for long prompts; no audible difference.
 - Warm latency (greedy, 3 s audio, 5 runs): stable; RTF 7.4-7.9, no warm-up artifacts.
 - Serialized concurrency: no races; single worker remains correct.
 - Listening check (stateful INT4 vs explicit INT4): passed; no audible difference.
+- Stateful predictor: implemented and validated; small RSS savings (~60 MiB), no artifacts.
 - PyTorch rollback: TTS_BACKEND=pytorch works; no regressions.
-- FP32-vs-PyTorch M2 parity on stateful main: passed on 0.6B-Base (SNR 77-86 dB; ≥60 dB gate).
+- FP32-vs-PyTorch M2 parity on stateful main: passed on 0.6B (SNR 77-86 dB) and 1.7B (SNR 71-80 dB).
 
 ## Service Integration
 

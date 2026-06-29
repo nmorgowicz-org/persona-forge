@@ -501,6 +501,13 @@ class OVTalkerRuntime:
             if not main_stateful_path.is_absolute():
                 main_stateful_path = self.model_dir / main_stateful_path
 
+        predictor_stateful_raw = os.getenv("OPENVINO_PREDICTOR_STATEFUL_MODEL", "").strip()
+        predictor_stateful_path = None
+        if predictor_stateful_raw:
+            predictor_stateful_path = Path(predictor_stateful_raw)
+            if not predictor_stateful_path.is_absolute():
+                predictor_stateful_path = self.model_dir / predictor_stateful_path
+
         # Milestone 7 / M9: OPENVINO_RELEASE_TORCH controls when PyTorch core weights are freed.
         # When enabled, we use a phased compilation:
         #   1) Compile predictor (small, safe while PyTorch loaded).
@@ -511,15 +518,13 @@ class OVTalkerRuntime:
         self._release_torch = os.getenv("OPENVINO_RELEASE_TORCH", "0").strip() == "1"
         self._torch_cores_released = False
 
-        graph_files = {
-            "predictor_prefill": _files_for(pred_comp)["predictor_prefill"],
-            "predictor_decode": _files_for(pred_comp)["predictor_decode"],
-        }
+        graph_files = {}
+        if predictor_stateful_path is None:
+            graph_files["predictor_prefill"] = _files_for(pred_comp)["predictor_prefill"]
+            graph_files["predictor_decode"] = _files_for(pred_comp)["predictor_decode"]
         if main_stateful_path is None:
-            graph_files.update({
-                "main_prefill": _files_for(main_comp)["main_prefill"],
-                "main_decode": _files_for(main_comp)["main_decode"],
-            })
+            graph_files["main_prefill"] = _files_for(main_comp)["main_prefill"]
+            graph_files["main_decode"] = _files_for(main_comp)["main_decode"]
         if main_comp != pred_comp:
             print(
                 f"[ov_talker] per-core precision: main={main_comp} predictor={pred_comp}",
@@ -532,13 +537,20 @@ class OVTalkerRuntime:
 
             # Phase 1: compile predictor (small; safe with PyTorch loaded)
             compiled = {}
-            for key, filename in graph_files.items():
-                if key not in ("predictor_prefill", "predictor_decode"):
-                    continue
-                path = self.model_dir / filename
-                if not path.is_file():
-                    raise FileNotFoundError(f"missing IR graph for {key}: {path}")
-                compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
+            if predictor_stateful_path is not None:
+                if not predictor_stateful_path.is_file():
+                    raise FileNotFoundError(f"missing stateful predictor IR: {predictor_stateful_path}")
+                compiled["predictor_stateful"] = self.core.compile_model(
+                    str(predictor_stateful_path), "CPU", core_config
+                )
+            else:
+                for key, filename in graph_files.items():
+                    if key not in ("predictor_prefill", "predictor_decode"):
+                        continue
+                    path = self.model_dir / filename
+                    if not path.is_file():
+                        raise FileNotFoundError(f"missing IR graph for {key}: {path}")
+                    compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
             self._log_rss("after_predictor_compile")
 
             # Phase 2: release PyTorch weights before main compile
@@ -606,9 +618,13 @@ class OVTalkerRuntime:
                 )
 
         pred_layers = talker.code_predictor.model.config.num_hidden_layers
-        self.pred = _OVCore(
-            compiled["predictor_prefill"], compiled["predictor_decode"], pred_layers, predictor=True
-        )
+        if predictor_stateful_path is not None:
+            self.pred = _OVStatefulCore(compiled["predictor_stateful"], pred_layers)
+            self.pred_comp = f"stateful-{self.pred_comp}"
+        else:
+            self.pred = _OVCore(
+                compiled["predictor_prefill"], compiled["predictor_decode"], pred_layers, predictor=True
+            )
 
         # Resolve speech_tokenizer. In qwen-tts it is a SIBLING of `talker` on the parent
         # model (model.model.speech_tokenizer), not an attribute of `talker`, so the old

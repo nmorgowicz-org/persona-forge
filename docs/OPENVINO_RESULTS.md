@@ -511,5 +511,32 @@ FP32-vs-PyTorch M2 parity on stateful main:
   - decode step1: SNR 81.41 dB, max_abs 2.30e-3
   - decode step2: SNR 79.12 dB, max_abs 2.72e-3
   - decode step3: SNR 77.56 dB, max_abs 2.66e-3
-- All steps above 60 dB; gate met. A 1.7B FP32 stateful parity is a recommended follow-up, but
-  this 0.6B result validates the stateful graph and its numeric fidelity at FP32.
+- All steps above 60 dB; gate met.
+
+1.7B FP32-vs-PyTorch M2 parity on stateful main (measured 2026-06-29):
+- Export FP32 main IR for 1.7B, transform to stateful (capacity 2048).
+- Method: prefill 8 tokens + 3 decode steps; SNR ≥ 60 dB gate; max_abs tolerance 1e-2.
+- Results:
+  - prefill: SNR 79.70 dB, max_abs 2.70e-3
+  - decode step1: SNR 73.41 dB, max_abs 2.87e-3
+  - decode step2: SNR 74.55 dB, max_abs 2.94e-3
+  - decode step3: SNR 71.41 dB, max_abs 3.72e-3
+- All steps above 60 dB; gate met on 1.7B.
+
+Stateful predictor (measured 2026-06-29):
+- INT4 predictor transform: 5 layers, 10 states, all shape [1,8,2048,128].
+- Runtime: OPENVINO_PREDICTOR_STATEFUL_MODEL wired; stateful predictor active.
+- Listening check: no audible difference vs main-only stateful.
+- Memory savings: modest (~60 MiB generation peak, ~1 MiB lifetime); not a primary lever.
+
+Capacity tuning: 1024/768 (measured 2026-06-29):
+- 1024:
+  - Short prompt: generation 8503 MiB, lifetime 11539 MiB, trimmed 8191 MiB.
+  - Long prompt: generation 8974 MiB, lifetime 11078 MiB, trimmed 8260 MiB.
+- 768:
+  - Short prompt: generation 8396 MiB, lifetime 11530 MiB, trimmed 8081 MiB.
+  - Long prompt: generation 8749 MiB, lifetime 11414 MiB, trimmed 8102 MiB.
+- Long prompts completed at both capacities without errors.
+- Listening check (768 vs 2048): no audible difference.
+- Recommendation: 768 as the new default capacity; reduces idle and generation RSS by 500-1500 MiB
+  vs 2048 for long prompts.
