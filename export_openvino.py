@@ -24,7 +24,6 @@ import argparse
 import hashlib
 import json
 import os
-import pickle
 import re
 import shutil
 import tempfile
@@ -82,16 +81,15 @@ def parse_args() -> argparse.Namespace:
         "--calibration",
         default=None,
         help=(
-            "directory of per-graph calibration pickles ({graph}.pkl from "
-            "calibration_capture.py). When set, INT8 cores use data-aware scale_estimation "
-            "(Milestone 6). Ignored for INT4 and the vocoder."
+            "unsupported compatibility option: pinned NNCF 3.2.0 rejects calibration datasets "
+            "for INT8 weight compression; providing this option exits before model loading"
         ),
     )
     parser.add_argument(
         "--calibration-subset",
         type=int,
         default=128,
-        help="max calibration records per graph fed to scale_estimation",
+        help="reserved compatibility option; INT8 calibration is unsupported by pinned NNCF",
     )
     parser.add_argument(
         "--vocoder-chunk",
@@ -110,7 +108,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="export only the vocoder decoder into an isolated milestone directory",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.calibration:
+        parser.error(
+            "--calibration is unsupported: pinned NNCF 3.2.0 rejects datasets and all "
+            "data-aware options for INT8 compress_weights; see Milestone 6"
+        )
+    return args
 
 
 def _versioned_dirname(qwen_version: str, model_repo: str, revision: str, ov_version: str) -> str:
@@ -155,20 +159,17 @@ def _convert(wrapper, example, ov):
     return ov.convert_model(wrapper, example_input=example)
 
 
-def _compress(ov_model, nncf, *, mode: str = "int8_asym", group_size: int = 32, ratio: float = 1.0,
-              dataset=None, subset_size: int = 128):
+def _compress(ov_model, nncf, *, mode: str = "int8_asym", group_size: int = 32, ratio: float = 1.0):
     """Compress weights with NNCF.
 
     mode: NNCF CompressWeightsMode enum name (INT8_ASYM, INT8_SYM, or INT4_ASYM).
     group_size: used for INT4 only (-1 disables grouping).
     ratio: fraction of layers assigned primary INT4 precision. NNCF uses its backup
         precision for the remainder; this is not an INT8/FP32 mixed mode.
-    dataset: optional nncf.Dataset of real inputs. When provided for an INT8 mode, enables
-        data-aware `scale_estimation` (Milestone 6). This is permitted for INT8 only on the
-        OpenVINO backend — the torch backend forces dataset=None for INT8.
-
     NOTE: weight-only INT8 modes are per-channel, ratio=1 and reject non-default
-    group_size/ratio. Only INT4 accepts group/ratio tuning in the supported CLI.
+    group_size/ratio. Pinned NNCF 3.2.0 also rejects dataset, scale_estimation, AWQ,
+    GPTQ, LoRA correction, and sensitivity selection for INT8 on every backend.
+    Only INT4 accepts group/ratio tuning in the supported CLI.
     """
     mode_lower = mode.lower()
     if mode_lower.startswith("int4"):
@@ -180,14 +181,9 @@ def _compress(ov_model, nncf, *, mode: str = "int8_asym", group_size: int = 32, 
     else:
         ov_mode = nncf.CompressWeightsMode.INT8_ASYM
 
-    # INT8 modes: all weights, per-channel. Add data-aware scale estimation when a
-    # calibration dataset is supplied (preserves INT8 speed; tightens activation error).
+    # INT8 modes: all weights, per-channel. NNCF 3.2.0 rejects every data-aware
+    # compress_weights option for INT8, including datasets and scale estimation.
     if ov_mode in (nncf.CompressWeightsMode.INT8_SYM, nncf.CompressWeightsMode.INT8_ASYM):
-        if dataset is not None:
-            return nncf.compress_weights(
-                ov_model, mode=ov_mode, dataset=dataset,
-                scale_estimation=True, subset_size=subset_size,
-            )
         return nncf.compress_weights(ov_model, mode=ov_mode)
 
     # INT4 mixed precision: primary INT4 with NNCF's configured/default backup mode.
@@ -381,30 +377,12 @@ def run() -> int:
                 if want_fp32:
                     ov.save_model(ov_model, tmp_dir / f"{name}.xml")
                 if want_int8:
-                    # Data-aware calibration (Milestone 6): replay real captured inputs through
-                    # NNCF scale_estimation for the INT8 transformer graphs. INT4 and the vocoder
-                    # do not use it.
-                    calib_ds = None
-                    calib_n = 0
-                    if args.calibration and "int4" not in args.int8_mode and name != "vocoder_decoder":
-                        pkl = Path(args.calibration) / f"{name}.pkl"
-                        if pkl.is_file():
-                            with open(pkl, "rb") as f:
-                                records = pickle.load(f)
-                            if records:
-                                calib_n = len(records)
-                                calib_ds = nncf.Dataset(records, lambda r: r)
-                        else:
-                            print(f"[export] no calibration pickle for {name}; weight-only INT8.", flush=True)
-
                     if "int4" in args.int8_mode:
                         detail = (
                             f"mode={args.int8_mode}, "
                             f"group_size={args.int8_group_size}, "
                             f"ratio={args.int8_ratio}"
                         )
-                    elif calib_ds is not None:
-                        detail = f"mode={args.int8_mode}, per-channel + scale_estimation ({calib_n} samples)"
                     else:
                         detail = f"mode={args.int8_mode}, per-channel, all weights"
                     print(f"[export] compressing {name} ({detail}) ...", flush=True)
@@ -415,8 +393,6 @@ def run() -> int:
                             mode=args.int8_mode,
                             group_size=args.int8_group_size,
                             ratio=args.int8_ratio,
-                            dataset=calib_ds,
-                            subset_size=min(args.calibration_subset, calib_n) if calib_n else args.calibration_subset,
                         ),
                         tmp_dir / f"{name}_int8.xml",
                     )
@@ -441,8 +417,8 @@ def run() -> int:
                     "mode": args.int8_mode,
                     "group_size": args.int8_group_size,
                     "ratio": args.int8_ratio,
-                    "scale_estimation": bool(args.calibration) and "int4" not in args.int8_mode,
-                    "calibration_dir": (Path(args.calibration).name if args.calibration else None),
+                    "scale_estimation": False,
+                    "calibration_dir": None,
                 }
                 if want_int8
                 else None

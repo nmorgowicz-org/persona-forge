@@ -10,7 +10,8 @@ This module runs the FP32 PyTorch model, monkeypatches the two inner transformer
 (`talker.model`, `talker.code_predictor.model`) to record exactly the positional input list the
 exported IR consumes — mirroring ov_talker_runtime._OVCore._run_non_buffered — and buckets each
 call into one of the four graphs by phase (prior==0 prefill, prior>0 decode). The records are
-pickled per graph for `export_openvino.py --calibration` to replay as an nncf.Dataset.
+pickled per graph for sensitivity and quantization diagnostics. Pinned NNCF 3.2.0 rejects
+calibration datasets for INT8 `compress_weights`; see Milestone 6 in the implementation plan.
 
 Record layout (matches the wrapper forward contract / IR input order):
     [inputs_embeds, attention_mask, position_ids, cache_position,

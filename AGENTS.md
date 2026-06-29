@@ -12,11 +12,14 @@ implementation contract for this repository.
 
 ## Current State
 
-- `app_api.py` and `app_worker.py` are the working PyTorch service baseline imported from
-  `dockermisc1`.
-- The OpenVINO generation runtime and `export_openvino.py` are not implemented yet. The
-  exporter image currently provides dependencies and a working one-shot model downloader,
-  not quantization.
+- `TTS_BACKEND=pytorch` remains the tested rollback baseline.
+- The explicit-cache OpenVINO generation runtime accelerates both transformer cores; FP32
+  OpenVINO vocoder integration and backend provenance reporting are implemented and measured.
+- `export_openvino.py` exports FP32 and weight-only INT8 transformer IR. Stateful cache is not
+  implemented. Pinned NNCF 3.2.0 does not support calibration datasets or data-aware options for
+  INT8 `compress_weights`; the attempted W8A8 PTQ fallback was rejected on tensor accuracy.
+- Milestone 6 captured real four-graph inputs on `dockermisc1`; selective weight-only INT8 with
+  sensitive layers kept in FP32 is the next quality experiment.
 - CI builds model-free `runtime` and `exporter` Docker targets.
 - Full model export, INT8 compression, parity testing, and performance benchmarking run on
   `dockermisc1`, not on ARC runners.
@@ -86,6 +89,10 @@ validating their presence.
   `torch==2.12.1+cpu` with `torchaudio==2.11.0+cpu`.
 - Do not update one OpenVINO-stack dependency in isolation without rebuilding both images and
   rerunning export parity.
+- Do not pass a dataset, scale estimation, AWQ, GPTQ, LoRA correction, or sensitivity selection
+  to NNCF 3.2.0 INT8 `compress_weights`; the API rejects these options for every backend. Do not
+  substitute full W8A8 `nncf.quantize`: the recorded M6 main-prefill spike regressed hidden-output
+  SNR from about 30 dB to about 7.4 dB. Follow the selective-INT8 plan in the implementation doc.
 - Update the implementation plan when a non-obvious compatibility pin changes.
 - Renovate tracks pip requirements, Docker base images, GitHub Actions, and the Dockerfile's
   independent Torch/Torchaudio ARGs. OpenVINO, Qwen-TTS, and PyTorch CPU-stack updates require
@@ -332,11 +339,11 @@ the property after conversion to recognized stateful cache graphs.
 
 ### Exporter image does not quantize
 
-The bootstrap exporter image contains export dependencies but does not make quantization
-functional by itself. `python -m scripts.download_model` is currently supported.
-`python export_openvino.py --output-dir /ov_output --compression both --validate` becomes the
-supported one-shot conversion only when Milestones 2 and 3 implement the script and its
-parity gates. Do not add a placeholder that emits unvalidated IR.
+The exporter performs FP32 conversion and weight-only INT8 compression. It does not make an
+unsupported calibration mode valid: NNCF 3.2.0 rejects datasets and data-aware options for INT8
+`compress_weights`. `--calibration` therefore exits before model loading. Use the staged parity
+and generation harnesses after every export; do not publish an artifact merely because NNCF wrote
+IR files.
 
 ### Container remains up after one Gunicorn service exits
 

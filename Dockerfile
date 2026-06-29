@@ -49,6 +49,6 @@ FROM runtime AS exporter
 RUN python -m pip install -r requirements-ov-export.txt
 
 # bench_common + test_ov_generation + run_bench provide the M4 generation-parity / warm-latency harness.
-COPY export_openvino.py ov_export_wrappers.py parity_contract.py test_vocoder_parity.py benchmark_vocoder.py test_transformer_parity.py bench_common.py test_ov_generation.py run_bench.sh ./
+COPY export_openvino.py ov_export_wrappers.py parity_contract.py test_vocoder_parity.py benchmark_vocoder.py test_transformer_parity.py bench_common.py test_ov_generation.py calibration_capture.py dump_audio.py run_bench.sh ./
 
 LABEL org.opencontainers.image.source="https://github.com/nmorgowicz-org/qwen3-tts-openvino"
