@@ -53,10 +53,14 @@ early-release change targeted. The next move is to measure that transient, not t
      **Lifetime peak 11,593 → 8,326 MiB; after-load ru_maxrss 11,593 → 2,620; trimmed idle 8,884 →
      8,093.** Two OV dtype seams fixed (`_to_numpy` bf16→fp32; forwards cast hidden back to model dtype),
      both no-ops under fp32. See RESULTS "M9 bf16 serving load".
-   **Two things remain on bf16:** (i) a **listening A/B** (`audio/{fp32,bf16}_glue.wav`) — bf16 changes
-   the sampled stream (3.36 s vs 3.68 s); the OV cores are unchanged so only glue precision differs;
-   (ii) it is **~8.3 GiB, still above 7 GiB** — the new ceiling is generation `main_prefill` (+1915 MiB
-   exact), so the next lever is **stateful capacity 768 and/or prefill handling**, not the load path.
+   **Listening A/B: DONE — bf16 is quality-equivalent** (user, 2026-06-29): no audible difference vs
+   fp32 (`audio/{fp32,bf16}_glue.wav`); the ~1 s leading/trailing silence is present in *both* and is
+   pre-existing prompt/seed behavior, not a bf16 effect. bf16 serving is therefore **adopted**. **One
+   thing remains:** it is **~8.3 GiB, still above 7 GiB** — the new ceiling is generation `main_prefill`
+   (+1915 MiB exact). The spike run used a **capacity-2048** stateful main; since the stateful prefill
+   attends over the static-capacity window, rebuilding the main graph at **capacity 768** is the next
+   lever to test (also cuts idle). Needs a 768 stateful-main export — the spike dir only has the 2048
+   `main_stateful_int4_v2.xml`.
 
 2. **Review PR #59.** Branch `feat/m9-generation-peak-profile`; tip is the commit following this
    handoff. Contains: Release Please fix, RSS profiler (+ exact `ru_maxrss` attribution), stateful

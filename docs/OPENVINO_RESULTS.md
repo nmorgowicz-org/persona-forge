@@ -628,8 +628,10 @@ capacity (768) and/or prefill handling, not the load path.
 
 **Two OV dtype seams** were required (both no-ops under fp32, gated by the env): `_to_numpy` upcasts
 bf16→fp32 before `.numpy()` (numpy has no bf16); the patched main/predictor forwards cast OV's fp32
-hidden back to the model dtype so the bf16 heads avoid a matmul mismatch. **Quality:** bf16 changes the
-sampled token stream (3.36 s vs 3.68 s audio for the same text+seed) — expected, but **requires a
-listening A/B** (`audio/{fp32,bf16}_glue.wav`) before adoption; the quantized OV cores are unchanged, so
-only the PyTorch glue precision differs. Still above the 7 GiB target, but the binding constraint is now
-a generation buffer, not a one-time boot spike.
+hidden back to the model dtype so the bf16 heads avoid a matmul mismatch. **Quality (listened, user,
+2026-06-29): bf16 is quality-equivalent — no audible difference** vs fp32 (`audio/{fp32,bf16}_glue.wav`);
+the ~1 s leading/trailing silence is in both and is pre-existing prompt/seed behavior, not a bf16 effect.
+bf16 changes the sampled token stream (3.36 s vs 3.68 s) but the quantized OV cores are unchanged, so
+only the PyTorch glue precision differs. **bf16 serving is adopted.** Still above the 7 GiB target, but
+the binding constraint is now a generation buffer (`main_prefill`, capacity-2048 stateful main), not a
+one-time boot spike; capacity 768 is the next lever.
