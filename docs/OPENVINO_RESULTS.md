@@ -34,6 +34,75 @@ not worth it for 0.6B.
 
 ---
 
+## 0.6B stateful-KV footprint track — measured 2026-06-29
+
+Branch `feat/0.6b-stateful-kv`, implementation commit `e5ab3cc` (the target runs used its
+semantically identical pre-commit working tree mounted over `/app`). Image `exporter-v0.10.0` at
+`sha256:5189f9bd604c4f4e187175691b7375e9b6f3fd449d91ca73ec78911beaebcb49`; model revision
+`5d83992436eae1d760afd27aff78a71d676296fc`; source metadata SHA-256
+`abec65a5d2f2dcf07382d707513cb2a9f5c2a4c5872728069b169d9601e3da7f`; OpenVINO 2026.2.1;
+6 threads; INT8_ASYM cores; FP32 OV vocoder; `OPENVINO_BUFFER_KV=1`. Generated IR/audio/profile
+artifacts remain outside Git under
+`...0.6b_5d83992436ea_ov-2026.2.1_stateful/` on `dockermisc1`.
+
+Transformed artifacts:
+
+| Core | Capacity | Graph contract | XML SHA-256 |
+|---|---:|---|---|
+| main INT8 | 768 | 4 inputs, 1 output, 56 states `[1,8,768,128]` | `d7fe2ce2…f0d7a` |
+| predictor INT8 | 32 | 5 inputs, 1 output, 10 states `[1,8,32,128]` | `a144ada5…a047b` |
+
+The predictor retains `generation_steps` as its fifth graph input. Live nested generation may omit
+that optional argument, so the stateful runtime now mirrors the explicit runtime's zero default.
+The transform CLI infers layer/base-input/cache-position layout and can write a hashed provenance
+sidecar with `--report-json`.
+
+### Parity and quality
+
+- INT8 explicit vs stateful: **bit-exact** hidden outputs and used K/V state prefixes. Main passed
+  prefill + 3 decode steps; predictor passed a 2-token prefill + all 14 decode calls (15 codebooks).
+- FP32 stateful vs PyTorch: main SNR **77.56–86.47 dB**, max_abs ≤0.00272; predictor SNR
+  **87.55–130.65 dB**, max_abs ≤0.00224. Every scope clears SNR ≥60 dB / max_abs ≤0.01.
+- Same-seed end-to-end explicit and stateful INT8 WAVs are byte-identical, SHA-256
+  `3ed46d287fc434ad423b3813fb5b47afe0078e5a4c2fce0b44a995dea7233ae6`. No quality or duration
+  change was introduced.
+
+### Memory attribution
+
+One backend per process, default short text, production sampling, bf16 where shown:
+
+| Configuration | Generation/lifetime peak | Trimmed retained | Change vs bf16+release explicit |
+|---|---:|---:|---:|
+| explicit, fp32 glue, no release | 11,036 MiB | 10,681 MiB | — |
+| explicit, bf16 glue, no release | 8,588 MiB | 8,221 MiB | — |
+| explicit, bf16 + release | **8,623 MiB** | **8,247 MiB** | baseline |
+| stateful main only, bf16 + release | 6,948 MiB | 6,696 MiB | −1,675 / −1,551 MiB |
+| stateful main + predictor, bf16 + release | **6,635 MiB** | **6,394 MiB** | **−1,988 / −1,853 MiB** |
+
+bf16 is the large load/retention lever. Early release frees ~0.97 GiB of core weights but does not
+move the binding 0.6B generation peak because OV compilation/generation reuses allocator pages.
+Stateful main removes most explicit K/V marshalling and saves ~1.68 GiB peak; cap-32 predictor adds
+another ~313 MiB. The short request fits under 7 GiB, but only with ~533 MiB (7.4%) cgroup headroom.
+
+### Capacity and latency
+
+- Capacity: the 177-word repeated paragraph completed without cache overflow and produced 45.28 s
+  audio at main cap 768 / predictor cap 32. Peak RSS was **7,845 MiB**, trimmed retained 6,716 MiB.
+  Therefore 7 GiB is valid only for bounded short requests; paragraph-capable deployments need 8 GiB.
+- Warm sampling, one warm-up + five measured iterations, identical seeds/text: explicit median
+  **18.429 s** (RTF 5.485) vs stateful **19.138 s** (RTF 5.696), a **3.8% regression**. Stateful KV
+  is accepted as a footprint feature, not a latency optimization.
+- Protected `litellm`, `litellm-postgres`, and `headroom-proxy` remained healthy; production
+  `qwen3-tts` remained stopped. Post-run host available memory was ~13 GiB; swap remained 2.9 GiB used.
+
+**Decision:** the stateful 0.6B profile is ship-capable after its IRs and runtime are baked into a
+versioned image/artifact set. Keep explicit cache as opt-out rollback. Do not advertise 20% headroom
+at 7 GiB or support long prompts there. This branch did not rerun HTTP serving/concurrency or the
+full PyTorch rollback; the last PyTorch rollback pass is the v0.11.0 M9 run and must be repeated from
+the baked release candidate.
+
+---
+
 ## A/B listening verdict — 0.6B INT8 vs PyTorch (2026-06-29)
 
 Same seed (20260628), same text ("Once upon a time, in a village far away, there lived a curious

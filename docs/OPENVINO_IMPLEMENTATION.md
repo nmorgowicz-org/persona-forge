@@ -68,6 +68,14 @@ untried lever and is not worth it for 0.6B. Next work is the **1.7B** track (qua
 memory enablers (M5/M7).
 See [`OPENVINO_RESULTS.md` § Milestone 6 and the 0.6B decision summary](OPENVINO_RESULTS.md#0.6b-decision-summary-current).
 
+**0.6B stateful-KV footprint track: IMPLEMENTED / measured (2026-06-29), pending release packaging.**
+Cap-768 main plus cap-32 predictor is bit-exact against the explicit INT8 graphs and produces a
+byte-identical same-seed WAV. With bf16 serving load and early release, short-request peak RSS fell
+**8,623 → 6,635 MiB** and trimmed retained RSS fell **8,247 → 6,394 MiB**. Warm median regressed
+3.8% (18.429 → 19.138 s), so this is a footprint feature, not a speed feature. A 177-word prompt
+completed at 45.28 s audio but peaked at 7,845 MiB: use 8 GiB for long-prompt deployments; 7 GiB is
+only valid for bounded short requests. See `PLAN_0.6B_STATEFUL_KV.md` and the results log.
+
 **Milestone 1.5 — Vocoder decoder export: COMPLETE (2026-06-28)**
 
 - FP32 IR exported and validated: SNR **46.4 dB** vs PyTorch (mean_abs 1.76e-4, p99.9 6.8e-3).
@@ -1311,6 +1319,30 @@ predictor (~60 MiB) are kept but are minor next to bf16. Shipped at `TTS_MEMORY_
 - Stateful predictor: implemented and validated; small RSS savings (~60 MiB), no artifacts.
 - PyTorch rollback: TTS_BACKEND=pytorch works; no regressions.
 - FP32-vs-PyTorch M2 parity on stateful main: passed on 0.6B (SNR 77-86 dB) and 1.7B (SNR 71-80 dB).
+
+### 0.6B stateful profile (implemented and measured)
+
+The same static-capacity design is now validated for the shipping 0.6B INT8 model:
+
+- Main: capacity 768, 28 layers, 4 base inputs, 56 internal K/V states.
+- Predictor: capacity 32, 5 layers, 5 base inputs, 10 internal K/V states. Capacity 32 covers its
+  2-token prefill plus 14 decode calls with margin; state resets once per audio frame.
+- `scripts/transform_stateful_ir.py` infers layer count, base-input count, and the named
+  `cache_position` input when flags are omitted. `--report-json` records source/output hashes,
+  resolved layout, OpenVINO version, compile result, state count, and state shapes.
+- `_OVStatefulCore` validates whether a compiled graph has four main inputs or five predictor inputs.
+  When nested generation omits optional predictor `generation_steps`, it supplies the same int64 zero
+  used by the explicit runtime. Do not remove the fifth predictor input or bake a nonzero value.
+- `test_stateful_main_parity.py --core main|predictor` gates both cores. Despite the historical
+  filename, it is now the shared stateful-core parity harness.
+- Health provenance reports both stateful-core flags and their compiled capacities.
+
+Acceptance results: INT8 explicit-vs-stateful is bit-exact for both cores; FP32-vs-PyTorch SNR is
+77.56–86.47 dB main and 87.55–130.65 dB predictor; same-seed rendered WAV is byte-identical. Short
+peak/retained RSS is 6,635/6,394 MiB. The 45.28-second capacity run peaks at 7,845 MiB, so the
+repository must not lower the general long-prompt limit to 7 GiB. Explicit cache remains available
+by leaving both stateful model environment variables unset; full rollback remains a fresh process
+with `TTS_BACKEND=pytorch`.
 
 ## Service Integration
 

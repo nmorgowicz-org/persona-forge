@@ -13,13 +13,15 @@ implementation contract for this repository.
 ## Current State
 
 - `TTS_BACKEND=pytorch` remains the tested rollback baseline.
-- The explicit-cache OpenVINO generation runtime accelerates both transformer cores; FP32
-  OpenVINO vocoder integration and backend provenance reporting are implemented and measured.
-- `export_openvino.py` exports FP32 and weight-only INT8 transformer IR. Stateful cache is not
-  implemented. Pinned NNCF 3.2.0 does not support calibration datasets or data-aware options for
-  INT8 `compress_weights`; the attempted W8A8 PTQ fallback was rejected on tensor accuracy.
-- Milestone 6 captured real four-graph inputs on `dockermisc1`; selective weight-only INT8 with
-  sensitive layers kept in FP32 is the next quality experiment.
+- The OpenVINO runtime accelerates both transformer cores and the FP32 vocoder. Explicit-cache
+  remains the rollback path; static-capacity stateful main and predictor cores are implemented.
+- `export_openvino.py` exports FP32 and weight-only INT8/INT4 transformer IR. Pinned NNCF 3.2.0
+  does not support calibration datasets or data-aware options for INT8 `compress_weights`; W8A8
+  and 0.6B mixed-precision recovery were rejected on measured accuracy/quality.
+- 0.6B ships INT8. Stateful cap-768 main + cap-32 predictor was validated on `dockermisc1` with
+  byte-identical audio versus explicit cache and reduced the short-request peak from 8,623 to
+  6,635 MiB. A 45.28-second request peaked at 7,845 MiB, so long requests still require 8 GiB.
+- 1.7B ships INT4 with bf16 glue and stateful cache at an 8 GiB memory limit.
 - CI builds model-free `runtime` and `exporter` Docker targets.
 - Full model export, INT8 compression, parity testing, and performance benchmarking run on
   `dockermisc1`, not on ARC runners.

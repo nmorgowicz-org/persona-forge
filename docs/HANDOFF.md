@@ -1,4 +1,4 @@
-# Handoff — qwen3-tts OpenVINO optimization (2026-06-29, after v0.11.0)
+# Handoff — 0.6B stateful-KV footprint work (2026-06-29)
 
 Self-contained brief for the next agent. Deeper detail lives in `OPENVINO_IMPLEMENTATION.md` (design +
 milestones) and `OPENVINO_RESULTS.md` (every measured number). Memory file:
@@ -6,10 +6,14 @@ milestones) and `OPENVINO_RESULTS.md` (every measured number). Memory file:
 
 ## Where we are (one paragraph)
 
-**Everything is merged to `main` and released as v0.11.0** (tag `qwen3-tts-openvino-v0.11.0`,
-commit `f8b7e5e`; PR #59 squashed in `08415a5`). 0.6B ships weight-only **INT8 at ~1.40×** (M6
-CLOSED). The **1.7B-INT4 track is functionally complete** — a validated *quality* win at near-0.6B
-latency, with the memory wall (M9) now CLOSED. All three 1.7B decision gates are answered and shipped:
+`main` is released as v0.11.0 (tag `qwen3-tts-openvino-v0.11.0`, commit `f8b7e5e`; PR #59 squashed
+in `08415a5`). Current work is on **`feat/0.6b-stateful-kv` and is not merged/released**. The 0.6B
+implementation source commit is **`e5ab3cc`**. The
+INT8 stateful profile is implemented and passes its footprint/quality gates: cap-768 main + cap-32
+predictor, bf16 serving glue, and early release cut the short peak **8,623 → 6,635 MiB** and retained
+RSS **8,247 → 6,394 MiB**. Explicit/stateful INT8 output is bit-exact at both cores and the rendered
+WAV is byte-identical. Warm median is 3.8% slower, and a 45.28-second request peaks at 7,845 MiB, so
+long-prompt deployments still need 8 GiB. The 1.7B-INT4 track remains closed and released:
 
 - **Quality (listened):** 1.7B-INT4 (g32) "slight comma pause but 100% good", beats 0.6B-INT8 whose
   comma artifact the user dislikes. → **INT4 is the chosen 1.7B precision.**
@@ -22,39 +26,36 @@ latency, with the memory wall (M9) now CLOSED. All three 1.7B decision gates are
   weight release, and a serving silence-trim. The ~7.5 GiB floor (INT4 weights + bf16 glue + runtime)
   does not move with capacity, so **1.7B ships at `TTS_MEMORY_LIMIT=8G`** (0.6B-INT8 still fits 7G).
 
-**Bottom line for the next agent:** the 1.7B-INT4 quality track is DONE and shipped. There is no open
-blocker. Remaining work is *enablement and polish*, not core engineering — see next steps. The one
-honest caveat: all M9 numbers were measured with PR-#59 runtime files mounted over the released
-`exporter-v0.10.0` image; **a v0.11.0 image that bakes those runtime files has not yet been built and
-smoke-tested end-to-end** (the code is on `main`, the image is not yet published).
+**Bottom line for the next agent:** core 0.6B stateful engineering and target-host validation are
+done. Remaining work is packaging/publish validation: commit/push/PR this branch, bake the runtime,
+promote the generated IRs with their provenance sidecars, and smoke-test without bind-mounted code.
+Do not claim 7 GiB support for unrestricted paragraph generation.
 
 ## Immediate next steps, in priority order
 
-1. **Build + publish the v0.11.0 runtime/exporter image and smoke-test it (the only real loose end).**
-   The M9 runtime changes (`app_worker.py`, `ov_talker_runtime.py`, `bench_common.py`, stateful
-   transforms) are on `main` but were validated by *mounting* them over `exporter-v0.10.0`. Build the
-   image at the v0.11.0 tag and confirm the 1.7B-INT4 config is reproducible **from the image alone**:
-   `OPENVINO_TORCH_DTYPE=bfloat16`, `OPENVINO_RELEASE_TORCH=1`, `OPENVINO_MAIN_STATEFUL_MODEL`
-   (capacity-768 main), `OPENVINO_PREDICTOR_STATEFUL_MODEL` (opt-in, small), `OPENVINO_VOCODER_ENABLED=1`
-   /`OPENVINO_VOCODER_DIR`, `SILENCE_TRIM=1`, `TTS_MEMORY_LIMIT=8G`. Re-confirm the headline numbers
-   (lifetime ~7,715 / idle ~7,485 MiB) hold from the baked image, then this track is fully closed.
-   *This is an outward-facing GHCR publish — confirm with the user before pushing.*
+1. **Publish this branch through a PR, then bake and smoke-test the next image.** The measured run used
+   `exporter-v0.10.0` with branch files mounted over `/app`. Rebuild both container targets and test
+   from the image alone with `MODEL_SIZE=0.6B`, `OPENVINO_TORCH_DTYPE=bfloat16`,
+   `OPENVINO_RELEASE_TORCH=1`, cap-768 `OPENVINO_MAIN_STATEFUL_MODEL`, cap-32
+   `OPENVINO_PREDICTOR_STATEFUL_MODEL`, and the FP32 OV vocoder. Apply `ready-to-test` only after the
+   repository tests pass. Repeat `/health`, serialized serving, explicit-cache opt-out, and a fresh
+   `TTS_BACKEND=pytorch` rollback process; those were not rerun on this branch. Publishing GHCR
+   artifacts is outward-facing; confirm before manual publish.
 
-2. **Ship a capacity-768 main IR as a first-class production artifact.** Today the cap-768 main lives in
-   the spike dir as `main_stateful_int4_cap768.xml`. Promote it into the released INT4 IR directory with
-   capacity recorded in metadata, and document the `transform_stateful_ir.py` rebuild recipe (already in
-   `compose.example.yml`'s "Capacity tuning" block) in the user-facing README/quickstart so operators
-   can retune. Validate bit-exact parity with `scripts/test_stateful_main_parity.py` after the rebuild.
+2. **Promote the 0.6B stateful IRs as versioned production artifacts.** Source directory:
+   `qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1`; generated directory adds `_stateful`. Promote
+   `main_stateful_int8_cap768.{xml,bin}` and `predictor_stateful_int8_cap32.{xml,bin}` plus their
+   `*.transform.json` provenance. Do not put them in Git or bake weights into an image. Re-run both
+   explicit-vs-stateful parity commands after promotion.
 
-3. **Optional further memory headroom (only if a 7G 1.7B target is ever required).** The floor is
-   ~7.5 GiB; the largest remaining single contributor is the `main_prefill` activation (+1,529 MiB at
-   cap 768). Levers, in order: drop capacity to 512 (~42 s max utterance — risky for paragraphs), OV
-   activation/buffer reuse, thread/activation tuning. Not needed for the shipped 8G target; pursue only
-   on explicit request. Re-confirm 768 holds under the longest operational prompt either way.
+3. **Choose and document the 0.6B memory policy.** Short requests peak at 6,635 MiB and fit 7 GiB with
+   only 7.4% headroom; the 45.28-second run peaks at 7,845 MiB. Prefer 8 GiB unless the API enforces a
+   bounded short text/request policy. Do not lower capacity below 768 without a replacement long-prompt
+   gate; the current 177-word prompt completed at that capacity.
 
-4. **Decide 1.7B's release role vs 0.6B.** 1.7B-INT4 is the quality leader but needs 8G and is ~1.07×
-   slower in absolute latency than nothing-special; 0.6B-INT8 is the lean 7G default. This is a
-   product/positioning call for the user, not an engineering one — surface it, don't decide it.
+4. **Keep rollback explicit.** Unset both stateful-model variables for explicit-cache A/B. Restart a
+   fresh process with `TTS_BACKEND=pytorch` for full rollback; early release makes in-process fallback
+   impossible by design.
 
 ## How to run benchmarks on the box (copy-paste ready)
 
@@ -63,6 +64,11 @@ smoke-tested end-to-end** (the code is on `main`, the image is not yet published
   See `dockermisc1-ops` memory.
 - **Never run two `--memory 13g` jobs at once** — 15 GiB box + litellm/headroom = OOM.
 - IR dirs under `/var/data/autopirate/qwen3-tts/openvino/`:
+  - 0.6B explicit INT8: `qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1`
+  - 0.6B stateful artifacts/reports: the same name plus `_stateful`; raw RSS, parity, speed JSON,
+    and generated WAVs remain there outside Git. Source metadata SHA-256 is
+    `abec65a5d2f2dcf07382d707513cb2a9f5c2a4c5872728069b169d9601e3da7f`.
+  - 0.6B FP32 vocoder: the explicit directory name plus `_vocoder`.
   - INT8: `qwen-tts-0.1.1_1.7b_fd4b25438912_ov-2026.2.1`
   - INT4: `qwen-tts-0.1.1_1.7b_fd4b25438912_ov-2026.2.1_int4g32` (no vocoder inside)
   - FP32 vocoder: `qwen-tts-0.1.1_1.7b_fd4b25438912_ov-2026.2.1_vocoder` (set `OPENVINO_VOCODER_DIR` to
@@ -102,6 +108,10 @@ smoke-tested end-to-end** (the code is on `main`, the image is not yet published
   stateful rewrite.
 - OpenVINO `MakeStateful` rejects dynamic state shapes. Do not retry it. The working design uses
   static-capacity Variables plus dynamic prefix Slice and cache-position ScatterUpdate/Assign.
+- Predictor stateful IR has five base inputs; `generation_steps` is retained at index 4. Live nested
+  generation may omit it, so `_OVStatefulCore` must preserve the explicit runtime's int64-zero default.
+- 0.6B cap-32 predictor is deliberate: its per-frame cache is reset and the validated path is a
+  2-token prefill plus 14 decode calls. Main capacity remains 768.
 - `ru_maxrss` includes model load and OV compilation; it is not a generation-only metric. Always pair
   it with the sampled generation timeline. The stateful run proved startup is now the lifetime peak.
 - RTF here is overhead-dominated (test utterances ~2.6 s), so compare absolute median seconds across
@@ -116,5 +126,7 @@ bit-exact explicit-vs-stateful main parity, end-to-end memory run, early release
 stateful predictor wiring and listening check, capacity tuning (768/1024 validated),
 M9 gates (capacity, warm latency, listening, concurrency, rollback, FP32-vs-PyTorch 0.6B and 1.7B
 parity); M9 bf16 serving load + capacity-768 + silence-trim + capacity-tuning docs. **M9 CLOSED and
-shipped in v0.11.0** (lifetime peak 7,715 / idle 7,485 MiB at 8G). Only remaining task: bake +
-smoke-test the v0.11.0 image (step 1 above).
+shipped in v0.11.0** (lifetime peak 7,715 / idle 7,485 MiB at 8G). On this branch, 0.6B stateful
+main+predictor transform, runtime input handling, INT8 bit-exact parity, FP32 PyTorch parity,
+byte-identical end-to-end quality, short/long RSS, and five-run warm latency are complete. Remaining:
+merge/publish, promote IR artifacts, and baked-image smoke test.
