@@ -1147,6 +1147,44 @@ This run confirms the harness and runtime are operational with OPENVINO_BUFFER_K
 - The 15 dB SNR acceptance criterion for INT8.
 - The logits-parity interpretation when INT8 is used.
 
+**M4 FP32 re-validation (2026-06-28, dockermisc1, runtime-v0.8.0, FP32, OPENVINO_BUFFER_KV=1, OPENVINO_VOCODER_ENABLED=1):**
+
+Configuration:
+
+- runtime-v0.8.0 (exporter-v0.8.0 image used as harness runner).
+- FP32 transformer cores (compression: fp32), vocoder FP32 IR enabled.
+- OPENVINO_BUFFER_KV=1.
+- 6 threads; seed 20260628; --mode all; --code-steps 96; --sampled-iters 5.
+
+Results (from ov_generation_report_v080_all_fp32_20260628T203102.json on dockermisc1):
+
+- Greedy:
+  - frames_compared: 196
+  - first_divergence: -1 (no divergence)
+  - waveform SNR: 220.83 dB
+  - speedup_median: 0.97x (PyTorch 22.45s → OV 23.24s; no speedup, as expected for FP32)
+  - peak RSS: ~12128 MiB (~11.8 GiB)
+- Sampled-quality:
+  - median_waveform_snr_db: 220.62
+  - mean_overall_codebook_match_rate: 0.9405
+  - min_per_codebook_match_rate: 0.8109
+  - mean_duration_ratio: 1.0244
+  - mean_energy_ratio: 1.002
+- Logits-parity:
+  - steps_compared: 37
+  - first_argmax_mismatch_frame: none (no argmax divergence within 37 frames)
+
+Interpretation:
+
+- This FP32 run confirms:
+  - The M4 runtime (FP32, with vocoder and buffer KV) is numerically correct and stable.
+  - The earlier INT8 issues (frame-160 divergence, very low SNR, logits-parity mismatch at frame 0) are INT8-specific, not a general OV-vs-PyTorch bug.
+- FP32 meets the conceptual quality expectations:
+  - Greedy: perfect agreement, very high SNR.
+  - Sampled-quality: extremely high SNR; codebook match, duration, and energy all excellent.
+  - Logits-parity: no argmax divergence.
+- FP32 does not provide speedup and remains expensive on memory; INT8 is still required for practical latency and memory on 0.6B/1.7B.
+
 ## Milestone 5: Stateful KV Cache
 
 After the explicit-cache runtime passes parity and benchmarks, produce one dynamic stateful
