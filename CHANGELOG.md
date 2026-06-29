@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.11.0...qwen3-tts-openvino-v0.11.1) (2026-06-29)
+
+
+### Documentation
+
+* mark M9 closed and shipped in v0.11.0; refresh handoff next steps ([d2dc334](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d2dc334fa974d109e2a588816d799aff7d481cf4))
+
 ## [0.11.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.10.0...qwen3-tts-openvino-v0.11.0) (2026-06-29)
 
 
