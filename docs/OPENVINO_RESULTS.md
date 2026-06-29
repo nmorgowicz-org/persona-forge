@@ -498,6 +498,11 @@ PyTorch rollback verification:
 - Result: 2.8 s of audio, no errors, standard PyTorch timings.
 - Conclusion: explicit rollback path functional; no regressions.
 
+Listening check (stateful INT4 vs explicit INT4):
+- A/B compare on identical text/seed: no audible difference.
+- No truncation, no repetition, no artifacts; intelligibility and speaker similarity matched.
+- Wav files: audio/explicit_int8.wav and audio/stateful_int8.wav (gitignored).
+
 FP32-vs-PyTorch M2 parity on stateful main:
 - Passed (on 0.6B-Base model): FP32 stateful main vs PyTorch eager main-core.
 - Method: prefill 8 tokens + 3 decode steps; SNR ≥ 60 dB gate enforced; max_abs tolerance 1e-2.

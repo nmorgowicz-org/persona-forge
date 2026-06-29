@@ -1296,6 +1296,7 @@ thread/activation configuration.
 - Long-prompt capacity (200+ words, capacity 2048): passed; 44.88 s audio, no overflow.
 - Warm latency (greedy, 3 s audio, 5 runs): stable; RTF 7.4-7.9, no warm-up artifacts.
 - Serialized concurrency: no races; single worker remains correct.
+- Listening check (stateful INT4 vs explicit INT4): passed; no audible difference.
 - PyTorch rollback: TTS_BACKEND=pytorch works; no regressions.
 - FP32-vs-PyTorch M2 parity on stateful main: passed on 0.6B-Base (SNR 77-86 dB; ≥60 dB gate).
 
