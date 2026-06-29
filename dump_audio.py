@@ -75,7 +75,10 @@ def main() -> None:
     from ov_talker_runtime import OVTalkerRuntime
 
     print(f"[dump] OpenVINO ({args.compression}) ...", flush=True)
-    runtime = OVTalkerRuntime(args.model_dir, talker, compression=args.compression)
+    runtime = OVTalkerRuntime(
+        args.model_dir, talker, compression=args.compression,
+        speech_tokenizer=model.model.speech_tokenizer,
+    )
     runtime.install()
     try:
         torch.manual_seed(args.seed)

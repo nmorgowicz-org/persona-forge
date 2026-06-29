@@ -1232,6 +1232,51 @@ Interpretation:
     - Greedy and logits-parity as diagnostics, not as direct quality gates.
 - INT8 speedup (1.40x) and lower RSS (~9.6 GiB vs ~11.8 GiB for FP32) make it necessary for practical deployment, even though it is not bit-for-bit identical to PyTorch.
 
+**CORRECTION — the v0.8.0 runs above ran the PyTorch vocoder, not the OV vocoder (2026-06-28, runtime-v0.8.1):**
+
+Despite `OPENVINO_VOCODER_ENABLED=1`, the OpenVINO vocoder IR **never loaded** in the v0.8.0 runs.
+Four stacked bugs each silently fell through to the PyTorch `speech_tokenizer.decode`:
+
+1. **Filename** — `ov_vocoder_runtime` looked for `vocoder.xml`; the exporter writes `vocoder_decoder.xml`.
+2. **`speech_tokenizer` lookup** — resolved via `getattr(talker, "speech_tokenizer")`, but it is a *sibling*
+   of `talker` on the parent model (`model.model.speech_tokenizer`), so it was always `None` → the
+   vocoder runtime was never constructed. This was the decisive blocker.
+3. **IR I/O binding** — `_validate_io` used `.any_name` (the IR's tensors are unnamed) and `.get_shape()`
+   (the IR's axes are dynamic); both raise. Fixed to bind by port index and use `get_partial_shape()`.
+4. **Return contract** — the patched `decode` returned only the waveform list; the real contract is
+   `(wavs: list[np.ndarray], sample_rate)`. Fixed to return the tuple and resolve the sample rate from
+   `speech_tokenizer.get_output_sample_rate()`.
+
+So "wiring the vocoder added no speedup" was true, but for the wrong reason — it was never wired.
+To prevent recurrence, the runtime now prints a loud backend-provenance line at install
+(`[ov_talker] backends: main=… predictor=… vocoder=OV|PyTorch`), the report JSON carries a `backends`
+block, and the `_ov_decode` fallback warns once instead of silently swapping to PyTorch.
+
+**M4 INT8 re-validation with the OV vocoder GENUINELY active (2026-06-28, runtime-v0.8.1, INT8, vocoder OV IR, OPENVINO_BUFFER_KV=1, 6 threads, seed 20260628, --mode all, --code-steps 96, --sampled-iters 5):**
+
+Results (`vocON_verify_int8.json` beside the IR; box was sharing CPU with litellm, so absolute times are noisier than v0.8.0):
+
+- Greedy: frames 194, first_divergence 160, waveform SNR −3.5 dB
+- speedup_median: **1.35x** (PyTorch 23.48s → OV 17.35s), OV RTF 5.86, peak RSS ~10.3 GiB
+- Sampled-quality: median_waveform_snr_db −2.66, mean_overall_codebook_match_rate **0.8165**,
+  min_per_codebook_match_rate 0.7656, mean_duration_ratio 0.9642, mean_energy_ratio 1.0108
+
+Interpretation:
+
+- The sampled-quality numbers are **identical** to the v0.8.0 PyTorch-vocoder run (0.8165 / 0.7656 /
+  0.9642 / 1.0108 / −2.66). Expected: the codes come from the transformer cores, and the FP32 vocoder
+  IR (46.4 dB) renders them faithfully — swapping vocoder backend does not move code-quality metrics.
+- The speedup did **not** rise when the OV vocoder was genuinely enabled (1.40x → 1.35x, within
+  box-load variance). **The ~29% tokenizer-decode chunk does not accelerate under OpenVINO IR on this
+  CPU** — the PyTorch conv decoder is already efficient and per-chunk IR marshalling roughly cancels any
+  matmul gain. The vocoder is therefore quality-neutral and speed-neutral here; it is *not* the lever to 2x.
+- The remaining lever toward both speed and the mid-utterance INT8 artifact (a duration-token divergence
+  that a listener heard as a slight pause) is **data-aware INT8 calibration** (NNCF `scale_estimation`/AWQ)
+  on the two transformer cores, validated by codebook-match + duration_ratio + listening — not the vocoder.
+- The frame-0 logits-parity mismatch NOTE in the v0.8.0 INT8 block ("consistent with accumulated FP32
+  drift") is **wrong**: a frame-0 mismatch cannot be accumulated drift. It is the expected first-step
+  effect of quantized body matmuls perturbing the hidden state; sampled-audio quality remains the ship gate.
+
 ## Milestone 5: Stateful KV Cache
 
 After the explicit-cache runtime passes parity and benchmarks, produce one dynamic stateful

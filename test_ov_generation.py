@@ -539,7 +539,10 @@ def run() -> int:
 
     from ov_talker_runtime import OVTalkerRuntime
 
-    runtime = OVTalkerRuntime(args.model_dir, talker, compression=args.compression)
+    runtime = OVTalkerRuntime(
+        args.model_dir, talker, compression=args.compression,
+        speech_tokenizer=speech_tokenizer,
+    )
     metadata = json.loads((args.model_dir / "metadata.json").read_text(encoding="utf-8"))
 
     exit_code = 0
@@ -673,6 +676,18 @@ def run() -> int:
         "seed": args.seed,
         "prompt": args.text,
         "code_steps": args.code_steps,
+        # Self-documenting provenance: which backend each component ACTUALLY ran on.
+        # A silent PyTorch-vocoder fallback once masqueraded as "vocoder enabled" —
+        # this block makes every report state the truth.
+        "backends": {
+            "main": getattr(runtime, "main_comp", runtime.compression),
+            "predictor": getattr(runtime, "pred_comp", runtime.compression),
+            "vocoder": (
+                "OV"
+                if (runtime.vocoder_runtime and runtime.vocoder_runtime.enabled)
+                else "PyTorch"
+            ),
+        },
         "env": {
             "OPENVINO_BUFFER_KV": os.getenv("OPENVINO_BUFFER_KV"),
             "OPENVINO_VOCODER_ENABLED": os.getenv("OPENVINO_VOCODER_ENABLED"),
