@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import ast
 import json
+import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -12,6 +14,52 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CONVENTIONAL_TYPES = (
+    "feat",
+    "fix",
+    "perf",
+    "refactor",
+    "test",
+    "docs",
+    "build",
+    "ci",
+    "chore",
+    "revert",
+)
+OVERRIDE_ENTRY_RE = re.compile(
+    rf"^({'|'.join(CONVENTIONAL_TYPES)})(?:\([a-z0-9][a-z0-9._/-]*\))?!?: .+$"
+)
+
+
+def validate_pr_override_body(body: str) -> None:
+    """Reject malformed Release Please override blocks when a PR supplies one."""
+    begin = "BEGIN_COMMIT_OVERRIDE"
+    end = "END_COMMIT_OVERRIDE"
+    if begin not in body and end not in body:
+        return
+    if body.count(begin) != 1 or body.count(end) != 1:
+        raise RuntimeError("PR body must contain exactly one complete commit override block")
+    block = body.split(begin, 1)[1].split(end, 1)[0].strip()
+    entries = [entry.strip() for entry in re.split(r"\r?\n\s*\r?\n+", block) if entry.strip()]
+    if not entries:
+        raise RuntimeError("Release Please commit override block must not be empty")
+    invalid = [entry for entry in entries if not OVERRIDE_ENTRY_RE.fullmatch(entry)]
+    if invalid:
+        raise RuntimeError(
+            "Release Please override entries must be separated by blank lines and use one "
+            "supported Conventional Commit type with an optional simple scope; "
+            f"invalid entries: {invalid}"
+        )
+
+
+def validate_pr_event() -> None:
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if not event_path:
+        return
+    event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+    pull_request = event.get("pull_request")
+    if isinstance(pull_request, dict):
+        validate_pr_override_body(pull_request.get("body") or "")
 
 
 def validate_python() -> None:
@@ -44,6 +92,13 @@ def validate_workflows() -> None:
     release_config = json.loads(
         (ROOT / ".github" / "release-please" / "config.json5").read_text(encoding="utf-8")
     )
+    configured_types = {
+        section["type"] for section in release_config.get("changelog-sections", [])
+    }
+    if configured_types != set(CONVENTIONAL_TYPES):
+        raise RuntimeError(
+            "Release Please changelog sections must match the supported override types"
+        )
     package_name = release_config["packages"]["."]["package-name"]
     tag_prefix = release_config.get("tag-prefix", "v")
     expected_release_tag = f"{package_name}-{tag_prefix}*"
@@ -140,6 +195,7 @@ def validate_artifact_policy() -> None:
 
 
 def main() -> None:
+    validate_pr_event()
     validate_python()
     validate_workflows()
     validate_repository_metadata()

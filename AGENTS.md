@@ -420,10 +420,14 @@ notes is represented:
 ```text
 BEGIN_COMMIT_OVERRIDE
 fix(ci): publish images only from Release Please tags
+
 fix(export): include the OpenVINO export CLI in the exporter image
 END_COMMIT_OVERRIDE
 ```
 
 The block is authoritative release-note input; keep it aligned with the full PR scope instead
-of relying on the PR title alone. Generated Release Please version PRs are exempt. Keep generated
-model artifacts and benchmark audio out of PRs.
+of relying on the PR title alone. Separate entries with a blank line: Release Please uses the blank
+line to split the override into multiple commits. Each entry must use exactly one supported type and
+an optional scope; express cross-cutting work as `feat(bench): ...` or `docs(export): ...`, never
+composite headers such as `feat(bench)+docs:` or `docs+export:`. Generated Release Please version PRs
+are exempt. Keep generated model artifacts and benchmark audio out of PRs.
