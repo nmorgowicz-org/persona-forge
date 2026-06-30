@@ -630,5 +630,57 @@ def infer():
     return Response(audio_bytes, content_type=media_type)
 
 
+@app.route("/stream_internal", methods=["POST"])
+def stream_internal():
+    """Dev-only streaming parity endpoint.
+
+    - Uses _run_generate_with_streaming to exercise the streaming vocoder path.
+    - Same JSON input as /infer.
+    - Returns WAV of concatenated streaming chunks.
+    - NOT part of the public API; may change or be removed.
+    """
+    if model is None or voice_clone_prompt is None:
+        return jsonify({"error": "Model not loaded"}), 503
+
+    data = request.get_json(force=True, silent=True)
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+
+    language = (data.get("language") or "English").strip()
+
+    def do_work():
+        import numpy as np
+
+        stream_chunks: List[np.ndarray] = []
+
+        def on_chunk(pcm: Any):
+            stream_chunks.append(np.asarray(pcm, dtype=np.float32).ravel())
+
+        wav, sr = _run_generate_with_streaming(text, language, on_chunk)
+
+        # Build audio from the streaming chunks for parity comparison.
+        if stream_chunks:
+            wav_stream = np.concatenate(stream_chunks, axis=0)
+        else:
+            wav_stream = wav
+
+        # Return streaming result as WAV.
+        buf = io.BytesIO()
+        sf.write(buf, wav_stream, sr, format="WAV")
+        buf.seek(0)
+        return buf.read(), "audio/wav", wav, sr
+
+    try:
+        audio_bytes, media_type, wav_batch, sr = executor.submit(do_work).result(timeout=300)
+    except Exception as e:
+        return jsonify({"error": f"Inference error: {str(e)}"}), 500
+
+    return Response(audio_bytes, content_type=media_type)
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8319)
