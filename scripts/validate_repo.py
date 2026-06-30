@@ -40,14 +40,14 @@ def validate_pr_override_body(body: str) -> None:
     if body.count(begin) != 1 or body.count(end) != 1:
         raise RuntimeError("PR body must contain exactly one complete commit override block")
     block = body.split(begin, 1)[1].split(end, 1)[0].strip()
-    entries = [entry.strip() for entry in re.split(r"\r?\n\s*\r?\n+", block) if entry.strip()]
+    entries = [line.strip() for line in block.splitlines() if line.strip()]
     if not entries:
         raise RuntimeError("Release Please commit override block must not be empty")
     invalid = [entry for entry in entries if not OVERRIDE_ENTRY_RE.fullmatch(entry)]
     if invalid:
         raise RuntimeError(
-            "Release Please override entries must be separated by blank lines and use one "
-            "supported Conventional Commit type with an optional simple scope; "
+            "Release Please override entries must each be a single Conventional Commit line "
+            "with one supported type and an optional simple scope; "
             f"invalid entries: {invalid}"
         )
 

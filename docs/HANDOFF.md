@@ -219,8 +219,8 @@ copied to `/private/tmp/profile_17_reuse.wav`; listen around 11.2 seconds.
 1. Update this handoff, `PLAN_STREAMING_VOCODER.md`, `OPENVINO_IMPLEMENTATION.md`,
    `OPENVINO_RESULTS.md`, `HOW_TO_RUN.md`, and README with final measured status.
 2. Keep raw PCM, WAVs, profiles, IR, and model files outside Git.
-3. Use a `feat(runtime): ...` PR title and an override block with blank lines between entries, for
-   example:
+3. Use a `feat(runtime): ...` PR title and an override block with one Conventional Commit per line,
+   for example:
 
    ```text
    BEGIN_COMMIT_OVERRIDE

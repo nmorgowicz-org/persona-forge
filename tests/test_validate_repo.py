@@ -28,15 +28,14 @@ END_COMMIT_OVERRIDE
 """
             )
 
-    def test_rejects_entries_without_blank_line_separators(self):
-        with self.assertRaisesRegex(RuntimeError, "separated by blank lines"):
-            validate_pr_override_body(
-                """BEGIN_COMMIT_OVERRIDE
+    def test_accepts_entries_without_blank_line_separators(self):
+        validate_pr_override_body(
+            """BEGIN_COMMIT_OVERRIDE
 feat(runtime): add generation RSS profiling
 docs(handoff): record the M9 command
 END_COMMIT_OVERRIDE
 """
-            )
+        )
 
     def test_ignores_bodies_without_an_override(self):
         validate_pr_override_body("Renovate dependency update")
