@@ -100,7 +100,9 @@ for diagnostics that duplicate final decode.
 
 The exact-parity listening WAV is `/private/tmp/profile_17_reuse.wav` on the development Mac and
 `/tmp/profile_17_reuse.wav` on `dockermisc1`; inspect around **11.2 seconds**, where total frame 300
-crosses from the first emitted block to the final block. Human listening verdict remains pending.
+crosses from the first emitted block to the final block. Human listening verdict (2026-06-30):
+streamed and batch sound **identical with no audible seam** at the boundary; quality gate closed.
+Fresh A/B WAVs also staged at `audio/streaming-ab/`.
 
 ### v0.13.0 baked-image streaming validation (2026-06-30, dockermisc1)
 
@@ -268,7 +270,8 @@ batch. Building B is a product decision; Deliverable A ships regardless. Raw: `/
 - Worker raw-PCM chunked transport: passed live.
 - Public proxy unit tests: passed in `runtime-v0.12.0`.
 - Baked-image streaming smoke (v0.13.0): passed (Task 1).
-- Not yet run: phase-separated per-core CPU profile, human listening at the 1.7B
+- Done since: phase-separated per-core CPU profile (Task 3) and human listening (identical, no seam).
+- (Originally pending) phase-separated per-core CPU profile, human listening at the 1.7B
    300-frame seam.
 - Run: identical-seed batch vs streaming wall-time comparison (Task 2) — short exact parity,
   no regression; paragraph: exact parity, 25% slower total wall time with 60 s head start on audio.

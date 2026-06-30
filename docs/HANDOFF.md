@@ -266,7 +266,9 @@ Raw capture: `/tmp/task3_mpstat.txt` on dockermisc1.
 
 ### Task 4 — quality and transport failure gates
 
-STATUS: TRANSPORT TESTS COMPLETE, LISTENING PENDING (2026-06-30)
+STATUS: COMPLETE (2026-06-30) — listening confirmed: user reports streamed vs batch sound identical,
+no seam at the ~11.2 s chunk boundary. Combined with exact sample parity (max_abs=0, SNR=inf), the
+streaming quality gate is closed.
 
 Transport tests completed (1.7B, v0.13.0):
 - Mid-stream disconnect: health ok after client killed mid-generation
@@ -275,10 +277,10 @@ Transport tests completed (1.7B, v0.13.0):
 - All: no wedging, no residual hooks, serialized access preserved
 
 1. Convert saved `f32le` outside Git for listening; compare streamed concatenation against batch at
-   the 300-frame seam. Exact sample parity passed; perceptual listening still pending the user.
+   the 300-frame seam. Exact sample parity passed; perceptual listening now confirmed identical.
    A/B WAVs staged at `audio/streaming-ab/` (gitignored): `batch_paragraph.wav`,
-   `stream_paragraph.wav`, plus `README.txt`. Seam to check is ~11.2 s into the stream file
-   (140 generated frames × 1920 / 24000). (LISTENING PENDING — USER)
+   `stream_paragraph.wav`, plus `README.txt`. Seam checked at ~11.2 s into the stream file
+   (140 generated frames × 1920 / 24000). LISTENING COMPLETE — user confirms identical, no seam.
 2. Transport failure tests: completed.
 3. Batch → stream → batch and stream → batch: completed.
 
