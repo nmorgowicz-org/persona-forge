@@ -71,5 +71,52 @@ class StreamingProxyTests(unittest.TestCase):
         self.assertEqual(result.get_json()["error"], "text is required")
 
 
+class OpenAiSpeechTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = app_api.app.test_client()
+
+    @patch("app_api.requests.post")
+    def test_maps_input_to_worker_infer_and_returns_audio(self, post: Mock) -> None:
+        worker = Mock()
+        worker.status_code = 200
+        worker.content = b"ID3audio-bytes"
+        worker.headers = {"content-type": "audio/mpeg"}
+        post.return_value = worker
+
+        result = self.client.post(
+            "/v1/audio/speech",
+            json={
+                "model": "qwen3-tts",
+                "input": "hello there",
+                "voice": "alloy",
+                "response_format": "mp3",
+            },
+        )
+
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.data, b"ID3audio-bytes")
+        self.assertEqual(result.headers["Content-Type"], "audio/mpeg")
+        post.assert_called_once_with(
+            "http://127.0.0.1:8319/infer",
+            json={"text": "hello there", "language": "English", "response_format": "mp3"},
+            timeout=300,
+        )
+
+    def test_rejects_missing_input_with_openai_error_envelope(self) -> None:
+        result = self.client.post("/v1/audio/speech", json={"model": "qwen3-tts"})
+
+        self.assertEqual(result.status_code, 400)
+        body = result.get_json()
+        self.assertEqual(body["error"]["message"], "'input' is required")
+        self.assertEqual(body["error"]["type"], "invalid_request_error")
+
+    @patch("app_api.requests.post", side_effect=requests.RequestException("offline"))
+    def test_worker_unreachable_returns_502_api_error(self, _post: Mock) -> None:
+        result = self.client.post("/v1/audio/speech", json={"input": "hi"})
+
+        self.assertEqual(result.status_code, 502)
+        self.assertEqual(result.get_json()["error"]["type"], "api_error")
+
+
 if __name__ == "__main__":
     unittest.main()
