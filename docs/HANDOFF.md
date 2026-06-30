@@ -173,7 +173,22 @@ Current `dockermisc1` state:
 - Five production-sampling WAVs took 21.16, 22.47, 22.50, 22.65, and 24.18 seconds. Median latency
   22.50 seconds; nearest-rank p95 24.18 seconds; audio duration 2.85-3.71 seconds; median RTF about
   7.39. Files: `/tmp/simplify-17-warm-{1..5}.wav` and `/tmp/simplify-17-warm.tsv`.
-- Listening/A-B quality evaluation is still required. Do not infer quality from tensor parity.
+- Listening/A-B quality evaluation was completed after these measurements; verdict follows. Tensor
+  parity alone was not used as the quality decision.
+
+Listening decision (user, 2026-06-30): all copied 0.6B and 1.7B samples were consistent and fully
+acceptable. Minor pronunciation differences occurred across both sets and appear to be normal
+production-sampling variation. The user judges 1.7B **slightly better** and prefers it if it can be
+deployed safely, even if no further RAM reduction is found. This closes the listening-quality gate
+for both profiles and makes **1.7B the product-preferred candidate**. It does not close the memory
+safety gate.
+
+Do not claim that 0.6B has a substantially smaller steady footprint from the simplify-v2 run. The
+recorded numbers used different memory views and phases: 0.6B had only Docker working-set samples
+(~5.9-6.0 GiB), while 1.7B had process RSS, cgroup peak, and active/inactive file-cache breakdown.
+The 1.7B warm Docker working set ultimately settled to 5.448 GiB. A controlled recreate-per-model
+run is required before comparing footprint. The confirmed differences are that 1.7B was ~15.8%
+slower in the five-request sample and its observed cold cgroup peak reached 9.84 GiB.
 
 #### Memory accounting and reduction work
 
@@ -239,7 +254,11 @@ Exact next tasks:
 4. Investigate the PyTorch rollback timeout separately. A bounded internal generation with a low
    `max_new_tokens` can diagnose functionality, but it does not make the public 300-second rollback
    gate pass. Do not increase the public timeout merely to turn the gate green.
-5. Have the user perform blind listening on the saved 0.6B and 1.7B WAVs before selecting a model.
+5. Recreate and measure both models with identical memory instrumentation. If 1.7B can operate with
+   a defensible limit/headroom policy, select it as the default based on the user's listening
+   preference. If its cold peak is unsafe on the shared host, quantify the required limit and choose
+   between a safe host allocation and the 0.6B fallback; do not describe 0.6B as smaller without the
+   controlled evidence.
 
 ## 4. `src/qwen3_tts/app.py` — the merged Flask app (single port 8318)
 

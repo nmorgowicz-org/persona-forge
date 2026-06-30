@@ -1051,7 +1051,7 @@ benchmarking, PyTorch rollback verification, and the complete 1.7B export/runtim
 Non-Git follow-up files on `dockermisc1`: `/tmp/simplify-06-parity.wav`,
 `/tmp/simplify-06-warm-{1..5}.wav`, and `/tmp/simplify-06-warm.tsv`.
 
-### simplify-v2 1.7B end-to-end validation — FUNCTIONAL PASS, MEMORY/LISTENING OPEN (2026-06-30)
+### simplify-v2 1.7B end-to-end validation — FUNCTIONAL/LISTENING PASS, MEMORY COMPARISON OPEN (2026-06-30)
 
 Fresh local export assembled an INT4 asymmetric group-32 main, INT8 explicit predictor, FP32
 OpenVINO vocoder, and BF16 Torch glue. Model revision
@@ -1075,5 +1075,19 @@ The cap768 stateful main compiled with 56 `[1,8,768,128]` states; XML SHA-256 is
   `/tmp/simplify-17-parity.wav`, `/tmp/simplify-17-warm-{1..5}.wav`, and
   `/tmp/simplify-17-warm.tsv` on `dockermisc1`.
 
-The 1.7B profile is not accepted for release until blind listening passes and the 10 GiB cold/first-
-generation peak is reconciled with the required memory-headroom policy.
+Listening verdict (user, 2026-06-30): every copied 0.6B and 1.7B WAV was consistent and acceptable.
+There were minor pronunciation differences across all samples, but no material defect. The user
+finds 1.7B slightly better and prefers it if deployment can be made safe, even if no additional RAM
+reduction is available. Both profiles therefore pass listening; 1.7B is the product-preferred
+candidate.
+
+Memory-selection correction: the simplify-v2 run did **not** collect apples-to-apples footprint
+data. The 0.6B record contains Docker working-set snapshots (~5.9-6.0 GiB), whereas 1.7B additionally
+captured process RSS (~7.62 GiB), total cgroup peak (9.84 GiB), and file-cache state. After its warm
+run, 1.7B Docker working set settled to 5.448 GiB because inactive file cache became reclaimable.
+Consequently, these results do not prove that 0.6B uses less steady memory. They do prove that the
+observed 1.7B cold/first-generation cgroup peak came within ~0.16 GiB of the 10 GiB limit.
+
+The 1.7B profile is not accepted for release until a recreate-per-model memory comparison uses the
+same cgroup/process counters and its deployment limit satisfies the project's safety policy. If that
+gate passes, prefer 1.7B based on listening; otherwise retain 0.6B as the safe fallback.
