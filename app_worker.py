@@ -544,7 +544,7 @@ def _trim_silence(wav, sr):
     return arr[start:end]
 
 
-def _run_generate(text: str, language: str):
+def _run_generate(text: str, language: str, **gen_kwargs):
     if model is None or voice_clone_prompt is None:
         raise RuntimeError("Model not loaded")
     import traceback as _tb
@@ -553,6 +553,7 @@ def _run_generate(text: str, language: str):
             text=text,
             language=language,
             voice_clone_prompt=voice_clone_prompt,
+            **gen_kwargs,
         )
     except Exception:
         _tb.print_exc()
@@ -564,6 +565,7 @@ def _run_generate_with_streaming(
     text: str,
     language: str,
     on_audio_chunk: Callable[[Any], None],
+    **gen_kwargs,
 ):
     """Run generation and call on_audio_chunk(1-D float32 PCM) for each streaming chunk.
 
@@ -573,8 +575,11 @@ def _run_generate_with_streaming(
     - Opt-in: only used when on_audio_chunk is provided; if None, falls back to _run_generate.
     - Uses _StreamingVocoderContext to intercept talker.forward outputs incrementally
       and feeds them into iter_decode_chunks from ov_vocoder_runtime.
+    - Extra gen_kwargs are forwarded to generate_voice_clone (e.g., do_sample=False).
     """
     if on_audio_chunk is None:
+        if gen_kwargs:
+            raise RuntimeError("_run_generate_with_streaming called with gen_kwargs but no streaming callback")
         return _run_generate(text, language)
 
     import numpy as np
@@ -582,15 +587,12 @@ def _run_generate_with_streaming(
     if model is None or voice_clone_prompt is None:
         raise RuntimeError("Model not loaded")
 
-    # Thread-local accumulator for streaming chunks and final wave.
     chunks: List[np.ndarray] = []
 
     def chunk_callback(pcm: Any):
-        # pcm: 1-D float32 from iter_decode_chunks.
         chunks.append(np.asarray(pcm, dtype=np.float32).ravel())
         on_audio_chunk(pcm)
 
-    # Use streaming context to capture codes and decode incrementally.
     ctx = _StreamingVocoderContext(model, chunk_callback)
     try:
         with ctx:
@@ -600,12 +602,12 @@ def _run_generate_with_streaming(
                     text=text,
                     language=language,
                     voice_clone_prompt=voice_clone_prompt,
+                    **gen_kwargs,
                 )
             except Exception:
                 _tb.print_exc()
                 raise
     finally:
-        # Context already flushed any partial remaining chunk.
         pass
 
     # Existing batch behavior: still return the complete trimmed wav.
@@ -628,7 +630,17 @@ def infer():
     language = (data.get("language") or "English").strip()
 
     def do_work():
-        wav, sr = _run_generate(text, language)
+        # Allow parity/greedy overrides in request (dev-only; not public API).
+        gen_kwargs_raw = {
+            "do_sample": data.get("do_sample"),
+            "temperature": data.get("temperature"),
+            "top_p": data.get("top_p"),
+            "top_k": data.get("top_k"),
+        }
+        gen_kwargs = {k: v for k, v in gen_kwargs_raw.items() if v is not None}
+
+        wav, sr = _run_generate(text, language, **gen_kwargs)
+
         fmt = (data.get("response_format") or "mp3").lower()
         buf = io.BytesIO()
         if fmt == "mp3":
@@ -673,12 +685,21 @@ def stream_internal():
     def do_work():
         import numpy as np
 
+        # Forward generation kwargs for parity and tests (e.g., do_sample=False).
+        gen_kwargs = {
+            "do_sample": data.get("do_sample"),
+            "temperature": data.get("temperature"),
+            "top_p": data.get("top_p"),
+            "top_k": data.get("top_k"),
+        }
+        gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
+
         stream_chunks: List[np.ndarray] = []
 
         def on_chunk(pcm: Any):
             stream_chunks.append(np.asarray(pcm, dtype=np.float32).ravel())
 
-        wav, sr = _run_generate_with_streaming(text, language, on_chunk)
+        wav, sr = _run_generate_with_streaming(text, language, on_chunk, **gen_kwargs)
 
         # Build audio from the streaming chunks for parity comparison.
         if stream_chunks:
