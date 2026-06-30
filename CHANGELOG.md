@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.14.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.13.0...qwen3-tts-openvino-v0.14.0) (2026-06-30)
+
+
+### Features
+
+* **api:** add OpenAI-compatible /v1/audio/speech endpoint ([c5d082e](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/c5d082e790f1f3976a21f39915234d3ca8f4d7da))
+* **runtime:** identical-seed batch vs streaming latency comparison ([c5d082e](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/c5d082e790f1f3976a21f39915234d3ca8f4d7da))
+
+
+### Bug Fixes
+
+* **serve:** drop gunicorn --preload from single-worker model server ([c5d082e](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/c5d082e790f1f3976a21f39915234d3ca8f4d7da))
+
+
+### Documentation
+
+* **handoff:** record Task 4/5 progress and OpenAI endpoint ([c5d082e](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/c5d082e790f1f3976a21f39915234d3ca8f4d7da))
+* **plans:** hermes TTS integration analysis and OpenAI-endpoint plan ([c5d082e](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/c5d082e790f1f3976a21f39915234d3ca8f4d7da))
+* **plans:** record server-side voice decision and ref_audio reality ([c5d082e](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/c5d082e790f1f3976a21f39915234d3ca8f4d7da))
+* record streaming listening verdict (identical, no seam) ([c5d082e](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/c5d082e790f1f3976a21f39915234d3ca8f4d7da))
+* **results:** record completed transport and rollback tests ([c5d082e](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/c5d082e790f1f3976a21f39915234d3ca8f4d7da))
+* **results:** record Task 3 per-core overlap go/no-go and preload fix ([c5d082e](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/c5d082e790f1f3976a21f39915234d3ca8f4d7da))
+* **results:** record v0.13.0 baked-image streaming validation ([c5d082e](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/c5d082e790f1f3976a21f39915234d3ca8f4d7da))
+* **run:** document no-preload memory fix and revised 1.7B footprint ([c5d082e](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/c5d082e790f1f3976a21f39915234d3ca8f4d7da))
+
 ## [0.13.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.12.0...qwen3-tts-openvino-v0.13.0) (2026-06-30)
 
 
