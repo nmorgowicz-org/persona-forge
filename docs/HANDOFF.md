@@ -53,8 +53,8 @@ qwen3-tts-openvino/
 │   ├─ __init__.py           # DONE
 │   ├─ app.py                # TODO: merged Flask app (see §4)
 │   ├─ model.py              # TODO: model load + generation (from app_worker.py, no Flask) (§5)
-│   ├─ presets.py            # TODO: MODEL_SIZE -> settings (§6)
-│   ├─ config.py             # TODO: env resolution + advanced overrides (§6)
+│   ├─ presets.py            # DONE — MODEL_SIZE -> settings (§6); validated locally
+│   ├─ config.py             # DONE — apply_preset_env() sets low-level env (§6); validated locally
 │   ├─ model_config.py       # DONE (moved) — HF token + repo + torch dtype helpers
 │   ├─ streaming.py          # DONE (moved, was streaming_vocoder.py) — StreamingVocoderSession
 │   └─ openvino/
@@ -84,9 +84,12 @@ DONE:
   `from qwen3_tts.openvino.runtime_config import get_ov_config` and
   `from qwen3_tts.openvino.vocoder import OpenVinoVocoderRuntime`.
 - Created empty dirs: `src/export/`, `requirements/`, `docs/dev/`.
+- **Wrote `src/qwen3_tts/presets.py` and `src/qwen3_tts/config.py`** (§6) — validated locally
+  (`PYTHONPATH=src python -c "from qwen3_tts import config; config.apply_preset_env(...)"`):
+  case-insensitive MODEL_SIZE, stable IR paths, expert override wins, bad-size errors clearly.
 
-TODO (in order): §4 app.py, §5 model.py, §6 presets/config, §7 export move, §8 Dockerfile/compose/env/tests,
-§9 docs, §10 validate.
+TODO (in order): §4 app.py, §5 model.py, §7 export move, §8 Dockerfile/compose/env/tests,
+§9 docs, §10 validate. (presets/config from §6 are DONE.)
 
 ## 4. `src/qwen3_tts/app.py` — the merged Flask app (single port 8318)
 
