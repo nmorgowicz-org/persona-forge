@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from model_config import configure_hf_token, resolve_model_repo
+from model_config import configure_hf_token, resolve_model_repo, resolve_torch_load_config
 
 
 class ModelConfigTests(unittest.TestCase):
@@ -29,6 +29,38 @@ class ModelConfigTests(unittest.TestCase):
     def test_rejects_unknown_size(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "Unsupported MODEL_SIZE"):
             resolve_model_repo({"MODEL_SIZE": "7B"})
+
+    def test_resolves_bf16_serving_load(self) -> None:
+        torch_module = type(
+            "FakeTorch",
+            (),
+            {"float32": object(), "bfloat16": object(), "float16": object()},
+        )
+
+        dtype, name, low_memory = resolve_torch_load_config(
+            torch_module,
+            {
+                "OPENVINO_TORCH_DTYPE": "bf16",
+                "OPENVINO_LOW_CPU_MEM_USAGE": "1",
+            },
+        )
+
+        self.assertIs(dtype, torch_module.bfloat16)
+        self.assertEqual(name, "bfloat16")
+        self.assertTrue(low_memory)
+
+    def test_rejects_unknown_torch_dtype(self) -> None:
+        torch_module = type(
+            "FakeTorch",
+            (),
+            {"float32": object(), "bfloat16": object(), "float16": object()},
+        )
+
+        with self.assertRaisesRegex(ValueError, "OPENVINO_TORCH_DTYPE"):
+            resolve_torch_load_config(
+                torch_module,
+                {"OPENVINO_TORCH_DTYPE": "int8"},
+            )
 
     def test_loads_token_from_secret_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

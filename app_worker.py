@@ -22,7 +22,7 @@ import soundfile as sf
 import torch
 
 from flask import Flask, Response, jsonify, request
-from model_config import configure_hf_token, resolve_model_repo
+from model_config import configure_hf_token, resolve_model_repo, resolve_torch_load_config
 from streaming_vocoder import StreamingVocoderSession
 
 configure_hf_token()
@@ -48,6 +48,7 @@ OPENVINO_MAIN_STATEFUL_MODEL = (os.getenv("OPENVINO_MAIN_STATEFUL_MODEL") or "")
 OPENVINO_PREDICTOR_STATEFUL_MODEL = (
     (os.getenv("OPENVINO_PREDICTOR_STATEFUL_MODEL") or "").strip() or None
 )
+TORCH_DTYPE, TORCH_DTYPE_NAME, OPENVINO_LOW_CPU_MEM_USAGE = resolve_torch_load_config(torch)
 
 torch.set_num_threads(6)
 
@@ -137,14 +138,16 @@ def load_model():
             )
 
     print(
-        f"[app_worker] Backend={TTS_BACKEND}, loading model at float32...",
+        f"[app_worker] Backend={TTS_BACKEND}, loading model at {TORCH_DTYPE_NAME} "
+        f"(low_cpu_mem_usage={OPENVINO_LOW_CPU_MEM_USAGE})...",
         flush=True,
     )
     wrapped = Qwen3TTSModel.from_pretrained(
         MODEL_ID,
         revision=MODEL_REVISION,
         device_map=DEVICE,
-        dtype=torch.float32,
+        dtype=TORCH_DTYPE,
+        low_cpu_mem_usage=OPENVINO_LOW_CPU_MEM_USAGE,
     )
 
     gc.collect()
@@ -215,6 +218,8 @@ def health():
         "model": MODEL_ID,
         "model_revision": MODEL_REVISION,
         "device": DEVICE,
+        "torch_dtype": TORCH_DTYPE_NAME,
+        "low_cpu_mem_usage": OPENVINO_LOW_CPU_MEM_USAGE,
         "ref_audio": REF_AUDIO,
         "timestamp": time.time(),
     }
@@ -241,6 +246,12 @@ def health():
                     "runtime_wired": ov_runtime is not None,
                     "active_compression": (
                         ov_runtime.compression if ov_runtime is not None else None
+                    ),
+                    "active_main_compression": (
+                        ov_runtime.main_comp if ov_runtime is not None else None
+                    ),
+                    "active_predictor_compression": (
+                        ov_runtime.pred_comp if ov_runtime is not None else None
                     ),
                     "stateful_main": bool(OPENVINO_MAIN_STATEFUL_MODEL),
                     "stateful_predictor": bool(OPENVINO_PREDICTOR_STATEFUL_MODEL),

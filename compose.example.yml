@@ -19,12 +19,15 @@ services:
       TTS_BACKEND: ${TTS_BACKEND:-pytorch}
       OV_MODEL_DIR: ${OV_MODEL_DIR:-}
       OPENVINO_BUFFER_KV: ${OPENVINO_BUFFER_KV:-}
+      OV_MAIN_COMPRESSION: ${OV_MAIN_COMPRESSION:-}
+      OV_PREDICTOR_COMPRESSION: ${OV_PREDICTOR_COMPRESSION:-}
       OPENVINO_RELEASE_TORCH: ${OPENVINO_RELEASE_TORCH:-}
       # Serving-only: load the PyTorch glue in the checkpoint's native bf16 instead
       # of upcasting to fp32. Cuts the 1.7B load-time memory peak by ~3 GiB with no
       # audible quality change. Leave UNSET (fp32) for the exporter — convert parity
       # needs fp32. See docs/OPENVINO_RESULTS.md "M9 bf16 serving load".
       OPENVINO_TORCH_DTYPE: ${OPENVINO_TORCH_DTYPE:-}
+      OPENVINO_LOW_CPU_MEM_USAGE: ${OPENVINO_LOW_CPU_MEM_USAGE:-}
       # Static-capacity stateful K/V cores. The capacity (max token positions per
       # request) is BAKED INTO the .xml at export time, not set here — see the
       # "Capacity tuning" note below. Point these at the desired-capacity IR.
