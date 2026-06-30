@@ -507,7 +507,7 @@ class OVTalkerRuntime:
                  core=None, speech_tokenizer=None):
         import openvino as ov
 
-        from ov_runtime_config import get_ov_config
+        from qwen3_tts.openvino.runtime_config import get_ov_config
 
         self.model_dir = Path(model_dir)
         self._talker = talker
@@ -671,7 +671,7 @@ class OVTalkerRuntime:
         self.vocoder_runtime = None
         vocoder_cfg = (self._ov_config or {}).get("vocoder")
         if vocoder_cfg and self._speech_tokenizer is not None:
-            from ov_vocoder_runtime import OpenVinoVocoderRuntime
+            from qwen3_tts.openvino.vocoder import OpenVinoVocoderRuntime
             self.vocoder_runtime = OpenVinoVocoderRuntime(self._speech_tokenizer, vocoder_cfg)
         elif vocoder_cfg and vocoder_cfg.get("enabled"):
             print(

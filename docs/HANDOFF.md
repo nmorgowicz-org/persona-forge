@@ -1,344 +1,236 @@
-# Handoff — streaming vocoder (2026-06-30)
+# HANDOFF — simplify-v2 production refactor
 
-This is the active resume document for `feat/streaming-vocoder`. Read
-`PLAN_STREAMING_VOCODER.md`, the "Streaming vocoder delivery" section of
-`OPENVINO_IMPLEMENTATION.md`, the top of `OPENVINO_RESULTS.md`, and `HOW_TO_RUN.md` before editing
-runtime code or starting a target container.
+> **Read this top to bottom before changing anything.** It is written to be followed by an
+> automated assistant. Do the steps **in order**. Do not skip the validation step (§10). Do not
+> invent file names or env vars that are not listed here.
 
-## Source and artifact provenance
+## 0. Context (what and why)
 
-- Base/released main: `9bf0848` (`v0.12.0`).
-- Branch: `feat/streaming-vocoder`; corrected streaming runtime/test commit `8f6b862`; BF16 serving
-  loader fix `68e58b2`. Use `git log -5` and `git status --short --branch` before resuming.
-- Target test image: `runtime-v0.12.0`, digest
-  `sha256:214eb114859e71d36ff19175d40c332124dfc0249dd6df27034101f7694e687b`.
-- Target tests mounted branch files over `/app`; no image containing this branch has been built.
-- Model: `Qwen/Qwen3-TTS-12Hz-0.6B-Base` at revision
-  `5d83992436eae1d760afd27aff78a71d676296fc`.
-- Explicit IR metadata file SHA-256:
-  `abec65a5d2f2dcf07382d707513cb2a9f5c2a4c5872728069b169d9601e3da7f`;
-  metadata `source_hash=dd8e1a75b4ef2174`; OpenVINO 2026.2.1.
-- Runtime graphs: capacity-768 stateful main, capacity-32 stateful predictor, FP32 OpenVINO
-  vocoder, 6 threads, 8 GiB cgroup. The test log labeled stateful core compression from runtime
-  selection metadata; the selected filenames were the validated `*_stateful_int8_*` artifacts.
-- Production `qwen3-tts` was stopped during the earlier streaming target runs. At the latest
-  2026-06-30 inspection it was running again as image `docker-qwen3-tts`, default FP32 PyTorch path,
-  7 GiB limit, ~3.3 GiB idle. It was not stopped for the BF16 follow-up; no second model was started.
+We are simplifying this project so a non-expert can run a small OpenAI-compatible TTS endpoint for
+the **hermes** agent, with the **smallest footprint**, and an **A/B of the 0.6B vs 1.7B** models.
 
-## What is implemented
+- **Branch:** `refactor/simplify-v2` (already created, off `main`). `main` is the released, working
+  **v0.14.0** baseline — DO NOT touch `main`.
+- **Target user experience:**
+  ```bash
+  cp .env.example .env             # edit 3 lines: REF_AUDIO_PATH, REF_TEXT, MODEL_SIZE
+  docker compose run --rm export   # one-time per model size: builds the OpenVINO IR locally
+  docker compose up                # one container, one port 8318
+  curl -s localhost:8318/v1/audio/speech \
+       -H 'Content-Type: application/json' \
+       -d '{"input":"hello there"}' -o out.mp3
+  ```
+  A/B test: set `MODEL_SIZE=1.7B` in `.env`, re-run export + up, compare.
 
-1. `ov_vocoder_runtime.py`
-   - `iter_decode_chunks(codes)` is the single 300-frame / 25-left-context decode seam.
-   - Batch decode consumes the iterator.
-   - `sample_rate` exposes the patched decode contract to the streaming transport.
-2. `streaming_vocoder.py`
-   - Hooks the **outer** talker forward, preserving its inspected signature.
-   - Captures complete 16-codebook frames from `result.hidden_states[-1]`.
-   - Ignores prefill, skips EOS, includes voice-clone reference codes, and supports batch size 1.
-   - Decodes only at new 300-frame total-prefix boundaries and one final partial boundary.
-   - Emits only new generated samples and validates exactly 1920 samples per codec frame.
-   - Restores the patched forward on success or failure and suppresses a final flush after failure.
-3. `app_worker.py`
-   - `/stream_internal` is the same-generation parity/timing harness.
-   - `/infer_stream` queues headerless mono `f32le` PCM into an HTTP chunked response.
-   - The streaming path reuses its final decoded prefix when upstream calls
-     `speech_tokenizer.decode`; this avoids a duplicate terminal vocoder inference.
-   - Streaming returns 503 when the FP32 OpenVINO vocoder is unavailable.
-   - Existing `/infer` behavior is unchanged.
-4. `app_api.py`
-   - `/generate/stream` proxies the worker stream and forwards the PCM contract headers.
-   - `/v1/audio/speech` is an OpenAI-compatible batch endpoint (maps `input`/`response_format` onto
-     the worker `/infer`), making the service a schema-identical drop-in for the MLX primary that
-     hermes calls. See `docs/plans/hermes-tts-integration-openai-endpoint.md`.
-   - Existing `/generate` and `/health` behavior is unchanged.
-5. `Dockerfile`
-   - Copies `streaming_vocoder.py` into runtime/exporter images.
-6. Tests
-   - `tests/test_streaming_vocoder.py` covers reference context, exact boundaries, final partial,
-     EOS, forward signature/restoration, malformed shapes, and failed generation.
-   - `tests/test_ov_vocoder_runtime.py` covers iterator/batch parity and chunk sizes.
-   - `tests/test_app_api.py` covers public proxy streaming and request validation.
-7. Serving load configuration
-   - `app_worker.py` now honors `OPENVINO_TORCH_DTYPE` and
-     `OPENVINO_LOW_CPU_MEM_USAGE`, using the same resolver as `bench_common.py`.
-   - `/health` reports `torch_dtype` and `low_cpu_mem_usage`.
-   - This closes a reproducibility gap: M9 measured BF16 through the benchmark loader, while the
-     serving worker still hard-coded FP32 before commit `68e58b2`.
+## 1. The 5 approved decisions (do not relitigate)
 
-## Chosen model profiles
+1. **One container, one process, one port `8318`.** Merge the old `app_api.py` (proxy) and
+   `app_worker.py` (model) into a **single Flask app** whose endpoints call the model **directly**
+   (no internal HTTP proxy). **Delete `serve.py`**, the second gunicorn, port `8319`, and the proxy.
+2. **`MODEL_SIZE` is the only model knob** (`0.6B` or `1.7B`). Everything else (`OPENVINO_*`, `OV_*`,
+   IR paths, capacity, memory) becomes an internal **preset**, not a user-facing env var. Keep a
+   `TTS_BACKEND=pytorch` zero-IR fallback for "just run it without exporting".
+3. **OpenVINO IR delivery = one-command local export.** `docker compose run --rm export` runs the
+   exporter and writes IR to a **local volume** at **stable, MODEL_SIZE-keyed paths** (no hashes).
+   The IR is NOT baked into the image and NOT downloaded from anywhere.
+4. **Full `src/` package layout.** `src/qwen3_tts/` is the service package. `src/export/` holds the
+   maintainer/export tooling as flat modules on `PYTHONPATH` (they import each other by bare name;
+   only their imports of the *shared* modules change to `qwen3_tts.*`).
+5. **Docs:** fold every still-true operational fact from the OLD `HOW_TO_RUN.md` into the new
+   methodology, THEN replace it. Write a new user+advanced `HOW_TO_RUN.md`. Move dev docs to
+   `docs/dev/`. This HANDOFF is the continuity doc.
 
-- **0.6B:** INT8 asymmetric main/predictor; stateful main capacity 768; stateful predictor capacity
-  32; BF16 PyTorch glue; early Torch-layer release; FP32 OV vocoder. Set both per-core compression
-  selectors to `int8`. Use 10G/11G for unrestricted paragraph production; 7–8 GiB is only a
-  bounded/test option.
-- **1.7B:** INT4 asymmetric group-32 layers; stateful main capacity 768; BF16 PyTorch glue; early
-  Torch-layer release; FP32 OV vocoder; 10G/11G production limit. The persistent target currently has no 1.7B stateful
-  predictor graph, so leave `OPENVINO_PREDICTOR_STATEFUL_MODEL` unset and use the explicit INT4
-  predictor. The measured stateful-predictor saving was only ~60 MiB.
+## 2. Target repository structure
 
-## Why the local-model implementation needed correction
-
-Keep this as an architectural guardrail, not as history to re-litigate:
-
-- `talker.model.forward` returns the main transformer hidden state. It does **not** return the
-  16-codebook codec frame. The correct seam is outer `talker.forward`.
-- Stock voice cloning prepends reference codes before decode and removes their samples afterward.
-  Streaming only generated codes cannot match batch audio.
-- A prefix must be decoded once at each new 300-frame boundary. Decoding frames 300, 301, 302, ...
-  is quadratic duplicate work.
-- The final stock `speech_tokenizer.decode` would duplicate vocoder work. The transport path now
-  flushes/reuses the session's final prefix while preserving upstream return structure.
-- Do not expose generation tuning fields through public `/infer`; they remain internal diagnostics.
-
-## Validation completed
-
-Repository/model-free commands:
-
-```bash
-PYTHONDONTWRITEBYTECODE=1 python -m unittest \
-  tests.test_model_config tests.test_streaming_vocoder \
-  tests.test_ov_vocoder_runtime tests.test_ov_talker_runtime -v
-python -m py_compile app_api.py app_worker.py model_config.py bench_common.py \
-  streaming_vocoder.py ov_vocoder_runtime.py
-PYTHONDONTWRITEBYTECODE=1 python scripts/validate_repo.py
-git diff --check
+```
+qwen3-tts-openvino/
+├─ README.md                 # short: what it is + 20-line quickstart + links
+├─ .env.example              # REF_AUDIO_PATH, REF_TEXT, MODEL_SIZE (+ commented advanced)
+├─ compose.yml               # ONE service (8318) + `export` profile, MODEL_SIZE-driven
+├─ Dockerfile                # runtime + exporter stages; entrypoint = qwen3_tts.app:app
+├─ requirements/             # runtime.txt, openvino.txt, export.txt
+├─ src/qwen3_tts/            # the service package  (PYTHONPATH=/app/src)
+│   ├─ __init__.py           # DONE
+│   ├─ app.py                # TODO: merged Flask app (see §4)
+│   ├─ model.py              # TODO: model load + generation (from app_worker.py, no Flask) (§5)
+│   ├─ presets.py            # TODO: MODEL_SIZE -> settings (§6)
+│   ├─ config.py             # TODO: env resolution + advanced overrides (§6)
+│   ├─ model_config.py       # DONE (moved) — HF token + repo + torch dtype helpers
+│   ├─ streaming.py          # DONE (moved, was streaming_vocoder.py) — StreamingVocoderSession
+│   └─ openvino/
+│       ├─ __init__.py       # DONE
+│       ├─ runtime_config.py # DONE (moved, was ov_runtime_config.py)
+│       ├─ talker.py         # DONE (moved, was ov_talker_runtime.py; lazy imports fixed)
+│       └─ vocoder.py        # DONE (moved, was ov_vocoder_runtime.py)
+├─ src/export/               # TODO: move export tooling here (§7)
+├─ scripts/                  # export.py (one-command export), ab_test.sh, download_model.py, transform_stateful_ir.py
+├─ tests/                    # TODO: update imports to qwen3_tts.* (§8)
+└─ docs/
+    ├─ HANDOFF.md            # this file
+    ├─ HOW_TO_RUN.md         # TODO: rewrite (§9)
+    ├─ plans/
+    └─ dev/                  # TODO: move OPENVINO_IMPLEMENTATION/RESULTS, PLAN_* here
 ```
 
-Result: 22 targeted tests passed; compile, repository validation, and diff check passed. Full local
-discovery cannot import `tests/test_app_api.py` because this Mac lacks Flask. The four app-API tests
-passed inside the cached `runtime-v0.12.0` image.
+## 3. Progress so far (state of the branch)
 
-Target results:
+DONE:
+- Branch `refactor/simplify-v2` created off `main`.
+- `src/qwen3_tts/` + `src/qwen3_tts/openvino/` packages scaffolded with `__init__.py`.
+- Moved via `git mv`: `ov_runtime_config.py → openvino/runtime_config.py`,
+  `ov_talker_runtime.py → openvino/talker.py`, `ov_vocoder_runtime.py → openvino/vocoder.py`,
+  `streaming_vocoder.py → streaming.py`, `model_config.py → qwen3_tts/model_config.py`.
+- Fixed the two lazy bare-name imports inside `talker.py` to
+  `from qwen3_tts.openvino.runtime_config import get_ov_config` and
+  `from qwen3_tts.openvino.vocoder import OpenVinoVocoderRuntime`.
+- Created empty dirs: `src/export/`, `requirements/`, `docs/dev/`.
 
-- Short parity: 160 reference + 23 generated frames; final boundary 183; max_abs 0; SNR infinite.
-- Short with terminal decode reuse: 160 + 24; boundary 184; 14.616 s; max_abs 0; SNR infinite.
-- Final smoke from committed `8f6b862`, including terminal-code fail-closed validation: 160 + 32;
-  boundary 192; 22.347 s total; max_abs 0; SNR infinite.
-- Paragraph (`bench_common.PROMPTS["paragraph"]`, `max_new_tokens=400`): 160 + 194; boundaries
-  300 and 354; two chunks; first audio 39.341 s; terminal 90.840 s; max_abs 0; SNR infinite.
-  The 90.840 s diagnostic deliberately retained the duplicate stock decode and is not the final
-  production latency number.
-- Worker `/infer_stream`: live HTTP chunked response, `f32le`, 24 kHz mono; short request delivered
-  184,320 bytes with curl start-transfer 14.675 s and total 14.675 s.
-- Paragraph CPU: 45 aggregate samples, 431.92–546.49%, mean 499.89% of 800%; approximate
-  pre-first-audio mean 514.85%, post-first-audio mean 487.92%. This is not phase-separated.
-- Paragraph RSS: about 5.97 → 6.33 GiB inside the 8 GiB test cgroup.
-- Chosen 0.6B profile after BF16 loader fix: health reported BF16/low-memory loading, main
-  stateful-int8 capacity 768, predictor stateful-int8 capacity 32, FP32 OV vocoder. Short parity:
-  48 frames, boundary 208, 20.110 s, max_abs 0, infinite SNR; ~4.95 GiB post-request RSS.
-- Chosen persisted 1.7B profile: BF16, INT4 g32, stateful main capacity 768, explicit predictor,
-  FP32 OV vocoder. Short parity: 42 frames, boundary 202, 23.651 s, max_abs 0, infinite SNR.
-- 1.7B paragraph with final-prefix reuse: 173 frames, boundaries 300/333, first audio 50.945 s,
-   total 81.061 s, max_abs 0, infinite SNR, aggregate CPU mean 469.94%. Fresh cgroup peak
-   8,350,515,200 bytes (~7.78 GiB), no max/OOM/swap events.
-- **Memory decision:** 8 GiB is a functional validation minimum with only ~2.8% headroom. Use
-   10G memory / 11G memory+swap for unrestricted production 0.6B paragraphs or 1.7B serving.
+TODO (in order): §4 app.py, §5 model.py, §6 presets/config, §7 export move, §8 Dockerfile/compose/env/tests,
+§9 docs, §10 validate.
 
-v0.13.0 baked-image streaming validation (2026-06-30, dockermisc1):
+## 4. `src/qwen3_tts/app.py` — the merged Flask app (single port 8318)
 
-- Image: `runtime-v0.13.0` contains streaming runtime and BF16 loader fix.
+ONE `app = Flask(__name__)`. Import the model module and call it directly. Endpoints (exact contracts,
+taken from the old `app_api.py` + `app_worker.py`):
 
-0.6B INT8 stateful, 10 GiB cgroup:
-  - Short phrase streaming: 130560 bytes (5.44 s audio), first_byte=30.31 s, total=30.31 s
-    (under 300 frames; audio emitted as burst at completion)
-  - Paragraph streaming: 2465280 bytes (25.68 s audio), first_byte=59.98 s, total=161.45 s
-    (101.5 s head start on audio delivery)
-  - Internal parity: max_abs=0, SNR=inf, reuse_streamed_decode=true
-  - Streaming headers correct: f32le, 24kHz, 1ch, connection-close semantics
+- `GET /health` → JSON `{status, backend, model, ...openvino info..., timestamp}`. Build it from
+  `model` module state (loaded? backend? OV vocoder enabled?). No proxy, no "degraded".
+- `POST /generate` body `{text, language?, response_format?}` → audio bytes. `text` required (400 if
+  missing). Default `language="English"`, `response_format="mp3"`. Encode mp3→`audio/mpeg`,
+  else wav→`audio/wav` (use `soundfile.write(buf, wav, sr, format=...)`).
+- `POST /v1/audio/speech` body `{input, response_format?, model?, voice?, ref_audio?, ref_text?, ...}`
+  → audio bytes. Map `input`→text (tolerate `text`). Missing input → **400 with OpenAI error
+  envelope** `{"error":{"message","type":"invalid_request_error","code":null}}`. `voice`/`ref_*` are
+  accepted but IGNORED (voice is server-side — see memory `hermes-tts-consumer`). Reuse the same
+  encode path as `/generate`.
+- `POST /generate/stream` body `{text, language?}` → headerless mono **f32le PCM** stream with headers
+  `X-Audio-Format: f32le`, `X-Audio-Sample-Rate`, `X-Audio-Channels: 1`,
+  `X-Stream-Error-Semantics: connection-close`. Calls the streaming generator in `model.py` directly
+  (the old `/infer_stream` logic — a `queue.Queue` fed by a producer thread via the `ThreadPoolExecutor`,
+  yielding PCM bytes). Requires the FP32 OpenVINO vocoder (503 if absent).
+- KEEP the dev parity endpoints `POST /stream_internal` and `POST /batch_internal` (used by the A/B
+  and validation). Same bodies/headers as the old worker versions. Mark them dev-only.
 
-1.7B INT4 stateful main + explicit predictor, 10 GiB cgroup:
-  - Health: stateful_main=true, stateful_predictor=false, torch_dtype=bfloat16 (matches expected evidence)
-  - Short phrase streaming: 368640 bytes (3.84 s audio), first_byte=47.53 s, total=47.53 s
-  - Paragraph streaming: 1167360 bytes (12.16 s audio), first_byte=65.34 s, total=118.01 s
-    (52.7 s head start on audio delivery)
-  - Internal parity: max_abs=0, SNR=inf, reuse=true, 20 gen frames, 160 ref frames
-  - Batch WAV: HTTP 200, 66348 bytes
-  - Paragraph-level parity at chunk boundaries: 167 gen frames + 160 ref = 327 total,
-    boundaries 300/327, two chunks, max_abs=0, SNR=inf
+Helpers in `app.py`: `_openai_error(message, status, type)` and
+`_encode(wav, sr, response_format) -> (bytes, media_type)`.
+`if __name__ == "__main__": app.run(host="0.0.0.0", port=8318)`.
 
-Transport failure tests (1.7B):
-  - Mid-stream disconnect: client killed mid-generation; health remained ok after disconnect
-  - Short timeout: curl --max-time 5 on paragraph request timed out as expected (502/28)
-  - Serialized mixed requests: stream → batch → stream sequence completed correctly
-  - Streaming endpoint returned 503 under PyTorch backend (Task 5 rollback)
+## 5. `src/qwen3_tts/model.py` — model load + generation (NO Flask)
 
-Non-Git diagnostics on `dockermisc1`:
+Move the guts of the old `app_worker.py` here, minus the Flask routes:
+- Module globals `model`, `voice_clone_prompt`, `ov_runtime`, `ov_metadata`, `ov_config`, and a
+  `ThreadPoolExecutor(max_workers=1)` named `executor` (serialize inference).
+- `load_model()` — same logic as old `app_worker.load_model()`, but read settings from
+  `qwen3_tts.config` (see §6) instead of bare `os.getenv`. Inside it:
+  `from qwen3_tts.openvino.talker import OVTalkerRuntime`.
+- `_validate_ov_metadata`, `_run_generate`, `_run_generate_with_streaming`, `_apply_optional_seed`,
+  `_trim_silence` — copy verbatim from old `app_worker.py` (they are correct).
+- Import update: `from qwen3_tts.streaming import StreamingVocoderSession`,
+  `from qwen3_tts.openvino.runtime_config import apply_thread_env` (call at import, before torch).
+- Call `load_model()` at import time (as the old worker did) so gunicorn `-w 1` loads once.
+- `app.py`'s `/generate/stream` imports `_run_generate_with_streaming`, `executor`, `ov_runtime`.
 
-```text
-/tmp/stream_long.wav
-/tmp/stream_long_headers.txt
-/tmp/stream_cpu.txt
-/tmp/stream_reuse.wav
-/tmp/stream_reuse_headers.txt
-/tmp/infer_stream.f32
-/tmp/profile_06_{health,stream}*
-/tmp/profile_17_{health,stream,paragraph,reuse,cpu}*
-/tmp/ov-streaming-review/
-```
+The old `app_worker.py`/`app_api.py` sources are in git history on `main` (and the squashed PR #68
+commit `c5d082e`). Use them as the literal reference while writing model.py/app.py.
 
-No new streaming-seam listening verdict has been recorded. The 1.7B exact-parity candidate is also
-copied to `/private/tmp/profile_17_reuse.wav`; listen around 11.2 seconds.
+## 6. `presets.py` + `config.py` — replace the env maze
 
-## Exact next tasks, in order
+`presets.py`: a dict `MODEL_SIZE -> settings`. Source of truth = the working candidate values
+(verified on dockermisc1):
 
-### Task 1 — finish a baked-image/public-proxy smoke test
+| key | 0.6B | 1.7B |
+|---|---|---|
+| `model_repo` | `Qwen/Qwen3-TTS-12Hz-0.6B-Base` | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` |
+| `backend` | `openvino` | `openvino` |
+| `main_compression` | `int8` | `int4` (group size 32) |
+| `predictor_compression` | `int8` | `int8` |
+| `vocoder` | FP32 OpenVINO, enabled | FP32 OpenVINO, enabled |
+| `stateful_capacity` | 768 | 768 |
+| `mem_limit / swap` | `10G / 11G` | `10G / 11G` |
+| torch load dtype | `bfloat16`, low_cpu_mem | `bfloat16`, low_cpu_mem |
 
-STATUS: COMPLETE (2026-06-30, both 0.6B and 1.7B)
+IR stable paths (the export step MUST emit these; presets reference them):
+- `OV_MODEL_DIR                  = /ov/<SIZE>/ir`
+- `OPENVINO_MAIN_STATEFUL_MODEL  = /ov/<SIZE>/main_stateful_cap768.xml`
+- `OPENVINO_VOCODER_DIR          = /ov/<SIZE>/vocoder`
+- (predictor stateful if used: `/ov/<SIZE>/predictor_stateful_cap32.xml`)
 
-- Baked image: `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:runtime-v0.13.0`
-- 0.6B results (10 GiB):
-  - Health ok; openvino; `torch_dtype=bfloat16`; `stateful_main=true`, `stateful_predictor=true`
-  - Batch WAV: 43742 bytes
-  - Short streaming: 130560 bytes, burst at completion (under 300 frames)
-  - Paragraph streaming: 2465280 bytes, first_byte=59.98 s, total=161.45 s (101.5 s head start)
-  - Internal parity: max_abs=0, SNR=inf, reuse=true
-- 1.7B results (10 GiB):
-  - Health ok; openvino; `stateful_main=true`, `stateful_predictor=false`, `torch_dtype=bfloat16`
-  - Batch WAV: 66348 bytes
-  - Short streaming: 368640 bytes, burst at completion
-  - Paragraph streaming: 1167360 bytes, first_byte=65.34 s, total=118.01 s (52.7 s head start)
-  - Internal parity: max_abs=0, SNR=inf, reuse=true
-- Both: streaming headers correct, batch unchanged.
+`config.py`: final settings = `preset(MODEL_SIZE)` overlaid with any explicit advanced env var (so
+experts can still override). Expose accessors used by `model.py`. `REF_AUDIO` is always
+`/voice/reference.wav` (mounted); `REF_TEXT` from env (required). Thread caps stay
+`OMP/MKL/OV_INFERENCE_THREADS=6` (in `openvino/runtime_config.py:apply_thread_env`) — do not change.
 
-### Task 2 — produce an identical-seed latency comparison
+## 7. Export tooling → `src/export/` (Phase 2)
 
-STATUS: COMPLETE (2026-06-30, dockermisc1, qwen3-tts-candidate)
+`git mv` to `src/export/` (flat): `export_openvino.py`, `ov_export_wrappers.py`, `ov_stateful_cache.py`,
+`parity_contract.py`, `calibration_capture.py`, `dump_audio.py`, `bench_common.py`,
+`benchmark_vocoder.py`, `benchmark_tts.py`, `bench_speed.py`, `profile_tts.py`,
+`test_vocoder_parity.py`, `test_transformer_parity.py`, `test_stateful_main_parity.py`,
+`test_ov_generation.py`. They import each other by **bare name** (keep that; `src/export` is on
+`PYTHONPATH`). Only rewrite imports of the **shared** modules:
+- `from model_config import …`        → `from qwen3_tts.model_config import …`
+- `import ov_runtime_config`          → `import qwen3_tts.openvino.runtime_config as ov_runtime_config`
+- `from ov_talker_runtime import …`   → `from qwen3_tts.openvino.talker import …`
+- `from ov_vocoder_runtime import …`  → `from qwen3_tts.openvino.vocoder import …`
+- `from streaming_vocoder import …`   → `from qwen3_tts.streaming import …`
 
-1. Add an internal-only seed control to the benchmark harness, not to public `/infer`.
-2. Run one warm-up plus at least three measured paragraph requests for:
-   - normal batch decode;
-   - synchronous streaming with final-prefix reuse.
-3. Use identical seeds/text/stateful graphs and record generation frames, audio seconds, first-byte
-   time, total wall time, vocoder time, median, p95, RSS, and swap delta.
-4. Acceptance: stream/batch generated codes and final PCM agree; streaming does not regress median
-    total wall time beyond noise. Update `OPENVINO_RESULTS.md` with raw artifact paths.
+`scripts/export.py`: thin CLI that, given `MODEL_SIZE`, runs the existing export pipeline
+(`export_openvino.py` → `scripts/transform_stateful_ir.py` for the stateful cap768 main, vocoder
+export) and writes outputs to the stable `/ov/<SIZE>/…` paths in §6. `scripts/ab_test.sh`: run the
+same text through 0.6B and 1.7B, save two WAVs.
 
-Results:
+## 8. Dockerfile / compose / .env / tests
 
-- Short prompt (3 iterations, seed 42): exact PCM parity; batch median 35.939 s, stream median
-  35.805 s (no regression; stream marginally faster).
-- Paragraph (max_new_tokens=200, seed 42, 1 run): exact PCM parity; batch 97.2 s, stream 121.3 s
-  (25% slower total wall time); first audio at 59.3 s (62 s head start).
-- Trade-off: streaming increases total wall time for paragraph-length requests (due to vocoder
-  decode at each 300-frame boundary), but begins delivering PCM ~60 s before completion.
-- Non-Git artifacts on dockermisc1: `/tmp/bench_short_identical_seed_report.json`,
-  `/tmp/bench_paragraph_identical_seed_report.json`.
+- **Dockerfile:** `COPY src/ ./src/`, `COPY scripts/ ./scripts/`,
+  `ENV PYTHONPATH=/app/src:/app/src/export`, `EXPOSE 8318` only, healthcheck on 8318,
+  `CMD ["gunicorn","qwen3_tts.app:app","-w","1","-k","gthread","--threads","4","--timeout","300","--bind","0.0.0.0:8318","--log-level","info"]`
+  (NO `--preload` — memory `serving-memory-footprint`). Exporter stage installs `requirements/export.txt`
+  and runs `scripts/export.py`. Split old `requirements.txt`/`requirements-ov-*.txt` into
+  `requirements/{runtime,openvino,export}.txt`.
+- **compose.yml:** ONE service `qwen3-tts` (port 8318, MODEL_SIZE-driven, mem from preset, mounts
+  `${REF_AUDIO_PATH}:/voice/reference.wav:ro`, model cache, `./data/ov:/ov`). A second service
+  `export` under `profiles: [export]` running `scripts/export.py` into the same `./data/ov`. Only the
+  3 user vars required; advanced vars commented.
+- **.env.example:** `REF_AUDIO_PATH=`, `REF_TEXT=`, `MODEL_SIZE=0.6B`, then a commented advanced block.
+- **tests/:** update imports to `qwen3_tts.*`. `tests/test_app_api.py` → point at merged `qwen3_tts.app`
+  and mock the model functions instead of `requests`.
 
-Also validated on 1.7B INT4 (12 GiB cgroup, 3 iterations, seed 42):
+## 9. Docs (Phase 5)
 
-- Batch median: 105.2 s; Stream median: 130.0 s (23.5% slower); TTFB: 65.5 s.
-- Exact PCM parity all 3 iterations.
-- Streaming penalty (23-25%) matches 0.6B behavior; structural, not model-size specific.
-- 12 GiB was required; container at 94.37% after 3 iterations.
+`git mv` to `docs/dev/`: `OPENVINO_IMPLEMENTATION.md`, `OPENVINO_RESULTS.md`,
+`PLAN_0.6B_STATEFUL_KV.md`, `PLAN_STREAMING_VOCODER.md`. Rewrite `README.md` → short quickstart +
+links. Rewrite `HOW_TO_RUN.md`: §A user quickstart (the 4 commands), §B A/B test, §C advanced (export
+internals, capacity tuning, pytorch fallback, memory) bridging the still-true facts from the old runbook.
 
-### Task 3 — complete the overlap go/no-go measurement
+## 10. VALIDATION GATE (Phase 6) — REQUIRED before "done"
 
-STATUS: COMPLETE (2026-06-30, dockermisc1, 1.7B-INT4 candidate, runtime-v0.13.0 + patched serve.py)
+You CANNOT run Python here (this Mac has no torch/flask/openvino). The ONLY real test is on
+**dockermisc1** (`ssh dockermisc1`, sudo available). Touch ONLY `qwen3-tts*` containers; never blanket
+`docker kill`/`stop`/`prune` — leave `litellm*`, `headroom-proxy`, `crowdsec`, hermes-*, *arr, etc.
+running (memory `dockermisc1-ops`). Reference WAV on the box:
+`/var/data/autopirate/qwen3-tts/voice/voice_A.wav`.
 
-Per-core `mpstat -P ALL 1` across a 71 s batch paragraph `/generate`, split into the generation bulk
-and the trailing `chunked_decode` vocoder phase. Active-window per-core busy%:
+Gates (all must pass):
+1. `python -m py_compile` over all new/moved `.py` (syntax only — does NOT prove imports).
+2. Build the new runtime image on dockermisc1.
+3. `docker compose run --rm export` for `MODEL_SIZE=0.6B` produces the `/ov/0.6B/...` IR.
+4. `docker compose up`; `GET /health` ok; `POST /v1/audio/speech` (mp3 + wav) returns valid audio;
+   `POST /generate` works; missing `input` → 400 OpenAI envelope.
+5. A/B: repeat for `1.7B`; both produce audio; note latency + memory (~5.8 GiB steady for 1.7B).
+6. Existing model-free unit tests pass: `python -m unittest` for the moved tests.
 
-| Core | Generation | Vocoder |
-|---|---:|---:|
-| cpu0–5 | 82–98% | 77–86% |
-| cpu6, cpu7 | 12–14% | 12–13% |
-| Sum | 533/800 | 507/800 |
+When ALL gates pass: commit in logical chunks, open a PR with a
+`BEGIN_COMMIT_OVERRIDE`/`END_COMMIT_OVERRIDE` block (memory `pr-commit-override-block`), end commit
+messages with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`. Only THEN mark complete.
 
-Finding: with `OV_INFERENCE_THREADS=6` the model pins 6 cores near-saturation and leaves **exactly 2
-cores (cpu6, cpu7) idle** in both phases. So headroom for Deliverable B exists, but it is only ~25% of
-the box (2 of 8 cores), and the 6 generation threads cannot be shared without slowing generation.
+## 11. Hard rules (from memory; keep in effect)
 
-Decision: **GO is technically available but narrow.** A dedicated vocoder `InferRequest` pinned to a
-2-thread pool on the spare cores could decode streaming chunks concurrently with generation, which would
-recover the measured 23–25% streaming wall-time penalty (Task 2) while keeping the ~60 s TTFB benefit.
-The prize is "streaming ≈ batch wall time AND ~60 s earlier first audio," not a net speedup over batch.
-Whether to build B is a product call (see decision note at end of this task list); A ships regardless.
-Raw capture: `/tmp/task3_mpstat.txt` on dockermisc1.
+- Never blanket `docker kill/stop/prune`; only `qwen3-tts*` benchmark containers.
+- Never run two large model jobs at once on the 15 GiB box (OOM).
+- Worker gunicorn: `-w 1`, **never** `--preload` (wastes ~2.8 GiB).
+- Do not change `load_model`'s exporter fp32 parity needs; serving uses bf16 via `OPENVINO_TORCH_DTYPE`.
+- Keep `TTS_BACKEND=pytorch` rollback working.
 
-1. Instrument explicit phase labels around autoregressive generation and vocoder inference.
-2. Sample **per-core** CPU at 1 s or faster for both 0.6B and 1.7B. Aggregate `docker stats` is not
-   enough to approve overlap.
-3. Record host load, available RAM, swap, model/IR provenance, and thread settings.
-4. Decision:
-   - if generation consistently leaves cores idle, prototype a dedicated vocoder request/thread and
-     explicit thread split;
-   - if generation saturates the host or overlap regresses wall time, stop deliverable B and ship only A.
-
-### Task 4 — quality and transport failure gates
-
-STATUS: COMPLETE (2026-06-30) — listening confirmed: user reports streamed vs batch sound identical,
-no seam at the ~11.2 s chunk boundary. Combined with exact sample parity (max_abs=0, SNR=inf), the
-streaming quality gate is closed.
-
-Transport tests completed (1.7B, v0.13.0):
-- Mid-stream disconnect: health ok after client killed mid-generation
-- Short timeout: curl --max-time 5 on paragraph correctly timed out
-- Serialized mixed: stream → batch → stream sequence completed correctly; health ok
-- All: no wedging, no residual hooks, serialized access preserved
-
-1. Convert saved `f32le` outside Git for listening; compare streamed concatenation against batch at
-   the 300-frame seam. Exact sample parity passed; perceptual listening now confirmed identical.
-   A/B WAVs staged at `audio/streaming-ab/` (gitignored): `batch_paragraph.wav`,
-   `stream_paragraph.wav`, plus `README.txt`. Seam checked at ~11.2 s into the stream file
-   (140 generated frames × 1920 / 24000). LISTENING COMPLETE — user confirms identical, no seam.
-2. Transport failure tests: completed.
-3. Batch → stream → batch and stream → batch: completed.
-
-### Task 5 — model/rollback gates
-
-STATUS: PARTIAL — PROFILES VALIDATED, PYTORCH ROLLBACK OK, LISTENING PENDING (2026-06-30)
-
-1. Under a maintenance window, validate commit `68e58b2` for both chosen profiles: health must report
-   BF16/low-memory loading, backend provenance must match the expected stateful/precision choices,
-   and startup/generation must remain within 8 GiB.
-2. Repeat producer parity and transport on 1.7B INT4, capacity-768 stateful main, **explicit INT4
-   predictor**, and FP32 vocoder: COMPLETED.
-   - Health: stateful_main=true, stateful_predictor=false, BF16, INT4 g32 mode
-   - Short parity: max_abs=0, SNR=inf
-   - Paragraph parity at boundaries: max_abs=0, SNR=inf, 2 chunks at 300/327
-   - Streaming and batch endpoints correct
-3. Start a fresh process with `TTS_BACKEND=pytorch`: COMPLETED.
-   - `/generate` returns 200, WAV/MP3 working
-   - `/generate/stream` returns 503 (no OV vocoder active)
-   - Health reports backend=pytorch
-4. Run Compose validation and both runtime/exporter import smoke tests after the Dockerfile change.
-   COMPLETE (2026-06-30): deployment compose (`/home/nick/docker/docker-compose.yml`, 0.6B service)
-   validates via `docker compose config`; runtime image (`runtime-v0.13.0` + patched `app_api.py`)
-   imports all app modules cleanly; exporter core modules import in `exporter-v0.10.0`. A fresh
-   `runtime-v0.14.0` build (carrying the `--preload` fix and the OpenAI endpoint) is deferred to release.
-
-### Task 6 — final documentation and PR
-
-1. Update this handoff, `PLAN_STREAMING_VOCODER.md`, `OPENVINO_IMPLEMENTATION.md`,
-   `OPENVINO_RESULTS.md`, `HOW_TO_RUN.md`, and README with final measured status.
-2. Keep raw PCM, WAVs, profiles, IR, and model files outside Git.
-3. Use a `feat(runtime): ...` PR title and an override block with one Conventional Commit per line,
-   for example:
-
-   ```text
-   BEGIN_COMMIT_OVERRIDE
-   feat(runtime): stream OpenVINO vocoder PCM during generation
-
-   test(runtime): validate streaming code and transport parity
-
-   docs(runtime): record streaming vocoder results and rollback gates
-   END_COMMIT_OVERRIDE
-   ```
-
-## Artifact paths and host safety
-
-- 0.6B explicit:
-  `/var/data/autopirate/qwen3-tts/openvino/qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1/`
-- 0.6B stateful: same basename plus `_stateful/`.
-- 0.6B FP32 vocoder: same basename plus `_vocoder/`.
-- 1.7B INT4:
-  `/var/data/autopirate/qwen3-tts/openvino/qwen-tts-0.1.1_1.7b_fd4b25438912_ov-2026.2.1_int4g32/`
-- 1.7B capacity-768 stateful main:
-  `..._int4g32_stateful_spike/main_stateful_int4_cap768.xml`.
-- 1.7B FP32 vocoder: corresponding `_vocoder/` directory.
-- No persistent 1.7B stateful predictor XML was present at the latest inspection.
-- Reference WAV: `/var/data/autopirate/qwen3-tts/voice/voice_A.wav`.
-
-Never run two large model jobs concurrently. Never blanket-stop, kill, or prune Docker. Touch only
-the named temporary/qwen service. Keep `litellm`, `litellm-postgres`, `headroom-proxy`, and every
-unrelated container untouched.
+---
+*Prior streaming-validation handoff (now merged as v0.14.0) is preserved in git history and in
+`docs/dev/OPENVINO_RESULTS.md`.*
