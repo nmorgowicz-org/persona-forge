@@ -199,7 +199,7 @@ STATUS: COMPLETE (2026-06-30, both 0.6B and 1.7B)
 
 ### Task 2 — produce an identical-seed latency comparison
 
-STATUS: PENDING
+STATUS: COMPLETE (2026-06-30, dockermisc1, qwen3-tts-candidate)
 
 1. Add an internal-only seed control to the benchmark harness, not to public `/infer`.
 2. Run one warm-up plus at least three measured paragraph requests for:
@@ -208,7 +208,25 @@ STATUS: PENDING
 3. Use identical seeds/text/stateful graphs and record generation frames, audio seconds, first-byte
    time, total wall time, vocoder time, median, p95, RSS, and swap delta.
 4. Acceptance: stream/batch generated codes and final PCM agree; streaming does not regress median
-   total wall time beyond noise. Update `OPENVINO_RESULTS.md` with raw artifact paths.
+    total wall time beyond noise. Update `OPENVINO_RESULTS.md` with raw artifact paths.
+
+Results:
+
+- Short prompt (3 iterations, seed 42): exact PCM parity; batch median 35.939 s, stream median
+  35.805 s (no regression; stream marginally faster).
+- Paragraph (max_new_tokens=200, seed 42, 1 run): exact PCM parity; batch 97.2 s, stream 121.3 s
+  (25% slower total wall time); first audio at 59.3 s (62 s head start).
+- Trade-off: streaming increases total wall time for paragraph-length requests (due to vocoder
+  decode at each 300-frame boundary), but begins delivering PCM ~60 s before completion.
+- Non-Git artifacts on dockermisc1: `/tmp/bench_short_identical_seed_report.json`,
+  `/tmp/bench_paragraph_identical_seed_report.json`.
+
+Also validated on 1.7B INT4 (12 GiB cgroup, 3 iterations, seed 42):
+
+- Batch median: 105.2 s; Stream median: 130.0 s (23.5% slower); TTFB: 65.5 s.
+- Exact PCM parity all 3 iterations.
+- Streaming penalty (23-25%) matches 0.6B behavior; structural, not model-size specific.
+- 12 GiB was required; container at 94.37% after 3 iterations.
 
 ### Task 3 — complete the overlap go/no-go measurement
 
