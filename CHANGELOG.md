@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.13.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.12.0...qwen3-tts-openvino-v0.13.0) (2026-06-30)
+
+
+### Features
+
+* **runtime:** stream OpenVINO vocoder PCM during generation ([d67a505](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d67a505ccaa51a85717e59bec4fdb43c56c5ecd9))
+
+
+### Bug Fixes
+
+* **runtime:** honor BF16 serving load settings in app_worker ([d67a505](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d67a505ccaa51a85717e59bec4fdb43c56c5ecd9))
+
+
+### Tests
+
+* **runtime:** validate streaming code capture and transport parity ([d67a505](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d67a505ccaa51a85717e59bec4fdb43c56c5ecd9))
+
+
+### Documentation
+
+* **runtime:** record streaming results and operator runbook ([d67a505](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d67a505ccaa51a85717e59bec4fdb43c56c5ecd9))
+
 ## [0.12.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.11.1...qwen3-tts-openvino-v0.12.0) (2026-06-29)
 
 
