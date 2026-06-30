@@ -26,7 +26,7 @@ import statistics
 from dataclasses import dataclass
 from pathlib import Path
 
-from model_config import configure_hf_token, resolve_model_repo
+from model_config import configure_hf_token, resolve_model_repo, resolve_torch_load_config
 
 
 # Reference voice defaults mirror app_worker.py so a benchmark run reproduces the
@@ -141,18 +141,7 @@ def load_model() -> LoadedModel:
     # drops to ~8.5 GiB settled. OPENVINO_TORCH_DTYPE lets the *serving* path load in
     # native bf16 to skip that upcast; the exporter MUST stay fp32 for convert parity
     # (do not set the env in export). See docs/OPENVINO_RESULTS.md (M9).
-    low_cpu_mem_usage = os.getenv("OPENVINO_LOW_CPU_MEM_USAGE", "1").strip() != "0"
-    dtype_name = os.getenv("OPENVINO_TORCH_DTYPE", "float32").strip().lower()
-    torch_dtype = {
-        "float32": torch.float32,
-        "fp32": torch.float32,
-        "bfloat16": torch.bfloat16,
-        "bf16": torch.bfloat16,
-        "float16": torch.float16,
-        "fp16": torch.float16,
-    }.get(dtype_name)
-    if torch_dtype is None:
-        raise ValueError(f"unsupported OPENVINO_TORCH_DTYPE={dtype_name!r}")
+    torch_dtype, dtype_name, low_cpu_mem_usage = resolve_torch_load_config(torch)
     print(
         f"[bench] loading {model_repo} (rev={revision}) on {device} at {dtype_name} "
         f"(low_cpu_mem_usage={low_cpu_mem_usage})...",

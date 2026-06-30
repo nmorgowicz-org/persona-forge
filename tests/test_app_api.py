@@ -32,5 +32,44 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(result.get_json()["status"], "degraded")
 
 
+class StreamingProxyTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = app_api.app.test_client()
+
+    @patch("app_api.requests.post")
+    def test_streams_worker_pcm_and_forwards_contract_headers(self, post: Mock) -> None:
+        upstream = Mock()
+        upstream.status_code = 200
+        upstream.headers = {
+            "content-type": "application/octet-stream",
+            "X-Audio-Format": "f32le",
+            "X-Audio-Sample-Rate": "24000",
+            "X-Audio-Channels": "1",
+            "X-Stream-Error-Semantics": "connection-close",
+        }
+        upstream.iter_content.return_value = iter((b"first", b"second"))
+        post.return_value = upstream
+
+        result = self.client.post("/generate/stream", json={"text": "hello"})
+
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.data, b"firstsecond")
+        self.assertEqual(result.headers["X-Audio-Format"], "f32le")
+        self.assertEqual(result.headers["X-Audio-Sample-Rate"], "24000")
+        post.assert_called_once_with(
+            "http://127.0.0.1:8319/infer_stream",
+            json={"text": "hello"},
+            stream=True,
+            timeout=300,
+        )
+        upstream.close.assert_called_once()
+
+    def test_rejects_missing_text_before_contacting_worker(self) -> None:
+        result = self.client.post("/generate/stream", json={"language": "English"})
+
+        self.assertEqual(result.status_code, 400)
+        self.assertEqual(result.get_json()["error"], "text is required")
+
+
 if __name__ == "__main__":
     unittest.main()

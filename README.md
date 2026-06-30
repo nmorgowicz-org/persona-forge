@@ -18,13 +18,14 @@ the expensive transformer work into OpenVINO.
 | FP32 OpenVINO parity | Passed on `dockermisc1` |
 | INT8 compression | Weight-only INT8 implemented; selective quality recovery in progress |
 | Explicit-cache OpenVINO generation | Implemented and measured |
-| Stateful OpenVINO K/V cache | Planned |
-| Thin runtime memory loader | Planned |
+| Stateful OpenVINO K/V cache | Implemented and measured |
+| Streaming OpenVINO vocoder PCM | Experimental; 0.6B producer/worker parity passed |
 
 `app_worker.py` selects PyTorch or the explicit-cache OpenVINO backend with `TTS_BACKEND`.
 OpenVINO is not activated merely by installing the dependency: the worker also requires matching,
 validated IR and metadata. Progress and release gates are defined in the
-[implementation plan](docs/OPENVINO_IMPLEMENTATION.md).
+[implementation plan](docs/OPENVINO_IMPLEMENTATION.md). Deployment, bind-mount, environment-variable,
+and benchmark commands for `dockermisc1` are in [the operator runbook](docs/HOW_TO_RUN.md).
 
 ## Goals
 
@@ -60,7 +61,7 @@ app_worker.py
         |
         +-- PyTorch prompt construction and generation (current)
         +-- OpenVINO main talker + code predictor (target)
-        +-- ONNX Runtime speech tokenizer/decoder
+        +-- FP32 OpenVINO vocoder (when enabled)
         v
 MP3 or WAV response
 ```
@@ -307,7 +308,10 @@ environment:
   OV_MODEL_DIR: /ov_model/qwen-tts-0.1.1_0.6b_ov-2026.2.1
   OV_INFERENCE_THREADS: "6"
   OV_DYNAMIC_QUANT_GROUP_SIZE: "32"
+  OV_MAIN_COMPRESSION: int8
+  OV_PREDICTOR_COMPRESSION: int8
   OPENVINO_TORCH_DTYPE: bfloat16
+  OPENVINO_LOW_CPU_MEM_USAGE: "1"
   OPENVINO_RELEASE_TORCH: "1"
   OPENVINO_MAIN_STATEFUL_MODEL: /ov_model/stateful/main_stateful_int8_cap768.xml
   OPENVINO_PREDICTOR_STATEFUL_MODEL: /ov_model/stateful/predictor_stateful_int8_cap32.xml
@@ -319,7 +323,10 @@ volumes:
 Stateful IR is generated outside Git with `scripts/transform_stateful_ir.py`; the transform report
 records capacity and source/output hashes. Leaving both stateful-model variables unset selects the
 explicit-cache OpenVINO path. For 0.6B, short requests measured 6,635 MiB peak at these capacities,
-but a 45.28-second request measured 7,845 MiB; use an 8 GiB limit unless request length is bounded.
+but a 45.28-second request measured 7,845 MiB. An 8 GiB limit is a functional validation minimum,
+not 20% production headroom. Use 10G memory /
+11G memory+swap for unrestricted paragraph-capable production. The exact 0.6B and 1.7B launch
+profiles are documented in [the operator runbook](docs/HOW_TO_RUN.md).
 
 ## Configuration
 
@@ -340,6 +347,9 @@ but a 45.28-second request measured 7,845 MiB; use an 8 GiB limit unless request
 | `MKL_NUM_THREADS` | `6` | MKL thread limit |
 | `OPENBLAS_NUM_THREADS` | `6` | OpenBLAS thread limit |
 | `OPENVINO_TORCH_DTYPE` | `float32` | Serving glue dtype; use `bfloat16` for the validated low-memory profile, never for export |
+| `OPENVINO_LOW_CPU_MEM_USAGE` | `1` | Use Hugging Face low-memory model loading in serving/benchmark paths |
+| `OV_MAIN_COMPRESSION` | selected artifact default | Per-core compressed graph selector (`int8` also names the INT4 file family) |
+| `OV_PREDICTOR_COMPRESSION` | selected artifact default | Predictor compressed graph selector |
 | `OPENVINO_RELEASE_TORCH` | `0` | Release replaced PyTorch transformer layers before main IR compile; requires process restart for rollback |
 | `OPENVINO_MAIN_STATEFUL_MODEL` | unset | Absolute or `OV_MODEL_DIR`-relative stateful main IR path |
 | `OPENVINO_PREDICTOR_STATEFUL_MODEL` | unset | Absolute or `OV_MODEL_DIR`-relative stateful predictor IR path |
@@ -413,6 +423,29 @@ Request fields:
 
 The API proxies worker errors and has a 300-second upstream timeout.
 
+### Stream raw PCM (experimental OpenVINO path)
+
+`/generate/stream` keeps the batch endpoints unchanged and returns headerless mono float32
+little-endian PCM as HTTP chunked transfer. It requires the FP32 OpenVINO vocoder; PyTorch-only
+deployments return HTTP 503 for this endpoint.
+
+```bash
+curl --fail-with-body \
+  -X POST http://127.0.0.1:8318/generate/stream \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "text": "This response begins playing before synthesis is complete.",
+    "language": "English"
+  }' \
+  --output speech.f32le
+```
+
+The response headers declare `X-Audio-Format: f32le`, `X-Audio-Sample-Rate: 24000`, and
+`X-Audio-Channels: 1`. Convert a completed stream outside the service, for example with
+`ffmpeg -f f32le -ar 24000 -ac 1 -i speech.f32le speech.wav`. If generation fails after bytes
+have been sent, the connection closes and the payload is truncated; clients must explicitly
+discard or handle partial PCM.
+
 ## Post-build model export lifecycle
 
 Full model conversion does not run in ARC CI because the current runners do not have enough
@@ -433,8 +466,9 @@ guaranteed memory. The intended lifecycle is:
 Export and release gates are run independently for 0.6B and 1.7B. Passing the 0.6B gates
 does not certify a 1.7B artifact.
 
-The exporter and explicit-cache runtime are implemented. Stateful cache, selective INT8 quality
-recovery, final memory reduction, and the 1.7B validation remain open milestones.
+The exporter, explicit/stateful cache runtimes, 0.6B INT8 profile, and 1.7B INT4/BF16 profile are
+implemented and measured. The active streaming track still requires baked-image/public-proxy,
+human seam-listening, phase-separated CPU, disconnect/concurrency, and rollback release gates.
 
 ## CI and repository automation
 

@@ -46,3 +46,29 @@ def resolve_model_repo(environ: MutableMapping[str, str] = os.environ) -> str:
     except KeyError as exc:
         choices = ", ".join(MODEL_PRESETS)
         raise RuntimeError(f"Unsupported MODEL_SIZE={model_size!r}; choose {choices}") from exc
+
+
+def resolve_torch_load_config(torch_module, environ: MutableMapping[str, str] = os.environ):
+    """Resolve runtime/benchmark Torch dtype and low-memory loading."""
+
+    requested = (environ.get("OPENVINO_TORCH_DTYPE") or "float32").strip().lower()
+    aliases = {
+        "float32": "float32",
+        "fp32": "float32",
+        "bfloat16": "bfloat16",
+        "bf16": "bfloat16",
+        "float16": "float16",
+        "fp16": "float16",
+    }
+    try:
+        canonical = aliases[requested]
+    except KeyError as exc:
+        choices = ", ".join(sorted(aliases))
+        raise ValueError(
+            f"unsupported OPENVINO_TORCH_DTYPE={requested!r}; choose {choices}"
+        ) from exc
+
+    low_cpu_mem_usage = (
+        (environ.get("OPENVINO_LOW_CPU_MEM_USAGE") or "1").strip() != "0"
+    )
+    return getattr(torch_module, canonical), canonical, low_cpu_mem_usage

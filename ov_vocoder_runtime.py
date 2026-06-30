@@ -12,6 +12,7 @@ rejected; only FP32 IR is supported.
 from __future__ import annotations
 
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
@@ -82,6 +83,11 @@ class OpenVinoVocoderRuntime:
         self._sanity_check()
 
         self.enabled = True
+
+    @property
+    def sample_rate(self) -> int:
+        """Return the PCM sample rate used by the patched decode contract."""
+        return self._sample_rate
 
     # -- internal helpers ----------------------------------------------------------
 
@@ -207,41 +213,33 @@ class OpenVinoVocoderRuntime:
 
     def _decode_codes_tensor(self, codes):
         """Core decode path for a single [frames, Q] codes tensor/array."""
-        import torch
-
-        # Normalize input to numpy [frames, Q].
-        if isinstance(codes, torch.Tensor):
-            codes = codes.detach().cpu().numpy()
-        codes = np.asarray(codes, dtype=np.int64)
-
-
-        if codes.ndim == 2:
-            frames, q = codes.shape
-        elif codes.ndim == 3 and codes.shape[0] == 1:
-            # Already [1, frames, Q]; squeeze.
-            codes = codes[0]
-            frames, q = codes.shape
-        else:
-            raise RuntimeError(
-                f"vocoder_runtime.decode: unexpected codes shape {codes.shape}; "
-                f"expected [frames, {self._num_quantizers}]"
-            )
-
-        if frames == 0:
+        chunks = list(self.iter_decode_chunks(codes))
+        if not chunks:
             return np.array([], dtype=np.float32)
+        return np.concatenate(chunks, axis=0).astype(np.float32, copy=False)
+
+    def iter_decode_chunks(self, codes) -> Iterator[np.ndarray]:
+        """Yield waveform chunks while preserving the batch decode boundaries.
+
+        This is the transport/pipeline seam for streaming output. Concatenating
+        every yielded array is exactly the existing batch waveform.
+        """
+        codes = self._normalize_codes(codes)
+        frames, q = codes.shape
+        if frames == 0:
+            return
 
         # Chunking parameters consistent with the export wrapper.
         chunk_size = 300        # frames per chunk
         left_context = 25       # previous frames for continuity
-        ir_input_frames = chunk_size + left_context  # 325
 
         # If input fits in one chunk, pad and infer directly, using left-context
         # warmup to match multi-chunk behavior.
         if frames <= chunk_size:
-            return self._single_chunk(codes, chunk_size, left_context)
+            yield self._single_chunk(codes, chunk_size, left_context)
+            return
 
-        # Longer: chunk with left context overlap, concatenate waveforms.
-        chunks = []
+        # Longer: chunk with left context overlap and yield each cropped waveform.
         pos = 0
         while pos < frames:
             end = min(pos + chunk_size, frames)
@@ -264,11 +262,23 @@ class OpenVinoVocoderRuntime:
             skip_ctx = int(left_context * self._total_upsample)
             chunk_samples = int(chunk_len * self._total_upsample)
             wav_chunk = wav_chunk[skip_ctx : skip_ctx + chunk_samples]
-            chunks.append(wav_chunk)
+            yield wav_chunk.astype(np.float32, copy=False)
 
             pos = end
 
-        return np.concatenate(chunks, axis=0).astype(np.float32)
+    def _normalize_codes(self, codes) -> np.ndarray:
+        """Normalize Torch/numpy codes to contiguous int64 [frames, Q]."""
+        if hasattr(codes, "detach") and hasattr(codes, "cpu"):
+            codes = codes.detach().cpu().numpy()
+        codes = np.asarray(codes, dtype=np.int64)
+        if codes.ndim == 3 and codes.shape[0] == 1:
+            codes = codes[0]
+        if codes.ndim != 2 or codes.shape[1] != self._num_quantizers:
+            raise RuntimeError(
+                f"vocoder_runtime.decode: unexpected codes shape {codes.shape}; "
+                f"expected [frames, {self._num_quantizers}]"
+            )
+        return np.ascontiguousarray(codes)
 
     def _single_chunk(self, codes, chunk_size, left_context):
         """Handle frames <= chunk_size with left-context warmup and right-padding.

@@ -29,8 +29,9 @@ RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/'
     /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_25hz/vq/speech_vq.py || true
 
 # ov_runtime_config is imported eagerly by app_worker (both backends); ov_talker_runtime and
-# ov_vocoder_runtime are imported lazily by the openvino backend. All three must ship.
-COPY app_api.py app_worker.py model_config.py serve.py ov_runtime_config.py ov_talker_runtime.py ov_vocoder_runtime.py ./
+# ov_vocoder_runtime are imported lazily by the openvino backend. The streaming
+# helper is imported by app_worker for the internal parity harness.
+COPY app_api.py app_worker.py model_config.py serve.py streaming_vocoder.py ov_runtime_config.py ov_talker_runtime.py ov_vocoder_runtime.py ./
 COPY scripts/download_model.py scripts/download_model.py
 
 FROM base AS runtime

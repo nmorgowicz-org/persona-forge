@@ -2,9 +2,11 @@ import gc
 import io
 import json
 import os
+import queue
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any, Callable
 
 # Apply thread and runtime envs before heavy imports
 from ov_runtime_config import apply_thread_env
@@ -20,7 +22,8 @@ import soundfile as sf
 import torch
 
 from flask import Flask, Response, jsonify, request
-from model_config import configure_hf_token, resolve_model_repo
+from model_config import configure_hf_token, resolve_model_repo, resolve_torch_load_config
+from streaming_vocoder import StreamingVocoderSession
 
 configure_hf_token()
 
@@ -45,6 +48,7 @@ OPENVINO_MAIN_STATEFUL_MODEL = (os.getenv("OPENVINO_MAIN_STATEFUL_MODEL") or "")
 OPENVINO_PREDICTOR_STATEFUL_MODEL = (
     (os.getenv("OPENVINO_PREDICTOR_STATEFUL_MODEL") or "").strip() or None
 )
+TORCH_DTYPE, TORCH_DTYPE_NAME, OPENVINO_LOW_CPU_MEM_USAGE = resolve_torch_load_config(torch)
 
 torch.set_num_threads(6)
 
@@ -134,14 +138,16 @@ def load_model():
             )
 
     print(
-        f"[app_worker] Backend={TTS_BACKEND}, loading model at float32...",
+        f"[app_worker] Backend={TTS_BACKEND}, loading model at {TORCH_DTYPE_NAME} "
+        f"(low_cpu_mem_usage={OPENVINO_LOW_CPU_MEM_USAGE})...",
         flush=True,
     )
     wrapped = Qwen3TTSModel.from_pretrained(
         MODEL_ID,
         revision=MODEL_REVISION,
         device_map=DEVICE,
-        dtype=torch.float32,
+        dtype=TORCH_DTYPE,
+        low_cpu_mem_usage=OPENVINO_LOW_CPU_MEM_USAGE,
     )
 
     gc.collect()
@@ -212,6 +218,8 @@ def health():
         "model": MODEL_ID,
         "model_revision": MODEL_REVISION,
         "device": DEVICE,
+        "torch_dtype": TORCH_DTYPE_NAME,
+        "low_cpu_mem_usage": OPENVINO_LOW_CPU_MEM_USAGE,
         "ref_audio": REF_AUDIO,
         "timestamp": time.time(),
     }
@@ -239,6 +247,12 @@ def health():
                     "active_compression": (
                         ov_runtime.compression if ov_runtime is not None else None
                     ),
+                    "active_main_compression": (
+                        ov_runtime.main_comp if ov_runtime is not None else None
+                    ),
+                    "active_predictor_compression": (
+                        ov_runtime.pred_comp if ov_runtime is not None else None
+                    ),
                     "stateful_main": bool(OPENVINO_MAIN_STATEFUL_MODEL),
                     "stateful_predictor": bool(OPENVINO_PREDICTOR_STATEFUL_MODEL),
                     "stateful_capacity": {
@@ -251,7 +265,16 @@ def health():
             }
         )
 
-    return jsonify(base)
+    def _json_safe(obj):
+        if isinstance(obj, Path):
+            return obj.as_posix()
+        if isinstance(obj, dict):
+            return {k: _json_safe(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_json_safe(v) for v in obj]
+        return obj
+
+    return jsonify(_json_safe(base))
 
 
 def _trim_silence(wav, sr):
@@ -282,7 +305,7 @@ def _trim_silence(wav, sr):
     return arr[start:end]
 
 
-def _run_generate(text: str, language: str):
+def _run_generate(text: str, language: str, **gen_kwargs):
     if model is None or voice_clone_prompt is None:
         raise RuntimeError("Model not loaded")
     import traceback as _tb
@@ -291,11 +314,97 @@ def _run_generate(text: str, language: str):
             text=text,
             language=language,
             voice_clone_prompt=voice_clone_prompt,
+            **gen_kwargs,
         )
     except Exception:
         _tb.print_exc()
         raise
     return _trim_silence(wavs[0], sr), sr
+
+
+def _run_generate_with_streaming(
+    text: str,
+    language: str,
+    on_audio_chunk: Callable[[Any], None],
+    *,
+    reuse_streamed_decode: bool = False,
+    **gen_kwargs,
+):
+    """Run generation while emitting incremental untrimmed PCM chunks.
+
+    The terminal return preserves the existing trimmed batch behavior. Internal
+    parity tests may retain the stock decode; transport reuses the final prefix.
+    """
+
+    import numpy as np
+
+    if model is None or voice_clone_prompt is None:
+        raise RuntimeError("Model not loaded")
+
+    vr = getattr(ov_runtime, "vocoder_runtime", None)
+    if vr is None or not vr.enabled:
+        raise RuntimeError("streaming parity requires the FP32 OpenVINO vocoder")
+
+    reference_codes = None
+    if isinstance(voice_clone_prompt, list) and voice_clone_prompt:
+        reference_codes = getattr(voice_clone_prompt[0], "ref_code", None)
+    elif isinstance(voice_clone_prompt, dict):
+        ref_code_list = voice_clone_prompt.get("ref_code")
+        if ref_code_list:
+            reference_codes = ref_code_list[0]
+
+    def decode_prefix(codes):
+        chunks = list(vr.iter_decode_chunks(codes))
+        if not chunks:
+            return np.empty(0, dtype=np.float32)
+        return np.concatenate(chunks).astype(np.float32, copy=False)
+
+    talker = model.model.talker
+    eos_token_id = model.model.config.talker_config.codec_eos_token_id
+    session = StreamingVocoderSession(
+        talker,
+        decode_prefix,
+        on_audio_chunk,
+        reference_codes=reference_codes,
+        eos_token_id=eos_token_id,
+    )
+    speech_tokenizer = model.model.speech_tokenizer
+    original_decode = speech_tokenizer.decode
+
+    def reuse_decode(items):
+        if not isinstance(items, list) or len(items) != 1:
+            raise RuntimeError("streaming decode currently supports batch size 1")
+        item = items[0]
+        if not isinstance(item, dict) or not session.matches_codes(item.get("audio_codes")):
+            raise RuntimeError("terminal decode codes differ from the captured streaming prefix")
+        session.flush()
+        return [session.full_waveform], vr.sample_rate
+
+    started = time.monotonic()
+    with session:
+        if reuse_streamed_decode:
+            speech_tokenizer.decode = reuse_decode
+        try:
+            wavs, sr = model.generate_voice_clone(
+                text=text,
+                language=language,
+                voice_clone_prompt=voice_clone_prompt,
+                **gen_kwargs,
+            )
+        finally:
+            if reuse_streamed_decode:
+                speech_tokenizer.decode = original_decode
+
+    # Existing batch behavior: still return the complete trimmed wav. The raw
+    # waveform is returned only to the internal parity harness so it can compare
+    # the side-channel chunks against the stock decode from the same generation.
+    wav_raw = np.asarray(wavs[0], dtype=np.float32).ravel()
+    return _trim_silence(wav_raw, sr), sr, wav_raw, {
+        "elapsed_seconds": time.monotonic() - started,
+        "generated_frames": session.generated_frames,
+        "reference_frames": session.reference_frames,
+        "decode_boundaries": session.decode_boundaries,
+    }
 
 
 @app.route("/infer", methods=["POST"])
@@ -332,6 +441,173 @@ def infer():
         return jsonify({"error": f"Inference error: {str(e)}"}), 500
 
     return Response(audio_bytes, content_type=media_type)
+
+
+@app.route("/infer_stream", methods=["POST"])
+def infer_stream():
+    """Stream mono float32 little-endian PCM from the OpenVINO vocoder.
+
+    The response contains no container header. A client must use the advertised
+    sample rate/channel/format headers. If generation fails after bytes have
+    been emitted, the connection closes and the partial PCM must be discarded
+    or handled explicitly by the client.
+    """
+    if model is None or voice_clone_prompt is None:
+        return jsonify({"error": "Model not loaded"}), 503
+    vr = getattr(ov_runtime, "vocoder_runtime", None)
+    if vr is None or not vr.enabled:
+        return jsonify({"error": "Streaming requires the FP32 OpenVINO vocoder"}), 503
+
+    data = request.get_json(force=True, silent=True)
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    language = (data.get("language") or "English").strip()
+
+    stream_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
+
+    def on_chunk(pcm: Any) -> None:
+        import numpy as np
+
+        payload = np.asarray(pcm, dtype="<f4").reshape(-1).tobytes()
+        if payload:
+            stream_queue.put(("audio", payload))
+
+    def produce() -> None:
+        try:
+            _run_generate_with_streaming(
+                text,
+                language,
+                on_chunk,
+                reuse_streamed_decode=True,
+            )
+        except BaseException as exc:
+            stream_queue.put(("error", exc))
+        finally:
+            stream_queue.put(("done", None))
+
+    future = executor.submit(produce)
+
+    def body():
+        while True:
+            kind, payload = stream_queue.get()
+            if kind == "audio":
+                yield payload
+            elif kind == "error":
+                raise RuntimeError(f"streaming inference failed: {payload}") from payload
+            elif kind == "done":
+                future.result()
+                return
+
+    return Response(
+        body(),
+        content_type="application/octet-stream",
+        headers={
+            "X-Audio-Format": "f32le",
+            "X-Audio-Sample-Rate": str(vr.sample_rate),
+            "X-Audio-Channels": "1",
+            "X-Stream-Error-Semantics": "connection-close",
+        },
+        direct_passthrough=True,
+    )
+
+
+@app.route("/stream_internal", methods=["POST"])
+def stream_internal():
+    """Dev-only streaming parity endpoint.
+
+    - Uses _run_generate_with_streaming to exercise the streaming vocoder path.
+    - Same JSON input as /infer.
+    - Returns WAV of concatenated streaming chunks.
+    - NOT part of the public API; may change or be removed.
+    """
+    if model is None or voice_clone_prompt is None:
+        return jsonify({"error": "Model not loaded"}), 503
+
+    data = request.get_json(force=True, silent=True)
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+
+    language = (data.get("language") or "English").strip()
+
+    def do_work():
+        import numpy as np
+
+        # Forward generation kwargs for parity and tests (e.g., do_sample=False).
+        gen_kwargs = {
+            "do_sample": data.get("do_sample"),
+            "temperature": data.get("temperature"),
+            "top_p": data.get("top_p"),
+            "top_k": data.get("top_k"),
+            "max_new_tokens": data.get("max_new_tokens"),
+        }
+        gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
+
+        stream_chunks: list[np.ndarray] = []
+        chunk_times: list[float] = []
+        started = time.monotonic()
+
+        def on_chunk(pcm: Any):
+            stream_chunks.append(np.asarray(pcm, dtype=np.float32).ravel())
+            chunk_times.append(time.monotonic() - started)
+
+        reuse_streamed_decode = bool(data.get("reuse_streamed_decode", False))
+        wav, sr, wav_raw, stream_info = _run_generate_with_streaming(
+            text,
+            language,
+            on_chunk,
+            reuse_streamed_decode=reuse_streamed_decode,
+            **gen_kwargs,
+        )
+
+        # Build audio from the streaming chunks for parity comparison.
+        if stream_chunks:
+            wav_stream = np.concatenate(stream_chunks, axis=0)
+        else:
+            wav_stream = wav
+
+        if wav_stream.shape != wav_raw.shape:
+            raise RuntimeError(
+                f"stream/batch length mismatch: {wav_stream.size} != {wav_raw.size}"
+            )
+        diff = wav_stream.astype(np.float64) - wav_raw.astype(np.float64)
+        signal = float(np.sum(wav_raw.astype(np.float64) ** 2))
+        noise = float(np.sum(diff ** 2))
+        snr_db = float("inf") if noise == 0.0 else 10.0 * np.log10(signal / noise)
+
+        # Return streaming result as WAV. Parity metrics are response headers so
+        # the body remains directly inspectable/listenable by the target harness.
+        buf = io.BytesIO()
+        sf.write(buf, wav_stream, sr, format="WAV")
+        buf.seek(0)
+        return buf.read(), "audio/wav", {
+            "X-Streaming-Frames": str(wav_stream.size // 1920),
+            "X-Streaming-Reference-Frames": str(stream_info["reference_frames"]),
+            "X-Streaming-Decode-Boundaries": ",".join(
+                str(value) for value in stream_info["decode_boundaries"]
+            ),
+            "X-Streaming-Chunk-Count": str(len(stream_chunks)),
+            "X-Streaming-Reused-Decode": str(reuse_streamed_decode).lower(),
+            "X-Streaming-TTFB-Seconds": (
+                f"{chunk_times[0]:.6f}" if chunk_times else "none"
+            ),
+            "X-Streaming-Total-Seconds": f"{stream_info['elapsed_seconds']:.6f}",
+            "X-Streaming-Max-Abs": f"{float(np.max(np.abs(diff), initial=0.0)):.9g}",
+            "X-Streaming-SNR-Db": "inf" if np.isinf(snr_db) else f"{snr_db:.6f}",
+        }
+
+    try:
+        audio_bytes, media_type, parity_headers = executor.submit(do_work).result(timeout=300)
+    except Exception as e:
+        return jsonify({"error": f"Inference error: {str(e)}"}), 500
+
+    return Response(audio_bytes, content_type=media_type, headers=parity_headers)
 
 
 if __name__ == "__main__":

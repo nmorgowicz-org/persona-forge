@@ -428,8 +428,8 @@ END_COMMIT_OVERRIDE
 ```
 
 The block is authoritative release-note input; keep it aligned with the full PR scope instead
-of relying on the PR title alone. Separate entries with a blank line: Release Please uses the blank
-line to split the override into multiple commits. Each entry must use exactly one supported type and
-an optional scope; express cross-cutting work as `feat(bench): ...` or `docs(export): ...`, never
+of relying on the PR title alone. Put one Conventional Commit line per entry; blank lines between
+entries are allowed but not required. Each entry must use exactly one supported type and an
+optional scope; express cross-cutting work as `feat(bench): ...` or `docs(export): ...`, never
 composite headers such as `feat(bench)+docs:` or `docs+export:`. Generated Release Please version PRs
 are exempt. Keep generated model artifacts and benchmark audio out of PRs.
