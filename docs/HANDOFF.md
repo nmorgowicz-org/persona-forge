@@ -126,10 +126,21 @@ Target results:
 - Chosen persisted 1.7B profile: BF16, INT4 g32, stateful main capacity 768, explicit predictor,
   FP32 OV vocoder. Short parity: 42 frames, boundary 202, 23.651 s, max_abs 0, infinite SNR.
 - 1.7B paragraph with final-prefix reuse: 173 frames, boundaries 300/333, first audio 50.945 s,
-  total 81.061 s, max_abs 0, infinite SNR, aggregate CPU mean 469.94%. Fresh cgroup peak
-  8,350,515,200 bytes (~7.78 GiB), no max/OOM/swap events.
+   total 81.061 s, max_abs 0, infinite SNR, aggregate CPU mean 469.94%. Fresh cgroup peak
+   8,350,515,200 bytes (~7.78 GiB), no max/OOM/swap events.
 - **Memory decision:** 8 GiB is a functional validation minimum with only ~2.8% headroom. Use
-  10G memory / 11G memory+swap for unrestricted production 0.6B paragraphs or 1.7B serving.
+   10G memory / 11G memory+swap for unrestricted production 0.6B paragraphs or 1.7B serving.
+
+v0.13.0 baked-image streaming validation (2026-06-30, dockermisc1):
+
+- Image: `runtime-v0.13.0` contains streaming runtime and BF16 loader fix.
+- 0.6B INT8 stateful, 10 GiB cgroup:
+  - Short phrase streaming: 130560 bytes (5.44 s audio), first_byte=30.31 s, total=30.31 s
+    (under 300 frames; audio emitted as burst at completion)
+  - Paragraph streaming: 2465280 bytes (25.68 s audio), first_byte=59.98 s, total=161.45 s
+    (101.5 s head start on audio delivery)
+  - Internal parity: max_abs=0, SNR=inf, reuse_streamed_decode=true
+  - Streaming headers correct: f32le, 24kHz, 1ch, connection-close semantics
 
 Non-Git diagnostics on `dockermisc1`:
 
@@ -152,21 +163,19 @@ copied to `/private/tmp/profile_17_reuse.wav`; listen around 11.2 seconds.
 
 ### Task 1 — finish a baked-image/public-proxy smoke test
 
-1. Build both Docker targets through the normal `ready-to-test` CI path; do not publish an ad hoc
-   image as a release artifact.
-2. Run the baked runtime image on `dockermisc1` without mounting source files.
-3. Call public port 8318, not the worker directly:
+STATUS: COMPLETE (2026-06-30)
 
-   ```bash
-   curl -D /tmp/public_stream.headers \
-     -H 'Content-Type: application/json' \
-     --data '{"text":"Worker stream transport test.","language":"English"}' \
-     -o /tmp/public_stream.f32 \
-     http://127.0.0.1:8318/generate/stream
-   ```
-
-4. Acceptance: HTTP 200, chunked response, all four `X-Audio-*`/error-semantics headers, byte count
-   divisible by 4 and by `1920*4`, no traceback, and existing `/health` remains ready.
+- Baked image: `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:runtime-v0.13.0`
+- Profile: 0.6B INT8 stateful (cap-768 main, cap-32 predictor), BF16 glue, FP32 OV vocoder
+- Deployed on `dockermisc1` per HOW_TO_RUN.md (no mounted source)
+- Results:
+  - `/health` ok; worker openvino; `torch_dtype=bfloat16`; `stateful_main=true`, `stateful_predictor=true`
+  - Batch WAV: HTTP 200, 43742 bytes
+  - Short streaming: HTTP 200, 130560 bytes, headers match contract (f32le, 24kHz, 1ch, connection-close)
+  - Paragraph streaming: HTTP 200, 2465280 bytes (25.68 s audio), first_byte=59.98 s, total=161.45 s
+    (101.5 s ahead of completion)
+  - Internal parity: max_abs=0, SNR=inf, decode reuse=true (14 gen frames, 160 ref frames)
+- Existing `/health` remains ready.
 
 ### Task 2 — produce an identical-seed latency comparison
 

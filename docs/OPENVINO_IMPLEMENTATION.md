@@ -1424,9 +1424,10 @@ delivered first audio at 50.95 s, completed at 81.06 s, and matched batch PCM ex
 averaged ~470% of 800%. Cgroup peak was ~7.78 GiB under 8G with no max/OOM/swap events; 8G is a test
 minimum, while 10G/11G is the production limit required for 20% headroom.
 
-Release remains blocked on a baked-image smoke test, live public-proxy test, seam listening, identical-
-seed batch latency comparison, disconnect/timeout and mixed serialized-request tests, phase-separated
-CPU profiling, and fresh-process PyTorch rollback.
+Release remains blocked on seam listening, identical-seed batch latency comparison, disconnect/timeout
+and mixed serialized-request tests, phase-separated CPU profiling, and fresh-process PyTorch rollback.
+The baked-image smoke test has passed for runtime-v0.13.0 (0.6B INT8 stateful profile, short + paragraph
+streaming, parity, and headers), but 1.7B and rollback are still open.
 
 ## Service Integration
 

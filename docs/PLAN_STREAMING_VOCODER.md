@@ -50,8 +50,9 @@ commit: `8f6b862`:
 
 Still open before release:
 
-1. Run a baked-image test of `/generate/stream`; current target tests mounted branch files over
-   `runtime-v0.12.0`.
+1. Run a baked-image test of `/generate/stream` on the first official release image that includes the
+   streaming runtime (completed for `runtime-v0.13.0`; 0.6B INT8 profile on dockermisc1: HTTP 200,
+   headers correct, short and paragraph tests pass, internal parity max_abs=0).
 2. Repeat the paragraph gate with terminal-decode reuse enabled and record baseline batch wall time using
    identical seeds. The existing 90.84 s diagnostic intentionally included a duplicate stock decode.
 3. Run phase-separated per-core CPU profiling for 0.6B and 1.7B. Do not implement overlap from aggregate
@@ -164,3 +165,26 @@ Before writing any pipeline code, answer: *is there CPU headroom during talker g
   no regression. If the box is saturated, record the null result and stop — A still stands alone.
 - This is the **last material optimization frontier** in the project (the only untouched ~29%). After
   this, the OpenVINO backend is feature-complete across both sizes.
+
+## Logging and telemetry (from validation runs, recommended)
+
+From actual validation runs on dockermisc1, these gaps were observed. Recommended but not blockers:
+
+- No container logs during streaming for:
+  - start of streaming request;
+  - chunk boundary crossings;
+  - total frames, chunks, elapsed time;
+  - whether terminal-decode reuse was used;
+  - restoration of talker.forward.
+- Internal parity headers (X-Streaming-*) are visible but not logged to container logs. For production
+  monitoring, log:
+  - "streaming started: text_len=N"
+  - "streaming chunk emitted at boundary {total_frames}"
+  - "streaming completed: {frames} gen, {chunks} chunks, {elapsed}s"
+  - "streaming reused final decode" or "streaming final decode not reused"
+- For debugging:
+  - log when StreamingVocoderSession hooks talker.forward
+  - log when it restores it (success or failure)
+  - log when it skips a chunk (no ready frames)
+- "Setting pad_token_id" warning from Transformers appears once per streaming request; harmless but
+  confusing; consider filtering in production logs.
