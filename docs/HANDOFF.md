@@ -47,6 +47,9 @@ runtime code or starting a target container.
    - Existing `/infer` behavior is unchanged.
 4. `app_api.py`
    - `/generate/stream` proxies the worker stream and forwards the PCM contract headers.
+   - `/v1/audio/speech` is an OpenAI-compatible batch endpoint (maps `input`/`response_format` onto
+     the worker `/infer`), making the service a schema-identical drop-in for the MLX primary that
+     hermes calls. See `docs/plans/hermes-tts-integration-openai-endpoint.md`.
    - Existing `/generate` and `/health` behavior is unchanged.
 5. `Dockerfile`
    - Copies `streaming_vocoder.py` into runtime/exporter images.
@@ -272,7 +275,10 @@ Transport tests completed (1.7B, v0.13.0):
 - All: no wedging, no residual hooks, serialized access preserved
 
 1. Convert saved `f32le` outside Git for listening; compare streamed concatenation against batch at
-   the 300-frame seam. Exact sample parity passed, but listening is still required. (PENDING)
+   the 300-frame seam. Exact sample parity passed; perceptual listening still pending the user.
+   A/B WAVs staged at `audio/streaming-ab/` (gitignored): `batch_paragraph.wav`,
+   `stream_paragraph.wav`, plus `README.txt`. Seam to check is ~11.2 s into the stream file
+   (140 generated frames × 1920 / 24000). (LISTENING PENDING — USER)
 2. Transport failure tests: completed.
 3. Batch → stream → batch and stream → batch: completed.
 
@@ -293,7 +299,11 @@ STATUS: PARTIAL — PROFILES VALIDATED, PYTORCH ROLLBACK OK, LISTENING PENDING (
    - `/generate` returns 200, WAV/MP3 working
    - `/generate/stream` returns 503 (no OV vocoder active)
    - Health reports backend=pytorch
-4. Run Compose validation and both runtime/exporter import smoke tests after the Dockerfile change. (PENDING)
+4. Run Compose validation and both runtime/exporter import smoke tests after the Dockerfile change.
+   COMPLETE (2026-06-30): deployment compose (`/home/nick/docker/docker-compose.yml`, 0.6B service)
+   validates via `docker compose config`; runtime image (`runtime-v0.13.0` + patched `app_api.py`)
+   imports all app modules cleanly; exporter core modules import in `exporter-v0.10.0`. A fresh
+   `runtime-v0.14.0` build (carrying the `--preload` fix and the OpenAI endpoint) is deferred to release.
 
 ### Task 6 — final documentation and PR
 
