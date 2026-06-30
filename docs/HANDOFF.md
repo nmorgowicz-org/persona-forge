@@ -230,7 +230,27 @@ Also validated on 1.7B INT4 (12 GiB cgroup, 3 iterations, seed 42):
 
 ### Task 3 — complete the overlap go/no-go measurement
 
-STATUS: PENDING
+STATUS: COMPLETE (2026-06-30, dockermisc1, 1.7B-INT4 candidate, runtime-v0.13.0 + patched serve.py)
+
+Per-core `mpstat -P ALL 1` across a 71 s batch paragraph `/generate`, split into the generation bulk
+and the trailing `chunked_decode` vocoder phase. Active-window per-core busy%:
+
+| Core | Generation | Vocoder |
+|---|---:|---:|
+| cpu0–5 | 82–98% | 77–86% |
+| cpu6, cpu7 | 12–14% | 12–13% |
+| Sum | 533/800 | 507/800 |
+
+Finding: with `OV_INFERENCE_THREADS=6` the model pins 6 cores near-saturation and leaves **exactly 2
+cores (cpu6, cpu7) idle** in both phases. So headroom for Deliverable B exists, but it is only ~25% of
+the box (2 of 8 cores), and the 6 generation threads cannot be shared without slowing generation.
+
+Decision: **GO is technically available but narrow.** A dedicated vocoder `InferRequest` pinned to a
+2-thread pool on the spare cores could decode streaming chunks concurrently with generation, which would
+recover the measured 23–25% streaming wall-time penalty (Task 2) while keeping the ~60 s TTFB benefit.
+The prize is "streaming ≈ batch wall time AND ~60 s earlier first audio," not a net speedup over batch.
+Whether to build B is a product call (see decision note at end of this task list); A ships regardless.
+Raw capture: `/tmp/task3_mpstat.txt` on dockermisc1.
 
 1. Instrument explicit phase labels around autoregressive generation and vocoder inference.
 2. Sample **per-core** CPU at 1 s or faster for both 0.6B and 1.7B. Aggregate `docker stats` is not

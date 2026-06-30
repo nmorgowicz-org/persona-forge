@@ -224,6 +224,41 @@ Non-Git artifacts on dockermisc1:
 
 Memory note: 1.7B INT4 paragraph-length streaming runs at 12 GiB approach 94% after 3 iterations.
 For production with streaming and paragraph loads, 12 GiB is a minimum; 10 GiB is unsafe.
+(Superseded by the `--preload` fix below — see "Serving `--preload` memory fix".)
+
+### Serving `--preload` memory fix (2026-06-30, dockermisc1, 1.7B-INT4)
+
+The Gunicorn worker was launched with `--preload` under `-w 1`. With a single worker, preload shares
+nothing and pins a redundant full model copy in the master. Removing `--preload` from `serve.py`:
+
+| Metric | With `--preload` | Without `--preload` |
+|---|---:|---:|
+| Worker master process RSS | 3.06 GiB | 0.03 GiB |
+| Container `anon`, post-paragraph | 10.64 GiB | **5.76 GiB** |
+| Container swap | 1.07 GiB | **0** |
+
+Held flat at 5.76 GiB across four back-to-back paragraph `/generate` calls (no retention creep, so no
+allocator tuning needed). Fresh idle after load ~4.0 GiB. The earlier "~7.78 GiB peak / 12 GiB minimum"
+figures were inflated by the preload copy; real 1.7B-INT4 serving steady-state is ~5.8 GiB. The 400-token
+maximum-length paragraph peak on a freshly baked image is not yet re-measured. Tested via `docker cp` of
+the patched `serve.py` onto `runtime-v0.13.0`, 12 GiB cgroup.
+
+### Task 3 — overlap go/no-go: per-core CPU (2026-06-30, dockermisc1, 1.7B-INT4)
+
+`mpstat -P ALL 1` across a 71 s batch paragraph `/generate`, active-window per-core busy%:
+
+| Core | Generation | Vocoder (`chunked_decode` tail) |
+|---|---:|---:|
+| cpu0–5 | 82–98% | 77–86% |
+| cpu6, cpu7 | 12–14% | 12–13% |
+| Sum | 533/800 | 507/800 |
+
+With `OV_INFERENCE_THREADS=6` the model saturates 6 cores and leaves **exactly 2 idle** in both phases.
+Headroom for Deliverable B (pipelined overlap) therefore exists but is narrow (2 of 8 cores); the 6
+generation threads cannot be shared without slowing generation. A dedicated vocoder `InferRequest` on a
+2-thread pool over the spare cores could decode streaming chunks concurrently, recovering the 23–25%
+streaming wall-time penalty while keeping the ~60 s TTFB benefit — a UX win, not a net speedup over
+batch. Building B is a product decision; Deliverable A ships regardless. Raw: `/tmp/task3_mpstat.txt`.
 
 ### Validation scope and remaining gates
 
