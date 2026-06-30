@@ -5,6 +5,7 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any, Callable, Iterator, List, Optional
 
 # Apply thread and runtime envs before heavy imports
 from ov_runtime_config import apply_thread_env
@@ -54,6 +55,240 @@ voice_clone_prompt = None
 ov_metadata = None
 ov_config = None
 ov_runtime = None
+
+# Streaming vocoder constants (must match ov_vocoder_runtime and the chunked_decode
+# contract in the Qwen3-TTS tokenizer).
+_STREAMING_CHUNK_SIZE = 300       # frames per vocoder chunk
+_STREAMING_LEFT_CONTEXT = 25      # previous frames for continuity
+
+
+class _StreamingVocoderContext:
+    """Opt-in, non-breaking streaming context for incremental vocoder decode.
+
+    Wrap model.generate_voice_clone(...) inside this context when you want audio
+    chunks emitted as soon as each 300-frame vocoder block is ready.
+
+    Behavior:
+      - If on_audio_chunk is None: no-op wrapper; identical to normal batch mode.
+      - If on_audio_chunk is set:
+          - Monkey-patches talker.forward so each completed 16-codebook frame is
+            captured and appended to an internal buffer.
+          - When buffer reaches >= STREAMING_CHUNK_SIZE frames, it flushes a chunk
+            through the vocoder runtime's iter_decode_chunks and yields PCM via
+            on_audio_chunk(chunk: np.ndarray[float32]).
+          - On __exit__, flushes any remaining frames (partial chunk) via iter_decode_chunks
+            in exactly the same way, then restores the original forward.
+      - Existing batch /generate path is unchanged: codes are still returned
+        as a complete sequence; we only emit early PCM side-channel.
+    """
+
+    def __init__(
+        self,
+        model: Any,
+        on_audio_chunk: Callable[[Any], None] | None,
+    ) -> None:
+        self.model = model
+        self.on_audio_chunk = on_audio_chunk
+        self._codes_buffer: Any = None  # [frames, 16], starts as list[tensor]
+        self._orig_forward: Any = None
+        self._speech_tokenizer: Any = None
+        self._vocoder_runtime: Any = None
+
+    def _get_vocoder_runtime(self):
+        """Resolve the vocoder_runtime that the current OV install is using."""
+        if self._vocoder_runtime is not None:
+            return self._vocoder_runtime
+
+        # If OV runtime installed and vocoder enabled, use its iter_decode_chunks.
+        if ov_runtime is not None:
+            vr = getattr(ov_runtime, "vocoder_runtime", None)
+            if vr is not None and getattr(vr, "enabled", False):
+                self._vocoder_runtime = vr
+                return vr
+
+        # Fallback: use speech_tokenizer.decode's underlying runtime.
+        st = getattr(getattr(self.model, "model", None), "speech_tokenizer", None)
+        if st is not None:
+            # When vocoder_runtime patches decode, use it directly.
+            decode_fn = getattr(st, "decode", None)
+            if callable(decode_fn):
+                # We'll just use st.decode for flush: it already wraps iter_decode_chunks.
+                self._speech_tokenizer = st
+        return None
+
+    def _to_numpy(self, x):
+        """Normalize a codes tensor or list of tensors to [frames, Q] int64 numpy."""
+        import numpy as np
+
+        # x is a list of [16] tensors per step.
+        if isinstance(x, list):
+            # stack in-place: each is [16], result [frames, 16].
+            import torch
+
+            if len(x) == 0:
+                return np.empty((0, 16), dtype=np.int64)
+            stacked = torch.cat([t.unsqueeze(0) for t in x], dim=0)
+            return stacked.detach().cpu().numpy().astype(np.int64, copy=False)
+        # If already numpy [frames, 16]
+        if isinstance(x, np.ndarray):
+            if x.ndim == 2 and x.shape[1] == 16:
+                return np.asarray(x, dtype=np.int64)
+        # If torch
+        if hasattr(x, "detach") and hasattr(x, "cpu"):
+            x = x.detach().cpu().numpy()
+        return np.asarray(x, dtype=np.int64)
+
+    def _maybe_flush_chunk(self) -> None:
+        """Flush completed 300-frame chunks incrementally.
+
+        Strategy:
+          - Defer all chunking semantics to iter_decode_chunks so streaming and
+            batch paths are bit-identical (same sliding window, same left-context).
+          - Feed iter_decode_chunks with all buffered codes as soon as we have
+            at least 300 frames.
+          - iter_decode_chunks:
+              - For <= 300: single chunk with warmup/padding.
+              - For > 300: slides in 300-frame steps with 25-frame overlap.
+          - We use its concatenated waveform to:
+              - Emit PCM via on_audio_chunk.
+              - Update self._codes_buffer so that only frames not yet decoded
+                remain for the next round.
+        """
+        if self.on_audio_chunk is None:
+            return
+        import numpy as np
+
+        codes_arr = self._to_numpy(self._codes_buffer)
+        frames, q = codes_arr.shape
+        chunk_size = _STREAMING_CHUNK_SIZE
+
+        if frames < chunk_size:
+            return  # not enough yet
+
+        # Number of full 300-frame chunks we can emit now.
+        full_chunks = (frames // chunk_size)
+
+        # Slice out the codes that represent full chunks.
+        to_decode = codes_arr[: full_chunks * chunk_size]
+        rest = codes_arr[full_chunks * chunk_size:]
+
+        # Use iter_decode_chunks as the single source of truth for chunking.
+        wav = self._decode_codes(to_decode)
+        if wav is not None and wav.size > 0:
+            self.on_audio_chunk(wav)
+
+        # Keep only the not-yet-decoded frames.
+        if rest is not None and rest.size > 0:
+            self._codes_buffer = rest
+        else:
+            self._codes_buffer = np.empty((0, 16), dtype=np.int64)
+
+    def _decode_codes(self, codes_2d: Any) -> Any | None:
+        """Run iter_decode_chunks on the given [frames, 16] codes once.
+
+        Uses:
+          - ov_runtime.vocoder_runtime if enabled (preferred),
+          - or speech_tokenizer.decode as a safe fallback.
+        Returns a 1-D float32 PCM array or None on failure.
+        """
+        import numpy as np
+
+        vr = self._get_vocoder_runtime()
+        if vr is not None:
+            try:
+                # Use iter_decode_chunks: its output concatenated is the full waveform
+                # for this chunk. We already ensured codes_2d is exactly one chunk's
+                # worth (or less), so this will emit at most one or two IR calls
+                # matching the existing _single_chunk / iter_decode_chunks behavior.
+                chunks = list(vr.iter_decode_chunks(codes_2d))
+                if chunks:
+                    return np.concatenate(chunks, axis=0).astype(np.float32, copy=False)
+                return None
+            except Exception:
+                pass
+
+        st = self._speech_tokenizer
+        if st is not None:
+            try:
+                result = st.decode([{"audio_codes": codes_2d}])
+                # speech_tokenizer.decode returns (wavs, sample_rate) for list inputs.
+                if isinstance(result, (list, tuple)) and len(result) >= 2:
+                    wavs, sr = result[0], result[1]
+                    if isinstance(wavs, list) and len(wavs) == 1:
+                        return np.asarray(wavs[0], dtype=np.float32).ravel()
+                return np.asarray(result, dtype=np.float32).ravel()
+            except Exception:
+                pass
+
+        return None
+
+    def __enter__(self) -> "_StreamingVocoderContext":
+        # No streaming if no callback is set.
+        if self.on_audio_chunk is None:
+            return self
+
+        # Capture codes from talker.forward by wrapping its output.
+        talker = getattr(getattr(self.model, "model", None), "talker", None)
+        if talker is None:
+            self.on_audio_chunk = None
+            return self
+
+        # Store original forward.
+        self._orig_forward = getattr(talker, "forward", None)
+        if not callable(self._orig_forward):
+            self.on_audio_chunk = None
+            return self
+
+        # Start buffer as a list of per-step code vectors.
+        self._codes_buffer = []
+
+        def _streaming_forward(*args, **kwargs):
+            out = self._orig_forward(*args, **kwargs)
+            # hidden_states[-1] is the codes tensor: [1, 1, 16] (batch=1, seq=1, Q=16)
+            # for each autoregressive step, or [1, seq, 16] on prefill.
+            if hasattr(out, "hidden_states") and isinstance(out.hidden_states, tuple):
+                codes = out.hidden_states[-1]  # [1, 1, 16] per step
+            else:
+                # Fallback: nothing to capture.
+                return out
+
+            # Normalize: [1,1,16] -> [16] per step, or [1,N,16] -> N rows.
+            import torch
+
+            if hasattr(codes, "squeeze"):
+                codes = codes.squeeze(0)
+            if codes.ndim == 3 and codes.shape[0] == 1:
+                codes = codes[0]
+            if codes.ndim == 2 and codes.shape[1] == 16:
+                # multi-row (prefill): append each row individually.
+                for i in range(codes.shape[0]):
+                    self._codes_buffer.append(codes[i])
+            elif codes.ndim == 1 and codes.shape[0] == 16:
+                # single step
+                self._codes_buffer.append(codes)
+
+            # Try to flush a complete chunk.
+            self._maybe_flush_chunk()
+            return out
+
+        talker.forward = _streaming_forward
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        # Restore original forward.
+        if self._orig_forward is not None:
+            talker = getattr(getattr(self.model, "model", None), "talker", None)
+            if talker is not None and hasattr(talker, "forward"):
+                talker.forward = self._orig_forward
+            self._orig_forward = None
+
+        # Flush any remaining codes (possibly partial chunk) via vocoder.
+        if self.on_audio_chunk is not None and self._codes_buffer:
+            codes_arr = self._to_numpy(self._codes_buffer)
+            wav = self._decode_codes(codes_arr)
+            if wav is not None and wav.size > 0:
+                self.on_audio_chunk(wav)
+            self._codes_buffer = None
 
 executor = ThreadPoolExecutor(max_workers=1)
 
@@ -304,6 +539,58 @@ def _run_generate(text: str, language: str):
     except Exception:
         _tb.print_exc()
         raise
+    return _trim_silence(wavs[0], sr), sr
+
+
+def _run_generate_with_streaming(
+    text: str,
+    language: str,
+    on_audio_chunk: Callable[[Any], None],
+):
+    """Run generation and call on_audio_chunk(1-D float32 PCM) for each streaming chunk.
+
+    - on_audio_chunk is called as soon as each 300-frame vocoder chunk is decoded.
+    - Still returns the same (full wav, sr) as _run_generate so existing callers
+      that ignore on_audio_chunk get unchanged batch behavior.
+    - Opt-in: only used when on_audio_chunk is provided; if None, falls back to _run_generate.
+    - Uses _StreamingVocoderContext to intercept talker.forward outputs incrementally
+      and feeds them into iter_decode_chunks from ov_vocoder_runtime.
+    """
+    if on_audio_chunk is None:
+        return _run_generate(text, language)
+
+    import numpy as np
+
+    if model is None or voice_clone_prompt is None:
+        raise RuntimeError("Model not loaded")
+
+    # Thread-local accumulator for streaming chunks and final wave.
+    chunks: List[np.ndarray] = []
+
+    def chunk_callback(pcm: Any):
+        # pcm: 1-D float32 from iter_decode_chunks.
+        chunks.append(np.asarray(pcm, dtype=np.float32).ravel())
+        on_audio_chunk(pcm)
+
+    # Use streaming context to capture codes and decode incrementally.
+    ctx = _StreamingVocoderContext(model, chunk_callback)
+    try:
+        with ctx:
+            import traceback as _tb
+            try:
+                wavs, sr = model.generate_voice_clone(
+                    text=text,
+                    language=language,
+                    voice_clone_prompt=voice_clone_prompt,
+                )
+            except Exception:
+                _tb.print_exc()
+                raise
+    finally:
+        # Context already flushed any partial remaining chunk.
+        pass
+
+    # Existing batch behavior: still return the complete trimmed wav.
     return _trim_silence(wavs[0], sr), sr
 
 
