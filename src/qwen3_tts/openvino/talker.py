@@ -527,7 +527,9 @@ class OVTalkerRuntime:
         self.pred_comp = pred_comp
 
         def _files_for(comp: str) -> dict:
-            return _INT8_GRAPH_FILES if comp == "int8" else _GRAPH_FILES
+            # INT4 and INT8 artifacts share the compressed graph filenames; the
+            # metadata records the actual per-core weight format.
+            return _INT8_GRAPH_FILES if comp in {"int4", "int8"} else _GRAPH_FILES
 
         main_stateful_raw = os.getenv("OPENVINO_MAIN_STATEFUL_MODEL", "").strip()
         main_stateful_path = None

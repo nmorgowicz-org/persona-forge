@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from streaming_vocoder import StreamingVocoderSession
+from qwen3_tts.streaming import StreamingVocoderSession
 
 
 class _FakeTalker:

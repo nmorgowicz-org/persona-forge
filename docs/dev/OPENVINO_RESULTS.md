@@ -999,3 +999,33 @@ dangerous 11.6 GiB boot spike is gone, peak is now a stable ~7.7 GiB. 0.6B-INT8 
 arc: lifetime peak **11,593 → 7,715 MiB (−3.9 GiB)** across bf16 + capacity 768.
 The 2026-06-30 streaming-profile follow-up supersedes the production limit with 10G/11G to preserve
 20% headroom; 8G remains the functional validation minimum.
+
+### simplify-v2 0.6B end-to-end validation — PASSED (2026-06-30)
+
+Validated the uncommitted `refactor/simplify-v2` worktree based on source commit `8d49141` on
+`dockermisc1`. Local image IDs were runtime
+`sha256:c93d0267d73f5352fc8c6a3d5634ec3cbfde7fb6fc3976cdab6dabad2e759063` and exporter
+`sha256:9607147cdf069adc17899d7245a8ff4179390822f67e8acb1736cbbb014de15c`; these are local test
+images, not published artifacts.
+
+- Model revision: `5d83992436eae1d760afd27aff78a71d676296fc`.
+- IR metadata source hash: `a6f9dc107cc69a2b`.
+- Fresh export path: `/var/data/autopirate/qwen3-tts/openvino-simplify-v2/0.6B`.
+- Main: INT8 stateful cap768; transform compiled with 56 states shaped `[1,8,768,128]`.
+- Predictor: INT8 stateful cap32; transform compiled with 10 states shaped `[1,8,32,128]`.
+- Vocoder: FP32 OpenVINO enabled. Torch glue: BF16 low-memory load.
+- All 53 model-free unit tests passed inside the runtime image. Both Docker targets built and the
+  exporter import smoke test passed.
+- `/health`, OpenAI MP3, OpenAI WAV, native `/generate` WAV, missing-input OpenAI error envelope,
+  and `/generate/stream` f32le PCM passed. The MP3 smoke request took 16 seconds cold/warm-state
+  unspecified; this is not a benchmark median.
+- Container memory after requests: 5.907 GiB / 10 GiB. Host available memory was 7.2 GiB; swap was
+  4.1/8.0 GiB used. No clean pre/post swap delta was captured, so this run is functional validation,
+  not the final performance gate.
+- Non-Git outputs: `/tmp/simplify-06.mp3`, `/tmp/simplify-06-openai.wav`,
+  `/tmp/simplify-06-native.wav`, and `/tmp/simplify-06-stream.f32le` on `dockermisc1`.
+- Rollback: prior `qwen3-tts-candidate` container remains present but stopped; the rollback image is
+  `runtime-v0.13.0`. Rollback was not restarted during this run.
+
+Remaining gates: deterministic batch/stream parity, listening, warm median/p95/RTF and peak-RSS
+benchmarking, PyTorch rollback verification, and the complete 1.7B export/runtime/A-B validation.

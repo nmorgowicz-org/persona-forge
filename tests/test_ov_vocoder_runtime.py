@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from ov_vocoder_runtime import OpenVinoVocoderRuntime
+from qwen3_tts.openvino.vocoder import OpenVinoVocoderRuntime
 
 
 class VocoderChunkIteratorTests(unittest.TestCase):

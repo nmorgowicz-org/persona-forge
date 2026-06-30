@@ -42,6 +42,11 @@ def apply_preset_env(environ: MutableMapping[str, str] = os.environ) -> dict[str
     # OpenVINO IR locations — the stable, size-keyed paths the export writes.
     _setdefault(environ, "OV_MODEL_DIR", preset["ov_model_dir"])
     _setdefault(environ, "OPENVINO_MAIN_STATEFUL_MODEL", preset["main_stateful_model"])
+    _setdefault(
+        environ,
+        "OPENVINO_PREDICTOR_STATEFUL_MODEL",
+        preset["predictor_stateful_model"],
+    )
     _setdefault(environ, "OPENVINO_VOCODER_DIR", preset["vocoder_dir"])
     _setdefault(environ, "OPENVINO_VOCODER_ENABLED", "1" if preset["vocoder_enabled"] else "0")
 

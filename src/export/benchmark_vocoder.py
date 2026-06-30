@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from export_openvino import _resolve_vocoder_decoder, _set_eager_attention
-from model_config import configure_hf_token
+from qwen3_tts.model_config import configure_hf_token
 
 
 def parse_args() -> argparse.Namespace:

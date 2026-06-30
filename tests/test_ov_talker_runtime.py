@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from ov_talker_runtime import _stateful_generation_steps, _to_numpy
+from qwen3_tts.openvino.talker import _stateful_generation_steps, _to_numpy
 
 
 class StatefulPredictorInputTests(unittest.TestCase):

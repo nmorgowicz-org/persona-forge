@@ -6,7 +6,7 @@ Provide a reproducible Linux AMD64 container that accelerates the official 0.6B 
 Qwen3-TTS Base voice-cloning checkpoint on Intel CPUs with OpenVINO while preserving the
 existing API and a tested PyTorch rollback path.
 
-Read `docs/OPENVINO_IMPLEMENTATION.md` before changing model export, cache handling,
+Read `docs/dev/OPENVINO_IMPLEMENTATION.md` before changing model export, cache handling,
 generation, quantization, memory loading, Docker packaging, or deployment behavior. It is the
 implementation contract for this repository.
 

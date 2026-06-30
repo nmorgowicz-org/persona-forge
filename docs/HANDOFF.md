@@ -91,6 +91,45 @@ DONE:
 TODO (in order): §4 app.py, §5 model.py, §7 export move, §8 Dockerfile/compose/env/tests,
 §9 docs, §10 validate. (presets/config from §6 are DONE.)
 
+### 2026-06-30 continuation checkpoint (`refactor/simplify-v2`)
+
+The TODO line above describes the state at handoff creation. Current branch state is now:
+
+- §4 and §5 implemented: `src/qwen3_tts/app.py` is the one-process API; model loading and
+  generation live in `model.py`. There is no internal HTTP proxy or port 8319.
+- The validated model profiles are explicit: 0.6B uses INT8 stateful main cap768 plus INT8
+  stateful predictor cap32; 1.7B uses INT4 asymmetric group-32 stateful main cap768 plus INT8
+  explicit predictor. Both use the FP32 OpenVINO vocoder and BF16 Torch glue.
+- §7 modules moved to `src/export`; shared imports and exporter source hashing were updated.
+- `scripts/export.py` assembles stable `/ov/<SIZE>` paths. For 1.7B it performs separate INT8 and
+  INT4 exports so only the main core comes from INT4; it then transforms the stateful main. For
+  0.6B it additionally transforms the predictor at cap32. This orchestration is syntax-checked but
+  has **not yet run a full model export**.
+- §8 wiring implemented: one-port Dockerfile, `compose.yml`, split `requirements/`, `.env.example`,
+  package-aware CI/test imports, direct-model API tests, and obsolete `serve.py`/serve test removed.
+- §9 implemented at the operational level: concise README, rewritten HOW_TO_RUN, and developer
+  plans/results moved to `docs/dev`. Additional stale internal links should be checked before PR.
+- Local results: `scripts/validate_repo.py` passes; all `src/`, `scripts/`, and selected test Python
+  files compile; Compose config passes when `REF_AUDIO_PATH` and `REF_TEXT` are supplied;
+  `git diff --check` passes. The Mac host lacks Flask/Numpy/SoundFile, but all 53 model-free tests
+  passed inside the runtime image on `dockermisc1`.
+- Target result: both images built, exporter imports passed, and the fresh 0.6B export plus HTTP
+  smoke gates passed. Runtime health reports stateful INT8 main cap768, stateful INT8 predictor
+  cap32, and FP32 OpenVINO vocoder. Post-request container memory was 5.907 GiB. Exact provenance,
+  output paths, and remaining gates are recorded in `docs/dev/OPENVINO_RESULTS.md`.
+
+Next steps, in order:
+
+1. Run deterministic 0.6B batch/stream parity, listening, warm latency/RTF/RSS benchmarks, and the
+   PyTorch rollback gate. Preserve outputs outside Git and update results.
+2. Repeat export/start/generation for 1.7B. Verify health reports main `stateful-int4`, predictor
+   `int8`, and OpenVINO vocoder enabled; if health reports FP32 main, stop and fix graph selection.
+3. Run deterministic batch/stream parity, warm latency/RSS collection, and A/B listening. Record
+   source commit, image ID/digest, model revision, metadata hash, host memory/swap, and saved audio
+   paths in `docs/dev/OPENVINO_RESULTS.md`.
+4. Update this checkpoint with real results, then commit in logical chunks and open the PR with one
+   Conventional Commit line per release-note item in the override block.
+
 ## 4. `src/qwen3_tts/app.py` — the merged Flask app (single port 8318)
 
 ONE `app = Flask(__name__)`. Import the model module and call it directly. Endpoints (exact contracts,

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from model_config import configure_hf_token, resolve_model_repo, resolve_torch_load_config
+from qwen3_tts.model_config import configure_hf_token, resolve_model_repo, resolve_torch_load_config
 
 
 class ModelConfigTests(unittest.TestCase):
