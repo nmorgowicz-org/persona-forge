@@ -105,33 +105,28 @@ crosses from the first emitted block to the final block. Human listening verdict
 ### v0.13.0 baked-image streaming validation (2026-06-30, dockermisc1)
 
 This is the first validation using a CI-baked runtime image containing the streaming runtime and BF16
-loader fix, without mounted branch files. Profile: 0.6B INT8 stateful (cap-768 main, cap-32
-predictor), BF16 glue, FP32 OV vocoder, 6 threads, 10 GiB cgroup.
+loader fix, without mounted branch files.
 
-**Short phrase streaming** (public `/generate/stream`):
-- Text: "Streaming transport check."
-- Response: HTTP 200, 130560 bytes f32le PCM (5.44 s audio), chunked transfer
-- first_byte=30.31 s, total=30.31 s (under 300 frames; emitted as burst at completion)
-- Headers: f32le, 24kHz, 1ch, X-Stream-Error-Semantics: connection-close (all correct)
+**0.6B INT8 profile** (cap-768 main, cap-32 predictor, BF16 glue, FP32 OV vocoder, 6 threads, 10 GiB cgroup):
 
-**Paragraph streaming** (public `/generate/stream`):
-- Long paragraph (3 sentences, designed to cross chunk boundaries)
-- Response: HTTP 200, 2465280 bytes f32le PCM (25.68 s audio)
-- first_byte=59.98 s, total=161.45 s (audio delivered 101.5 s before generation completed)
-- Demonstrates real streaming benefit for longer utterances
+- Short phrase streaming: HTTP 200, 130560 bytes (5.44 s audio), first_byte=30.31 s, total=30.31 s
+  (under 300 frames; burst at completion)
+- Paragraph streaming: HTTP 200, 2465280 bytes (25.68 s audio), first_byte=59.98 s, total=161.45 s
+  (101.5 s head start on audio delivery)
+- Internal parity: max_abs=0, SNR=inf, reuse=true, 14 gen frames, 160 ref frames
+- Batch WAV: HTTP 200, 43742 bytes (batch path unchanged)
 
-**Internal parity endpoint** (`/stream_internal`):
-- Text: "The service is ready."
-- Response: HTTP 200, max_abs=0, SNR=inf, reuse_streamed_decode=true
-- 14 generated frames, 160 reference frames, boundary 174
-- Confirms parity and decode reuse in the baked image
+**1.7B INT4 profile** (cap-768 stateful main, explicit INT4 predictor, BF16 glue, FP32 OV vocoder, 6 threads, 10 GiB cgroup):
 
-**Batch endpoint** (`/generate`):
-- Text: "The service is ready.", response_format=wav
-- Response: HTTP 200, 43742 bytes WAV
-- Confirms batch path unchanged
+- Health: stateful_main=true, stateful_predictor=false, torch_dtype=bfloat16 (matches expected evidence)
+- Short phrase streaming: HTTP 200, 368640 bytes (3.84 s audio), first_byte=47.53 s, total=47.53 s
+  (under 300 frames; burst at completion)
+- Paragraph streaming: HTTP 200, 1167360 bytes (12.16 s audio), first_byte=65.34 s, total=118.01 s
+  (52.7 s head start on audio delivery)
+- Internal parity: max_abs=0, SNR=inf, reuse=true, 20 gen frames, 160 ref frames
+- Batch WAV: HTTP 200, 66348 bytes (batch path unchanged)
 
-This covers Task 1 (baked-image smoke) from the handoff. The 1.7B profile and rollback remain open.
+Both profiles pass Task 1 (baked-image smoke) on v0.13.0.
 
 ### Validation scope and remaining gates
 
@@ -143,8 +138,8 @@ This covers Task 1 (baked-image smoke) from the handoff. The 1.7B profile and ro
 - Baked-image streaming smoke (v0.13.0): passed (Task 1).
 - Not yet run: phase-separated per-core CPU profile, human listening at the 1.7B
   300-frame seam,
-  identical-seed batch wall-time comparison, disconnect/timeout behavior, serialized mixed requests,
-  or fresh-process PyTorch rollback.
+  identical-seed batch wall-time comparison.
+- Run: disconnect/timeout tests (ok), mixed serialized requests (ok), fresh-process PyTorch rollback (ok, 503).
 
 Raw diagnostics remain outside Git on `dockermisc1` under `/tmp/stream_{long,reuse}*`,
 `/tmp/infer_stream.f32`, and `/tmp/stream_cpu.txt`. The temporary container was stopped after testing.
