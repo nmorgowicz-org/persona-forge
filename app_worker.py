@@ -93,6 +93,8 @@ class _StreamingVocoderContext:
         self.model = model
         self.on_audio_chunk = on_audio_chunk
         self._codes_buffer: Any = None  # [frames, 16], starts as list[tensor]
+        self._decoded_frames: int = 0  # how many frames already emitted via streaming
+        self._prev_wav: Any = None    # previous full decode output for diff streaming
         self._orig_forward: Any = None
         self._speech_tokenizer: Any = None
         self._vocoder_runtime: Any = None
@@ -142,20 +144,12 @@ class _StreamingVocoderContext:
         return np.asarray(x, dtype=np.int64)
 
     def _maybe_flush_chunk(self) -> None:
-        """Flush completed 300-frame chunks incrementally.
+        """Flush new audio chunks incrementally.
 
-        Strategy:
-          - Defer all chunking semantics to iter_decode_chunks so streaming and
-            batch paths are bit-identical (same sliding window, same left-context).
-          - Feed iter_decode_chunks with all buffered codes as soon as we have
-            at least 300 frames.
-          - iter_decode_chunks:
-              - For <= 300: single chunk with warmup/padding.
-              - For > 300: slides in 300-frame steps with 25-frame overlap.
-          - We use its concatenated waveform to:
-              - Emit PCM via on_audio_chunk.
-              - Update self._codes_buffer so that only frames not yet decoded
-                remain for the next round.
+        To ensure the streaming path is bit-identical to the batch path:
+        - We always decode codes[0:N] as a prefix using iter_decode_chunks.
+        - We emit only the new audio beyond what we previously streamed.
+        - Left-context / overlap logic is fully handled by iter_decode_chunks.
         """
         if self.on_audio_chunk is None:
             return
@@ -166,25 +160,27 @@ class _StreamingVocoderContext:
         chunk_size = _STREAMING_CHUNK_SIZE
 
         if frames < chunk_size:
-            return  # not enough yet
+            return
 
-        # Number of full 300-frame chunks we can emit now.
-        full_chunks = (frames // chunk_size)
+        # Decode the full prefix [0:N].
+        wav = self._decode_codes(codes_arr)
+        if wav is None or wav.size == 0:
+            return
 
-        # Slice out the codes that represent full chunks.
-        to_decode = codes_arr[: full_chunks * chunk_size]
-        rest = codes_arr[full_chunks * chunk_size:]
-
-        # Use iter_decode_chunks as the single source of truth for chunking.
-        wav = self._decode_codes(to_decode)
-        if wav is not None and wav.size > 0:
-            self.on_audio_chunk(wav)
-
-        # Keep only the not-yet-decoded frames.
-        if rest is not None and rest.size > 0:
-            self._codes_buffer = rest
+        # Determine how many audio samples we already emitted.
+        if self._prev_wav is not None:
+            emitted_samples = len(self._prev_wav)
         else:
-            self._codes_buffer = np.empty((0, 16), dtype=np.int64)
+            emitted_samples = 0
+
+        # Emit only the new tail.
+        if len(wav) > emitted_samples:
+            new_chunk = wav[emitted_samples:]
+            self.on_audio_chunk(new_chunk)
+
+        # Remember last full decode for diff streaming.
+        self._prev_wav = wav
+        self._decoded_frames = frames
 
     def _decode_codes(self, codes_2d: Any) -> Any | None:
         """Run iter_decode_chunks on the given [frames, 16] codes once.
@@ -293,13 +289,24 @@ class _StreamingVocoderContext:
                     inner.forward = self._orig_forward
             self._orig_forward = None
 
-        # Flush any remaining codes (possibly partial chunk) via vocoder.
+        # Flush any remaining codes as a final full decode.
         if self.on_audio_chunk is not None and self._codes_buffer:
+            import numpy as np
+
             codes_arr = self._to_numpy(self._codes_buffer)
             wav = self._decode_codes(codes_arr)
             if wav is not None and wav.size > 0:
-                self.on_audio_chunk(wav)
+                # Emit only the part beyond what we already streamed.
+                if self._prev_wav is not None:
+                    emitted_samples = len(self._prev_wav)
+                    if len(wav) > emitted_samples:
+                        self.on_audio_chunk(wav[emitted_samples:])
+                else:
+                    self.on_audio_chunk(wav)
+
             self._codes_buffer = None
+            self._prev_wav = None
+            self._decoded_frames = 0
 
 executor = ThreadPoolExecutor(max_workers=1)
 
