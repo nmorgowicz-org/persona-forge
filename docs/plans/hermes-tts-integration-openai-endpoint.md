@@ -43,6 +43,25 @@ Active config: `~/.hermes-gateway/config.yaml`, `tts.provider: iris-mlx`. `iris-
 So today hermes consumes qwen3-tts **only in batch mode**, via `/generate`, and the fallback is the one
 remaining arm that does not match the primary's OpenAI schema.
 
+### Reference-voice reality (verified 2026-06-30) — why `ref_audio`/`ref_text` stay server-side
+
+The primary's `ref_audio` is a **hardcoded Mac-local filesystem path**
+`"/Users/nick/AI/mlx-audio/reference/voice_iris_a.wav"` with `ref_text` = our exact baked-in
+`REF_TEXT` ("Welcome to Rosies…"). The CPU fallback payload is `{text, language:"english"}` — it
+**does not send `ref_audio`/`ref_text` at all**. Implications:
+
+- That path exists only on the Mac; our container cannot read it, and opening arbitrary host paths
+  would be unsafe. Honoring `ref_audio` as sent would *break* (file-not-found), not help.
+- The voices already match: our server-side `REF_AUDIO=/voice/voice_A.wav` is the same Iris persona
+  as `voice_iris_a.wav`, and the `ref_text` is identical.
+
+**Decision (2026-06-30):** keep the voice **server-side**. The `/v1/audio/speech` endpoint accepts
+`voice`/`ref_audio`/`ref_text` for schema parity but ignores them. A real per-request voice would
+require a *safe* input channel (base64 audio or a container-internal/mounted voices dir — never a host
+path), per-request `create_voice_clone_prompt` with caching, verification that it works under
+`OPENVINO_RELEASE_TORCH=1`, **and** a hermes-side change to actually send usable ref data. Deferred to
+future work (Nick has ideas); not in scope for this PR.
+
 ## Decision
 
 1. **Deliverable A (streaming TTFB):** keep as-is. It is implemented, parity-validated, opt-in per
