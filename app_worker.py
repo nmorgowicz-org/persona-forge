@@ -2,10 +2,11 @@ import gc
 import io
 import json
 import os
+import queue
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Callable, Iterator, List, Optional
+from typing import Any, Callable
 
 # Apply thread and runtime envs before heavy imports
 from ov_runtime_config import apply_thread_env
@@ -22,6 +23,7 @@ import torch
 
 from flask import Flask, Response, jsonify, request
 from model_config import configure_hf_token, resolve_model_repo
+from streaming_vocoder import StreamingVocoderSession
 
 configure_hf_token()
 
@@ -55,291 +57,6 @@ voice_clone_prompt = None
 ov_metadata = None
 ov_config = None
 ov_runtime = None
-
-# Streaming vocoder constants (must match ov_vocoder_runtime and the chunked_decode
-# contract in the Qwen3-TTS tokenizer).
-_STREAMING_CHUNK_SIZE = 300       # frames per vocoder chunk
-_STREAMING_LEFT_CONTEXT = 25      # previous frames for continuity
-
-
-class _StreamingVocoderContext:
-    """Opt-in, non-breaking streaming context for incremental vocoder decode.
-
-    Wrap model.generate_voice_clone(...) inside this context when you want audio
-    chunks emitted as soon as each 300-frame vocoder block is ready.
-
-    Behavior:
-      - If on_audio_chunk is None: no-op wrapper; identical to normal batch mode.
-      - If on_audio_chunk is set:
-          - Patches talker.model.forward (the inner core, where OpenVINO is wired)
-            instead of talker.forward to avoid colliding with Transformers'
-            kwarg validation.
-          - Each completed 16-codebook frame is captured from hidden_states[-1]
-            and appended to an internal buffer.
-          - When buffer reaches >= STREAMING_CHUNK_SIZE frames, it flushes a chunk
-            through the vocoder runtime's iter_decode_chunks and yields PCM via
-            on_audio_chunk(chunk: np.ndarray[float32]).
-          - On __exit__, flushes any remaining frames (partial chunk) via iter_decode_chunks
-            in exactly the same way, then restores the original forward.
-      - Existing batch /generate path is unchanged: codes are still returned
-        as a complete sequence; we only emit early PCM side-channel.
-    """
-
-    def __init__(
-        self,
-        model: Any,
-        on_audio_chunk: Callable[[Any], None] | None,
-    ) -> None:
-        self.model = model
-        self.on_audio_chunk = on_audio_chunk
-        self._codes_buffer: Any = None  # [frames, 16], starts as list[tensor]
-        self._decoded_frames: int = 0  # how many frames already emitted via streaming
-        self._prev_wav: Any = None    # previous full decode output for diff streaming
-        self._orig_forward: Any = None
-        self._speech_tokenizer: Any = None
-        self._vocoder_runtime: Any = None
-
-    def _get_vocoder_runtime(self):
-        """Resolve the vocoder_runtime that the current OV install is using."""
-        if self._vocoder_runtime is not None:
-            return self._vocoder_runtime
-
-        # If OV runtime installed and vocoder enabled, use its iter_decode_chunks.
-        if ov_runtime is not None:
-            vr = getattr(ov_runtime, "vocoder_runtime", None)
-            if vr is not None and getattr(vr, "enabled", False):
-                self._vocoder_runtime = vr
-                return vr
-
-        # Fallback: use speech_tokenizer.decode's underlying runtime.
-        st = getattr(getattr(self.model, "model", None), "speech_tokenizer", None)
-        if st is not None:
-            # When vocoder_runtime patches decode, use it directly.
-            decode_fn = getattr(st, "decode", None)
-            if callable(decode_fn):
-                # We'll just use st.decode for flush: it already wraps iter_decode_chunks.
-                self._speech_tokenizer = st
-        return None
-
-    def _to_numpy(self, x):
-        """Normalize a codes tensor or list of tensors to [frames, Q] int64 numpy."""
-        import numpy as np
-
-        # x is a list of [16] tensors per step.
-        if isinstance(x, list):
-            # stack in-place: each is [16], result [frames, 16].
-            import torch
-
-            if len(x) == 0:
-                return np.empty((0, 16), dtype=np.int64)
-            stacked = torch.cat([t.unsqueeze(0) for t in x], dim=0)
-            return stacked.detach().cpu().numpy().astype(np.int64, copy=False)
-        # If already numpy [frames, 16]
-        if isinstance(x, np.ndarray):
-            if x.ndim == 2 and x.shape[1] == 16:
-                return np.asarray(x, dtype=np.int64)
-        # If torch
-        if hasattr(x, "detach") and hasattr(x, "cpu"):
-            x = x.detach().cpu().numpy()
-        return np.asarray(x, dtype=np.int64)
-
-    def _maybe_flush_chunk(self) -> None:
-        """Flush new audio chunks incrementally.
-
-        To ensure the streaming path is bit-identical to the batch path:
-        - We always decode codes[0:N] as a prefix using iter_decode_chunks.
-        - We emit only the new audio beyond what we previously streamed.
-        - Left-context / overlap logic is fully handled by iter_decode_chunks.
-        """
-        if self.on_audio_chunk is None:
-            return
-        import numpy as np
-        import os
-
-        codes_arr = self._to_numpy(self._codes_buffer)
-        frames, q = codes_arr.shape
-        chunk_size = _STREAMING_CHUNK_SIZE
-
-        if frames < chunk_size:
-            return
-
-        # Decode the full prefix [0:N].
-        wav = self._decode_codes(codes_arr)
-        if wav is None or wav.size == 0:
-            return
-
-        # Determine how many audio samples we already emitted.
-        if self._prev_wav is not None:
-            emitted_samples = len(self._prev_wav)
-        else:
-            emitted_samples = 0
-
-        # Emit only the new tail.
-        if len(wav) > emitted_samples:
-            new_chunk = wav[emitted_samples:]
-            self.on_audio_chunk(new_chunk)
-            if os.getenv("STREAMING_DEBUG"):
-                print(
-                    f"[stream] flush: frames={frames}, wav_len={len(wav)}, "
-                    f"prev={emitted_samples}, emitted={len(new_chunk)}",
-                    flush=True,
-                )
-
-        # Remember last full decode for diff streaming.
-        self._prev_wav = wav
-        self._decoded_frames = frames
-
-    def _decode_codes(self, codes_2d: Any) -> Any | None:
-        """Run iter_decode_chunks on the given [frames, 16] codes once.
-
-        Uses:
-          - ov_runtime.vocoder_runtime if enabled (preferred),
-          - or speech_tokenizer.decode as a safe fallback.
-        Returns a 1-D float32 PCM array or None on failure.
-        """
-        import numpy as np
-
-        vr = self._get_vocoder_runtime()
-        if vr is not None:
-            try:
-                # Use iter_decode_chunks: its output concatenated is the full waveform
-                # for this chunk. We already ensured codes_2d is exactly one chunk's
-                # worth (or less), so this will emit at most one or two IR calls
-                # matching the existing _single_chunk / iter_decode_chunks behavior.
-                chunks = list(vr.iter_decode_chunks(codes_2d))
-                if chunks:
-                    return np.concatenate(chunks, axis=0).astype(np.float32, copy=False)
-                return None
-            except Exception:
-                pass
-
-        st = self._speech_tokenizer
-        if st is not None:
-            try:
-                result = st.decode([{"audio_codes": codes_2d}])
-                # speech_tokenizer.decode returns (wavs, sample_rate) for list inputs.
-                if isinstance(result, (list, tuple)) and len(result) >= 2:
-                    wavs, sr = result[0], result[1]
-                    if isinstance(wavs, list) and len(wavs) == 1:
-                        return np.asarray(wavs[0], dtype=np.float32).ravel()
-                return np.asarray(result, dtype=np.float32).ravel()
-            except Exception:
-                pass
-
-        return None
-
-    def __enter__(self) -> "_StreamingVocoderContext":
-        # No streaming if no callback is set.
-        if self.on_audio_chunk is None:
-            return self
-
-        # Patch the inner model forward (where OV is wired) to avoid colliding
-        # with Transformers' outer model_kwargs validation.
-        talker = getattr(getattr(self.model, "model", None), "talker", None)
-        if talker is None:
-            self.on_audio_chunk = None
-            return self
-
-        inner = getattr(talker, "model", None)
-        if inner is None:
-            self.on_audio_chunk = None
-            return self
-
-        # Store original inner forward.
-        self._orig_forward = getattr(inner, "forward", None)
-        if not callable(self._orig_forward):
-            self.on_audio_chunk = None
-            return self
-
-        # Start buffer as a list of per-step code vectors.
-        self._codes_buffer = []
-
-        def _streaming_forward(*args, **kwargs):
-            out = self._orig_forward(*args, **kwargs)
-            # hidden_states[-1] is the codes tensor: [1, 1, 16] (batch=1, seq=1, Q=16)
-            # for each autoregressive step, or [1, seq, 16] on prefill.
-            if hasattr(out, "hidden_states") and isinstance(out.hidden_states, tuple):
-                codes = out.hidden_states[-1]  # [1, 1, 16] per step
-            else:
-                # Fallback: nothing to capture.
-                return out
-
-            # Normalize: [1,1,16] -> [16] per step, or [1,N,16] -> N rows.
-            import torch
-
-            if hasattr(codes, "squeeze"):
-                codes = codes.squeeze(0)
-            if codes.ndim == 3 and codes.shape[0] == 1:
-                codes = codes[0]
-            if codes.ndim == 2 and codes.shape[1] == 16:
-                # multi-row (prefill): append each row individually.
-                for i in range(codes.shape[0]):
-                    self._codes_buffer.append(codes[i])
-            elif codes.ndim == 1 and codes.shape[0] == 16:
-                # single step
-                self._codes_buffer.append(codes)
-
-            # Try to flush a complete chunk.
-            self._maybe_flush_chunk()
-            return out
-
-        inner.forward = _streaming_forward
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        # Restore original inner forward.
-        if self._orig_forward is not None:
-            talker = getattr(getattr(self.model, "model", None), "talker", None)
-            if talker is not None:
-                inner = getattr(talker, "model", None)
-                if inner is not None and hasattr(inner, "forward"):
-                    inner.forward = self._orig_forward
-            self._orig_forward = None
-
-        # Flush any remaining codes as a final full decode.
-        if self.on_audio_chunk is not None and self._codes_buffer is not None:
-            import numpy as np
-            import os
-
-            codes_arr = self._to_numpy(self._codes_buffer)
-            if codes_arr.size == 0:
-                # No buffered codes; nothing to flush.
-                self._codes_buffer = None
-                self._prev_wav = None
-                self._decoded_frames = 0
-                return
-
-            if os.getenv("STREAMING_DEBUG"):
-                print(
-                    f"[stream] exit: final_frames={codes_arr.shape[0]}, "
-                    f"prev_wav_len={len(self._prev_wav) if self._prev_wav is not None else 0}",
-                    flush=True,
-                )
-
-            wav = self._decode_codes(codes_arr)
-            if wav is not None and wav.size > 0:
-                # Emit only the part beyond what we already streamed.
-                if self._prev_wav is not None:
-                    emitted_samples = len(self._prev_wav)
-                    if len(wav) > emitted_samples:
-                        tail = wav[emitted_samples:]
-                        if os.getenv("STREAMING_DEBUG"):
-                            print(
-                                f"[stream] exit emit: total={len(wav)}, prev={emitted_samples}, tail={len(tail)}",
-                                flush=True,
-                            )
-                        self.on_audio_chunk(tail)
-                else:
-                    if os.getenv("STREAMING_DEBUG"):
-                        print(
-                            f"[stream] exit emit (no prev): total={len(wav)}",
-                            flush=True,
-                        )
-                    self.on_audio_chunk(wav)
-
-            self._codes_buffer = None
-            self._prev_wav = None
-            self._decoded_frames = 0
 
 executor = ThreadPoolExecutor(max_workers=1)
 
@@ -598,53 +315,85 @@ def _run_generate_with_streaming(
     text: str,
     language: str,
     on_audio_chunk: Callable[[Any], None],
+    *,
+    reuse_streamed_decode: bool = False,
     **gen_kwargs,
 ):
-    """Run generation and call on_audio_chunk(1-D float32 PCM) for each streaming chunk.
+    """Run generation while emitting incremental untrimmed PCM chunks.
 
-    - on_audio_chunk is called as soon as each 300-frame vocoder chunk is decoded.
-    - Still returns the same (full wav, sr) as _run_generate so existing callers
-      that ignore on_audio_chunk get unchanged batch behavior.
-    - Opt-in: only used when on_audio_chunk is provided; if None, falls back to _run_generate.
-    - Uses _StreamingVocoderContext to intercept talker.forward outputs incrementally
-      and feeds them into iter_decode_chunks from ov_vocoder_runtime.
-    - Extra gen_kwargs are forwarded to generate_voice_clone (e.g., do_sample=False).
+    The terminal return preserves the existing trimmed batch behavior. Internal
+    parity tests may retain the stock decode; transport reuses the final prefix.
     """
-    if on_audio_chunk is None:
-        if gen_kwargs:
-            raise RuntimeError("_run_generate_with_streaming called with gen_kwargs but no streaming callback")
-        return _run_generate(text, language)
 
     import numpy as np
 
     if model is None or voice_clone_prompt is None:
         raise RuntimeError("Model not loaded")
 
-    chunks: List[np.ndarray] = []
+    vr = getattr(ov_runtime, "vocoder_runtime", None)
+    if vr is None or not vr.enabled:
+        raise RuntimeError("streaming parity requires the FP32 OpenVINO vocoder")
 
-    def chunk_callback(pcm: Any):
-        chunks.append(np.asarray(pcm, dtype=np.float32).ravel())
-        on_audio_chunk(pcm)
+    reference_codes = None
+    if isinstance(voice_clone_prompt, list) and voice_clone_prompt:
+        reference_codes = getattr(voice_clone_prompt[0], "ref_code", None)
+    elif isinstance(voice_clone_prompt, dict):
+        ref_code_list = voice_clone_prompt.get("ref_code")
+        if ref_code_list:
+            reference_codes = ref_code_list[0]
 
-    ctx = _StreamingVocoderContext(model, chunk_callback)
-    try:
-        with ctx:
-            import traceback as _tb
-            try:
-                wavs, sr = model.generate_voice_clone(
-                    text=text,
-                    language=language,
-                    voice_clone_prompt=voice_clone_prompt,
-                    **gen_kwargs,
-                )
-            except Exception:
-                _tb.print_exc()
-                raise
-    finally:
-        pass
+    def decode_prefix(codes):
+        chunks = list(vr.iter_decode_chunks(codes))
+        if not chunks:
+            return np.empty(0, dtype=np.float32)
+        return np.concatenate(chunks).astype(np.float32, copy=False)
 
-    # Existing batch behavior: still return the complete trimmed wav.
-    return _trim_silence(wavs[0], sr), sr
+    talker = model.model.talker
+    eos_token_id = model.model.config.talker_config.codec_eos_token_id
+    session = StreamingVocoderSession(
+        talker,
+        decode_prefix,
+        on_audio_chunk,
+        reference_codes=reference_codes,
+        eos_token_id=eos_token_id,
+    )
+    speech_tokenizer = model.model.speech_tokenizer
+    original_decode = speech_tokenizer.decode
+
+    def reuse_decode(items):
+        if not isinstance(items, list) or len(items) != 1:
+            raise RuntimeError("streaming decode currently supports batch size 1")
+        item = items[0]
+        if not isinstance(item, dict) or not session.matches_codes(item.get("audio_codes")):
+            raise RuntimeError("terminal decode codes differ from the captured streaming prefix")
+        session.flush()
+        return [session.full_waveform], vr.sample_rate
+
+    started = time.monotonic()
+    with session:
+        if reuse_streamed_decode:
+            speech_tokenizer.decode = reuse_decode
+        try:
+            wavs, sr = model.generate_voice_clone(
+                text=text,
+                language=language,
+                voice_clone_prompt=voice_clone_prompt,
+                **gen_kwargs,
+            )
+        finally:
+            if reuse_streamed_decode:
+                speech_tokenizer.decode = original_decode
+
+    # Existing batch behavior: still return the complete trimmed wav. The raw
+    # waveform is returned only to the internal parity harness so it can compare
+    # the side-channel chunks against the stock decode from the same generation.
+    wav_raw = np.asarray(wavs[0], dtype=np.float32).ravel()
+    return _trim_silence(wav_raw, sr), sr, wav_raw, {
+        "elapsed_seconds": time.monotonic() - started,
+        "generated_frames": session.generated_frames,
+        "reference_frames": session.reference_frames,
+        "decode_boundaries": session.decode_boundaries,
+    }
 
 
 @app.route("/infer", methods=["POST"])
@@ -663,17 +412,7 @@ def infer():
     language = (data.get("language") or "English").strip()
 
     def do_work():
-        # Allow parity/greedy overrides in request (dev-only; not public API).
-        gen_kwargs_raw = {
-            "do_sample": data.get("do_sample"),
-            "temperature": data.get("temperature"),
-            "top_p": data.get("top_p"),
-            "top_k": data.get("top_k"),
-        }
-        gen_kwargs = {k: v for k, v in gen_kwargs_raw.items() if v is not None}
-
-        wav, sr = _run_generate(text, language, **gen_kwargs)
-
+        wav, sr = _run_generate(text, language)
         fmt = (data.get("response_format") or "mp3").lower()
         buf = io.BytesIO()
         if fmt == "mp3":
@@ -691,6 +430,77 @@ def infer():
         return jsonify({"error": f"Inference error: {str(e)}"}), 500
 
     return Response(audio_bytes, content_type=media_type)
+
+
+@app.route("/infer_stream", methods=["POST"])
+def infer_stream():
+    """Stream mono float32 little-endian PCM from the OpenVINO vocoder.
+
+    The response contains no container header. A client must use the advertised
+    sample rate/channel/format headers. If generation fails after bytes have
+    been emitted, the connection closes and the partial PCM must be discarded
+    or handled explicitly by the client.
+    """
+    if model is None or voice_clone_prompt is None:
+        return jsonify({"error": "Model not loaded"}), 503
+    vr = getattr(ov_runtime, "vocoder_runtime", None)
+    if vr is None or not vr.enabled:
+        return jsonify({"error": "Streaming requires the FP32 OpenVINO vocoder"}), 503
+
+    data = request.get_json(force=True, silent=True)
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    language = (data.get("language") or "English").strip()
+
+    stream_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
+
+    def on_chunk(pcm: Any) -> None:
+        import numpy as np
+
+        payload = np.asarray(pcm, dtype="<f4").reshape(-1).tobytes()
+        if payload:
+            stream_queue.put(("audio", payload))
+
+    def produce() -> None:
+        try:
+            _run_generate_with_streaming(
+                text,
+                language,
+                on_chunk,
+                reuse_streamed_decode=True,
+            )
+        except BaseException as exc:
+            stream_queue.put(("error", exc))
+        finally:
+            stream_queue.put(("done", None))
+
+    future = executor.submit(produce)
+
+    def body():
+        while True:
+            kind, payload = stream_queue.get()
+            if kind == "audio":
+                yield payload
+            elif kind == "error":
+                raise RuntimeError(f"streaming inference failed: {payload}") from payload
+            elif kind == "done":
+                future.result()
+                return
+
+    return Response(
+        body(),
+        content_type="application/octet-stream",
+        headers={
+            "X-Audio-Format": "f32le",
+            "X-Audio-Sample-Rate": str(vr.sample_rate),
+            "X-Audio-Channels": "1",
+            "X-Stream-Error-Semantics": "connection-close",
+        },
+        direct_passthrough=True,
+    )
 
 
 @app.route("/stream_internal", methods=["POST"])
@@ -724,15 +534,26 @@ def stream_internal():
             "temperature": data.get("temperature"),
             "top_p": data.get("top_p"),
             "top_k": data.get("top_k"),
+            "max_new_tokens": data.get("max_new_tokens"),
         }
         gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
 
-        stream_chunks: List[np.ndarray] = []
+        stream_chunks: list[np.ndarray] = []
+        chunk_times: list[float] = []
+        started = time.monotonic()
 
         def on_chunk(pcm: Any):
             stream_chunks.append(np.asarray(pcm, dtype=np.float32).ravel())
+            chunk_times.append(time.monotonic() - started)
 
-        wav, sr = _run_generate_with_streaming(text, language, on_chunk, **gen_kwargs)
+        reuse_streamed_decode = bool(data.get("reuse_streamed_decode", False))
+        wav, sr, wav_raw, stream_info = _run_generate_with_streaming(
+            text,
+            language,
+            on_chunk,
+            reuse_streamed_decode=reuse_streamed_decode,
+            **gen_kwargs,
+        )
 
         # Build audio from the streaming chunks for parity comparison.
         if stream_chunks:
@@ -740,18 +561,42 @@ def stream_internal():
         else:
             wav_stream = wav
 
-        # Return streaming result as WAV.
+        if wav_stream.shape != wav_raw.shape:
+            raise RuntimeError(
+                f"stream/batch length mismatch: {wav_stream.size} != {wav_raw.size}"
+            )
+        diff = wav_stream.astype(np.float64) - wav_raw.astype(np.float64)
+        signal = float(np.sum(wav_raw.astype(np.float64) ** 2))
+        noise = float(np.sum(diff ** 2))
+        snr_db = float("inf") if noise == 0.0 else 10.0 * np.log10(signal / noise)
+
+        # Return streaming result as WAV. Parity metrics are response headers so
+        # the body remains directly inspectable/listenable by the target harness.
         buf = io.BytesIO()
         sf.write(buf, wav_stream, sr, format="WAV")
         buf.seek(0)
-        return buf.read(), "audio/wav", wav, sr
+        return buf.read(), "audio/wav", {
+            "X-Streaming-Frames": str(wav_stream.size // 1920),
+            "X-Streaming-Reference-Frames": str(stream_info["reference_frames"]),
+            "X-Streaming-Decode-Boundaries": ",".join(
+                str(value) for value in stream_info["decode_boundaries"]
+            ),
+            "X-Streaming-Chunk-Count": str(len(stream_chunks)),
+            "X-Streaming-Reused-Decode": str(reuse_streamed_decode).lower(),
+            "X-Streaming-TTFB-Seconds": (
+                f"{chunk_times[0]:.6f}" if chunk_times else "none"
+            ),
+            "X-Streaming-Total-Seconds": f"{stream_info['elapsed_seconds']:.6f}",
+            "X-Streaming-Max-Abs": f"{float(np.max(np.abs(diff), initial=0.0)):.9g}",
+            "X-Streaming-SNR-Db": "inf" if np.isinf(snr_db) else f"{snr_db:.6f}",
+        }
 
     try:
-        audio_bytes, media_type, wav_batch, sr = executor.submit(do_work).result(timeout=300)
+        audio_bytes, media_type, parity_headers = executor.submit(do_work).result(timeout=300)
     except Exception as e:
         return jsonify({"error": f"Inference error: {str(e)}"}), 500
 
-    return Response(audio_bytes, content_type=media_type)
+    return Response(audio_bytes, content_type=media_type, headers=parity_headers)
 
 
 if __name__ == "__main__":

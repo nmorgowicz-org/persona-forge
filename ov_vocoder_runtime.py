@@ -84,6 +84,11 @@ class OpenVinoVocoderRuntime:
 
         self.enabled = True
 
+    @property
+    def sample_rate(self) -> int:
+        """Return the PCM sample rate used by the patched decode contract."""
+        return self._sample_rate
+
     # -- internal helpers ----------------------------------------------------------
 
     def _resolve_num_quantizers(self) -> int:
