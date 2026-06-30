@@ -10,6 +10,70 @@ All runs: CPU only, dockermisc1 (8 vCPU i7-1360P, AVX2+VNNI, no AVX-512, 15 GiB 
 
 ---
 
+## Streaming vocoder track — measured 2026-06-30
+
+Branch `feat/streaming-vocoder`, corrected runtime/test commit `8f6b862` (target runs used its
+semantically equivalent pre-commit working tree) mounted over `runtime-v0.12.0` at digest
+`sha256:214eb114859e71d36ff19175d40c332124dfc0249dd6df27034101f7694e687b`.
+Model `Qwen/Qwen3-TTS-12Hz-0.6B-Base`, revision
+`5d83992436eae1d760afd27aff78a71d676296fc`; explicit IR metadata file SHA-256
+`abec65a5d2f2dcf07382d707513cb2a9f5c2a4c5872728069b169d9601e3da7f`, source hash
+`dd8e1a75b4ef2174`; OpenVINO 2026.2.1. Runtime used the capacity-768 main and capacity-32
+predictor stateful graphs, FP32 OpenVINO vocoder, 6 threads, an 8 GiB cgroup, and production
+sampling. Production `qwen3-tts` remained stopped; only temporary `qwen-stream-test` was used.
+
+The inspected Qwen seam is the outer `Qwen3TTSTalkerForConditionalGeneration.forward` result:
+`hidden_states[-1]` is the completed 16-codebook frame. The inner `talker.model.forward` result is
+a transformer hidden state and must not be treated as codec IDs. Stock voice-clone decode prepends
+160 reference frames, so the streaming prefix must include those codes and omit their samples.
+
+### Parity and TTFB
+
+| Run | Ref + generated frames | Boundaries | First audio | Terminal | max abs | SNR |
+|---|---:|---|---:|---:|---:|---:|
+| short producer parity | 160 + 23 | 183 final | terminal | — | 0 | infinite |
+| short, terminal decode reused | 160 + 24 | 184 final | 14.616 s | 14.616 s | 0 | infinite |
+| final committed-code reuse smoke | 160 + 32 | 192 final | 22.372 s | 22.347 s | 0 | infinite |
+| paragraph, diagnostic duplicate stock decode | 160 + 194 | 300, 354 | **39.341 s** | **90.840 s** | 0 | infinite |
+
+The paragraph prompt was the repository `bench_common.PROMPTS["paragraph"]`, with
+`max_new_tokens=400`. Two chunks were emitted: the first at the real 300-frame boundary and the
+second from the final partial prefix. First audio preceded terminal completion by **51.50 s**. The
+90.84-second total is not a production latency comparison: that diagnostic intentionally allowed
+upstream `generate_voice_clone` to perform its normal full decode after the early prefix decode. The
+implemented transport path now reuses the already-decoded final prefix; the short reuse run dropped
+from prior ~27-second duplicate-decode diagnostics to 14.62 s while retaining exact sample parity.
+
+The worker `/infer_stream` transport returned HTTP chunked `application/octet-stream` with mono
+24 kHz `f32le` metadata. A short live request delivered 184,320 bytes (24 frames) with
+`time_starttransfer=14.675 s` and `time_total=14.675 s`. Public `/generate/stream` proxy behavior is
+covered by four passing runtime-image tests; a live two-Gunicorn public-proxy run remains open.
+
+### CPU and memory observation
+
+The paragraph profile collected 45 `docker stats` samples. Container CPU ranged **431.92–546.49%**
+and averaged **499.89%** on the 8-vCPU host. The approximate pre-first-audio mean was 514.85%; the
+post-first-audio mean was 487.92%. This demonstrates aggregate CPU headroom but does **not** separate
+talker and vocoder phases or establish that concurrent overlap will improve wall time. Deliverable B
+remains gated on per-core, phase-separated 0.6B and 1.7B profiles. Container RSS rose from about
+5.97 GiB to 6.33 GiB during the diagnostic and stayed within the 8 GiB test limit.
+
+### Validation scope and remaining gates
+
+- Model-free iterator/session tests: passed, including reference codes, EOS, exact boundaries, final
+  partial flush, exception cleanup, and forward-signature preservation.
+- Real 0.6B same-generation stream-vs-batch parity: passed exactly.
+- Worker raw-PCM chunked transport: passed live.
+- Public proxy unit tests: passed in `runtime-v0.12.0`.
+- Not yet run: baked branch image, 1.7B, phase-separated CPU profile, listening at the 300-frame seam,
+  identical-seed batch wall-time comparison, disconnect/timeout behavior, serialized mixed requests,
+  or fresh-process PyTorch rollback.
+
+Raw diagnostics remain outside Git on `dockermisc1` under `/tmp/stream_{long,reuse}*`,
+`/tmp/infer_stream.f32`, and `/tmp/stream_cpu.txt`. The temporary container was stopped after testing.
+
+---
+
 ## 0.6B decision summary (current)
 
 **LOCKED: 0.6B ships weight-only INT8_ASYM transformer cores + FP32 OV vocoder (~1.40x).** The

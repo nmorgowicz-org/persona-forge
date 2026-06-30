@@ -1351,10 +1351,80 @@ repository must not lower the general long-prompt limit to 7 GiB. Explicit cache
 by leaving both stateful model environment variables unset; full rollback remains a fresh process
 with `TTS_BACKEND=pytorch`.
 
+## Streaming vocoder delivery (in progress)
+
+This track is a latency/UX feature, not a memory optimization. The vocoder already processes bounded
+300-frame chunks with 25 frames of left context and contributed only ~6–12 MiB to the M9 sampled peak.
+No new IR is required.
+
+### Generation seam and invariants
+
+The correct producer seam is the return value of
+`Qwen3TTSTalkerForConditionalGeneration.forward`, not its inner transformer model. During prefill,
+the outer result carries `hidden_states=(transformer_hidden_states, None)`. Each autoregressive call
+then carries `hidden_states=(transformer_hidden_states, codec_ids)`, where `codec_ids` is the completed
+16-codebook frame. `StreamingVocoderSession` observes that return value while preserving the original
+forward signature so Transformers 4.57.3 model-kwarg validation remains unchanged.
+
+The session must preserve all of these rules:
+
+- Ignore the prefill `codec_ids=None` result and skip a generated frame whose first codebook is EOS.
+- Support batch size 1 only until a separately tested multiplexed stream contract exists.
+- Include voice-clone reference codes before generated codes. Stock `generate_voice_clone` decodes the
+  combined prefix, then removes the reference samples. Omitting reference codes changes the vocoder
+  context and cannot pass waveform parity.
+- Decode only when total reference + generated frames cross `300, 600, ...`, then once for the final
+  partial prefix. Never decode every frame after 300.
+- Route every prefix through `OpenVinoVocoderRuntime.iter_decode_chunks`; it owns the accepted
+  300-frame/25-left-context crop math.
+- Emit only samples after the reference prefix and after the previously emitted prefix. Require exactly
+  `frames * 1920` samples from each complete prefix; fail closed on shape mismatch.
+- Restore both the talker forward and any temporary speech-tokenizer decode hook in `finally` paths.
+- Do not emit a final partial chunk after generation raises. Any already-emitted bytes are governed by
+  the streaming transport's truncation contract.
+
+The transport path reuses the session's final full-prefix waveform when upstream
+`generate_voice_clone` reaches `speech_tokenizer.decode`. This avoids a duplicate terminal vocoder pass
+while preserving the upstream return/cut structure. The parity-only diagnostic may leave the stock
+decode active to compare streamed concatenation and batch output from the same generated codes.
+
+### HTTP contract
+
+Existing `/generate` and `/infer` remain atomic WAV/MP3 endpoints. Streaming is opt-in:
+
+- Worker: `POST /infer_stream`.
+- Public proxy: `POST /generate/stream`.
+- Request JSON: same required `text` and optional `language` fields as `/generate`.
+- Response: HTTP chunked `application/octet-stream`, mono float32 little-endian PCM.
+- Required metadata headers: `X-Audio-Format: f32le`, `X-Audio-Sample-Rate: 24000`,
+  `X-Audio-Channels: 1`.
+- Mid-stream failure: close the connection. Raw PCM has no control frame; clients must explicitly decide
+  whether to discard or retain a truncated payload. Failures before streaming begins should remain HTTP
+  errors where the WSGI stack can still produce one.
+- Streaming requires the FP32 OpenVINO vocoder and returns HTTP 503 when it is unavailable. The PyTorch
+  rollback remains the batch API; it must not silently enter a different streaming implementation.
+
+The single-worker executor continues to serialize model access. A queue transfers PCM from the worker
+thread to Flask's response iterator; this is transport streaming only. Vocoder inference currently runs
+synchronously in the generation callback, so deliverable B (concurrent talker/vocoder overlap) is not
+implemented.
+
+### Current measured status (2026-06-30)
+
+The 0.6B mounted-file target run passed exact same-generation parity. The paragraph test used 160
+reference + 194 generated frames, decoded at total-frame boundaries 300 and 354, delivered first audio
+at 39.34 s, and completed at 90.84 s with max_abs 0 / infinite SNR. Aggregate container CPU averaged
+~500% of 800%; this is not sufficient to approve overlap. Full provenance and caveats are recorded in
+`OPENVINO_RESULTS.md`.
+
+Release remains blocked on a baked-image smoke test, live public-proxy test, seam listening, identical-
+seed batch latency comparison, disconnect/timeout and mixed serialized-request tests, 1.7B validation,
+phase-separated CPU profiling, and fresh-process PyTorch rollback.
+
 ## Service Integration
 
-Keep `app_api.py` and the external HTTP contract unchanged. Update `app_worker.py` to select
-the backend with an environment variable:
+Keep the existing `app_api.py` batch contract unchanged. The streaming track adds only the opt-in
+raw-PCM endpoint documented above. `app_worker.py` selects the backend with an environment variable:
 
 ```text
 TTS_BACKEND=pytorch|openvino
@@ -1457,13 +1527,15 @@ convenience but must not be the Compose production reference.
 | `ov_export_wrappers.py` | Tensor-only prefill/decode wrappers and cache flattening |
 | `test_vocoder_parity.py` | Deterministic vocoder wrapper, dynamic-shape, FP32, and INT8 parity gate |
 | `ov_talker_runtime.py` | Install/uninstall OV cores by swapping the two inner core forwards (M4) |
+| `streaming_vocoder.py` | Observe completed outer-talker codec frames and emit parity-preserving prefixes |
 | `test_transformer_parity.py` | Synthetic FP32/INT8 tensor/cache/token core parity (M2/M3) |
 | `test_ov_generation.py` | Generation-level greedy code agreement + warm latency/RTF (M4) |
-| `app_worker.py` | Backend selection, loading, health metadata, and rollback path |
-| `app_api.py` | Preserve API behavior and return HTTP 503 until the worker is ready |
+| `app_worker.py` | Backend selection, health, rollback, internal parity, and raw-PCM worker streaming |
+| `app_api.py` | Preserve batch behavior, proxy raw-PCM streaming, and keep readiness fail-closed |
 | `serve.py` | Supervise both Gunicorn masters and forward shutdown signals |
 | `Dockerfile` | Experimental OpenVINO stage and CPU-only PyTorch cleanup |
 | `compose.example.yml` | Keep runnable runtime/downloader wiring and add the validated IR mount |
+| `docs/HOW_TO_RUN.md` | Operator commands, mounts, environment variables, safety, and benchmark capture |
 | `.github/workflows/ci.yml` | Lightweight tests on `arc-general` without model download |
 | `.github/workflows/image.yml` | Build and publish runtime/exporter targets on `arc-general-docker` |
 | `scripts/export-on-dockermisc1.sh` | Versioned host-side export and validation command |
@@ -1482,7 +1554,9 @@ Ship the OpenVINO backend only when all gates pass:
    accepted based on quality and resource savings.
 6. p95 latency, real-time factor, and peak RSS are recorded for short and paragraph prompts.
 7. The container remains below its memory limit without increasing host swap pressure.
-8. `/generate`, `/infer`, `/health`, MP3 output, WAV output, and serialized concurrency pass.
+8. `/generate`, `/infer`, `/health`, MP3 output, WAV output, and serialized concurrency pass. If
+   streaming ships, `/generate/stream`, truncation semantics, disconnect cleanup, and mixed
+   batch/stream serialization must also pass.
 9. `TTS_BACKEND=pytorch` provides a tested one-setting rollback.
 
 Gate 5 is model-size-specific: the warm median must improve by at least 2x for 0.6B and at

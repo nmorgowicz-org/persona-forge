@@ -18,13 +18,14 @@ the expensive transformer work into OpenVINO.
 | FP32 OpenVINO parity | Passed on `dockermisc1` |
 | INT8 compression | Weight-only INT8 implemented; selective quality recovery in progress |
 | Explicit-cache OpenVINO generation | Implemented and measured |
-| Stateful OpenVINO K/V cache | Planned |
-| Thin runtime memory loader | Planned |
+| Stateful OpenVINO K/V cache | Implemented and measured |
+| Streaming OpenVINO vocoder PCM | Experimental; 0.6B producer/worker parity passed |
 
 `app_worker.py` selects PyTorch or the explicit-cache OpenVINO backend with `TTS_BACKEND`.
 OpenVINO is not activated merely by installing the dependency: the worker also requires matching,
 validated IR and metadata. Progress and release gates are defined in the
-[implementation plan](docs/OPENVINO_IMPLEMENTATION.md).
+[implementation plan](docs/OPENVINO_IMPLEMENTATION.md). Deployment, bind-mount, environment-variable,
+and benchmark commands for `dockermisc1` are in [the operator runbook](docs/HOW_TO_RUN.md).
 
 ## Goals
 
@@ -60,7 +61,7 @@ app_worker.py
         |
         +-- PyTorch prompt construction and generation (current)
         +-- OpenVINO main talker + code predictor (target)
-        +-- ONNX Runtime speech tokenizer/decoder
+        +-- FP32 OpenVINO vocoder (when enabled)
         v
 MP3 or WAV response
 ```
@@ -412,6 +413,29 @@ Request fields:
 | `response_format` | no | `mp3` | `mp3` selects MP3; other values currently produce WAV |
 
 The API proxies worker errors and has a 300-second upstream timeout.
+
+### Stream raw PCM (experimental OpenVINO path)
+
+`/generate/stream` keeps the batch endpoints unchanged and returns headerless mono float32
+little-endian PCM as HTTP chunked transfer. It requires the FP32 OpenVINO vocoder; PyTorch-only
+deployments return HTTP 503 for this endpoint.
+
+```bash
+curl --fail-with-body \
+  -X POST http://127.0.0.1:8318/generate/stream \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "text": "This response begins playing before synthesis is complete.",
+    "language": "English"
+  }' \
+  --output speech.f32le
+```
+
+The response headers declare `X-Audio-Format: f32le`, `X-Audio-Sample-Rate: 24000`, and
+`X-Audio-Channels: 1`. Convert a completed stream outside the service, for example with
+`ffmpeg -f f32le -ar 24000 -ac 1 -i speech.f32le speech.wav`. If generation fails after bytes
+have been sent, the connection closes and the payload is truncated; clients must explicitly
+discard or handle partial PCM.
 
 ## Post-build model export lifecycle
 

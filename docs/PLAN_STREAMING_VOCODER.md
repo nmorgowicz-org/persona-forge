@@ -1,16 +1,17 @@
 # Plan — streaming / pipelined vocoder decode
 
-Branch: `feat/streaming-vocoder`. Status: **implementation started; chunk iterator foundation built,
-CPU headroom and live streaming not measured.** Self-contained
-brief for a fresh agent. Design context: `OPENVINO_IMPLEMENTATION.md` § "Milestone 1.5" (vocoder export)
-and § "Milestone 4" (runtime). Numbers: `OPENVINO_RESULTS.md`.
+Branch: `feat/streaming-vocoder`. Status: **deliverable A works on the real 0.6B model and now has
+an experimental HTTP transport; release gates remain open.** Self-contained brief for a fresh agent.
+Design context: `OPENVINO_IMPLEMENTATION.md` § "Milestone 1.5" and § "Streaming vocoder delivery".
+Measured numbers: `OPENVINO_RESULTS.md`.
 
-> **v0.11.1 is already shipped.** This is a NEW, independent track — it must stand on its own and not
-> assume any in-flight integration work. Do not couple it to the 0.6B footprint branch.
+> `main` is released as v0.12.0 at `9bf0848`. This track is independent of the already-merged
+> stateful-KV feature. Do not change cache behavior while finishing streaming.
 
 ## Implementation progress / resume point
 
-Completed after rebasing onto released `main` commit `9bf0848`:
+Verified on 2026-06-30 after rebasing onto released `main` commit `9bf0848`; corrected runtime/test
+commit: `8f6b862`:
 
 - `OpenVinoVocoderRuntime.iter_decode_chunks(codes)` now exposes the existing 300-frame / 25-frame
   left-context boundary as an iterator of cropped float32 PCM chunks.
@@ -21,21 +22,42 @@ Completed after rebasing onto released `main` commit `9bf0848`:
 - `tests/test_ov_vocoder_runtime.py` covers empty, single-chunk, exact-boundary, multi-chunk, chunk-size,
   and wrong-quantizer cases. Concatenated iterator output equals batch output exactly in the deterministic
   model-free harness.
+- `StreamingVocoderSession` hooks the **outer** `Qwen3TTSTalkerForConditionalGeneration.forward` result,
+  where `hidden_states[-1]` is the completed `[batch, 16]` codec frame. It preserves the inspected forward
+  signature, ignores prefill (`codec_ids=None`), skips EOS, and always restores the method.
+- Voice-clone reference codes are prepended before every prefix decode. This is required for waveform
+  parity because stock `generate_voice_clone` decodes reference + generated codes and then cuts the
+  reference samples.
+- Prefix decode occurs only when total reference + generated frames cross 300, 600, ... and once for the
+  final partial prefix. The abandoned local implementation decoded every prefix after frame 300 and hooked
+  the inner transformer hidden state; both errors are now removed.
+- `/infer_stream` and public `/generate/stream` emit headerless mono `f32le` PCM using HTTP chunked transfer.
+  Existing `/infer` and `/generate` remain batch WAV/MP3 paths. Mid-stream failure semantics are an abrupt
+  connection close; clients must treat partial PCM explicitly.
+- The streaming path reuses its final decoded prefix when upstream calls `speech_tokenizer.decode`, avoiding
+  a duplicate terminal vocoder pass.
+- Model-free session + iterator tests pass. Public proxy tests pass inside `runtime-v0.12.0`.
+- Real 0.6B short parity: 23 generated frames, max_abs 0, SNR infinite. Terminal-decode reuse also passed:
+  24 frames, max_abs 0, SNR infinite, 14.62 s total.
+- Real 0.6B paragraph: 160 reference + 194 generated frames, boundaries `300,354`, two emitted chunks,
+  first audio 39.34 s versus 90.84 s terminal completion, max_abs 0, SNR infinite.
+- 0.6B container CPU during that paragraph averaged ~500% on 8 vCPUs (432–546%). This shows aggregate
+  headroom but is not yet the phase-separated go/no-go result for concurrent vocoder overlap.
 
-**Important limitation:** this does not yet improve TTFB. The current Qwen generation call returns audio
-codes only after the complete autoregressive sequence, then calls `speech_tokenizer.decode`. The next
-implementation step is to locate/instrument the talker generation loop and emit each completed 300-frame
-code block to a callback/queue without changing the existing terminal return structure. Do not add a
-`/generate/stream` endpoint until that producer seam can deliver codes before generation completes.
+Still open before release:
 
-Next actions, in order:
-
-1. Run Step 0 CPU utilization on both 0.6B and 1.7B; record whether overlap deliverable B is viable.
-2. Trace the exact point where each full 16-codebook audio frame is appended in the stock talker loop.
-3. Add an opt-in callback/iterator adapter there and feed completed 300-frame blocks into
-   `iter_decode_chunks`-equivalent incremental state. Preserve terminal batch output for all existing APIs.
-4. Only then add transport and TTFB timing. The 300-frame threshold means first audio cannot arrive
-   before roughly 24 seconds of generated audio unless a smaller vocoder chunk is separately parity-gated.
+1. Run a baked-image test of `/generate/stream`; current target tests mounted branch files over
+   `runtime-v0.12.0`.
+2. Repeat the paragraph gate with terminal-decode reuse enabled and record baseline batch wall time using
+   identical seeds. The existing 90.84 s diagnostic intentionally included a duplicate stock decode.
+3. Run phase-separated per-core CPU profiling for 0.6B and 1.7B. Do not implement overlap from aggregate
+   `docker stats` alone.
+4. Run a boundary listening A/B using the saved two-chunk paragraph PCM converted outside Git. Exact sample
+   parity strongly de-risks seams but does not replace listening.
+5. Verify serialized batch-after-stream, stream-after-batch, client disconnect cleanup, timeout behavior,
+   and a fresh-process `TTS_BACKEND=pytorch` rollback. Streaming correctly returns 503 without OV vocoder.
+6. Decide whether the raw PCM contract is sufficient for release or whether a documented client helper is
+   required. Do not label raw bytes as WAV.
 
 ## Read this first: what is and isn't true about the vocoder
 
@@ -52,27 +74,27 @@ fixed `[1, 16, 325]` IR: 300 chunk frames + 25 left-context, right-padded). It i
 
 ## The two deliverables (separable — ship either)
 
-### A. Streaming output — time-to-first-audio (the certain win)
-Today the flow is **generate all audio codes → then run `chunked_decode` over the whole sequence →
-return one complete WAV/MP3.** Streaming means: as soon as the talker has produced enough codes for one
-vocoder chunk (300 frames ≈ 24 s of audio @ 12 Hz / 1920 samples-per-frame), decode that chunk and
-**emit its waveform immediately**, then continue. The user hears audio long before generation finishes.
-This is a **TTFB / UX win that does not depend on any CPU-headroom assumption** — it's reordering, not
-parallelism. It is the higher-confidence half of this track.
+### A. Streaming output — time-to-first-audio (implemented, release gates open)
+The batch flow remains **generate all audio codes → run `chunked_decode` → return complete WAV/MP3**.
+The opt-in path decodes and emits when reference + generated codes reach each 300-frame boundary.
+The validated prompt has 160 reference frames, so its first boundary requires 140 generated frames
+(~11.7 s of audio), not 300 generated frames. The paragraph run delivered first audio 51.5 s before
+terminal completion. This is a TTFB/UX win; vocoder work still runs synchronously with generation.
 
 ### B. Pipelined overlap — wall-clock latency (the uncertain win)
 Run vocoder chunk N's decode **concurrently** with the talker generating chunk N+1's codes, so the
 ~29% vocoder wall time hides under generation time instead of adding to it.
 
-**Honest caveat — measure before building.** This box is **8 vCPU and CPU-bound.** Overlapping two
+**Honest caveat — finish measuring before building.** This box is **8 vCPU and CPU-bound.** Overlapping two
 compute-bound stages only reduces wall time if generation leaves **idle cores** the vocoder can use. The
 autoregressive talker loop (each token depends on the previous; the predictor runs ~15 *sequential*
-forwards per frame) plausibly *does* leave headroom — sequential dependencies often underuse a wide CPU
-— but this is **unproven here**. If generation already saturates all 8 cores, pipelining just time-slices
+forwards per frame) plausibly *does* leave headroom — sequential dependencies often underuse a wide CPU.
+Aggregate 0.6B paragraph utilization averaged ~500% of 800%, which is encouraging but is not a
+phase-separated result. If generation saturates all 8 cores, pipelining just time-slices
 and yields ~0 wall-clock gain (you'd still get deliverable A's TTFB benefit). **Gate B on a measurement,
 not a hope.**
 
-## Step 0 — the go/no-go measurement for deliverable B (do this FIRST)
+## Step 0 — the go/no-go measurement for deliverable B (partially complete)
 
 Before writing any pipeline code, answer: *is there CPU headroom during talker generation?*
 - Run a normal 1.7B (and 0.6B) generation and sample per-core utilization (e.g. `mpstat -P ALL 1`,
@@ -95,21 +117,21 @@ Before writing any pipeline code, answer: *is there CPU headroom during talker g
   a vocoder worker thread (consumer). The OV vocoder `InferRequest` is single-threaded per request;
   give the vocoder its own `InferRequest` so it doesn't contend with the talker cores' requests. Tune
   OV thread counts so the two stages split cores deliberately rather than both grabbing all 8.
-- **Streaming transport for A.** The current `/generate` / `/infer` contract returns a *complete* audio
-  body. Streaming needs a chunked-transfer or websocket variant (e.g. `/generate/stream` returning
-  `audio/wav` as a chunked response, or raw PCM frames). **Keep the existing batch endpoints unchanged**
-  (rollback + back-compat); add streaming as a new endpoint. Note: streaming WAV needs a header written
-  up front with an unknown length — emit a streaming-friendly container (raw PCM or chunked WAV with a
-  placeholder size) and document the client contract.
+- **Streaming transport for A.** `/generate/stream` proxies `/infer_stream` using HTTP chunked transfer.
+  The payload is headerless mono float32 little-endian PCM; headers declare `f32le`, 24 kHz, and one
+  channel. **Keep the existing batch endpoints unchanged.** A mid-stream error closes the connection
+  because raw PCM has no control frame. Do not label these bytes as WAV.
 
 ## Steps
 
-0. **CPU-headroom measurement** (above) → decide whether B is in scope.
-1. **Pull the chunk boundary out of `chunked_decode`** into the runtime so the generation loop can hand
+0. **CPU-headroom measurement — partial.** Aggregate 0.6B data exists; per-core phase separation and
+   1.7B remain before deciding whether B is in scope.
+1. **Pull the chunk boundary out of `chunked_decode` — complete.** The generation loop can hand
    completed code chunks (with left context) to the vocoder incrementally, instead of one terminal call.
    Verify streamed-concat output is bit-parity with the current one-shot path.
-2. **Deliverable A — streaming endpoint.** Add `/generate/stream` (batch endpoints untouched). Emit each
-   chunk's PCM as it's decoded. Measure **time-to-first-audio** vs. current end-to-end.
+2. **Deliverable A — implemented, not release-complete.** `/generate/stream` exists and batch endpoints
+   are untouched. Target producer/worker transport parity passed; baked-image, live public proxy,
+   listening, disconnect, concurrency, and rollback gates remain.
 3. **Deliverable B — overlap** (only if step 0 showed headroom). Producer/consumer thread + dedicated
    vocoder `InferRequest` + OV thread split. Measure warm **end-to-end** wall time vs. serial baseline.
 4. **Quality/parity gate.** Listening A/B of streamed vs. batch output — confirm **no seam artifacts**
@@ -124,8 +146,8 @@ Before writing any pipeline code, answer: *is there CPU headroom during talker g
   listening A/B.
 - **Thread contention** on 8 cores can erase deliverable B's win — that's why step 0 gates it. Split OV
   threads between stages explicitly; don't let both default to all cores.
-- **Streaming error semantics:** a mid-stream generation failure has already emitted partial audio —
-  define the client contract for truncated streams (the batch path can still fail atomically).
+- **Streaming error semantics:** a mid-stream generation failure closes the connection after any bytes
+  already sent. Clients must explicitly discard or retain truncated raw PCM; batch remains atomic.
 - **Box hygiene (carried):** never blanket `docker kill`/`prune` (took down `litellm*`/`headroom-proxy`);
   touch only `qwen3-tts`. Never two `--memory 13g` jobs at once. One backend per process for benchmarks.
 - **Don't re-litigate INT8 vocoder** — rejected at 16.3 dB (M1.5). This track keeps the FP32 IR.
