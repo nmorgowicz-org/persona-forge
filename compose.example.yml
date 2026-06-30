@@ -52,8 +52,9 @@ services:
     # Memory: the 1.7B-INT4 stateful + bf16 serving config runs at ~7.5 GiB idle /
     # ~7.7 GiB peak with a capacity-768 main (~8.1/8.3 GiB at capacity 2048). The
     # ~7.5 GiB floor (INT4 weights + bf16 glue + runtime) means 1.7B does NOT fit the
-    # 7G default — set TTS_MEMORY_LIMIT=8G for 1.7B. 0.6B-INT8 fits 7G comfortably.
-    # If you raise capacity or run longer utterances, raise the limit to peak + headroom.
+    # 7G default. An 8G validation run peaked at ~7.78 GiB; set TTS_MEMORY_LIMIT=10G
+    # and TTS_MEMORY_SWAP_LIMIT=11G for the required production headroom. 0.6B-INT8
+    # fits 7G only for bounded short requests; paragraph-capable production also uses 10G.
     #
     # --- Capacity tuning (stateful K/V cores) ---------------------------------
     # OpenVINO cannot resize state tensors at run time, so each stateful core
@@ -74,7 +75,8 @@ services:
     # predictor_decode_int8.xml; cap 32 is validated for its per-frame 2+14 path.
     # then point OPENVINO_MAIN_STATEFUL_MODEL at the new .xml. Validate bit-exact
     # parity for --core main and --core predictor before deploying. 0.6B short
-    # requests fit 7G, but a measured 45 s request needs an 8G limit.
+    # requests fit 7G, but a measured 45 s request needs 8G just to complete;
+    # use 10G/11G for the required production headroom.
     # --------------------------------------------------------------------------
     mem_limit: ${TTS_MEMORY_LIMIT:-7G}
     memswap_limit: ${TTS_MEMORY_SWAP_LIMIT:-8G}

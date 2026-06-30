@@ -1235,7 +1235,7 @@ quality while being smaller/faster** — an untested quadrant and the most promi
 **Status — CLOSED and SHIPPED in v0.11.0 (2026-06-29).** Full memory arc complete: lifetime peak
 **11,593 → 7,715 MiB**, trimmed idle **8,884 → 7,485 MiB**, and the dangerous boot spike (real OOM
 risk) is eliminated. The peak is now a stable ~7.7 GiB. The 1.7B-INT4 stateful + bf16 serving config
-ships at **`TTS_MEMORY_LIMIT=8G`** (the ~7.5 GiB floor — INT4 weights + bf16 glue + OV runtime —
+originally shipped at **`TTS_MEMORY_LIMIT=8G`** (the ~7.5 GiB floor — INT4 weights + bf16 glue + OV runtime —
 does not fit the 7G default; 0.6B-INT8 still fits 7G). See `OPENVINO_RESULTS.md` for the measured
 timeline and provenance.
 
@@ -1315,7 +1315,8 @@ inputs and reads only the hidden state.
 checkpoint-load transient, not startup overlap. Loading the native-bf16 checkpoint
 (`OPENVINO_TORCH_DTYPE=bfloat16`) plus a capacity-768 stateful main cut lifetime peak **11,593 →
 7,715 MiB** and trimmed idle to **7,485 MiB**. Early release (12.1 → 11.3 GiB) and the stateful
-predictor (~60 MiB) are kept but are minor next to bf16. Shipped at `TTS_MEMORY_LIMIT=8G` for 1.7B.
+predictor (~60 MiB) are kept but are minor next to bf16. The historical release used 8G for 1.7B;
+the 2026-06-30 streaming-profile follow-up requires 10G/11G for 20% production headroom.
 
 **M9 gates status (measured 2026-06-29 on dockermisc1):**
 - Long-prompt capacity (200+ words, capacities 2048/1024/768): passed; 768 recommended as default.
@@ -1417,9 +1418,15 @@ at 39.34 s, and completed at 90.84 s with max_abs 0 / infinite SNR. Aggregate co
 ~500% of 800%; this is not sufficient to approve overlap. Full provenance and caveats are recorded in
 `OPENVINO_RESULTS.md`.
 
+The persisted 1.7B profile (INT4 g32, BF16 glue, capacity-768 stateful main, explicit predictor,
+FP32 vocoder) also passed mounted-file streaming parity. Its reuse run decoded at boundaries 300/333,
+delivered first audio at 50.95 s, completed at 81.06 s, and matched batch PCM exactly. Aggregate CPU
+averaged ~470% of 800%. Cgroup peak was ~7.78 GiB under 8G with no max/OOM/swap events; 8G is a test
+minimum, while 10G/11G is the production limit required for 20% headroom.
+
 Release remains blocked on a baked-image smoke test, live public-proxy test, seam listening, identical-
-seed batch latency comparison, disconnect/timeout and mixed serialized-request tests, 1.7B validation,
-phase-separated CPU profiling, and fresh-process PyTorch rollback.
+seed batch latency comparison, disconnect/timeout and mixed serialized-request tests, phase-separated
+CPU profiling, and fresh-process PyTorch rollback.
 
 ## Service Integration
 
@@ -1429,6 +1436,15 @@ raw-PCM endpoint documented above. `app_worker.py` selects the backend with an e
 ```text
 TTS_BACKEND=pytorch|openvino
 OV_MODEL_DIR=/ov_model/qwen-tts-0.1.1_0.6b_ov-2026.2.1
+OPENVINO_TORCH_DTYPE=bfloat16
+OPENVINO_LOW_CPU_MEM_USAGE=1
+OV_MAIN_COMPRESSION=int8
+OV_PREDICTOR_COMPRESSION=int8
+OPENVINO_MAIN_STATEFUL_MODEL=/ov/.../main_stateful_..._cap768.xml
+OPENVINO_PREDICTOR_STATEFUL_MODEL=/ov/.../predictor_stateful_int8_cap32.xml  # 0.6B only, currently persisted
+OPENVINO_RELEASE_TORCH=1
+OPENVINO_VOCODER_ENABLED=1
+OPENVINO_VOCODER_DIR=/ov/..._vocoder
 OV_INFERENCE_THREADS=6
 OV_DYNAMIC_QUANT_GROUP_SIZE=32
 OV_KV_CACHE_PRECISION=u8
@@ -1446,6 +1462,7 @@ Extend `/health` with:
 - IR metadata hash.
 - Thread and quantization settings.
 - Whether stateful KV cache is active.
+- Serving Torch dtype and low-memory-loader selection.
 
 The public API readiness endpoint returns HTTP 200 only after the worker reports ready and
 returns HTTP 503 while the worker is loading or unreachable. The image health check uses this
@@ -1469,8 +1486,12 @@ volumes:
   - /var/data/autopirate/qwen3-tts/openvino:/ov_model:ro
 ```
 
-For 0.6B-INT8 keep `mem_limit: 7G` and `memswap_limit: 8G`. For 1.7B-INT4 stateful + bf16 set
-`TTS_MEMORY_LIMIT=8G` (M9 closed: ~7.5 GiB idle / ~7.7 GiB peak floor does not fit 7G).
+For bounded short 0.6B-INT8 requests, 7G/8G remains an option. The measured long 0.6B request peaked
+at 7,845 MiB; paragraph-capable production uses 10G/11G to retain 20% headroom. A fresh 1.7B-INT4
+stateful-main + BF16 streaming run peaked at ~7.78 GiB under an 8G cgroup, so 8G is a functional test
+minimum, not a production limit; use `TTS_MEMORY_LIMIT=10G` and `TTS_MEMORY_SWAP_LIMIT=11G`. The
+currently persisted 1.7B profile uses an explicit INT4 predictor; do not point at a nonexistent
+stateful predictor artifact.
 
 ### Private GHCR authentication on `dockermisc1`
 

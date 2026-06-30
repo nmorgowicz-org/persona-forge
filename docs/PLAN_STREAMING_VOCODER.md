@@ -43,6 +43,10 @@ commit: `8f6b862`:
   first audio 39.34 s versus 90.84 s terminal completion, max_abs 0, SNR infinite.
 - 0.6B container CPU during that paragraph averaged ~500% on 8 vCPUs (432–546%). This shows aggregate
   headroom but is not yet the phase-separated go/no-go result for concurrent vocoder overlap.
+- The persisted 1.7B INT4/BF16 profile is now exercised with capacity-768 stateful main, explicit
+  predictor, and FP32 vocoder. Paragraph streaming crossed boundaries 300/333, delivered first audio
+  at 50.95 s, completed at 81.06 s with final-prefix reuse, and matched batch PCM exactly. Aggregate
+  CPU averaged ~470% of 800%; per-core/phase separation and human seam listening remain open.
 
 Still open before release:
 
@@ -124,8 +128,8 @@ Before writing any pipeline code, answer: *is there CPU headroom during talker g
 
 ## Steps
 
-0. **CPU-headroom measurement — partial.** Aggregate 0.6B data exists; per-core phase separation and
-   1.7B remain before deciding whether B is in scope.
+0. **CPU-headroom measurement — partial.** Aggregate 0.6B and 1.7B data exists; per-core phase
+   separation remains before deciding whether B is in scope.
 1. **Pull the chunk boundary out of `chunked_decode` — complete.** The generation loop can hand
    completed code chunks (with left context) to the vocoder incrementally, instead of one terminal call.
    Verify streamed-concat output is bit-parity with the current one-shot path.

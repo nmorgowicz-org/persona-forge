@@ -8,8 +8,8 @@ runtime code or starting a target container.
 ## Source and artifact provenance
 
 - Base/released main: `9bf0848` (`v0.12.0`).
-- Branch: `feat/streaming-vocoder`; corrected runtime/test commit `8f6b862`. Use `git log -5` and
-  `git status --short --branch` to obtain the following documentation commit before resuming.
+- Branch: `feat/streaming-vocoder`; corrected streaming runtime/test commit `8f6b862`; BF16 serving
+  loader fix `68e58b2`. Use `git log -5` and `git status --short --branch` before resuming.
 - Target test image: `runtime-v0.12.0`, digest
   `sha256:214eb114859e71d36ff19175d40c332124dfc0249dd6df27034101f7694e687b`.
 - Target tests mounted branch files over `/app`; no image containing this branch has been built.
@@ -21,8 +21,9 @@ runtime code or starting a target container.
 - Runtime graphs: capacity-768 stateful main, capacity-32 stateful predictor, FP32 OpenVINO
   vocoder, 6 threads, 8 GiB cgroup. The test log labeled stateful core compression from runtime
   selection metadata; the selected filenames were the validated `*_stateful_int8_*` artifacts.
-- Production `qwen3-tts` was already stopped. The temporary `qwen-stream-test` container was stopped
-  after validation. No unrelated container was changed.
+- Production `qwen3-tts` was stopped during the earlier streaming target runs. At the latest
+  2026-06-30 inspection it was running again as image `docker-qwen3-tts`, default FP32 PyTorch path,
+  7 GiB limit, ~3.3 GiB idle. It was not stopped for the BF16 follow-up; no second model was started.
 
 ## What is implemented
 
@@ -54,6 +55,23 @@ runtime code or starting a target container.
      EOS, forward signature/restoration, malformed shapes, and failed generation.
    - `tests/test_ov_vocoder_runtime.py` covers iterator/batch parity and chunk sizes.
    - `tests/test_app_api.py` covers public proxy streaming and request validation.
+7. Serving load configuration
+   - `app_worker.py` now honors `OPENVINO_TORCH_DTYPE` and
+     `OPENVINO_LOW_CPU_MEM_USAGE`, using the same resolver as `bench_common.py`.
+   - `/health` reports `torch_dtype` and `low_cpu_mem_usage`.
+   - This closes a reproducibility gap: M9 measured BF16 through the benchmark loader, while the
+     serving worker still hard-coded FP32 before commit `68e58b2`.
+
+## Chosen model profiles
+
+- **0.6B:** INT8 asymmetric main/predictor; stateful main capacity 768; stateful predictor capacity
+  32; BF16 PyTorch glue; early Torch-layer release; FP32 OV vocoder. Set both per-core compression
+  selectors to `int8`. Use 10G/11G for unrestricted paragraph production; 7–8 GiB is only a
+  bounded/test option.
+- **1.7B:** INT4 asymmetric group-32 layers; stateful main capacity 768; BF16 PyTorch glue; early
+  Torch-layer release; FP32 OV vocoder; 10G/11G production limit. The persistent target currently has no 1.7B stateful
+  predictor graph, so leave `OPENVINO_PREDICTOR_STATEFUL_MODEL` unset and use the explicit INT4
+  predictor. The measured stateful-predictor saving was only ~60 MiB.
 
 ## Why the local-model implementation needed correction
 
@@ -75,13 +93,15 @@ Repository/model-free commands:
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python -m unittest \
-  tests.test_streaming_vocoder tests.test_ov_vocoder_runtime tests.test_ov_talker_runtime -v
-python -m py_compile app_api.py app_worker.py streaming_vocoder.py ov_vocoder_runtime.py
+  tests.test_model_config tests.test_streaming_vocoder \
+  tests.test_ov_vocoder_runtime tests.test_ov_talker_runtime -v
+python -m py_compile app_api.py app_worker.py model_config.py bench_common.py \
+  streaming_vocoder.py ov_vocoder_runtime.py
 PYTHONDONTWRITEBYTECODE=1 python scripts/validate_repo.py
 git diff --check
 ```
 
-Result: 14 targeted tests passed; compile, repository validation, and diff check passed. Full local
+Result: 22 targeted tests passed; compile, repository validation, and diff check passed. Full local
 discovery cannot import `tests/test_app_api.py` because this Mac lacks Flask. The four app-API tests
 passed inside the cached `runtime-v0.12.0` image.
 
@@ -100,6 +120,16 @@ Target results:
 - Paragraph CPU: 45 aggregate samples, 431.92–546.49%, mean 499.89% of 800%; approximate
   pre-first-audio mean 514.85%, post-first-audio mean 487.92%. This is not phase-separated.
 - Paragraph RSS: about 5.97 → 6.33 GiB inside the 8 GiB test cgroup.
+- Chosen 0.6B profile after BF16 loader fix: health reported BF16/low-memory loading, main
+  stateful-int8 capacity 768, predictor stateful-int8 capacity 32, FP32 OV vocoder. Short parity:
+  48 frames, boundary 208, 20.110 s, max_abs 0, infinite SNR; ~4.95 GiB post-request RSS.
+- Chosen persisted 1.7B profile: BF16, INT4 g32, stateful main capacity 768, explicit predictor,
+  FP32 OV vocoder. Short parity: 42 frames, boundary 202, 23.651 s, max_abs 0, infinite SNR.
+- 1.7B paragraph with final-prefix reuse: 173 frames, boundaries 300/333, first audio 50.945 s,
+  total 81.061 s, max_abs 0, infinite SNR, aggregate CPU mean 469.94%. Fresh cgroup peak
+  8,350,515,200 bytes (~7.78 GiB), no max/OOM/swap events.
+- **Memory decision:** 8 GiB is a functional validation minimum with only ~2.8% headroom. Use
+  10G memory / 11G memory+swap for unrestricted production 0.6B paragraphs or 1.7B serving.
 
 Non-Git diagnostics on `dockermisc1`:
 
@@ -110,10 +140,13 @@ Non-Git diagnostics on `dockermisc1`:
 /tmp/stream_reuse.wav
 /tmp/stream_reuse_headers.txt
 /tmp/infer_stream.f32
+/tmp/profile_06_{health,stream}*
+/tmp/profile_17_{health,stream,paragraph,reuse,cpu}*
 /tmp/ov-streaming-review/
 ```
 
-No listening verdict has been recorded for these files.
+No new streaming-seam listening verdict has been recorded. The 1.7B exact-parity candidate is also
+copied to `/private/tmp/profile_17_reuse.wav`; listen around 11.2 seconds.
 
 ## Exact next tasks, in order
 
@@ -170,11 +203,16 @@ No listening verdict has been recorded for these files.
 
 ### Task 5 — model/rollback gates
 
-1. Repeat producer parity and transport on 1.7B INT4 stateful + FP32 vocoder under its 8 GiB setting.
-2. Start a fresh process with `TTS_BACKEND=pytorch`; verify `/generate`, WAV, MP3, and health. Streaming
+1. Under a maintenance window, validate commit `68e58b2` for both chosen profiles: health must report
+   BF16/low-memory loading, backend provenance must match the expected stateful/precision choices,
+   and startup/generation must remain within 8 GiB.
+2. Repeat producer parity and transport on 1.7B INT4, capacity-768 stateful main, **explicit INT4
+   predictor**, and FP32 vocoder. Run one 300-frame-boundary listening check and phase-separated CPU
+   profile; do not repeat the completed INT4-vs-INT8 selection campaign.
+3. Start a fresh process with `TTS_BACKEND=pytorch`; verify `/generate`, WAV, MP3, and health. Streaming
    should return 503 because no OV vocoder is active. This is the rollback contract, not a fallback
    streaming implementation.
-3. Run Compose validation and both runtime/exporter import smoke tests after the Dockerfile change.
+4. Run Compose validation and both runtime/exporter import smoke tests after the Dockerfile change.
 
 ### Task 6 — final documentation and PR
 
@@ -202,7 +240,10 @@ No listening verdict has been recorded for these files.
 - 0.6B FP32 vocoder: same basename plus `_vocoder/`.
 - 1.7B INT4:
   `/var/data/autopirate/qwen3-tts/openvino/qwen-tts-0.1.1_1.7b_fd4b25438912_ov-2026.2.1_int4g32/`
+- 1.7B capacity-768 stateful main:
+  `..._int4g32_stateful_spike/main_stateful_int4_cap768.xml`.
 - 1.7B FP32 vocoder: corresponding `_vocoder/` directory.
+- No persistent 1.7B stateful predictor XML was present at the latest inspection.
 - Reference WAV: `/var/data/autopirate/qwen3-tts/voice/voice_A.wav`.
 
 Never run two large model jobs concurrently. Never blanket-stop, kill, or prune Docker. Touch only

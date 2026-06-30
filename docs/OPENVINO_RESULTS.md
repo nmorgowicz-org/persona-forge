@@ -58,6 +58,50 @@ talker and vocoder phases or establish that concurrent overlap will improve wall
 remains gated on per-core, phase-separated 0.6B and 1.7B profiles. Container RSS rose from about
 5.97 GiB to 6.33 GiB during the diagnostic and stayed within the 8 GiB test limit.
 
+### Chosen-profile serving validation (2026-06-30 follow-up)
+
+Commit `68e58b2` fixed a reproducibility gap: M9's BF16 result was loaded through
+`bench_common.py`, while `app_worker.py` still hard-coded FP32. The worker now shares the BF16/
+low-memory resolver and reports both settings plus per-core active compression in health. Target runs
+mounted the follow-up working tree over the same `runtime-v0.12.0` image.
+
+**0.6B chosen profile:** INT8 asymmetric, capacity-768 stateful main, capacity-32 stateful predictor,
+BF16 glue, early Torch-layer release, FP32 OV vocoder, 6 threads, 8 GiB test cgroup. Startup log:
+`main=stateful-int8 predictor=stateful-int8 vocoder=OV`; cold ready RSS ~3.76 GiB. A short request
+generated 48 frames, boundary 208, total 20.110 s, max_abs 0, infinite SNR. Post-request RSS was
+~4.95 GiB. This validates the exact environment/profile wiring; the existing long-request result
+(7,845 MiB) still governs paragraph memory sizing.
+
+**1.7B persisted profile:** INT4 asymmetric g32 transformer layers, capacity-768 stateful main,
+**explicit INT4 predictor** (no persistent 1.7B stateful-predictor XML exists), BF16 glue, early
+release, FP32 OV vocoder, 6 threads. Metadata SHA-256
+`ca8f50be8ff4be280248f4ec9c7767ec91f3244e20ef9bcd58042a410344ea2e`; stateful-main XML SHA-256
+`bd0b0daed8c3bec0fc4cd86043dcaecaa704ea8d01050b3a217dcca0cb9cd36b`. Startup log:
+`main=stateful-int8 predictor=int8 vocoder=OV`; health reported model revision
+`fd4b254389122332181a7c3db7f27e918eec64e3`, BF16, low-memory load, main capacity 768, and no
+stateful predictor. Cold ready RSS was ~4.23 GiB.
+
+1.7B short request: 42 generated frames, boundary 202, 23.651 s, max_abs 0, infinite SNR, ~6.03 GiB
+post-request RSS. Paragraph diagnostics used `bench_common.PROMPTS["paragraph"]`, production sampling,
+and `max_new_tokens=400`:
+
+| 1.7B paragraph mode | Frames | Boundaries | First audio | Total | CPU mean | PCM parity |
+|---|---:|---|---:|---:|---:|---|
+| diagnostic stock final decode | 180 | 300, 340 | 48.992 s | 102.495 s | 466.80% | exact |
+| final-prefix reuse | 173 | 300, 333 | 50.945 s | 81.061 s | 469.94% | exact |
+
+The two sampling runs are not an identical-seed latency A/B; the total-time difference is diagnostic,
+not a release speed claim. The fresh reuse run peaked at **8,350,515,200 bytes (~7.78 GiB)** in the
+8 GiB cgroup, with zero `memory.events:max`, OOM, or swap events. This proves 8 GiB is a functional
+minimum but leaves only ~2.8% cgroup headroom. Enforcing the repository's 20% production-headroom
+rule requires a **10 GiB production limit** for unrestricted 1.7B serving. The earlier non-reuse run
+hit the 8 GiB limit and recorded 1,370 `memory.events:max` events, confirming that 8 GiB is too tight
+for diagnostics that duplicate final decode.
+
+The exact-parity listening WAV is `/private/tmp/profile_17_reuse.wav` on the development Mac and
+`/tmp/profile_17_reuse.wav` on `dockermisc1`; inspect around **11.2 seconds**, where total frame 300
+crosses from the first emitted block to the final block. Human listening verdict remains pending.
+
 ### Validation scope and remaining gates
 
 - Model-free iterator/session tests: passed, including reference codes, EOS, exact boundaries, final
@@ -65,7 +109,8 @@ remains gated on per-core, phase-separated 0.6B and 1.7B profiles. Container RSS
 - Real 0.6B same-generation stream-vs-batch parity: passed exactly.
 - Worker raw-PCM chunked transport: passed live.
 - Public proxy unit tests: passed in `runtime-v0.12.0`.
-- Not yet run: baked branch image, 1.7B, phase-separated CPU profile, listening at the 300-frame seam,
+- Not yet run: baked branch image, phase-separated per-core CPU profile, human listening at the 1.7B
+  300-frame seam,
   identical-seed batch wall-time comparison, disconnect/timeout behavior, serialized mixed requests,
   or fresh-process PyTorch rollback.
 
@@ -785,6 +830,9 @@ Capacity scales the prefill activation as expected (~1/3 capacity → ~1/5 less 
 drops with the smaller K/V state. **But the floor is ~7.5 GiB idle / ~7.7 GiB peak** — the INT4 weights
 + bf16 glue + OV runtime base does not move with capacity. **1.7B-INT4 therefore cannot fit the 7 GiB
 `mem_limit`** without dropping capacity below 768 (risking long-utterance overflow: 768 ≈ 64 s of 12 Hz
-context). **Recommendation: ship 1.7B-INT4 at capacity 768 + bf16 with `TTS_MEMORY_LIMIT=8G`**; the
+context). **Historical recommendation: ship 1.7B-INT4 at capacity 768 + bf16 with
+`TTS_MEMORY_LIMIT=8G`**; the
 dangerous 11.6 GiB boot spike is gone, peak is now a stable ~7.7 GiB. 0.6B-INT8 still fits 7 GiB. Full
 arc: lifetime peak **11,593 → 7,715 MiB (−3.9 GiB)** across bf16 + capacity 768.
+The 2026-06-30 streaming-profile follow-up supersedes the production limit with 10G/11G to preserve
+20% headroom; 8G remains the functional validation minimum.
