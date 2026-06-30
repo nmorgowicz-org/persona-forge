@@ -42,6 +42,18 @@ The runtime image starts `python serve.py`, which supervises two Gunicorn master
 Only publish port 8318. Port 8319 should remain inside the container except for an explicitly isolated
 debug container bound to `127.0.0.1`.
 
+The model worker runs as a single Gunicorn worker (`-w 1`) and **must not** use `--preload`. This is a
+deliberate memory decision, not an oversight. Rule for anyone editing `serve.py`:
+
+- **Do NOT add `--preload` to the worker command.** Keep it removed.
+- Reason: `--preload` makes the Gunicorn master load the full model before forking the worker. That
+  only saves memory when several workers share one preloaded copy. With one worker (`-w 1`) it shares
+  nothing and instead pins a second full copy of the model in the master process for the life of the
+  container. Measured on the 1.7B-INT4 profile, that wasted second copy was about 2.8 GiB (master
+  process 3.06 GiB with `--preload` versus 0.03 GiB without it).
+- With `--preload` removed, the single worker process loads and holds the only copy of the model, and
+  `OPENVINO_RELEASE_TORCH=1` still runs normally at worker startup.
+
 The runtime image does not contain model weights or generated IR. Those are supplied through bind
 mounts at startup.
 
@@ -124,8 +136,23 @@ Latest mounted-source confirmation (2026-06-30): both profiles reported BF16/low
 the expected per-core precision/stateful status. The 0.6B short stream matched batch PCM exactly and
 used ~4.95 GiB after generation. The 1.7B short stream also matched exactly; its paragraph reuse run
 crossed boundaries 300/333, matched batch PCM exactly, and peaked at ~7.78 GiB in an 8 GiB test cgroup
-without OOM or swap. This supports the 10 GiB production recommendation but does not replace a baked-
-image smoke test.
+without OOM or swap.
+
+Important: that earlier ~7.78 GiB figure was measured **before** the `--preload` fix described in the
+"Chosen serving profiles" topology note above, so it included the redundant ~2.8 GiB model copy in the
+Gunicorn master. After removing `--preload`, the real footprint is much lower. Re-measured on the
+1.7B-INT4 profile (`runtime-v0.13.0` image with the patched `serve.py`, 12 GiB cgroup, 2026-06-30):
+
+- Gunicorn worker master process: 0.03 GiB (was 3.06 GiB with `--preload`).
+- Container anonymous memory (cgroup `anon`), fresh idle after model load: ~4.0 GiB.
+- Container anonymous memory after a full paragraph `/generate`: **~5.76 GiB, swap 0**.
+- This held flat at 5.76 GiB across four back-to-back paragraph requests, so memory does not creep with
+  repeated long generations; no allocator tuning (`MALLOC_*`, tcmalloc) is needed.
+
+The `--memory 10g` production recommendation is therefore conservative and still safe; it can be revisited
+downward once the same measurement is repeated for a maximum-length paragraph (`max_new_tokens=400`) on a
+freshly baked image (these numbers used `docker cp` of the patched `serve.py`, not a rebuilt image).
+None of this replaces a baked-image smoke test.
 
 List before selecting a graph; do not guess a filename:
 

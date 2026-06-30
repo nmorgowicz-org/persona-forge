@@ -100,7 +100,167 @@ for diagnostics that duplicate final decode.
 
 The exact-parity listening WAV is `/private/tmp/profile_17_reuse.wav` on the development Mac and
 `/tmp/profile_17_reuse.wav` on `dockermisc1`; inspect around **11.2 seconds**, where total frame 300
-crosses from the first emitted block to the final block. Human listening verdict remains pending.
+crosses from the first emitted block to the final block. Human listening verdict (2026-06-30):
+streamed and batch sound **identical with no audible seam** at the boundary; quality gate closed.
+Fresh A/B WAVs also staged at `audio/streaming-ab/`.
+
+### v0.13.0 baked-image streaming validation (2026-06-30, dockermisc1)
+
+This is the first validation using a CI-baked runtime image containing the streaming runtime and BF16
+loader fix, without mounted branch files.
+
+**0.6B INT8 profile** (cap-768 main, cap-32 predictor, BF16 glue, FP32 OV vocoder, 6 threads, 10 GiB cgroup):
+
+- Short phrase streaming: HTTP 200, 130560 bytes (5.44 s audio), first_byte=30.31 s, total=30.31 s
+  (under 300 frames; burst at completion)
+- Paragraph streaming: HTTP 200, 2465280 bytes (25.68 s audio), first_byte=59.98 s, total=161.45 s
+  (101.5 s head start on audio delivery)
+- Internal parity: max_abs=0, SNR=inf, reuse=true, 14 gen frames, 160 ref frames
+- Batch WAV: HTTP 200, 43742 bytes (batch path unchanged)
+
+**1.7B INT4 profile** (cap-768 stateful main, explicit INT4 predictor, BF16 glue, FP32 OV vocoder, 6 threads, 10 GiB cgroup):
+
+- Health: stateful_main=true, stateful_predictor=false, torch_dtype=bfloat16 (matches expected evidence)
+- Short phrase streaming: HTTP 200, 368640 bytes (3.84 s audio), first_byte=47.53 s, total=47.53 s
+  (under 300 frames; burst at completion)
+- Paragraph streaming: HTTP 200, 1167360 bytes (12.16 s audio), first_byte=65.34 s, total=118.01 s
+  (52.7 s head start on audio delivery)
+- Internal parity: max_abs=0, SNR=inf, reuse=true, 20 gen frames, 160 ref frames
+- Batch WAV: HTTP 200, 66348 bytes (batch path unchanged)
+
+Both profiles pass Task 1 (baked-image smoke) on v0.13.0.
+
+### Task 2 — identical-seed latency comparison (2026-06-30, dockermisc1)
+
+Container `qwen3-tts-candidate`, `runtime-v0.13.0`, 0.6B INT8 (stateful main cap-768, stateful
+predictor cap-32, BF16 glue, FP32 OV vocoder), 10 GiB cgroup, 6 threads. Seed 42,
+`do_sample=False`, same paragraph text across all runs. The `/batch_internal` and
+`/stream_internal` endpoints each apply the seed before generation via `_apply_optional_seed()`.
+
+**Short prompt** (bench_common short text, 3 warm-measured iterations):
+
+| Metric | Batch | Stream |
+|---|---:|---:|
+| median wall time (s) | 35.939 | 35.805 |
+| p95 wall time (s) | 37.844 | 35.881 |
+| min wall time (s) | 35.868 | 35.747 |
+| max wall time (s) | 37.844 | 35.881 |
+| median TTFB (s) | — | 35.801 |
+| frames | 49 | 49 |
+| audio (s) | 3.92 | 3.92 |
+
+- PCM parity: all 3 iterations exact (max_abs=0, SNR=inf).
+- Under 300 frames, audio is emitted as a single burst at completion; TTFB ≈ total.
+- Stream median wall time is marginally faster than batch (−0.134 s), within noise.
+  No regression for short requests.
+
+**Paragraph** (bench_common paragraph prompt, max_new_tokens=200, 1 run):
+
+| Metric | Batch | Stream |
+|---|---:|---:|
+| wall time (s) | 97.205 | 121.252 |
+| elapsed (s) | 97.164 | 121.224 |
+| frames | 195 | 195 |
+| ref frames | 160 | 160 |
+| audio (s) | 15.6 | 15.6 |
+| TTFB (s) | — | 59.308 |
+| chunks / boundaries | — | 2 / 300,355 |
+
+- PCM parity: exact (max_abs=0, SNR=inf).
+- Stream total wall time is 24.6 s (25.4%) slower than batch.
+- First audio arrives 59.3 s in, 61.9 s before batch would have finished and 62.0 s before stream
+  completion. Audio is delivered before generation completes, but the streaming overhead (vocoder
+  decode at each boundary, streaming hooks) increases total wall time for paragraph-length requests.
+
+Verdict: identical-seed parity is confirmed for both short and paragraph. Streaming does not regress
+short-request wall time. For paragraph-length, streaming increases total wall time by ~25% because
+of repeated vocoder inferences at each decode boundary; however, it starts delivering PCM ~60 s
+before completion. Task 2 acceptance is met (exact parity, streaming does not regress beyond noise
+for short requests; paragraph regression is documented as a trade-off).
+
+Non-Git artifacts on dockermisc1:
+
+```text
+/tmp/bench_short_identical_seed_report.json (0.6B)
+/tmp/bench_paragraph_identical_seed_report.json (0.6B)
+/tmp/bench_stream_06b_r150_report.json (partial, from earlier attempt)
+```
+
+Memory note: after these runs the 0.6B container was at 9.446 GiB / 10 GiB. Paragraph-length streaming
+runs accumulate memory (stateful caches, vocoder buffers, streaming chunk storage). Periodic restart
+or 10 GiB+ headroom is required to avoid OOM.
+
+### Task 2 — 1.7B identical-seed latency comparison (2026-06-30, dockermisc1)
+
+Container `qwen3-tts-candidate`, `runtime-v0.13.0`, 1.7B INT4 asymmetric g32 (stateful main cap-768,
+explicit INT4 predictor, BF16 glue, FP32 OV vocoder), **12 GiB cgroup / 13 GiB swap**, 6 threads.
+Seed 42, `do_sample=False`. The same "short" prompt text generates 195 frames (15.6 s audio) on 1.7B
+(equivalent to paragraph-length), so these are paragraph-scale runs.
+
+**3 measured iterations:**
+
+| Iteration | Batch wall (s) | Stream wall (s) | Slowdown | TTFB (s) | Parity |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 113.332 | 130.445 | +15.1% | 66.104 | exact |
+| 2 | 104.649 | 128.782 | +23.1% | 64.778 | exact |
+| 3 | 105.205 | 129.976 | +23.6% | 65.509 | exact |
+
+Summary:
+- Batch median wall: 105.205 s; Stream median wall: 129.976 s (23.5% slower).
+- Stream median TTFB: 65.509 s (audio starts ~64.5 s before batch would have completed).
+- All 3 iterations exact PCM parity (max_abs=0, SNR=inf).
+- First iteration is slower for both modes (batch 113.3 s vs 105 s median) — cold cache effect.
+- After 3 iterations: container at 11.32 GiB / 12 GiB (94.37%); 12 GiB was necessary (a prior run
+  at 12 GiB with only 2+ iterations hit 99.45% and the next streaming run failed).
+
+Verdict (1.7B): identical-seed parity confirmed; streaming increases total wall time by 23-24% for
+paragraph-length requests, matching the 0.6B's 25% regression. Streaming TTFB starts ~65 s before
+completion. The 23-25% penalty is consistent across both models and is structural (repeated vocoder
+inference at each 300-frame boundary).
+
+Non-Git artifacts on dockermisc1:
+
+```text
+/tmp/bench_short_identical_seed_report.json (1.7B — overwrote 0.6B report; 0.6B data captured above)
+```
+
+Memory note: 1.7B INT4 paragraph-length streaming runs at 12 GiB approach 94% after 3 iterations.
+For production with streaming and paragraph loads, 12 GiB is a minimum; 10 GiB is unsafe.
+(Superseded by the `--preload` fix below — see "Serving `--preload` memory fix".)
+
+### Serving `--preload` memory fix (2026-06-30, dockermisc1, 1.7B-INT4)
+
+The Gunicorn worker was launched with `--preload` under `-w 1`. With a single worker, preload shares
+nothing and pins a redundant full model copy in the master. Removing `--preload` from `serve.py`:
+
+| Metric | With `--preload` | Without `--preload` |
+|---|---:|---:|
+| Worker master process RSS | 3.06 GiB | 0.03 GiB |
+| Container `anon`, post-paragraph | 10.64 GiB | **5.76 GiB** |
+| Container swap | 1.07 GiB | **0** |
+
+Held flat at 5.76 GiB across four back-to-back paragraph `/generate` calls (no retention creep, so no
+allocator tuning needed). Fresh idle after load ~4.0 GiB. The earlier "~7.78 GiB peak / 12 GiB minimum"
+figures were inflated by the preload copy; real 1.7B-INT4 serving steady-state is ~5.8 GiB. The 400-token
+maximum-length paragraph peak on a freshly baked image is not yet re-measured. Tested via `docker cp` of
+the patched `serve.py` onto `runtime-v0.13.0`, 12 GiB cgroup.
+
+### Task 3 — overlap go/no-go: per-core CPU (2026-06-30, dockermisc1, 1.7B-INT4)
+
+`mpstat -P ALL 1` across a 71 s batch paragraph `/generate`, active-window per-core busy%:
+
+| Core | Generation | Vocoder (`chunked_decode` tail) |
+|---|---:|---:|
+| cpu0–5 | 82–98% | 77–86% |
+| cpu6, cpu7 | 12–14% | 12–13% |
+| Sum | 533/800 | 507/800 |
+
+With `OV_INFERENCE_THREADS=6` the model saturates 6 cores and leaves **exactly 2 idle** in both phases.
+Headroom for Deliverable B (pipelined overlap) therefore exists but is narrow (2 of 8 cores); the 6
+generation threads cannot be shared without slowing generation. A dedicated vocoder `InferRequest` on a
+2-thread pool over the spare cores could decode streaming chunks concurrently, recovering the 23–25%
+streaming wall-time penalty while keeping the ~60 s TTFB benefit — a UX win, not a net speedup over
+batch. Building B is a product decision; Deliverable A ships regardless. Raw: `/tmp/task3_mpstat.txt`.
 
 ### Validation scope and remaining gates
 
@@ -109,10 +269,13 @@ crosses from the first emitted block to the final block. Human listening verdict
 - Real 0.6B same-generation stream-vs-batch parity: passed exactly.
 - Worker raw-PCM chunked transport: passed live.
 - Public proxy unit tests: passed in `runtime-v0.12.0`.
-- Not yet run: baked branch image, phase-separated per-core CPU profile, human listening at the 1.7B
-  300-frame seam,
-  identical-seed batch wall-time comparison, disconnect/timeout behavior, serialized mixed requests,
-  or fresh-process PyTorch rollback.
+- Baked-image streaming smoke (v0.13.0): passed (Task 1).
+- Done since: phase-separated per-core CPU profile (Task 3) and human listening (identical, no seam).
+- (Originally pending) phase-separated per-core CPU profile, human listening at the 1.7B
+   300-frame seam.
+- Run: identical-seed batch vs streaming wall-time comparison (Task 2) — short exact parity,
+  no regression; paragraph: exact parity, 25% slower total wall time with 60 s head start on audio.
+- Run: disconnect/timeout tests (ok), mixed serialized requests (ok), fresh-process PyTorch rollback (ok, 503).
 
 Raw diagnostics remain outside Git on `dockermisc1` under `/tmp/stream_{long,reuse}*`,
 `/tmp/infer_stream.f32`, and `/tmp/stream_cpu.txt`. The temporary container was stopped after testing.

@@ -322,12 +322,26 @@ def _run_generate(text: str, language: str, **gen_kwargs):
     return _trim_silence(wavs[0], sr), sr
 
 
+def _apply_optional_seed(seed_value):
+    """Apply an optional seed to torch, numpy, and Python RNGs for deterministic runs."""
+    if seed_value is None:
+        return
+    import random
+    import numpy as np
+    torch.manual_seed(seed_value)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed_value)
+    np.random.seed(seed_value)
+    random.seed(seed_value)
+
+
 def _run_generate_with_streaming(
     text: str,
     language: str,
     on_audio_chunk: Callable[[Any], None],
     *,
     reuse_streamed_decode: bool = False,
+    seed_value=None,
     **gen_kwargs,
 ):
     """Run generation while emitting incremental untrimmed PCM chunks.
@@ -337,6 +351,8 @@ def _run_generate_with_streaming(
     """
 
     import numpy as np
+
+    _apply_optional_seed(seed_value)
 
     if model is None or voice_clone_prompt is None:
         raise RuntimeError("Model not loaded")
@@ -558,11 +574,13 @@ def stream_internal():
             chunk_times.append(time.monotonic() - started)
 
         reuse_streamed_decode = bool(data.get("reuse_streamed_decode", False))
+        seed_value = data.get("seed")
         wav, sr, wav_raw, stream_info = _run_generate_with_streaming(
             text,
             language,
             on_chunk,
             reuse_streamed_decode=reuse_streamed_decode,
+            seed_value=seed_value,
             **gen_kwargs,
         )
 
@@ -608,6 +626,76 @@ def stream_internal():
         return jsonify({"error": f"Inference error: {str(e)}"}), 500
 
     return Response(audio_bytes, content_type=media_type, headers=parity_headers)
+
+
+@app.route("/batch_internal", methods=["POST"])
+def batch_internal():
+    """Dev-only batch parity endpoint.
+
+    - Uses the same JSON input as /stream_internal.
+    - Applies optional seed, same as /stream_internal, for identical-seed A/B.
+    - Returns WAV with timing headers.
+    - NOT part of the public API; may change or be removed.
+    """
+    if model is None or voice_clone_prompt is None:
+        return jsonify({"error": "Model not loaded"}), 503
+
+    data = request.get_json(force=True, silent=True)
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+
+    language = (data.get("language") or "English").strip()
+
+    def do_work():
+        import numpy as np
+
+        # Forward generation kwargs for parity and tests.
+        gen_kwargs = {
+            "do_sample": data.get("do_sample"),
+            "temperature": data.get("temperature"),
+            "top_p": data.get("top_p"),
+            "top_k": data.get("top_k"),
+            "max_new_tokens": data.get("max_new_tokens"),
+        }
+        gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
+
+        # Apply seed control, same as /stream_internal.
+        _apply_optional_seed(data.get("seed"))
+
+        started = time.monotonic()
+        wavs, sr = model.generate_voice_clone(
+            text=text,
+            language=language,
+            voice_clone_prompt=voice_clone_prompt,
+            **gen_kwargs,
+        )
+        elapsed = time.monotonic() - started
+
+        # Return batch result as WAV with timing headers.
+        buf = io.BytesIO()
+        sf.write(buf, wavs[0], sr, format="WAV")
+        buf.seek(0)
+        audio_bytes = buf.read()
+
+        wav_size = len(wavs[0])
+        frames = wav_size // 1920
+
+        return audio_bytes, "audio/wav", {
+            "X-Batch-Frames": str(frames),
+            "X-Batch-Elapsed-Seconds": f"{elapsed:.6f}",
+            "X-Batch-Seed": str(data.get("seed")),
+        }
+
+    try:
+        audio_bytes, media_type, headers = executor.submit(do_work).result(timeout=300)
+    except Exception as e:
+        return jsonify({"error": f"Inference error: {str(e)}"}), 500
+
+    return Response(audio_bytes, content_type=media_type, headers=headers)
 
 
 if __name__ == "__main__":

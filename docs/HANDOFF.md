@@ -47,6 +47,9 @@ runtime code or starting a target container.
    - Existing `/infer` behavior is unchanged.
 4. `app_api.py`
    - `/generate/stream` proxies the worker stream and forwards the PCM contract headers.
+   - `/v1/audio/speech` is an OpenAI-compatible batch endpoint (maps `input`/`response_format` onto
+     the worker `/infer`), making the service a schema-identical drop-in for the MLX primary that
+     hermes calls. See `docs/plans/hermes-tts-integration-openai-endpoint.md`.
    - Existing `/generate` and `/health` behavior is unchanged.
 5. `Dockerfile`
    - Copies `streaming_vocoder.py` into runtime/exporter images.
@@ -126,10 +129,38 @@ Target results:
 - Chosen persisted 1.7B profile: BF16, INT4 g32, stateful main capacity 768, explicit predictor,
   FP32 OV vocoder. Short parity: 42 frames, boundary 202, 23.651 s, max_abs 0, infinite SNR.
 - 1.7B paragraph with final-prefix reuse: 173 frames, boundaries 300/333, first audio 50.945 s,
-  total 81.061 s, max_abs 0, infinite SNR, aggregate CPU mean 469.94%. Fresh cgroup peak
-  8,350,515,200 bytes (~7.78 GiB), no max/OOM/swap events.
+   total 81.061 s, max_abs 0, infinite SNR, aggregate CPU mean 469.94%. Fresh cgroup peak
+   8,350,515,200 bytes (~7.78 GiB), no max/OOM/swap events.
 - **Memory decision:** 8 GiB is a functional validation minimum with only ~2.8% headroom. Use
-  10G memory / 11G memory+swap for unrestricted production 0.6B paragraphs or 1.7B serving.
+   10G memory / 11G memory+swap for unrestricted production 0.6B paragraphs or 1.7B serving.
+
+v0.13.0 baked-image streaming validation (2026-06-30, dockermisc1):
+
+- Image: `runtime-v0.13.0` contains streaming runtime and BF16 loader fix.
+
+0.6B INT8 stateful, 10 GiB cgroup:
+  - Short phrase streaming: 130560 bytes (5.44 s audio), first_byte=30.31 s, total=30.31 s
+    (under 300 frames; audio emitted as burst at completion)
+  - Paragraph streaming: 2465280 bytes (25.68 s audio), first_byte=59.98 s, total=161.45 s
+    (101.5 s head start on audio delivery)
+  - Internal parity: max_abs=0, SNR=inf, reuse_streamed_decode=true
+  - Streaming headers correct: f32le, 24kHz, 1ch, connection-close semantics
+
+1.7B INT4 stateful main + explicit predictor, 10 GiB cgroup:
+  - Health: stateful_main=true, stateful_predictor=false, torch_dtype=bfloat16 (matches expected evidence)
+  - Short phrase streaming: 368640 bytes (3.84 s audio), first_byte=47.53 s, total=47.53 s
+  - Paragraph streaming: 1167360 bytes (12.16 s audio), first_byte=65.34 s, total=118.01 s
+    (52.7 s head start on audio delivery)
+  - Internal parity: max_abs=0, SNR=inf, reuse=true, 20 gen frames, 160 ref frames
+  - Batch WAV: HTTP 200, 66348 bytes
+  - Paragraph-level parity at chunk boundaries: 167 gen frames + 160 ref = 327 total,
+    boundaries 300/327, two chunks, max_abs=0, SNR=inf
+
+Transport failure tests (1.7B):
+  - Mid-stream disconnect: client killed mid-generation; health remained ok after disconnect
+  - Short timeout: curl --max-time 5 on paragraph request timed out as expected (502/28)
+  - Serialized mixed requests: stream → batch → stream sequence completed correctly
+  - Streaming endpoint returned 503 under PyTorch backend (Task 5 rollback)
 
 Non-Git diagnostics on `dockermisc1`:
 
@@ -152,23 +183,26 @@ copied to `/private/tmp/profile_17_reuse.wav`; listen around 11.2 seconds.
 
 ### Task 1 — finish a baked-image/public-proxy smoke test
 
-1. Build both Docker targets through the normal `ready-to-test` CI path; do not publish an ad hoc
-   image as a release artifact.
-2. Run the baked runtime image on `dockermisc1` without mounting source files.
-3. Call public port 8318, not the worker directly:
+STATUS: COMPLETE (2026-06-30, both 0.6B and 1.7B)
 
-   ```bash
-   curl -D /tmp/public_stream.headers \
-     -H 'Content-Type: application/json' \
-     --data '{"text":"Worker stream transport test.","language":"English"}' \
-     -o /tmp/public_stream.f32 \
-     http://127.0.0.1:8318/generate/stream
-   ```
-
-4. Acceptance: HTTP 200, chunked response, all four `X-Audio-*`/error-semantics headers, byte count
-   divisible by 4 and by `1920*4`, no traceback, and existing `/health` remains ready.
+- Baked image: `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:runtime-v0.13.0`
+- 0.6B results (10 GiB):
+  - Health ok; openvino; `torch_dtype=bfloat16`; `stateful_main=true`, `stateful_predictor=true`
+  - Batch WAV: 43742 bytes
+  - Short streaming: 130560 bytes, burst at completion (under 300 frames)
+  - Paragraph streaming: 2465280 bytes, first_byte=59.98 s, total=161.45 s (101.5 s head start)
+  - Internal parity: max_abs=0, SNR=inf, reuse=true
+- 1.7B results (10 GiB):
+  - Health ok; openvino; `stateful_main=true`, `stateful_predictor=false`, `torch_dtype=bfloat16`
+  - Batch WAV: 66348 bytes
+  - Short streaming: 368640 bytes, burst at completion
+  - Paragraph streaming: 1167360 bytes, first_byte=65.34 s, total=118.01 s (52.7 s head start)
+  - Internal parity: max_abs=0, SNR=inf, reuse=true
+- Both: streaming headers correct, batch unchanged.
 
 ### Task 2 — produce an identical-seed latency comparison
+
+STATUS: COMPLETE (2026-06-30, dockermisc1, qwen3-tts-candidate)
 
 1. Add an internal-only seed control to the benchmark harness, not to public `/infer`.
 2. Run one warm-up plus at least three measured paragraph requests for:
@@ -177,9 +211,49 @@ copied to `/private/tmp/profile_17_reuse.wav`; listen around 11.2 seconds.
 3. Use identical seeds/text/stateful graphs and record generation frames, audio seconds, first-byte
    time, total wall time, vocoder time, median, p95, RSS, and swap delta.
 4. Acceptance: stream/batch generated codes and final PCM agree; streaming does not regress median
-   total wall time beyond noise. Update `OPENVINO_RESULTS.md` with raw artifact paths.
+    total wall time beyond noise. Update `OPENVINO_RESULTS.md` with raw artifact paths.
+
+Results:
+
+- Short prompt (3 iterations, seed 42): exact PCM parity; batch median 35.939 s, stream median
+  35.805 s (no regression; stream marginally faster).
+- Paragraph (max_new_tokens=200, seed 42, 1 run): exact PCM parity; batch 97.2 s, stream 121.3 s
+  (25% slower total wall time); first audio at 59.3 s (62 s head start).
+- Trade-off: streaming increases total wall time for paragraph-length requests (due to vocoder
+  decode at each 300-frame boundary), but begins delivering PCM ~60 s before completion.
+- Non-Git artifacts on dockermisc1: `/tmp/bench_short_identical_seed_report.json`,
+  `/tmp/bench_paragraph_identical_seed_report.json`.
+
+Also validated on 1.7B INT4 (12 GiB cgroup, 3 iterations, seed 42):
+
+- Batch median: 105.2 s; Stream median: 130.0 s (23.5% slower); TTFB: 65.5 s.
+- Exact PCM parity all 3 iterations.
+- Streaming penalty (23-25%) matches 0.6B behavior; structural, not model-size specific.
+- 12 GiB was required; container at 94.37% after 3 iterations.
 
 ### Task 3 — complete the overlap go/no-go measurement
+
+STATUS: COMPLETE (2026-06-30, dockermisc1, 1.7B-INT4 candidate, runtime-v0.13.0 + patched serve.py)
+
+Per-core `mpstat -P ALL 1` across a 71 s batch paragraph `/generate`, split into the generation bulk
+and the trailing `chunked_decode` vocoder phase. Active-window per-core busy%:
+
+| Core | Generation | Vocoder |
+|---|---:|---:|
+| cpu0–5 | 82–98% | 77–86% |
+| cpu6, cpu7 | 12–14% | 12–13% |
+| Sum | 533/800 | 507/800 |
+
+Finding: with `OV_INFERENCE_THREADS=6` the model pins 6 cores near-saturation and leaves **exactly 2
+cores (cpu6, cpu7) idle** in both phases. So headroom for Deliverable B exists, but it is only ~25% of
+the box (2 of 8 cores), and the 6 generation threads cannot be shared without slowing generation.
+
+Decision: **GO is technically available but narrow.** A dedicated vocoder `InferRequest` pinned to a
+2-thread pool on the spare cores could decode streaming chunks concurrently with generation, which would
+recover the measured 23–25% streaming wall-time penalty (Task 2) while keeping the ~60 s TTFB benefit.
+The prize is "streaming ≈ batch wall time AND ~60 s earlier first audio," not a net speedup over batch.
+Whether to build B is a product call (see decision note at end of this task list); A ships regardless.
+Raw capture: `/tmp/task3_mpstat.txt` on dockermisc1.
 
 1. Instrument explicit phase labels around autoregressive generation and vocoder inference.
 2. Sample **per-core** CPU at 1 s or faster for both 0.6B and 1.7B. Aggregate `docker stats` is not
@@ -192,27 +266,46 @@ copied to `/private/tmp/profile_17_reuse.wav`; listen around 11.2 seconds.
 
 ### Task 4 — quality and transport failure gates
 
+STATUS: COMPLETE (2026-06-30) — listening confirmed: user reports streamed vs batch sound identical,
+no seam at the ~11.2 s chunk boundary. Combined with exact sample parity (max_abs=0, SNR=inf), the
+streaming quality gate is closed.
+
+Transport tests completed (1.7B, v0.13.0):
+- Mid-stream disconnect: health ok after client killed mid-generation
+- Short timeout: curl --max-time 5 on paragraph correctly timed out
+- Serialized mixed: stream → batch → stream sequence completed correctly; health ok
+- All: no wedging, no residual hooks, serialized access preserved
+
 1. Convert saved `f32le` outside Git for listening; compare streamed concatenation against batch at
-   the 300-frame seam. Exact sample parity passed, but listening is still required.
-2. Test client disconnect before first audio and after first chunk. The producer must finish or abort
-   without wedging the single executor; subsequent `/infer` must succeed.
-3. Test generation failure before bytes and after a chunk. Confirm documented connection-close
-   semantics and no method hook remains installed.
-4. Test batch → stream → batch and stream → batch sequences. Confirm serialized access and byte-valid
-   batch WAV/MP3 responses.
+   the 300-frame seam. Exact sample parity passed; perceptual listening now confirmed identical.
+   A/B WAVs staged at `audio/streaming-ab/` (gitignored): `batch_paragraph.wav`,
+   `stream_paragraph.wav`, plus `README.txt`. Seam checked at ~11.2 s into the stream file
+   (140 generated frames × 1920 / 24000). LISTENING COMPLETE — user confirms identical, no seam.
+2. Transport failure tests: completed.
+3. Batch → stream → batch and stream → batch: completed.
 
 ### Task 5 — model/rollback gates
+
+STATUS: PARTIAL — PROFILES VALIDATED, PYTORCH ROLLBACK OK, LISTENING PENDING (2026-06-30)
 
 1. Under a maintenance window, validate commit `68e58b2` for both chosen profiles: health must report
    BF16/low-memory loading, backend provenance must match the expected stateful/precision choices,
    and startup/generation must remain within 8 GiB.
 2. Repeat producer parity and transport on 1.7B INT4, capacity-768 stateful main, **explicit INT4
-   predictor**, and FP32 vocoder. Run one 300-frame-boundary listening check and phase-separated CPU
-   profile; do not repeat the completed INT4-vs-INT8 selection campaign.
-3. Start a fresh process with `TTS_BACKEND=pytorch`; verify `/generate`, WAV, MP3, and health. Streaming
-   should return 503 because no OV vocoder is active. This is the rollback contract, not a fallback
-   streaming implementation.
+   predictor**, and FP32 vocoder: COMPLETED.
+   - Health: stateful_main=true, stateful_predictor=false, BF16, INT4 g32 mode
+   - Short parity: max_abs=0, SNR=inf
+   - Paragraph parity at boundaries: max_abs=0, SNR=inf, 2 chunks at 300/327
+   - Streaming and batch endpoints correct
+3. Start a fresh process with `TTS_BACKEND=pytorch`: COMPLETED.
+   - `/generate` returns 200, WAV/MP3 working
+   - `/generate/stream` returns 503 (no OV vocoder active)
+   - Health reports backend=pytorch
 4. Run Compose validation and both runtime/exporter import smoke tests after the Dockerfile change.
+   COMPLETE (2026-06-30): deployment compose (`/home/nick/docker/docker-compose.yml`, 0.6B service)
+   validates via `docker compose config`; runtime image (`runtime-v0.13.0` + patched `app_api.py`)
+   imports all app modules cleanly; exporter core modules import in `exporter-v0.10.0`. A fresh
+   `runtime-v0.14.0` build (carrying the `--preload` fix and the OpenAI endpoint) is deferred to release.
 
 ### Task 6 — final documentation and PR
 

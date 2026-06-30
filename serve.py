@@ -33,7 +33,6 @@ SERVICES = (
             "300",
             "--bind",
             "0.0.0.0:8319",
-            "--preload",
             "--log-level",
             "info",
         ],
