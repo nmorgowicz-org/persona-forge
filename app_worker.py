@@ -71,8 +71,11 @@ class _StreamingVocoderContext:
     Behavior:
       - If on_audio_chunk is None: no-op wrapper; identical to normal batch mode.
       - If on_audio_chunk is set:
-          - Monkey-patches talker.forward so each completed 16-codebook frame is
-            captured and appended to an internal buffer.
+          - Patches talker.model.forward (the inner core, where OpenVINO is wired)
+            instead of talker.forward to avoid colliding with Transformers'
+            kwarg validation.
+          - Each completed 16-codebook frame is captured from hidden_states[-1]
+            and appended to an internal buffer.
           - When buffer reaches >= STREAMING_CHUNK_SIZE frames, it flushes a chunk
             through the vocoder runtime's iter_decode_chunks and yields PCM via
             on_audio_chunk(chunk: np.ndarray[float32]).
@@ -227,14 +230,20 @@ class _StreamingVocoderContext:
         if self.on_audio_chunk is None:
             return self
 
-        # Capture codes from talker.forward by wrapping its output.
+        # Patch the inner model forward (where OV is wired) to avoid colliding
+        # with Transformers' outer model_kwargs validation.
         talker = getattr(getattr(self.model, "model", None), "talker", None)
         if talker is None:
             self.on_audio_chunk = None
             return self
 
-        # Store original forward.
-        self._orig_forward = getattr(talker, "forward", None)
+        inner = getattr(talker, "model", None)
+        if inner is None:
+            self.on_audio_chunk = None
+            return self
+
+        # Store original inner forward.
+        self._orig_forward = getattr(inner, "forward", None)
         if not callable(self._orig_forward):
             self.on_audio_chunk = None
             return self
@@ -271,15 +280,17 @@ class _StreamingVocoderContext:
             self._maybe_flush_chunk()
             return out
 
-        talker.forward = _streaming_forward
+        inner.forward = _streaming_forward
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        # Restore original forward.
+        # Restore original inner forward.
         if self._orig_forward is not None:
             talker = getattr(getattr(self.model, "model", None), "talker", None)
-            if talker is not None and hasattr(talker, "forward"):
-                talker.forward = self._orig_forward
+            if talker is not None:
+                inner = getattr(talker, "model", None)
+                if inner is not None and hasattr(inner, "forward"):
+                    inner.forward = self._orig_forward
             self._orig_forward = None
 
         # Flush any remaining codes (possibly partial chunk) via vocoder.
