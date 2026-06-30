@@ -117,18 +117,129 @@ The TODO line above describes the state at handoff creation. Current branch stat
   smoke gates passed. Runtime health reports stateful INT8 main cap768, stateful INT8 predictor
   cap32, and FP32 OpenVINO vocoder. Post-request container memory was 5.907 GiB. Exact provenance,
   output paths, and remaining gates are recorded in `docs/dev/OPENVINO_RESULTS.md`.
+- Follow-up: deterministic 0.6B stream parity passed exactly (`max_abs=0`, `SNR=inf`); five warm
+  production-sampling requests had 19.43-second median latency and approximately 5.94 median RTF.
+  PyTorch backend startup passed, but actual rollback generation timed out at 300 seconds and
+  returned no audio. OpenVINO was restored. Treat rollback generation as a blocking failed gate.
 
 Next steps, in order:
 
-1. Run deterministic 0.6B batch/stream parity, listening, warm latency/RTF/RSS benchmarks, and the
-   PyTorch rollback gate. Preserve outputs outside Git and update results.
-2. Repeat export/start/generation for 1.7B. Verify health reports main `stateful-int4`, predictor
+1. Diagnose the PyTorch rollback timeout without weakening the 300-second public API contract.
+2. Complete 0.6B listening and the larger warm benchmark sample required by the implementation plan.
+3. Repeat export/start/generation for 1.7B. Verify health reports main `stateful-int4`, predictor
    `int8`, and OpenVINO vocoder enabled; if health reports FP32 main, stop and fix graph selection.
-3. Run deterministic batch/stream parity, warm latency/RSS collection, and A/B listening. Record
+4. Run deterministic batch/stream parity, warm latency/RSS collection, and A/B listening. Record
    source commit, image ID/digest, model revision, metadata hash, host memory/swap, and saved audio
    paths in `docs/dev/OPENVINO_RESULTS.md`.
-4. Update this checkpoint with real results, then commit in logical chunks and open the PR with one
+5. Update this checkpoint with real results, then commit in logical chunks and open the PR with one
    Conventional Commit line per release-note item in the override block.
+
+### 2026-06-30 final operator state after commit `377287e`
+
+`377287e refactor(service): simplify runtime and local export` is pushed to
+`origin/refactor/simplify-v2`. Host `gh auth status` succeeds when run outside the sandbox. No PR has
+been opened yet. The documentation changes in this final operator section are the only post-commit
+worktree changes and must be committed/pushed before handoff.
+
+Current `dockermisc1` state:
+
+- `qwen3-tts` is healthy and running the **1.7B OpenVINO** profile from local image
+  `qwen3-tts-openvino:simplify-v2-runtime`
+  (`sha256:c93d0267d73f5352fc8c6a3d5634ec3cbfde7fb6fc3976cdab6dabad2e759063`).
+- Exporter image:
+  `sha256:9607147cdf069adc17899d7245a8ff4179390822f67e8acb1736cbbb014de15c`.
+- Validation checkout: `/tmp/qwen3-tts-simplify-v2`. It is a tar-staged worktree, not a Git
+  checkout. The original `/home/nick/projects/qwen3-tts-openvino` checkout was not modified.
+- Isolated artifacts: `/var/data/autopirate/qwen3-tts/openvino-simplify-v2/{0.6B,1.7B}`. Existing
+  production artifacts under `/var/data/autopirate/qwen3-tts/openvino` were not modified.
+- Model cache: `/var/data/autopirate/qwen3-tts/model`. Reference:
+  `/var/data/autopirate/qwen3-tts/voice/voice_A.wav` with the Rosie transcript already recorded in
+  the Compose invocation/history above.
+- The previous `qwen3-tts-candidate` (`runtime-v0.13.0`) remains present but stopped.
+
+1.7B validated configuration and provenance:
+
+- Model revision `fd4b254389122332181a7c3db7f27e918eec64e3`; metadata source hash
+  `a6f9dc107cc69a2b`.
+- Main `int4_asym_g32`, stateful cap768. Stateful XML SHA-256
+  `2ced2c3e91676efb77d44373fbe60906de37359a3d6a8746a14298e710c3ed1d`, 56 states shaped
+  `[1,8,768,128]`, compile smoke passed.
+- Predictor `int8_asym`, explicit cache. FP32 OpenVINO vocoder enabled. BF16 low-memory Torch glue.
+- Health reports `active_main_compression=stateful-int4`,
+  `active_predictor_compression=int8`, `stateful_predictor=false`, and vocoder enabled.
+- MP3, native WAV, missing-input OpenAI envelope, and bounded deterministic streaming parity passed.
+  Parity (`do_sample=false`, seed 1234, max 32) had max absolute error 0, infinite SNR, 26 generated
+  frames, and 25.97-second total/TTFB.
+- Five production-sampling WAVs took 21.16, 22.47, 22.50, 22.65, and 24.18 seconds. Median latency
+  22.50 seconds; nearest-rank p95 24.18 seconds; audio duration 2.85-3.71 seconds; median RTF about
+  7.39. Files: `/tmp/simplify-17-warm-{1..5}.wav` and `/tmp/simplify-17-warm.tsv`.
+- Listening/A-B quality evaluation is still required. Do not infer quality from tensor parity.
+
+#### Memory accounting and reduction work
+
+Do not collapse the following into one number:
+
+- Immediately after the first 1.7B generations, Docker working-set reporting was 9.686 GiB / 10
+  GiB and cgroup peak was 10,561,286,144 bytes (9.84 GiB). This leaves almost no cgroup peak margin.
+- Process `VmRSS`/`VmHWM` was about 7.62 GiB, consistent with the earlier cap768 measurements.
+- After five warm requests, Docker reported 5.448 GiB / 10 GiB because 4.69 GB of cgroup file pages
+  became `inactive_file` and Docker subtracts reclaimable inactive file cache. At that point cgroup
+  `anon` was 5.79 GB, total `file` 4.71 GB, `inactive_file` 4.69 GB, and process `VmRSS` 7,991,484
+  kB. The cgroup peak remained 9.84 GiB.
+- Therefore the apparent 9.69 -> 5.45 GiB drop is mainly active-to-inactive file-cache accounting,
+  not model tensors being freed. Use `memory.current`, `memory.peak`, `memory.stat`, process
+  `VmRSS/VmHWM`, host available RAM, and swap together. Reset peak by recreating the container.
+
+Ranked memory-reduction hypotheses:
+
+1. **Release the unused PyTorch speech-tokenizer model after prompt creation and successful OV
+   vocoder compile.** Current `OPENVINO_RELEASE_TORCH` frees only the 28+5 transformer `.layers`
+   (~2.77 GiB for 1.7B). The original speech-tokenizer decoder remains resident even though
+   `speech_tokenizer.decode` is patched to the OpenVINO vocoder. The reference encoder may also be
+   dead after `voice_clone_prompt` is materialized. First instrument parameter/buffer bytes for
+   tokenizer encoder and decoder separately; then replace only proven-dead parameters with empty
+   storage, run `gc.collect()`/`malloc_trim`, and fail closed instead of retaining a silent PyTorch
+   vocoder fallback. Validate prompt reuse, batch decode, streaming decode, RSS, parity, and
+   listening. This is the most plausible steady-anonymous-memory reduction.
+2. **Build a selective/thin serving loader.** Avoid materializing transformer blocks and
+   reference-only components that OpenVINO replaces. This primarily reduces boot peak and load
+   time because the core layers are already released after compile, but it may also reduce
+   allocator retention. Preserve embeddings, norms, projections, codec/predictor heads, configs,
+   and the exact `GenerationMixin` return contract. This is high complexity and must retain the
+   normal full FP32 exporter path.
+3. **Test BF16 activation hints and recognized state-cache precision independently.** The current
+   OV config uses `INFERENCE_PRECISION_HINT=f32` and `KV_CACHE_PRECISION=f32`. On the now-stateful
+   main, try BF16 inference precision and then `KV_CACHE_PRECISION=u8` as separate experiments.
+   Record whether OpenVINO actually applies each property. The main FP32 cache is only roughly
+   56*8*768*128*4 bytes (~176 MiB), so U8 cache savings are bounded (~132 MiB maximum) and cannot
+   explain multi-GiB usage. Require deterministic token/cache parity, production listening, and
+   latency/RSS results; do not silently lower thresholds.
+4. **Capacity 512 experiment only if product duration permits.** The 2048 -> 768 change previously
+   saved ~611 MiB peak. A further 768 -> 512 reduction may save only low hundreds of MiB and lowers
+   context from ~64 to ~43 seconds including prompt/generated positions. Test long prompts and fail
+   closed on overflow. Keep cap768 as the production candidate until evidence justifies the trade.
+5. **Measure explicit predictor duplication.** The explicit predictor compiles prefill and decode
+   graphs, potentially duplicating its small weights. A single stateful predictor can reduce graph
+   duplication, but the earlier 1.7B decision favored explicit predictor; revisit only with measured
+   memory/latency and all 15 codebook parity. Expected savings are modest.
+6. **Do not optimize reclaimable file cache blindly.** OpenVINO weight mmaps legitimately populate
+   file cache, which the kernel can reclaim. Copying IR, dropping caches globally, or disturbing
+   unrelated host workloads is not acceptable. The operational issue is the cold/first-generation
+   cgroup peak; solve anonymous duplication first and evaluate whether 10 GiB remains safe under
+   concurrent host pressure. If the 20% peak-headroom rule is strict, 10 GiB is not yet sufficient.
+
+Exact next tasks:
+
+1. Commit/push this final documentation checkpoint.
+2. Add model-free byte-accounting/release helpers for speech-tokenizer components, with synthetic
+   unit tests. Do not release anything before measuring and identifying runtime consumers.
+3. Run an isolated 1.7B A/B on `dockermisc1`: baseline versus tokenizer release, recreate the
+   container between runs, reset/capture cgroup peak, and use the same deterministic and production
+   prompts. Roll back immediately on decode/streaming failure.
+4. Investigate the PyTorch rollback timeout separately. A bounded internal generation with a low
+   `max_new_tokens` can diagnose functionality, but it does not make the public 300-second rollback
+   gate pass. Do not increase the public timeout merely to turn the gate green.
+5. Have the user perform blind listening on the saved 0.6B and 1.7B WAVs before selecting a model.
 
 ## 4. `src/qwen3_tts/app.py` — the merged Flask app (single port 8318)
 

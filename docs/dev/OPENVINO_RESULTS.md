@@ -1029,3 +1029,51 @@ images, not published artifacts.
 
 Remaining gates: deterministic batch/stream parity, listening, warm median/p95/RTF and peak-RSS
 benchmarking, PyTorch rollback verification, and the complete 1.7B export/runtime/A-B validation.
+
+#### 0.6B follow-up parity, warm timing, and rollback (2026-06-30)
+
+- Deterministic `stream_internal` run (`do_sample=false`, seed 1234, max 96 tokens) passed exact
+  stream-vs-terminal parity: 95 generated frames, one decode chunk, max absolute error 0, SNR
+  infinite. TTFB was 37.20 seconds. Container memory after parity was 6.039 GiB.
+- Five production-sampling OpenAI WAV requests using the same prompt completed in 17.55, 18.12,
+  19.43, 20.06, and 20.60 seconds. Median latency was 19.43 seconds; nearest-rank p95 was 20.60
+  seconds. Audio duration varied from 2.79 to 3.47 seconds because sampling was enabled; median RTF
+  was approximately 5.94. This five-request run is useful operational data but is smaller than the
+  final benchmark sample required by the implementation plan.
+- `TTS_BACKEND=pytorch` loaded successfully and `/health` reported `backend=pytorch`, proving
+  selection/startup works. Actual rollback generation **failed the serving gate**: the short prompt
+  exceeded the 300-second HTTP timeout and returned 500 with no WAV. The manual CPU PyTorch
+  generation continued in the executor until the container was recreated. The service was restored
+  to the validated OpenVINO 0.6B configuration afterward. Do not claim rollback is tested until a
+  generation returns audio within the serving timeout or the rollback timeout contract is changed
+  deliberately.
+
+Non-Git follow-up files on `dockermisc1`: `/tmp/simplify-06-parity.wav`,
+`/tmp/simplify-06-warm-{1..5}.wav`, and `/tmp/simplify-06-warm.tsv`.
+
+### simplify-v2 1.7B end-to-end validation — FUNCTIONAL PASS, MEMORY/LISTENING OPEN (2026-06-30)
+
+Fresh local export assembled an INT4 asymmetric group-32 main, INT8 explicit predictor, FP32
+OpenVINO vocoder, and BF16 Torch glue. Model revision
+`fd4b254389122332181a7c3db7f27e918eec64e3`; metadata source hash `a6f9dc107cc69a2b`.
+The cap768 stateful main compiled with 56 `[1,8,768,128]` states; XML SHA-256 is
+`2ced2c3e91676efb77d44373fbe60906de37359a3d6a8746a14298e710c3ed1d`.
+
+- Health reported `stateful-int4` main, explicit `int8` predictor, no stateful predictor, and OV
+  vocoder enabled. MP3, native WAV, and OpenAI error-envelope gates passed.
+- Bounded deterministic stream parity (seed 1234, max 32) was exact: max abs 0, SNR infinite, 26
+  frames, 25.97 seconds.
+- Five production-sampling WAVs: median 22.50 seconds, nearest-rank p95 24.18 seconds, median RTF
+  approximately 7.39. This is about 15.8% slower in median wall time than the five-run 0.6B sample
+  (19.43 seconds), though the prompts differed only in the spoken model-size phrase and sampling
+  produced different durations.
+- Cold/early cgroup peak reached 9.84 GiB under the 10 GiB limit. Process high-water RSS was about
+  7.62 GiB. After warm requests Docker working-set reporting settled to 5.448 GiB as 4.69 GB of file
+  cache became inactive/reclaimable; this does not erase the cold peak. See HANDOFF for full
+  accounting and ranked reduction experiments.
+- Saved files: `/tmp/simplify-17.mp3`, `/tmp/simplify-17-native.wav`,
+  `/tmp/simplify-17-parity.wav`, `/tmp/simplify-17-warm-{1..5}.wav`, and
+  `/tmp/simplify-17-warm.tsv` on `dockermisc1`.
+
+The 1.7B profile is not accepted for release until blind listening passes and the 10 GiB cold/first-
+generation peak is reconciled with the required memory-headroom policy.
