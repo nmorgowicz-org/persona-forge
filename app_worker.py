@@ -154,6 +154,7 @@ class _StreamingVocoderContext:
         if self.on_audio_chunk is None:
             return
         import numpy as np
+        import os
 
         codes_arr = self._to_numpy(self._codes_buffer)
         frames, q = codes_arr.shape
@@ -177,6 +178,12 @@ class _StreamingVocoderContext:
         if len(wav) > emitted_samples:
             new_chunk = wav[emitted_samples:]
             self.on_audio_chunk(new_chunk)
+            if os.getenv("STREAMING_DEBUG"):
+                print(
+                    f"[stream] flush: frames={frames}, wav_len={len(wav)}, "
+                    f"prev={emitted_samples}, emitted={len(new_chunk)}",
+                    flush=True,
+                )
 
         # Remember last full decode for diff streaming.
         self._prev_wav = wav
@@ -290,18 +297,44 @@ class _StreamingVocoderContext:
             self._orig_forward = None
 
         # Flush any remaining codes as a final full decode.
-        if self.on_audio_chunk is not None and self._codes_buffer:
+        if self.on_audio_chunk is not None and self._codes_buffer is not None:
             import numpy as np
+            import os
 
             codes_arr = self._to_numpy(self._codes_buffer)
+            if codes_arr.size == 0:
+                # No buffered codes; nothing to flush.
+                self._codes_buffer = None
+                self._prev_wav = None
+                self._decoded_frames = 0
+                return
+
+            if os.getenv("STREAMING_DEBUG"):
+                print(
+                    f"[stream] exit: final_frames={codes_arr.shape[0]}, "
+                    f"prev_wav_len={len(self._prev_wav) if self._prev_wav is not None else 0}",
+                    flush=True,
+                )
+
             wav = self._decode_codes(codes_arr)
             if wav is not None and wav.size > 0:
                 # Emit only the part beyond what we already streamed.
                 if self._prev_wav is not None:
                     emitted_samples = len(self._prev_wav)
                     if len(wav) > emitted_samples:
-                        self.on_audio_chunk(wav[emitted_samples:])
+                        tail = wav[emitted_samples:]
+                        if os.getenv("STREAMING_DEBUG"):
+                            print(
+                                f"[stream] exit emit: total={len(wav)}, prev={emitted_samples}, tail={len(tail)}",
+                                flush=True,
+                            )
+                        self.on_audio_chunk(tail)
                 else:
+                    if os.getenv("STREAMING_DEBUG"):
+                        print(
+                            f"[stream] exit emit (no prev): total={len(wav)}",
+                            flush=True,
+                        )
                     self.on_audio_chunk(wav)
 
             self._codes_buffer = None
