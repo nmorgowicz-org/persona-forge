@@ -218,9 +218,12 @@ class _OVCore:
             cache_position, prior=prior, seq=seq, device=inputs_embeds.device
         )
 
-        position_ids, self._axis_checked = self._resolve_position_ids(
-            position_ids, cache_position, self._axis_checked
-        )
+        if is_prefill:
+            position_ids, self._axis_checked = self._resolve_position_ids(
+                position_ids, cache_position, self._axis_checked
+            )
+        else:
+            position_ids = cache_position.unsqueeze(0)
         if attention_mask is None:
             attention_mask = torch.ones(
                 inputs_embeds.shape[0], prior + seq, dtype=torch.long, device=inputs_embeds.device
@@ -329,9 +332,12 @@ class _OVCore:
             cache_position, prior=prior, seq=seq, device=inputs_embeds.device
         )
 
-        position_ids, self._axis_checked = self._resolve_position_ids(
-            position_ids, cache_position, self._axis_checked
-        )
+        if is_prefill:
+            position_ids, self._axis_checked = self._resolve_position_ids(
+                position_ids, cache_position, self._axis_checked
+            )
+        else:
+            position_ids = cache_position.unsqueeze(0)
         if attention_mask is None:
             attention_mask = torch.ones(
                 inputs_embeds.shape[0], prior + seq, dtype=torch.long, device=inputs_embeds.device
@@ -497,9 +503,16 @@ class _OVStatefulCore:
                 f"stateful cache capacity exceeded: need {prior + seq}, max {self.capacity}"
             )
 
-        position_ids, self._axis_checked = _OVCore._resolve_position_ids(
-            position_ids, cache_position, self._axis_checked
-        )
+        if is_prefill:
+            position_ids, self._axis_checked = _OVCore._resolve_position_ids(
+                position_ids, cache_position, self._axis_checked
+            )
+        else:
+            # Decode: authoritative position from cache_position, not caller.
+            # Under transformers 5.x, the outer path can emit position_ids = arange(N)
+            # from the full input_ids shape instead of [current_pos], breaking mRoPE
+            # and making EOS probability ≈ 0 every step.
+            position_ids = cache_position.unsqueeze(0)
         if attention_mask is None:
             attention_mask = torch.ones(
                 inputs_embeds.shape[0], prior + seq, dtype=torch.long,
