@@ -42,7 +42,7 @@ generation, quantization, memory loading, Docker packaging, or deployment behavi
 - 0.6B ships INT8 with stateful main (cap 768) + stateful predictor (cap 32).
 - 1.7B ships INT4 asymmetric (group 32) with stateful main (cap 768) + INT8 explicit predictor.
 - Both profiles land at ~5.4–5.8 GiB steady serving RSS on the validated host. Export needs up to 13 GiB.
-- `LOW_RAM_MODE=1` enables tcmalloc LD_PRELOAD (aggressive page return to OS) + idle unload (default 1800s). Requires `libgoogle-perftools4` in image. Jemalloc was tried first but caused SIGABRT during OpenVINO compilation under transformers 5.x; `libjemalloc2` remains in the image for reference.
+- `LOW_RAM_MODE=1` enables glibc malloc tuning (`MALLOC_MMAP_THRESHOLD_=65536`, `MALLOC_ARENA_MAX=1`) + idle unload (default 1800s). Python calls `malloc_trim(0)` after idle unload. LD_PRELOAD allocator replacement (jemalloc, tcmalloc) is incompatible with OpenVINO `compile_model()` under transformers 5.x — both caused SIGABRT/SIGSEGV. `libjemalloc2` remains in the image for reference.
 - OV compiled kernel cache at `/ov/cache` (default) eliminates ~60–120s recompilation on every restart.
 - Full model export, parity, and performance benchmarks run on `dockermisc1`, not on ARC runners.
 
