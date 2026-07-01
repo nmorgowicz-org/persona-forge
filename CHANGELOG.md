@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.16.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.16.0...qwen3-tts-openvino-v0.16.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* **deps:** add sox Python package to runtime deps ([8262bbd](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/8262bbdd220cf784301dbd461fe05596e80d3814))
+* **deps:** patch qwen-tts check_model_inputs for transformers 5.x API ([8262bbd](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/8262bbdd220cf784301dbd461fe05596e80d3814))
+* **deps:** remove check_model_inputs decorator instead of replacing it ([8262bbd](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/8262bbdd220cf784301dbd461fe05596e80d3814))
+* **deps:** remove qwen-tts from runtime.txt to resolve pip conflict ([8262bbd](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/8262bbdd220cf784301dbd461fe05596e80d3814))
+* **deps:** upgrade transformers to 5.12.1 to fix CVE-2026-1839 ([8262bbd](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/8262bbdd220cf784301dbd461fe05596e80d3814))
+
 ## [0.16.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.15.1...qwen3-tts-openvino-v0.16.0) (2026-07-01)
 
 
