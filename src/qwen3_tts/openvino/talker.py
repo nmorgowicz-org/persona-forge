@@ -218,9 +218,12 @@ class _OVCore:
             cache_position, prior=prior, seq=seq, device=inputs_embeds.device
         )
 
-        position_ids, self._axis_checked = self._resolve_position_ids(
-            position_ids, cache_position, self._axis_checked
-        )
+        if is_prefill:
+            position_ids, self._axis_checked = self._resolve_position_ids(
+                position_ids, cache_position, self._axis_checked
+            )
+        else:
+            position_ids = cache_position.unsqueeze(0)
         if attention_mask is None:
             attention_mask = torch.ones(
                 inputs_embeds.shape[0], prior + seq, dtype=torch.long, device=inputs_embeds.device
@@ -329,9 +332,12 @@ class _OVCore:
             cache_position, prior=prior, seq=seq, device=inputs_embeds.device
         )
 
-        position_ids, self._axis_checked = self._resolve_position_ids(
-            position_ids, cache_position, self._axis_checked
-        )
+        if is_prefill:
+            position_ids, self._axis_checked = self._resolve_position_ids(
+                position_ids, cache_position, self._axis_checked
+            )
+        else:
+            position_ids = cache_position.unsqueeze(0)
         if attention_mask is None:
             attention_mask = torch.ones(
                 inputs_embeds.shape[0], prior + seq, dtype=torch.long, device=inputs_embeds.device
@@ -462,6 +468,8 @@ class _OVStatefulCore:
         self.capacity = capacities.pop()
         self._cache_len = 0
         self._axis_checked = False
+        self._decode_step = 0
+        self._decode_t0 = 0.0
 
     def run(self, *, inputs_embeds, attention_mask, position_ids, cache_position,
             past_key_values, generation_steps=None):
@@ -479,6 +487,13 @@ class _OVStatefulCore:
         if is_prefill:
             self._request.reset_state()
             self._cache_len = 0
+            self._decode_step = 0
+            self._decode_t0 = 0.0
+            print(
+                f"[ov_stateful] prefill  seq={seq}  capacity={self.capacity}"
+                f"  budget={self.capacity - seq}",
+                flush=True,
+            )
         elif prior != self._cache_len:
             raise RuntimeError(
                 f"stateful cache length mismatch: outer cache={prior}, internal={self._cache_len}"
@@ -488,9 +503,16 @@ class _OVStatefulCore:
                 f"stateful cache capacity exceeded: need {prior + seq}, max {self.capacity}"
             )
 
-        position_ids, self._axis_checked = _OVCore._resolve_position_ids(
-            position_ids, cache_position, self._axis_checked
-        )
+        if is_prefill:
+            position_ids, self._axis_checked = _OVCore._resolve_position_ids(
+                position_ids, cache_position, self._axis_checked
+            )
+        else:
+            # Decode: authoritative position from cache_position, not caller.
+            # Under transformers 5.x, the outer path can emit position_ids = arange(N)
+            # from the full input_ids shape instead of [current_pos], breaking mRoPE
+            # and making EOS probability ≈ 0 every step.
+            position_ids = cache_position.unsqueeze(0)
         if attention_mask is None:
             attention_mask = torch.ones(
                 inputs_embeds.shape[0], prior + seq, dtype=torch.long,
@@ -509,11 +531,36 @@ class _OVStatefulCore:
             # Match _OVCore: the live nested GenerationMixin path does not
             # always forward this optional argument to the predictor core.
             infer_inputs.append(_to_numpy(generation_steps, np.int64))
+        import time as _time
+
+        if not is_prefill and self._decode_step < 5:
+            mask_shape = tuple(attention_mask.shape) if attention_mask is not None else None
+            pid_val = position_ids[0].tolist() if position_ids is not None else None
+            cp_val = cache_position.tolist() if cache_position is not None else None
+            print(
+                f"[ov_stateful] decode_step={self._decode_step}"
+                f"  prior={prior}  mask={mask_shape}"
+                f"  pos={pid_val}  cache_pos={cp_val}",
+                flush=True,
+            )
         self._request.infer(infer_inputs)
         hidden = torch.from_numpy(
             np.array(self._request.get_output_tensor(0).data, dtype=np.float32, copy=True)
         )
         self._cache_len = prior + seq
+        if not is_prefill:
+            self._decode_step += 1
+            if self._decode_step == 1:
+                self._decode_t0 = _time.monotonic()
+            elif self._decode_step % 50 == 0:
+                elapsed = _time.monotonic() - self._decode_t0
+                rate = (self._decode_step - 1) / elapsed if elapsed > 0 else 0
+                print(
+                    f"[ov_talker] decode step {self._decode_step}"
+                    f"  cache={self._cache_len}/{self.capacity}"
+                    f"  {rate:.1f} tok/s",
+                    flush=True,
+                )
         cache = _length_only_cache(self._cache_len, self.num_layers)
         return BaseModelOutputWithPast(
             last_hidden_state=hidden,
@@ -746,9 +793,44 @@ class OVTalkerRuntime:
                 return "int8"
         return "fp32"
 
+    @staticmethod
+    def _patch_talker_prepare_inputs(talker) -> None:
+        """Patch prepare_inputs_for_generation to clip input_ids to last token.
+
+        Transformers 5.x passes the full accumulated input_ids tensor (shape [B, N])
+        to the talker forward instead of just the most-recent token ([B, 1]).  The
+        qwen3_tts talker forward uses input_ids.shape[1] as seq_length to compute
+        position_ids (→ mRoPE) and to sum codec embeddings.  With N > 1, this causes:
+          - position_ids = arange(N) instead of [current_pos] → wrong RoPE all steps
+          - codec hidden = sum of N embeddings instead of current token → garbage logits
+          - EOS probability ≈ 0 every step; generation always runs to capacity limit
+
+        The fix clips input_ids to its last token in decode steps (past_key_values
+        is not None and inputs_embeds is None), restoring T4-style behaviour.
+        """
+        from qwen_tts.core.models.modeling_qwen3_tts import Qwen3TTSTalkerForConditionalGeneration
+
+        _base_pigf = Qwen3TTSTalkerForConditionalGeneration.prepare_inputs_for_generation
+
+        def _clipped_pigf(self_inner, input_ids, past_key_values=None, inputs_embeds=None, **kwargs):
+            if (
+                past_key_values is not None
+                and inputs_embeds is None
+                and input_ids is not None
+                and input_ids.shape[1] > 1
+            ):
+                input_ids = input_ids[:, -1:]
+            return _base_pigf(self_inner, input_ids=input_ids, past_key_values=past_key_values,
+                               inputs_embeds=inputs_embeds, **kwargs)
+
+        Qwen3TTSTalkerForConditionalGeneration.prepare_inputs_for_generation = _clipped_pigf
+        print("[ov_talker] patched talker prepare_inputs_for_generation (T5 input_ids clip)", flush=True)
+
     def install(self) -> "OVTalkerRuntime":
         if self._orig_main_forward is not None:
             raise RuntimeError("OVTalkerRuntime already installed")
+
+        self._patch_talker_prepare_inputs(self._talker)
 
         main_module = self._talker.model
         pred_module = self._talker.code_predictor.model

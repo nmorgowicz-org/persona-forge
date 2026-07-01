@@ -421,7 +421,7 @@ def run() -> int:
             "attention_implementation": "eager",
             "source_commit": source_commit,
             "exporter_image_digest": exporter_image_digest,
-            "compression": args.compression,
+            "compression": args.int8_mode if (want_int8 and "int4" in args.int8_mode) else args.compression,
             "int8_config": (
                 {
                     "mode": args.int8_mode,
