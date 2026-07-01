@@ -79,11 +79,64 @@ run two model jobs concurrently.
 WAV; a mismatch reduces speaker and pronunciation quality. Do not place tokens, private voices,
 model caches, IR, or generated audio in the Git checkout.
 
+## Sizing for your host
+
+Both model sizes use nearly the same memory (~5.4–5.8 GiB steady) because the inference engine
+overhead dominates the model-size difference. Export is the memory spike.
+
+| Available RAM | Setup |
+|---|---|
+| **≥ 28 GiB** | Can export and serve at the same time. Optionally raise `TTS_MEMORY_LIMIT` to 16G for long requests. |
+| **16–27 GiB** | Stop serving before export. Can raise `TTS_MEMORY_LIMIT` to 12–14G for longer requests. |
+| **10–15 GiB** | Stop serving before export (default dockermisc1 setup). Keep default memory limits. |
+| **< 10 GiB** | Serving will not fit. This service needs at least 10 GiB for the container. |
+
+### Low RAM mode
+
+Set `LOW_RAM_MODE=1` on hosts where RAM is shared with other workloads (VMs, LXCs, other containers):
+
+```dotenv
+LOW_RAM_MODE=1
+```
+
+This does three things together:
+
+1. **jemalloc allocator** — replaces glibc malloc via `LD_PRELOAD` before Gunicorn starts. PyTorch and OpenVINO hold large intermediate allocations that glibc never returns to the OS even after they are freed; jemalloc with a 1-second decay actively purges those pages back to the kernel.
+2. **Aggressive memory return** — `MALLOC_CONF=background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:1000` runs a jemalloc background thread that continuously returns unused pages.
+3. **Idle unload** — model weights (~5–6 GiB) are released after 30 minutes of idle. The next request reloads them automatically. With the OV kernel cache warm (default), reload takes ~5–10s; on a completely cold first boot it takes ~60–120s while OV compiles kernels and writes the cache. Override the timeout with `IDLE_UNLOAD_SECONDS=<seconds>`.
+
+`LOW_RAM_MODE` requires the container image to have `libjemalloc2` installed. All released images built after this feature was added include it. If you built an older local image, rebuild it.
+
+The `/health` endpoint reports `model_loaded`, `process_rss_mib`, and `idle_unload_seconds` so you can observe the effect.
+
+### Memory limits
+
+The default `TTS_MEMORY_LIMIT=10G` is conservative. Raising it lets the container handle longer
+requests without being killed by the cgroup limit:
+
+```dotenv
+TTS_MEMORY_LIMIT=14G     # comfortable on a 20+ GiB host
+TTS_MEMORY_SWAP_LIMIT=15G
+```
+
+Long requests (several paragraphs) push memory higher as the model accumulates context. The hard
+ceiling is roughly 64 seconds of generated audio per request regardless of memory limit — increase
+it by re-exporting, not by raising the memory limit.
+
+### Threads
+
+Set `OV_INFERENCE_THREADS` to your CPU's physical core count (not hyperthreads):
+
+```dotenv
+OV_INFERENCE_THREADS=8   # example for an 8-core CPU
+```
+
+The default is 6, tuned for the validated host. More threads = faster generation up to the core
+count; beyond that there are no gains.
+
 ## Compare 0.6B and 1.7B
 
-**Recommendation: use `1.7B`.** It is slightly preferred on listening quality and has **no memory
-penalty** — both profiles are dominated by a fixed OpenVINO/vocoder floor and land at roughly
-5.4–5.8 GiB steady for normal single-utterance traffic (see *Memory expectations* below). The A/B
+**Recommendation: use `1.7B`.** It sounds better and uses the same memory. The A/B
 procedure remains here for anyone who wants to re-verify on their own hardware.
 
 Run one model at a time on a 15 GiB host. Generate the same text, reference, format, and sampling
@@ -116,37 +169,26 @@ latency, peak container RSS, host available RAM, and swap delta. The acceptance 
 
 ## Presets and advanced settings
 
-`MODEL_SIZE` chooses the tested serving profile:
+`MODEL_SIZE` is the only setting most users need to change:
 
-| Setting | 0.6B | 1.7B |
-|---|---|---|
-| Main transformer | INT8, stateful cache capacity 768 | INT4 asymmetric group 32, stateful cache capacity 768 |
-| Predictor | INT8 stateful cache capacity 32 | INT8 explicit cache |
-| Vocoder | FP32 OpenVINO | FP32 OpenVINO |
-| Torch glue | BF16 low-memory load | BF16 low-memory load |
-| Default memory/swap | 10G / 11G | 10G / 11G |
+| Setting | Quality | Steady memory | Max request | Notes |
+|---|---|---|---|---|
+| `0.6B` | Good | ~5–6 GiB | ~64 sec | Use only if you have a specific reason |
+| `1.7B` | Better | ~5–6 GiB | ~64 sec | **Recommended default** |
 
-The stateful capacity is baked into the IR. Capacity 768 is about 64 seconds at 12 Hz, including
-prompt and generated positions. A request exceeding it fails closed. Changing capacity requires a
-new stateful transform plus parity and memory validation; it is not a runtime tuning variable.
+Both profiles use the same memory. The 64-second ceiling per request is a property of the exported
+model and cannot be raised at runtime — re-export is required if you need longer requests.
 
-### Memory expectations
-
-Both sizes run at roughly **5.4–5.8 GiB** for normal single-utterance traffic and are safe under the
-default 10G/11G limit. Steady memory is a large fixed OpenVINO floor (~2.7 GiB for the FP32 vocoder
-plus runtime) plus a small variable delta, which is why **0.6B is not meaningfully smaller than
-1.7B**. Long paragraphs push the generation peak higher as the stateful KV cache fills toward
-capacity 768. On the OpenVINO backend the service frees the ~0.3 GiB PyTorch codec after startup
-(`OPENVINO_RELEASE_CODEC`, on by default) once the voice prompt is built and the OpenVINO vocoder
-owns decoding; the startup log prints `released ~0.32 GiB of PyTorch codec` when it does. Measured
-A/B tables are in `docs/dev/OPENVINO_RESULTS.md`.
+After startup the service releases ~0.3 GiB of load-time overhead; the startup log prints
+`released ~0.32 GiB of PyTorch codec` when this happens. Measured results are in
+`docs/dev/OPENVINO_RESULTS.md`.
 
 Explicit advanced environment values override preset defaults. Common examples are:
 
 ```dotenv
 TTS_BACKEND=pytorch
 MODEL_CACHE_PATH=/var/data/autopirate/qwen3-tts/model
-OV_DATA_PATH=/var/data/autopirate/qwen3-tts/openvino-simplify-v2
+OV_DATA_PATH=/var/data/autopirate/qwen3-tts/openvino
 TTS_MEMORY_LIMIT=10G
 TTS_MEMORY_SWAP_LIMIT=11G
 MODEL_REVISION=<pinned-hugging-face-revision>
@@ -158,15 +200,24 @@ Operational settings:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `MODEL_SIZE` | `0.6B` | Selects the complete tested 0.6B or 1.7B preset |
-| `QWEN3_TTS_IMAGE` | `qwen3-tts-openvino:local` | Unified serving/export image; pin SHA or digest in production |
+| `MODEL_SIZE` | `1.7B` | `0.6B` or `1.7B`; 1.7B is recommended (same memory, better quality) |
+| `QWEN3_TTS_IMAGE` | `qwen3-tts-openvino:local` | Image to run; pin a SHA or digest in production |
 | `QWEN3_TTS_PORT` | `8318` | Host port mapped to container port 8318 |
-| `TTS_BACKEND` | `openvino` | Set `pytorch` for the rollback backend |
-| `MODEL_REVISION` | unset | Optional Hugging Face revision pin; must match IR metadata for OpenVINO |
-| `HF_TOKEN` | unset | Hugging Face access token when required; do not commit it |
-| `TTS_MEMORY_LIMIT` / `TTS_MEMORY_SWAP_LIMIT` | `10G` / `11G` | Serving cgroup limits |
-| `EXPORT_MEMORY_LIMIT` / `EXPORT_MEMORY_SWAP_LIMIT` | `13G` / `14G` | Export cgroup limits |
-| `OPENVINO_RELEASE_CODEC` | `1` for OpenVINO | Frees the PyTorch codec after startup; disable for future per-request cloning |
+| `TZ` | `America/Detroit` | Container timezone for log timestamps |
+| `TTS_BACKEND` | `openvino` | Set `pytorch` for the rollback backend (slower, no IR needed) |
+| `MODEL_REVISION` | unset | Pin a specific Hugging Face revision; must match exported IR |
+| `HF_TOKEN` | unset | Hugging Face token when required; do not commit it |
+| `TTS_MEMORY_LIMIT` / `TTS_MEMORY_SWAP_LIMIT` | `10G` / `11G` | Serving container memory limits; raise on hosts with more RAM |
+| `EXPORT_MEMORY_LIMIT` / `EXPORT_MEMORY_SWAP_LIMIT` | `13G` / `14G` | Export container memory limits |
+| `LOW_RAM_MODE` | `0` | Set to `1` to enable jemalloc allocator, aggressive memory return, and 30-min idle unload. Recommended on hosts with less than 20 GiB free. Requires a rebuilt or freshly pulled image (jemalloc is installed at build time). |
+| `OV_INFERENCE_THREADS` | `6` | CPU threads for inference; set to your CPU's physical core count |
+| `OV_CACHE_DIR` | `/ov/cache` | OpenVINO compiled kernel cache directory. Already on the persistent `OV_DATA_PATH` mount — no extra setup needed. Eliminates ~60–120s JIT recompilation on every restart or idle-unload reload. Set to empty string to disable. |
+| `OV_DYNAMIC_QUANT_GROUP_SIZE` | `32` | Inference speed/accuracy knob (`0` = off, `32` = default, `64` = faster/slightly lower accuracy) |
+| `IDLE_UNLOAD_SECONDS` | unset | Unload the model after this many idle seconds (e.g. `1800` = 30 min). Frees ~5–6 GiB. Reload is automatic: ~5–10s with OV cache warm, ~60–120s on first cold boot. Disabled by default. Set automatically to `1800` by `LOW_RAM_MODE=1`. |
+| `SILENCE_TRIM` | `1` | Trim trailing silence from output (`0` to disable if audio seems clipped) |
+| `SILENCE_TRIM_THRESH` | `0.01` | Silence threshold as a fraction of peak amplitude |
+| `SILENCE_TRIM_PAD_MS` | `30` | Milliseconds of audio kept after the silence boundary |
+| `OPENVINO_RELEASE_CODEC` | `1` | Frees ~0.3 GiB of load-time overhead after startup; set `0` to keep it |
 
 `TTS_BACKEND=pytorch` is the rollback path and does not require exported IR. It still needs the
 checkpoint cache and reference voice. Do not set exporter serving dtype overrides: graph conversion
@@ -207,17 +258,22 @@ Use the persistent host paths and run commands from a checkout of this repositor
 export MODEL_CACHE_PATH=/var/data/autopirate/qwen3-tts/model
 export REF_AUDIO_PATH=/var/data/autopirate/qwen3-tts/voice/voice_A.wav
 export REF_TEXT='Exact transcript for voice_A.wav'
-export MODEL_SIZE=0.6B
+export MODEL_SIZE=1.7B
 
+# Export IR once (stop qwen3-tts first if it is running — 13G export + 10G serve = OOM).
 docker compose run --rm export
-docker compose up --build -d qwen3-tts
+
+# Start the service using the released image rather than building locally.
+export QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:v0.15.1
+docker compose up -d qwen3-tts
 docker stats --no-stream qwen3-tts
 ```
 
-For a released image, replace the local build with an immutable tag:
+To update to a newer release, change `QWEN3_TTS_IMAGE` to the new version tag (or `:latest`) and
+restart:
 
 ```bash
-export QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>
+export QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:v0.15.1
 docker compose pull qwen3-tts
 docker compose up -d qwen3-tts
 ```

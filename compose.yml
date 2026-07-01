@@ -1,7 +1,7 @@
 name: qwen3-tts-openvino
 
 x-model-environment: &model-environment
-  MODEL_SIZE: ${MODEL_SIZE:-0.6B}
+  MODEL_SIZE: ${MODEL_SIZE:-1.7B}
   REF_TEXT: ${REF_TEXT:?Set REF_TEXT to the exact reference-audio transcript}
   HF_TOKEN: ${HF_TOKEN:-}
   MODEL_REVISION: ${MODEL_REVISION:-}
@@ -12,6 +12,8 @@ x-model-volumes: &model-volumes
 
 services:
   qwen3-tts:
+    # Local builds: `docker compose up --build` creates the :local tag automatically.
+    # Production: set QWEN3_TTS_IMAGE to a pinned GHCR SHA or version tag.
     image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:local}
     build:
       context: .
@@ -23,6 +25,7 @@ services:
       <<: *model-environment
       TTS_BACKEND: ${TTS_BACKEND:-openvino}
       TZ: ${TZ:-America/Detroit}
+      LOW_RAM_MODE: ${LOW_RAM_MODE:-0}
     volumes:
       - ${MODEL_CACHE_PATH:-./data/model}:/root/.cache/huggingface/hub:rw
       - ${OV_DATA_PATH:-./data/ov}:/ov:rw

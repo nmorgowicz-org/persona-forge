@@ -1,6 +1,7 @@
 import gc
 import json
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -43,6 +44,7 @@ REF_TEXT = os.getenv(
 )
 
 TTS_BACKEND = (os.getenv("TTS_BACKEND", "pytorch") or "pytorch").strip().lower()
+IDLE_UNLOAD_SECONDS = int(os.environ.get("IDLE_UNLOAD_SECONDS", "0") or "0")
 OV_MODEL_DIR = os.getenv("OV_MODEL_DIR")
 OPENVINO_RELEASE_TORCH = os.getenv("OPENVINO_RELEASE_TORCH", "0").strip() == "1"
 OPENVINO_MAIN_STATEFUL_MODEL = (os.getenv("OPENVINO_MAIN_STATEFUL_MODEL") or "").strip() or None
@@ -51,7 +53,7 @@ OPENVINO_PREDICTOR_STATEFUL_MODEL = (
 )
 TORCH_DTYPE, TORCH_DTYPE_NAME, OPENVINO_LOW_CPU_MEM_USAGE = resolve_torch_load_config(torch)
 
-torch.set_num_threads(6)
+torch.set_num_threads(int(os.environ.get("OV_INFERENCE_THREADS", "6")))
 
 model = None
 voice_clone_prompt = None
@@ -61,6 +63,58 @@ ov_config = None
 ov_runtime = None
 
 executor = ThreadPoolExecutor(max_workers=1)
+
+_service_started: bool = False
+_last_request_time: float = time.time()
+_unload_pending: bool = False
+
+
+def _process_rss_mib() -> float | None:
+    try:
+        with open("/proc/self/status", encoding="ascii") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return round(int(line.split()[1]) / 1024, 1)
+    except Exception:
+        pass
+    return None
+
+
+def _touch_last_request():
+    global _last_request_time, _unload_pending
+    _last_request_time = time.time()
+    _unload_pending = False
+
+
+def _do_unload():
+    """Runs inside the executor thread; serialized with inference."""
+    global model, voice_clone_prompt, ov_runtime, _unload_pending
+    _unload_pending = False
+    if model is None:
+        return
+    if time.time() - _last_request_time < IDLE_UNLOAD_SECONDS:
+        return
+    print("[app_worker] Idle timeout reached; unloading model to free RAM...", flush=True)
+    model = None
+    voice_clone_prompt = None
+    ov_runtime = None
+    gc.collect()
+    gc.collect()
+    # Ask glibc to return freed heap to the OS. No-op with jemalloc (which handles
+    # this automatically via its background thread), harmless either way.
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+    print("[app_worker] Model unloaded.", flush=True)
+
+
+def _ensure_loaded():
+    """Runs inside the executor thread; reloads model if idle-unloaded."""
+    if model is None:
+        print("[app_worker] Reloading model after idle unload...", flush=True)
+        load_model()
 
 
 def _validate_ov_metadata(model_dir: str):
@@ -210,16 +264,40 @@ def load_model():
             flush=True,
         )
 
+    global _service_started
+    _service_started = True
     print("[app_worker] Model loaded and ready.")
 
 
 load_model()
 
 
+def _idle_watcher():
+    while True:
+        time.sleep(30)
+        global _unload_pending
+        if (
+            not _unload_pending
+            and model is not None
+            and time.time() - _last_request_time > IDLE_UNLOAD_SECONDS
+        ):
+            _unload_pending = True
+            executor.submit(_do_unload)
+
+
+if IDLE_UNLOAD_SECONDS > 0:
+    threading.Thread(target=_idle_watcher, daemon=True, name="idle-watcher").start()
+    print(f"[app_worker] Idle unload enabled: {IDLE_UNLOAD_SECONDS}s cooldown.", flush=True)
+
+
 def health_state() -> dict[str, Any]:
     """Return JSON-serializable model and backend readiness state."""
+    idle_unload_seconds = IDLE_UNLOAD_SECONDS if IDLE_UNLOAD_SECONDS > 0 else None
     base = {
         "status": "ok",
+        "model_loaded": model is not None,
+        "process_rss_mib": _process_rss_mib(),
+        "idle_unload_seconds": idle_unload_seconds,
         "backend": TTS_BACKEND,
         "model": MODEL_ID,
         "model_revision": MODEL_REVISION,
@@ -249,6 +327,7 @@ def health_state() -> dict[str, Any]:
                     "compression": ov_metadata.get("compression"),
                     "int8_config": ov_metadata.get("int8_config"),
                     "config": ov_config,
+                    "cache_dir": ov_config.get("CACHE_DIR"),
                     "runtime_wired": ov_runtime is not None,
                     "active_compression": (
                         ov_runtime.compression if ov_runtime is not None else None
@@ -312,6 +391,8 @@ def _trim_silence(wav, sr):
 
 
 def _run_generate(text: str, language: str, **gen_kwargs):
+    _touch_last_request()
+    _ensure_loaded()
     if model is None or voice_clone_prompt is None:
         raise RuntimeError("Model not loaded")
     import traceback as _tb
@@ -358,7 +439,9 @@ def _run_generate_with_streaming(
 
     import numpy as np
 
+    _touch_last_request()
     _apply_optional_seed(seed_value)
+    _ensure_loaded()
 
     if model is None or voice_clone_prompt is None:
         raise RuntimeError("Model not loaded")

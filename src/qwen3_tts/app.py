@@ -43,7 +43,9 @@ def _encode(wav: Any, sr: int, response_format: str) -> tuple[bytes, str]:
 
 
 def _ready():
-    return model.model is not None and model.voice_clone_prompt is not None
+    # True once the service has successfully loaded at least once.
+    # With IDLE_UNLOAD_SECONDS set, model may be None temporarily — requests reload it.
+    return model._service_started
 
 
 def _json_body():
@@ -111,9 +113,12 @@ def openai_audio_speech():
 def generate_stream():
     if not _ready():
         return jsonify({"error": "Model not loaded"}), 503
-    vocoder = getattr(model.ov_runtime, "vocoder_runtime", None)
-    if vocoder is None or not vocoder.enabled:
-        return jsonify({"error": "Streaming requires the FP32 OpenVINO vocoder"}), 503
+    # Fast-fail only when model is loaded — if it's idle-unloaded, the executor will reload
+    # and _run_generate_with_streaming will raise RuntimeError if vocoder isn't available.
+    if model.model is not None:
+        vocoder = getattr(model.ov_runtime, "vocoder_runtime", None)
+        if vocoder is None or not vocoder.enabled:
+            return jsonify({"error": "Streaming requires the FP32 OpenVINO vocoder"}), 503
     data = _json_body()
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400

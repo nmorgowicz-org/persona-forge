@@ -1,434 +1,212 @@
-# Qwen3-TTS OpenVINO Project Rules
+# Qwen3-TTS OpenVINO — Agent Guide
 
-## Project Objective
+## Quick orientation
 
-Provide a reproducible Linux AMD64 container that accelerates the official 0.6B or 1.7B
-Qwen3-TTS Base voice-cloning checkpoint on Intel CPUs with OpenVINO while preserving the
-existing API and a tested PyTorch rollback path.
+```
+src/qwen3_tts/     Flask app, model runtime, model config, OpenVINO runtime adapters
+src/export/        OpenVINO export/quantization, parity tests, benchmark tooling
+scripts/           entrypoint.sh (container entrypoint), export.py, download_model.py, run-*.sh
+tests/             Unit and integration tests; no model weights needed
+requirements/      runtime.txt  openvino.txt  export.txt
+Dockerfile         Single image: ENTRYPOINT=entrypoint.sh, default CMD = gunicorn serving
+compose.yml        Two services (qwen3-tts, export) sharing one image
+```
+
+`PYTHONPATH=/app/src:/app/src/export` — both `qwen3_tts.*` and export modules are importable inside the container.
+
+**One image, two behaviors.** `scripts/entrypoint.sh` is the container ENTRYPOINT; it applies
+`LOW_RAM_MODE` tuning (jemalloc, idle unload defaults) before exec-ing the CMD. The serving
+container runs the image's default CMD (gunicorn). The export service overrides CMD with
+`python scripts/export.py`. There are no multi-stage build targets.
+
+**Gunicorn constraints.** Always `-w 1 -k gthread --threads 4`. Never `--preload`. Never more than
+one worker. The single worker holds the model and serializes all inference through a
+`concurrent.futures.ThreadPoolExecutor(max_workers=1)` to prevent concurrent model access.
+
+**Model size.** `MODEL_SIZE` (0.6B or 1.7B) is the only required preset. `resolve_model_repo`
+in `model_config.py` maps it to the checkpoint and IR paths. 1.7B is the recommended default.
+
+## Project objective
+
+Reproducible Linux AMD64 container that accelerates 0.6B or 1.7B Qwen3-TTS Base voice-cloning
+checkpoints on Intel CPUs with OpenVINO while preserving a tested PyTorch rollback path.
 
 Read `docs/dev/OPENVINO_IMPLEMENTATION.md` before changing model export, cache handling,
-generation, quantization, memory loading, Docker packaging, or deployment behavior. It is the
-implementation contract for this repository.
+generation, quantization, memory loading, Docker packaging, or deployment behavior.
 
-## Current State
+## Current state (v0.15.x)
 
-- `TTS_BACKEND=pytorch` remains the tested rollback baseline.
-- The OpenVINO runtime accelerates both transformer cores and the FP32 vocoder. Explicit-cache
-  remains the rollback path; static-capacity stateful main and predictor cores are implemented.
-- `export_openvino.py` exports FP32 and weight-only INT8/INT4 transformer IR. Pinned NNCF 3.2.0
-  does not support calibration datasets or data-aware options for INT8 `compress_weights`; W8A8
-  and 0.6B mixed-precision recovery were rejected on measured accuracy/quality.
-- 0.6B ships INT8. Stateful cap-768 main + cap-32 predictor was validated on `dockermisc1` with
-  byte-identical audio versus explicit cache and reduced the short-request peak from 8,623 to
-  6,635 MiB. A 45.28-second request peaked at 7,845 MiB, so long requests still require 8 GiB.
-- 1.7B ships INT4 with bf16 glue and stateful cache at an 8 GiB memory limit.
-- CI builds one model-free Docker image containing serving and export tooling.
-- Full model export, INT8 compression, parity testing, and performance benchmarking run on
-  `dockermisc1`, not on ARC runners.
+- Single image ships serving and export tooling. CI publishes it as `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<sha>`.
+- `TTS_BACKEND=pytorch` is the tested rollback baseline.
+- OpenVINO accelerates both transformer cores and the FP32 vocoder.
+- 0.6B ships INT8 with stateful main (cap 768) + stateful predictor (cap 32).
+- 1.7B ships INT4 asymmetric (group 32) with stateful main (cap 768) + INT8 explicit predictor.
+- Both profiles land at ~5.4–5.8 GiB steady serving RSS on the validated host. Export needs up to 13 GiB.
+- `LOW_RAM_MODE=1` enables jemalloc allocator + idle unload (default 1800s). Requires libjemalloc2 in image.
+- OV compiled kernel cache at `/ov/cache` (default) eliminates ~60–120s recompilation on every restart.
+- Full model export, parity, and performance benchmarks run on `dockermisc1`, not on ARC runners.
 
-Do not describe an OpenVINO milestone as complete until its parity and benchmark gates in the
-implementation plan pass on the target VM.
+## Architecture invariants
 
-## Architecture Invariants
-
-Qwen3-TTS has two nested autoregressive transformer paths:
-
-1. The 28-layer main talker generates the first audio codebook.
-2. The 5-layer code predictor generates the remaining 15 codebooks for every audio frame.
-
-Both cores must be profiled and accelerated. Replacing only one `talker.forward()` call is not
-a complete backend.
-
-Preserve these boundaries:
-
-- Keep prompt construction, embeddings, sampling, and lightweight glue in PyTorch initially.
-- Export the main and predictor transformer cores separately.
-- Validate explicit K/V cache behavior before introducing stateful OpenVINO cache models.
-- Reuse persistent `InferRequest` objects; never create one per token.
-- Preserve the original talker object's embeddings, projections, configuration, dtype, and
-  device behavior.
-- Keep `/generate`, `/infer`, `/health`, MP3 output, WAV output, and serialized inference
-  compatible with the baseline.
+- Two nested autoregressive transformer paths: 28-layer main talker (codebook 1), 5-layer code predictor (codebooks 2–16). Both must be accelerated.
+- Keep prompt construction, embeddings, sampling, and lightweight glue in PyTorch.
+- Export main and predictor transformer cores separately; validate K/V cache before introducing stateful models.
+- Reuse persistent `InferRequest` objects; never create one per token or per request.
+- Preserve the talker object's embeddings, projections, codebook heads, config, dtype, and device behavior.
+- Keep `/generate`, `/v1/audio/speech`, `/health`, MP3/WAV output, and serialized inference compatible with the baseline.
 - Keep `TTS_BACKEND=pytorch` as an explicit rollback path.
-- Derive tensor shapes from the selected checkpoint and keep IR, metadata, parity results,
-  and benchmarks isolated by model repository and revision.
-- Keep `serve.py` as the signal-aware supervisor for both Gunicorn masters. If either master
-  exits, the container must exit; container stop signals must reach both process groups.
-- Return HTTP 503 from public readiness while the worker is loading or unreachable. Do not
-  weaken `/health` to return HTTP 200 for a degraded worker.
+- Return HTTP 503 during initial startup (before `_service_started` is set). After first successful load,
+  idle-unloaded requests block in the executor and reload transparently — do not 503 them.
 
-## Model and Secret Safety
+## Model and secret safety
 
-Never commit or copy these into a Git tree or container image:
+Never commit to Git or bake into the image:
+- HF model weights or cache directories
+- Generated OpenVINO IR (`.xml`/`.bin`) or ONNX models
+- Reference voice audio or generated speech
+- HF tokens, GitHub tokens, PEM keys, `.env` files, or deployment credentials
 
-- Hugging Face model weights or cache directories
-- generated OpenVINO IR (`.xml`/`.bin`) or ONNX models
-- reference voice audio or generated speech
-- Hugging Face tokens, GitHub tokens, PEM keys, `.env` files, or deployment credentials
-
-Persistent host locations belong outside the repository:
-
+Persistent host paths on `dockermisc1`:
 ```text
-/var/data/autopirate/qwen3-tts/model
-/var/data/autopirate/qwen3-tts/openvino
+/var/data/autopirate/qwen3-tts/model      ← HF cache (MODEL_CACHE_PATH)
+/var/data/autopirate/qwen3-tts/openvino   ← OpenVINO IR  (OV_DATA_PATH)
 ```
 
-Repository secrets are configured through GitHub settings. Never print secret values while
-validating their presence.
+## Dependency rules
 
-## Dependency Rules
+- The OpenVINO stack (OpenVINO, NNCF, Transformers, Python) moves together; pin all of them.
+- `qwen-tts==0.1.1` hard-pins `transformers==4.57.3`. Bump transformers only when `qwen-tts` does. Re-verify export wrappers and parity gate after any bump.
+- Install CPU-only Torch before `qwen-tts` to prevent CUDA library pulls.
+- Validated Python 3.13 CPU pair: `torch==2.12.1+cpu` + `torchaudio==2.11.0+cpu`.
+- Do not update one OpenVINO-stack dependency in isolation without rebuilding the image and rerunning export parity.
+- Optimum Intel is intentionally absent: the custom talker has no registered exporter in `TasksManager`. Use `openvino.convert_model` + `nncf.compress_weights` directly.
+- Do not pass datasets, AWQ, GPTQ, LoRA correction, or sensitivity selection to NNCF 3.2.0 `compress_weights`; the API rejects them. Do not substitute W8A8 `nncf.quantize` (caused ~23 dB SNR regression at M6).
+- Renovate tracks pip requirements, Docker base images, and GitHub Actions. OpenVINO, Qwen-TTS, and PyTorch CPU-stack updates must not auto-merge.
 
-- Pin the OpenVINO stack because OpenVINO, NNCF, Transformers, and Python compatibility move
-  together. Optimum Intel is intentionally not a dependency: the custom talker has no
-  registered exporter, so export uses `openvino.convert_model` + `nncf.compress_weights`
-  directly, and avoiding Optimum keeps the Transformers pin owned solely by `qwen-tts`.
-- Do not upgrade `transformers` independently. `qwen-tts==0.1.1` hard-pins
-  `transformers==4.57.3`, and the OpenVINO export wrappers depend on that exact
-  `DynamicCache` (`to_legacy_cache`/`from_legacy_cache`) and `generate` API. Bump it only
-  when `qwen-tts` itself does, and re-verify the export wrappers and parity gate.
-- Install CPU-only Torch before `qwen-tts` so pip does not pull CUDA libraries.
-- Pin Torch and Torchaudio independently. The validated Python 3.13 CPU pair is currently
-  `torch==2.12.1+cpu` with `torchaudio==2.11.0+cpu`.
-- Do not update one OpenVINO-stack dependency in isolation without rebuilding both images and
-  rerunning export parity.
-- Do not pass a dataset, scale estimation, AWQ, GPTQ, LoRA correction, or sensitivity selection
-  to NNCF 3.2.0 INT8 `compress_weights`; the API rejects these options for every backend. Do not
-  substitute full W8A8 `nncf.quantize`: the recorded M6 main-prefill spike regressed hidden-output
-  SNR from about 30 dB to about 7.4 dB. Follow the selective-INT8 plan in the implementation doc.
-- Update the implementation plan when a non-obvious compatibility pin changes.
-- Renovate tracks pip requirements, Docker base images, GitHub Actions, and the Dockerfile's
-  independent Torch/Torchaudio ARGs. OpenVINO, Qwen-TTS, and PyTorch CPU-stack updates require
-  review and must not auto-merge.
-- Validate Renovate changes with the pinned `renovate-config-validator` command in CI.
+## Build and CI
 
-## Build and CI Boundaries
-
-Use the correct ARC pool:
-
-- `arc-general`: repository validation, labels, release automation, and non-Docker jobs.
+- `arc-general`: validation, labels, and release automation.
 - `arc-general-docker`: native Linux AMD64 image builds.
-- Never download or convert the full model in current ARC jobs; their memory is insufficient.
+- CI builds one image per run — no matrix. Smoke test imports all export and serving modules.
+- Image build runs on PRs with `ready-to-test` label. Tag pushes publish to GHCR.
+- `main` pushes alone do not build or publish.
+- `buildcache` and `latest` are protected from cleanup. Keep at least 5 older versions for rollback.
+- Production Compose must pin the SHA tag or digest; never `latest`.
 
-Cheap repository validation runs on every internal PR. The expensive container image build
-run only when an authorized maintainer applies the `ready-to-test` label. After that label is
-present, later commits rerun the image checks. Release Please version tags publish images;
-manual workflow dispatches remain an explicit build-and-publish override. Merges to `main` do
-not build or publish images by themselves.
+GHCR pulls on `dockermisc1` need a `read:packages` token. Pass via `docker login --password-stdin` only; never echo or embed in Compose.
 
-Release cleanup must protect `latest` and `buildcache`. Keep five additional package versions for
-rollback; do not use an
-unqualified package-wide retention rule that can delete the active tags or caches.
+## Required validation
 
-Images are immutable build artifacts:
-
-```text
-ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>
-```
-
-Production Compose must use an immutable SHA tag or digest, not `latest`.
-
-Private GHCR pulls on `dockermisc1` require a GitHub token with `read:packages`. A workflow's
-`GITHUB_TOKEN` does not authenticate the target VM. Pass credentials only through
-`docker login --password-stdin`; never echo a token, put it in Compose, or commit a Docker
-config. Prefer a temporary Docker config for one-shot pulls, or configure a host credential
-helper and least-privilege read-only package token for persistent deployment access.
-
-If the repository becomes public, do not run untrusted fork PR code on self-hosted runners.
-Keep or strengthen the same-repository PR guards before changing visibility.
-
-## Required Validation
-
-For repository-only changes:
-
+Repository-only changes:
 ```bash
-PYTHONDONTWRITEBYTECODE=1 python scripts/validate_repo.py
-REF_AUDIO_PATH=./voice/reference.wav \
-REF_TEXT='Configuration validation transcript' \
-docker compose -f compose.example.yml config --quiet
+python scripts/validate_repo.py
+docker compose config --quiet   # requires REF_AUDIO_PATH, REF_TEXT env vars
 git diff --check
 ```
 
-For container or dependency changes, the single image build and its serving/export import smoke
-test must pass on `arc-general-docker`. Apply `ready-to-test` only after local validation passes and the
-branch is ready to spend runner capacity.
+Container or dependency changes: apply `ready-to-test` to trigger the image build and import smoke test on `arc-general-docker`. Do this only after local validation passes.
 
-For model execution changes, also run the relevant staged gates from the implementation plan:
+Model execution changes also require the staged gates from `docs/dev/OPENVINO_IMPLEMENTATION.md`:
+1. PyTorch baseline/profile
+2. FP32 OpenVINO tensor, token, position, and cache parity
+3. INT8 accuracy and greedy-code agreement
+4. Voice quality listening checks
+5. Warm median/p95 latency, RTF, and peak RSS on `dockermisc1`
+6. PyTorch rollback verification
 
-1. PyTorch baseline/profile.
-2. FP32 OpenVINO tensor, token, position, and cache parity.
-3. INT8 accuracy and greedy-code agreement analysis.
-4. Voice quality listening checks.
-5. Warm median/p95 latency, real-time factor, and peak RSS on `dockermisc1`.
-6. PyTorch rollback verification.
+## Test tiers
 
-Do not lower the 7 GiB production container limit until the final thin runtime is measured
-under short and long utterances with at least 20% memory headroom.
-
-## Test Design Guidance
-
-Keep tests separated by cost and required environment:
-
-### Tier 1: Repository and unit tests
-
-Run on every PR without model downloads. Use generated tensors and tiny synthetic modules to
-test:
-
-- K/V cache flattening, naming, ordering, and reconstruction
-- prefill versus one-token decode shapes
-- position IDs, cache positions, masks, and cache-length accounting
-- export metadata validation and source/config hash checks
-- backend selection and startup mismatch failures
-- sampling helpers, suppression lists, EOS handling, and repetition penalties
+### Tier 1 — Repository/unit (arc-general, no model)
+- K/V cache flattening, naming, ordering, reconstruction
+- Prefill vs. one-token decode shapes
+- Position IDs, cache positions, masks, cache-length accounting
+- Export metadata validation and source/config hash checks
+- Backend selection and startup mismatch failures
 - HTTP request validation and response formats
 
-Synthetic fixtures must be deterministic and small enough for `arc-general`.
+### Tier 2 — Container (arc-general-docker, no model weights)
+- Build the single image for Linux AMD64
+- Import Torch, Torchaudio, Qwen3-TTS, OpenVINO, NNCF, and all export modules
+- Assert Torch is a CPU build (no CUDA shared libraries)
+- Validate `compose.yml`, the health check endpoint, both MODEL_SIZE presets, the downloader module
 
-### Tier 2: Container tests
+### Tier 3 — Model parity (dockermisc1, do_sample=False)
+1. PyTorch vs. FP32 OpenVINO main prefill
+2. Several main decode steps with growing cache
+3. Predictor prefill and all 15 codebook steps
+4. Complete generated code sequences
 
-Run on `arc-general-docker` without model weights:
+Record max/mean absolute error, top-1 agreement, top-k overlap, cache shapes, first divergent step. Parity gates fail closed — never catch missing outputs or lower thresholds to make a run pass.
 
-- build both `runtime` and `exporter` targets for Linux AMD64
-- import Torch, Torchaudio, Qwen3-TTS, OpenVINO, and NNCF as appropriate
-- assert Torch reports a CPU build and does not require CUDA shared libraries
-- validate executable entrypoints and dependency metadata
-- validate `compose.example.yml`, the image health check, both model presets, the downloader
-  module, and the signal-aware supervisor entrypoint
+### Tier 4 — Quality and performance (dockermisc1)
+Record: audio duration, end-to-end latency, RTF, warm median/p95, container peak RSS, host RAM/swap, and listening notes. Keep benchmark prompts in source control; store audio outside Git.
 
-### Tier 3: Model parity tests
+## Troubleshooting
 
-Run on `dockermisc1` with the persistent model cache. Use `do_sample=False` and fixed inputs.
-Compare one boundary at a time:
+### CPU Torch/Torchaudio unresolvable
+Inspect the CPU wheel index directly. Keep TORCH_VERSION and TORCHAUDIO_VERSION as independent Dockerfile ARGs. After changing a pin, rebuild and smoke-test.
 
-1. PyTorch versus FP32 OpenVINO main prefill.
-2. Several main decode steps with growing cache.
-3. Predictor prefill.
-4. All 15 predictor codebook steps.
-5. Complete generated code sequences.
+### Why Optimum Intel is absent
+`qwen3_tts_talker` has no registered exporter in `TasksManager`. Use `openvino.convert_model()` + `nncf.compress_weights()` instead.
 
-Record max/mean absolute error, relative error, top-1 agreement, top-k overlap, cache shapes,
-and the first divergent step. Exact waveform equality is not a useful parity criterion.
-
-Parity gates must fail closed:
-
-- Do not catch a missing projection, output head, cache output, or required metric and continue
-  with a reduced test. Treat it as a harness failure.
-- In multi-step decode tests, carry each backend's own K/V output into its next step. Seeding
-  every step from PyTorch cache is allowed only as a separately labeled single-step diagnostic.
-- Exercise `talker.codec_head` and all 15 predictor `lm_head` selections before claiming token
-  parity. Hidden-state SNR alone cannot complete a transformer milestone.
-- Synthetic inputs characterize graph conversion only. Milestone acceptance additionally
-  requires inputs and mRoPE positions captured from the real generation path, bounded generated-
-  code comparison, production-sampling listening checks, and warm performance measurements.
-- Do not lower an existing accuracy threshold solely to make a failed run pass. A gate change
-  requires documented generation-level evidence and listening results.
-- Verify compression modes and parameter semantics against the pinned NNCF API. Unsupported
-  convenience names such as a hypothetical `MIX8` mode must not be added to the exporter CLI.
-
-### Tier 4: INT8 quality and performance
-
-Use both deterministic greedy generation and production sampling. Record:
-
-- generated audio duration and end-to-end latency
-- model, vocoder, and serialization timings
-- main and predictor step counts
-- real-time factor, warm median, and p95
-- container peak RSS, host available RAM, swap delta, and CPU utilization
-- intelligibility, speaker similarity, repetition, truncation, and audible artifacts
-
-Keep benchmark prompts in source control as text. Store generated audio outside Git and label
-results with image digest, model revision, IR metadata hash, and runtime configuration.
-
-## Troubleshooting Playbook
-
-### CPU Torch or Torchaudio cannot be resolved
-
-- Inspect the actual CPU wheel index; do not assume Torch and Torchaudio publish matching
-  versions.
-- Keep their Docker build arguments independent.
-- Compare with the versions already importing successfully on `dockermisc1`.
-- After changing a pin, rebuild and smoke-test the image's serving and export capabilities.
-
-### Why Optimum Intel is not used
-
-`qwen3_tts_talker` is a custom architecture with no exporter registered in Optimum Intel's
-`TasksManager`, so `optimum-cli export openvino` and `OVModelFor*.from_pretrained(export=True)`
-fail with a "custom or unsupported architecture" error. Do not add Optimum Intel to make this
-work. Use tensor-only wrapper modules with `openvino.convert_model()`, then
-`nncf.compress_weights()`, as described in the implementation plan.
-
-### Export expects `input_ids`
-
-The main generation path supplies `inputs_embeds`. The wrappers must expose embeddings as the
-primary input and keep embedding lookup in PyTorch. An `input_ids`-only IR is not compatible
-with the current Qwen3-TTS generator.
+### Export expects input_ids
+The generation path supplies `inputs_embeds`. Wrappers must expose embeddings as the primary input. An `input_ids`-only IR is incompatible with the current generator.
 
 ### Output matches prefill but diverges during decode
-
-Check, in order:
-
-1. flattened K/V layer ordering and key/value ordering
-2. cache sequence length before and after the step
-3. `cache_position`, attention mask, and position IDs
-4. main-request versus predictor-request reset scope
-5. the selected predictor codebook embedding and output head
-6. trailing-text versus padding embedding selection
-
-Log the first divergent step and compare its PyTorch/OpenVINO inputs before inspecting later
-audio output.
+Check in order: K/V layer/key/value ordering; cache sequence length; `cache_position`, attention mask, position IDs; main vs. predictor reset scope; predictor codebook embedding and output head. Log the first divergent step before inspecting audio.
 
 ### Stateful generation repeats or contaminates requests
+- Main state resets once per utterance; predictor state resets once per audio frame.
+- Never share an `InferRequest` across concurrent requests.
+- Never create a new request per token.
+- Use `query_state()` in tests to confirm reset length.
 
-- Main state resets once per utterance.
-- Predictor state resets once per audio frame, before its 15-codebook sequence.
-- Do not share an `InferRequest` across concurrent requests.
-- Do not create a new request per token.
-- Use `query_state()` in tests to confirm state exists and resets to the expected length.
+### OpenVINO loaded but RAM stays high
+The first hybrid implementation keeps both PyTorch and OpenVINO weights resident. RSS drops only after unused PyTorch layers are released. Measure after GC; allocator retention can hide freed tensors. Do not delete the talker object — embeddings, projections, and codebook heads are still needed.
 
-Separate prefill and decode compiled models do not implicitly share state. The stateful
-milestone uses one dynamic stateful model per transformer core.
+### INT8 runs but not faster
+Confirm both cores use OpenVINO; confirm IR weights are compressed; check MatMul activation quantization; benchmark group sizes 0/32/64; profile main vs. predictor; check for per-token array copies; verify host isn't swapping.
 
-### Hugging Face generation code rejects the cache/output object
+### Export killed / VM swaps heavily
+Stop `qwen3-tts` before exporting (13G export + 10G serve = OOM on 15 GiB host). Never load a second model inside the existing container. Keep IR on the persistent OV volume.
 
-Do not return `None` or a cosmetic `SimpleNamespace` where Transformers expects a real cache
-contract. The integration seam is `self.talker.generate(...)` on
-`Qwen3TTSForConditionalGeneration` (reached as `wrapped.model.talker.generate(...)`). Note
-that this is the *stock* `GenerationMixin.generate`, not a custom method: the per-frame
-code-predictor loop lives inside the talker's custom `forward`, and the outer model consumes
-`talker_result.hidden_states` (codes from `hid[-1]`, hidden state from `hid[0][-1]`) with
-`output_hidden_states=True` and `return_dict_in_generate=True`. The OpenVINO replacement must
-reproduce that sampling loop, the in-`forward` predictor invocation, and that exact return
-structure, keeping OpenVINO cache state inside the dedicated runtime.
-
-### OpenVINO is loaded but RAM increases
-
-The first hybrid implementation duplicates PyTorch and OpenVINO transformer weights. RAM only
-drops after the unused PyTorch main/predictor layers are released or a thin selective loader
-is implemented. Measure RSS after collection; allocator retention can hide released tensors.
-
-Do not delete the complete talker object: embeddings, projections, codebook heads, config,
-device, and dtype behavior are still required.
-
-### INT8 runs but is not faster
-
-- Confirm both transformer cores are using OpenVINO.
-- Confirm the IR weights are actually compressed.
-- Check whether activation dynamic quantization is enabled for supported MatMuls.
-- Benchmark dynamic group sizes `0`, `32`, and `64`.
-- Profile main versus predictor time; the predictor performs up to 15 steps per audio frame.
-- Check for numpy/Torch cache copies or request creation inside token loops.
-- Check host contention, throttling, and swap before comparing runs.
-
-### CPU usage stays high
-
-High active utilization is expected. Optimize CPU-seconds and wall time, not peak CPU alone.
-Set thread variables before importing numerical runtimes, use one inference request at a time,
-benchmark 6 versus 8 threads, and keep `OMP_WAIT_POLICY=PASSIVE` to reduce post-inference spin.
-
-### `KV_CACHE_PRECISION=u8` has no effect
-
-The property applies to cache patterns recognized by OpenVINO. It may not quantize arbitrary
-explicit K/V graph inputs and outputs. Validate explicit-cache correctness first, then measure
-the property after conversion to recognized stateful cache graphs.
-
-### Export is killed or the VM swaps heavily
-
-- Stop only the existing `qwen3-tts` container before export to release its model memory.
-- Do not load a second model inside that container.
-- Confirm available memory and swap before starting.
-- Keep output on the persistent OpenVINO volume so a container exit does not lose validated
-  artifacts.
-
-### Exporter image does not quantize
-
-The exporter performs FP32 conversion and weight-only INT8 compression. It does not make an
-unsupported calibration mode valid: NNCF 3.2.0 rejects datasets and data-aware options for INT8
-`compress_weights`. `--calibration` therefore exits before model loading. Use the staged parity
-and generation harnesses after every export; do not publish an artifact merely because NNCF wrote
-IR files.
-
-### Container remains up after one Gunicorn service exits
-
-- Confirm the image command is `python serve.py`, not a shell with a background process.
-- Confirm both Gunicorn masters were started in their own process groups.
-- Confirm the supervisor exits after either child exits and forwards stop signals to the
-  remaining group.
-- A public `/health` response must return HTTP 503 while the worker is unavailable.
-
-### ARC job remains queued
-
-- Confirm the workflow uses the exact `arc-general` or `arc-general-docker` label.
-- Confirm the ARC GitHub App installation includes this repository.
-- Check the scale set, ephemeral runner pod, listener logs, and node allocatable resources.
-- Do not increase Helm limits merely to hide a workload that belongs on `dockermisc1`.
+### ARC job queued
+Confirm `arc-general` or `arc-general-docker` label; confirm ARC GitHub App is installed; check scale set, ephemeral pod, and listener logs.
 
 ### GHCR build cache fails
+Use the `:buildcache` reference with `mode=min,ignore-error=true`. Cache failure must not invalidate an otherwise successful build.
 
-Use the dedicated `buildcache` reference. Keep `mode=min,ignore-error=true`; large
-`mode=max` intermediate caches have previously been rejected by GHCR. A cache-export failure
-must not invalidate an otherwise successful image build.
+## Agent handoff requirements
 
-## Agent Handoff Requirements
+Every handoff must state:
+- Source commit and image tag/digest
+- Model revision and IR metadata hash
+- Completed milestones and remaining release gates
+- Exact validation commands and results
+- Benchmark prompts and runtime settings (FP32/INT8, explicit/stateful cache)
+- Known divergences, first failing step, and non-Git artifact locations
+- Rollback procedure and whether it was tested
 
-Every implementation handoff must state:
+## Production VM safety (dockermisc1)
 
-- source commit and image tag/digest
-- model revision and IR metadata hash
-- completed milestone and remaining release gates
-- exact validation commands and their results
-- benchmark prompts and runtime settings
-- whether testing used FP32, INT8, explicit cache, or stateful cache
-- known divergences, first failing step, and saved non-Git artifacts
-- rollback procedure and whether it was tested
+- Shared live host — prefer read-only inspection unless the user explicitly authorizes changes.
+- Stop only `qwen3-tts` during export; never touch unrelated containers (`litellm*`, `headroom-proxy`, `crowdsec`, `hermes-*`, `*arr`, `searxng`).
+- Never run two large model jobs at once (export + serve will OOM a 15 GiB box).
+- Record host load, available RAM, and swap alongside performance results.
+- On failure, restore the previous immutable image or switch to `TTS_BACKEND=pytorch`.
+- Port 8318 has no auth or TLS; keep it on a trusted network or behind an authenticated reverse proxy.
 
-Distinguish clearly between code-path validation, synthetic tests, full-model parity, listening
-tests, and target-hardware performance. Passing one category does not imply the others.
+## Commit and PR conventions
 
-## Production VM Safety
+Use Conventional Commits (`feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `build`, `ci`, `chore`, `revert`). Use squash merge. The PR title drives Release Please, so user-facing changes need a `feat:` or `fix:` title.
 
-- Treat `dockermisc1` as a live shared host.
-- Prefer read-only inspection unless the user explicitly authorizes deployment or service
-  changes.
-- Stop only the `qwen3-tts` service during export maintenance; do not disturb unrelated
-  containers.
-- Record host load, available RAM, and swap beside performance results.
-- Do not run a second full model inside the existing 7 GiB production container.
-- On export or deployment failure, restore the previous image or use the PyTorch backend.
-- The service has no built-in authentication or TLS. Keep port 8318 on a trusted network or
-  use an authenticated TLS reverse proxy, and follow `SECURITY.md` for private reports.
-
-## Commit and Pull Request Conventions
-
-Use Conventional Commits:
-
-```text
-feat(runtime): add stateful OpenVINO talker
-fix(export): preserve predictor cache positions
-perf(runtime): reduce K/V cache transfers
-docs(plan): record validated dependency pair
-ci(images): publish unified runtime and exporter image
-```
-
-Supported types: `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `build`, `ci`, `chore`,
-and `revert`.
-
-Use squash merge. Release Please evaluates the pull request title, so a user-facing feature or
-fix must have a corresponding `feat:` or `fix:` PR title.
-
-Every implementation PR body must include an explicit Release Please override block. Put one
-Conventional Commit entry on each line so every user-visible change that belongs in the release
-notes is represented:
+Every implementation PR body must include a Release Please override block:
 
 ```text
 BEGIN_COMMIT_OVERRIDE
-fix(ci): publish images only from Release Please tags
-
-fix(export): include the OpenVINO export CLI in the exporter image
+fix(ci): publish one complete container image
+fix(runtime): correct gunicorn worker threading
 END_COMMIT_OVERRIDE
 ```
 
-The block is authoritative release-note input; keep it aligned with the full PR scope instead
-of relying on the PR title alone. Put one Conventional Commit line per entry; blank lines between
-entries are allowed but not required. Each entry must use exactly one supported type and an
-optional scope; express cross-cutting work as `feat(bench): ...` or `docs(export): ...`, never
-composite headers such as `feat(bench)+docs:` or `docs+export:`. Generated Release Please version PRs
-are exempt. Keep generated model artifacts and benchmark audio out of PRs.
+One Conventional Commit line per entry; one supported type per entry; no composite headers. Release Please version PRs are exempt. Keep model artifacts and benchmark audio out of PRs.
