@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.15.0...qwen3-tts-openvino-v0.15.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* **ci:** publish one complete container image ([b7defd7](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/b7defd7be16c6817713c162b88181fb3b77611b2))
+
 ## [0.15.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.14.0...qwen3-tts-openvino-v0.15.0) (2026-07-01)
 
 
