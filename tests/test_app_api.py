@@ -12,6 +12,7 @@ import numpy as np
 fake_model = types.ModuleType("qwen3_tts.model")
 fake_model.model = object()
 fake_model.voice_clone_prompt = object()
+fake_model._service_started = True
 fake_model.ov_runtime = types.SimpleNamespace(
     vocoder_runtime=types.SimpleNamespace(enabled=True, sample_rate=24000)
 )
