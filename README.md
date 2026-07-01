@@ -1,10 +1,33 @@
 # Qwen3-TTS OpenVINO
 
-Linux AMD64 container for the official Qwen3-TTS Base voice-cloning checkpoints, accelerated on
-Intel CPUs with OpenVINO. It exposes a small OpenAI-compatible HTTP API and supports `0.6B` and
-`1.7B` through one `MODEL_SIZE` setting.
+CPU-only Linux AMD64 container for the official Qwen3-TTS Base voice-cloning checkpoints. It runs
+the two autoregressive transformer cores and FP32 vocoder with OpenVINO on Intel CPUs, while keeping
+prompt construction, sampling, and lightweight model glue in PyTorch.
+
+The application is intentionally small: one image, one Gunicorn process, one model, one server-side
+reference voice, and port `8318`. The same image also contains the export, quantization, parity, and
+benchmark tooling.
+
+## Current capabilities
+
+- Qwen3-TTS Base `0.6B` and `1.7B`, selected with one `MODEL_SIZE` setting.
+- OpenAI-compatible `POST /v1/audio/speech` subset with MP3 or WAV output.
+- Native `POST /generate` endpoint and raw incremental PCM at `POST /generate/stream`.
+- Stateful OpenVINO main-talker cache for both profiles; stateful predictor cache for 0.6B.
+- FP32 OpenVINO vocoder and serialized single-request inference.
+- Persistent local Hugging Face and OpenVINO artifact bind mounts.
+- Explicit `TTS_BACKEND=pytorch` rollback path that does not require exported IR.
+
+The service uses the reference WAV mounted at `/voice/reference.wav` and its exact `REF_TEXT` for
+all requests. Per-request voices, arbitrary reference audio, Voice Design, CustomVoice, instruct
+control, authentication, and TLS are not implemented. OpenAI fields other than `input`,
+`response_format`, and the extension `language` do not change generation.
 
 ## Quick start
+
+Requirements: Linux AMD64, Docker Compose, an Intel CPU, a reference WAV with its exact transcript,
+and at least 10 GiB available to the serving container. Export needs up to 13 GiB and must not run
+beside the service on a constrained host.
 
 ```bash
 cp .env.example .env
@@ -12,6 +35,7 @@ cp .env.example .env
 
 docker compose run --rm export
 docker compose up --build -d qwen3-tts
+curl -fsS http://localhost:8318/health
 
 curl -sS http://localhost:8318/v1/audio/speech \
   -H 'Content-Type: application/json' \
@@ -19,13 +43,45 @@ curl -sS http://localhost:8318/v1/audio/speech \
   -o output.mp3
 ```
 
-The export is stored under `./data/ov/<MODEL_SIZE>` and reused by later starts. Change
-`MODEL_SIZE`, rerun the export, then restart the service to compare 0.6B and 1.7B.
+The first export downloads the selected checkpoint to `./data/model` and writes reusable IR to
+`./data/ov/<MODEL_SIZE>`. Change `MODEL_SIZE`, run export again, and restart to change profiles.
 
-**Which size?** `1.7B` is the recommended profile — slightly better quality with **no memory
-penalty** over 0.6B: both are dominated by a fixed OpenVINO/vocoder floor and sit at roughly
-**5.4–5.8 GiB** for normal single-utterance traffic, comfortably under the default 10 GiB limit.
+## Model profiles
 
-See [HOW_TO_RUN.md](docs/HOW_TO_RUN.md) for operations, A/B testing, volumes, settings, and
-benchmark collection. Development contracts and measured results are under [docs/dev](docs/dev/).
-Security and private-reporting guidance is in [SECURITY.md](SECURITY.md).
+| Profile | Main talker | Predictor | Vocoder | Recommendation |
+|---|---|---|---|---|
+| `0.6B` | INT8, stateful cap 768 | INT8, stateful cap 32 | FP32 OpenVINO | Smaller model, similar serving footprint |
+| `1.7B` | INT4 asymmetric group 32, stateful cap 768 | INT8, explicit cache | FP32 OpenVINO | Preferred listening quality |
+
+Use `1.7B` unless you have a model-specific reason to choose 0.6B. On the validated host, normal
+single-utterance traffic for both profiles used roughly 5.4–5.8 GiB; the fixed OpenVINO/vocoder
+floor dominates the model-size difference. The default 10G/11G memory and swap limits retain
+headroom for longer prompts and cache growth.
+
+## HTTP API
+
+```text
+GET  /health
+POST /v1/audio/speech  {"input":"...", "language":"English", "response_format":"mp3|wav"}
+POST /generate         {"text":"...",  "language":"English", "response_format":"mp3|wav"}
+POST /generate/stream  {"text":"...",  "language":"English"}  -> mono f32le PCM
+```
+
+`/stream_internal` and `/batch_internal` are development parity endpoints, not stable public APIs.
+The public stream reports format, sample rate, and channel count in `X-Audio-*` headers. If an error
+occurs after audio starts, the connection closes and the partial audio must be discarded or handled
+explicitly.
+
+## Images and artifacts
+
+Release automation publishes one image as immutable
+`ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>` and also applies release-version and moving
+`latest` tags. Production must use a SHA tag or digest. Model weights, OpenVINO IR, reference audio,
+and generated speech are never included in the image; Compose bind-mounts them from the host.
+
+See [HOW_TO_RUN.md](docs/HOW_TO_RUN.md) for deployment, streaming, rollback, memory measurement,
+A/B listening, and benchmark collection. The implementation contract and measured evidence are in
+[docs/dev/OPENVINO_IMPLEMENTATION.md](docs/dev/OPENVINO_IMPLEMENTATION.md) and
+[docs/dev/OPENVINO_RESULTS.md](docs/dev/OPENVINO_RESULTS.md). Security guidance is in
+[SECURITY.md](SECURITY.md); the service has no authentication or TLS and must remain on a trusted
+network or behind an authenticated TLS reverse proxy.

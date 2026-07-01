@@ -1,5 +1,5 @@
 ARG PYTHON_IMAGE=python:3.13-slim@sha256:eb43ff125d8d58d7449dcba7d336c23bcac412f526d861db493b9994d8010280
-FROM ${PYTHON_IMAGE} AS base
+FROM ${PYTHON_IMAGE}
 
 ARG TORCH_VERSION=2.12.1
 ARG TORCHAUDIO_VERSION=2.11.0
@@ -26,24 +26,20 @@ RUN python -m pip install \
 RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/' \
     /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_25hz/vq/speech_vq.py || true
 
+# One image, all capabilities: OpenVINO serving runtime + export/quantization tooling.
+RUN python -m pip install -r requirements/openvino.txt && \
+    python -m pip install -r requirements/export.txt
+
 COPY src/ src/
 COPY scripts/ scripts/
-
-FROM base AS runtime
-
-RUN python -m pip install -r requirements/openvino.txt
 
 EXPOSE 8318
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10m --retries=3 \
     CMD curl --fail --silent --show-error http://127.0.0.1:8318/health >/dev/null || exit 1
 
-CMD ["gunicorn","qwen3_tts.app:app","-w","1","-k","gthread","--threads","4","--timeout","300","--bind","0.0.0.0:8318","--log-level","info"]
-
-FROM runtime AS exporter
-
-RUN python -m pip install -r requirements/export.txt
-
-CMD ["python", "scripts/export.py"]
-
 LABEL org.opencontainers.image.source="https://github.com/nmorgowicz-org/qwen3-tts-openvino"
+
+# Default command serves the API. The compose `export` service overrides this with
+# `python scripts/export.py` to build IR and quantize using the same image.
+CMD ["gunicorn","qwen3_tts.app:app","-w","1","-k","gthread","--threads","4","--timeout","300","--bind","0.0.0.0:8318","--log-level","info"]

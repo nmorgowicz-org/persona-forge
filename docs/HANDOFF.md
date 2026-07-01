@@ -1,7 +1,7 @@
-# HANDOFF — simplify-v2 production refactor
+# HANDOFF — unified container image follow-up
 
-> Follow the steps in **§4 What's left** in order. Everything above it is current-state context so
-> you know *why*. Do not touch `main`. Obey **§6 Hard rules**.
+> Current work is on `fix/workflows-single-image`, based on released `v0.15.0` main. Follow
+> **§4 What's left** and obey **§6 Hard rules**.
 
 ## 1. What this is
 
@@ -19,7 +19,7 @@ curl -s localhost:8318/v1/audio/speech -H 'Content-Type: application/json' \
      -d '{"input":"hello there"}' -o out.mp3
 ```
 
-## 2. Current state (branch `refactor/simplify-v2`, off released v0.14.0 `main`)
+## 2. Current state (branch `fix/workflows-single-image`, off released v0.15.0 `main`)
 
 **The refactor is DONE and validated.** One merged Flask app (`qwen3_tts.app:app`), `src/` package
 layout, `MODEL_SIZE` presets, one-command export, `serve.py`/port-8319 proxy removed, docs moved to
@@ -52,25 +52,20 @@ The "0.6B ≈ 1.7B memory" surprise is explained and the reduction work is done.
 
 ## 4. What's left (do in this order)
 
-1. **Commit is done** — the codec-release change (`OPENVINO_RELEASE_CODEC` in
-   `src/qwen3_tts/openvino/talker.py` + call in `model.py`, `.env.example` doc) is committed on
-   `refactor/simplify-v2`. If you changed code, run `python -m py_compile` over it first.
+1. **Single-image implementation is complete locally.** Docker now installs serving and export
+   dependencies in one final image. Compose uses that image for both services and only overrides
+   the export command. CI builds, caches, publishes, and smoke-tests one immutable SHA tag. Cleanup,
+   operator docs, the M4 harness, repository validation, and the issue template use the same naming.
 
-2. **Bake + redeploy the runtime image.** The box validation used a **bind-mounted** `src` over the
-   existing image, so the running container does not yet contain the codec-release code. On
-   `dockermisc1`, rebuild and restart:
-   ```bash
-   cd /tmp/qv2val && git pull   # or re-sync src; then:
-   docker build --target runtime -t qwen3-tts-openvino:simplify-v2-runtime .
-   docker rm -f qwen3-tts
-   # re-run with the §5 recipe (MODEL_SIZE=1.7B), NO bind-mount this time
-   ```
-   Confirm the startup log shows `released ~0.32 GiB of PyTorch codec` and health is ok.
+2. **Local model-free gates pass:** `scripts/validate_repo.py`, Compose config, shell syntax, JSON
+   validation, and `git diff --check`. A local image build could not run because this Mac's Docker
+   daemon is not available. After publishing the branch, apply `ready-to-test`; the
+   `arc-general-docker` build/import smoke test is the remaining required gate.
 
-3. **Open the PR** (`refactor/simplify-v2` → `main`). Body MUST contain a
-   `BEGIN_COMMIT_OVERRIDE`/`END_COMMIT_OVERRIDE` block listing one Conventional-Commit line per commit
-   (memory `pr-commit-override-block`). End every commit message with
-   `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
+3. **After CI passes, deploy an immutable image on `dockermisc1`.** Set `QWEN3_TTS_IMAGE` to
+   `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>`, run the Compose export profile only when IR
+   must be regenerated, then start the service. Confirm `/health`, one short generation, and the
+   startup `released ~0.32 GiB of PyTorch codec` log. Roll back by restoring the prior image digest.
 
 4. **Optional follow-ups (not blockers):**
    - Re-measure codec release on **0.6B** (the A/B above was 1.7B-only) for symmetry.
@@ -97,7 +92,7 @@ docker run -d --name qwen3-tts -p 8318:8318 --memory 10g --memory-swap 11g \
   -v /var/data/autopirate/qwen3-tts/model:/root/.cache/huggingface/hub:rw \
   -v /var/data/autopirate/qwen3-tts/openvino-simplify-v2:/ov:rw \
   -v /var/data/autopirate/qwen3-tts/voice/voice_A.wav:/voice/reference.wav:ro \
-  qwen3-tts-openvino:simplify-v2-runtime
+  qwen3-tts-openvino:simplify-v2
 curl -sf localhost:8318/health
 ```
 
@@ -107,7 +102,7 @@ docker exec qwen3-tts cat /sys/fs/cgroup/memory.current   # idle load RSS
 # ...POST /generate...
 docker exec qwen3-tts cat /sys/fs/cgroup/memory.peak       # gen peak
 ```
-NNCF (for any OV weight-compression experiment) lives in the **exporter** image, not runtime.
+NNCF and the export/parity tools are included in the same image as the serving runtime.
 
 ## 6. Hard rules (keep in effect)
 

@@ -12,10 +12,9 @@ x-model-volumes: &model-volumes
 
 services:
   qwen3-tts:
-    image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:runtime-local}
+    image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:local}
     build:
       context: .
-      target: runtime
     container_name: qwen3-tts
     restart: unless-stopped
     ports:
@@ -33,10 +32,11 @@ services:
     stop_grace_period: 45s
 
   export:
-    image: ${QWEN3_TTS_EXPORTER_IMAGE:-qwen3-tts-openvino:exporter-local}
+    # Same single image as the service above; only the command differs.
+    image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:local}
     build:
       context: .
-      target: exporter
+    command: ["python", "scripts/export.py"]
     profiles: [export]
     environment:
       <<: *model-environment

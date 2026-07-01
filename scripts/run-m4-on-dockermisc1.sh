@@ -3,7 +3,7 @@
 # Run the Milestone 4 generation-parity + warm-latency harness on dockermisc1.
 #
 # Stops the prod qwen3-tts container (so the full model load does not contend for memory
-# or swap-thrash), runs test_ov_generation.py inside the exporter image against an exported
+# or swap-thrash), runs test_ov_generation.py inside the project image against an exported
 # IR directory, then ALWAYS restarts the service — even if the harness fails or is
 # interrupted. The harness writes ov_generation_report.json beside the IR files.
 #
@@ -19,7 +19,8 @@
 # Override any path/image via environment:
 #   COMPOSE_FILE   /home/nick/docker/docker-compose.yml
 #   SERVICE        qwen3-tts
-#   EXPORTER_IMAGE ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-latest  (pin a tag!)
+#   QWEN3_TTS_IMAGE ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>
+#                   (`EXPORTER_IMAGE` remains a deprecated compatibility alias)
 #   MODEL_CACHE    /var/data/autopirate/qwen3-tts/model
 #   OV_ROOT        /var/data/autopirate/qwen3-tts/openvino
 #   MODEL_SIZE     0.6B
@@ -38,7 +39,7 @@ COMPRESSION="${2:-${COMPRESSION:-}}"
 
 COMPOSE_FILE="${COMPOSE_FILE:-/home/nick/docker/docker-compose.yml}"
 SERVICE="${SERVICE:-qwen3-tts}"
-EXPORTER_IMAGE="${EXPORTER_IMAGE:-ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-latest}"
+QWEN3_TTS_IMAGE="${QWEN3_TTS_IMAGE:-${EXPORTER_IMAGE:-ghcr.io/nmorgowicz-org/qwen3-tts-openvino:latest}}"
 MODEL_CACHE="${MODEL_CACHE:-/var/data/autopirate/qwen3-tts/model}"
 OV_ROOT="${OV_ROOT:-/var/data/autopirate/qwen3-tts/openvino}"
 MODEL_SIZE="${MODEL_SIZE:-0.6B}"
@@ -58,8 +59,8 @@ if [[ ! -f "$REF_AUDIO_PATH" ]]; then
   echo "error: reference audio not found: $REF_AUDIO_PATH (set REF_AUDIO_PATH)" >&2
   exit 1
 fi
-if [[ "$EXPORTER_IMAGE" == *:exporter-latest ]]; then
-  echo "warning: using a moving 'exporter-latest' tag; pin EXPORTER_IMAGE to an immutable tag for reproducible runs." >&2
+if [[ "$QWEN3_TTS_IMAGE" == *:latest ]]; then
+  echo "warning: using the moving 'latest' tag; pin QWEN3_TTS_IMAGE to an immutable SHA tag for reproducible runs." >&2
 fi
 
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
@@ -79,7 +80,7 @@ if [[ -n "$COMPRESSION" ]]; then
   harness_cmd+=(--compression "$COMPRESSION")
 fi
 
-echo ">> running M4 harness in $EXPORTER_IMAGE against $IR_DIR_NAME ..."
+echo ">> running M4 harness in $QWEN3_TTS_IMAGE against $IR_DIR_NAME ..."
 docker run --rm \
   --memory "$MEMORY" --memory-swap "$MEMORY_SWAP" \
   -e "MODEL_SIZE=$MODEL_SIZE" \
@@ -94,7 +95,7 @@ docker run --rm \
   -v "$MODEL_CACHE:/root/.cache/huggingface/hub:rw" \
   -v "$OV_ROOT:/ov_output:rw" \
   -v "$REF_AUDIO_PATH:/voice/voice_A.wav:ro" \
-  "$EXPORTER_IMAGE" \
+  "$QWEN3_TTS_IMAGE" \
   "${harness_cmd[@]}"
 
 echo ">> done. Report: $OV_ROOT/$IR_DIR_NAME/ov_generation_report.json"

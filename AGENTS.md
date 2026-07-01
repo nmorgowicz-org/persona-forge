@@ -22,7 +22,7 @@ implementation contract for this repository.
   byte-identical audio versus explicit cache and reduced the short-request peak from 8,623 to
   6,635 MiB. A 45.28-second request peaked at 7,845 MiB, so long requests still require 8 GiB.
 - 1.7B ships INT4 with bf16 glue and stateful cache at an 8 GiB memory limit.
-- CI builds model-free `runtime` and `exporter` Docker targets.
+- CI builds one model-free Docker image containing serving and export tooling.
 - Full model export, INT8 compression, parity testing, and performance benchmarking run on
   `dockermisc1`, not on ARC runners.
 
@@ -106,24 +106,23 @@ validating their presence.
 Use the correct ARC pool:
 
 - `arc-general`: repository validation, labels, release automation, and non-Docker jobs.
-- `arc-general-docker`: native Linux AMD64 runtime/exporter image builds.
+- `arc-general-docker`: native Linux AMD64 image builds.
 - Never download or convert the full model in current ARC jobs; their memory is insufficient.
 
-Cheap repository validation runs on every internal PR. Expensive runtime/exporter image builds
+Cheap repository validation runs on every internal PR. The expensive container image build
 run only when an authorized maintainer applies the `ready-to-test` label. After that label is
 present, later commits rerun the image checks. Release Please version tags publish images;
 manual workflow dispatches remain an explicit build-and-publish override. Merges to `main` do
 not build or publish images by themselves.
 
-Release cleanup must protect `runtime-latest`, `exporter-latest`, `buildcache-runtime`, and
-`buildcache-exporter`. Keep five additional package versions for rollback; do not use an
+Release cleanup must protect `latest` and `buildcache`. Keep five additional package versions for
+rollback; do not use an
 unqualified package-wide retention rule that can delete the active tags or caches.
 
 Images are immutable build artifacts:
 
 ```text
-ghcr.io/nmorgowicz-org/qwen3-tts-openvino:runtime-<git-sha>
-ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-<git-sha>
+ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>
 ```
 
 Production Compose must use an immutable SHA tag or digest, not `latest`.
@@ -149,8 +148,8 @@ docker compose -f compose.example.yml config --quiet
 git diff --check
 ```
 
-For container or dependency changes, both Docker targets and their import smoke tests must
-pass on `arc-general-docker`. Apply `ready-to-test` only after local validation passes and the
+For container or dependency changes, the single image build and its serving/export import smoke
+test must pass on `arc-general-docker`. Apply `ready-to-test` only after local validation passes and the
 branch is ready to spend runner capacity.
 
 For model execution changes, also run the relevant staged gates from the implementation plan:
@@ -247,7 +246,7 @@ results with image digest, model revision, IR metadata hash, and runtime configu
   versions.
 - Keep their Docker build arguments independent.
 - Compare with the versions already importing successfully on `dockermisc1`.
-- After changing a pin, rebuild and smoke-test both Docker targets.
+- After changing a pin, rebuild and smoke-test the image's serving and export capabilities.
 
 ### Why Optimum Intel is not used
 
@@ -364,7 +363,7 @@ IR files.
 
 ### GHCR build cache fails
 
-Use a separate cache reference per Docker target. Keep `mode=min,ignore-error=true`; large
+Use the dedicated `buildcache` reference. Keep `mode=min,ignore-error=true`; large
 `mode=max` intermediate caches have previously been rejected by GHCR. A cache-export failure
 must not invalidate an otherwise successful image build.
 
@@ -406,7 +405,7 @@ feat(runtime): add stateful OpenVINO talker
 fix(export): preserve predictor cache positions
 perf(runtime): reduce K/V cache transfers
 docs(plan): record validated dependency pair
-ci(images): publish exporter target
+ci(images): publish unified runtime and exporter image
 ```
 
 Supported types: `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `build`, `ci`, `chore`,

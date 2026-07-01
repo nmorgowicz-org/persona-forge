@@ -42,6 +42,12 @@
       "automerge": false
     },
     {
+      "description": "OpenVINO 2026.2.1 and NNCF 3.2.0 require NumPy below 2.5",
+      "matchManagers": ["pip_requirements"],
+      "matchPackageNames": ["numpy"],
+      "allowedVersions": "<2.5.0"
+    },
+    {
       "description": "transformers is pinned to the version qwen-tts==0.1.1 was tested against; our OV export wrappers depend on specific internals (DynamicLayer, create_causal_mask). Re-enable when qwen-tts bumps its compatibility baseline.",
       "matchManagers": ["pip_requirements"],
       "matchPackageNames": ["transformers"],

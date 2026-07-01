@@ -14,7 +14,7 @@ Set these three values in `.env`:
 ```dotenv
 REF_AUDIO_PATH=/absolute/path/to/reference.wav
 REF_TEXT=The exact words spoken in the reference WAV
-MODEL_SIZE=0.6B
+MODEL_SIZE=1.7B
 ```
 
 Export once for the selected model, then start the service:
@@ -29,6 +29,11 @@ The first export downloads the Hugging Face checkpoint into `./data/model` and w
 under `./data/ov/0.6B` or `./data/ov/1.7B`. Both directories are host bind mounts, so image rebuilds
 do not redownload or re-export them. The reference WAV is mounted read-only at
 `/voice/reference.wav`; `REF_TEXT` must match it exactly.
+
+Serving and export use the same image. Its default command starts the API; the Compose `export`
+service overrides that command with `python scripts/export.py`. Released images are tagged
+`ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>` (plus version and moving `latest` tags on a
+release). Production must pin the SHA tag or digest.
 
 Check readiness and generate audio:
 
@@ -48,6 +53,31 @@ curl -sS http://localhost:8318/generate \
 
 Only port 8318 is exposed. One Gunicorn process owns the model and serializes inference through a
 single executor, avoiding duplicate model memory.
+
+### What the containers do
+
+There is one image and two Compose service definitions:
+
+- `qwen3-tts` runs the image's default Gunicorn command and serves port 8318.
+- `export` uses the same image but overrides its command with `python scripts/export.py`. It
+  downloads the selected checkpoint if needed, exports/compresses the transformer IR, exports the
+  FP32 vocoder, creates the stateful graph(s), and writes the stable `/ov/<MODEL_SIZE>` layout.
+
+Export is a one-time operation per model size or source/dependency change. It can use 13–14 GiB,
+whereas serving defaults to 10G/11G. On a 15 GiB host, stop `qwen3-tts` before exporting and never
+run two model jobs concurrently.
+
+### Bind mounts
+
+| Host setting | Container path | Mode | Purpose |
+|---|---|---|---|
+| `MODEL_CACHE_PATH` (default `./data/model`) | `/root/.cache/huggingface/hub` | read/write | Reuses downloaded checkpoint files |
+| `OV_DATA_PATH` (default `./data/ov`) | `/ov` | read/write | Stores generated IR by model size |
+| `REF_AUDIO_PATH` | `/voice/reference.wav` | read-only | Fixed voice-clone reference used at startup |
+
+`REF_TEXT` is an environment value, not a mount. It must be the exact transcript of the reference
+WAV; a mismatch reduces speaker and pronunciation quality. Do not place tokens, private voices,
+model caches, IR, or generated audio in the Git checkout.
 
 ## Compare 0.6B and 1.7B
 
@@ -124,6 +154,20 @@ HF_TOKEN=<token-if-the-checkpoint-requires-it>
 OPENVINO_RELEASE_CODEC=0
 ```
 
+Operational settings:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MODEL_SIZE` | `0.6B` | Selects the complete tested 0.6B or 1.7B preset |
+| `QWEN3_TTS_IMAGE` | `qwen3-tts-openvino:local` | Unified serving/export image; pin SHA or digest in production |
+| `QWEN3_TTS_PORT` | `8318` | Host port mapped to container port 8318 |
+| `TTS_BACKEND` | `openvino` | Set `pytorch` for the rollback backend |
+| `MODEL_REVISION` | unset | Optional Hugging Face revision pin; must match IR metadata for OpenVINO |
+| `HF_TOKEN` | unset | Hugging Face access token when required; do not commit it |
+| `TTS_MEMORY_LIMIT` / `TTS_MEMORY_SWAP_LIMIT` | `10G` / `11G` | Serving cgroup limits |
+| `EXPORT_MEMORY_LIMIT` / `EXPORT_MEMORY_SWAP_LIMIT` | `13G` / `14G` | Export cgroup limits |
+| `OPENVINO_RELEASE_CODEC` | `1` for OpenVINO | Frees the PyTorch codec after startup; disable for future per-request cloning |
+
 `TTS_BACKEND=pytorch` is the rollback path and does not require exported IR. It still needs the
 checkpoint cache and reference voice. Do not set exporter serving dtype overrides: graph conversion
 requires its FP32 parity path.
@@ -139,6 +183,18 @@ per-request voice cloning, and useful if you want the PyTorch vocoder fallback a
 `POST /generate/stream` returns headerless mono float32 little-endian PCM. Read
 `X-Audio-Sample-Rate`, `X-Audio-Channels`, and `X-Audio-Format`; if generation fails after bytes are
 sent, the connection closes and the partial audio must be discarded or handled explicitly.
+
+Save a raw stream and convert it to WAV with SoX:
+
+```bash
+curl -sS http://localhost:8318/generate/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"This response can begin playing while it is decoded."}' \
+  -o /tmp/qwen-stream.f32le
+sox -t raw -r 24000 -e floating-point -b 32 -c 1 -L /tmp/qwen-stream.f32le stream.wav
+```
+
+Use the sample rate returned by `X-Audio-Sample-Rate` rather than assuming 24000 in client code.
 
 `POST /stream_internal` and `POST /batch_internal` are development parity endpoints. They accept
 fixed seeds and sampling controls and return timing/parity headers. They are not stable public API.
@@ -157,6 +213,45 @@ docker compose run --rm export
 docker compose up --build -d qwen3-tts
 docker stats --no-stream qwen3-tts
 ```
+
+For a released image, replace the local build with an immutable tag:
+
+```bash
+export QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>
+docker compose pull qwen3-tts
+docker compose up -d qwen3-tts
+```
+
+Private GHCR pulls require `read:packages` credentials passed to `docker login --password-stdin`.
+Never store the token in `.env` or Compose. The application itself has no authentication or TLS;
+keep port 8318 on a trusted network or place it behind an authenticated TLS reverse proxy.
+
+### Validation and benchmark capture
+
+After every image, model, IR, or runtime-setting change:
+
+```bash
+curl -fsS http://localhost:8318/health | python -m json.tool
+docker inspect --format '{{.Image}}' qwen3-tts
+docker exec qwen3-tts cat /sys/fs/cgroup/memory.current
+
+# Generate the committed benchmark prompts or fixed comparison text, then capture the resettable
+# cgroup peak. Recreate the container before each A/B configuration.
+docker exec qwen3-tts cat /sys/fs/cgroup/memory.peak
+docker stats --no-stream qwen3-tts
+```
+
+Record source commit, immutable image tag/digest, model revision, IR metadata hash from `/health`,
+backend, compression/cache profile, prompt, sampling settings, latency, audio duration/RTF, memory
+current/peak, host available RAM, swap delta, and listening notes. Use deterministic greedy runs for
+code/parity comparisons and production sampling for final listening and performance decisions.
+
+### Rollback
+
+The fastest production rollback is restoring the previous immutable image digest and restarting
+Compose. The backend rollback is `TTS_BACKEND=pytorch`; it uses the checkpoint and reference mounts
+but not OpenVINO IR. Verify `/health` reports `"backend": "pytorch"`, then generate a short WAV.
+PyTorch is substantially slower and is a recovery path, not the preferred steady-state backend.
 
 Stop only this project with `docker compose stop qwen3-tts`. Never run a second full-model job at
 the same time, and never use blanket Docker stop, kill, or prune commands on the shared host.
