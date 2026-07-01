@@ -5,18 +5,19 @@
 ```
 src/qwen3_tts/     Flask app, model runtime, model config, OpenVINO runtime adapters
 src/export/        OpenVINO export/quantization, parity tests, benchmark tooling
-scripts/           export.py (run inside container), download_model.py, run-*.sh
+scripts/           entrypoint.sh (container entrypoint), export.py, download_model.py, run-*.sh
 tests/             Unit and integration tests; no model weights needed
 requirements/      runtime.txt  openvino.txt  export.txt
-Dockerfile         Single image: default CMD = gunicorn serving; export overrides CMD
+Dockerfile         Single image: ENTRYPOINT=entrypoint.sh, default CMD = gunicorn serving
 compose.yml        Two services (qwen3-tts, export) sharing one image
 ```
 
 `PYTHONPATH=/app/src:/app/src/export` — both `qwen3_tts.*` and export modules are importable inside the container.
 
-**One image, two behaviors.** The serving container runs gunicorn (the image's default CMD).
-The export service (`docker compose run --rm export`) overrides CMD with `python scripts/export.py`.
-There are no multi-stage build targets; both capabilities live in the same layer.
+**One image, two behaviors.** `scripts/entrypoint.sh` is the container ENTRYPOINT; it applies
+`LOW_RAM_MODE` tuning (jemalloc, idle unload defaults) before exec-ing the CMD. The serving
+container runs the image's default CMD (gunicorn). The export service overrides CMD with
+`python scripts/export.py`. There are no multi-stage build targets.
 
 **Gunicorn constraints.** Always `-w 1 -k gthread --threads 4`. Never `--preload`. Never more than
 one worker. The single worker holds the model and serializes all inference through a
@@ -33,7 +34,7 @@ checkpoints on Intel CPUs with OpenVINO while preserving a tested PyTorch rollba
 Read `docs/dev/OPENVINO_IMPLEMENTATION.md` before changing model export, cache handling,
 generation, quantization, memory loading, Docker packaging, or deployment behavior.
 
-## Current state (v0.15.1)
+## Current state (v0.15.x)
 
 - Single image ships serving and export tooling. CI publishes it as `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<sha>`.
 - `TTS_BACKEND=pytorch` is the tested rollback baseline.
@@ -41,6 +42,8 @@ generation, quantization, memory loading, Docker packaging, or deployment behavi
 - 0.6B ships INT8 with stateful main (cap 768) + stateful predictor (cap 32).
 - 1.7B ships INT4 asymmetric (group 32) with stateful main (cap 768) + INT8 explicit predictor.
 - Both profiles land at ~5.4–5.8 GiB steady serving RSS on the validated host. Export needs up to 13 GiB.
+- `LOW_RAM_MODE=1` enables jemalloc allocator + idle unload (default 1800s). Requires libjemalloc2 in image.
+- OV compiled kernel cache at `/ov/cache` (default) eliminates ~60–120s recompilation on every restart.
 - Full model export, parity, and performance benchmarks run on `dockermisc1`, not on ARC runners.
 
 ## Architecture invariants
@@ -52,7 +55,8 @@ generation, quantization, memory loading, Docker packaging, or deployment behavi
 - Preserve the talker object's embeddings, projections, codebook heads, config, dtype, and device behavior.
 - Keep `/generate`, `/v1/audio/speech`, `/health`, MP3/WAV output, and serialized inference compatible with the baseline.
 - Keep `TTS_BACKEND=pytorch` as an explicit rollback path.
-- Return HTTP 503 while the worker is loading. Never return HTTP 200 for a degraded worker.
+- Return HTTP 503 during initial startup (before `_service_started` is set). After first successful load,
+  idle-unloaded requests block in the executor and reload transparently — do not 503 them.
 
 ## Model and secret safety
 

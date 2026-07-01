@@ -91,6 +91,24 @@ overhead dominates the model-size difference. Export is the memory spike.
 | **10–15 GiB** | Stop serving before export (default dockermisc1 setup). Keep default memory limits. |
 | **< 10 GiB** | Serving will not fit. This service needs at least 10 GiB for the container. |
 
+### Low RAM mode
+
+Set `LOW_RAM_MODE=1` on hosts where RAM is shared with other workloads (VMs, LXCs, other containers):
+
+```dotenv
+LOW_RAM_MODE=1
+```
+
+This does three things together:
+
+1. **jemalloc allocator** — replaces glibc malloc via `LD_PRELOAD` before Gunicorn starts. PyTorch and OpenVINO hold large intermediate allocations that glibc never returns to the OS even after they are freed; jemalloc with a 1-second decay actively purges those pages back to the kernel.
+2. **Aggressive memory return** — `MALLOC_CONF=background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:1000` runs a jemalloc background thread that continuously returns unused pages.
+3. **Idle unload** — model weights (~5–6 GiB) are released after 30 minutes of idle. The next request reloads them automatically. With the OV kernel cache warm (default), reload takes ~5–10s; on a completely cold first boot it takes ~60–120s while OV compiles kernels and writes the cache. Override the timeout with `IDLE_UNLOAD_SECONDS=<seconds>`.
+
+`LOW_RAM_MODE` requires the container image to have `libjemalloc2` installed. All released images built after this feature was added include it. If you built an older local image, rebuild it.
+
+The `/health` endpoint reports `model_loaded`, `process_rss_mib`, and `idle_unload_seconds` so you can observe the effect.
+
 ### Memory limits
 
 The default `TTS_MEMORY_LIMIT=10G` is conservative. Raising it lets the container handle longer
@@ -191,8 +209,11 @@ Operational settings:
 | `HF_TOKEN` | unset | Hugging Face token when required; do not commit it |
 | `TTS_MEMORY_LIMIT` / `TTS_MEMORY_SWAP_LIMIT` | `10G` / `11G` | Serving container memory limits; raise on hosts with more RAM |
 | `EXPORT_MEMORY_LIMIT` / `EXPORT_MEMORY_SWAP_LIMIT` | `13G` / `14G` | Export container memory limits |
+| `LOW_RAM_MODE` | `0` | Set to `1` to enable jemalloc allocator, aggressive memory return, and 30-min idle unload. Recommended on hosts with less than 20 GiB free. Requires a rebuilt or freshly pulled image (jemalloc is installed at build time). |
 | `OV_INFERENCE_THREADS` | `6` | CPU threads for inference; set to your CPU's physical core count |
+| `OV_CACHE_DIR` | `/ov/cache` | OpenVINO compiled kernel cache directory. Already on the persistent `OV_DATA_PATH` mount — no extra setup needed. Eliminates ~60–120s JIT recompilation on every restart or idle-unload reload. Set to empty string to disable. |
 | `OV_DYNAMIC_QUANT_GROUP_SIZE` | `32` | Inference speed/accuracy knob (`0` = off, `32` = default, `64` = faster/slightly lower accuracy) |
+| `IDLE_UNLOAD_SECONDS` | unset | Unload the model after this many idle seconds (e.g. `1800` = 30 min). Frees ~5–6 GiB. Reload is automatic: ~5–10s with OV cache warm, ~60–120s on first cold boot. Disabled by default. Set automatically to `1800` by `LOW_RAM_MODE=1`. |
 | `SILENCE_TRIM` | `1` | Trim trailing silence from output (`0` to disable if audio seems clipped) |
 | `SILENCE_TRIM_THRESH` | `0.01` | Silence threshold as a fraction of peak amplitude |
 | `SILENCE_TRIM_PAD_MS` | `30` | Milliseconds of audio kept after the silence boundary |
