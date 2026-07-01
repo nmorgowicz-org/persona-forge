@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.2](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.17.1...qwen3-tts-openvino-v0.17.2) (2026-07-01)
+
+
+### Bug Fixes
+
+* **deps:** restore 'default' RoPE type removed in transformers 5.x ([d5f3ad5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d5f3ad5ff036d6bf6ef9e5898fea7930b8db5335))
+* **runtime:** drop jemalloc from LOW_RAM_MODE; keep idle unload ([d5f3ad5](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d5f3ad5ff036d6bf6ef9e5898fea7930b8db5335))
+
 ## [0.17.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.17.0...qwen3-tts-openvino-v0.17.1) (2026-07-01)
 
 
