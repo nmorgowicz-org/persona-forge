@@ -1,10 +1,9 @@
 flask==3.1.3
 gunicorn==26.0.0
 soundfile==0.14.0
-# qwen-tts is installed --no-deps in the Dockerfile to bypass its hard pin on
-# transformers==4.57.3 (CVE-2026-1839). Its runtime dependencies that pip would
-# normally resolve are listed explicitly below.
-qwen-tts==0.1.1
+# qwen-tts==0.1.1 hard-pins transformers==4.57.3, so the Dockerfile installs it
+# with --no-deps before this file to bypass that constraint (CVE-2026-1839).
+# Its runtime dependencies that pip would normally resolve are listed below.
 accelerate
 einops
 librosa
