@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.16.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.15.1...qwen3-tts-openvino-v0.16.0) (2026-07-01)
+
+
+### Features
+
+* **infra:** LOW_RAM_MODE with jemalloc allocator and entrypoint ([33fb4ea](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/33fb4ea661d5ace201c07443829cfdfcdf797750))
+* **runtime:** expose OV_INFERENCE_THREADS; wire torch.set_num_threads to it ([33fb4ea](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/33fb4ea661d5ace201c07443829cfdfcdf797750))
+* **runtime:** idle model unload with configurable cooldown and RAM telemetry ([33fb4ea](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/33fb4ea661d5ace201c07443829cfdfcdf797750))
+* **runtime:** OpenVINO compiled kernel cache via OV_CACHE_DIR ([33fb4ea](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/33fb4ea661d5ace201c07443829cfdfcdf797750))
+
+
+### Bug Fixes
+
+* **compose:** default MODEL_SIZE to 1.7B to match recommendation ([33fb4ea](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/33fb4ea661d5ace201c07443829cfdfcdf797750))
+
+
+### Documentation
+
+* **compose:** explain :local tag vs production QWEN3_TTS_IMAGE usage ([33fb4ea](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/33fb4ea661d5ace201c07443829cfdfcdf797750))
+* **config:** group and expand .env.example with all user-facing vars ([33fb4ea](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/33fb4ea661d5ace201c07443829cfdfcdf797750))
+* document idle unload, OV cache, and LOW_RAM_MODE ([33fb4ea](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/33fb4ea661d5ace201c07443829cfdfcdf797750))
+* simplify README/HOW_TO_RUN; add RAM-tiered setup guidance ([33fb4ea](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/33fb4ea661d5ace201c07443829cfdfcdf797750))
+* update AGENTS.md for single-image v0.15.1 ([33fb4ea](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/33fb4ea661d5ace201c07443829cfdfcdf797750))
+
+
+### Miscellaneous Chores
+
+* remove stale bench_results/ JSON files ([33fb4ea](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/33fb4ea661d5ace201c07443829cfdfcdf797750))
+
 ## [0.15.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.15.0...qwen3-tts-openvino-v0.15.1) (2026-07-01)
 
 
