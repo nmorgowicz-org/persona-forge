@@ -19,6 +19,14 @@ def get_ov_config() -> dict[str, object]:
     dynamic_quant_group = os.getenv("OV_DYNAMIC_QUANT_GROUP_SIZE", "32").strip()
     kv_cache_precision = os.getenv("OV_KV_CACHE_PRECISION", "f32").strip()
 
+    # Compiled kernel cache — eliminates ~60–120s JIT on every restart/reload.
+    # Defaults to /ov/cache, which is already on the persistent OV_DATA_PATH mount.
+    # Set OV_CACHE_DIR="" to disable.
+    cache_dir_raw = os.getenv("OV_CACHE_DIR", "/ov/cache").strip()
+    cache_dir = cache_dir_raw or None
+    if cache_dir:
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+
     cfg: dict[str, object] = {
         "PERFORMANCE_HINT": "LATENCY",
         "NUM_STREAMS": "1",
@@ -27,6 +35,8 @@ def get_ov_config() -> dict[str, object]:
         "DYNAMIC_QUANTIZATION_GROUP_SIZE": dynamic_quant_group,
         "KV_CACHE_PRECISION": kv_cache_precision,
     }
+    if cache_dir:
+        cfg["CACHE_DIR"] = cache_dir
 
     # Vocoder runtime config (FP32-only; INT8 vocoder rejected).
     vocoder_enabled = os.getenv("OPENVINO_VOCODER_ENABLED", "0").strip() == "1"
@@ -35,15 +45,19 @@ def get_ov_config() -> dict[str, object]:
     # OPENVINO_VOCODER_COMPRESSION is kept for metadata; runtime only supports FP32.
     _ = os.getenv("OPENVINO_VOCODER_COMPRESSION", "fp32").strip().lower()
 
+    vocoder_compile_cfg: dict[str, object] = {
+        "PERFORMANCE_HINT": "LATENCY",
+        "NUM_STREAMS": "1",
+        "INFERENCE_NUM_THREADS": str(inference_threads),
+    }
+    if cache_dir:
+        vocoder_compile_cfg["CACHE_DIR"] = cache_dir
+
     cfg["vocoder"] = {
         "enabled": vocoder_enabled,
         "model_path": Path(vocoder_dir) if vocoder_dir else None,
         "device": vocoder_device,
-        "config": {
-            "PERFORMANCE_HINT": "LATENCY",
-            "NUM_STREAMS": "1",
-            "INFERENCE_NUM_THREADS": str(inference_threads),
-        },
+        "config": vocoder_compile_cfg,
     }
 
     return cfg
