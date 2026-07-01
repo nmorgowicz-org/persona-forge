@@ -1122,8 +1122,15 @@ Findings:
   meaningfully smaller than 1.7B.**
 
 Implication for the release decision: since the two use nearly the same memory and 1.7B is the
-listening-preferred profile, **prefer 1.7B** — there is no footprint advantage to 0.6B. The only open
-memory gate is whether 1.7B's generation peak (~9.8 GiB cgroup) is safe under the deployment limit.
+listening-preferred profile, **prefer 1.7B** — there is no footprint advantage to 0.6B.
+
+**Generation-peak A/B (fresh cgroup per model, same ~20-word prompt, 2026-06-30):** peak after load
+4.42 GiB for both; peak after generation **0.6B 5.48 GiB vs 1.7B 5.76 GiB (Δ0.28 GiB)**. So even the
+generation peak is nearly identical for a normal utterance. The earlier "9.84 GiB cold cgroup peak"
+for 1.7B was a longer-prompt / cold-start worst case — the peak scales with KV occupancy toward
+cap768, so a long paragraph pushes 1.7B higher than 0.6B, but single-utterance hermes traffic sits at
+~5.5-5.8 GiB and is comfortably safe under a 10G limit. Remaining variable to characterize if we ever
+serve long paragraphs: the near-capacity peak for each size.
 
 **Where the real memory is (levers, in priority order — all inside our OpenVINO stack):**
 1. **Quantize / bf16 the FP32 vocoder** (the ~2.7 GiB fixed jump at vocoder compile). Biggest lever;
