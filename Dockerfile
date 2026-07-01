@@ -21,6 +21,7 @@ COPY requirements/ requirements/
 RUN python -m pip install \
       --index-url https://download.pytorch.org/whl/cpu \
       "torch==${TORCH_VERSION}" "torchaudio==${TORCHAUDIO_VERSION}" && \
+    python -m pip install qwen-tts==0.1.1 --no-deps && \
     python -m pip install -r requirements/runtime.txt
 
 RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/' \
