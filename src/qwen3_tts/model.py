@@ -445,6 +445,27 @@ def _run_generate(text: str, language: str, **gen_kwargs):
         ]
         print(f"[diag] TTS_DIAG active  eos_token_id={eos_id}", flush=True)
 
+    # Diagnostic/safety override: cap generation length so a non-terminating
+    # decode returns partial audio for inspection instead of crashing at the
+    # stateful cache capacity. Unset in normal operation.
+    _max_new = os.getenv("TTS_MAX_NEW_TOKENS", "").strip()
+    if not _max_new and os.path.exists("/tmp/tts_max_new"):
+        try:
+            with open("/tmp/tts_max_new") as _f:
+                _max_new = _f.read().strip()
+        except Exception:
+            _max_new = ""
+    if _max_new:
+        gen_kwargs.setdefault("max_new_tokens", int(_max_new))
+        print(f"[diag] TTS_MAX_NEW_TOKENS override -> {_max_new}", flush=True)
+
+    # Batch/complete-file consumers (hermes) don't need the streaming internal
+    # text-delivery path. non_streaming_mode=True bakes the whole target text into
+    # the prefill instead of feeding it incrementally via trailing_text_hidden.
+    if os.getenv("TTS_NON_STREAMING", "").strip() == "1" or os.path.exists("/tmp/tts_non_streaming"):
+        gen_kwargs.setdefault("non_streaming_mode", True)
+        print("[diag] non_streaming_mode=True (batch prefill text delivery)", flush=True)
+
     try:
         wavs, sr = model.generate_voice_clone(
             text=text,
