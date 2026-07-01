@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.17.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.16.1...qwen3-tts-openvino-v0.17.0) (2026-07-01)
+
+
+### Features
+
+* **runtime:** log generation start, elapsed time, audio duration, and RTF ([8a65186](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/8a6518691249cfccce0891ef70125400234d783b))
+
+
+### Bug Fixes
+
+* **deps:** patch qwen-tts pad_token_id access for transformers 5.x ([8a65186](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/8a6518691249cfccce0891ef70125400234d783b))
+* **deps:** patch qwen-tts pad_token_id access for transformers 5.x ([aa33890](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/aa33890aef859c7324bb821d42823576901fb9b0))
+
 ## [0.16.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.16.0...qwen3-tts-openvino-v0.16.1) (2026-07-01)
 
 
