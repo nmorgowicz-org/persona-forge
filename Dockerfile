@@ -21,10 +21,13 @@ COPY requirements/ requirements/
 RUN python -m pip install \
       --index-url https://download.pytorch.org/whl/cpu \
       "torch==${TORCH_VERSION}" "torchaudio==${TORCHAUDIO_VERSION}" && \
+    python -m pip install qwen-tts==0.1.1 --no-deps && \
     python -m pip install -r requirements/runtime.txt
 
 RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/' \
-    /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_25hz/vq/speech_vq.py || true
+    /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_25hz/vq/speech_vq.py || true && \
+    sed -i '/@check_model_inputs/d' \
+    /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_12hz/modeling_qwen3_tts_tokenizer_v2.py || true
 
 # One image, all capabilities: OpenVINO serving runtime + export/quantization tooling.
 RUN python -m pip install -r requirements/openvino.txt && \
