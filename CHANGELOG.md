@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.15.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.14.0...qwen3-tts-openvino-v0.15.0) (2026-07-01)
+
+
+### Features
+
+* **runtime:** release PyTorch codec after startup to cut ~0.4 GiB RSS ([d56456c](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d56456c9888119eb07f6484a66aaccb31cef163c))
+
+
+### Bug Fixes
+
+* **runtime:** unbreak pytorch rollback, harden formats, doc memory root cause ([d56456c](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d56456c9888119eb07f6484a66aaccb31cef163c))
+
+
+### Code Refactoring
+
+* **config:** add MODEL_SIZE presets + apply_preset_env (validated) ([d56456c](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d56456c9888119eb07f6484a66aaccb31cef163c))
+* **service:** simplify runtime and local export ([d56456c](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d56456c9888119eb07f6484a66aaccb31cef163c))
+* **wip:** scaffold src/qwen3_tts package + write simplify-v2 HANDOFF ([d56456c](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d56456c9888119eb07f6484a66aaccb31cef163c))
+
+
+### Documentation
+
+* record codec-release A/B, reject INT8 vocoder, slim HANDOFF ([d56456c](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d56456c9888119eb07f6484a66aaccb31cef163c))
+* refresh README + HOW_TO_RUN with 1.7B recommendation, footprint, codec flag ([d56456c](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d56456c9888119eb07f6484a66aaccb31cef163c))
+* **results:** correct memory root cause with measured data; rollback confirmed ([d56456c](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d56456c9888119eb07f6484a66aaccb31cef163c))
+* **results:** record generation-peak A/B (0.6B vs 1.7B nearly identical) ([d56456c](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d56456c9888119eb07f6484a66aaccb31cef163c))
+* **results:** record listening preference ([d56456c](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d56456c9888119eb07f6484a66aaccb31cef163c))
+* **results:** record simplify-v2 validation ([d56456c](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d56456c9888119eb07f6484a66aaccb31cef163c))
+
 ## [0.14.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.13.0...qwen3-tts-openvino-v0.14.0) (2026-06-30)
 
 
