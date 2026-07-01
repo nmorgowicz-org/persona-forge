@@ -166,6 +166,7 @@ Operational settings:
 | `HF_TOKEN` | unset | Hugging Face access token when required; do not commit it |
 | `TTS_MEMORY_LIMIT` / `TTS_MEMORY_SWAP_LIMIT` | `10G` / `11G` | Serving cgroup limits |
 | `EXPORT_MEMORY_LIMIT` / `EXPORT_MEMORY_SWAP_LIMIT` | `13G` / `14G` | Export cgroup limits |
+| `OV_INFERENCE_THREADS` | `6` | CPU threads for OpenVINO inference and PyTorch glue; set to your CPU's physical core count |
 | `OPENVINO_RELEASE_CODEC` | `1` for OpenVINO | Frees the PyTorch codec after startup; disable for future per-request cloning |
 
 `TTS_BACKEND=pytorch` is the rollback path and does not require exported IR. It still needs the

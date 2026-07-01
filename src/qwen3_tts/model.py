@@ -51,7 +51,7 @@ OPENVINO_PREDICTOR_STATEFUL_MODEL = (
 )
 TORCH_DTYPE, TORCH_DTYPE_NAME, OPENVINO_LOW_CPU_MEM_USAGE = resolve_torch_load_config(torch)
 
-torch.set_num_threads(6)
+torch.set_num_threads(int(os.environ.get("OV_INFERENCE_THREADS", "6")))
 
 model = None
 voice_clone_prompt = None
