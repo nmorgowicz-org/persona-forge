@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.3](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.17.2...qwen3-tts-openvino-v0.17.3) (2026-07-01)
+
+
+### Bug Fixes
+
+* **runtime:** glibc malloc tuning for LOW_RAM_MODE; drop LD_PRELOAD ([85f2014](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/85f201445d28c8faceae9f7595d532fa99c85736))
+
 ## [0.17.2](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.17.1...qwen3-tts-openvino-v0.17.2) (2026-07-01)
 
 
