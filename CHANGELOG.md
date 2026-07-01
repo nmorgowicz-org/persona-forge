@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.4](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.17.3...qwen3-tts-openvino-v0.17.4) (2026-07-01)
+
+
+### Bug Fixes
+
+* **runtime:** suppress transformers 5.x deprecation warnings ([aea333a](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/aea333a7842c5af3884442a08050cdfce155d668))
+
 ## [0.17.3](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.17.2...qwen3-tts-openvino-v0.17.3) (2026-07-01)
 
 
