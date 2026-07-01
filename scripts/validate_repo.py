@@ -129,16 +129,32 @@ def validate_compose() -> None:
     for service in ("qwen3-tts", "export"):
         if service not in services:
             raise RuntimeError(f"compose.yml is missing service {service!r}")
+    if services["qwen3-tts"].get("image") != services["export"].get("image"):
+        raise RuntimeError("compose.yml serving and export services must use the same image")
+    if "target" in services["qwen3-tts"].get("build", {}):
+        raise RuntimeError("compose.yml must not select a serving-only Docker target")
+    if "target" in services["export"].get("build", {}):
+        raise RuntimeError("compose.yml must not select an exporter-only Docker target")
+    # Single image: the export service shares the serving image and only overrides the
+    # command, so it must carry an explicit command (the image defaults to serving).
+    if not services.get("export", {}).get("command"):
+        raise RuntimeError("compose.yml export service must override 'command' for the single image")
 
 
 def validate_dockerfile() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    for target in ("runtime", "exporter"):
-        if f" AS {target}" not in dockerfile:
-            raise RuntimeError(f"Dockerfile target {target!r} is missing")
-    for marker in ('HEALTHCHECK ', 'qwen3_tts.app:app', 'EXPOSE 8318'):
+    # One image carries every capability: the serving contract plus the OpenVINO
+    # export/quantization requirements. The compose `export` service overrides the
+    # default serve command with scripts/export.py.
+    for marker in (
+        "HEALTHCHECK ",
+        "qwen3_tts.app:app",
+        "EXPOSE 8318",
+        "requirements/openvino.txt",
+        "requirements/export.txt",
+    ):
         if marker not in dockerfile:
-            raise RuntimeError(f"Dockerfile runtime contract is missing {marker!r}")
+            raise RuntimeError(f"Dockerfile single-image contract is missing {marker!r}")
     required_export_files = {
         "export_openvino.py",
         "ov_export_wrappers.py",
@@ -154,7 +170,7 @@ def validate_dockerfile() -> None:
     missing = {f for f in required_export_files if not (ROOT / "src" / "export" / f).is_file()}
     if missing:
         raise RuntimeError(
-            f"Dockerfile exporter target is missing: {', '.join(sorted(missing))}"
+            f"src/export is missing required modules: {', '.join(sorted(missing))}"
         )
 
     if not (ROOT / "SECURITY.md").is_file():

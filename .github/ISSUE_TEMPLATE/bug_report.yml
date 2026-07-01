@@ -27,7 +27,7 @@ body:
     id: image
     attributes:
       label: Image tag or digest
-      placeholder: "runtime-<git-sha>"
+      placeholder: "<git-sha> or sha256:<digest>"
 
   - type: textarea
     id: environment

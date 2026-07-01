@@ -102,8 +102,8 @@ In place today:
 - PyTorch-only worker (`app_worker.py`) serving `/infer` and `/health`, with the
   single-worker serialized executor and signal-forwarding supervisor (`serve.py`).
 - Model selection and HF authentication helpers (`model_config.py`).
-- Split dependency sets (`requirements.txt`, `requirements-ov-runtime.txt`,
-  `requirements-ov-export.txt`) and `runtime`/`exporter` Docker targets.
+- Split dependency sets under `requirements/` installed into one Docker image containing both
+  serving and export capabilities.
 - Model-free CI validation (`scripts/validate_repo.py`) and one-shot download tool.
 - Milestone 0 harness (`bench_common.py`, `benchmark_tts.py`, `profile_tts.py`) with a
   first measured baseline captured under "Milestone 0" (0.6B FP32, sampling, RTF ~6.6).
@@ -405,24 +405,21 @@ CI builds model-free Linux AMD64 images from the private Git repository. Model w
 reference audio, and generated OpenVINO IR are never copied into an image or committed to
 Git.
 
-Use two Docker targets from the same source revision:
-
-- `runtime`: service code, CPU-only PyTorch, Qwen3-TTS, OpenVINO Runtime, ONNX Runtime, and
-  audio dependencies.
-- `exporter`: the runtime dependencies plus NNCF, export code, and parity tooling.
+Use one Docker image per source revision. It contains the service, CPU-only PyTorch, Qwen3-TTS,
+OpenVINO Runtime, ONNX Runtime, NNCF, export code, parity tooling, and audio dependencies. The image
+defaults to serving; Compose's `export` profile overrides the command with `scripts/export.py`.
 
 Publish immutable SHA tags to private GHCR, for example:
 
 ```text
-ghcr.io/nmorgowicz-org/qwen3-tts-openvino:runtime-<git-sha>
-ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-<git-sha>
+ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>
 ```
 
 Workflow placement:
 
 - `arc-general`: linting, unit tests, metadata/schema tests, and cleanup.
-- `arc-general-docker`: Buildx builds both AMD64 image targets after an internal PR receives
-  `ready-to-test`, and publishes them from Release Please version tags or an explicit manual
+- `arc-general-docker`: Buildx builds the AMD64 image after an internal PR receives
+  `ready-to-test`, and publishes it from Release Please version tags or an explicit manual
   workflow dispatch. Merges to `main` do not publish images.
 - `dockermisc1`: downloads the Hugging Face model, runs export/quantization, validates the
   generated IR, and runs hardware-specific benchmarks.
@@ -1502,7 +1499,7 @@ available on `dockermisc1`. Before pulling a private image, authenticate with a 
 ```bash
 gh auth refresh -h github.com -s read:packages
 gh auth token | docker login ghcr.io -u nmorgowicz --password-stdin
-docker pull ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-<git-sha>
+docker pull ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>
 docker logout ghcr.io
 ```
 
@@ -1516,19 +1513,19 @@ leaving registry credentials on disk.
 1. Merge a source revision after lightweight CI passes, then merge the corresponding Release
    Please pull request.
 2. The Release Please tag triggers `arc-general-docker` to build and push
-   `runtime-<release-commit-sha>` and `exporter-<release-commit-sha>`.
-3. Authenticate `dockermisc1` to private GHCR with `read:packages`, pull both immutable tags,
+   `<release-commit-sha>`.
+3. Authenticate `dockermisc1` to private GHCR with `read:packages`, pull the immutable tag,
    then remove temporary registry credentials.
 4. Set `MODEL_SIZE` to `0.6B` or `1.7B`, with optional `HF_TOKEN_FILE`, and pre-download the
    selected checkpoint into the persistent cache.
 5. Stop the existing `qwen3-tts` container to release its model memory.
-6. Run `exporter-<git-sha>` with the same model selection and these mounts:
+6. Run `<git-sha>` with the export command, the same model selection, and these mounts:
    - `/var/data/autopirate/qwen3-tts/model:/root/.cache/huggingface/hub:rw`
    - `/var/data/autopirate/qwen3-tts/openvino:/ov_output:rw`
    If the root-owned output directory does not exist, create it with `sudo install -d` and
    assign it to the deployment user before starting the exporter.
-7. Run parity and IR metadata validation in the exporter container.
-8. Point Compose at `runtime-<git-sha>` and the matching validated IR directory.
+7. Run parity and IR metadata validation in a container from the same image.
+8. Point Compose at `<git-sha>` and the matching validated IR directory.
 9. Start the service, verify `/health`, and run the short and paragraph benchmarks.
 10. Roll back by restoring the previous image/Compose settings or by setting
    `TTS_BACKEND=pytorch`.
@@ -1558,9 +1555,9 @@ convenience but must not be the Compose production reference.
 | `compose.example.yml` | Keep runnable runtime/downloader wiring and add the validated IR mount |
 | `docs/HOW_TO_RUN.md` | Operator commands, mounts, environment variables, safety, and benchmark capture |
 | `.github/workflows/ci.yml` | Lightweight tests on `arc-general` without model download |
-| `.github/workflows/image.yml` | Build and publish runtime/exporter targets on `arc-general-docker` |
+| `.github/workflows/image.yml` | Build and publish the unified image on `arc-general-docker` |
 | `scripts/export-on-dockermisc1.sh` | Versioned host-side export and validation command |
-| `scripts/run-m4-on-dockermisc1.sh` | Stop service, run the M4 generation harness in the exporter image, restart |
+| `scripts/run-m4-on-dockermisc1.sh` | Stop service, run the M4 generation harness in the unified image, restart |
 
 ## Release Gates
 
