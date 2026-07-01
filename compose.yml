@@ -12,6 +12,8 @@ x-model-volumes: &model-volumes
 
 services:
   qwen3-tts:
+    # Local builds: `docker compose up --build` creates the :local tag automatically.
+    # Production: set QWEN3_TTS_IMAGE to a pinned GHCR SHA or version tag.
     image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:local}
     build:
       context: .
