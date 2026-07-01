@@ -19,15 +19,26 @@ def _openai_error(message: str, status: int, err_type: str = "invalid_request_er
     return jsonify({"error": {"message": message, "type": err_type, "code": None}}), status
 
 
+# Encodings we can actually produce. Anything else is rejected with 400 rather than
+# silently returned as mislabeled WAV. (opus/aac/flac are future work — see docs/plans.)
+_SUPPORTED_FORMATS = {"mp3": ("MP3", "audio/mpeg"), "wav": ("WAV", "audio/wav")}
+
+
+def _canonical_format(response_format: str | None) -> str:
+    return (response_format or "mp3").strip().lower()
+
+
 def _encode(wav: Any, sr: int, response_format: str) -> tuple[bytes, str]:
-    fmt = (response_format or "mp3").strip().lower()
+    fmt = _canonical_format(response_format)
+    try:
+        sf_format, media_type = _SUPPORTED_FORMATS[fmt]
+    except KeyError as exc:
+        raise ValueError(
+            f"unsupported response_format {fmt!r}; supported: "
+            f"{', '.join(sorted(_SUPPORTED_FORMATS))}"
+        ) from exc
     output = io.BytesIO()
-    if fmt == "mp3":
-        sf.write(output, wav, sr, format="MP3")
-        media_type = "audio/mpeg"
-    else:
-        sf.write(output, wav, sr, format="WAV")
-        media_type = "audio/wav"
+    sf.write(output, wav, sr, format=sf_format)
     return output.getvalue(), media_type
 
 
@@ -58,9 +69,13 @@ def generate():
     text, language = _generation_fields(data)
     if not text:
         return jsonify({"error": "text is required"}), 400
+    fmt = _canonical_format(data.get("response_format"))
+    if fmt not in _SUPPORTED_FORMATS:
+        return jsonify({"error": f"unsupported response_format {fmt!r}; supported: "
+                        f"{', '.join(sorted(_SUPPORTED_FORMATS))}"}), 400
     try:
         wav, sr = model.executor.submit(model._run_generate, text, language).result(timeout=300)
-        audio, media_type = _encode(wav, sr, data.get("response_format") or "mp3")
+        audio, media_type = _encode(wav, sr, fmt)
     except Exception as exc:
         return jsonify({"error": f"Inference error: {exc}"}), 500
     return Response(audio, content_type=media_type)
@@ -76,10 +91,17 @@ def openai_audio_speech():
     text = (data.get("input") or data.get("text") or "").strip()
     if not text:
         return _openai_error("'input' is required", 400)
+    fmt = _canonical_format(data.get("response_format"))
+    if fmt not in _SUPPORTED_FORMATS:
+        return _openai_error(
+            f"unsupported response_format {fmt!r}; supported: "
+            f"{', '.join(sorted(_SUPPORTED_FORMATS))}",
+            400,
+        )
     language = (data.get("language") or "English").strip()
     try:
         wav, sr = model.executor.submit(model._run_generate, text, language).result(timeout=300)
-        audio, media_type = _encode(wav, sr, data.get("response_format") or "mp3")
+        audio, media_type = _encode(wav, sr, fmt)
     except Exception as exc:
         return _openai_error(f"Inference error: {exc}", 500, "api_error")
     return Response(audio, content_type=media_type)

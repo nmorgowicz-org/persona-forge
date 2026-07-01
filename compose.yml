@@ -42,5 +42,8 @@ services:
       <<: *model-environment
       OV_OUTPUT_ROOT: /ov
     volumes: *model-volumes
-    mem_limit: ${TTS_MEMORY_LIMIT:-10G}
-    memswap_limit: ${TTS_MEMORY_SWAP_LIMIT:-11G}
+    # The FP32 export + INT4/INT8 quantization needs more headroom than serving; the 1.7B
+    # INT4 export can OOM at the 10G serving limit. Stop the serving container before exporting
+    # on the 15 GiB box — never run a 13G export and a 10G serve concurrently (OOM).
+    mem_limit: ${EXPORT_MEMORY_LIMIT:-13G}
+    memswap_limit: ${EXPORT_MEMORY_SWAP_LIMIT:-14G}
