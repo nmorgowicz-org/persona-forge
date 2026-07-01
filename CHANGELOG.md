@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.17.0...qwen3-tts-openvino-v0.17.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* **deps:** restore 'default' RoPE type removed in transformers 5.x ([10c8a0c](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/10c8a0c33f63a8394c7f74c69192e5c590a90445))
+
 ## [0.17.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.16.1...qwen3-tts-openvino-v0.17.0) (2026-07-01)
 
 
