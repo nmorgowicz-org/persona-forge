@@ -462,6 +462,8 @@ class _OVStatefulCore:
         self.capacity = capacities.pop()
         self._cache_len = 0
         self._axis_checked = False
+        self._decode_step = 0
+        self._decode_t0 = 0.0
 
     def run(self, *, inputs_embeds, attention_mask, position_ids, cache_position,
             past_key_values, generation_steps=None):
@@ -479,6 +481,8 @@ class _OVStatefulCore:
         if is_prefill:
             self._request.reset_state()
             self._cache_len = 0
+            self._decode_step = 0
+            self._decode_t0 = 0.0
         elif prior != self._cache_len:
             raise RuntimeError(
                 f"stateful cache length mismatch: outer cache={prior}, internal={self._cache_len}"
@@ -509,11 +513,26 @@ class _OVStatefulCore:
             # Match _OVCore: the live nested GenerationMixin path does not
             # always forward this optional argument to the predictor core.
             infer_inputs.append(_to_numpy(generation_steps, np.int64))
+        import time as _time
+
         self._request.infer(infer_inputs)
         hidden = torch.from_numpy(
             np.array(self._request.get_output_tensor(0).data, dtype=np.float32, copy=True)
         )
         self._cache_len = prior + seq
+        if not is_prefill:
+            self._decode_step += 1
+            if self._decode_step == 1:
+                self._decode_t0 = _time.monotonic()
+            elif self._decode_step % 50 == 0:
+                elapsed = _time.monotonic() - self._decode_t0
+                rate = (self._decode_step - 1) / elapsed if elapsed > 0 else 0
+                print(
+                    f"[ov_talker] decode step {self._decode_step}"
+                    f"  cache={self._cache_len}/{self.capacity}"
+                    f"  {rate:.1f} tok/s",
+                    flush=True,
+                )
         cache = _length_only_cache(self._cache_len, self.num_layers)
         return BaseModelOutputWithPast(
             last_hidden_state=hidden,

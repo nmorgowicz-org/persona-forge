@@ -82,7 +82,7 @@ def main() -> int:
     _copy_pair(int8 / "vocoder_decoder.xml", vocoder / "vocoder_decoder.xml")
     (vocoder / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
-    stateful = output / "main_stateful_cap768.xml"
+    stateful = output / "main_stateful_cap1024.xml"
     subprocess.run(
         [
             sys.executable,
@@ -92,12 +92,12 @@ def main() -> int:
             "--output",
             str(stateful),
             "--max-seq",
-            "768",
+            "1024",
             "--state-prefix",
             "main",
             "--compile-smoke",
             "--report-json",
-            str(output / "main_stateful_cap768.transform.json"),
+            str(output / "main_stateful_cap1024.transform.json"),
         ],
         check=True,
     )
