@@ -207,17 +207,22 @@ Use the persistent host paths and run commands from a checkout of this repositor
 export MODEL_CACHE_PATH=/var/data/autopirate/qwen3-tts/model
 export REF_AUDIO_PATH=/var/data/autopirate/qwen3-tts/voice/voice_A.wav
 export REF_TEXT='Exact transcript for voice_A.wav'
-export MODEL_SIZE=0.6B
+export MODEL_SIZE=1.7B
 
+# Export IR once (stop qwen3-tts first if it is running — 13G export + 10G serve = OOM).
 docker compose run --rm export
-docker compose up --build -d qwen3-tts
+
+# Start the service using the released image rather than building locally.
+export QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:v0.15.1
+docker compose up -d qwen3-tts
 docker stats --no-stream qwen3-tts
 ```
 
-For a released image, replace the local build with an immutable tag:
+To update to a newer release, change `QWEN3_TTS_IMAGE` to the new version tag (or `:latest`) and
+restart:
 
 ```bash
-export QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>
+export QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:v0.15.1
 docker compose pull qwen3-tts
 docker compose up -d qwen3-tts
 ```

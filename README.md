@@ -31,7 +31,7 @@ beside the service on a constrained host.
 
 ```bash
 cp .env.example .env
-# Set REF_AUDIO_PATH, REF_TEXT, and MODEL_SIZE in .env.
+# Set REF_AUDIO_PATH and REF_TEXT in .env.  MODEL_SIZE defaults to 1.7B (recommended).
 
 docker compose run --rm export
 docker compose up --build -d qwen3-tts
