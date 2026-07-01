@@ -1,7 +1,6 @@
 import unittest
 
 import numpy as np
-import torch
 
 from qwen3_tts.openvino.talker import (
     _cache_position_or_default,
@@ -10,6 +9,12 @@ from qwen3_tts.openvino.talker import (
     _stateful_generation_steps,
     _to_numpy,
 )
+
+try:
+    import torch
+    _TORCH_AVAILABLE = True
+except ImportError:
+    _TORCH_AVAILABLE = False
 
 
 class StatefulPredictorInputTests(unittest.TestCase):
@@ -35,6 +40,7 @@ class StatefulPredictorInputTests(unittest.TestCase):
         np.testing.assert_array_equal(result, np.array([1], dtype=np.int64))
 
 
+@unittest.skipUnless(_TORCH_AVAILABLE, "torch not installed")
 class CachePositionCompatibilityTests(unittest.TestCase):
     def test_preserves_transformers_cache_position(self):
         supplied = torch.tensor([7], dtype=torch.long)
@@ -54,6 +60,7 @@ class CachePositionCompatibilityTests(unittest.TestCase):
         torch.testing.assert_close(result, torch.tensor([17], dtype=torch.long))
 
 
+@unittest.skipUnless(_TORCH_AVAILABLE, "torch not installed")
 class DynamicCacheCompatibilityTests(unittest.TestCase):
     def test_round_trips_kv_with_installed_transformers(self):
         key = torch.zeros(1, 2, 3, 4)
