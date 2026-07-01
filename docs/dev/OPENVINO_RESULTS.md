@@ -1110,8 +1110,9 @@ Findings:
   **leaves steady RSS in both.** What is *kept* in Torch (embeddings ~0.585/0.591, codec 0.318,
   heads) is nearly identical between the two models.
 - **Total PyTorch resident is only ~1.0-1.1 GiB; the 0.6B→1.7B PyTorch delta is ~0.08 GiB.** The codec
-  is only **0.318 GiB** — not the multi-GiB chunk first hypothesized. A codec-decoder release would
-  save at most ~0.15-0.3 GiB and is **not worth** the fail-closed risk; that idea is dropped.
+  is only **0.318 GiB** — not the multi-GiB chunk first hypothesized. (An earlier draft called a codec
+  release "not worth it"; that was wrong — see the **measured codec-release win** below, which returns
+  ~0.4-0.47 GiB of RSS and is now shipped.)
 - **The dominant ~4 GiB of RSS is native OpenVINO, not PyTorch.** The 0.6B release log shows RSS at
   only **2.18 GiB after main compile**, then jumping to **4.92 GiB during vocoder compile + prompt
   creation** — i.e. the **FP32 OpenVINO vocoder + OV runtime floor (~2.7 GiB) is the biggest single
@@ -1133,8 +1134,8 @@ cap768, so a long paragraph pushes 1.7B higher than 0.6B, but single-utterance h
 serve long paragraphs: the near-capacity peak for each size.
 
 **Where the real memory is (levers, in priority order — all inside our OpenVINO stack):**
-1. **Quantize / bf16 the FP32 vocoder** (the ~2.7 GiB fixed jump at vocoder compile). Biggest lever;
-   done in our own export, not via Optimum Intel or a host-language rewrite.
+1. ~~Quantize the FP32 vocoder~~ — **disproven for memory** (see the codec-release + INT8-vocoder A/B
+   below): NNCF INT8 weight-compression dequantizes to FP32 at inference, so it does not lower RSS.
 2. **Generation-peak activations** (the ~9.8 GiB cgroup peak): try `KV_CACHE_PRECISION=u8`, capacity
    768→512, and bf16 inference-precision hint on the now-stateful main — separate, parity-gated
    experiments (see the ranked hypotheses in HANDOFF).
@@ -1144,6 +1145,39 @@ floor, likely worse (keeps the full HF torch model); no memory win. A Rust/other
 would save only the small Python/torch host overhead (~hundreds of MB) while leaving the dominant
 native OpenVINO runtime + IR + activation buffers untouched — a huge rewrite for no meaningful
 footprint gain. `scripts/codec_memory_report.py` remains as the standing instrument for this.
+
+### Codec release + INT8 vocoder — MEASURED A/B (2026-06-30, shipped codec release)
+
+Two memory levers were built and measured on `dockermisc1` against the 1.7B simplify-v2 runtime image
+(bind-mounted `src`, `--memory 10g`, one fresh container per config, cgroup `memory.current` at idle
+load and `memory.peak` after one ~35-word `/generate`):
+
+| Config | Load RSS | Gen peak | Δ peak vs base |
+|---|---|---|---|
+| base (codec kept, FP32 vocoder) | 4249 MiB | 5846 MiB | — |
+| **`OPENVINO_RELEASE_CODEC=1` (FP32 vocoder)** | **3868 MiB** | **5380 MiB** | **−466 MiB** |
+| `OPENVINO_RELEASE_CODEC=1` + INT8 vocoder | 4012 MiB | 5500 MiB | −346 MiB |
+
+**Codec release SHIPPED — the ~300 MB ask, delivered.** After startup the codec encoder has already
+built the server-side `voice_clone_prompt` and the codec decoder is fully replaced by the OV vocoder,
+so `OVTalkerRuntime.release_codec()` frees the ~0.32 GiB PyTorch `speech_tokenizer` and `malloc_trim`s.
+This time the allocator returned it well: **−381 MiB at load, −466 MiB at gen peak.** It is one-way and
+**fail-closed** — the PyTorch decode fallback is gone, so an OV vocoder failure now errors the request
+instead of silently switching to PyTorch. Gated by `OPENVINO_RELEASE_CODEC` (default on wherever
+`OPENVINO_RELEASE_TORCH` is on); set it `0` to keep the encoder live for future per-request voice
+cloning / VoiceDesign (alexandria). Decode output is byte-identical (the decode path is unchanged), so
+there is no quality question.
+
+**INT8 vocoder REJECTED with data — do not re-try.** NNCF `compress_weights` INT8_ASYM on the vocoder
+IR halves it on *disk* (231 MB → 114 MB) but is a **net RSS loss** (+144 MiB load, +120 MiB peak vs
+codec-release alone): OpenVINO **dequantizes the weights to FP32 at inference**, so nothing is saved in
+memory and dynamic-dequant overhead is added. It is also a quality risk (a greedy, identical-code A/B
+shifted the silence-trimmed tail). This confirms the long-standing "INT8 vocoder rejected" note with
+fresh numbers. The one-line lever (`OPENVINO_VOCODER_COMPRESSION`) and the int8 IR were removed.
+
+Corrected lever ranking after this A/B: **(1) codec release — done.** (2) generation-peak activation
+levers (`KV_CACHE_PRECISION=u8`, cap768→512) remain the only untried memory reductions, and they are
+small and parity-gated. Weight-quantizing the FP32 vocoder is **not** a memory lever (above).
 
 ### PyTorch rollback timeout — root cause found and fixed in config (2026-06-30)
 
