@@ -483,6 +483,11 @@ class _OVStatefulCore:
             self._cache_len = 0
             self._decode_step = 0
             self._decode_t0 = 0.0
+            print(
+                f"[ov_stateful] prefill  seq={seq}  capacity={self.capacity}"
+                f"  budget={self.capacity - seq}",
+                flush=True,
+            )
         elif prior != self._cache_len:
             raise RuntimeError(
                 f"stateful cache length mismatch: outer cache={prior}, internal={self._cache_len}"
@@ -515,6 +520,16 @@ class _OVStatefulCore:
             infer_inputs.append(_to_numpy(generation_steps, np.int64))
         import time as _time
 
+        if not is_prefill and self._decode_step < 5:
+            mask_shape = tuple(attention_mask.shape) if attention_mask is not None else None
+            pid_val = position_ids[0].tolist() if position_ids is not None else None
+            cp_val = cache_position.tolist() if cache_position is not None else None
+            print(
+                f"[ov_stateful] decode_step={self._decode_step}"
+                f"  prior={prior}  mask={mask_shape}"
+                f"  pos={pid_val}  cache_pos={cp_val}",
+                flush=True,
+            )
         self._request.infer(infer_inputs)
         hidden = torch.from_numpy(
             np.array(self._request.get_output_tensor(0).data, dtype=np.float32, copy=True)
@@ -765,9 +780,44 @@ class OVTalkerRuntime:
                 return "int8"
         return "fp32"
 
+    @staticmethod
+    def _patch_talker_prepare_inputs(talker) -> None:
+        """Patch prepare_inputs_for_generation to clip input_ids to last token.
+
+        Transformers 5.x passes the full accumulated input_ids tensor (shape [B, N])
+        to the talker forward instead of just the most-recent token ([B, 1]).  The
+        qwen3_tts talker forward uses input_ids.shape[1] as seq_length to compute
+        position_ids (→ mRoPE) and to sum codec embeddings.  With N > 1, this causes:
+          - position_ids = arange(N) instead of [current_pos] → wrong RoPE all steps
+          - codec hidden = sum of N embeddings instead of current token → garbage logits
+          - EOS probability ≈ 0 every step; generation always runs to capacity limit
+
+        The fix clips input_ids to its last token in decode steps (past_key_values
+        is not None and inputs_embeds is None), restoring T4-style behaviour.
+        """
+        from qwen_tts.core.models.modeling_qwen3_tts import Qwen3TTSTalkerForConditionalGeneration
+
+        _base_pigf = Qwen3TTSTalkerForConditionalGeneration.prepare_inputs_for_generation
+
+        def _clipped_pigf(self_inner, input_ids, past_key_values=None, inputs_embeds=None, **kwargs):
+            if (
+                past_key_values is not None
+                and inputs_embeds is None
+                and input_ids is not None
+                and input_ids.shape[1] > 1
+            ):
+                input_ids = input_ids[:, -1:]
+            return _base_pigf(self_inner, input_ids=input_ids, past_key_values=past_key_values,
+                               inputs_embeds=inputs_embeds, **kwargs)
+
+        Qwen3TTSTalkerForConditionalGeneration.prepare_inputs_for_generation = _clipped_pigf
+        print("[ov_talker] patched talker prepare_inputs_for_generation (T5 input_ids clip)", flush=True)
+
     def install(self) -> "OVTalkerRuntime":
         if self._orig_main_forward is not None:
             raise RuntimeError("OVTalkerRuntime already installed")
+
+        self._patch_talker_prepare_inputs(self._talker)
 
         main_module = self._talker.model
         pred_module = self._talker.code_predictor.model

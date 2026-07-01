@@ -390,6 +390,41 @@ def _trim_silence(wav, sr):
     return arr[start:end]
 
 
+class _DiagLogitsProcessor:
+    """Diagnostic: logs top tokens and EOS probability at early decode steps.
+
+    Enabled by TTS_DIAG=1 in the environment. Hooks into the talker's
+    generation loop to catch what is actually being sampled — useful to
+    distinguish garbage hidden-state output (uniform/degenerate distribution)
+    from a genuine EOS-detection failure.
+    """
+
+    _LOG_AT = frozenset({1, 2, 3, 5, 10, 30, 50})
+
+    def __init__(self, eos_token_id: int):
+        self._step = 0
+        self._eos = eos_token_id
+
+    def __call__(self, input_ids, scores):
+        import torch
+
+        self._step += 1
+        if self._step in self._LOG_AT:
+            probs = torch.softmax(scores[0].float(), dim=-1)
+            top = probs.topk(5)
+            tok_str = ", ".join(
+                f"{int(i)}({float(p):.3f})" for i, p in zip(top.indices, top.values)
+            )
+            eos_p = float(probs[self._eos]) if self._eos < probs.shape[0] else 0.0
+            argmax = int(probs.argmax())
+            print(
+                f"[diag] step={self._step:3d}  top5=[{tok_str}]"
+                f"  eos({self._eos})={eos_p:.5f}  argmax={argmax}",
+                flush=True,
+            )
+        return scores
+
+
 def _run_generate(text: str, language: str, **gen_kwargs):
     _touch_last_request()
     _ensure_loaded()
@@ -398,6 +433,18 @@ def _run_generate(text: str, language: str, **gen_kwargs):
     import traceback as _tb
     t0 = time.monotonic()
     print(f"[generate] batch  lang={language!r}  chars={len(text)}", flush=True)
+
+    if (os.getenv("TTS_DIAG", "0").strip() == "1" or os.path.exists("/tmp/tts_diag")) and TTS_BACKEND == "openvino":
+        eos_id = getattr(
+            getattr(getattr(model, "model", None), "config", None), "talker_config", None
+        )
+        eos_id = getattr(eos_id, "codec_eos_token_id", 2150) if eos_id is not None else 2150
+        gen_kwargs.setdefault("logits_processor", [])
+        gen_kwargs["logits_processor"] = list(gen_kwargs["logits_processor"]) + [
+            _DiagLogitsProcessor(eos_id)
+        ]
+        print(f"[diag] TTS_DIAG active  eos_token_id={eos_id}", flush=True)
+
     try:
         wavs, sr = model.generate_voice_clone(
             text=text,
