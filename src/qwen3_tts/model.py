@@ -175,6 +175,11 @@ def load_model():
         )
         ov_runtime.install()
 
+        # The codec encoder has done its one job (voice_clone_prompt was built above) and
+        # the OV vocoder now owns decode, so free the ~0.3 GiB PyTorch speech_tokenizer.
+        # Self-gates on OPENVINO_RELEASE_CODEC; no-op when disabled for per-request cloning.
+        ov_runtime.release_codec()
+
         # Startup policy logs
         if OPENVINO_RELEASE_TORCH:
             print(
