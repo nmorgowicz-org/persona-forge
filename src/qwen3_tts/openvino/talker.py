@@ -783,19 +783,19 @@ class OVTalkerRuntime:
         self._orig_st_decode = None
         self._logits_diag_step = 0
 
-        # Diagnostic: patch codec_head to log top-5 logits at selected decode steps.
+        # Diagnostic: wrap codec_head.forward to log top-5 logits at selected decode steps.
         # This tells us whether EOS is ever assigned high probability.
         # Gated by TTS_LOGITS_DIAG env var so it can be turned off in production.
         if os.getenv("TTS_LOGITS_DIAG", "1").strip() == "1":
-            _orig_codec_head = talker.codec_head
+            _orig_codec_forward = talker.codec_head.forward
             _diag_at = {1, 2, 3, 5, 10, 20, 50, 100, 200, 400}
             eos_id = 2150
 
-            def _diag_codec_head(hidden):
+            def _diag_codec_forward(hidden):
                 self._logits_diag_step += 1
+                logits = _orig_codec_forward(hidden)
                 if self._logits_diag_step in _diag_at:
                     import torch
-                    logits = _orig_codec_head(hidden)
                     step = self._logits_diag_step
                     last_step_logits = logits[0, -1]
                     probs = torch.softmax(last_step_logits.float(), dim=-1)
@@ -811,10 +811,9 @@ class OVTalkerRuntime:
                         f"top5=[{tok_str}]  argmax={argmax}",
                         flush=True,
                     )
-                    return logits
-                return _orig_codec_head(hidden)
+                return logits
 
-            talker.codec_head = _diag_codec_head
+            talker.codec_head.forward = _diag_codec_forward
             print(f"[ov_talker] codec_head diag enabled  eos={eos_id}", flush=True)
         else:
             self._logits_diag_step = 0
