@@ -12,7 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONPATH=/app/src:/app/src/export
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential curl git libgomp1 libsox-fmt-all sox && \
+      build-essential curl git libjemalloc2 libgomp1 libsox-fmt-all sox && \
       apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -32,6 +32,9 @@ RUN python -m pip install -r requirements/openvino.txt && \
 
 COPY src/ src/
 COPY scripts/ scripts/
+RUN chmod +x scripts/entrypoint.sh
+
+ENTRYPOINT ["scripts/entrypoint.sh"]
 
 EXPOSE 8318
 

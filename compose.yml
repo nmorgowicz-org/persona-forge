@@ -25,6 +25,7 @@ services:
       <<: *model-environment
       TTS_BACKEND: ${TTS_BACKEND:-openvino}
       TZ: ${TZ:-America/Detroit}
+      LOW_RAM_MODE: ${LOW_RAM_MODE:-0}
     volumes:
       - ${MODEL_CACHE_PATH:-./data/model}:/root/.cache/huggingface/hub:rw
       - ${OV_DATA_PATH:-./data/ov}:/ov:rw
