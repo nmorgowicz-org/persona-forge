@@ -26,7 +26,7 @@ RUN python -m pip install \
 
 RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/' \
     /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_25hz/vq/speech_vq.py || true && \
-    sed -i 's/@check_model_inputs()/@check_model_inputs/g' \
+    sed -i '/@check_model_inputs/d' \
     /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_12hz/modeling_qwen3_tts_tokenizer_v2.py || true
 
 # One image, all capabilities: OpenVINO serving runtime + export/quantization tooling.
