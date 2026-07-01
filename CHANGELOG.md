@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.17.4...qwen3-tts-openvino-v0.18.0) (2026-07-01)
+
+
+### Features
+
+* **runtime:** add decode-step heartbeat in OVStatefulCore ([5ea00db](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5ea00dbde2592d27a6d3682b9b776a1810855c0d))
+
+
+### Bug Fixes
+
+* **runtime:** force correct decode position_ids in OV cores ([5ea00db](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5ea00dbde2592d27a6d3682b9b776a1810855c0d))
+
 ## [0.17.4](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.17.3...qwen3-tts-openvino-v0.17.4) (2026-07-01)
 
 
