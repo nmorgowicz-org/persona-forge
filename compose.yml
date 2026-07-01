@@ -1,7 +1,7 @@
 name: qwen3-tts-openvino
 
 x-model-environment: &model-environment
-  MODEL_SIZE: ${MODEL_SIZE:-0.6B}
+  MODEL_SIZE: ${MODEL_SIZE:-1.7B}
   REF_TEXT: ${REF_TEXT:?Set REF_TEXT to the exact reference-audio transcript}
   HF_TOKEN: ${HF_TOKEN:-}
   MODEL_REVISION: ${MODEL_REVISION:-}
