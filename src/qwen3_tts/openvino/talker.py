@@ -85,6 +85,34 @@ def _to_numpy(tensor, dtype) -> np.ndarray:
     return array
 
 
+def _cache_position_or_default(cache_position, *, prior: int, seq: int, device):
+    """Provide positions when Transformers 5 omits them for this custom model."""
+    if cache_position is not None:
+        return cache_position
+
+    import torch
+
+    return torch.arange(prior, prior + seq, dtype=torch.long, device=device)
+
+
+def _dynamic_cache_from_kv(pairs):
+    """Build a DynamicCache with the Transformers 4 or 5 cache API."""
+    from transformers.cache_utils import DynamicCache
+
+    factory = getattr(DynamicCache, "from_legacy_cache", None)
+    if factory is not None:
+        return factory(tuple(pairs))
+    return DynamicCache(pairs)
+
+
+def _dynamic_cache_kv(cache):
+    """Return K/V pairs from a Transformers 4 or 5 DynamicCache."""
+    converter = getattr(cache, "to_legacy_cache", None)
+    if converter is not None:
+        return converter()
+    return tuple((layer[0], layer[1]) for layer in cache)
+
+
 def _stateful_generation_steps(generation_steps, expects_generation_steps: bool):
     """Mirror the explicit predictor's optional generation_steps contract."""
     if not expects_generation_steps:
@@ -181,12 +209,14 @@ class _OVCore:
     def _run_buffered(self, *, inputs_embeds, attention_mask, position_ids,
                       cache_position, past_key_values, generation_steps=None):
         import torch
-        from transformers.cache_utils import DynamicCache
         from transformers.modeling_outputs import BaseModelOutputWithPast
 
         seq = inputs_embeds.shape[1]
         prior = past_key_values.get_seq_length() if past_key_values is not None else 0
         is_prefill = prior == 0
+        cache_position = _cache_position_or_default(
+            cache_position, prior=prior, seq=seq, device=inputs_embeds.device
+        )
 
         position_ids, self._axis_checked = self._resolve_position_ids(
             position_ids, cache_position, self._axis_checked
@@ -275,7 +305,7 @@ class _OVCore:
             k = torch.from_numpy(self._kv_buf[i][0][:, :, :clen, :])
             v = torch.from_numpy(self._kv_buf[i][1][:, :, :clen, :])
             legacy_present.append((k, v))
-        present = DynamicCache.from_legacy_cache(tuple(legacy_present))
+        present = _dynamic_cache_from_kv(legacy_present)
 
         return BaseModelOutputWithPast(
             last_hidden_state=last_hidden,
@@ -290,12 +320,14 @@ class _OVCore:
     def _run_non_buffered(self, *, inputs_embeds, attention_mask, position_ids,
                           cache_position, past_key_values, generation_steps=None):
         import torch
-        from transformers.cache_utils import DynamicCache
         from transformers.modeling_outputs import BaseModelOutputWithPast
 
         seq = inputs_embeds.shape[1]
         prior = past_key_values.get_seq_length() if past_key_values is not None else 0
         is_prefill = prior == 0
+        cache_position = _cache_position_or_default(
+            cache_position, prior=prior, seq=seq, device=inputs_embeds.device
+        )
 
         position_ids, self._axis_checked = self._resolve_position_ids(
             position_ids, cache_position, self._axis_checked
@@ -320,7 +352,7 @@ class _OVCore:
         # Build K/V inputs from DynamicCache via to_legacy_cache.
         ir_inputs = base_inputs
         if not is_prefill:
-            legacy = past_key_values.to_legacy_cache()
+            legacy = _dynamic_cache_kv(past_key_values)
             L = self.num_layers
             for i in range(L):
                 k_t, v_t = legacy[i]
@@ -348,7 +380,7 @@ class _OVCore:
             legacy_present.append((k, v))
             out += 2
 
-        present = DynamicCache.from_legacy_cache(tuple(legacy_present))
+        present = _dynamic_cache_from_kv(legacy_present)
 
         return BaseModelOutputWithPast(
             last_hidden_state=last_hidden,
@@ -441,6 +473,9 @@ class _OVStatefulCore:
         seq = int(inputs_embeds.shape[1])
         prior = past_key_values.get_seq_length() if past_key_values is not None else 0
         is_prefill = prior == 0
+        cache_position = _cache_position_or_default(
+            cache_position, prior=prior, seq=seq, device=inputs_embeds.device
+        )
         if is_prefill:
             self._request.reset_state()
             self._cache_len = 0

@@ -34,6 +34,12 @@ t = open(p).read(); \
 t = t.replace('self.padding_idx = config.pad_token_id', 'self.padding_idx = getattr(config, \"pad_token_id\", None)'); \
 open(p, 'w').write(t)" && \
     python -c "\
+p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/configuration_qwen3_tts.py'; \
+t = open(p).read(); \
+t = t.replace('from transformers.configuration_utils import PretrainedConfig, layer_type_validation', 'from transformers.configuration_utils import PretrainedConfig'); \
+t = t.replace('layer_type_validation(self.layer_types)', 'self.validate_layer_type()'); \
+open(p, 'w').write(t)" && \
+    python -c "\
 import pathlib; \
 p = pathlib.Path('/usr/local/lib/python3.13/site-packages/transformers/modeling_rope_utils.py'); \
 t = p.read_text(); \
