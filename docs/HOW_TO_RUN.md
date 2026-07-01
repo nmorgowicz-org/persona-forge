@@ -79,11 +79,46 @@ run two model jobs concurrently.
 WAV; a mismatch reduces speaker and pronunciation quality. Do not place tokens, private voices,
 model caches, IR, or generated audio in the Git checkout.
 
+## Sizing for your host
+
+Both model sizes use nearly the same memory (~5.4–5.8 GiB steady) because the inference engine
+overhead dominates the model-size difference. Export is the memory spike.
+
+| Available RAM | Setup |
+|---|---|
+| **≥ 28 GiB** | Can export and serve at the same time. Optionally raise `TTS_MEMORY_LIMIT` to 16G for long requests. |
+| **16–27 GiB** | Stop serving before export. Can raise `TTS_MEMORY_LIMIT` to 12–14G for longer requests. |
+| **10–15 GiB** | Stop serving before export (default dockermisc1 setup). Keep default memory limits. |
+| **< 10 GiB** | Serving will not fit. This service needs at least 10 GiB for the container. |
+
+### Memory limits
+
+The default `TTS_MEMORY_LIMIT=10G` is conservative. Raising it lets the container handle longer
+requests without being killed by the cgroup limit:
+
+```dotenv
+TTS_MEMORY_LIMIT=14G     # comfortable on a 20+ GiB host
+TTS_MEMORY_SWAP_LIMIT=15G
+```
+
+Long requests (several paragraphs) push memory higher as the model accumulates context. The hard
+ceiling is roughly 64 seconds of generated audio per request regardless of memory limit — increase
+it by re-exporting, not by raising the memory limit.
+
+### Threads
+
+Set `OV_INFERENCE_THREADS` to your CPU's physical core count (not hyperthreads):
+
+```dotenv
+OV_INFERENCE_THREADS=8   # example for an 8-core CPU
+```
+
+The default is 6, tuned for the validated host. More threads = faster generation up to the core
+count; beyond that there are no gains.
+
 ## Compare 0.6B and 1.7B
 
-**Recommendation: use `1.7B`.** It is slightly preferred on listening quality and has **no memory
-penalty** — both profiles are dominated by a fixed OpenVINO/vocoder floor and land at roughly
-5.4–5.8 GiB steady for normal single-utterance traffic (see *Memory expectations* below). The A/B
+**Recommendation: use `1.7B`.** It sounds better and uses the same memory. The A/B
 procedure remains here for anyone who wants to re-verify on their own hardware.
 
 Run one model at a time on a 15 GiB host. Generate the same text, reference, format, and sampling
@@ -116,37 +151,26 @@ latency, peak container RSS, host available RAM, and swap delta. The acceptance 
 
 ## Presets and advanced settings
 
-`MODEL_SIZE` chooses the tested serving profile:
+`MODEL_SIZE` is the only setting most users need to change:
 
-| Setting | 0.6B | 1.7B |
-|---|---|---|
-| Main transformer | INT8, stateful cache capacity 768 | INT4 asymmetric group 32, stateful cache capacity 768 |
-| Predictor | INT8 stateful cache capacity 32 | INT8 explicit cache |
-| Vocoder | FP32 OpenVINO | FP32 OpenVINO |
-| Torch glue | BF16 low-memory load | BF16 low-memory load |
-| Default memory/swap | 10G / 11G | 10G / 11G |
+| Setting | Quality | Steady memory | Max request | Notes |
+|---|---|---|---|---|
+| `0.6B` | Good | ~5–6 GiB | ~64 sec | Use only if you have a specific reason |
+| `1.7B` | Better | ~5–6 GiB | ~64 sec | **Recommended default** |
 
-The stateful capacity is baked into the IR. Capacity 768 is about 64 seconds at 12 Hz, including
-prompt and generated positions. A request exceeding it fails closed. Changing capacity requires a
-new stateful transform plus parity and memory validation; it is not a runtime tuning variable.
+Both profiles use the same memory. The 64-second ceiling per request is a property of the exported
+model and cannot be raised at runtime — re-export is required if you need longer requests.
 
-### Memory expectations
-
-Both sizes run at roughly **5.4–5.8 GiB** for normal single-utterance traffic and are safe under the
-default 10G/11G limit. Steady memory is a large fixed OpenVINO floor (~2.7 GiB for the FP32 vocoder
-plus runtime) plus a small variable delta, which is why **0.6B is not meaningfully smaller than
-1.7B**. Long paragraphs push the generation peak higher as the stateful KV cache fills toward
-capacity 768. On the OpenVINO backend the service frees the ~0.3 GiB PyTorch codec after startup
-(`OPENVINO_RELEASE_CODEC`, on by default) once the voice prompt is built and the OpenVINO vocoder
-owns decoding; the startup log prints `released ~0.32 GiB of PyTorch codec` when it does. Measured
-A/B tables are in `docs/dev/OPENVINO_RESULTS.md`.
+After startup the service releases ~0.3 GiB of load-time overhead; the startup log prints
+`released ~0.32 GiB of PyTorch codec` when this happens. Measured results are in
+`docs/dev/OPENVINO_RESULTS.md`.
 
 Explicit advanced environment values override preset defaults. Common examples are:
 
 ```dotenv
 TTS_BACKEND=pytorch
 MODEL_CACHE_PATH=/var/data/autopirate/qwen3-tts/model
-OV_DATA_PATH=/var/data/autopirate/qwen3-tts/openvino-simplify-v2
+OV_DATA_PATH=/var/data/autopirate/qwen3-tts/openvino
 TTS_MEMORY_LIMIT=10G
 TTS_MEMORY_SWAP_LIMIT=11G
 MODEL_REVISION=<pinned-hugging-face-revision>
@@ -158,16 +182,21 @@ Operational settings:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `MODEL_SIZE` | `0.6B` | Selects the complete tested 0.6B or 1.7B preset |
-| `QWEN3_TTS_IMAGE` | `qwen3-tts-openvino:local` | Unified serving/export image; pin SHA or digest in production |
+| `MODEL_SIZE` | `1.7B` | `0.6B` or `1.7B`; 1.7B is recommended (same memory, better quality) |
+| `QWEN3_TTS_IMAGE` | `qwen3-tts-openvino:local` | Image to run; pin a SHA or digest in production |
 | `QWEN3_TTS_PORT` | `8318` | Host port mapped to container port 8318 |
-| `TTS_BACKEND` | `openvino` | Set `pytorch` for the rollback backend |
-| `MODEL_REVISION` | unset | Optional Hugging Face revision pin; must match IR metadata for OpenVINO |
-| `HF_TOKEN` | unset | Hugging Face access token when required; do not commit it |
-| `TTS_MEMORY_LIMIT` / `TTS_MEMORY_SWAP_LIMIT` | `10G` / `11G` | Serving cgroup limits |
-| `EXPORT_MEMORY_LIMIT` / `EXPORT_MEMORY_SWAP_LIMIT` | `13G` / `14G` | Export cgroup limits |
-| `OV_INFERENCE_THREADS` | `6` | CPU threads for OpenVINO inference and PyTorch glue; set to your CPU's physical core count |
-| `OPENVINO_RELEASE_CODEC` | `1` for OpenVINO | Frees the PyTorch codec after startup; disable for future per-request cloning |
+| `TZ` | `America/Detroit` | Container timezone for log timestamps |
+| `TTS_BACKEND` | `openvino` | Set `pytorch` for the rollback backend (slower, no IR needed) |
+| `MODEL_REVISION` | unset | Pin a specific Hugging Face revision; must match exported IR |
+| `HF_TOKEN` | unset | Hugging Face token when required; do not commit it |
+| `TTS_MEMORY_LIMIT` / `TTS_MEMORY_SWAP_LIMIT` | `10G` / `11G` | Serving container memory limits; raise on hosts with more RAM |
+| `EXPORT_MEMORY_LIMIT` / `EXPORT_MEMORY_SWAP_LIMIT` | `13G` / `14G` | Export container memory limits |
+| `OV_INFERENCE_THREADS` | `6` | CPU threads for inference; set to your CPU's physical core count |
+| `OV_DYNAMIC_QUANT_GROUP_SIZE` | `32` | Inference speed/accuracy knob (`0` = off, `32` = default, `64` = faster/slightly lower accuracy) |
+| `SILENCE_TRIM` | `1` | Trim trailing silence from output (`0` to disable if audio seems clipped) |
+| `SILENCE_TRIM_THRESH` | `0.01` | Silence threshold as a fraction of peak amplitude |
+| `SILENCE_TRIM_PAD_MS` | `30` | Milliseconds of audio kept after the silence boundary |
+| `OPENVINO_RELEASE_CODEC` | `1` | Frees ~0.3 GiB of load-time overhead after startup; set `0` to keep it |
 
 `TTS_BACKEND=pytorch` is the rollback path and does not require exported IR. It still needs the
 checkpoint cache and reference voice. Do not set exporter serving dtype overrides: graph conversion

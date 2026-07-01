@@ -8,20 +8,17 @@ The application is intentionally small: one image, one Gunicorn process, one mod
 reference voice, and port `8318`. The same image also contains the export, quantization, parity, and
 benchmark tooling.
 
-## Current capabilities
+## What it does
 
-- Qwen3-TTS Base `0.6B` and `1.7B`, selected with one `MODEL_SIZE` setting.
-- OpenAI-compatible `POST /v1/audio/speech` subset with MP3 or WAV output.
-- Native `POST /generate` endpoint and raw incremental PCM at `POST /generate/stream`.
-- Stateful OpenVINO main-talker cache for both profiles; stateful predictor cache for 0.6B.
-- FP32 OpenVINO vocoder and serialized single-request inference.
-- Persistent local Hugging Face and OpenVINO artifact bind mounts.
-- Explicit `TTS_BACKEND=pytorch` rollback path that does not require exported IR.
+- Synthesizes speech in a cloned voice from a single reference WAV, no training required.
+- Two model sizes (`MODEL_SIZE=0.6B` or `1.7B`). Both use roughly the same memory; 1.7B sounds better.
+- OpenAI-compatible `POST /v1/audio/speech` — drop-in for clients that already speak the OpenAI TTS API.
+- MP3 or WAV output; incremental PCM stream available for low-latency playback.
+- Generated IR and model weights persist on the host — restarts are fast, no re-download.
+- `TTS_BACKEND=pytorch` rollback if something goes wrong with the accelerated backend.
 
-The service uses the reference WAV mounted at `/voice/reference.wav` and its exact `REF_TEXT` for
-all requests. Per-request voices, arbitrary reference audio, Voice Design, CustomVoice, instruct
-control, authentication, and TLS are not implemented. OpenAI fields other than `input`,
-`response_format`, and the extension `language` do not change generation.
+One fixed reference voice per container. Per-request voices, Voice Design, authentication, and TLS
+are not implemented. The service must run on a trusted network or behind an authenticated reverse proxy.
 
 ## Quick start
 
@@ -48,15 +45,14 @@ The first export downloads the selected checkpoint to `./data/model` and writes 
 
 ## Model profiles
 
-| Profile | Main talker | Predictor | Vocoder | Recommendation |
+| Profile | Quality | Steady serving memory | Max request length | Recommendation |
 |---|---|---|---|---|
-| `0.6B` | INT8, stateful cap 768 | INT8, stateful cap 32 | FP32 OpenVINO | Smaller model, similar serving footprint |
-| `1.7B` | INT4 asymmetric group 32, stateful cap 768 | INT8, explicit cache | FP32 OpenVINO | Preferred listening quality |
+| `0.6B` | Good | ~5.4–5.8 GiB | ~64 seconds of audio | Only if you have a specific reason to avoid 1.7B |
+| `1.7B` | Better | ~5.4–5.8 GiB | ~64 seconds of audio | **Default — same memory, better output** |
 
-Use `1.7B` unless you have a model-specific reason to choose 0.6B. On the validated host, normal
-single-utterance traffic for both profiles used roughly 5.4–5.8 GiB; the fixed OpenVINO/vocoder
-floor dominates the model-size difference. The default 10G/11G memory and swap limits retain
-headroom for longer prompts and cache growth.
+Both profiles use nearly identical memory because the fixed inference engine overhead dominates the
+model-size difference. The default 10G/11G container limits leave headroom for longer prompts.
+See [HOW_TO_RUN.md](docs/HOW_TO_RUN.md) for RAM-tiered setup guidance.
 
 ## HTTP API
 
