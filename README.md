@@ -22,6 +22,10 @@ curl -sS http://localhost:8318/v1/audio/speech \
 The export is stored under `./data/ov/<MODEL_SIZE>` and reused by later starts. Change
 `MODEL_SIZE`, rerun the export, then restart the service to compare 0.6B and 1.7B.
 
+**Which size?** `1.7B` is the recommended profile — slightly better quality with **no memory
+penalty** over 0.6B: both are dominated by a fixed OpenVINO/vocoder floor and sit at roughly
+**5.4–5.8 GiB** for normal single-utterance traffic, comfortably under the default 10 GiB limit.
+
 See [HOW_TO_RUN.md](docs/HOW_TO_RUN.md) for operations, A/B testing, volumes, settings, and
 benchmark collection. Development contracts and measured results are under [docs/dev](docs/dev/).
 Security and private-reporting guidance is in [SECURITY.md](SECURITY.md).

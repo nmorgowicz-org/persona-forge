@@ -51,6 +51,11 @@ single executor, avoiding duplicate model memory.
 
 ## Compare 0.6B and 1.7B
 
+**Recommendation: use `1.7B`.** It is slightly preferred on listening quality and has **no memory
+penalty** — both profiles are dominated by a fixed OpenVINO/vocoder floor and land at roughly
+5.4–5.8 GiB steady for normal single-utterance traffic (see *Memory expectations* below). The A/B
+procedure remains here for anyone who wants to re-verify on their own hardware.
+
 Run one model at a time on a 15 GiB host. Generate the same text, reference, format, and sampling
 settings for both. Save audio outside Git.
 
@@ -95,6 +100,17 @@ The stateful capacity is baked into the IR. Capacity 768 is about 64 seconds at 
 prompt and generated positions. A request exceeding it fails closed. Changing capacity requires a
 new stateful transform plus parity and memory validation; it is not a runtime tuning variable.
 
+### Memory expectations
+
+Both sizes run at roughly **5.4–5.8 GiB** for normal single-utterance traffic and are safe under the
+default 10G/11G limit. Steady memory is a large fixed OpenVINO floor (~2.7 GiB for the FP32 vocoder
+plus runtime) plus a small variable delta, which is why **0.6B is not meaningfully smaller than
+1.7B**. Long paragraphs push the generation peak higher as the stateful KV cache fills toward
+capacity 768. On the OpenVINO backend the service frees the ~0.3 GiB PyTorch codec after startup
+(`OPENVINO_RELEASE_CODEC`, on by default) once the voice prompt is built and the OpenVINO vocoder
+owns decoding; the startup log prints `released ~0.32 GiB of PyTorch codec` when it does. Measured
+A/B tables are in `docs/dev/OPENVINO_RESULTS.md`.
+
 Explicit advanced environment values override preset defaults. Common examples are:
 
 ```dotenv
@@ -105,11 +121,18 @@ TTS_MEMORY_LIMIT=10G
 TTS_MEMORY_SWAP_LIMIT=11G
 MODEL_REVISION=<pinned-hugging-face-revision>
 HF_TOKEN=<token-if-the-checkpoint-requires-it>
+OPENVINO_RELEASE_CODEC=0
 ```
 
 `TTS_BACKEND=pytorch` is the rollback path and does not require exported IR. It still needs the
 checkpoint cache and reference voice. Do not set exporter serving dtype overrides: graph conversion
 requires its FP32 parity path.
+
+`OPENVINO_RELEASE_CODEC` frees the PyTorch codec after startup for a smaller footprint and defaults
+on (with the OpenVINO release-torch policy). The release is fail-closed: once freed there is no
+PyTorch decode fallback, so an OpenVINO vocoder failure errors the request instead of silently
+switching backends. Set it to `0` to keep the codec encoder resident — required for future
+per-request voice cloning, and useful if you want the PyTorch vocoder fallback available.
 
 ## Streaming and validation endpoints
 
