@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from model_config import configure_hf_token, resolve_model_repo
+from qwen3_tts.model_config import configure_hf_token, resolve_model_repo
 
 
 def main() -> None:

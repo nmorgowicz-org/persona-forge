@@ -63,23 +63,7 @@ def validate_pr_event() -> None:
 
 
 def validate_python() -> None:
-    paths = (
-        ROOT / "app_api.py",
-        ROOT / "app_worker.py",
-        ROOT / "export_openvino.py",
-        ROOT / "model_config.py",
-        ROOT / "ov_export_wrappers.py",
-        ROOT / "ov_stateful_cache.py",
-        ROOT / "serve.py",
-        ROOT / "test_vocoder_parity.py",
-        ROOT / "test_transformer_parity.py",
-        ROOT / "test_stateful_main_parity.py",
-        ROOT / "calibration_capture.py",
-        ROOT / "dump_audio.py",
-        ROOT / "scripts" / "download_model.py",
-        ROOT / "scripts" / "stateful_cache_spike.py",
-        ROOT / "scripts" / "transform_stateful_ir.py",
-    )
+    paths = tuple((ROOT / "src").rglob("*.py")) + tuple((ROOT / "scripts").glob("*.py"))
     for path in paths:
         ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
@@ -139,12 +123,12 @@ def validate_repository_metadata() -> None:
             raise RuntimeError(f"Labeler rule {label!r} has no glob patterns")
 
 
-def validate_compose_example() -> None:
-    document = yaml.safe_load((ROOT / "compose.example.yml").read_text(encoding="utf-8"))
+def validate_compose() -> None:
+    document = yaml.safe_load((ROOT / "compose.yml").read_text(encoding="utf-8"))
     services = document.get("services", {}) if isinstance(document, dict) else {}
-    for service in ("qwen3-tts", "qwen3-tts-download"):
+    for service in ("qwen3-tts", "export"):
         if service not in services:
-            raise RuntimeError(f"compose.example.yml is missing service {service!r}")
+            raise RuntimeError(f"compose.yml is missing service {service!r}")
 
 
 def validate_dockerfile() -> None:
@@ -152,7 +136,7 @@ def validate_dockerfile() -> None:
     for target in ("runtime", "exporter"):
         if f" AS {target}" not in dockerfile:
             raise RuntimeError(f"Dockerfile target {target!r} is missing")
-    for marker in ('HEALTHCHECK ', 'CMD ["python", "serve.py"]'):
+    for marker in ('HEALTHCHECK ', 'qwen3_tts.app:app', 'EXPOSE 8318'):
         if marker not in dockerfile:
             raise RuntimeError(f"Dockerfile runtime contract is missing {marker!r}")
     required_export_files = {
@@ -167,14 +151,7 @@ def validate_dockerfile() -> None:
         "calibration_capture.py",
         "dump_audio.py",
     }
-    exporter_copy_lines = [
-        line for line in dockerfile.splitlines()
-        if line.strip().startswith("COPY export_openvino.py")
-    ]
-    if not exporter_copy_lines:
-        raise RuntimeError("Dockerfile exporter target is missing the export CLI sources")
-    copy_target = " ".join(" ".join(exporter_copy_lines).split())
-    missing = {f for f in required_export_files if f not in copy_target}
+    missing = {f for f in required_export_files if not (ROOT / "src" / "export" / f).is_file()}
     if missing:
         raise RuntimeError(
             f"Dockerfile exporter target is missing: {', '.join(sorted(missing))}"
@@ -219,7 +196,7 @@ def main() -> None:
     validate_python()
     validate_workflows()
     validate_repository_metadata()
-    validate_compose_example()
+    validate_compose()
     validate_dockerfile()
     validate_artifact_policy()
     print("repository validation passed")

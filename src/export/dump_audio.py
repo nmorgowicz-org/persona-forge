@@ -34,7 +34,7 @@ except ImportError:  # non-POSIX; ru_maxrss bracketing simply unavailable
     _resource = None
 
 # Sets thread env before torch/openvino import (import side effect).
-import ov_runtime_config  # noqa: F401
+import qwen3_tts.openvino.runtime_config as ov_runtime_config  # noqa: F401
 from bench_common import load_model
 
 
@@ -241,7 +241,7 @@ def main() -> None:
         _write_wav(pt_path, pt_wavs[0], sr)
 
     # OpenVINO candidate.
-    from ov_talker_runtime import OVTalkerRuntime
+    from qwen3_tts.openvino.talker import OVTalkerRuntime
 
     print(f"[dump] OpenVINO ({args.compression}) ...", flush=True)
     # Startup ru_maxrss brackets: isolate whether the lifetime peak is the PyTorch

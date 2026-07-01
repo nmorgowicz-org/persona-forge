@@ -30,7 +30,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from model_config import configure_hf_token, resolve_model_repo
+from qwen3_tts.model_config import configure_hf_token, resolve_model_repo
 
 COMPRESSION_CHOICES = ("fp32", "int8", "both")
 
@@ -197,8 +197,12 @@ def _compress(ov_model, nncf, *, mode: str = "int8_asym", group_size: int = 32, 
 
 def _source_hash() -> str:
     h = hashlib.sha256()
-    for name in ("ov_export_wrappers.py", "export_openvino.py", "model_config.py"):
-        path = Path(__file__).resolve().parent / name
+    paths = (
+        Path(__file__).resolve().parent / "ov_export_wrappers.py",
+        Path(__file__).resolve(),
+        Path(__file__).resolve().parents[1] / "qwen3_tts" / "model_config.py",
+    )
+    for path in paths:
         h.update(path.read_bytes())
     return h.hexdigest()[:16]
 

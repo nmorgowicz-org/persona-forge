@@ -1,0 +1,49 @@
+name: qwen3-tts-openvino
+
+x-model-environment: &model-environment
+  MODEL_SIZE: ${MODEL_SIZE:-0.6B}
+  REF_TEXT: ${REF_TEXT:?Set REF_TEXT to the exact reference-audio transcript}
+  HF_TOKEN: ${HF_TOKEN:-}
+  MODEL_REVISION: ${MODEL_REVISION:-}
+
+x-model-volumes: &model-volumes
+  - ${MODEL_CACHE_PATH:-./data/model}:/root/.cache/huggingface/hub:rw
+  - ${OV_DATA_PATH:-./data/ov}:/ov:rw
+
+services:
+  qwen3-tts:
+    image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:runtime-local}
+    build:
+      context: .
+      target: runtime
+    container_name: qwen3-tts
+    restart: unless-stopped
+    ports:
+      - "${QWEN3_TTS_PORT:-8318}:8318"
+    environment:
+      <<: *model-environment
+      TTS_BACKEND: ${TTS_BACKEND:-openvino}
+      TZ: ${TZ:-America/Detroit}
+    volumes:
+      - ${MODEL_CACHE_PATH:-./data/model}:/root/.cache/huggingface/hub:rw
+      - ${OV_DATA_PATH:-./data/ov}:/ov:rw
+      - ${REF_AUDIO_PATH:?Set REF_AUDIO_PATH to the reference WAV file}:/voice/reference.wav:ro
+    mem_limit: ${TTS_MEMORY_LIMIT:-10G}
+    memswap_limit: ${TTS_MEMORY_SWAP_LIMIT:-11G}
+    stop_grace_period: 45s
+
+  export:
+    image: ${QWEN3_TTS_EXPORTER_IMAGE:-qwen3-tts-openvino:exporter-local}
+    build:
+      context: .
+      target: exporter
+    profiles: [export]
+    environment:
+      <<: *model-environment
+      OV_OUTPUT_ROOT: /ov
+    volumes: *model-volumes
+    # The FP32 export + INT4/INT8 quantization needs more headroom than serving; the 1.7B
+    # INT4 export can OOM at the 10G serving limit. Stop the serving container before exporting
+    # on the 15 GiB box — never run a 13G export and a 10G serve concurrently (OOM).
+    mem_limit: ${EXPORT_MEMORY_LIMIT:-13G}
+    memswap_limit: ${EXPORT_MEMORY_SWAP_LIMIT:-14G}

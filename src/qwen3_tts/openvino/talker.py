@@ -507,7 +507,7 @@ class OVTalkerRuntime:
                  core=None, speech_tokenizer=None):
         import openvino as ov
 
-        from ov_runtime_config import get_ov_config
+        from qwen3_tts.openvino.runtime_config import get_ov_config
 
         self.model_dir = Path(model_dir)
         self._talker = talker
@@ -527,7 +527,9 @@ class OVTalkerRuntime:
         self.pred_comp = pred_comp
 
         def _files_for(comp: str) -> dict:
-            return _INT8_GRAPH_FILES if comp == "int8" else _GRAPH_FILES
+            # INT4 and INT8 artifacts share the compressed graph filenames; the
+            # metadata records the actual per-core weight format.
+            return _INT8_GRAPH_FILES if comp in {"int4", "int8"} else _GRAPH_FILES
 
         main_stateful_raw = os.getenv("OPENVINO_MAIN_STATEFUL_MODEL", "").strip()
         main_stateful_path = None
@@ -552,6 +554,20 @@ class OVTalkerRuntime:
         # compiled-model working buffers reside simultaneously.
         self._release_torch = os.getenv("OPENVINO_RELEASE_TORCH", "0").strip() == "1"
         self._torch_cores_released = False
+
+        # Codec (speech_tokenizer) weight release after startup. The codec ENCODER is only
+        # used to build the server-side voice_clone_prompt at load time, and the codec
+        # DECODER is fully replaced by the OpenVINO vocoder IR (speech_tokenizer.decode is
+        # patched below). So in steady serving the ~0.3 GiB PyTorch codec is dead weight.
+        # release_codec() frees it. One-way and fail-closed: once freed, the PyTorch
+        # speech_tokenizer.decode fallback can no longer run, so an OV vocoder failure
+        # errors the request instead of silently switching to PyTorch. Defaults on wherever
+        # OPENVINO_RELEASE_TORCH is on; disable (OPENVINO_RELEASE_CODEC=0) when future
+        # per-request voice cloning / VoiceDesign needs the encoder live (alexandria_ideas).
+        self._release_codec = os.getenv(
+            "OPENVINO_RELEASE_CODEC", "1" if self._release_torch else "0"
+        ).strip() == "1"
+        self._codec_released = False
 
         graph_files = {}
         if predictor_stateful_path is None:
@@ -671,7 +687,7 @@ class OVTalkerRuntime:
         self.vocoder_runtime = None
         vocoder_cfg = (self._ov_config or {}).get("vocoder")
         if vocoder_cfg and self._speech_tokenizer is not None:
-            from ov_vocoder_runtime import OpenVinoVocoderRuntime
+            from qwen3_tts.openvino.vocoder import OpenVinoVocoderRuntime
             self.vocoder_runtime = OpenVinoVocoderRuntime(self._speech_tokenizer, vocoder_cfg)
         elif vocoder_cfg and vocoder_cfg.get("enabled"):
             print(
@@ -757,6 +773,15 @@ class OVTalkerRuntime:
                     try:
                         return self.vocoder_runtime.decode(inputs, *args, **kwargs)
                     except Exception:
+                        if self._codec_released:
+                            # Fail-closed: the PyTorch codec was freed after startup, so
+                            # there is no decode fallback. Surface the OV failure loudly.
+                            raise RuntimeError(
+                                "OpenVINO vocoder decode failed and the PyTorch codec was "
+                                "released (OPENVINO_RELEASE_CODEC=1); no fallback available. "
+                                "Restart with OPENVINO_RELEASE_CODEC=0 to keep the PyTorch "
+                                "fallback live."
+                            )
                         if first_decode_failure[0]:
                             first_decode_failure[0] = False
                             print(
@@ -838,6 +863,58 @@ class OVTalkerRuntime:
             flush=True,
         )
 
+    def release_codec(self) -> None:
+        """Free the PyTorch speech-tokenizer (codec) weights after startup (memory).
+
+        Self-gates on OPENVINO_RELEASE_CODEC (see __init__). Must be called only after the
+        server-side voice_clone_prompt has been built (the encoder's one job) and the OV
+        vocoder is installed (replacing the decoder). The OV vocoder resolves num_quantizers,
+        total_upsample, and sample_rate from the codec config at construction time and caches
+        them as plain ints, so it does not touch the codec after that. Freeing is one-way and
+        fail-closed: _ov_decode / generate_waveform_from_codes stop offering a PyTorch
+        fallback once _codec_released is set.
+        """
+        if not self._release_codec or self._codec_released:
+            return
+        st = self._speech_tokenizer
+        codec = getattr(st, "model", None) if st is not None else None
+        if codec is None or not hasattr(codec, "parameters"):
+            print(
+                "[ov_talker] release_codec(): no speech_tokenizer.model nn.Module to free; "
+                "skipping (codec already absent or non-standard).",
+                flush=True,
+            )
+            return
+
+        import gc
+
+        import torch
+
+        freed_bytes = 0
+        with torch.no_grad():
+            for param in codec.parameters(recurse=True):
+                freed_bytes += param.numel() * param.element_size()
+                param.data = torch.empty(0, dtype=param.dtype, device=param.device)
+            for buf in codec.buffers(recurse=True):
+                freed_bytes += buf.numel() * buf.element_size()
+                buf.data = torch.empty(0, dtype=buf.dtype, device=buf.device)
+        self._codec_released = True
+        # The dead PyTorch decode fallback must never be restored on uninstall().
+        self._orig_st_decode = None
+        gc.collect()
+        try:
+            import ctypes
+
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
+        print(
+            f"[ov_talker] released ~{freed_bytes / 2**30:.2f} GiB of PyTorch codec "
+            "(speech_tokenizer) weights (OPENVINO_RELEASE_CODEC=1); the PyTorch decode "
+            "fallback is now unavailable — the OV vocoder is the only decode path.",
+            flush=True,
+        )
+
     def uninstall(self) -> None:
         if self._torch_cores_released:
             # Weights were freed for memory; restoring the eager forwards would only expose
@@ -879,6 +956,11 @@ class OVTalkerRuntime:
             try:
                 return self.vocoder_runtime.decode(codes)
             except Exception:
+                if self._codec_released:
+                    raise RuntimeError(
+                        "OpenVINO vocoder decode failed and the PyTorch codec was released "
+                        "(OPENVINO_RELEASE_CODEC=1); no fallback available."
+                    )
                 # One-time warning on first fallback.
                 if getattr(self, "_wvf_first_warn", True):
                     self._wvf_first_warn = False

@@ -999,3 +999,204 @@ dangerous 11.6 GiB boot spike is gone, peak is now a stable ~7.7 GiB. 0.6B-INT8 
 arc: lifetime peak **11,593 → 7,715 MiB (−3.9 GiB)** across bf16 + capacity 768.
 The 2026-06-30 streaming-profile follow-up supersedes the production limit with 10G/11G to preserve
 20% headroom; 8G remains the functional validation minimum.
+
+### simplify-v2 0.6B end-to-end validation — PASSED (2026-06-30)
+
+Validated the uncommitted `refactor/simplify-v2` worktree based on source commit `8d49141` on
+`dockermisc1`. Local image IDs were runtime
+`sha256:c93d0267d73f5352fc8c6a3d5634ec3cbfde7fb6fc3976cdab6dabad2e759063` and exporter
+`sha256:9607147cdf069adc17899d7245a8ff4179390822f67e8acb1736cbbb014de15c`; these are local test
+images, not published artifacts.
+
+- Model revision: `5d83992436eae1d760afd27aff78a71d676296fc`.
+- IR metadata source hash: `a6f9dc107cc69a2b`.
+- Fresh export path: `/var/data/autopirate/qwen3-tts/openvino-simplify-v2/0.6B`.
+- Main: INT8 stateful cap768; transform compiled with 56 states shaped `[1,8,768,128]`.
+- Predictor: INT8 stateful cap32; transform compiled with 10 states shaped `[1,8,32,128]`.
+- Vocoder: FP32 OpenVINO enabled. Torch glue: BF16 low-memory load.
+- All 53 model-free unit tests passed inside the runtime image. Both Docker targets built and the
+  exporter import smoke test passed.
+- `/health`, OpenAI MP3, OpenAI WAV, native `/generate` WAV, missing-input OpenAI error envelope,
+  and `/generate/stream` f32le PCM passed. The MP3 smoke request took 16 seconds cold/warm-state
+  unspecified; this is not a benchmark median.
+- Container memory after requests: 5.907 GiB / 10 GiB. Host available memory was 7.2 GiB; swap was
+  4.1/8.0 GiB used. No clean pre/post swap delta was captured, so this run is functional validation,
+  not the final performance gate.
+- Non-Git outputs: `/tmp/simplify-06.mp3`, `/tmp/simplify-06-openai.wav`,
+  `/tmp/simplify-06-native.wav`, and `/tmp/simplify-06-stream.f32le` on `dockermisc1`.
+- Rollback: prior `qwen3-tts-candidate` container remains present but stopped; the rollback image is
+  `runtime-v0.13.0`. Rollback was not restarted during this run.
+
+Remaining gates: deterministic batch/stream parity, listening, warm median/p95/RTF and peak-RSS
+benchmarking, PyTorch rollback verification, and the complete 1.7B export/runtime/A-B validation.
+
+#### 0.6B follow-up parity, warm timing, and rollback (2026-06-30)
+
+- Deterministic `stream_internal` run (`do_sample=false`, seed 1234, max 96 tokens) passed exact
+  stream-vs-terminal parity: 95 generated frames, one decode chunk, max absolute error 0, SNR
+  infinite. TTFB was 37.20 seconds. Container memory after parity was 6.039 GiB.
+- Five production-sampling OpenAI WAV requests using the same prompt completed in 17.55, 18.12,
+  19.43, 20.06, and 20.60 seconds. Median latency was 19.43 seconds; nearest-rank p95 was 20.60
+  seconds. Audio duration varied from 2.79 to 3.47 seconds because sampling was enabled; median RTF
+  was approximately 5.94. This five-request run is useful operational data but is smaller than the
+  final benchmark sample required by the implementation plan.
+- `TTS_BACKEND=pytorch` loaded successfully and `/health` reported `backend=pytorch`, proving
+  selection/startup works. Actual rollback generation **failed the serving gate**: the short prompt
+  exceeded the 300-second HTTP timeout and returned 500 with no WAV. The manual CPU PyTorch
+  generation continued in the executor until the container was recreated. The service was restored
+  to the validated OpenVINO 0.6B configuration afterward. Do not claim rollback is tested until a
+  generation returns audio within the serving timeout or the rollback timeout contract is changed
+  deliberately.
+
+Non-Git follow-up files on `dockermisc1`: `/tmp/simplify-06-parity.wav`,
+`/tmp/simplify-06-warm-{1..5}.wav`, and `/tmp/simplify-06-warm.tsv`.
+
+### simplify-v2 1.7B end-to-end validation — FUNCTIONAL/LISTENING PASS, MEMORY COMPARISON OPEN (2026-06-30)
+
+Fresh local export assembled an INT4 asymmetric group-32 main, INT8 explicit predictor, FP32
+OpenVINO vocoder, and BF16 Torch glue. Model revision
+`fd4b254389122332181a7c3db7f27e918eec64e3`; metadata source hash `a6f9dc107cc69a2b`.
+The cap768 stateful main compiled with 56 `[1,8,768,128]` states; XML SHA-256 is
+`2ced2c3e91676efb77d44373fbe60906de37359a3d6a8746a14298e710c3ed1d`.
+
+- Health reported `stateful-int4` main, explicit `int8` predictor, no stateful predictor, and OV
+  vocoder enabled. MP3, native WAV, and OpenAI error-envelope gates passed.
+- Bounded deterministic stream parity (seed 1234, max 32) was exact: max abs 0, SNR infinite, 26
+  frames, 25.97 seconds.
+- Five production-sampling WAVs: median 22.50 seconds, nearest-rank p95 24.18 seconds, median RTF
+  approximately 7.39. This is about 15.8% slower in median wall time than the five-run 0.6B sample
+  (19.43 seconds), though the prompts differed only in the spoken model-size phrase and sampling
+  produced different durations.
+- Cold/early cgroup peak reached 9.84 GiB under the 10 GiB limit. Process high-water RSS was about
+  7.62 GiB. After warm requests Docker working-set reporting settled to 5.448 GiB as 4.69 GB of file
+  cache became inactive/reclaimable; this does not erase the cold peak. See HANDOFF for full
+  accounting and ranked reduction experiments.
+- Saved files: `/tmp/simplify-17.mp3`, `/tmp/simplify-17-native.wav`,
+  `/tmp/simplify-17-parity.wav`, `/tmp/simplify-17-warm-{1..5}.wav`, and
+  `/tmp/simplify-17-warm.tsv` on `dockermisc1`.
+
+Listening verdict (user, 2026-06-30): every copied 0.6B and 1.7B WAV was consistent and acceptable.
+There were minor pronunciation differences across all samples, but no material defect. The user
+finds 1.7B slightly better and prefers it if deployment can be made safe, even if no additional RAM
+reduction is available. Both profiles therefore pass listening; 1.7B is the product-preferred
+candidate.
+
+Memory-selection correction: the simplify-v2 run did **not** collect apples-to-apples footprint
+data. The 0.6B record contains Docker working-set snapshots (~5.9-6.0 GiB), whereas 1.7B additionally
+captured process RSS (~7.62 GiB), total cgroup peak (9.84 GiB), and file-cache state. After its warm
+run, 1.7B Docker working set settled to 5.448 GiB because inactive file cache became reclaimable.
+Consequently, these results do not prove that 0.6B uses less steady memory. They do prove that the
+observed 1.7B cold/first-generation cgroup peak came within ~0.16 GiB of the 10 GiB limit.
+
+The 1.7B profile is not accepted for release until a recreate-per-model memory comparison uses the
+same cgroup/process counters and its deployment limit satisfies the project's safety policy. If that
+gate passes, prefer 1.7B based on listening; otherwise retain 0.6B as the safe fallback.
+
+### Why 0.6B and 1.7B have nearly identical steady memory — root cause (2026-06-30)
+
+This surprised us; MEASURED with `scripts/codec_memory_report.py` on `dockermisc1` (2026-06-30). An
+earlier draft of this section guessed the PyTorch speech-tokenizer/codec was the big shared chunk —
+**that guess was wrong; the instrumentation corrected it.** Post-OV-release resident bytes:
+
+| component | 0.6B | 1.7B |
+|---|---|---|
+| talker PyTorch total (kept: embeddings/norms/heads; `.layers` freed) | 0.720 GiB | 0.798 GiB |
+| `speech_tokenizer.model` (the PyTorch codec) | 0.318 GiB | 0.318 GiB |
+| **process VmRSS at load (no generation yet)** | **4.92 GiB** | **5.23 GiB** |
+
+Findings:
+- The only big differentiator — the talker `.layers` — is freed by
+  `OVTalkerRuntime._release_torch_core_weights()` after OV compile (0.6B released ~0.97 GiB), so it
+  **leaves steady RSS in both.** What is *kept* in Torch (embeddings ~0.585/0.591, codec 0.318,
+  heads) is nearly identical between the two models.
+- **Total PyTorch resident is only ~1.0-1.1 GiB; the 0.6B→1.7B PyTorch delta is ~0.08 GiB.** The codec
+  is only **0.318 GiB** — not the multi-GiB chunk first hypothesized. (An earlier draft called a codec
+  release "not worth it"; that was wrong — see the **measured codec-release win** below, which returns
+  ~0.4-0.47 GiB of RSS and is now shipped.)
+- **The dominant ~4 GiB of RSS is native OpenVINO, not PyTorch.** The 0.6B release log shows RSS at
+  only **2.18 GiB after main compile**, then jumping to **4.92 GiB during vocoder compile + prompt
+  creation** — i.e. the **FP32 OpenVINO vocoder + OV runtime floor (~2.7 GiB) is the biggest single
+  cost, identical for both models.**
+- **Measured 0.6B→1.7B RSS delta is only ~0.31 GiB** (4.92 vs 5.23 GiB at load). That is the real,
+  evidence-based reason the two profiles are nearly identical: memory is a large *fixed* OpenVINO floor
+  (vocoder + runtime + framework) plus a tiny (~0.3 GiB) variable IR/embedding delta. **0.6B is NOT
+  meaningfully smaller than 1.7B.**
+
+Implication for the release decision: since the two use nearly the same memory and 1.7B is the
+listening-preferred profile, **prefer 1.7B** — there is no footprint advantage to 0.6B.
+
+**Generation-peak A/B (fresh cgroup per model, same ~20-word prompt, 2026-06-30):** peak after load
+4.42 GiB for both; peak after generation **0.6B 5.48 GiB vs 1.7B 5.76 GiB (Δ0.28 GiB)**. So even the
+generation peak is nearly identical for a normal utterance. The earlier "9.84 GiB cold cgroup peak"
+for 1.7B was a longer-prompt / cold-start worst case — the peak scales with KV occupancy toward
+cap768, so a long paragraph pushes 1.7B higher than 0.6B, but single-utterance hermes traffic sits at
+~5.5-5.8 GiB and is comfortably safe under a 10G limit. Remaining variable to characterize if we ever
+serve long paragraphs: the near-capacity peak for each size.
+
+**Where the real memory is (levers, in priority order — all inside our OpenVINO stack):**
+1. ~~Quantize the FP32 vocoder~~ — **disproven for memory** (see the codec-release + INT8-vocoder A/B
+   below): NNCF INT8 weight-compression dequantizes to FP32 at inference, so it does not lower RSS.
+2. **Generation-peak activations** (the ~9.8 GiB cgroup peak): try `KV_CACHE_PRECISION=u8`, capacity
+   768→512, and bf16 inference-precision hint on the now-stateful main — separate, parity-gated
+   experiments (see the ranked hypotheses in HANDOFF).
+
+**Not levers (confirmed):** Optimum Intel is the same OpenVINO runtime under an HF wrapper — same
+floor, likely worse (keeps the full HF torch model); no memory win. A Rust/other-language rewrite
+would save only the small Python/torch host overhead (~hundreds of MB) while leaving the dominant
+native OpenVINO runtime + IR + activation buffers untouched — a huge rewrite for no meaningful
+footprint gain. `scripts/codec_memory_report.py` remains as the standing instrument for this.
+
+### Codec release + INT8 vocoder — MEASURED A/B (2026-06-30, shipped codec release)
+
+Two memory levers were built and measured on `dockermisc1` against the 1.7B simplify-v2 runtime image
+(bind-mounted `src`, `--memory 10g`, one fresh container per config, cgroup `memory.current` at idle
+load and `memory.peak` after one ~35-word `/generate`):
+
+| Config | Load RSS | Gen peak | Δ peak vs base |
+|---|---|---|---|
+| base (codec kept, FP32 vocoder) | 4249 MiB | 5846 MiB | — |
+| **`OPENVINO_RELEASE_CODEC=1` (FP32 vocoder)** | **3868 MiB** | **5380 MiB** | **−466 MiB** |
+| `OPENVINO_RELEASE_CODEC=1` + INT8 vocoder | 4012 MiB | 5500 MiB | −346 MiB |
+
+**Codec release SHIPPED — the ~300 MB ask, delivered.** After startup the codec encoder has already
+built the server-side `voice_clone_prompt` and the codec decoder is fully replaced by the OV vocoder,
+so `OVTalkerRuntime.release_codec()` frees the ~0.32 GiB PyTorch `speech_tokenizer` and `malloc_trim`s.
+This time the allocator returned it well: **−381 MiB at load, −466 MiB at gen peak.** It is one-way and
+**fail-closed** — the PyTorch decode fallback is gone, so an OV vocoder failure now errors the request
+instead of silently switching to PyTorch. Gated by `OPENVINO_RELEASE_CODEC` (default on wherever
+`OPENVINO_RELEASE_TORCH` is on); set it `0` to keep the encoder live for future per-request voice
+cloning / VoiceDesign (alexandria). Decode output is byte-identical (the decode path is unchanged), so
+there is no quality question.
+
+**INT8 vocoder REJECTED with data — do not re-try.** NNCF `compress_weights` INT8_ASYM on the vocoder
+IR halves it on *disk* (231 MB → 114 MB) but is a **net RSS loss** (+144 MiB load, +120 MiB peak vs
+codec-release alone): OpenVINO **dequantizes the weights to FP32 at inference**, so nothing is saved in
+memory and dynamic-dequant overhead is added. It is also a quality risk (a greedy, identical-code A/B
+shifted the silence-trimmed tail). This confirms the long-standing "INT8 vocoder rejected" note with
+fresh numbers. The one-line lever (`OPENVINO_VOCODER_COMPRESSION`) and the int8 IR were removed.
+
+Corrected lever ranking after this A/B: **(1) codec release — done.** (2) generation-peak activation
+levers (`KV_CACHE_PRECISION=u8`, cap768→512) remain the only untried memory reductions, and they are
+small and parity-gated. Weight-quantizing the FP32 vocoder is **not** a memory lever (above).
+
+### PyTorch rollback timeout — root cause found and fixed in config (2026-06-30)
+
+The failed `TTS_BACKEND=pytorch` rollback gate (generation exceeding the 300 s HTTP timeout) was a
+simplify-v2 regression, now fixed in `src/qwen3_tts/config.py`. `apply_preset_env()` was setting
+`OPENVINO_TORCH_DTYPE=bfloat16` **unconditionally**, for every backend. On the OpenVINO path that is
+harmless — the talker cores run on OpenVINO and the bf16 Torch weights are just load-time glue that is
+released after compile. But on the pure-PyTorch fallback the transformer forward **actually runs in
+Torch on CPU**, where bf16 has no fast GEMM kernels, so generation ran pathologically slow and blew
+past the timeout. The pre-refactor design only set that variable for the OpenVINO service, so the old
+fallback loaded fp32.
+
+Fix: the bf16/`OPENVINO_RELEASE_TORCH` serving-load policy is now gated on `backend == "openvino"`; the
+PyTorch fallback falls through to the fp32 default (`resolve_torch_load_config` default). Verified
+locally that `TTS_BACKEND=pytorch` no longer receives a forced bf16 dtype, the OpenVINO path is
+unchanged (bf16 + release), and an explicit expert `OPENVINO_TORCH_DTYPE` override is still honored.
+
+**CONFIRMED PASS on `dockermisc1` (2026-06-30):** with the fix, `TTS_BACKEND=pytorch MODEL_SIZE=0.6B`
+loads at `torch_dtype=float32` and a short-prompt `POST /generate` returned **HTTP 200 in 20.4 s** with
+a valid 24 kHz mono WAV (vs the previous >300 s timeout under bf16). The rollback gate passes for 0.6B.
+Follow-up (non-blocking): spot-check 1.7B PyTorch (the deployed fallback size) with a short prompt — it
+will be slower than 0.6B but is expected to stay within 300 s for typical utterances.

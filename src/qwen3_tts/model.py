@@ -1,15 +1,16 @@
 import gc
-import io
 import json
 import os
-import queue
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
 # Apply thread and runtime envs before heavy imports
-from ov_runtime_config import apply_thread_env
+from qwen3_tts.config import REF_AUDIO_PATH, apply_preset_env
+from qwen3_tts.openvino.runtime_config import apply_thread_env
+
+apply_preset_env()
 
 apply_thread_env()
 os.environ.setdefault("ORT_INTRA_OP_NUM_THREADS", "6")
@@ -18,23 +19,23 @@ os.environ.setdefault("OMP_NUM_THREADS", "6")
 os.environ.setdefault("MKL_NUM_THREADS", "6")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
-import soundfile as sf
 import torch
 
-from flask import Flask, Response, jsonify, request
-from model_config import configure_hf_token, resolve_model_repo, resolve_torch_load_config
-from streaming_vocoder import StreamingVocoderSession
+from qwen3_tts.model_config import (
+    configure_hf_token,
+    resolve_model_repo,
+    resolve_torch_load_config,
+)
+from qwen3_tts.streaming import StreamingVocoderSession
 
 configure_hf_token()
 
 from qwen_tts import Qwen3TTSModel
 
-app = Flask(__name__)
-
 MODEL_ID = resolve_model_repo()
 MODEL_REVISION = os.getenv("MODEL_REVISION") or None
 DEVICE = os.getenv("DEVICE", "cpu")
-REF_AUDIO = os.getenv("REF_AUDIO", "/voice/voice_A.wav")
+REF_AUDIO = os.getenv("REF_AUDIO", REF_AUDIO_PATH)
 REF_TEXT = os.getenv(
     "REF_TEXT",
     "Welcome to Rosies. What can I get for you today? You know, Im a good girl. "
@@ -70,7 +71,7 @@ def _validate_ov_metadata(model_dir: str):
         raise RuntimeError(f"OV_MODEL_DIR missing metadata.json: {meta_path}")
 
     ov_metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-    from ov_runtime_config import get_ov_config
+    from qwen3_tts.openvino.runtime_config import get_ov_config
     ov_config = get_ov_config()
 
     # Validate metadata matches loaded model
@@ -163,7 +164,7 @@ def load_model():
     if TTS_BACKEND == "openvino":
         # Milestone 4: install the OpenVINO talker runtime by swapping the two inner
         # transformer core forwards. All other generation glue stays in PyTorch.
-        from ov_talker_runtime import OVTalkerRuntime
+        from qwen3_tts.openvino.talker import OVTalkerRuntime
 
         talker = model.model.talker
         # speech_tokenizer is a sibling of talker on the parent model, not a child of it;
@@ -173,6 +174,11 @@ def load_model():
             speech_tokenizer=model.model.speech_tokenizer,
         )
         ov_runtime.install()
+
+        # The codec encoder has done its one job (voice_clone_prompt was built above) and
+        # the OV vocoder now owns decode, so free the ~0.3 GiB PyTorch speech_tokenizer.
+        # Self-gates on OPENVINO_RELEASE_CODEC; no-op when disabled for per-request cloning.
+        ov_runtime.release_codec()
 
         # Startup policy logs
         if OPENVINO_RELEASE_TORCH:
@@ -210,8 +216,8 @@ def load_model():
 load_model()
 
 
-@app.route("/health")
-def health():
+def health_state() -> dict[str, Any]:
+    """Return JSON-serializable model and backend readiness state."""
     base = {
         "status": "ok",
         "backend": TTS_BACKEND,
@@ -274,7 +280,7 @@ def health():
             return [_json_safe(v) for v in obj]
         return obj
 
-    return jsonify(_json_safe(base))
+    return _json_safe(base)
 
 
 def _trim_silence(wav, sr):
@@ -421,282 +427,3 @@ def _run_generate_with_streaming(
         "reference_frames": session.reference_frames,
         "decode_boundaries": session.decode_boundaries,
     }
-
-
-@app.route("/infer", methods=["POST"])
-def infer():
-    if model is None or voice_clone_prompt is None:
-        return jsonify({"error": "Model not loaded"}), 503
-
-    data = request.get_json(force=True, silent=True)
-    if not data:
-        return jsonify({"error": "Invalid JSON"}), 400
-
-    text = (data.get("text") or "").strip()
-    if not text:
-        return jsonify({"error": "text is required"}), 400
-
-    language = (data.get("language") or "English").strip()
-
-    def do_work():
-        wav, sr = _run_generate(text, language)
-        fmt = (data.get("response_format") or "mp3").lower()
-        buf = io.BytesIO()
-        if fmt == "mp3":
-            sf.write(buf, wav, sr, format="MP3")
-            media_type = "audio/mpeg"
-        else:
-            sf.write(buf, wav, sr, format="WAV")
-            media_type = "audio/wav"
-        buf.seek(0)
-        return buf.read(), media_type
-
-    try:
-        audio_bytes, media_type = executor.submit(do_work).result(timeout=300)
-    except Exception as e:
-        return jsonify({"error": f"Inference error: {str(e)}"}), 500
-
-    return Response(audio_bytes, content_type=media_type)
-
-
-@app.route("/infer_stream", methods=["POST"])
-def infer_stream():
-    """Stream mono float32 little-endian PCM from the OpenVINO vocoder.
-
-    The response contains no container header. A client must use the advertised
-    sample rate/channel/format headers. If generation fails after bytes have
-    been emitted, the connection closes and the partial PCM must be discarded
-    or handled explicitly by the client.
-    """
-    if model is None or voice_clone_prompt is None:
-        return jsonify({"error": "Model not loaded"}), 503
-    vr = getattr(ov_runtime, "vocoder_runtime", None)
-    if vr is None or not vr.enabled:
-        return jsonify({"error": "Streaming requires the FP32 OpenVINO vocoder"}), 503
-
-    data = request.get_json(force=True, silent=True)
-    if not data:
-        return jsonify({"error": "Invalid JSON"}), 400
-    text = (data.get("text") or "").strip()
-    if not text:
-        return jsonify({"error": "text is required"}), 400
-    language = (data.get("language") or "English").strip()
-
-    stream_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
-
-    def on_chunk(pcm: Any) -> None:
-        import numpy as np
-
-        payload = np.asarray(pcm, dtype="<f4").reshape(-1).tobytes()
-        if payload:
-            stream_queue.put(("audio", payload))
-
-    def produce() -> None:
-        try:
-            _run_generate_with_streaming(
-                text,
-                language,
-                on_chunk,
-                reuse_streamed_decode=True,
-            )
-        except BaseException as exc:
-            stream_queue.put(("error", exc))
-        finally:
-            stream_queue.put(("done", None))
-
-    future = executor.submit(produce)
-
-    def body():
-        while True:
-            kind, payload = stream_queue.get()
-            if kind == "audio":
-                yield payload
-            elif kind == "error":
-                raise RuntimeError(f"streaming inference failed: {payload}") from payload
-            elif kind == "done":
-                future.result()
-                return
-
-    return Response(
-        body(),
-        content_type="application/octet-stream",
-        headers={
-            "X-Audio-Format": "f32le",
-            "X-Audio-Sample-Rate": str(vr.sample_rate),
-            "X-Audio-Channels": "1",
-            "X-Stream-Error-Semantics": "connection-close",
-        },
-        direct_passthrough=True,
-    )
-
-
-@app.route("/stream_internal", methods=["POST"])
-def stream_internal():
-    """Dev-only streaming parity endpoint.
-
-    - Uses _run_generate_with_streaming to exercise the streaming vocoder path.
-    - Same JSON input as /infer.
-    - Returns WAV of concatenated streaming chunks.
-    - NOT part of the public API; may change or be removed.
-    """
-    if model is None or voice_clone_prompt is None:
-        return jsonify({"error": "Model not loaded"}), 503
-
-    data = request.get_json(force=True, silent=True)
-    if not data:
-        return jsonify({"error": "Invalid JSON"}), 400
-
-    text = (data.get("text") or "").strip()
-    if not text:
-        return jsonify({"error": "text is required"}), 400
-
-    language = (data.get("language") or "English").strip()
-
-    def do_work():
-        import numpy as np
-
-        # Forward generation kwargs for parity and tests (e.g., do_sample=False).
-        gen_kwargs = {
-            "do_sample": data.get("do_sample"),
-            "temperature": data.get("temperature"),
-            "top_p": data.get("top_p"),
-            "top_k": data.get("top_k"),
-            "max_new_tokens": data.get("max_new_tokens"),
-        }
-        gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
-
-        stream_chunks: list[np.ndarray] = []
-        chunk_times: list[float] = []
-        started = time.monotonic()
-
-        def on_chunk(pcm: Any):
-            stream_chunks.append(np.asarray(pcm, dtype=np.float32).ravel())
-            chunk_times.append(time.monotonic() - started)
-
-        reuse_streamed_decode = bool(data.get("reuse_streamed_decode", False))
-        seed_value = data.get("seed")
-        wav, sr, wav_raw, stream_info = _run_generate_with_streaming(
-            text,
-            language,
-            on_chunk,
-            reuse_streamed_decode=reuse_streamed_decode,
-            seed_value=seed_value,
-            **gen_kwargs,
-        )
-
-        # Build audio from the streaming chunks for parity comparison.
-        if stream_chunks:
-            wav_stream = np.concatenate(stream_chunks, axis=0)
-        else:
-            wav_stream = wav
-
-        if wav_stream.shape != wav_raw.shape:
-            raise RuntimeError(
-                f"stream/batch length mismatch: {wav_stream.size} != {wav_raw.size}"
-            )
-        diff = wav_stream.astype(np.float64) - wav_raw.astype(np.float64)
-        signal = float(np.sum(wav_raw.astype(np.float64) ** 2))
-        noise = float(np.sum(diff ** 2))
-        snr_db = float("inf") if noise == 0.0 else 10.0 * np.log10(signal / noise)
-
-        # Return streaming result as WAV. Parity metrics are response headers so
-        # the body remains directly inspectable/listenable by the target harness.
-        buf = io.BytesIO()
-        sf.write(buf, wav_stream, sr, format="WAV")
-        buf.seek(0)
-        return buf.read(), "audio/wav", {
-            "X-Streaming-Frames": str(wav_stream.size // 1920),
-            "X-Streaming-Reference-Frames": str(stream_info["reference_frames"]),
-            "X-Streaming-Decode-Boundaries": ",".join(
-                str(value) for value in stream_info["decode_boundaries"]
-            ),
-            "X-Streaming-Chunk-Count": str(len(stream_chunks)),
-            "X-Streaming-Reused-Decode": str(reuse_streamed_decode).lower(),
-            "X-Streaming-TTFB-Seconds": (
-                f"{chunk_times[0]:.6f}" if chunk_times else "none"
-            ),
-            "X-Streaming-Total-Seconds": f"{stream_info['elapsed_seconds']:.6f}",
-            "X-Streaming-Max-Abs": f"{float(np.max(np.abs(diff), initial=0.0)):.9g}",
-            "X-Streaming-SNR-Db": "inf" if np.isinf(snr_db) else f"{snr_db:.6f}",
-        }
-
-    try:
-        audio_bytes, media_type, parity_headers = executor.submit(do_work).result(timeout=300)
-    except Exception as e:
-        return jsonify({"error": f"Inference error: {str(e)}"}), 500
-
-    return Response(audio_bytes, content_type=media_type, headers=parity_headers)
-
-
-@app.route("/batch_internal", methods=["POST"])
-def batch_internal():
-    """Dev-only batch parity endpoint.
-
-    - Uses the same JSON input as /stream_internal.
-    - Applies optional seed, same as /stream_internal, for identical-seed A/B.
-    - Returns WAV with timing headers.
-    - NOT part of the public API; may change or be removed.
-    """
-    if model is None or voice_clone_prompt is None:
-        return jsonify({"error": "Model not loaded"}), 503
-
-    data = request.get_json(force=True, silent=True)
-    if not data:
-        return jsonify({"error": "Invalid JSON"}), 400
-
-    text = (data.get("text") or "").strip()
-    if not text:
-        return jsonify({"error": "text is required"}), 400
-
-    language = (data.get("language") or "English").strip()
-
-    def do_work():
-        import numpy as np
-
-        # Forward generation kwargs for parity and tests.
-        gen_kwargs = {
-            "do_sample": data.get("do_sample"),
-            "temperature": data.get("temperature"),
-            "top_p": data.get("top_p"),
-            "top_k": data.get("top_k"),
-            "max_new_tokens": data.get("max_new_tokens"),
-        }
-        gen_kwargs = {k: v for k, v in gen_kwargs.items() if v is not None}
-
-        # Apply seed control, same as /stream_internal.
-        _apply_optional_seed(data.get("seed"))
-
-        started = time.monotonic()
-        wavs, sr = model.generate_voice_clone(
-            text=text,
-            language=language,
-            voice_clone_prompt=voice_clone_prompt,
-            **gen_kwargs,
-        )
-        elapsed = time.monotonic() - started
-
-        # Return batch result as WAV with timing headers.
-        buf = io.BytesIO()
-        sf.write(buf, wavs[0], sr, format="WAV")
-        buf.seek(0)
-        audio_bytes = buf.read()
-
-        wav_size = len(wavs[0])
-        frames = wav_size // 1920
-
-        return audio_bytes, "audio/wav", {
-            "X-Batch-Frames": str(frames),
-            "X-Batch-Elapsed-Seconds": f"{elapsed:.6f}",
-            "X-Batch-Seed": str(data.get("seed")),
-        }
-
-    try:
-        audio_bytes, media_type, headers = executor.submit(do_work).result(timeout=300)
-    except Exception as e:
-        return jsonify({"error": f"Inference error: {str(e)}"}), 500
-
-    return Response(audio_bytes, content_type=media_type, headers=headers)
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8319)

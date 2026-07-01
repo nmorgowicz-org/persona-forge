@@ -8,49 +8,42 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app/src:/app/src/export
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential curl git libgomp1 libsox-fmt-all sox && \
       apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+COPY requirements/ requirements/
 
-COPY requirements.txt requirements-ov-runtime.txt requirements-ov-export.txt ./
-
-# Install CPU-only Torch explicitly before qwen-tts so pip does not pull CUDA libraries.
 RUN python -m pip install \
       --index-url https://download.pytorch.org/whl/cpu \
       "torch==${TORCH_VERSION}" "torchaudio==${TORCHAUDIO_VERSION}" && \
-    python -m pip install -r requirements.txt
+    python -m pip install -r requirements/runtime.txt
 
-# Fix Qwen3-TTS ONNX Runtime: set intra threads to 6 instead of 1
 RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/' \
     /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_25hz/vq/speech_vq.py || true
 
-# ov_runtime_config is imported eagerly by app_worker (both backends); ov_talker_runtime and
-# ov_vocoder_runtime are imported lazily by the openvino backend. The streaming
-# helper is imported by app_worker for the internal parity harness.
-COPY app_api.py app_worker.py model_config.py serve.py streaming_vocoder.py ov_runtime_config.py ov_talker_runtime.py ov_vocoder_runtime.py ./
-COPY scripts/download_model.py scripts/download_model.py
+COPY src/ src/
+COPY scripts/ scripts/
 
 FROM base AS runtime
 
-RUN python -m pip install -r requirements-ov-runtime.txt
+RUN python -m pip install -r requirements/openvino.txt
 
-EXPOSE 8318 8319
+EXPOSE 8318
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10m --retries=3 \
     CMD curl --fail --silent --show-error http://127.0.0.1:8318/health >/dev/null || exit 1
 
-CMD ["python", "serve.py"]
+CMD ["gunicorn","qwen3_tts.app:app","-w","1","-k","gthread","--threads","4","--timeout","300","--bind","0.0.0.0:8318","--log-level","info"]
 
 FROM runtime AS exporter
 
-RUN python -m pip install -r requirements-ov-export.txt
+RUN python -m pip install -r requirements/export.txt
 
-# bench_common + test_ov_generation + run_bench provide the M4 generation-parity / warm-latency harness.
-COPY export_openvino.py ov_export_wrappers.py ov_stateful_cache.py parity_contract.py test_vocoder_parity.py benchmark_vocoder.py test_transformer_parity.py test_stateful_main_parity.py bench_common.py test_ov_generation.py calibration_capture.py dump_audio.py run_bench.sh ./
-COPY scripts/transform_stateful_ir.py ./
+CMD ["python", "scripts/export.py"]
 
 LABEL org.opencontainers.image.source="https://github.com/nmorgowicz-org/qwen3-tts-openvino"
