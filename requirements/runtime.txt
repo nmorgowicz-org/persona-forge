@@ -8,4 +8,5 @@ accelerate
 einops
 librosa
 onnxruntime
+sox
 transformers==5.12.1
