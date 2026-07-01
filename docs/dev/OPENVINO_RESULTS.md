@@ -1094,43 +1094,49 @@ gate passes, prefer 1.7B based on listening; otherwise retain 0.6B as the safe f
 
 ### Why 0.6B and 1.7B have nearly identical steady memory — root cause (2026-06-30)
 
-This surprised us; it is not a measurement fluke, it is the architecture behaving as designed. The
-only large component that differs between the two models — the talker transformer decoder blocks
-(`.layers`) — is exactly the component that `OVTalkerRuntime._release_torch_core_weights()` frees
-after the OpenVINO IR compiles (block tensors replaced with empty storage, then `malloc_trim`). So the
-~1.1B-parameter difference between 0.6B and 1.7B **leaves steady RSS in both configs.**
+This surprised us; MEASURED with `scripts/codec_memory_report.py` on `dockermisc1` (2026-06-30). An
+earlier draft of this section guessed the PyTorch speech-tokenizer/codec was the big shared chunk —
+**that guess was wrong; the instrumentation corrected it.** Post-OV-release resident bytes:
 
-What remains resident is dominated by components that are the same size in both:
+| component | 0.6B | 1.7B |
+|---|---|---|
+| talker PyTorch total (kept: embeddings/norms/heads; `.layers` freed) | 0.720 GiB | 0.798 GiB |
+| `speech_tokenizer.model` (the PyTorch codec) | 0.318 GiB | 0.318 GiB |
+| **process VmRSS at load (no generation yet)** | **4.92 GiB** | **5.23 GiB** |
 
-1. **The PyTorch speech-tokenizer / codec model** (the 12 Hz neural codec, encoder + decoder). It is
-   independent of talker size — identical bytes for 0.6B and 1.7B — and is **never released**: only
-   its `.decode` is monkey-patched to the OV vocoder, so its weights stay fully resident. This is the
-   single largest unreleased fixed chunk.
-2. Torch runtime + OpenVINO runtime + Python/framework overhead (fixed).
-3. Stateful KV buffers (cap768, FP32) — same shapes in both.
-4. **The OV IR weights, where the larger model is quantized harder.** 1.7B main is INT4 asym g32
-   (~0.5 byte/param + fp16 group scales ⇒ ~0.9-1.0 GiB) while 0.6B main is INT8 (~1 byte/param
-   ⇒ ~0.6-0.7 GiB). The IR-weight delta is only ~0.3 GiB, not the ~2x parameter-count ratio.
+Findings:
+- The only big differentiator — the talker `.layers` — is freed by
+  `OVTalkerRuntime._release_torch_core_weights()` after OV compile (0.6B released ~0.97 GiB), so it
+  **leaves steady RSS in both.** What is *kept* in Torch (embeddings ~0.585/0.591, codec 0.318,
+  heads) is nearly identical between the two models.
+- **Total PyTorch resident is only ~1.0-1.1 GiB; the 0.6B→1.7B PyTorch delta is ~0.08 GiB.** The codec
+  is only **0.318 GiB** — not the multi-GiB chunk first hypothesized. A codec-decoder release would
+  save at most ~0.15-0.3 GiB and is **not worth** the fail-closed risk; that idea is dropped.
+- **The dominant ~4 GiB of RSS is native OpenVINO, not PyTorch.** The 0.6B release log shows RSS at
+  only **2.18 GiB after main compile**, then jumping to **4.92 GiB during vocoder compile + prompt
+  creation** — i.e. the **FP32 OpenVINO vocoder + OV runtime floor (~2.7 GiB) is the biggest single
+  cost, identical for both models.**
+- **Measured 0.6B→1.7B RSS delta is only ~0.31 GiB** (4.92 vs 5.23 GiB at load). That is the real,
+  evidence-based reason the two profiles are nearly identical: memory is a large *fixed* OpenVINO floor
+  (vocoder + runtime + framework) plus a tiny (~0.3 GiB) variable IR/embedding delta. **0.6B is NOT
+  meaningfully smaller than 1.7B.**
 
-Kept-but-model-scaling Torch pieces (embeddings, norms, projections, codec/predictor heads) add at
-most a few hundred MB of difference. Combined with the ~0.3 GiB IR delta, the theoretical steady
-difference is well under ~0.5 GiB — easily masked by the multi-GiB shared codec/framework floor and by
-file-cache reclaim accounting. Hence the two profiles land within noise of each other, and we must not
-claim 0.6B is meaningfully smaller from the simplify-v2 runs.
+Implication for the release decision: since the two use nearly the same memory and 1.7B is the
+listening-preferred profile, **prefer 1.7B** — there is no footprint advantage to 0.6B. The only open
+memory gate is whether 1.7B's generation peak (~9.8 GiB cgroup) is safe under the deployment limit.
 
-**Highest-value reduction (helps both equally): release the codec DECODER only.** The codec decoder
-is dead once `speech_tokenizer.decode` is redirected to the OV vocoder, so freeing it is the win. Do
-**not** free the codec encoder: future per-request voice cloning and VoiceDesign
-(`docs/plans/alexandria_ideas.md`) need it to encode reference audio into codes. Constraints:
-- **Confirm first** with `scripts/codec_memory_report.py` (run in the runtime image on the box). It
-  prints resident PyTorch bytes per `speech_tokenizer` submodule post-OV-release, so we can quantify
-  the decoder-vs-encoder split before freeing anything.
-- Releasing the decoder means going **fail-closed**: today `talker.py` keeps `_orig_st_decode` as a
-  silent PyTorch fallback (install() lines ~753–770). The release must drop that fallback (if the OV
-  vocoder fails, error out) since the decoder weights will be gone.
-- Free only proven-dead params, `gc.collect()` + `malloc_trim`, gate behind a flag, and validate
-  prompt-reuse / batch / stream / parity / listening + RSS-before/after on `dockermisc1` before
-  acceptance. This is the HANDOFF ranked hypothesis #1, narrowed to be alexandria-compatible.
+**Where the real memory is (levers, in priority order — all inside our OpenVINO stack):**
+1. **Quantize / bf16 the FP32 vocoder** (the ~2.7 GiB fixed jump at vocoder compile). Biggest lever;
+   done in our own export, not via Optimum Intel or a host-language rewrite.
+2. **Generation-peak activations** (the ~9.8 GiB cgroup peak): try `KV_CACHE_PRECISION=u8`, capacity
+   768→512, and bf16 inference-precision hint on the now-stateful main — separate, parity-gated
+   experiments (see the ranked hypotheses in HANDOFF).
+
+**Not levers (confirmed):** Optimum Intel is the same OpenVINO runtime under an HF wrapper — same
+floor, likely worse (keeps the full HF torch model); no memory win. A Rust/other-language rewrite
+would save only the small Python/torch host overhead (~hundreds of MB) while leaving the dominant
+native OpenVINO runtime + IR + activation buffers untouched — a huge rewrite for no meaningful
+footprint gain. `scripts/codec_memory_report.py` remains as the standing instrument for this.
 
 ### PyTorch rollback timeout — root cause found and fixed in config (2026-06-30)
 
@@ -1148,8 +1154,8 @@ PyTorch fallback falls through to the fp32 default (`resolve_torch_load_config` 
 locally that `TTS_BACKEND=pytorch` no longer receives a forced bf16 dtype, the OpenVINO path is
 unchanged (bf16 + release), and an explicit expert `OPENVINO_TORCH_DTYPE` override is still honored.
 
-Still OPEN and requires `dockermisc1`: confirm that fp32 pure-PyTorch generation of a short prompt now
-returns audio within the 300 s serving timeout. Removing the bf16 regression is necessary and correct
-regardless; if fp32 CPU generation is still too slow for the contract, that is an inherent PyTorch-CPU
-limit and the rollback story should be redefined (e.g. "rollback = redeploy the previous OpenVINO
-image") rather than raising the public timeout to force the gate green.
+**CONFIRMED PASS on `dockermisc1` (2026-06-30):** with the fix, `TTS_BACKEND=pytorch MODEL_SIZE=0.6B`
+loads at `torch_dtype=float32` and a short-prompt `POST /generate` returned **HTTP 200 in 20.4 s** with
+a valid 24 kHz mono WAV (vs the previous >300 s timeout under bf16). The rollback gate passes for 0.6B.
+Follow-up (non-blocking): spot-check 1.7B PyTorch (the deployed fallback size) with a short prompt — it
+will be slower than 0.6B but is expected to stay within 300 s for typical utterances.
