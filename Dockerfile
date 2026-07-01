@@ -33,6 +33,7 @@ p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/modeling_qwen3
 t = open(p).read(); \
 t = t.replace('self.padding_idx = config.pad_token_id', 'self.padding_idx = getattr(config, \"pad_token_id\", None)'); \
 t = t.replace('input_embeds=inputs_embeds', 'inputs_embeds=inputs_embeds'); \
+t = t.replace('\n            cache_position=cache_position,\n', ''); \
 open(p, 'w').write(t)" && \
     python -c "\
 p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/configuration_qwen3_tts.py'; \
