@@ -396,6 +396,8 @@ def _run_generate(text: str, language: str, **gen_kwargs):
     if model is None or voice_clone_prompt is None:
         raise RuntimeError("Model not loaded")
     import traceback as _tb
+    t0 = time.monotonic()
+    print(f"[generate] batch  lang={language!r}  chars={len(text)}", flush=True)
     try:
         wavs, sr = model.generate_voice_clone(
             text=text,
@@ -406,7 +408,11 @@ def _run_generate(text: str, language: str, **gen_kwargs):
     except Exception:
         _tb.print_exc()
         raise
-    return _trim_silence(wavs[0], sr), sr
+    wav, sr = _trim_silence(wavs[0], sr), sr
+    duration = len(wav) / sr
+    elapsed = time.monotonic() - t0
+    print(f"[generate] done   elapsed={elapsed:.1f}s  audio={duration:.1f}s  RTF={elapsed/duration:.2f}x", flush=True)
+    return wav, sr
 
 
 def _apply_optional_seed(seed_value):
@@ -445,6 +451,8 @@ def _run_generate_with_streaming(
 
     if model is None or voice_clone_prompt is None:
         raise RuntimeError("Model not loaded")
+
+    print(f"[generate] stream lang={language!r}  chars={len(text)}", flush=True)
 
     vr = getattr(ov_runtime, "vocoder_runtime", None)
     if vr is None or not vr.enabled:
@@ -504,8 +512,11 @@ def _run_generate_with_streaming(
     # waveform is returned only to the internal parity harness so it can compare
     # the side-channel chunks against the stock decode from the same generation.
     wav_raw = np.asarray(wavs[0], dtype=np.float32).ravel()
+    elapsed = time.monotonic() - started
+    duration = len(wav_raw) / sr
+    print(f"[generate] done   elapsed={elapsed:.1f}s  audio={duration:.1f}s  RTF={elapsed/duration:.2f}x  chunks={len(session.decode_boundaries)}", flush=True)
     return _trim_silence(wav_raw, sr), sr, wav_raw, {
-        "elapsed_seconds": time.monotonic() - started,
+        "elapsed_seconds": elapsed,
         "generated_frames": session.generated_frames,
         "reference_frames": session.reference_frames,
         "decode_boundaries": session.decode_boundaries,
