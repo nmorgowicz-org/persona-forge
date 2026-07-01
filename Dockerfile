@@ -29,10 +29,11 @@ RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/'
     sed -i '/@check_model_inputs/d' \
     /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_12hz/modeling_qwen3_tts_tokenizer_v2.py || true && \
     python -c "\
-p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/modeling_qwen3_tts.py'; \
-t = open(p).read(); \
-t = t.replace('self.padding_idx = config.pad_token_id', 'self.padding_idx = getattr(config, \"pad_token_id\", None)'); \
-open(p, 'w').write(t)" && \
+ p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/modeling_qwen3_tts.py'; \
+ t = open(p).read(); \
+ t = t.replace('self.padding_idx = config.pad_token_id', 'self.padding_idx = getattr(config, \"pad_token_id\", None)'); \
+ t = t.replace('input_embeds=inputs_embeds', 'inputs_embeds=inputs_embeds'); \
+ open(p, 'w').write(t)" && \
     python -c "\
 p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/configuration_qwen3_tts.py'; \
 t = open(p).read(); \
