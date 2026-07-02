@@ -90,7 +90,7 @@ Persistent host paths on `dockermisc1`:
 ## Dependency rules
 
 - The OpenVINO stack (OpenVINO, NNCF, Transformers, Python) moves together; pin all of them.
-- `qwen-tts==0.1.1` hard-pins `transformers==4.57.3` but is installed `--no-deps` in the Dockerfile so that `requirements/runtime.txt` can supply `transformers==5.12.1` (CVE-2026-1839 fix). All other qwen-tts runtime deps (accelerate, einops, librosa, onnxruntime) are listed explicitly in runtime.txt. Re-verify export wrappers and parity gate after any transformers bump.
+- `qwen-tts==0.1.1` hard-pins `transformers==4.57.3` but is installed `--no-deps` in the Dockerfile so that `requirements/requirements-runtime.txt` can supply `transformers==5.12.1` (CVE-2026-1839 fix). All other qwen-tts runtime deps (accelerate, einops, librosa, onnxruntime) are listed explicitly in requirements-runtime.txt. Re-verify export wrappers and parity gate after any transformers bump.
 - Install CPU-only Torch before `qwen-tts` to prevent CUDA library pulls.
 - Validated Python 3.13 CPU pair: `torch==2.12.1+cpu` + `torchaudio==2.11.0+cpu`.
 - Do not update one OpenVINO-stack dependency in isolation without rebuilding the image and rerunning export parity.

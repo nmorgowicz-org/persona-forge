@@ -150,8 +150,8 @@ def validate_dockerfile() -> None:
         "HEALTHCHECK ",
         "qwen3_tts.app:app",
         "EXPOSE 8318",
-        "requirements/openvino.txt",
-        "requirements/export.txt",
+        "requirements/requirements-openvino.txt",
+        "requirements/requirements-export.txt",
         "from transformers import initialization as init",
         "s/create_sliding_window_causal_mask/create_causal_mask/g",
     ):
