@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.21.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.20.0...qwen3-tts-openvino-v0.21.0) (2026-07-02)
+
+
+### Features
+
+* **backend:** seeded VoiceDesign, per-voice cloning cache, runtime control panel ([1d56671](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/1d56671f39aa3cb4135af59bfc417576408e17c4))
+* **frontend:** complete VoiceDesign web UI ([1d56671](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/1d56671f39aa3cb4135af59bfc417576408e17c4))
+* **tests:** add Playwright E2E suite, screenshot harness, and dedicated UI CI workflow ([1d56671](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/1d56671f39aa3cb4135af59bfc417576408e17c4))
+
+
+### Bug Fixes
+
+* **deps:** rename requirements manifests for Dependabot graph compatibility ([9db3930](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/9db39308fd012e52e41cbf4cae73632d71184c0d))
+* **tests:** repair CI test failures from stale fakes and pytest-only test module ([1d56671](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/1d56671f39aa3cb4135af59bfc417576408e17c4))
+* **tests:** silence werkzeug per-request access log in the E2E fake server ([1d56671](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/1d56671f39aa3cb4135af59bfc417576408e17c4))
+
+
+### Documentation
+
+* **agent-reference:** document delete/seed/runtime-config APIs, reorganize agent reference docs ([1d56671](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/1d56671f39aa3cb4135af59bfc417576408e17c4))
+
 ## [0.20.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.19.0...qwen3-tts-openvino-v0.20.0) (2026-07-02)
 
 
