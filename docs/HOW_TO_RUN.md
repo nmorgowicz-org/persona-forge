@@ -117,6 +117,8 @@ These three are all you strictly need beyond the defaults.
   hosts with < 20 GiB free RAM.
 - `QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<sha>` — pin your production image.
 - `TTS_MEMORY_LIMIT`, `TTS_MEMORY_SWAP_LIMIT` — adjust for your host (defaults 10G/11G).
+- For all other knobs (threading, quantization, silence trim, codec behavior, etc.), see
+  Advanced settings reference below and the .env.example comments.
 
 ### Memory and sizing
 
@@ -158,25 +160,73 @@ No jemalloc / tcmalloc: allocator replacement caused SIGABRT/SIGSEGV under trans
 Changing `TTS_BACKEND` or `OV_DYNAMIC_QUANT_GROUP_SIZE` briefly reloads the model (serialized,
 no dropped requests).
 
-### Advanced settings
+### Advanced settings reference
 
-Use these only if you have a reason. All others are preset-derived and work out of the box.
+Use these only if you have a reason. All other internals are preset-derived and work out of the box.
 
-| Variable | Default | When to change |
-|---|---|---|
-| `TTS_BACKEND` | `openvino` | `pytorch` for rollback |
-| `OV_INFERENCE_THREADS` | `6` | Set to your physical core count |
-| `TTS_MEMORY_LIMIT` / `TTS_MEMORY_SWAP_LIMIT` | `10G` / `11G` | Raise on hosts with more RAM |
-| `EXPORT_MEMORY_LIMIT` / `EXPORT_MEMORY_SWAP_LIMIT` | `13G` / `14G` | Only if export OOMs |
-| `OPENVINO_RELEASE_CODEC` | `1` | Set `0` if using voice library / VoiceDesign; see above |
-| `OV_DYNAMIC_QUANT_GROUP_SIZE` | `32` | `0` = off; `64` = faster, slightly lower accuracy |
-| `OV_CACHE_DIR` | `/ov/cache` | Only change if you need to isolate caches |
-| `SILENCE_TRIM` / `SILENCE_TRIM_THRESH` / `SILENCE_TRIM_PAD_MS` | `1` / `0.01` / `30` | Disable if audio is clipped |
-| `HF_TOKEN` | unset | Set if checkpoint is gated |
-| `MODEL_REVISION` | unset | Pin a specific revision |
-| `VOICE_DESIGN_MODEL_SIZE` | `1.7B` | Only relevant if shipping other sizes |
-| `VOICE_DESIGN_MAX_SPEECH_SECONDS` | `20` | Only change if you need longer VoiceDesign samples |
-| `TTS_MAX_SPEECH_SECONDS` | `64` | Only change if you want a different per-request cap |
+**`TTS_BACKEND`** (default `openvino`)
+- Set to `pytorch` as a rollback backend when OpenVINO IR is broken or missing.
+- PyTorch is slower and does not use the IR, but is useful for verification.
+- Change live via Runtime panel or `.env`; triggers a model reload.
+
+**`OV_INFERENCE_THREADS`** (default `6`)
+- Number of CPU threads for OpenVINO transformer + vocoder and PyTorch glue.
+- Set this to your physical core count (not hyperthreads) for best latency.
+- Beyond physical cores there are no gains; too many threads can cause contention.
+
+**`OV_DYNAMIC_QUANT_GROUP_SIZE`** (default `32`)
+- OpenVINO dynamic quantization for inference:
+  - `0` = disabled (baseline accuracy, slower)
+  - `32` = default (slight speedup, negligible quality loss)
+  - `64` = faster, slightly lower accuracy (useful only on very constrained hosts)
+- Change live via Runtime panel or `.env`; triggers a model reload.
+
+**`OV_CACHE_DIR`** (default `/ov/cache`)
+- OpenVINO compiled kernel cache directory. Leaving this default eliminates 60–120s of
+  JIT recompilation on every restart or idle-unload reload.
+- Set to empty string (`""`) to disable (useful only for controlled testing).
+
+**`OPENVINO_RELEASE_CODEC`** (default `1`)
+- Controls whether the ~0.3 GiB PyTorch codec is freed after startup:
+  - `1` (default): codec is released; saves ~0.3 GiB. Uncached `voice_id` fails with a clear error instead of silently cloning.
+  - `0`: codec stays loaded; any `voice_id` can be cloned immediately. Use this if you plan to use VoiceDesign or the voice library frequently.
+- Recommended: set `0` in new deployments that want full voice library functionality.
+
+**`IDLE_UNLOAD_SECONDS`** (default `0` or `1800` with `LOW_RAM_MODE=1`)
+- Unload the model after this many seconds of idle. Reload is automatic and transparent
+  but adds ~5–30s of latency on first request if the kernel cache is warm.
+- `LOW_RAM_MODE=1` sets this to 1800 automatically.
+- Useful on shared hosts where RAM is needed for other workloads.
+
+**`TTS_MAX_SPEECH_SECONDS`** (default `64`)
+- Maximum duration for a single request. Baked into the OpenVINO IR at export time.
+- Is a latency/safety cap, not a memory lever. Changing it from 64s to 15s saves
+  ~200 MiB, not gigabytes. Use it to bound worst-case latency and fail fast on
+  runaway or misbehaving requests.
+- Must match between `export` and `qwen3-tts`. Changing it requires re-exporting.
+- Leave at `64` unless you have a specific reason to change it.
+
+**`SILENCE_TRIM` / `SILENCE_TRIM_THRESH` / `SILENCE_TRIM_PAD_MS`**
+- Trim leading/trailing silence from generated audio.
+  - `SILENCE_TRIM=1` (default) with threshold `0.01` and `30 ms` padding.
+  - Disable (`SILENCE_TRIM=0`) only if output is clipped or you need the raw waveform.
+- Tunable live via Runtime panel or `.env`.
+
+**`HF_TOKEN`** (unset by default)
+- Set if the checkpoint is gated in your environment (e.g., new HF account, specific region).
+- Never log or commit this. Use Docker secrets or `HF_TOKEN_FILE` in production.
+
+**`MODEL_REVISION`** (unset by default)
+- Pin a specific Hugging Face revision. If set, must match exported IR metadata.
+- Useful for strict reproducibility; generally unnecessary if you pin the image.
+
+**`VOICE_DESIGN_MODEL_SIZE`** (default `1.7B`)
+- Only relevant if you're deploying VoiceDesign with a different size.
+- Today only 1.7B ships a VoiceDesign checkpoint.
+
+**`VOICE_DESIGN_MAX_SPEECH_SECONDS`** (default `20`)
+- Capacity baked into the VoiceDesign IR at export time. Must match between
+  `export-voice-design` and `qwen3-tts`. Change only if you need longer VoiceDesign samples.
 
 ## HTTP API reference
 
