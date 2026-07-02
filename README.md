@@ -63,16 +63,35 @@ a memory lever (lowering it saves tens of MiB, not GiB); see
 ## HTTP API
 
 ```text
-GET  /health
-POST /v1/audio/speech  {"input":"...", "language":"English", "response_format":"mp3|wav", "voice_id":"...", "seed":123}
-POST /generate         {"text":"...",  "language":"English", "response_format":"mp3|wav", "voice_id":"...", "seed":123}
-POST /generate/stream  {"text":"...",  "language":"English", "voice_id":"...", "seed":123}  -> mono f32le PCM
+GET    /health
+POST   /v1/audio/speech  {"input":"...", "language":"English", "response_format":"mp3|wav", "voice_id":"...", "instruct":"...", "seed":123}
+POST   /generate         {"text":"...",  "language":"English", "response_format":"mp3|wav", "voice_id":"...", "instruct":"...", "seed":123}
+POST   /generate/stream  {"text":"...",  "language":"English", "voice_id":"...", "seed":123}  -> mono f32le PCM
 
-POST /voice_design     {"description":"...", "sample_text":"...", "language":"English"}
-                       -> {"voice_id":"...", "sample_rate":24000, "audio_base64":"..."}
-GET  /voices           -> {"voices": [...]}
-GET  /voices/<voice_id> -> voice metadata + audio_base64
+POST   /voice_design      {"description":"...", "sample_text":"...", "language":"English", "seed":123, "selections":{...}}
+                          -> {"voice_id":"...", "sample_rate":24000, "seed":123, "audio_base64":"..."}
+GET    /voices            -> {"voices": [...]}
+GET    /voices/<voice_id> -> voice metadata + audio_base64
+DELETE /voices/<voice_id> -> {"deleted": "<voice_id>"}
+
+GET    /runtime/config    -> live/read-only/not-live runtime knobs (see below)
+POST   /runtime/config    {"TTS_BACKEND":"openvino|pytorch", "IDLE_UNLOAD_SECONDS":1800, ...}
 ```
+
+`GET/POST /runtime/config` expose the container's live-adjustable knobs (`TTS_BACKEND`,
+`IDLE_UNLOAD_SECONDS`, `SILENCE_TRIM*`, `OV_DYNAMIC_QUANT_GROUP_SIZE`) alongside read-only
+transparency fields (mount read/write mode, whether `REF_AUDIO_PATH`/`HF_TOKEN` are set) and
+knobs that need a re-export to change (`TTS_MAX_SPEECH_SECONDS`, quantization precision).
+Changing `TTS_BACKEND` or `OV_DYNAMIC_QUANT_GROUP_SIZE` briefly reloads the model — in-flight
+requests wait in the executor rather than failing, same as an idle-unload reload. This route has
+no auth gate, matching the rest of the API's "trusted network only" posture.
+
+`seed` is optional everywhere it's accepted — omit it for a fresh random draw. `/generate` and
+`/v1/audio/speech` report the seed actually used (random or caller-supplied) back in the
+`X-Seed` response header; `/voice_design` reports it in the JSON body. `selections` on
+`/voice_design` is opaque chip-selection state the frontend stores alongside the voice so it can
+be reopened and tweaked later — the backend doesn't interpret it, only `description` feeds the
+model.
 
 `/stream_internal` and `/batch_internal` are development parity endpoints, not stable public APIs.
 The public stream reports format, sample rate, and channel count in `X-Audio-*` headers. If an error

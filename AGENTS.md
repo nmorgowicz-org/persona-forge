@@ -1,5 +1,22 @@
 # Qwen3-TTS OpenVINO — Agent Guide
 
+## How to use this guide
+
+- This is your single source of truth for working on this repo.
+- When implementing or modifying features, treat `docs/plans/` as authoritative and binding.
+  Do not silently relax stack choices, runtime constraints, or memory rules to "simplify"—
+  only propose alternatives explicitly.
+- For runtime invariants, memory rules, and LOW_RAM_MODE details, see:
+  - `docs/agent-reference/RUNTIME_AND_MEMORY.md`
+- For the transformers 5 compatibility hacks, see:
+  - `docs/agent-reference/TRANSFORMERS_COMPAT.md`
+- For export system behavior and fragility, see:
+  - `docs/agent-reference/EXPORT_SYSTEM.md`
+- For VoiceDesign and frontend work, follow:
+  - `docs/plans/PLAN_voice_design.md`
+
+If a change conflicts with any of these, stop and propose alternatives explicitly.
+
 ## Quick orientation
 
 ```
@@ -9,15 +26,13 @@ scripts/           entrypoint.sh (container entrypoint), export.py, download_mod
 tests/             Unit and integration tests; no model weights needed
 requirements/      runtime.txt  openvino.txt  export.txt
 Dockerfile         Single image: ENTRYPOINT=entrypoint.sh, default CMD = gunicorn serving
-compose.yml        Two services (qwen3-tts, export) sharing one image
+compose.yml        Services (qwen3-tts, export, export-voice-design) sharing one image
 ```
 
 `PYTHONPATH=/app/src:/app/src/export` — both `qwen3_tts.*` and export modules are importable inside the container.
 
 **One image, two behaviors.** `scripts/entrypoint.sh` is the container ENTRYPOINT; it applies
-`LOW_RAM_MODE` tuning (jemalloc, idle unload defaults) before exec-ing the CMD. The serving
-container runs the image's default CMD (gunicorn). The export service overrides CMD with
-`python scripts/export.py`. There are no multi-stage build targets.
+`LOW_RAM_MODE` tuning before exec-ing the CMD. The serving container runs the image's default CMD (gunicorn). The export service overrides CMD with `python scripts/export.py`. There are no multi-stage build targets.
 
 **Gunicorn constraints.** Always `-w 1 -k gthread --threads 4`. Never `--preload`. Never more than
 one worker. The single worker holds the model and serializes all inference through a
@@ -34,7 +49,7 @@ checkpoints on Intel CPUs with OpenVINO while preserving a tested PyTorch rollba
 Read `docs/dev/architecture/OPENVINO_IMPLEMENTATION.md` before changing model export, cache handling,
 generation, quantization, memory loading, Docker packaging, or deployment behavior.
 
-## Current state (v0.15.x)
+## Current state
 
 - Single image ships serving and export tooling. CI publishes it as `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<sha>`.
 - `TTS_BACKEND=pytorch` is the tested rollback baseline.
@@ -42,7 +57,7 @@ generation, quantization, memory loading, Docker packaging, or deployment behavi
 - 0.6B ships INT8 with stateful main (cap 768) + stateful predictor (cap 32).
 - 1.7B ships INT4 asymmetric (group 32) with stateful main (cap 768) + INT8 explicit predictor.
 - Both profiles land at ~5.4–6.9 GiB steady serving RSS on the validated host. Export needs up to 13 GiB.
-- `LOW_RAM_MODE=1` enables glibc malloc tuning (`MALLOC_MMAP_THRESHOLD_=65536`, `MALLOC_ARENA_MAX=1`) + idle unload (default 1800s). Python calls `malloc_trim(0)` after idle unload. LD_PRELOAD allocator replacement (jemalloc, tcmalloc) is incompatible with OpenVINO `compile_model()` under transformers 5.x — both caused SIGABRT/SIGSEGV. `libjemalloc2` remains in the image for reference.
+- `LOW_RAM_MODE=1` enables glibc malloc tuning + idle unload. Python calls `malloc_trim(0)` after idle unload. LD_PRELOAD allocator replacement (jemalloc, tcmalloc) is incompatible with OpenVINO `compile_model()` under transformers 5.x — both caused SIGABRT/SIGSEGV. `libjemalloc2` remains in the image for reference.
 - OV compiled kernel cache at `/ov/cache` (default) eliminates ~60–120s recompilation on every restart.
 - Full model export, parity, and performance benchmarks run on `dockermisc1`, not on ARC runners.
 

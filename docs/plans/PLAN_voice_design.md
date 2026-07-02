@@ -341,16 +341,57 @@ unless one is already running.
 Decision: **serve the frontend from the same Flask process on port 8318.**
 
 - New top-level directory in this repo: `frontend/` (sibling to `src/`, `scripts/`, `docs/`).
-- **Framework: Vite + React + TypeScript + Tailwind + shadcn/ui, not Next.js** (revised
-  2026-07-02, supersedes alexandria_ideas.md's Next.js recommendation). Rationale: this is a
-  fully client-driven single-page control panel with no server-rendering need — we're already
-  doing a static export either way, so Next.js's App Router/RSC machinery buys nothing here and
-  only adds build complexity and a slower dev loop. Vite gives instant HMR, a plain `dist/`
-  static output (same "Flask serves it at `/`" deployment story), and a lighter dependency tree.
-  shadcn/ui (Radix primitives + Tailwind, copy-in components, no runtime UI-kit dependency) for
-  premium-feeling chips/dropdowns/sliders without a heavy component library; Framer Motion for
-  the polish pass (§8.7 step 5) — chip selection, waveform, and swap-in-progress states should
-  feel alive, not static forms.
+- **Framework (mandatory): Vite + React + TypeScript + Tailwind + shadcn/ui + Radix +
+  Framer Motion. Not Next.js; not a heavy UI kit; not raw Tailwind-only.**
+
+  This is a deliberate, non-optional choice. Any implementation or AI agent that drops
+  shadcn/ui or Motion to “keep it simple” is shipping the wrong thing.
+
+  Rationale:
+
+  - **Why this stack, specifically:**
+    - This is a control-panel SPA with chips, dropdowns, modals, and waveform states — not a
+      landing page and not a bare form. The user will judge this product on feel.
+    - shadcn/ui + Radix:
+      - Copy-pasted, statically typed components that integrate cleanly with Tailwind.
+      - Radix primitives provide correct ARIA roles, keyboard navigation, focus trapping,
+        and edge-case behavior (popovers, tooltips, modals, select menus) that hand-rolled
+        Tailwind utilities almost never get right.
+      - For a single-page panel like this, we only need a small, curated subset of components
+        (Button, Select, Tooltip, Popover, Dialog, etc.). The “copy-paste” model ensures only
+        what you use is in your bundle — no monolithic runtime, no dead code.
+      - This is the mainstream, modern “premium SaaS” standard; dev tools and AI helpers
+        (Cursor, v0, etc.) generate idiomatic shadcn/ui code by default, which helps keep
+        future edits aligned.
+    - Framer Motion:
+      - Non-negotiable for motion: chip selection pops, section transitions, swap-in-progress
+        feedback, waveform appearance. A static, clicky interface will feel like an admin tool,
+        not a voice design product.
+      - Tiny footprint, declarative API, designed for React UI; better choice than GSAP for
+        this scale and use case.
+  - **Why not “simpler” alternatives:**
+    - “Just Tailwind” (raw utility classes, no shadcn/ui, no Radix):
+      - Lacks: proper component patterns, consistent motion, accessibility; easy to drift into
+        an inconsistent, half-polished UI.
+    - Heavy monolithic UI kits (Mantine, MUI, Ant):
+      - Bring unnecessary runtime overhead, opinionated theming, and slower dev loops for a
+        single focused panel — overkill here.
+    - Landing-page animation kits (Aceternity, etc.):
+      - Great for marketing “wow”; wrong fit for an operational control panel with many
+        interactive controls.
+  - **Memory / runtime impact: none.**
+    - The frontend is built as a static export (`vite build` → `dist/`), then served as static
+      files by Flask from disk (same process, same port, no SSR, no Node.js at runtime).
+      Library choices only affect:
+      - Initial JS bundle size on the client (still small: we only include what we use).
+      - Perceived polish and usability in the browser.
+      They do not affect backend memory, model memory, OpenVINO memory, or CPU load on dockermisc1.
+      The model runtime dominates any consideration.
+
+  Concretely, for this project you should:
+  - Use shadcn/ui + Radix for all interactive primitives (buttons, selects, dialogs, etc.).
+  - Use Framer Motion for micro-animations (chips, waveforms, swap-in-progress states).
+  - Keep the component set minimal and focused on a control-panel aesthetic — not a marketing site.
 - Build the frontend as a **static export** (`vite build` → `dist/`) during container build.
 - Flask serves static frontend files at `/` (or all non-API routes). API endpoints remain at
   `/v1/audio/speech`, `/voice_design`, `/voices`, `/health`, etc.
@@ -585,3 +626,56 @@ Carried over from alexandria_ideas.md §1 "We intentionally drop": audiobook-cen
 voice baking (alexandria_ideas.md §9 — revisit only if zero-shot cloning proves insufficient for a
 specific voice), CustomVoice's 9 built-in speakers, authentication/multi-tenancy beyond what
 already exists. Do not scope-creep into these while implementing this plan.
+
+## 11. Implementation checklist (for AI agents and reviewers)
+
+Use this as a pass/fail checklist when reviewing changes to this feature. If a bullet is
+incomplete or contradicted, the change is not ready.
+
+- [ ] Backend:
+  - [ ] load_model() accepts ModelProfile; BASE_PROFILE and VOICE_DESIGN_PROFILE are separate.
+  - [ ] Model-swap is fully serialized via model.executor; never called directly off-thread.
+  - [ ] POST /voice_design:
+    - [ ] Validates description, sample_text, and language.
+    - [ ] Returns 503 while swap_in_progress() is True.
+    - [ ] On any exception, finally block restores BASE_PROFILE.
+  - [ ] Per-request voice cloning:
+    - [ ] voice_id accepted on all generation endpoints.
+    - [ ] Per-voice prompt cache exists and is invalidated on model reload.
+    - [ ] OPENVINO_RELEASE_CODEC guard: if codec is released and voice_id is used, return a clear error.
+  - [ ] 503 semantics:
+    - [ ] /health and all generation endpoints return 503 during swap.
+    - [ ] After first successful load, idle-unloaded requests block in the executor and reload transparently.
+  - [ ] Voice library:
+    - [ ] Filesystem layout under /voices/<voice_id>/reference.wav + meta.json.
+    - [ ] voice_id format: vd_<12hex>.
+    - [ ] GET /voices and GET /voices/<voice_id> wired; path-traversal guard in place.
+  - [ ] Quantization:
+    - [ ] 0.6B: INT8 (both cores) + stateful main (cap 768) + stateful predictor (cap 32).
+    - [ ] 1.7B: INT4 asymmetric (group 32) + stateful main (cap 768) + INT8 explicit predictor.
+  - [ ] Gunicorn and executor:
+    - [ ] -w 1 -k gthread --threads 4; never more than 1 worker; never --preload.
+    - [ ] ThreadPoolExecutor(max_workers=1); never create your own thread pool for model work.
+  - [ ] Runtime:
+    - [ ] LOW_RAM_MODE=1 tuning respects existing constraints (no jemalloc/tcmalloc without validation).
+    - [ ] OPENVINO_RELEASE_TORCH/OPENVINO_RELEASE_CODEC flags honored.
+
+- [ ] Frontend:
+  - [ ] Stack:
+    - [ ] Vite + React + TypeScript + Tailwind + shadcn/ui + Radix + Framer Motion (mandatory).
+    - [ ] Static build only (vite build → dist/); no SSR; same Flask process, same port.
+    - [ ] FRONTEND_ENABLED opt-out; backend works standalone without frontend.
+  - [ ] VoiceDesign panel:
+    - [ ] Guided UX: chips, presets, advanced mode, unstable-combo warnings.
+    - [ ] Composed description follows anatomy order: accent → demographics → register → texture/timbre → persona/character.
+    - [ ] Sample text:
+      - [ ] Persona-linked defaults; short by default (10-12s); backend validates <= 15s.
+  - [ ] Integration:
+    - [ ] voice_id wired into all generation calls.
+    - [ ] History panel (backed by GET /voices).
+    - [ ] Swap-in-progress states and feedback are clear and visible.
+
+- [ ] General:
+  - [ ] Changes do not conflict with existing AGENTS.md and runtime invariants.
+  - [ ] All tests and parity gates still pass (Tier 1-4).
+  - [ ] Docs updated: README.md, docs/HOW_TO_RUN.md, .env.example, compose.yml.
