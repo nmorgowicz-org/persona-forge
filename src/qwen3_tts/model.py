@@ -215,6 +215,22 @@ def load_model():
         x_vector_only_mode=False,
     )
 
+    # Opt-in, deterministic artifact for controlled Transformers 4/5 comparisons.
+    # The dump contains codec token IDs and package versions, never reference audio/text.
+    _prompt_dump_dir = os.getenv("TTS_PROMPT_DUMP_DIR", "").strip()
+    if not _prompt_dump_dir and os.path.exists("/tmp/tts_prompt_dump"):
+        _prompt_dump_dir = "/tmp/tts-prompt-dump"
+    if _prompt_dump_dir:
+        from qwen3_tts.prompt_diagnostics import (
+            dump_reference_prompt,
+            dump_talker_parameter_manifest,
+        )
+
+        manifest_path = dump_reference_prompt(voice_clone_prompt, _prompt_dump_dir)
+        print(f"[prompt_diag] reference prompt saved: {manifest_path}", flush=True)
+        parameter_path = dump_talker_parameter_manifest(model.model.talker, _prompt_dump_dir)
+        print(f"[prompt_diag] talker parameters saved: {parameter_path}", flush=True)
+
     if TTS_BACKEND == "openvino":
         # Milestone 4: install the OpenVINO talker runtime by swapping the two inner
         # transformer core forwards. All other generation glue stays in PyTorch.

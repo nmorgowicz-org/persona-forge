@@ -28,9 +28,16 @@ RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/'
     /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_25hz/vq/speech_vq.py || true && \
     sed -i '/@check_model_inputs/d' \
     /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_12hz/modeling_qwen3_tts_tokenizer_v2.py || true && \
+    sed -i 's/create_sliding_window_causal_mask/create_causal_mask/g' \
+    /usr/local/lib/python3.13/site-packages/transformers/models/mimi/modeling_mimi.py && \
     python -c "\
 p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/modeling_qwen3_tts.py'; \
 t = open(p).read(); \
+t = t.replace('from transformers.activations import ACT2FN', 'from transformers import initialization as init\nfrom transformers.activations import ACT2FN'); \
+t = t.replace('module.weight.data.normal_(mean=0.0, std=std)', 'init.normal_(module.weight, mean=0.0, std=std)'); \
+t = t.replace('module.bias.data.zero_()', 'init.zeros_(module.bias)'); \
+t = t.replace('module.weight.data.fill_(1.0)', 'init.ones_(module.weight)'); \
+t = t.replace('if module.padding_idx is not None:\n                module.weight.data[module.padding_idx].zero_()', 'if module.padding_idx is not None and not getattr(module.weight, \"_is_hf_initialized\", False):\n                module.weight.data[module.padding_idx].zero_()'); \
 t = t.replace('self.padding_idx = config.pad_token_id', 'self.padding_idx = getattr(config, \"pad_token_id\", None)'); \
 t = t.replace('input_embeds=inputs_embeds', 'inputs_embeds=inputs_embeds'); \
 t = t.replace('\n            cache_position=cache_position,\n', ''); \

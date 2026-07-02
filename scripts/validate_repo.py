@@ -152,6 +152,8 @@ def validate_dockerfile() -> None:
         "EXPOSE 8318",
         "requirements/openvino.txt",
         "requirements/export.txt",
+        "from transformers import initialization as init",
+        "s/create_sliding_window_causal_mask/create_causal_mask/g",
     ):
         if marker not in dockerfile:
             raise RuntimeError(f"Dockerfile single-image contract is missing {marker!r}")

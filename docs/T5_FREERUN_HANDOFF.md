@@ -2,9 +2,43 @@
 
 **Date:** 2026-07-01  **Branch:** `fix/t5-talker-eos-conditioning`  **Box:** `dockermisc1`
 
-This document is written to be read by someone (or a smaller model) with **no prior context**.
-Read it top to bottom. It tells you exactly what is broken, what has been proven, and the single
-next experiment to run.
+This document records the diagnosis and validated fix. The original investigation notes remain
+below where they provide useful evidence, but the July 1 full-fix result supersedes their proposed
+next experiments.
+
+## Resolution (2026-07-01)
+
+Two independent Transformers-5 compatibility failures caused the free-run behavior:
+
+1. **Loaded qwen-tts weights were overwritten during Transformers-5 finalization.** qwen-tts 0.1.1
+   initializes weights with direct `.data.normal_()`, `.zero_()`, and `.fill_()` calls. Transformers
+   5 assigns checkpoint tensors and marks them `_is_hf_initialized`, then runs guarded missing-weight
+   initialization. The direct qwen-tts calls bypass that guard and randomize already-loaded talker
+   embeddings, projections, and heads. All 24 conditioning-related parameter hashes differed from
+   T4. Adapting both qwen-tts `_init_weights` implementations to `transformers.initialization`
+   preserves the checkpoint tensors. The repaired T5 `model.text_embedding.weight` SHA-256 exactly
+   matches T4 and the checkpoint: `1ad88c2b566bfa4d66dab33999babf3ea8e53abe564ce6beecb4067eba6ac787`.
+
+2. **Transformers 5 changed Mimi encoder masking.** Its Mimi implementation uses
+   `create_sliding_window_causal_mask`; T4 used `create_causal_mask`. With the shipped tokenizer
+   configuration (`sliding_window=250`), T5 changed 314/2560 reference codec tokens across 31/160
+   frames. Restoring the causal mask makes the T5 reference-code SHA-256 exactly match T4:
+   `69b236e5dfbf04998e3f6ef75e3ef55051cd83a068a78e1a484c06d7fefdfe27`.
+
+The removed `@check_model_inputs()` decorator and Mimi `use_cache=use_streaming` change were tested
+separately and did not change the bad T5 reference-code hash.
+
+Validated image: `qwen3-tts-t5-diag:fullfix`, image ID
+`sha256:71fa34002c23c7085d82eeb9a410e349bfc7ca973eb4a7a950d0a85eef785ba8`, built from source commit
+`848ce5b` plus the uncommitted fixes recorded in this repository. Model revision is
+`fd4b254389122332181a7c3db7f27e918eec64e3`; IR metadata SHA-256 is
+`ca8f50be8ff4be280248f4ec9c7767ec91f3244e20ef9bcd58042a410344ea2e`.
+
+Final batch validation for `Hi there.` returned HTTP 200, produced a 56,886-byte WAV lasting
+1.184208 seconds, completed in 21.5 seconds, and stopped without reaching the stateful capacity.
+Whisper transcription was not rerun because Whisper was unavailable on the local and remote hosts.
+Diagnostic artifacts are outside Git at `/tmp/qwen3-tts-t5-diagnosis/` on `dockermisc1`; validation
+audio is `/tmp/fullfix-hi.wav` there and `/private/tmp/fullfix-hi.wav` locally.
 
 ---
 
@@ -17,18 +51,15 @@ next experiment to run.
   audio buffer capacity (768 frames) and crashes with `stateful cache capacity exceeded`.
 - **This is NOT a drone, NOT broken audio, NOT RoPE, NOT the OpenVINO (OV) model.** The audio is
   perfectly natural speech — the model just **ignores the target text** and free-runs.
-- **ROOT CAUSE — PROVEN:** the `inputs_embeds` tensor (the "prompt" that conditions the model,
+- **FAILURE LOCALIZED:** the `inputs_embeds` tensor (the "prompt" that conditions the model,
   built by qwen_tts's PyTorch code) is **numerically different** under transformers 5.x than under
   4.57.3. We dumped this tensor from a known-good T4 run and the broken T5 run, for the *same input*,
   feeding the *same OV model*: the position IDs and attention mask are byte-for-byte identical, but
   **`inputs_embeds` differs at every one of the 170 prefill positions** (mean-abs-diff 0.085, max 16.9,
-  std 0.078 vs 0.109). Same model + wrong prompt = wrong (free-running) output.
-- **THE NEXT STEP** (Section 6): find *which part* of the `inputs_embeds` construction changed. The
-  tensor is `text_embeds + reference_audio_codec_embeds` summed together. Dump the reference codes
-  (`voice_clone_prompt.ref_code`) and the text embeds separately under T4 vs T5 to see which one moved.
-  Strong suspects: (a) the reference-audio encoder `speech_tokenizer.encode` (its 12Hz tokenizer had a
-  `@check_model_inputs` decorator stripped by a Dockerfile patch), or (b) an embedding/projection
-  module behaving differently under transformers 5.x.
+  std 0.078 vs 0.109). This proves that the two runs supplied different conditioning, but the existing
+  comparison used different application revisions and therefore does not yet isolate Transformers.
+- **RESOLVED:** both the reference codec path and the loaded talker parameter path differed. The
+  resolution section above documents the two fixes and exact parity hashes.
 
 ---
 
@@ -70,10 +101,10 @@ the WAV. That is how we discovered it is *fluent but wrong* rather than noise.
 
 ---
 
-## 4. ROOT CAUSE — proven by a direct tensor diff
+## 4. Failure localized by a direct tensor diff
 
 We ran the **same** request ("Hi there.") against two containers using the **same** OV model files,
-same voice reference, same env — differing only in transformers version + code version:
+same voice reference and intended environment, but different Transformers and application revisions:
 
 - T4 reference: image `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:v0.15.1` (transformers 4.57.3). WORKS.
 - T5 broken:    image `qwen3-tts-test-b8901c9` (transformers 5.12.1). BROKEN.
@@ -95,9 +126,10 @@ smaller-norm under T5 (position 0: T4 norm 1.81 vs T5 0.37). Both models load at
 this is NOT a float32-vs-bfloat16 precision artifact — it is a real difference in how the
 `inputs_embeds` is computed.
 
-**Conclusion:** the OV model and all its other inputs are correct. The single thing that changed is
-the **conditioning tensor `inputs_embeds`**, which is built by qwen_tts PyTorch code that behaves
-differently under transformers 5.x. That is 100% why the model free-runs and never stops.
+**Conclusion:** the observed divergence is already present in the **conditioning tensor
+`inputs_embeds`**, before the OV transformer executes. This rules out the OV core as the origin of
+that numerical divergence. It does not yet prove that Transformers 5 is the cause: `v0.15.1` and
+`b8901c9` also differ in application code, dependency installation, and runtime behavior.
 
 ---
 
@@ -120,36 +152,40 @@ differently under transformers 5.x. That is 100% why the model free-runs and nev
 
 ---
 
-## 6. THE NEXT STEP (do this next)
+## 6. Diagnostic method used
 
 The prefill `inputs_embeds` = **text embeddings + reference-audio codec embeddings**, summed and
 concatenated inside `Qwen3TTSForConditionalGeneration.generate()` and its helper
-`generate_icl_prompt()` (in `qwen_tts/core/models/modeling_qwen3_tts.py`, around lines 2010-2280 and
-1956-2007). All 170 positions differ, so localize *which addend* moved:
+`generate_icl_prompt()`. The investigation localized both divergent inputs as follows:
 
-1. **Dump `voice_clone_prompt.ref_code` under T4 and T5 and compare.** This is the reference-audio
+1. **Build a controlled A/B.** Use the same source commit, model revision/cache, reference-audio
+   bytes, Torch and qwen-tts versions, IR files/metadata hash, environment, and generation settings.
+   Change only Transformers and the minimum compatibility patches required for that version. Record
+   the image digest and all hashes. The existing `v0.15.1` versus `b8901c9` comparison is useful for
+   localization but is not a controlled version comparison.
+
+2. **Dump `voice_clone_prompt.ref_code` under T4 and T5 and compare.** This is the reference-audio
    encoding, produced ONCE at startup by `model.create_voice_clone_prompt(...)` which calls
    `model.speech_tokenizer.encode(ref_wav)`. If `ref_code` differs, the **reference-audio encoder is
    the culprit**. Prime suspect: the Dockerfile patch that runs
    `sed -i '/@check_model_inputs/d' .../tokenizer_12hz/modeling_qwen3_tts_tokenizer_v2.py`
    (removes a transformers-5 decorator from the 12Hz codec model that encodes the reference). Removing
    that decorator may change what the encoder returns.
-   - In `src/qwen3_tts/model.py`, after `voice_clone_prompt = model.create_voice_clone_prompt(...)`,
-     add `import numpy as np; np.save('/tmp/refcode.npy', voice_clone_prompt[...].ref_code.cpu().numpy())`
-     (inspect the structure — it is a list of items or a dict with key `ref_code`). Run under T4 (v0.15.1
-     container) and T5 (b8901c9 container) and diff the two `.npy` files.
+   - The repository now has a gated dump. Set `TTS_PROMPT_DUMP_DIR=/tmp/t5-prompt` before worker
+     startup, or create `/tmp/tts_prompt_dump` before startup. It writes `ref_code.npy` plus
+     `ref_code.json` containing shape, dtype, SHA-256, and qwen-tts/Torch/Transformers versions.
+     Compare the JSON hashes first, then use NumPy for an element-wise diff if they differ.
 
-2. **If `ref_code` is identical**, then the difference is in the **text/codec embedding modules**
+3. **If `ref_code` is identical**, then the difference is in the **text/codec embedding modules**
    (`talker.text_projection`, `talker.get_text_embeddings()`, `talker.get_input_embeddings()`,
    `code_predictor.get_input_embeddings()`). Dump the individual embedding outputs for a fixed input id
    under both versions and find which module diverges. Look at the Dockerfile patches (Section 7) —
    one of them may change an embedding path, or transformers 5.x may have changed `nn.Embedding` /
    projection behavior for this model config.
 
-3. Once the diverging component is found, fix it (correct the patch, or adapt to the transformers-5.x
-   API) so that `inputs_embeds` matches the T4 values. Verify by re-running the tensor dump: the
-   prefill `inputs_embeds` should become byte-close to the T4 dump, and "Hi there." should transcribe
-   correctly and emit EOS.
+4. Fingerprint the talker's embedding, projection, and head parameters and compare them with the
+   checkpoint. This exposed the independent post-load reinitialization bug after reference codes
+   were repaired.
 
 **The success criterion is objective:** transcribe the output WAV with Whisper — it must say
 "Hi there." and be ~1 second (small file, e.g. ~5-9 KB mp3), and the request must return HTTP 200
@@ -168,7 +204,8 @@ They only exist to make transformers 5.x import/run. One of them likely changed 
   `input_embeds=inputs_embeds` → `inputs_embeds=inputs_embeds`; removed a
   `cache_position=cache_position,` line (from `create_causal_mask`, which is deprecated/unused in T5 —
   benign for OV since the inner forward is replaced).
-- In `configuration_qwen3_tts.py`: dropped `layer_type_validation` import / call.
+- In `configuration_qwen3_tts.py`: replaced the removed `layer_type_validation(...)` helper with
+  `self.validate_layer_type()`.
 - In `transformers/modeling_rope_utils.py`: re-added a custom `_compute_default_rope_parameters`
   (transformers 5.x removed the "default" rope type). **Note:** this only affects the PyTorch RoPE
   path; the OV graph has RoPE baked from the T4 export, so it does NOT affect the OV serving path — but

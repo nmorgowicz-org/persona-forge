@@ -786,7 +786,7 @@ class OVTalkerRuntime:
         # Diagnostic: wrap codec_head.forward to log top-5 logits at selected decode steps.
         # This tells us whether EOS is ever assigned high probability.
         # Gated by TTS_LOGITS_DIAG env var so it can be turned off in production.
-        if os.getenv("TTS_LOGITS_DIAG", "1").strip() == "1":
+        if os.getenv("TTS_LOGITS_DIAG", "0").strip() == "1":
             _orig_codec_forward = talker.codec_head.forward
             _diag_at = {1, 2, 3, 5, 10, 20, 50, 100, 200, 400}
             eos_id = 2150
