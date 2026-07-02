@@ -53,6 +53,8 @@ t = t.replace('module.weight.data.fill_(1.0)', 'init.ones_(module.weight)'); \
 t = t.replace('if module.padding_idx is not None:\n                module.weight.data[module.padding_idx].zero_()', 'if module.padding_idx is not None and not getattr(module.weight, \"_is_hf_initialized\", False):\n                module.weight.data[module.padding_idx].zero_()'); \
 t = t.replace('self.padding_idx = config.pad_token_id', 'self.padding_idx = getattr(config, \"pad_token_id\", None)'); \
 t = t.replace('input_embeds=inputs_embeds', 'inputs_embeds=inputs_embeds'); \
+t = t.replace('\"input_embeds\": inputs_embeds,', '\"inputs_embeds\": inputs_embeds,'); \
+t = t.replace('\n                \"cache_position\": cache_position,\n', '\n'); \
 t = t.replace('\n            cache_position=cache_position,\n', ''); \
 open(p, 'w').write(t)" && \
     python -c "\

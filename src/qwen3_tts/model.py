@@ -31,6 +31,7 @@ from qwen3_tts.model_config import (
     resolve_voice_design_model_repo,
 )
 from qwen3_tts.streaming import StreamingVocoderSession
+from qwen3_tts.transformers_compat import repair_rotary_buffers
 
 configure_hf_token()
 
@@ -303,6 +304,8 @@ def load_model(profile: ModelProfile | None = None):
         dtype=TORCH_DTYPE,
         low_cpu_mem_usage=OPENVINO_LOW_CPU_MEM_USAGE,
     )
+    rotary_report = repair_rotary_buffers(wrapped.model, torch)
+    print(f"[app_worker] Repaired and validated RoPE buffers: {rotary_report}", flush=True)
 
     gc.collect()
 

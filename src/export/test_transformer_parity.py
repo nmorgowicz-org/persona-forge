@@ -114,7 +114,23 @@ def _build_cache(past_kv_flat: list[np.ndarray], num_layers: int):
         (torch.from_numpy(past_kv_flat[2 * i]), torch.from_numpy(past_kv_flat[2 * i + 1]))
         for i in range(num_layers)
     )
-    return DynamicCache.from_legacy_cache(legacy)
+    factory = getattr(DynamicCache, "from_legacy_cache", None)
+    if factory is not None:
+        return factory(legacy)
+    return DynamicCache(legacy)
+
+
+def _flatten_cache(cache) -> list[np.ndarray]:
+    """Flatten a Transformers 4 or 5 DynamicCache as k0,v0,k1,v1,... arrays."""
+    converter = getattr(cache, "to_legacy_cache", None)
+    if converter is not None:
+        pairs = converter()
+    else:
+        pairs = ((layer.keys, layer.values) for layer in cache.layers)
+    result = []
+    for key, value in pairs:
+        result.extend((key.detach().numpy(), value.detach().numpy()))
+    return result
 
 
 def _run_core(core_module, inputs_embeds, attention_mask, position_ids, cache_position, cache,
@@ -191,10 +207,7 @@ def _compare_core(
         DynamicCache(), generation_steps=gen_steps,
     ))
     pt_hidden_prefill = pt_out.last_hidden_state.detach().numpy()
-    pt_kv_legacy = pt_out.past_key_values.to_legacy_cache()
-    pt_kv_flat = []
-    for k, v in pt_kv_legacy:
-        pt_kv_flat.extend([k.detach().numpy(), v.detach().numpy()])
+    pt_kv_flat = _flatten_cache(pt_out.past_key_values)
 
     # Build OV prefill inputs
     ov_prefill_inputs = [

@@ -48,17 +48,25 @@ import torch
 import torch.nn as nn
 from transformers.cache_utils import DynamicCache, DynamicLayer
 
-# transformers 4.57.3: DynamicCache.__init__() calls Cache.__init__(layer_class_to_replicate=DynamicLayer),
-# setting an INSTANCE attribute that cannot be overridden by a subclass class attribute.
-# Patching lazy_initialization directly is the only reliable way to replace the rank-1
-# torch.tensor([]) seed tensor with a rank-4 empty tensor that OV's aten::cat converter
-# can validate (axis -2 is out of range [-1, 0] for a rank-1 tensor).
+# DynamicCache.__init__() calls Cache.__init__(layer_class_to_replicate=DynamicLayer), setting
+# an INSTANCE attribute that cannot be overridden by a subclass class attribute. Patching
+# lazy_initialization directly is the only reliable way to replace the rank-1 torch.tensor([])
+# seed tensor with a rank-4 empty tensor that OV's aten::cat converter can validate (axis -2 is
+# out of range [-1, 0] for a rank-1 tensor).
+#
+# Signature tracks the transformers version pinned in requirements/runtime.txt — transformers
+# 4.57.3 called this with (key_states) only; 5.12.1 calls it with (key_states, value_states) (see
+# transformers.cache_utils.DynamicLayer.lazy_initialization). Keep both in sync with whatever
+# `Cache.update()` actually calls, not with what's convenient — a stale signature here fails
+# loudly at export time (TypeError: takes N positional arguments but M were given), not silently.
 # This module is only imported in the export container so the global patch is safe.
-def _ov_lazy_initialization(self: DynamicLayer, key_states: torch.Tensor) -> None:
+def _ov_lazy_initialization(
+    self: DynamicLayer, key_states: torch.Tensor, value_states: torch.Tensor
+) -> None:
     self.dtype = key_states.dtype
     self.device = key_states.device
-    self.keys = key_states[..., :0, :]    # [batch, kv_heads, 0, head_dim] — rank 4
-    self.values = key_states[..., :0, :]
+    self.keys = key_states[..., :0, :]      # [batch, kv_heads, 0, head_dim] — rank 4
+    self.values = value_states[..., :0, :]
     self.is_initialized = True
 
 DynamicLayer.lazy_initialization = _ov_lazy_initialization  # type: ignore[method-assign]
@@ -82,14 +90,17 @@ class CoreCacheWrapper(nn.Module):
         legacy = tuple(
             (past_kv[2 * i], past_kv[2 * i + 1]) for i in range(self.num_layers)
         )
-        return DynamicCache.from_legacy_cache(legacy)
+        # DynamicCache.from_legacy_cache()/to_legacy_cache() were removed in transformers 5.x
+        # (see requirements/runtime.txt pin) — the ddp_cache_data constructor arg and per-layer
+        # .keys/.values below are the replacement (transformers.cache_utils.DynamicCache).
+        return DynamicCache(legacy)
 
     @staticmethod
     def _flatten_present(cache: DynamicCache) -> list[torch.Tensor]:
         present: list[torch.Tensor] = []
-        for key, value in cache.to_legacy_cache():
-            present.append(key)
-            present.append(value)
+        for layer in cache.layers:
+            present.append(layer.keys)
+            present.append(layer.values)
         return present
 
     @staticmethod

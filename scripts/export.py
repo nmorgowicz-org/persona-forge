@@ -34,12 +34,14 @@ def _run_export(parent: Path, mode: str) -> Path:
         "--output-dir",
         str(parent),
         "--compression",
-        "both",
+        "int8" if mode == "int4_asym" else "both",
         "--int8-mode",
         mode,
     ]
     if mode == "int4_asym":
-        command.extend(("--int8-group-size", "32", "--int8-ratio", "1.0"))
+        command.extend(
+            ("--main-only", "--int8-group-size", "32", "--int8-ratio", "1.0")
+        )
     subprocess.run(command, check=True)
     created = [path for path in parent.iterdir() if path not in before and path.is_dir()]
     if len(created) != 1:
@@ -47,10 +49,11 @@ def _run_export(parent: Path, mode: str) -> Path:
     return created[0]
 
 
-def _copy_pair(source_xml: Path, destination_xml: Path) -> None:
+def _move_pair(source_xml: Path, destination_xml: Path) -> None:
+    """Move a staged XML/BIN pair into place without duplicating multi-GB weights."""
     destination_xml.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_xml, destination_xml)
-    shutil.copy2(source_xml.with_suffix(".bin"), destination_xml.with_suffix(".bin"))
+    shutil.move(source_xml, destination_xml)
+    shutil.move(source_xml.with_suffix(".bin"), destination_xml.with_suffix(".bin"))
 
 
 def main() -> int:
@@ -91,11 +94,11 @@ def main() -> int:
 
     for stem in ("main_prefill", "main_decode"):
         source = int4 if int4 is not None else int8
-        _copy_pair(source / f"{stem}_int8.xml", ir / f"{stem}_int8.xml")
+        _move_pair(source / f"{stem}_int8.xml", ir / f"{stem}_int8.xml")
     for stem in ("predictor_prefill", "predictor_decode"):
-        _copy_pair(int8 / f"{stem}_int8.xml", ir / f"{stem}_int8.xml")
+        _move_pair(int8 / f"{stem}_int8.xml", ir / f"{stem}_int8.xml")
     for stem in ("main_prefill", "main_decode", "predictor_prefill", "predictor_decode"):
-        _copy_pair(int8 / f"{stem}.xml", ir / f"{stem}.xml")
+        _move_pair(int8 / f"{stem}.xml", ir / f"{stem}.xml")
 
     metadata = json.loads((int8 / "metadata.json").read_text(encoding="utf-8"))
     metadata["per_core_compression"] = {
@@ -108,7 +111,7 @@ def main() -> int:
     if vocoder.exists():
         shutil.rmtree(vocoder)
     vocoder.mkdir(parents=True)
-    _copy_pair(int8 / "vocoder_decoder.xml", vocoder / "vocoder_decoder.xml")
+    _move_pair(int8 / "vocoder_decoder.xml", vocoder / "vocoder_decoder.xml")
     (vocoder / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
     stateful = output / f"main_stateful_cap{capacity}.xml"
