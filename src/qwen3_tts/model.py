@@ -803,7 +803,7 @@ def _apply_optional_seed(seed_value):
 
 # Comfortably inside a signed 63-bit range so resolved seeds round-trip cleanly through
 # JSON/int() parsing and response headers.
-_MAX_SEED = 2**63 - 1
+_MAX_SEED = 2**32 - 1
 
 
 def resolve_seed(seed_value: int | None) -> int:

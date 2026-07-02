@@ -1,441 +1,220 @@
 # How to run Qwen3-TTS OpenVINO
 
-## User quick start
+This document is for anyone deploying or operating this container. Internal host-specific
+procedures are in [INTERNAL_OPERATIONS.md](docs/dev/INTERNAL_OPERATIONS.md).
 
-Requirements: Linux AMD64, Docker with Compose, an Intel CPU, at least 10 GiB available container
-memory, a reference WAV, and its exact transcript.
+## Quick start
 
-```bash
-cp .env.example .env
-```
+Requirements: Linux AMD64, Docker with Compose, Intel CPU, at least 10 GiB for the service, a
+reference WAV, and its exact transcript.
 
-Set these three values in `.env`:
+1. Copy and edit the environment:
 
-```dotenv
-REF_AUDIO_PATH=/absolute/path/to/reference.wav
-REF_TEXT=The exact words spoken in the reference WAV
-MODEL_SIZE=1.7B
-```
+   ```bash
+   cp .env.example .env
+   # Set REF_AUDIO_PATH and REF_TEXT.
+   # MODEL_SIZE=1.7B is recommended and is the default.
+   ```
 
-Export once for the selected model, then start the service:
+2. Export IR (one time per model size / config change; uses 13–14 GiB):
 
-```bash
-docker compose run --rm export
-docker compose up --build -d qwen3-tts
-docker compose logs -f qwen3-tts
-```
+   ```bash
+   docker compose run --rm export
+   ```
 
-The first export downloads the Hugging Face checkpoint into `./data/model` and writes OpenVINO IR
-under `./data/ov/0.6B` or `./data/ov/1.7B`. Both directories are host bind mounts, so image rebuilds
-do not redownload or re-export them. The reference WAV is mounted read-only at
-`/voice/reference.wav`; `REF_TEXT` must match it exactly.
+   On a constrained host (10–15 GiB), stop the serving container first:
+   ```bash
+   docker compose down qwen3-tts
+   ```
 
-Serving and export use the same image. Its default command starts the API; the Compose `export`
-service overrides that command with `python scripts/export.py`. Released images are tagged
-`ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>` (plus version and moving `latest` tags on a
-release). Production must pin the SHA tag or digest.
+3. Start the service:
 
-Check readiness and generate audio:
+   ```bash
+   docker compose up -d qwen3-tts
+   docker compose logs -f qwen3-tts
+   ```
 
-```bash
-curl -fsS http://localhost:8318/health
+   First boot is slow: it loads the model and warms the OpenVINO kernel cache.
+   Health will report `status: "starting"` until it finishes.
 
-curl -sS http://localhost:8318/v1/audio/speech \
-  -H 'Content-Type: application/json' \
-  -d '{"input":"This is a test.","response_format":"mp3"}' \
-  -o test.mp3
+4. Verify:
 
-curl -sS http://localhost:8318/generate \
-  -H 'Content-Type: application/json' \
-  -d '{"text":"This is a WAV test.","response_format":"wav"}' \
-  -o test.wav
-```
+   ```bash
+   curl -fsS http://localhost:8318/health
 
-Only port 8318 is exposed. One Gunicorn process owns the model and serializes inference through a
-single executor, avoiding duplicate model memory.
+   curl -sS http://localhost:8318/v1/audio/speech \
+     -H 'Content-Type: application/json' \
+     -d '{"input":"This is a test.","response_format":"mp3"}' \
+     -o test.mp3
+   ```
 
-### What the containers do
+Only port 8318 is exposed. The same image is used for serving and exporting; the Compose
+`export` service overrides the command.
 
-There is one image and two Compose service definitions:
+### Using the web UI
 
-- `qwen3-tts` runs the image's default Gunicorn command and serves port 8318.
-- `export` uses the same image but overrides its command with `python scripts/export.py`. It
-  downloads the selected checkpoint if needed, exports/compresses the transformer IR, exports the
-  FP32 vocoder, creates the stateful graph(s), and writes the stable `/ov/<MODEL_SIZE>` layout.
+By default, `FRONTEND_ENABLED=1` and the UI is available at `http://localhost:8318/`:
 
-Export is a one-time operation per model size or source/dependency change. It can use 13–14 GiB,
-whereas serving defaults to 10G/11G. On a 15 GiB host, stop `qwen3-tts` before exporting and never
-run two model jobs concurrently.
+- Speak: text-to-speech with voice selection.
+- Voice Design: guided creation of new voices from text descriptions.
+- Voice Library: browse, preview, edit, and delete generated voices.
+- Integrations: OpenAI-compatible API snippets using your voices.
+- Runtime: adjust live settings (backend, idle unload, silence trim, etc.).
 
-### Bind mounts
+Set `FRONTEND_ENABLED=0` to run as an API-only service.
 
-| Host setting | Container path | Mode | Purpose |
-|---|---|---|---|
-| `MODEL_CACHE_PATH` (default `./data/model`) | `/root/.cache/huggingface/hub` | read/write | Reuses downloaded checkpoint files |
-| `OV_DATA_PATH` (default `./data/ov`) | `/ov` | read/write | Stores generated IR by model size |
-| `REF_AUDIO_PATH` | `/voice/reference.wav` | read-only | Fixed voice-clone reference used at startup |
-| `VOICE_LIBRARY_PATH` (default `./data/voices`) | `/voices` | read/write | VoiceDesign reference samples saved via `POST /voice_design` |
+### Using VoiceDesign / voice library (optional)
 
-`REF_TEXT` is an environment value, not a mount. It must be the exact transcript of the reference
-WAV; a mismatch reduces speaker and pronunciation quality. Do not place tokens, private voices,
-model caches, IR, or generated audio in the Git checkout.
+If you want to generate new voices and use them as clone targets:
 
-## Sizing for your host
-
-Both model sizes use nearly the same memory (~5.4–5.8 GiB steady) because the inference engine
-overhead dominates the model-size difference. Export is the memory spike.
-
-| Available RAM | Setup |
-|---|---|
-| **≥ 28 GiB** | Can export and serve at the same time. Optionally raise `TTS_MEMORY_LIMIT` to 16G for long requests. |
-| **16–27 GiB** | Stop serving before export. Can raise `TTS_MEMORY_LIMIT` to 12–14G for longer requests. |
-| **10–15 GiB** | Stop serving before export (default dockermisc1 setup). Keep default memory limits. |
-| **< 10 GiB** | Serving will not fit. This service needs at least 10 GiB for the container. |
-
-### Low RAM mode
-
-Set `LOW_RAM_MODE=1` on hosts where RAM is shared with other workloads (VMs, LXCs, other containers):
-
-```dotenv
-LOW_RAM_MODE=1
-```
-
-This does three things together:
-
-1. **Aggressive memory return** — tunes glibc malloc with
-   `MALLOC_MMAP_THRESHOLD_=65536` and `MALLOC_ARENA_MAX=1` so large allocations use mmap and are
-   returned to the OS more eagerly. PyTorch and OpenVINO hold large intermediate allocations that
-   glibc normally never releases; these settings force it to return memory from large arenas.
-2. **Idle unload** — model weights (~5–6 GiB) are released after 30 minutes of idle. The next
-   request reloads them automatically. With the OV kernel cache warm (default), reload takes
-   ~5–10s; on a completely cold first boot it takes ~60–120s while OV compiles kernels and writes
-   the cache. Python also calls `malloc_trim(0)` after each unload to flush glibc arenas back to
-   the kernel. Override the timeout with `IDLE_UNLOAD_SECONDS=<seconds>`.
-3. **No allocator replacement** — previous attempts to swap glibc with jemalloc or tcmalloc via
-   `LD_PRELOAD` caused SIGABRT/SIGSEGV during OpenVINO `compile_model()` under transformers 5.x;
-   `LOW_RAM_MODE` intentionally avoids that and relies on glibc tuning.
-
-The `/health` endpoint reports `model_loaded`, `process_rss_mib`, and `idle_unload_seconds` so you
-can observe the effect.
-
-### Memory limits
-
-The default `TTS_MEMORY_LIMIT=10G` is conservative. Raising it lets the container handle longer
-requests without being killed by the cgroup limit:
-
-```dotenv
-TTS_MEMORY_LIMIT=14G     # comfortable on a 20+ GiB host
-TTS_MEMORY_SWAP_LIMIT=15G
-```
-
-Long requests (several paragraphs) push memory higher as the model accumulates context. The hard
-ceiling is roughly 64 seconds of generated audio per request regardless of memory limit — increase
-it by re-exporting with a larger `TTS_MAX_SPEECH_SECONDS` (see below), not by raising the memory
-limit.
-
-### Max speech length (`TTS_MAX_SPEECH_SECONDS`)
-
-The exported OpenVINO graph has a fixed-size internal K/V cache, so the longest possible single
-request is baked in at export time — it cannot be changed at runtime, only by re-exporting.
-`TTS_MAX_SPEECH_SECONDS` (default `64`) controls that ceiling in human units instead of raw frame
-counts:
-
-```dotenv
-TTS_MAX_SPEECH_SECONDS=20   # e.g. a Hermes-style tool that only ever needs short utterances
-```
-
-Set the **same value** in `.env` for both the `export` and `qwen3-tts` services before running
-`docker compose run --rm export` — the value selects both which capacity-keyed IR file gets built
-(`main_stateful_cap<N>.xml`) and which one gets loaded. A request that would exceed the configured
-limit fails fast with `stateful cache capacity exceeded`, reported in both frames and seconds, instead
-of silently truncating or (pre-fix) free-running until it crashes.
-
-**This is a safety/latency cap, not a memory-saving knob.** Peak container RSS is dominated by fixed
-OpenVINO runtime + vocoder overhead (~7.3 GiB), with capacity contributing only ~0.5 MiB per second
-of headroom (measured from the 768-vs-2048-frame A/B in `docs/dev/benchmarks/OPENVINO_RESULTS.md`) — lowering it
-from 64s to 15s saves roughly 200 MiB, not gigabytes. Use it to bound worst-case latency and fail
-closed on runaway/misbehaving requests, not to fit a smaller memory budget.
-
-Leave it unset (or `64`) unless you have a specific reason to change it — the default reproduces the
-exact IR filename and capacity every existing deployment already has on disk, so nothing changes for
-existing setups.
-
-### Threads
-
-Set `OV_INFERENCE_THREADS` to your CPU's physical core count (not hyperthreads):
-
-```dotenv
-OV_INFERENCE_THREADS=8   # example for an 8-core CPU
-```
-
-The default is 6, tuned for the validated host. More threads = faster generation up to the core
-count; beyond that there are no gains.
-
-## Compare 0.6B and 1.7B
-
-**Recommendation: use `1.7B`.** It sounds better and uses the same memory. The A/B
-procedure remains here for anyone who wants to re-verify on their own hardware.
-
-Run one model at a time on a 15 GiB host. Generate the same text, reference, format, and sampling
-settings for both. Save audio outside Git.
-
-```bash
-# First run with MODEL_SIZE=0.6B in .env
-docker compose run --rm export
-docker compose up --build -d qwen3-tts
-curl -sS http://localhost:8318/v1/audio/speech \
-  -H 'Content-Type: application/json' \
-  -d '{"input":"Use the same benchmark sentence for both models.","response_format":"wav"}' \
-  -o /tmp/qwen-0.6B.wav
-
-docker compose down
-# Change MODEL_SIZE=1.7B, then repeat.
-docker compose run --rm export
-docker compose up -d qwen3-tts
-curl -sS http://localhost:8318/v1/audio/speech \
-  -H 'Content-Type: application/json' \
-  -d '{"input":"Use the same benchmark sentence for both models.","response_format":"wav"}' \
-  -o /tmp/qwen-1.7B.wav
-```
-
-Listen blind if possible. Record intelligibility, speaker similarity, prosody, repetition,
-truncation, and artifacts. Also capture image ID, source commit, model revision, IR metadata hash,
-latency, peak container RSS, host available RAM, and swap delta. The acceptance methodology is in
-`docs/dev/architecture/OPENVINO_IMPLEMENTATION.md`; historical measurements are in
-`docs/dev/benchmarks/OPENVINO_RESULTS.md`.
-
-## Presets and advanced settings
-
-`MODEL_SIZE` is the only setting most users need to change:
-
-| Setting | Quality | Steady memory | Max request | Notes |
-|---|---|---|---|---|
-| `0.6B` | Good | ~5–6 GiB | ~64 sec | Use only if you have a specific reason |
-| `1.7B` | Better | ~5–6 GiB | ~64 sec | **Recommended default** |
-
-Both profiles use the same memory. The 64-second ceiling per request is the `TTS_MAX_SPEECH_SECONDS`
-default (see above) — a property of the exported model, not runtime-adjustable; re-export with a
-different `TTS_MAX_SPEECH_SECONDS` if you need a different ceiling.
-
-After startup the service releases ~0.3 GiB of load-time overhead; the startup log prints
-`released ~0.32 GiB of PyTorch codec` when this happens. Measured results are in
-`docs/dev/benchmarks/OPENVINO_RESULTS.md`.
-
-Explicit advanced environment values override preset defaults. Common examples are:
-
-```dotenv
-TTS_BACKEND=pytorch
-MODEL_CACHE_PATH=/var/data/autopirate/qwen3-tts/model
-OV_DATA_PATH=/var/data/autopirate/qwen3-tts/openvino
-TTS_MEMORY_LIMIT=10G
-TTS_MEMORY_SWAP_LIMIT=11G
-MODEL_REVISION=<pinned-hugging-face-revision>
-HF_TOKEN=<token-if-the-checkpoint-requires-it>
-OPENVINO_RELEASE_CODEC=0
-```
-
-Operational settings:
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `MODEL_SIZE` | `1.7B` | `0.6B` or `1.7B`; 1.7B is recommended (same memory, better quality) |
-| `TTS_MAX_SPEECH_SECONDS` | `64` | Longest single request the exported IR supports. Export-time only (re-export to change); must match between `export` and `qwen3-tts`. Not a meaningful memory lever — see above |
-| `QWEN3_TTS_IMAGE` | `qwen3-tts-openvino:local` | Image to run; pin a SHA or digest in production |
-| `QWEN3_TTS_PORT` | `8318` | Host port mapped to container port 8318 |
-| `TZ` | `America/Detroit` | Container timezone for log timestamps |
-| `TTS_BACKEND` | `openvino` | Set `pytorch` for the rollback backend (slower, no IR needed) |
-| `MODEL_REVISION` | unset | Pin a specific Hugging Face revision; must match exported IR |
-| `HF_TOKEN` | unset | Hugging Face token when required; do not commit it |
-| `VOICE_DESIGN_MODEL_SIZE` | `1.7B` | VoiceDesign checkpoint size preset; only `1.7B` ships one today |
-| `VOICE_DESIGN_MODEL_REPO` | unset | Override the HF repo instead of using the size preset |
-| `VOICE_DESIGN_MAX_SPEECH_SECONDS` | `20` | VoiceDesign IR capacity; must match between `export-voice-design` and `qwen3-tts` |
-| `TTS_MEMORY_LIMIT` / `TTS_MEMORY_SWAP_LIMIT` | `10G` / `11G` | Serving container memory limits; raise on hosts with more RAM |
-| `EXPORT_MEMORY_LIMIT` / `EXPORT_MEMORY_SWAP_LIMIT` | `13G` / `14G` | Export container memory limits |
-| `LOW_RAM_MODE` | `0` | Set to `1` to enable jemalloc allocator, aggressive memory return, and 30-min idle unload. Recommended on hosts with less than 20 GiB free. Requires a rebuilt or freshly pulled image (jemalloc is installed at build time). |
-| `OV_INFERENCE_THREADS` | `6` | CPU threads for inference; set to your CPU's physical core count |
-| `OV_CACHE_DIR` | `/ov/cache` | OpenVINO compiled kernel cache directory. Already on the persistent `OV_DATA_PATH` mount — no extra setup needed. Eliminates ~60–120s JIT recompilation on every restart or idle-unload reload. Set to empty string to disable. |
-| `OV_DYNAMIC_QUANT_GROUP_SIZE` | `32` | Inference speed/accuracy knob (`0` = off, `32` = default, `64` = faster/slightly lower accuracy) |
-| `IDLE_UNLOAD_SECONDS` | unset | Unload the model after this many idle seconds (e.g. `1800` = 30 min). Frees ~5–6 GiB. Reload is automatic: ~5–10s with OV cache warm, ~60–120s on first cold boot. Disabled by default. Set automatically to `1800` by `LOW_RAM_MODE=1`. |
-| `SILENCE_TRIM` | `1` | Trim leading and trailing silence from output (`0` to disable if audio seems clipped) |
-| `SILENCE_TRIM_THRESH` | `0.01` | Silence threshold as a fraction of peak amplitude |
-| `SILENCE_TRIM_PAD_MS` | `30` | Milliseconds of audio kept after the silence boundary |
-| `OPENVINO_RELEASE_CODEC` | `1` | Frees ~0.3 GiB of load-time overhead after startup; set `0` to keep it |
-
-`TTS_BACKEND=pytorch` is the rollback path and does not require exported IR. It still needs the
-checkpoint cache and reference voice. Do not set exporter serving dtype overrides: graph conversion
-requires its FP32 parity path.
-
-`OPENVINO_RELEASE_CODEC` frees the PyTorch codec after startup for a smaller footprint and defaults
-on (with the OpenVINO release-torch policy). The release is fail-closed: once freed there is no
-PyTorch decode fallback, so an OpenVINO vocoder failure errors the request instead of silently
-switching backends. Set it to `0` to keep the codec encoder resident — **required for per-request
-voice cloning** (passing a new, not-yet-cached `voice_id` to a generate endpoint) — the codec
-encoder is what turns a saved reference sample into a `voice_clone_prompt`. With the default
-`OPENVINO_RELEASE_CODEC=1`, requesting an uncached `voice_id` fails fast with a clear error
-telling you to restart with `OPENVINO_RELEASE_CODEC=0`, rather than silently encoding against
-freed weights.
-
-## VoiceDesign (generate a new voice from a text description)
-
-1. Export the VoiceDesign checkpoint once, in addition to the Base export above (only 1.7B ships a
-   VoiceDesign checkpoint today, independent of `MODEL_SIZE`):
+1. After exporting the Base model (Quick start, step 2), run:
 
    ```bash
    docker compose run --rm export-voice-design
    ```
 
-   This writes IR to `/ov/1.7B-voicedesign/...` — a separate tree from the Base 1.7B export, so
-   the two never collide.
+   This writes a separate VoiceDesign IR under `/ov/1.7B-voicedesign/...` and is required before
+   VoiceDesign will work.
 
-2. Call `POST /voice_design` with a free-text voice description and a short (~15s of speech)
-   sample of text to say in that voice. `seed` is optional (omit it for a random draw) and
-   `selections` is optional opaque chip state the frontend uses to let a voice be reopened and
-   tweaked later — the backend just stores it alongside the voice, it doesn't interpret it:
+2. Ensure `OPENVINO_RELEASE_CODEC=0` (set in `.env` or via the Runtime panel). With the codec
+   released (`1`), a new `voice_id` cannot be cloned on first use. Setting it to `0` uses
+   ~0.3 GiB more but enables full voice library functionality.
 
-   ```bash
-   curl -sS http://localhost:8318/voice_design \
-     -H 'Content-Type: application/json' \
-     -d '{"description":"An older British man, calm and gravelly.","sample_text":"The old lighthouse stood against the storm.","seed":12345}'
-   ```
+3. Create a new voice:
+   - In the UI: open Voice Design, choose chips or write a description, generate, and save.
+   - Or via curl:
 
-   The response is `{"voice_id", "sample_rate", "seed", "audio_base64"}` — `seed` is the resolved
-   seed actually used, so a good take can be reproduced exactly by passing it back in a later
-   call. The generated sample is saved to the voice library (`VOICE_LIBRARY_PATH`, default
-   `./data/voices`, mounted at `/voices` — see `src/qwen3_tts/voice_library.py`) so it survives
-   restarts.
+     ```bash
+     curl -sS http://localhost:8318/voice_design \
+       -H 'Content-Type: application/json' \
+       -d '{"description":"An older British man, calm and gravelly.",
+            "sample_text":"The old lighthouse stood against the storm."}'
+     ```
 
-3. Pass the returned `voice_id` to any generate endpoint (`/generate`, `/v1/audio/speech`,
-   `/generate/stream`) to clone that voice instead of the container's default reference voice.
-   Omitting `voice_id` is unchanged from before this feature existed. This requires
-   `OPENVINO_RELEASE_CODEC=0` (see above) the first time a given `voice_id` is used; after that
-   its `voice_clone_prompt` is cached in-process.
+4. Use the returned `voice_id` in `/generate` or `/v1/audio/speech`, or select it from the
+   Voice Library in the UI.
 
-`GET /voices` lists saved voices; `GET /voices/<voice_id>` fetches one (metadata + `audio_base64`);
-`DELETE /voices/<voice_id>` removes one (used by the frontend's Voice Library to prune superseded
-voices after a tune/tweak, since editing forks a new voice rather than overwriting).
+Note: `POST /voice_design` briefly swaps the resident model and causes 503 for a short period
+(typically 5–30 seconds if the kernel cache is warm).
 
-`/generate` and `/v1/audio/speech` also accept an optional `seed`; whichever seed was actually used
-(random or caller-supplied) is reported back in the `X-Seed` response header.
+## Operator reference
 
-**This briefly unloads the resident Base model.** `POST /voice_design` swaps the container over to
-the VoiceDesign checkpoint, generates the one sample, then swaps back to Base — serialized through
-the same single-worker executor as every other request, so an in-flight `/generate` call can't race
-it. `GET /health` and all generate endpoints return `503` for the ~seconds-to-tens-of-seconds the
-swap takes (governed by the same JIT/cache behavior as a normal restart — see `OV_CACHE_DIR` above).
-If VoiceDesign generation itself fails, the service still restores Base before returning the error;
-it never gets stuck without a loaded model.
+This section is for day-to-day operators: what to change and what to leave alone.
 
-## Runtime control panel
+### Essential settings (set these)
 
-`GET /runtime/config` and `POST /runtime/config` (and the "Runtime" tab in the web UI) expose the
-knobs that were previously env-var-only and required a container restart to change, split into
-three groups:
+In `.env` (or your Compose environment):
 
-- **Live-adjustable:** `TTS_BACKEND`, `IDLE_UNLOAD_SECONDS`, `SILENCE_TRIM`/`SILENCE_TRIM_THRESH`/
-  `SILENCE_TRIM_PAD_MS`, `OV_DYNAMIC_QUANT_GROUP_SIZE`. Changing `TTS_BACKEND` or
-  `OV_DYNAMIC_QUANT_GROUP_SIZE` triggers `force_unload()` + reload of the currently active profile
-  (Base or VoiceDesign, whichever was resident) — serialized through the same single-worker
-  executor as every other model operation, so it can't race an in-flight request. `GET /health` and
-  `_ready()` report `reconfig_in_progress` and 503 for the duration, the same way a VoiceDesign swap
-  does. The other keys take effect immediately with no reload.
-- **Read-only transparency:** mount read/write mode for the model cache, OpenVINO IR, and voice
-  library directories, plus whether `REF_AUDIO_PATH`/`HF_TOKEN` are set (never the token value
-  itself). These reflect how the container was actually started; there's no control here because
-  there's nothing this endpoint can do about them.
-- **Requires re-export:** `TTS_MAX_SPEECH_SECONDS` and quantization precision are baked into the
-  OpenVINO IR at export time — the API reports them but changing them means re-running `export`/
-  `export-voice-design` (see above), not a runtime toggle.
+- `REF_AUDIO_PATH` — absolute host path to your reference WAV (REQUIRED).
+- `REF_TEXT` — exact transcript of the reference WAV (REQUIRED).
+- `MODEL_SIZE` — `1.7B` (recommended) or `0.6B`.
 
-There is deliberately no auth gate on `POST /runtime/config` — the whole service already runs
-unauthenticated on a trusted-network-only posture (see [SECURITY.md](../SECURITY.md)), and gating
-just this one route would be inconsistent with that. Example:
+These three are all you strictly need beyond the defaults.
 
-```bash
-curl -sS http://localhost:8318/runtime/config
-curl -sS -X POST http://localhost:8318/runtime/config \
-  -H 'Content-Type: application/json' \
-  -d '{"IDLE_UNLOAD_SECONDS": 900}'
-```
+### Recommended settings (for most real deployments)
 
-## Streaming and validation endpoints
+- `LOW_RAM_MODE=1` — enables aggressive glibc memory tuning + idle unload. Recommended on
+  hosts with < 20 GiB free RAM.
+- `QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<sha>` — pin your production image.
+- `TTS_MEMORY_LIMIT`, `TTS_MEMORY_SWAP_LIMIT` — adjust for your host (defaults 10G/11G).
 
-`POST /generate/stream` returns headerless mono float32 little-endian PCM. Read
-`X-Audio-Sample-Rate`, `X-Audio-Channels`, and `X-Audio-Format`; if generation fails after bytes are
-sent, the connection closes and the partial audio must be discarded or handled explicitly.
+### Memory and sizing
 
-Save a raw stream and convert it to WAV with SoX:
+Both model sizes use ~5.4–5.8 GiB steady. Export uses 13–14 GiB.
 
-```bash
-curl -sS http://localhost:8318/generate/stream \
-  -H 'Content-Type: application/json' \
-  -d '{"text":"This response can begin playing while it is decoded."}' \
-  -o /tmp/qwen-stream.f32le
-sox -t raw -r 24000 -e floating-point -b 32 -c 1 -L /tmp/qwen-stream.f32le stream.wav
-```
+| Available RAM | Guidance |
+|---|---|
+| ≥ 28 GiB | Can export and serve simultaneously; can raise `TTS_MEMORY_LIMIT` to 16G. |
+| 16–27 GiB | Stop serving before export. Raise `TTS_MEMORY_LIMIT` to 12–14G if desired. |
+| 10–15 GiB | Stop serving before export. Keep default limits. |
+| < 10 GiB | Service will not fit. |
 
-Use the sample rate returned by `X-Audio-Sample-Rate` rather than assuming 24000 in client code.
+`LOW_RAM_MODE=1` enables:
+- Glibc malloc tuning (`MALLOC_MMAP_THRESHOLD_=65536`, `MALLOC_ARENA_MAX=1`).
+- Idle unload after 30 minutes (override with `IDLE_UNLOAD_SECONDS`).
+- Python `malloc_trim(0)` after unload.
+No jemalloc / tcmalloc: allocator replacement caused SIGABRT/SIGSEGV under transformers 5.x.
 
-`POST /stream_internal` and `POST /batch_internal` are development parity endpoints. They accept
-fixed seeds and sampling controls and return timing/parity headers. They are not stable public API.
+`TTS_MAX_SPEECH_SECONDS` (default 64):
+- Controls max audio duration per request. Baked into IR at export time.
+- Is a latency/safety cap, not a memory lever. Changing it from 64s to 15s saves ~200 MiB,
+  not gigabytes.
+- Must match between `export` and `qwen3-tts`; changing it requires re-exporting.
 
-## dockermisc1
+### Runtime control (no restart needed)
 
-Use the persistent host paths and run commands from a checkout of this repository:
+`GET/POST /runtime/config` (and the Runtime panel in the UI) let you adjust settings live:
 
-```bash
-export MODEL_CACHE_PATH=/var/data/autopirate/qwen3-tts/model
-export REF_AUDIO_PATH=/var/data/autopirate/qwen3-tts/voice/voice_A.wav
-export REF_TEXT='Exact transcript for voice_A.wav'
-export MODEL_SIZE=1.7B
+- Live-adjustable:
+  - `TTS_BACKEND` (openvino | pytorch)
+  - `IDLE_UNLOAD_SECONDS`
+  - `SILENCE_TRIM`, `SILENCE_TRIM_THRESH`, `SILENCE_TRIM_PAD_MS`
+  - `OV_DYNAMIC_QUANT_GROUP_SIZE`
+- Read-only:
+  - Mount modes, `REF_AUDIO_PATH` set?, `HF_TOKEN` set?, device, dtype.
+- Requires re-export:
+  - `TTS_MAX_SPEECH_SECONDS`, quantization.
 
-# Export IR once (stop qwen3-tts first if it is running — 13G export + 10G serve = OOM).
-docker compose run --rm export
+Changing `TTS_BACKEND` or `OV_DYNAMIC_QUANT_GROUP_SIZE` briefly reloads the model (serialized,
+no dropped requests).
 
-# Start the service using the released image rather than building locally.
-export QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:v0.15.1
-docker compose up -d qwen3-tts
-docker stats --no-stream qwen3-tts
-```
+### Advanced settings
 
-To update to a newer release, change `QWEN3_TTS_IMAGE` to the new version tag (or `:latest`) and
-restart:
+Use these only if you have a reason. All others are preset-derived and work out of the box.
 
-```bash
-export QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:v0.15.1
-docker compose pull qwen3-tts
-docker compose up -d qwen3-tts
-```
+| Variable | Default | When to change |
+|---|---|---|
+| `TTS_BACKEND` | `openvino` | `pytorch` for rollback |
+| `OV_INFERENCE_THREADS` | `6` | Set to your physical core count |
+| `TTS_MEMORY_LIMIT` / `TTS_MEMORY_SWAP_LIMIT` | `10G` / `11G` | Raise on hosts with more RAM |
+| `EXPORT_MEMORY_LIMIT` / `EXPORT_MEMORY_SWAP_LIMIT` | `13G` / `14G` | Only if export OOMs |
+| `OPENVINO_RELEASE_CODEC` | `1` | Set `0` if using voice library / VoiceDesign; see above |
+| `OV_DYNAMIC_QUANT_GROUP_SIZE` | `32` | `0` = off; `64` = faster, slightly lower accuracy |
+| `OV_CACHE_DIR` | `/ov/cache` | Only change if you need to isolate caches |
+| `SILENCE_TRIM` / `SILENCE_TRIM_THRESH` / `SILENCE_TRIM_PAD_MS` | `1` / `0.01` / `30` | Disable if audio is clipped |
+| `HF_TOKEN` | unset | Set if checkpoint is gated |
+| `MODEL_REVISION` | unset | Pin a specific revision |
+| `VOICE_DESIGN_MODEL_SIZE` | `1.7B` | Only relevant if shipping other sizes |
+| `VOICE_DESIGN_MAX_SPEECH_SECONDS` | `20` | Only change if you need longer VoiceDesign samples |
+| `TTS_MAX_SPEECH_SECONDS` | `64` | Only change if you want a different per-request cap |
 
-Private GHCR pulls require `read:packages` credentials passed to `docker login --password-stdin`.
-Never store the token in `.env` or Compose. The application itself has no authentication or TLS;
-keep port 8318 on a trusted network or place it behind an authenticated TLS reverse proxy.
+## HTTP API reference
 
-### Validation and benchmark capture
+- `GET /health`
+  - Health, readiness, OpenVINO status, and `swap_in_progress`.
 
-After every image, model, IR, or runtime-setting change:
+- `POST /v1/audio/speech` (OpenAI-compatible)
+  - `{ "input": "text", "language": "English", "response_format": "mp3|wav", "voice_id": "vd_...", "instruct": "..." }`
+  - `voice_id` selects a saved voice from the library.
 
-```bash
-curl -fsS http://localhost:8318/health | python -m json.tool
-docker inspect --format '{{.Image}}' qwen3-tts
-docker exec qwen3-tts cat /sys/fs/cgroup/memory.current
+- `POST /generate` (native)
+  - Same fields as above but `text` instead of `input`.
 
-# Generate the committed benchmark prompts or fixed comparison text, then capture the resettable
-# cgroup peak. Recreate the container before each A/B configuration.
-docker exec qwen3-tts cat /sys/fs/cgroup/memory.peak
-docker stats --no-stream qwen3-tts
-```
+- `POST /generate/stream`
+  - Returns headerless mono float32 LE PCM with `X-Audio-*` headers for low-latency playback.
 
-Record source commit, immutable image tag/digest, model revision, IR metadata hash from `/health`,
-backend, compression/cache profile, prompt, sampling settings, latency, audio duration/RTF, memory
-current/peak, host available RAM, swap delta, and listening notes. Use deterministic greedy runs for
-code/parity comparisons and production sampling for final listening and performance decisions.
+- `POST /voice_design`
+  - `{ "description": "...", "sample_text": "...", "language": "English", "seed": 123 }`
+  - Returns `{ "voice_id", "sample_rate", "seed", "audio_base64" }`.
+  - Briefly swaps the model; other endpoints return 503 during the swap.
 
-### Rollback
+- `GET /voices`
+  - Lists all saved voices.
 
-The fastest production rollback is restoring the previous immutable image digest and restarting
-Compose. The backend rollback is `TTS_BACKEND=pytorch`; it uses the checkpoint and reference mounts
-but not OpenVINO IR. Verify `/health` reports `"backend": "pytorch"`, then generate a short WAV.
-PyTorch is substantially slower and is a recovery path, not the preferred steady-state backend.
+- `GET /voices/<voice_id>`
+  - Metadata + sample audio (`audio_base64`).
 
-Stop only this project with `docker compose stop qwen3-tts`. Never run a second full-model job at
-the same time, and never use blanket Docker stop, kill, or prune commands on the shared host.
+- `DELETE /voices/<voice_id>`
+  - Deletes a saved voice.
+
+- `GET/POST /runtime/config`
+  - See Runtime control section above.
+
+`seed` is optional; `/generate` and `/v1/audio/speech` report the used seed via `X-Seed` header.
+`/stream_internal` and `/batch_internal` are internal parity endpoints, not stable APIs.
+
+## Rollback
+
+- Fastest: restore previous immutable image and restart Compose.
+- Backend fallback: set `TTS_BACKEND=pytorch` (via `.env` or Runtime panel). Slower,
+  no OpenVINO IR needed.
