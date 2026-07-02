@@ -3,7 +3,12 @@ from __future__ import annotations
 import unittest
 
 from qwen3_tts.config import apply_preset_env
-from qwen3_tts.presets import capacity_for_seconds, get_preset, seconds_for_capacity
+from qwen3_tts.presets import (
+    capacity_for_seconds,
+    get_preset,
+    get_voice_design_preset,
+    seconds_for_capacity,
+)
 
 
 class PresetTests(unittest.TestCase):
@@ -76,6 +81,25 @@ class PresetTests(unittest.TestCase):
             default_preset["main_stateful_model"], short_preset["main_stateful_model"]
         )
         self.assertEqual(short_preset["stateful_capacity"], 180)
+
+    def test_voice_design_preset_uses_its_own_ir_tree(self) -> None:
+        preset = get_voice_design_preset("1.7B")
+
+        self.assertEqual(preset["model_repo"], "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign")
+        self.assertEqual(preset["ov_model_dir"], "/ov/1.7B-voicedesign/ir")
+        self.assertEqual(preset["vocoder_dir"], "/ov/1.7B-voicedesign/vocoder")
+        # 20s default keeps capacity well below the Base preset's 64s (768-frame) default.
+        self.assertEqual(preset["stateful_capacity"], 240)
+        self.assertEqual(
+            preset["main_stateful_model"], "/ov/1.7B-voicedesign/main_stateful_cap240.xml"
+        )
+
+    def test_voice_design_preset_never_collides_with_base_preset_paths(self) -> None:
+        base = get_preset("1.7B", max_speech_seconds=20)
+        voice_design = get_voice_design_preset("1.7B")
+
+        self.assertNotEqual(base["main_stateful_model"], voice_design["main_stateful_model"])
+        self.assertNotEqual(base["ov_model_dir"], voice_design["ov_model_dir"])
 
 
 if __name__ == "__main__":

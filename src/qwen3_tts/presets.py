@@ -71,6 +71,62 @@ PRESETS: dict[str, dict[str, object]] = {
 }
 
 
+# VoiceDesign (docs/plans/PLAN_voice_design.md) only ever generates a short sample
+# utterance for reference capture, never long-form speech, so its IR capacity can stay
+# much smaller than the Base preset's default.
+VOICE_DESIGN_DEFAULT_MAX_SPEECH_SECONDS = 20.0
+
+
+def _voice_design_ir_paths(size: str, capacity: int) -> dict[str, str]:
+    # A distinct, size-keyed directory tree (never "/ov/<size>/...") so a VoiceDesign
+    # export can never collide with — or accidentally overwrite — the Base export for
+    # the same MODEL_SIZE.
+    base = f"/ov/{size}-voicedesign"
+    return {
+        "ov_model_dir": f"{base}/ir",
+        "main_stateful_model": f"{base}/main_stateful_cap{capacity}.xml",
+        "vocoder_dir": f"{base}/vocoder",
+    }
+
+
+VOICE_DESIGN_PRESETS: dict[str, dict[str, object]] = {
+    "1.7B": {
+        "model_repo": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+        "backend": "openvino",
+        "main_compression": "int4",
+        "predictor_compression": "int8",
+        "vocoder_enabled": True,
+        "max_speech_seconds": VOICE_DESIGN_DEFAULT_MAX_SPEECH_SECONDS,
+        "predictor_stateful_model": None,
+        "torch_dtype": "bfloat16",
+    },
+}
+
+
+def normalize_voice_design_size(model_size: str | None) -> str:
+    """Return the canonical preset key for a user-supplied VOICE_DESIGN_MODEL_SIZE."""
+    key = (model_size or "1.7B").strip()
+    for preset_key in VOICE_DESIGN_PRESETS:
+        if preset_key.lower() == key.lower():
+            return preset_key
+    choices = ", ".join(VOICE_DESIGN_PRESETS)
+    raise ValueError(f"Unsupported VOICE_DESIGN_MODEL_SIZE={model_size!r}; choose one of: {choices}")
+
+
+def get_voice_design_preset(
+    model_size: str | None = None, max_speech_seconds: float | None = None
+) -> dict[str, object]:
+    """Return a copy of the VoiceDesign preset settings, mirroring :func:`get_preset`."""
+    key = normalize_voice_design_size(model_size)
+    preset = dict(VOICE_DESIGN_PRESETS[key])
+    seconds = max_speech_seconds if max_speech_seconds is not None else preset["max_speech_seconds"]
+    capacity = capacity_for_seconds(seconds)
+    preset["max_speech_seconds"] = seconds
+    preset["stateful_capacity"] = capacity
+    preset.update(_voice_design_ir_paths(key, capacity))
+    return preset
+
+
 def normalize_size(model_size: str | None) -> str:
     """Return the canonical preset key for a user-supplied MODEL_SIZE (case-insensitive)."""
     key = (model_size or "0.6B").strip()

@@ -13,12 +13,16 @@ benchmark tooling.
 - Synthesizes speech in a cloned voice from a single reference WAV, no training required.
 - Two model sizes (`MODEL_SIZE=0.6B` or `1.7B`). Both use roughly the same memory; 1.7B sounds better.
 - OpenAI-compatible `POST /v1/audio/speech` — drop-in for clients that already speak the OpenAI TTS API.
+- `POST /voice_design` generates a new reference voice from a free-text description (`Qwen3-TTS-1.7B-VoiceDesign`
+  checkpoint) and saves it to a filesystem-backed voice library; pass its `voice_id` to any generate
+  endpoint to clone it. This briefly swaps the resident model — see [HOW_TO_RUN.md](docs/HOW_TO_RUN.md).
 - MP3 or WAV output; incremental PCM stream available for low-latency playback.
 - Generated IR and model weights persist on the host — restarts are fast, no re-download.
 - `TTS_BACKEND=pytorch` rollback if something goes wrong with the accelerated backend.
 
-One fixed reference voice per container. Per-request voices, Voice Design, authentication, and TLS
-are not implemented. The service must run on a trusted network or behind an authenticated reverse proxy.
+One fixed default reference voice per container, extendable at runtime via `POST /voice_design` +
+`voice_id`. Authentication and TLS are not implemented — the service must run on a trusted network or
+behind an authenticated reverse proxy.
 
 ## Quick start
 
@@ -60,9 +64,14 @@ a memory lever (lowering it saves tens of MiB, not GiB); see
 
 ```text
 GET  /health
-POST /v1/audio/speech  {"input":"...", "language":"English", "response_format":"mp3|wav"}
-POST /generate         {"text":"...",  "language":"English", "response_format":"mp3|wav"}
-POST /generate/stream  {"text":"...",  "language":"English"}  -> mono f32le PCM
+POST /v1/audio/speech  {"input":"...", "language":"English", "response_format":"mp3|wav", "voice_id":"...", "seed":123}
+POST /generate         {"text":"...",  "language":"English", "response_format":"mp3|wav", "voice_id":"...", "seed":123}
+POST /generate/stream  {"text":"...",  "language":"English", "voice_id":"...", "seed":123}  -> mono f32le PCM
+
+POST /voice_design     {"description":"...", "sample_text":"...", "language":"English"}
+                       -> {"voice_id":"...", "sample_rate":24000, "audio_base64":"..."}
+GET  /voices           -> {"voices": [...]}
+GET  /voices/<voice_id> -> voice metadata + audio_base64
 ```
 
 `/stream_internal` and `/batch_internal` are development parity endpoints, not stable public APIs.

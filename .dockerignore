@@ -15,3 +15,5 @@ voice
 *.safetensors
 openvino_model*.bin
 openvino_model*.xml
+frontend/node_modules
+frontend/dist

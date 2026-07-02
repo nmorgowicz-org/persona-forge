@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Export the selected MODEL_SIZE into stable runtime paths under /ov."""
+"""Export the selected MODEL_SIZE (or VoiceDesign checkpoint) into stable runtime paths under /ov.
+
+EXPORT_TARGET=base (default) exports the MODEL_SIZE Base checkpoint into /ov/<size>/...
+EXPORT_TARGET=voice_design exports the VoiceDesign checkpoint (VOICE_DESIGN_MODEL_SIZE,
+default 1.7B) into the separate /ov/<size>-voicedesign/... tree so it can never collide
+with a Base export for the same size. See docs/plans/PLAN_voice_design.md §4.1 — this
+reuses the same exporter/transform tooling, only the source repo and output dir differ.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from qwen3_tts.presets import FRAME_RATE_HZ, get_preset, normalize_size
+from qwen3_tts.model_config import resolve_voice_design_model_repo
+from qwen3_tts.presets import FRAME_RATE_HZ, get_preset, get_voice_design_preset, normalize_size
 
 
 OV_ROOT = Path(os.environ.get("OV_OUTPUT_ROOT", "/ov"))
@@ -46,18 +54,36 @@ def _copy_pair(source_xml: Path, destination_xml: Path) -> None:
 
 
 def main() -> int:
-    size = normalize_size(os.environ.get("MODEL_SIZE"))
-    max_speech_seconds_env = os.environ.get("TTS_MAX_SPEECH_SECONDS")
-    preset = get_preset(size, float(max_speech_seconds_env) if max_speech_seconds_env else None)
+    target = (os.environ.get("EXPORT_TARGET") or "base").strip().lower()
+    if target not in ("base", "voice_design"):
+        raise RuntimeError(f"Unsupported EXPORT_TARGET={target!r}; choose base or voice_design")
+
+    if target == "voice_design":
+        max_speech_seconds_env = os.environ.get("VOICE_DESIGN_MAX_SPEECH_SECONDS")
+        preset = get_voice_design_preset(
+            os.environ.get("VOICE_DESIGN_MODEL_SIZE"),
+            float(max_speech_seconds_env) if max_speech_seconds_env else None,
+        )
+        # export_openvino.py resolves its checkpoint via qwen3_tts.model_config.resolve_model_repo(),
+        # which honors an explicit MODEL_REPO override — set it so the subprocess below (which
+        # inherits this environment) loads the VoiceDesign checkpoint instead of a Base one.
+        os.environ["MODEL_REPO"] = resolve_voice_design_model_repo()
+    else:
+        size = normalize_size(os.environ.get("MODEL_SIZE"))
+        max_speech_seconds_env = os.environ.get("TTS_MAX_SPEECH_SECONDS")
+        preset = get_preset(size, float(max_speech_seconds_env) if max_speech_seconds_env else None)
+
     capacity = int(preset["stateful_capacity"])
-    output = OV_ROOT / size
+    # Derived from the preset's own IR paths (not size directly) so Base and VoiceDesign
+    # never need duplicated directory-naming logic here.
+    output = Path(preset["ov_model_dir"]).parent
     staging = output / ".exports"
     if staging.exists():
         shutil.rmtree(staging)
     staging.mkdir(parents=True, exist_ok=True)
 
     int8 = _run_export(staging, "int8_asym")
-    int4 = _run_export(staging, "int4_asym") if size == "1.7B" else None
+    int4 = _run_export(staging, "int4_asym") if preset["main_compression"] == "int4" else None
     ir = output / "ir"
     if ir.exists():
         shutil.rmtree(ir)
@@ -108,7 +134,7 @@ def main() -> int:
         f"stateful main capacity: {capacity} frames "
         f"(~{preset['max_speech_seconds']:.0f}s at {FRAME_RATE_HZ} Hz) -> {stateful}"
     )
-    if size == "0.6B":
+    if preset["predictor_stateful_model"] is not None:
         predictor_stateful = output / "predictor_stateful_cap32.xml"
         subprocess.run(
             [

@@ -12,6 +12,30 @@ MODEL_PRESETS = {
     "1.7B": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
 }
 
+# VoiceDesign is a separate checkpoint (see docs/plans/PLAN_voice_design.md) that
+# generate_voice_design() requires; it is never the primary MODEL_SIZE selection, only
+# ever loaded via the lazy model-swap path (qwen3_tts.voice_design).
+VOICE_DESIGN_MODEL_PRESETS = {
+    "1.7B": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+}
+
+
+def resolve_voice_design_model_repo(environ: MutableMapping[str, str] = os.environ) -> str:
+    """Resolve the VoiceDesign checkpoint, with VOICE_DESIGN_MODEL_REPO as an expert override."""
+
+    override = environ.get("VOICE_DESIGN_MODEL_REPO", "").strip()
+    if override:
+        return override
+
+    model_size = environ.get("VOICE_DESIGN_MODEL_SIZE", "1.7B").strip().upper()
+    try:
+        return VOICE_DESIGN_MODEL_PRESETS[model_size]
+    except KeyError as exc:
+        choices = ", ".join(VOICE_DESIGN_MODEL_PRESETS)
+        raise RuntimeError(
+            f"Unsupported VOICE_DESIGN_MODEL_SIZE={model_size!r}; choose {choices}"
+        ) from exc
+
 
 def configure_hf_token(environ: MutableMapping[str, str] = os.environ) -> None:
     """Populate HF_TOKEN from a Docker secret without logging the credential."""

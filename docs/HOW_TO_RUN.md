@@ -74,6 +74,7 @@ run two model jobs concurrently.
 | `MODEL_CACHE_PATH` (default `./data/model`) | `/root/.cache/huggingface/hub` | read/write | Reuses downloaded checkpoint files |
 | `OV_DATA_PATH` (default `./data/ov`) | `/ov` | read/write | Stores generated IR by model size |
 | `REF_AUDIO_PATH` | `/voice/reference.wav` | read-only | Fixed voice-clone reference used at startup |
+| `VOICE_LIBRARY_PATH` (default `./data/voices`) | `/voices` | read/write | VoiceDesign reference samples saved via `POST /voice_design` |
 
 `REF_TEXT` is an environment value, not a mount. It must be the exact transcript of the reference
 WAV; a mismatch reduces speaker and pronunciation quality. Do not place tokens, private voices,
@@ -237,6 +238,9 @@ Operational settings:
 | `TTS_BACKEND` | `openvino` | Set `pytorch` for the rollback backend (slower, no IR needed) |
 | `MODEL_REVISION` | unset | Pin a specific Hugging Face revision; must match exported IR |
 | `HF_TOKEN` | unset | Hugging Face token when required; do not commit it |
+| `VOICE_DESIGN_MODEL_SIZE` | `1.7B` | VoiceDesign checkpoint size preset; only `1.7B` ships one today |
+| `VOICE_DESIGN_MODEL_REPO` | unset | Override the HF repo instead of using the size preset |
+| `VOICE_DESIGN_MAX_SPEECH_SECONDS` | `20` | VoiceDesign IR capacity; must match between `export-voice-design` and `qwen3-tts` |
 | `TTS_MEMORY_LIMIT` / `TTS_MEMORY_SWAP_LIMIT` | `10G` / `11G` | Serving container memory limits; raise on hosts with more RAM |
 | `EXPORT_MEMORY_LIMIT` / `EXPORT_MEMORY_SWAP_LIMIT` | `13G` / `14G` | Export container memory limits |
 | `LOW_RAM_MODE` | `0` | Set to `1` to enable jemalloc allocator, aggressive memory return, and 30-min idle unload. Recommended on hosts with less than 20 GiB free. Requires a rebuilt or freshly pulled image (jemalloc is installed at build time). |
@@ -258,6 +262,45 @@ on (with the OpenVINO release-torch policy). The release is fail-closed: once fr
 PyTorch decode fallback, so an OpenVINO vocoder failure errors the request instead of silently
 switching backends. Set it to `0` to keep the codec encoder resident — required for future
 per-request voice cloning, and useful if you want the PyTorch vocoder fallback available.
+
+## VoiceDesign (generate a new voice from a text description)
+
+1. Export the VoiceDesign checkpoint once, in addition to the Base export above (only 1.7B ships a
+   VoiceDesign checkpoint today, independent of `MODEL_SIZE`):
+
+   ```bash
+   docker compose run --rm export-voice-design
+   ```
+
+   This writes IR to `/ov/1.7B-voicedesign/...` — a separate tree from the Base 1.7B export, so
+   the two never collide.
+
+2. Call `POST /voice_design` with a free-text voice description and a short (~15s of speech)
+   sample of text to say in that voice:
+
+   ```bash
+   curl -sS http://localhost:8318/voice_design \
+     -H 'Content-Type: application/json' \
+     -d '{"description":"An older British man, calm and gravelly.","sample_text":"The old lighthouse stood against the storm."}'
+   ```
+
+   The response is `{"voice_id", "sample_rate", "audio_base64"}`. The generated sample is saved to
+   the voice library (`VOICE_LIBRARY_PATH`, default `./data/voices`, mounted at `/voices` — see
+   `src/qwen3_tts/voice_library.py`) so it survives restarts.
+
+3. Pass the returned `voice_id` to any generate endpoint (`/generate`, `/v1/audio/speech`,
+   `/generate/stream`) to clone that voice instead of the container's default reference voice.
+   Omitting `voice_id` is unchanged from before this feature existed.
+
+`GET /voices` lists saved voices; `GET /voices/<voice_id>` fetches one (metadata + `audio_base64`).
+
+**This briefly unloads the resident Base model.** `POST /voice_design` swaps the container over to
+the VoiceDesign checkpoint, generates the one sample, then swaps back to Base — serialized through
+the same single-worker executor as every other request, so an in-flight `/generate` call can't race
+it. `GET /health` and all generate endpoints return `503` for the ~seconds-to-tens-of-seconds the
+swap takes (governed by the same JIT/cache behavior as a normal restart — see `OV_CACHE_DIR` above).
+If VoiceDesign generation itself fails, the service still restores Base before returning the error;
+it never gets stuck without a loaded model.
 
 ## Streaming and validation endpoints
 

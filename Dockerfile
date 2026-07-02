@@ -1,4 +1,17 @@
 ARG PYTHON_IMAGE=python:3.13-slim@sha256:eb43ff125d8d58d7449dcba7d336c23bcac412f526d861db493b9994d8010280
+# Not digest-pinned like PYTHON_IMAGE below (build-stage only, never shipped in the final
+# image) — override via --build-arg if you need reproducibility guarantees for CI.
+ARG NODE_IMAGE=node:22-slim
+
+# Static export, served by Flask at / (see src/qwen3_tts/app.py). Independent stage so the
+# final image never needs a Node toolchain.
+FROM ${NODE_IMAGE} AS frontend-build
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
 FROM ${PYTHON_IMAGE}
 
 ARG TORCH_VERSION=2.12.1
@@ -63,6 +76,7 @@ RUN python -m pip install -r requirements/openvino.txt && \
 
 COPY src/ src/
 COPY scripts/ scripts/
+COPY --from=frontend-build /frontend/dist frontend/dist
 RUN chmod +x scripts/entrypoint.sh
 
 ENTRYPOINT ["scripts/entrypoint.sh"]

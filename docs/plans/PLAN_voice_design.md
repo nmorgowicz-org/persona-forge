@@ -341,9 +341,17 @@ unless one is already running.
 Decision: **serve the frontend from the same Flask process on port 8318.**
 
 - New top-level directory in this repo: `frontend/` (sibling to `src/`, `scripts/`, `docs/`).
-- Framework: Next.js 15, App Router, TypeScript, Tailwind (alexandria_ideas.md recommendation,
-  accepted as-is).
-- Build the frontend as a **static export** during container build.
+- **Framework: Vite + React + TypeScript + Tailwind + shadcn/ui, not Next.js** (revised
+  2026-07-02, supersedes alexandria_ideas.md's Next.js recommendation). Rationale: this is a
+  fully client-driven single-page control panel with no server-rendering need — we're already
+  doing a static export either way, so Next.js's App Router/RSC machinery buys nothing here and
+  only adds build complexity and a slower dev loop. Vite gives instant HMR, a plain `dist/`
+  static output (same "Flask serves it at `/`" deployment story), and a lighter dependency tree.
+  shadcn/ui (Radix primitives + Tailwind, copy-in components, no runtime UI-kit dependency) for
+  premium-feeling chips/dropdowns/sliders without a heavy component library; Framer Motion for
+  the polish pass (§8.7 step 5) — chip selection, waveform, and swap-in-progress states should
+  feel alive, not static forms.
+- Build the frontend as a **static export** (`vite build` → `dist/`) during container build.
 - Flask serves static frontend files at `/` (or all non-API routes). API endpoints remain at
   `/v1/audio/speech`, `/voice_design`, `/voices`, `/health`, etc.
 - This gives: `http://host:8318/` = the UI; same port, same container, zero extra processes.
@@ -360,67 +368,111 @@ that instead; Nginx/Caddy is not required.
 ### 8.2 Layout (alexandria_ideas.md §10.3)
 
 Three-zone layout:
-- **Left: Voice control** — VoiceDesign panel, cloning panel, presets.
+- **Left: Voice control** — VoiceDesign panel, cloning panel, presets, runtime settings (§8.8).
 - **Center: Text editor + generate controls + waveform** — primary "type → hear" loop.
 - **Right: History** — past generations with seed/voice/replay.
 
 ### 8.3 Guided Voice Design UX (CRITICAL — not a bare textarea)
 
+**Scope note (2026-07-02):** this repo's downstream consumer is Hermes Agent — an AI
+assistant/companion voice, not audiobook narration. alexandria's VOICE_REFERENCE.md gives us the
+*mechanics* (tested vocabulary, composition order, known-unstable combos); it does not give us the
+right *taxonomy* (its archetypes are professional-VO roles — announcer, trusted advisor, hard
+sell — which don't fit an assistant persona). The chip categories below adapt the mechanics to an
+assistant/companion taxonomy, explicitly including NSFW/roleplay personas as just another
+persona-chip category — no different mechanically than "professional."
+
 Unstructured prompts create unstable or unusable voices (alexandria empirical findings,
 VOICE_REFERENCE.md). The VoiceDesign UI must guide the user with proven, tested patterns.
+Do not expose the full lexicon as raw text — encode it into chips/selectors and a composed prompt.
 
-The UX is based on alexandria's VOICE_REFERENCE.md. Do not expose the full lexicon as raw text —
-encode it into chips/selectors and a composed prompt.
+Our `/voice_design` API has exactly one free-text lever (`description`, sent as VoiceDesign's
+`instruct`) — there is no separate identity/delivery split at the API level (see §2 point 5). The
+"anatomy-first, no mixing" rule below is therefore how the frontend **assembles** that single
+string from chip categories, in this fixed order: accent → demographics → register →
+texture/timbre → persona/character. Physical descriptors first, character/energy descriptors last
+— this ordering is what alexandria found stable; it's a UX assembly rule, not a model-enforced field.
+
+#### Accent / language (own chip row, independent lever)
+- **Tier 1 (always visible, high confidence):** English (US), English (UK), English (AU),
+  English (IE).
+- **Tier 2 (available, labeled "Experimental — verify by listening"):** Boston, New York,
+  Southern US, Scottish, Received Pronunciation / "posh" UK, Kiwi (NZ), plus finer Irish/Scottish
+  regional flavors on request. These are plausible but unverified with the actual VoiceDesign
+  checkpoint — before shipping any Tier 2 accent as "confirmed" (removing the experimental label),
+  do a manual listening pass on dockermisc1: same sample text and same demographic/register chips,
+  swap only the accent word, listen for a distinct and stable result. Promote or drop per accent
+  based on that pass; track results as a short table in this doc once run.
+- Accent is part of the description, not a separate API field — the frontend prepends it.
+
+#### Demographics (own chip row — explicit, not inferred from persona)
+- Gender: `[Female]` `[Male]` `[Neutral/androgynous]`
+- Age range: `[Young adult]` `[Adult]` `[Mature]`
+- (Alexandria left this implicit inside archetype choices; assistant-voice users expect to set it
+  directly.)
 
 #### Register selector
 Chips: `[Bass]` `[Baritone]` `[Tenor]` `[Alto]` `[Mezzo-Soprano]` `[Soprano]`
 
-#### Accent / language
-Dropdown or chips for common accents: English (US), English (UK), English (AU), English (IE),
-other as needed. Accent is part of the description, not a separate API field — the frontend
-prepends it to the description string.
-
-#### Texture / timbre chips (Section I, tested stable)
-Curated chips from alexandria's tested terms:
+#### Texture / timbre chips (tested stable, from alexandria's Section I)
 - Smooth: `[Silky]` `[Even]` `[Warm]` `[Rich]` `[Soft rounded]`
 - Resonance: `[Dark]` `[Deep]` `[Full]` `[Grounded]`
 - Precision: `[Crisp]` `[Clear]` `[Precise]`
 - Grit: `[Slight gravel]`
-- Bright: `[Bright]` (include, but warn if combined with energy terms — see rules)
+- Bright: `[Bright]` (include, but warn if combined with energy/persona terms — see rules)
 
-#### Character feel chips (Section II, limited set)
-These are personality hints the model tends to incorporate into identity:
-- `[Sweet]` `[Calm]` `[Gentle]` `[Fun]` `[Energetic]` `[Playful]` `[Confident]` `[Mysterious]`
+#### Persona / character chips (assistant-and-companion taxonomy — our own, not alexandria's)
+Grouped so the picker doesn't read as one flat undifferentiated list:
+- **Assistant-forward:** `[Warm Assistant]` `[Confident Professional]` `[Calm & Grounded]`
+  `[Bubbly & Energetic]`
+- **Companion/social:** `[Playful]` `[Flirty]` `[Mysterious]` `[Sultry / Intimate]`
+- **Power dynamic:** `[Authoritative / Dominant]` `[Soft / Submissive]`
+These are treated exactly like any other persona chip in the API/model sense — no separate
+moderation path, no separate field. They compose into the same description string as everything
+else.
 
 Note: The VoiceDesign model treats the entire `instruct` holistically. These chips compose into
-a single description string. The "anatomy-first, no mixing" rule is guidance for stability, not a
-model-enforced separation — but alexandria's experiments show that following these patterns
-yields dramatically more consistent results.
+a single description string.
 
 #### Composition
 - The UI assembles a single description string from selections, e.g.:
-  - "Young Australian female, mezzo-soprano, clear forward tone, silky even timbre, sweet playful personality."
+  - "Young Australian female, mezzo-soprano, clear forward tone, silky even timbre, playful and flirty personality."
 - The user sees the composed description and can:
   - Accept it as-is
   - Switch to "Advanced" text mode to edit freely
   - Adjust individual chips
 
 #### Known unstable combinations (warn inline)
-If user selects `[Bright]` + `[Energetic]` or similar: show a warning:
-"This combination tends to create emotional instability. Consider using 'Bright' alone and
-moving energy-related traits to the 'Tone' field for delivery control."
+If user selects `[Bright]` + `[Bubbly & Energetic]` (or similar bright+energy pairing): show a
+warning: "This combination tends to create emotional instability. Consider using 'Bright' alone
+and moving energy-related traits to the 'Tone' field for delivery control."
 
 This is a killer feature: users get great, stable voices without needing to know the model's
 quirks.
+
+#### Starter presets (one-click, satisfies "options already in place to play with")
+Ship 3-5 curated chip bundles the user can generate immediately, no composing required, e.g.
+"Warm Assistant (US, female)", "Confident Professional (UK, male)", "Playful Companion (AU,
+female)". Each preset also carries a persona-matched sample_text (§8.4) so the first thing a new
+user hears is a good result, not a blank textarea. Presets are just pre-filled chip selections —
+same composition path, same API call, nothing special server-side.
 
 ### 8.4 Sample text: short by default (10-12 second max reference)
 
 The Base model only needs 3-15 seconds of reference audio for zero-shot cloning. To ensure
 VoiceDesign output is usable as a high-quality reference, enforce practical limits:
 
-- **Frontend:** Default sample_text fields should be short (2-4 sentences, ~10-12s of speech):
-  - "Hi, I'm [name]. How can I help you today?"
-  - "Hey there! I'm excited to work with you on this."
+- **Frontend:** Default sample_text is **persona-linked**, not one generic greeting — the wav
+  that gets stored is what the Base model clones from, so its prosody should already match the
+  persona (a dominant/authoritative voice and a bubbly/playful voice reading the same flat line
+  don't showcase either well). Suggest text per persona chip (§8.3), still short (2-4 sentences,
+  ~10-12s), still editable:
+  - Warm Assistant: "Hi, I'm here to help. What can I do for you today?"
+  - Confident Professional: "Let's get straight to it — here's exactly what we're going to do."
+  - Playful / Flirty: "Well hello there. I was hoping you'd show up."
+  - Authoritative / Dominant: "Listen closely, because I'm only going to say this once."
+  - Sultry / Intimate: "Come a little closer. I don't bite... much."
+  - Calm & Grounded: "Take a breath. We've got plenty of time to figure this out."
 - **API (`/voice_design`):** Validate `sample_text` length — reject if the estimated duration
   exceeds ~15 seconds. A rough heuristic: 130-150 words/min → about 35-40 words max for 15s.
   Return a 400 error if exceeded: "Sample text is too long; keep it under 15 seconds of speech."
@@ -448,12 +500,12 @@ implemented server-side yet, use the raw PCM stream directly first and add SSE s
 
 ### 8.7 State
 
-React Server Components for static layout, a lightweight client store (Zustand)
-for playback/history/settings. History can start as `localStorage`/`IndexedDB`-only and later
-sync against `GET /voices` — don't build a sync layer until the basic flow works end-to-end.
+A lightweight client store (Zustand) for playback/history/settings — no server-rendering, so no
+RSC layer. History can start as `localStorage`/`IndexedDB`-only and later sync against
+`GET /voices` — don't build a sync layer until the basic flow works end-to-end.
 
 Suggested build order for whoever implements this:
-1. Scaffold `frontend/` (Next.js + TS + Tailwind, static export), talk to the *existing*
+1. Scaffold `frontend/` (Vite + React + TS + Tailwind, static export), talk to the *existing*
    `/v1/audio/speech` and `/generate/stream` endpoints only — prove basic "type text → hear
    audio" works with zero new backend changes, served from Flask on port 8318.
 2. Wire up `/voice_design` once backend work lands — VoiceDesign panel with guided UX (chips,
@@ -463,6 +515,46 @@ Suggested build order for whoever implements this:
 4. History panel backed by `GET /voices` + local generation log.
 5. Polish pass against alexandria_ideas.md §10.9 (latency feel, dark theme, keyboard shortcuts,
    offline resilience) — last, not first.
+6. Runtime control panel (§8.8) — after the core design/clone/speak loop is solid, not before.
+
+### 8.8 Runtime control panel (sketch — scoped into this milestone, detailed design deferred)
+
+The user also wants the frontend to expose "all the dials and knobs" for how the container runs,
+not just VoiceDesign — within reason. This is a sketch of the shape, not a committed spec; work it
+out in detail when we get here (step 6 above).
+
+**Constraint that shapes everything below:** almost all current tuning knobs are read from
+`os.environ` once at process import time into module-level constants in `model.py` (`MODEL_ID`,
+`TTS_BACKEND`, `IDLE_UNLOAD_SECONDS`, thread counts via `torch.set_num_threads`, etc. — see
+`src/qwen3_tts/model.py:1-60`). The container also can't know at build time what the operator
+mounted read-only, what env vars they set, or their memory limits. So "control panel" has to mean
+three different things depending on the knob, not one uniform settings form:
+
+1. **Live-adjustable via the existing swap mechanism** (unload → reconfigure → reload, same
+   pattern as `voice_design.py`'s Base↔VoiceDesign swap): `TTS_BACKEND` (openvino/pytorch),
+   `IDLE_UNLOAD_SECONDS`, `SILENCE_TRIM`/`SILENCE_TRIM_THRESH`/`SILENCE_TRIM_PAD_MS`,
+   `OV_DYNAMIC_QUANT_GROUP_SIZE`. Also plausible: **live `MODEL_SIZE` swap** (0.6B ↔ 1.7B) reusing
+   the exact `ModelProfile` pattern already built for VoiceDesign, *if* both size's IR trees are
+   already exported and present under `OV_DATA_PATH` — genuinely new capability, not just exposing
+   an existing lever, worth calling out as the most interesting item here.
+2. **Read-only display, not editable from the app:** anything set by Docker/the host at container
+   creation and outside the app's control — `mem_limit`/`memswap_limit` (cgroup), port mapping,
+   volume mounts and their ro/rw mode, whether `REF_AUDIO_PATH`/`HF_TOKEN` are set (presence only,
+   never echo the token value). Show these for transparency ("here's what you're actually running
+   with") without implying they're changeable — a control that silently no-ops or lies about
+   effect is worse than no control.
+3. **Genuinely not exposable without a restart:** things baked into the OpenVINO IR itself at
+   export time (`TTS_MAX_SPEECH_SECONDS`, quantization precision) — these need an
+   `export`/`export-voice-design` re-run, not a runtime toggle. Surface as "requires re-export,
+   see docs/HOW_TO_RUN.md" rather than a disabled-looking control.
+
+**Security note to resolve before implementing:** category 1 introduces a *mutating*,
+unauthenticated endpoint that can trigger a full model reload/backend swap — a bigger blast radius
+than today's read-mostly generate endpoints, on a service the docs already flag as having no
+auth/TLS (SECURITY.md). Decide then whether category-1 controls need their own lightweight gate
+(e.g. a bearer token via an env var, checked only on `/runtime/*` mutating routes) even though the
+rest of the service stays open, or whether "trusted network only" (the existing posture) is judged
+sufficient. Don't build this silently — flag it for an explicit decision at implementation time.
 
 ## 9. Suggested implementation order (whole plan, backend-first)
 

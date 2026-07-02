@@ -4,13 +4,14 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 # Apply thread and runtime envs before heavy imports
 from qwen3_tts.config import REF_AUDIO_PATH, apply_preset_env
 from qwen3_tts.openvino.runtime_config import apply_thread_env
-from qwen3_tts.presets import seconds_for_capacity
+from qwen3_tts.presets import get_voice_design_preset, seconds_for_capacity
 
 apply_preset_env()
 
@@ -27,6 +28,7 @@ from qwen3_tts.model_config import (
     configure_hf_token,
     resolve_model_repo,
     resolve_torch_load_config,
+    resolve_voice_design_model_repo,
 )
 from qwen3_tts.streaming import StreamingVocoderSession
 
@@ -56,8 +58,69 @@ TORCH_DTYPE, TORCH_DTYPE_NAME, OPENVINO_LOW_CPU_MEM_USAGE = resolve_torch_load_c
 
 torch.set_num_threads(int(os.environ.get("OV_INFERENCE_THREADS", "6")))
 
+
+@dataclass(frozen=True)
+class ModelProfile:
+    """A checkpoint + IR pairing that ``load_model`` can install.
+
+    ``load_model()`` used to read MODEL_ID/OV_MODEL_DIR/etc. as module-level
+    constants computed once at import time. Swapping in a second checkpoint (e.g.
+    VoiceDesign, see docs/plans/PLAN_voice_design.md) needs those to vary per call,
+    so they now travel as a profile instead. OVTalkerRuntime still reads its IR
+    paths from the environment (OV_MODEL_DIR / OPENVINO_*_STATEFUL_MODEL), so
+    ``load_model`` writes the profile's values into ``os.environ`` before
+    constructing it — the env vars stay the single source of truth for that layer.
+    """
+
+    name: str
+    model_repo: str
+    revision: str | None
+    ov_model_dir: str | None
+    main_stateful_model: str | None
+    predictor_stateful_model: str | None
+    vocoder_dir: str | None = None
+    build_voice_clone_prompt: bool = True
+    ref_audio: str | None = None
+    ref_text: str | None = None
+
+
+BASE_PROFILE = ModelProfile(
+    name="base",
+    model_repo=MODEL_ID,
+    revision=MODEL_REVISION,
+    ov_model_dir=OV_MODEL_DIR,
+    main_stateful_model=OPENVINO_MAIN_STATEFUL_MODEL,
+    predictor_stateful_model=OPENVINO_PREDICTOR_STATEFUL_MODEL,
+    vocoder_dir=os.getenv("OPENVINO_VOCODER_DIR"),
+    build_voice_clone_prompt=True,
+    ref_audio=REF_AUDIO,
+    ref_text=REF_TEXT,
+)
+
+_voice_design_max_speech_seconds = os.getenv("VOICE_DESIGN_MAX_SPEECH_SECONDS", "").strip()
+_voice_design_preset = get_voice_design_preset(
+    os.getenv("VOICE_DESIGN_MODEL_SIZE"),
+    float(_voice_design_max_speech_seconds) if _voice_design_max_speech_seconds else None,
+)
+
+# VoiceDesign is never the model loaded at startup — it is only ever installed via the
+# lazy model-swap path in qwen3_tts.voice_design (docs/plans/PLAN_voice_design.md §3/§4.2).
+# generate_voice_design() synthesizes the sample_text directly from the description; there
+# is no reference audio/transcript to build a voice_clone_prompt from.
+VOICE_DESIGN_PROFILE = ModelProfile(
+    name="voice_design",
+    model_repo=resolve_voice_design_model_repo(),
+    revision=(os.getenv("VOICE_DESIGN_MODEL_REVISION") or "").strip() or None,
+    ov_model_dir=_voice_design_preset["ov_model_dir"],
+    main_stateful_model=_voice_design_preset["main_stateful_model"],
+    predictor_stateful_model=_voice_design_preset["predictor_stateful_model"],
+    vocoder_dir=_voice_design_preset["vocoder_dir"],
+    build_voice_clone_prompt=False,
+)
+
 model = None
 voice_clone_prompt = None
+active_profile: ModelProfile | None = None
 
 ov_metadata = None
 ov_config = None
@@ -87,15 +150,17 @@ def _touch_last_request():
     _unload_pending = False
 
 
-def _do_unload():
-    """Runs inside the executor thread; serialized with inference."""
-    global model, voice_clone_prompt, ov_runtime, _unload_pending
-    _unload_pending = False
+def force_unload():
+    """Unconditionally drop the loaded model/runtime and return freed heap to the OS.
+
+    Runs inside the executor thread; serialized with inference. Used by the idle-unload
+    watcher (via ``_do_unload``, which adds the idle-timeout gate) and by the VoiceDesign
+    model-swap manager (``qwen3_tts.voice_design``), which must unload unconditionally
+    regardless of how recently a request came in.
+    """
+    global model, voice_clone_prompt, ov_runtime
     if model is None:
         return
-    if time.time() - _last_request_time < IDLE_UNLOAD_SECONDS:
-        return
-    print("[app_worker] Idle timeout reached; unloading model to free RAM...", flush=True)
     model = None
     voice_clone_prompt = None
     ov_runtime = None
@@ -111,14 +176,26 @@ def _do_unload():
     print("[app_worker] Model unloaded.", flush=True)
 
 
+def _do_unload():
+    """Runs inside the executor thread; serialized with inference."""
+    global _unload_pending
+    _unload_pending = False
+    if model is None:
+        return
+    if time.time() - _last_request_time < IDLE_UNLOAD_SECONDS:
+        return
+    print("[app_worker] Idle timeout reached; unloading model to free RAM...", flush=True)
+    force_unload()
+
+
 def _ensure_loaded():
     """Runs inside the executor thread; reloads model if idle-unloaded."""
     if model is None:
         print("[app_worker] Reloading model after idle unload...", flush=True)
-        load_model()
+        load_model(active_profile)
 
 
-def _validate_ov_metadata(model_dir: str):
+def _validate_ov_metadata(model_dir: str, model_repo: str, revision: str | None):
     global ov_metadata, ov_config
     path = Path(model_dir)
     meta_path = path / "metadata.json"
@@ -130,23 +207,23 @@ def _validate_ov_metadata(model_dir: str):
     ov_config = get_ov_config()
 
     # Validate metadata matches loaded model
-    if ov_metadata.get("model_repo") != MODEL_ID:
+    if ov_metadata.get("model_repo") != model_repo:
         raise RuntimeError(
             f"OV metadata model_repo {ov_metadata.get('model_repo')!r} "
-            f"!= {MODEL_ID!r}"
+            f"!= {model_repo!r}"
         )
 
-    # Revision check: only enforced when MODEL_REVISION is explicitly pinned. When it is
+    # Revision check: only enforced when a revision is explicitly pinned. When it is
     # unset, accept whatever the export recorded (an auto-resolved commit SHA or "main"),
     # so easy/ad-hoc exports don't block worker startup.
     artifact_revision = ov_metadata.get("model_revision")
-    if MODEL_REVISION and artifact_revision != MODEL_REVISION:
+    if revision and artifact_revision != revision:
         raise RuntimeError(
-            f"OV metadata model_revision {artifact_revision!r} != pinned {MODEL_REVISION!r}"
+            f"OV metadata model_revision {artifact_revision!r} != pinned {revision!r}"
         )
-    if not MODEL_REVISION:
+    if not revision:
         print(
-            f"[app_worker] MODEL_REVISION unpinned; accepting artifact revision "
+            f"[app_worker] revision unpinned; accepting artifact revision "
             f"{artifact_revision!r}.",
             flush=True,
         )
@@ -172,21 +249,41 @@ def _validate_ov_metadata(model_dir: str):
     )
 
 
-def load_model():
-    global model, voice_clone_prompt, ov_runtime
+def load_model(profile: ModelProfile | None = None):
+    global model, voice_clone_prompt, ov_runtime, active_profile
+    global MODEL_ID, OV_MODEL_DIR, OPENVINO_MAIN_STATEFUL_MODEL, OPENVINO_PREDICTOR_STATEFUL_MODEL
+
+    profile = profile or BASE_PROFILE
 
     if TTS_BACKEND not in ("pytorch", "openvino"):
         raise RuntimeError(f"Invalid TTS_BACKEND: {TTS_BACKEND!r}")
 
     if TTS_BACKEND == "openvino":
-        if not OV_MODEL_DIR:
+        if not profile.ov_model_dir:
             raise RuntimeError(
                 "TTS_BACKEND=openvino requires OV_MODEL_DIR"
             )
-        _validate_ov_metadata(OV_MODEL_DIR)
+        # Downstream OpenVINO helpers (get_ov_config, OVTalkerRuntime) read their IR
+        # paths from the environment, not from this function's arguments, so mirror
+        # the active profile into os.environ before anything reads it.
+        os.environ["OV_MODEL_DIR"] = profile.ov_model_dir
+        if profile.main_stateful_model:
+            os.environ["OPENVINO_MAIN_STATEFUL_MODEL"] = profile.main_stateful_model
+        else:
+            os.environ.pop("OPENVINO_MAIN_STATEFUL_MODEL", None)
+        if profile.predictor_stateful_model:
+            os.environ["OPENVINO_PREDICTOR_STATEFUL_MODEL"] = profile.predictor_stateful_model
+        else:
+            os.environ.pop("OPENVINO_PREDICTOR_STATEFUL_MODEL", None)
+        if profile.vocoder_dir:
+            os.environ["OPENVINO_VOCODER_DIR"] = profile.vocoder_dir
+        else:
+            os.environ.pop("OPENVINO_VOCODER_DIR", None)
+
+        _validate_ov_metadata(profile.ov_model_dir, profile.model_repo, profile.revision)
     else:
         # PyTorch-only backend
-        if OV_MODEL_DIR:
+        if profile.ov_model_dir:
             print(
                 "[app_worker] OV_MODEL_DIR set but TTS_BACKEND=pytorch; "
                 "ignoring OpenVINO directory.",
@@ -194,43 +291,48 @@ def load_model():
             )
 
     print(
-        f"[app_worker] Backend={TTS_BACKEND}, loading model at {TORCH_DTYPE_NAME} "
+        f"[app_worker] Backend={TTS_BACKEND}, loading profile={profile.name!r} "
+        f"({profile.model_repo}) at {TORCH_DTYPE_NAME} "
         f"(low_cpu_mem_usage={OPENVINO_LOW_CPU_MEM_USAGE})...",
         flush=True,
     )
     wrapped = Qwen3TTSModel.from_pretrained(
-        MODEL_ID,
-        revision=MODEL_REVISION,
+        profile.model_repo,
+        revision=profile.revision,
         device_map=DEVICE,
         dtype=TORCH_DTYPE,
         low_cpu_mem_usage=OPENVINO_LOW_CPU_MEM_USAGE,
     )
 
     gc.collect()
-    print("[app_worker] Model loaded. Creating voice clone prompt...", flush=True)
 
     model = wrapped
-    voice_clone_prompt = model.create_voice_clone_prompt(
-        ref_audio=REF_AUDIO,
-        ref_text=REF_TEXT,
-        x_vector_only_mode=False,
-    )
-
-    # Opt-in, deterministic artifact for controlled Transformers 4/5 comparisons.
-    # The dump contains codec token IDs and package versions, never reference audio/text.
-    _prompt_dump_dir = os.getenv("TTS_PROMPT_DUMP_DIR", "").strip()
-    if not _prompt_dump_dir and os.path.exists("/tmp/tts_prompt_dump"):
-        _prompt_dump_dir = "/tmp/tts-prompt-dump"
-    if _prompt_dump_dir:
-        from qwen3_tts.prompt_diagnostics import (
-            dump_reference_prompt,
-            dump_talker_parameter_manifest,
+    voice_clone_prompt = None
+    if profile.build_voice_clone_prompt:
+        print("[app_worker] Model loaded. Creating voice clone prompt...", flush=True)
+        voice_clone_prompt = model.create_voice_clone_prompt(
+            ref_audio=profile.ref_audio,
+            ref_text=profile.ref_text,
+            x_vector_only_mode=False,
         )
 
-        manifest_path = dump_reference_prompt(voice_clone_prompt, _prompt_dump_dir)
-        print(f"[prompt_diag] reference prompt saved: {manifest_path}", flush=True)
-        parameter_path = dump_talker_parameter_manifest(model.model.talker, _prompt_dump_dir)
-        print(f"[prompt_diag] talker parameters saved: {parameter_path}", flush=True)
+        # Opt-in, deterministic artifact for controlled Transformers 4/5 comparisons.
+        # The dump contains codec token IDs and package versions, never reference audio/text.
+        _prompt_dump_dir = os.getenv("TTS_PROMPT_DUMP_DIR", "").strip()
+        if not _prompt_dump_dir and os.path.exists("/tmp/tts_prompt_dump"):
+            _prompt_dump_dir = "/tmp/tts-prompt-dump"
+        if _prompt_dump_dir:
+            from qwen3_tts.prompt_diagnostics import (
+                dump_reference_prompt,
+                dump_talker_parameter_manifest,
+            )
+
+            manifest_path = dump_reference_prompt(voice_clone_prompt, _prompt_dump_dir)
+            print(f"[prompt_diag] reference prompt saved: {manifest_path}", flush=True)
+            parameter_path = dump_talker_parameter_manifest(model.model.talker, _prompt_dump_dir)
+            print(f"[prompt_diag] talker parameters saved: {parameter_path}", flush=True)
+    else:
+        print("[app_worker] Model loaded. (profile skips voice clone prompt)", flush=True)
 
     if TTS_BACKEND == "openvino":
         # Milestone 4: install the OpenVINO talker runtime by swapping the two inner
@@ -241,7 +343,7 @@ def load_model():
         # speech_tokenizer is a sibling of talker on the parent model, not a child of it;
         # pass it explicitly so the OV vocoder patch can find it.
         ov_runtime = OVTalkerRuntime(
-            OV_MODEL_DIR, talker, ov_config=ov_config,
+            profile.ov_model_dir, talker, ov_config=ov_config,
             speech_tokenizer=model.model.speech_tokenizer,
         )
         ov_runtime.install()
@@ -258,16 +360,16 @@ def load_model():
                 "PyTorch core weights may be released during OpenVINO compilation.",
                 flush=True,
             )
-        if OPENVINO_MAIN_STATEFUL_MODEL:
+        if profile.main_stateful_model:
             print(
                 f"[app_worker] OPENVINO_MAIN_STATEFUL_MODEL active: "
-                f"{OPENVINO_MAIN_STATEFUL_MODEL}",
+                f"{profile.main_stateful_model}",
                 flush=True,
             )
-        if OPENVINO_PREDICTOR_STATEFUL_MODEL:
+        if profile.predictor_stateful_model:
             print(
                 f"[app_worker] OPENVINO_PREDICTOR_STATEFUL_MODEL active: "
-                f"{OPENVINO_PREDICTOR_STATEFUL_MODEL}",
+                f"{profile.predictor_stateful_model}",
                 flush=True,
             )
 
@@ -281,9 +383,18 @@ def load_model():
             flush=True,
         )
 
+    # Mirror the active profile into the module-level constants that health_state()
+    # and callers still read directly, so behavior is unchanged when profile is None
+    # (BASE_PROFILE) and correct when a non-base profile is swapped in.
+    MODEL_ID = profile.model_repo
+    OV_MODEL_DIR = profile.ov_model_dir
+    OPENVINO_MAIN_STATEFUL_MODEL = profile.main_stateful_model
+    OPENVINO_PREDICTOR_STATEFUL_MODEL = profile.predictor_stateful_model
+    active_profile = profile
+
     global _service_started
     _service_started = True
-    print("[app_worker] Model loaded and ready.")
+    print(f"[app_worker] Model loaded and ready (profile={profile.name!r}).")
 
 
 load_model()
@@ -448,11 +559,60 @@ class _DiagLogitsProcessor:
         return scores
 
 
-def _run_generate(text: str, language: str, **gen_kwargs):
-    _touch_last_request()
-    _ensure_loaded()
-    if model is None or voice_clone_prompt is None:
+_voice_clone_prompt_cache: dict[str, Any] = {}
+
+
+def get_voice_clone_prompt(voice_id: str | None = None):
+    """Resolve the voice_clone_prompt to generate with.
+
+    voice_id=None returns the startup-built module-global prompt unchanged — this is the
+    Hermes/default path and must stay byte-for-byte identical to pre-voice_id behavior.
+    A given voice_id is built from its library reference sample on first use and cached
+    (building requires model.create_voice_clone_prompt, i.e. must run inside model.executor
+    with Base loaded).
+    """
+    if voice_id is None:
+        return voice_clone_prompt
+    if voice_id in _voice_clone_prompt_cache:
+        return _voice_clone_prompt_cache[voice_id]
+    from qwen3_tts import voice_library
+
+    meta = voice_library.get_voice(voice_id)
+    if meta is None:
+        raise ValueError(f"voice_id not found: {voice_id!r}")
+    if model is None:
         raise RuntimeError("Model not loaded")
+    prompt = model.create_voice_clone_prompt(
+        ref_audio=meta["wav_path"],
+        ref_text=meta["sample_text"],
+        x_vector_only_mode=False,
+    )
+    _voice_clone_prompt_cache[voice_id] = prompt
+    return prompt
+
+
+def _run_generate(
+    text: str,
+    language: str,
+    *,
+    voice_id: str | None = None,
+    seed_value=None,
+    instruct: str | None = None,
+    **gen_kwargs,
+):
+    _touch_last_request()
+    _apply_optional_seed(seed_value)
+    _ensure_loaded()
+    if model is None:
+        raise RuntimeError("Model not loaded")
+    voice_prompt = get_voice_clone_prompt(voice_id)
+    if voice_prompt is None:
+        raise RuntimeError("Model not loaded")
+    if instruct:
+        # Base's generate_voice_clone has no tone/instruct parameter — VoiceDesign is the only
+        # checkpoint that consumes free-text instruct. No-op here rather than erroring, so a
+        # frontend that always sends `instruct` doesn't need to special-case Base.
+        print(f"[generate] instruct field ignored on Base checkpoint: {instruct!r}", flush=True)
     import traceback as _tb
     t0 = time.monotonic()
     print(f"[generate] batch  lang={language!r}  chars={len(text)}", flush=True)
@@ -493,7 +653,7 @@ def _run_generate(text: str, language: str, **gen_kwargs):
         wavs, sr = model.generate_voice_clone(
             text=text,
             language=language,
-            voice_clone_prompt=voice_clone_prompt,
+            voice_clone_prompt=voice_prompt,
             **gen_kwargs,
         )
     except Exception:
@@ -526,6 +686,7 @@ def _run_generate_with_streaming(
     *,
     reuse_streamed_decode: bool = False,
     seed_value=None,
+    voice_id: str | None = None,
     **gen_kwargs,
 ):
     """Run generation while emitting incremental untrimmed PCM chunks.
@@ -540,7 +701,10 @@ def _run_generate_with_streaming(
     _apply_optional_seed(seed_value)
     _ensure_loaded()
 
-    if model is None or voice_clone_prompt is None:
+    if model is None:
+        raise RuntimeError("Model not loaded")
+    voice_prompt = get_voice_clone_prompt(voice_id)
+    if voice_prompt is None:
         raise RuntimeError("Model not loaded")
 
     print(f"[generate] stream lang={language!r}  chars={len(text)}", flush=True)
@@ -550,10 +714,10 @@ def _run_generate_with_streaming(
         raise RuntimeError("streaming parity requires the FP32 OpenVINO vocoder")
 
     reference_codes = None
-    if isinstance(voice_clone_prompt, list) and voice_clone_prompt:
-        reference_codes = getattr(voice_clone_prompt[0], "ref_code", None)
-    elif isinstance(voice_clone_prompt, dict):
-        ref_code_list = voice_clone_prompt.get("ref_code")
+    if isinstance(voice_prompt, list) and voice_prompt:
+        reference_codes = getattr(voice_prompt[0], "ref_code", None)
+    elif isinstance(voice_prompt, dict):
+        ref_code_list = voice_prompt.get("ref_code")
         if ref_code_list:
             reference_codes = ref_code_list[0]
 
@@ -592,7 +756,7 @@ def _run_generate_with_streaming(
             wavs, sr = model.generate_voice_clone(
                 text=text,
                 language=language,
-                voice_clone_prompt=voice_clone_prompt,
+                voice_clone_prompt=voice_prompt,
                 **gen_kwargs,
             )
         finally:

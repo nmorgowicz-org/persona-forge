@@ -4,7 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from qwen3_tts.model_config import configure_hf_token, resolve_model_repo, resolve_torch_load_config
+from qwen3_tts.model_config import (
+    configure_hf_token,
+    resolve_model_repo,
+    resolve_torch_load_config,
+    resolve_voice_design_model_repo,
+)
 
 
 class ModelConfigTests(unittest.TestCase):
@@ -74,6 +79,24 @@ class ModelConfigTests(unittest.TestCase):
         environ = {"HF_TOKEN": "direct", "HF_TOKEN_FILE": "/missing"}
         configure_hf_token(environ)
         self.assertEqual(environ["HF_TOKEN"], "direct")
+
+    def test_voice_design_defaults_to_17b_checkpoint(self) -> None:
+        self.assertEqual(
+            resolve_voice_design_model_repo({}),
+            "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+        )
+
+    def test_voice_design_model_repo_overrides_preset(self) -> None:
+        self.assertEqual(
+            resolve_voice_design_model_repo(
+                {"VOICE_DESIGN_MODEL_SIZE": "invalid", "VOICE_DESIGN_MODEL_REPO": "org/vd"}
+            ),
+            "org/vd",
+        )
+
+    def test_voice_design_rejects_unknown_size(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "Unsupported VOICE_DESIGN_MODEL_SIZE"):
+            resolve_voice_design_model_repo({"VOICE_DESIGN_MODEL_SIZE": "0.6B"})
 
 
 if __name__ == "__main__":
