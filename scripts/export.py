@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from qwen3_tts.presets import normalize_size
+from qwen3_tts.presets import FRAME_RATE_HZ, get_preset, normalize_size
 
 
 OV_ROOT = Path(os.environ.get("OV_OUTPUT_ROOT", "/ov"))
@@ -47,6 +47,9 @@ def _copy_pair(source_xml: Path, destination_xml: Path) -> None:
 
 def main() -> int:
     size = normalize_size(os.environ.get("MODEL_SIZE"))
+    max_speech_seconds_env = os.environ.get("TTS_MAX_SPEECH_SECONDS")
+    preset = get_preset(size, float(max_speech_seconds_env) if max_speech_seconds_env else None)
+    capacity = int(preset["stateful_capacity"])
     output = OV_ROOT / size
     staging = output / ".exports"
     if staging.exists():
@@ -82,7 +85,7 @@ def main() -> int:
     _copy_pair(int8 / "vocoder_decoder.xml", vocoder / "vocoder_decoder.xml")
     (vocoder / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
-    stateful = output / "main_stateful_cap768.xml"
+    stateful = output / f"main_stateful_cap{capacity}.xml"
     subprocess.run(
         [
             sys.executable,
@@ -92,14 +95,18 @@ def main() -> int:
             "--output",
             str(stateful),
             "--max-seq",
-            "768",
+            str(capacity),
             "--state-prefix",
             "main",
             "--compile-smoke",
             "--report-json",
-            str(output / "main_stateful_cap768.transform.json"),
+            str(output / f"main_stateful_cap{capacity}.transform.json"),
         ],
         check=True,
+    )
+    print(
+        f"stateful main capacity: {capacity} frames "
+        f"(~{preset['max_speech_seconds']:.0f}s at {FRAME_RATE_HZ} Hz) -> {stateful}"
     )
     if size == "0.6B":
         predictor_stateful = output / "predictor_stateful_cap32.xml"

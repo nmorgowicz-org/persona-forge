@@ -5,6 +5,9 @@ x-model-environment: &model-environment
   REF_TEXT: ${REF_TEXT:?Set REF_TEXT to the exact reference-audio transcript}
   HF_TOKEN: ${HF_TOKEN:-}
   MODEL_REVISION: ${MODEL_REVISION:-}
+  # Must match between `export` and `qwen3-tts` — it selects which capacity-keyed IR file
+  # gets built and which one gets loaded. Unset uses the 64s default (unchanged behavior).
+  TTS_MAX_SPEECH_SECONDS: ${TTS_MAX_SPEECH_SECONDS:-}
 
 x-model-volumes: &model-volumes
   - ${MODEL_CACHE_PATH:-./data/model}:/root/.cache/huggingface/hub:rw

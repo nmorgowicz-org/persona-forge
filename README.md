@@ -47,12 +47,14 @@ The first export downloads the selected checkpoint to `./data/model` and writes 
 
 | Profile | Quality | Steady serving memory | Max request length | Recommendation |
 |---|---|---|---|---|
-| `0.6B` | Good | ~5.4–5.8 GiB | ~64 seconds of audio | Only if you have a specific reason to avoid 1.7B |
-| `1.7B` | Better | ~5.4–5.8 GiB | ~64 seconds of audio | **Default — same memory, better output** |
+| `0.6B` | Good | ~5.4–5.8 GiB | ~64 seconds of audio (`TTS_MAX_SPEECH_SECONDS`) | Only if you have a specific reason to avoid 1.7B |
+| `1.7B` | Better | ~5.4–5.8 GiB | ~64 seconds of audio (`TTS_MAX_SPEECH_SECONDS`) | **Default — same memory, better output** |
 
 Both profiles use nearly identical memory because the fixed inference engine overhead dominates the
-model-size difference. The default 10G/11G container limits leave headroom for longer prompts.
-See [HOW_TO_RUN.md](docs/HOW_TO_RUN.md) for RAM-tiered setup guidance.
+model-size difference. The default 10G/11G container limits leave headroom for longer prompts. Max
+request length is export-time only, set via `TTS_MAX_SPEECH_SECONDS` — it's a latency/safety cap, not
+a memory lever (lowering it saves tens of MiB, not GiB); see
+[HOW_TO_RUN.md](docs/HOW_TO_RUN.md) for RAM-tiered setup guidance and details.
 
 ## HTTP API
 

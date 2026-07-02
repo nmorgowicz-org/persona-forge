@@ -44,6 +44,8 @@ from pathlib import Path
 
 import numpy as np
 
+from qwen3_tts.presets import seconds_for_capacity
+
 # IR filenames produced by export_openvino.py.
 _GRAPH_FILES = {
     "main_prefill": "main_prefill.xml",
@@ -500,7 +502,11 @@ class _OVStatefulCore:
             )
         if prior + seq > self.capacity:
             raise RuntimeError(
-                f"stateful cache capacity exceeded: need {prior + seq}, max {self.capacity}"
+                f"stateful cache capacity exceeded: need {prior + seq} frames "
+                f"(~{seconds_for_capacity(prior + seq):.1f}s), max {self.capacity} frames "
+                f"(~{seconds_for_capacity(self.capacity):.1f}s). This deployment was exported "
+                f"with TTS_MAX_SPEECH_SECONDS={seconds_for_capacity(self.capacity):.0f} (or the "
+                "64s default) — re-export with a larger value if you need longer requests."
             )
 
         if is_prefill:

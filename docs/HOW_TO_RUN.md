@@ -121,7 +121,35 @@ TTS_MEMORY_SWAP_LIMIT=15G
 
 Long requests (several paragraphs) push memory higher as the model accumulates context. The hard
 ceiling is roughly 64 seconds of generated audio per request regardless of memory limit — increase
-it by re-exporting, not by raising the memory limit.
+it by re-exporting with a larger `TTS_MAX_SPEECH_SECONDS` (see below), not by raising the memory
+limit.
+
+### Max speech length (`TTS_MAX_SPEECH_SECONDS`)
+
+The exported OpenVINO graph has a fixed-size internal K/V cache, so the longest possible single
+request is baked in at export time — it cannot be changed at runtime, only by re-exporting.
+`TTS_MAX_SPEECH_SECONDS` (default `64`) controls that ceiling in human units instead of raw frame
+counts:
+
+```dotenv
+TTS_MAX_SPEECH_SECONDS=20   # e.g. a Hermes-style tool that only ever needs short utterances
+```
+
+Set the **same value** in `.env` for both the `export` and `qwen3-tts` services before running
+`docker compose run --rm export` — the value selects both which capacity-keyed IR file gets built
+(`main_stateful_cap<N>.xml`) and which one gets loaded. A request that would exceed the configured
+limit fails fast with `stateful cache capacity exceeded`, reported in both frames and seconds, instead
+of silently truncating or (pre-fix) free-running until it crashes.
+
+**This is a safety/latency cap, not a memory-saving knob.** Peak container RSS is dominated by fixed
+OpenVINO runtime + vocoder overhead (~7.3 GiB), with capacity contributing only ~0.5 MiB per second
+of headroom (measured from the 768-vs-2048-frame A/B in `docs/dev/OPENVINO_RESULTS.md`) — lowering it
+from 64s to 15s saves roughly 200 MiB, not gigabytes. Use it to bound worst-case latency and fail
+closed on runaway/misbehaving requests, not to fit a smaller memory budget.
+
+Leave it unset (or `64`) unless you have a specific reason to change it — the default reproduces the
+exact IR filename and capacity every existing deployment already has on disk, so nothing changes for
+existing setups.
 
 ### Threads
 
@@ -176,8 +204,9 @@ latency, peak container RSS, host available RAM, and swap delta. The acceptance 
 | `0.6B` | Good | ~5–6 GiB | ~64 sec | Use only if you have a specific reason |
 | `1.7B` | Better | ~5–6 GiB | ~64 sec | **Recommended default** |
 
-Both profiles use the same memory. The 64-second ceiling per request is a property of the exported
-model and cannot be raised at runtime — re-export is required if you need longer requests.
+Both profiles use the same memory. The 64-second ceiling per request is the `TTS_MAX_SPEECH_SECONDS`
+default (see above) — a property of the exported model, not runtime-adjustable; re-export with a
+different `TTS_MAX_SPEECH_SECONDS` if you need a different ceiling.
 
 After startup the service releases ~0.3 GiB of load-time overhead; the startup log prints
 `released ~0.32 GiB of PyTorch codec` when this happens. Measured results are in
@@ -201,6 +230,7 @@ Operational settings:
 | Variable | Default | Meaning |
 |---|---|---|
 | `MODEL_SIZE` | `1.7B` | `0.6B` or `1.7B`; 1.7B is recommended (same memory, better quality) |
+| `TTS_MAX_SPEECH_SECONDS` | `64` | Longest single request the exported IR supports. Export-time only (re-export to change); must match between `export` and `qwen3-tts`. Not a meaningful memory lever — see above |
 | `QWEN3_TTS_IMAGE` | `qwen3-tts-openvino:local` | Image to run; pin a SHA or digest in production |
 | `QWEN3_TTS_PORT` | `8318` | Host port mapped to container port 8318 |
 | `TZ` | `America/Detroit` | Container timezone for log timestamps |
