@@ -215,12 +215,25 @@ Every handoff must state:
 
 Use Conventional Commits (`feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `build`, `ci`, `chore`, `revert`). Use squash merge. The PR title drives Release Please, so user-facing changes need a `feat:` or `fix:` title.
 
+**Scopes** (choose the one that matches your change; omit only if obvious):
+
+- `(model)` — model.py, model_config.py, generation, sampling, seed handling, cache logic
+- `(openvino)` — OpenVINO adapters, IR, runtime, quantization, stateful models, vocoder
+- `(export)` — export.py, export modules, parity tests, benchmarks
+- `(runtime)` — Flask app, startup, idle unload, config, memory, Gunicorn, endpoints
+- `(frontend)` — frontend UI, VoiceDesign page, components, API calls
+- `(docker)` — Dockerfile, container behavior, entrypoint.sh, compose.yml
+- `(deps)` — requirements, dependency updates, version changes
+- `(ci)` — CI workflows, ARC runners, build and publish
+- `(docs)` — documentation, README, HOW_TO_RUN, AGENTS, etc.
+- `(test)` — unit and integration tests
+
 Every implementation PR body must include a Release Please override block:
 
 ```text
 BEGIN_COMMIT_OVERRIDE
-fix(ci): publish one complete container image
-fix(runtime): correct gunicorn worker threading
+fix(model): correct seed max from 2^63-1 to 2^32-1
+docs: restore advanced env var detail in .env.example and HOW_TO_RUN.md
 END_COMMIT_OVERRIDE
 ```
 
