@@ -23,6 +23,7 @@ fake_model.runtime_config_state = lambda: {"reconfig_in_progress": False, "live"
 fake_model.apply_runtime_config = lambda updates: {"reconfig_in_progress": False, "live": updates}
 fake_model._run_generate = lambda text, language, **kwargs: (np.zeros(240, dtype=np.float32), 24000)
 fake_model._apply_optional_seed = lambda seed: None
+fake_model.resolve_seed = lambda seed_value: seed_value if seed_value is not None else 12345
 
 
 def _stream(text, language, on_chunk, **kwargs):

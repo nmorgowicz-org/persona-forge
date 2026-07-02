@@ -31,6 +31,8 @@ fake_model.BASE_PROFILE = "BASE"
 fake_model.VOICE_DESIGN_PROFILE = "VOICE_DESIGN"
 fake_model.model = None
 fake_model._trim_silence = lambda wav, sr: wav
+fake_model.resolve_seed = lambda seed_value: seed_value if seed_value is not None else 12345
+fake_model._apply_optional_seed = lambda seed_value: None
 
 
 def _force_unload() -> None:
@@ -67,10 +69,13 @@ class VoiceDesignSwapTests(unittest.TestCase):
         voice_design._swap_in_progress = False
 
     def test_happy_path_swaps_to_voice_design_and_back_to_base(self) -> None:
-        wav, sr = voice_design.run_voice_design_request("a description", "hello there", "English")
+        wav, sr, resolved_seed = voice_design.run_voice_design_request(
+            "a description", "hello there", "English"
+        )
 
         self.assertEqual(sr, 24000)
         self.assertEqual(len(wav), 480)
+        self.assertEqual(resolved_seed, 12345)
         self.assertEqual(
             calls,
             [
