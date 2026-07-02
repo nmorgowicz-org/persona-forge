@@ -40,9 +40,22 @@ def _voice_dir(voice_id: str) -> Path:
 
 
 def save_voice(
-    wav_bytes: bytes, *, description: str, sample_text: str, language: str
+    wav_bytes: bytes,
+    *,
+    description: str,
+    sample_text: str,
+    language: str,
+    seed: int | None = None,
+    selections: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Persist a newly captured VoiceDesign reference sample; returns its metadata."""
+    """Persist a newly captured VoiceDesign reference sample; returns its metadata.
+
+    ``seed`` is the exact seed used to generate this reference (see voice_design.py —
+    always a concrete resolved value, never None, so every voice is reproducible).
+    ``selections`` is the chip state that composed ``description``, stored so the voice can
+    later be reopened and tweaked in the VoiceDesign panel instead of only re-typed from
+    scratch (PLAN_voice_design.md §8.3 tune/tweak workflow).
+    """
     voice_id = new_voice_id()
     voice_dir = _voice_dir(voice_id)
     voice_dir.mkdir(parents=True, exist_ok=True)
@@ -52,6 +65,8 @@ def save_voice(
         "description": description,
         "sample_text": sample_text,
         "language": language,
+        "seed": seed,
+        "selections": selections,
         "created_at": time.time(),
     }
     (voice_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
@@ -82,6 +97,22 @@ def get_voice_wav_bytes(voice_id: str) -> bytes | None:
     if not wav_path.is_file():
         return None
     return wav_path.read_bytes()
+
+
+def delete_voice(voice_id: str) -> bool:
+    """Remove a voice's directory. Returns False if it doesn't exist (not an error) — the
+    tune/tweak workflow forks a new voice on every edit, so this exists to prune superseded
+    forks (PLAN_voice_design.md §8.3).
+    """
+    if not _is_valid_voice_id(voice_id):
+        return False
+    voice_dir = _voice_dir(voice_id)
+    if not voice_dir.is_dir():
+        return False
+    import shutil
+
+    shutil.rmtree(voice_dir)
+    return True
 
 
 def list_voices() -> list[dict[str, Any]]:

@@ -404,11 +404,15 @@ load_model()
 
 
 def _idle_watcher():
+    # Always runs (not gated on the startup value of IDLE_UNLOAD_SECONDS) so that
+    # apply_runtime_config() can flip idle-unload on/off live by just reassigning the
+    # global — there's no separate thread lifecycle to manage.
     while True:
         time.sleep(30)
         global _unload_pending
         if (
-            not _unload_pending
+            IDLE_UNLOAD_SECONDS > 0
+            and not _unload_pending
             and model is not None
             and time.time() - _last_request_time > IDLE_UNLOAD_SECONDS
         ):
@@ -416,8 +420,8 @@ def _idle_watcher():
             executor.submit(_do_unload)
 
 
+threading.Thread(target=_idle_watcher, daemon=True, name="idle-watcher").start()
 if IDLE_UNLOAD_SECONDS > 0:
-    threading.Thread(target=_idle_watcher, daemon=True, name="idle-watcher").start()
     print(f"[app_worker] Idle unload enabled: {IDLE_UNLOAD_SECONDS}s cooldown.", flush=True)
 
 
@@ -497,6 +501,114 @@ def health_state() -> dict[str, Any]:
         return obj
 
     return _json_safe(base)
+
+
+# ── Runtime control panel (PLAN_voice_design.md §8.8) ──────────────────────────────────
+#
+# Category 1 (live-adjustable): applied via apply_runtime_config(), always inside
+# model.executor so it never races inference. Two flavors:
+#   - "hot" keys are read fresh from os.environ on every use elsewhere in this module
+#     (SILENCE_TRIM*), so just writing the env var is enough.
+#   - "reload" keys are only read inside load_model()/_validate_ov_metadata() at call
+#     time, so they need force_unload() + load_model(active_profile) to take effect
+#     (TTS_BACKEND, OV_DYNAMIC_QUANT_GROUP_SIZE) or are read directly by the idle
+#     watcher loop each tick (IDLE_UNLOAD_SECONDS, effectively "hot" too but listed here
+#     since it's a plain global rather than an os.environ lookup).
+_HOT_ENV_KEYS = {"SILENCE_TRIM", "SILENCE_TRIM_THRESH", "SILENCE_TRIM_PAD_MS"}
+_RELOAD_ENV_KEYS = {"OV_DYNAMIC_QUANT_GROUP_SIZE"}
+_GLOBAL_KEYS = {"TTS_BACKEND", "IDLE_UNLOAD_SECONDS"}
+LIVE_RUNTIME_KEYS = _HOT_ENV_KEYS | _RELOAD_ENV_KEYS | _GLOBAL_KEYS
+
+_reconfig_in_progress = False
+
+
+def reconfig_in_progress() -> bool:
+    return _reconfig_in_progress
+
+
+def runtime_config_state() -> dict[str, Any]:
+    """Snapshot of every knob the runtime control panel can show, in its three categories."""
+    mounts = {
+        "model_cache": os.getenv("MODEL_CACHE_CONTAINER_PATH", "/root/.cache/huggingface/hub"),
+        "ov_data": OV_MODEL_DIR and str(Path(OV_MODEL_DIR).parent) or None,
+        "voice_library": os.getenv("VOICE_LIBRARY_PATH_CONTAINER", "/voices"),
+    }
+    mount_access = {}
+    for name, path in mounts.items():
+        if not path or not os.path.isdir(path):
+            mount_access[name] = None
+            continue
+        mount_access[name] = "rw" if os.access(path, os.W_OK) else "ro"
+
+    return {
+        "reconfig_in_progress": _reconfig_in_progress,
+        "live": {
+            "TTS_BACKEND": TTS_BACKEND,
+            "IDLE_UNLOAD_SECONDS": IDLE_UNLOAD_SECONDS,
+            "SILENCE_TRIM": os.getenv("SILENCE_TRIM", "1").strip() != "0",
+            "SILENCE_TRIM_THRESH": float(os.getenv("SILENCE_TRIM_THRESH", "0.01")),
+            "SILENCE_TRIM_PAD_MS": float(os.getenv("SILENCE_TRIM_PAD_MS", "30")),
+            "OV_DYNAMIC_QUANT_GROUP_SIZE": int(os.getenv("OV_DYNAMIC_QUANT_GROUP_SIZE", "32")),
+        },
+        "read_only": {
+            "mounts": mount_access,
+            "ref_audio_path_set": bool(REF_AUDIO),
+            "hf_token_set": bool(os.getenv("HF_TOKEN")),
+            "device": DEVICE,
+            "torch_dtype": TORCH_DTYPE_NAME,
+        },
+        "not_live": {
+            "TTS_MAX_SPEECH_SECONDS": os.getenv("TTS_MAX_SPEECH_SECONDS"),
+            "MODEL_SIZE": os.getenv("MODEL_SIZE"),
+            "compression": ov_metadata.get("compression") if ov_metadata else None,
+            "reason": "Baked into the OpenVINO IR at export time; requires re-export (see docs/HOW_TO_RUN.md).",
+        },
+    }
+
+
+def apply_runtime_config(updates: dict[str, Any]) -> dict[str, Any]:
+    """Apply a partial set of live-adjustable runtime knobs.
+
+    Must run inside model.executor (same serialization discipline as load_model()/
+    force_unload() elsewhere) — callers submit via
+    ``model.executor.submit(apply_runtime_config, updates)``, never call directly
+    off-thread. Unknown keys are rejected up front (before mutating anything) so a
+    partially-applied bad request can't leave the service in a half-updated state.
+    """
+    unknown = set(updates) - LIVE_RUNTIME_KEYS
+    if unknown:
+        raise ValueError(f"Not a live-adjustable key: {sorted(unknown)}")
+
+    global TTS_BACKEND, IDLE_UNLOAD_SECONDS, _reconfig_in_progress
+    needs_reload = bool(set(updates) & _RELOAD_ENV_KEYS) or "TTS_BACKEND" in updates
+
+    _reconfig_in_progress = True
+    try:
+        if "TTS_BACKEND" in updates:
+            backend = str(updates["TTS_BACKEND"]).strip().lower()
+            if backend not in ("pytorch", "openvino"):
+                raise ValueError(f"Invalid TTS_BACKEND: {backend!r}")
+            TTS_BACKEND = backend
+
+        if "IDLE_UNLOAD_SECONDS" in updates:
+            IDLE_UNLOAD_SECONDS = int(updates["IDLE_UNLOAD_SECONDS"])
+
+        for key in _HOT_ENV_KEYS | _RELOAD_ENV_KEYS:
+            if key in updates:
+                os.environ[key] = str(updates[key])
+
+        if needs_reload:
+            print(
+                f"[app_worker] Runtime config change requires reload: {sorted(set(updates))}",
+                flush=True,
+            )
+            force_unload()
+            load_model(active_profile)
+            _voice_clone_prompt_cache.clear()
+    finally:
+        _reconfig_in_progress = False
+
+    return runtime_config_state()
 
 
 def _trim_silence(wav, sr):
@@ -585,6 +697,13 @@ def get_voice_clone_prompt(voice_id: str | None = None):
         raise ValueError(f"voice_id not found: {voice_id!r}")
     if model is None:
         raise RuntimeError("Model not loaded")
+    if getattr(ov_runtime, "codec_released", False):
+        raise RuntimeError(
+            "Cannot build a voice_clone_prompt for a new voice_id: the PyTorch codec was "
+            "released at startup (OPENVINO_RELEASE_CODEC=1, the default) and encoding new "
+            "reference audio requires it. Restart the container with "
+            "OPENVINO_RELEASE_CODEC=0 to use per-request/voice_id cloning."
+        )
     prompt = model.create_voice_clone_prompt(
         ref_audio=meta["wav_path"],
         ref_text=meta["sample_text"],
@@ -680,6 +799,25 @@ def _apply_optional_seed(seed_value):
         torch.cuda.manual_seed_all(seed_value)
     np.random.seed(seed_value)
     random.seed(seed_value)
+
+
+# Comfortably inside a signed 63-bit range so resolved seeds round-trip cleanly through
+# JSON/int() parsing and response headers.
+_MAX_SEED = 2**63 - 1
+
+
+def resolve_seed(seed_value: int | None) -> int:
+    """Return seed_value, or a fresh random seed if not supplied.
+
+    Callers that want every generation to be reproducible and inspectable (not just
+    optionally seedable) should call this instead of passing seed_value straight through —
+    it guarantees a concrete seed always exists to report back to the caller, rather than
+    silently depending on whatever ambient RNG state happens to exist.
+    """
+    if seed_value is not None:
+        return seed_value
+    import secrets
+    return secrets.randbelow(_MAX_SEED)
 
 
 def _run_generate_with_streaming(

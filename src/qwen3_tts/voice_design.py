@@ -41,8 +41,8 @@ def validate_sample_text(sample_text: str) -> None:
 
 
 def run_voice_design_request(
-    description: str, sample_text: str, language: str
-) -> tuple[Any, int]:
+    description: str, sample_text: str, language: str, seed: int | None = None
+) -> tuple[Any, int, int]:
     """Swap to VoiceDesign, synthesize the sample, and swap back to Base.
 
     Must run inside model.executor — callers submit this via
@@ -52,9 +52,16 @@ def run_voice_design_request(
     without a loaded model — see PLAN_voice_design.md §4.3 step 5 for why this fail-safe
     matters more than usual here (this is the only code path that unloads the
     otherwise-always-resident Base model).
+
+    A concrete seed is always resolved and applied (random when the caller doesn't supply
+    one) and returned to the caller, so every saved voice has a reproducible, inspectable
+    seed rather than depending on whatever ambient RNG state happened to exist — required
+    for the tune/tweak workflow (PLAN_voice_design.md §8.3) to mean anything: re-rolling a
+    voice needs a real new random draw, and locking onto a good take needs its exact seed.
     """
     global _swap_in_progress
     _swap_in_progress = True
+    resolved_seed = model.resolve_seed(seed)
     t0 = time.monotonic()
     try:
         print("[voice_design] swapping to VoiceDesign checkpoint...", flush=True)
@@ -68,7 +75,11 @@ def run_voice_design_request(
                 "check VOICE_DESIGN_MODEL_REPO / VOICE_DESIGN_MODEL_SIZE."
             )
 
-        print(f"[voice_design] generating sample (lang={language!r})...", flush=True)
+        model._apply_optional_seed(resolved_seed)
+        print(
+            f"[voice_design] generating sample (lang={language!r}, seed={resolved_seed})...",
+            flush=True,
+        )
         wavs, sr = model.model.generate_voice_design(
             text=sample_text,
             language=language,
@@ -77,7 +88,7 @@ def run_voice_design_request(
         wav = model._trim_silence(wavs[0], sr)
         elapsed = time.monotonic() - t0
         print(f"[voice_design] sample generated in {elapsed:.1f}s", flush=True)
-        return wav, sr
+        return wav, sr, resolved_seed
     finally:
         print("[voice_design] swapping back to Base checkpoint...", flush=True)
         model.force_unload()
