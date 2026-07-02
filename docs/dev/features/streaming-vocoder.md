@@ -2,8 +2,8 @@
 
 Branch: `feat/streaming-vocoder`. Status: **deliverable A works on the real 0.6B model and now has
 an experimental HTTP transport; release gates remain open.** Self-contained brief for a fresh agent.
-Design context: `OPENVINO_IMPLEMENTATION.md` § "Milestone 1.5" and § "Streaming vocoder delivery".
-Measured numbers: `OPENVINO_RESULTS.md`.
+Design context: `../architecture/OPENVINO_IMPLEMENTATION.md` § "Milestone 1.5" and § "Streaming vocoder delivery".
+Measured numbers: `../benchmarks/OPENVINO_RESULTS.md`.
 
 > `main` is released as v0.12.0 at `9bf0848`. This track is independent of the already-merged
 > stateful-KV feature. Do not change cache behavior while finishing streaming.
@@ -107,7 +107,7 @@ Before writing any pipeline code, answer: *is there CPU headroom during talker g
   from the vocoder phase.
 - **If mean utilization during generation is well below 100% × ncores** → headroom exists → deliverable
   B is worth building. **If it's pegged near saturation** → skip B, ship only A (streaming TTFB), and
-  record the negative result in `OPENVINO_RESULTS.md`.
+  record the negative result in `../benchmarks/OPENVINO_RESULTS.md`.
 
 ## Design (reuse, don't re-export)
 

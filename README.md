@@ -79,7 +79,7 @@ and generated speech are never included in the image; Compose bind-mounts them f
 
 See [HOW_TO_RUN.md](docs/HOW_TO_RUN.md) for deployment, streaming, rollback, memory measurement,
 A/B listening, and benchmark collection. The implementation contract and measured evidence are in
-[docs/dev/OPENVINO_IMPLEMENTATION.md](docs/dev/OPENVINO_IMPLEMENTATION.md) and
-[docs/dev/OPENVINO_RESULTS.md](docs/dev/OPENVINO_RESULTS.md). Security guidance is in
+[docs/dev/architecture/OPENVINO_IMPLEMENTATION.md](docs/dev/architecture/OPENVINO_IMPLEMENTATION.md) and
+[docs/dev/benchmarks/OPENVINO_RESULTS.md](docs/dev/benchmarks/OPENVINO_RESULTS.md). Security guidance is in
 [SECURITY.md](SECURITY.md); the service has no authentication or TLS and must remain on a trusted
 network or behind an authenticated TLS reverse proxy.

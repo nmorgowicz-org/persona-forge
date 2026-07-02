@@ -143,7 +143,7 @@ of silently truncating or (pre-fix) free-running until it crashes.
 
 **This is a safety/latency cap, not a memory-saving knob.** Peak container RSS is dominated by fixed
 OpenVINO runtime + vocoder overhead (~7.3 GiB), with capacity contributing only ~0.5 MiB per second
-of headroom (measured from the 768-vs-2048-frame A/B in `docs/dev/OPENVINO_RESULTS.md`) — lowering it
+of headroom (measured from the 768-vs-2048-frame A/B in `docs/dev/benchmarks/OPENVINO_RESULTS.md`) — lowering it
 from 64s to 15s saves roughly 200 MiB, not gigabytes. Use it to bound worst-case latency and fail
 closed on runaway/misbehaving requests, not to fit a smaller memory budget.
 
@@ -192,8 +192,8 @@ curl -sS http://localhost:8318/v1/audio/speech \
 Listen blind if possible. Record intelligibility, speaker similarity, prosody, repetition,
 truncation, and artifacts. Also capture image ID, source commit, model revision, IR metadata hash,
 latency, peak container RSS, host available RAM, and swap delta. The acceptance methodology is in
-`docs/dev/OPENVINO_IMPLEMENTATION.md`; historical measurements are in
-`docs/dev/OPENVINO_RESULTS.md`.
+`docs/dev/architecture/OPENVINO_IMPLEMENTATION.md`; historical measurements are in
+`docs/dev/benchmarks/OPENVINO_RESULTS.md`.
 
 ## Presets and advanced settings
 
@@ -210,7 +210,7 @@ different `TTS_MAX_SPEECH_SECONDS` if you need a different ceiling.
 
 After startup the service releases ~0.3 GiB of load-time overhead; the startup log prints
 `released ~0.32 GiB of PyTorch codec` when this happens. Measured results are in
-`docs/dev/OPENVINO_RESULTS.md`.
+`docs/dev/benchmarks/OPENVINO_RESULTS.md`.
 
 Explicit advanced environment values override preset defaults. Common examples are:
 

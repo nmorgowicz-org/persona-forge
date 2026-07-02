@@ -1,7 +1,7 @@
 # Plan — hermes TTS integration: OpenAI `/v1/audio/speech` endpoint (and the streaming/Deliverable-B decision)
 
 Status: **research complete; decision made; implementation pending.**
-Owner context: this supersedes the open question in `PLAN_STREAMING_VOCODER.md` about whether to build
+Owner context: this supersedes the open question in `../features/streaming-vocoder.md` about whether to build
 Deliverable B (pipelined vocoder overlap). The answer is **no — there is no consumer for streaming**;
 the real integration work is a batch OpenAI-compatible endpoint.
 
@@ -70,7 +70,7 @@ future work (Nick has ideas); not in scope for this PR.
 2. **Deliverable B (pipelined overlap):** **do not build.** Task 3 showed it is technically possible
    (2 idle cores) but its only payoff is recovering streaming's 23–25% wall-time penalty — and nothing
    consumes streaming. For producing a complete file, batch is already the fast path. The time-boxed
-   spike is therefore moot. Recorded as GO-but-no-consumer in `OPENVINO_RESULTS.md` / `HANDOFF.md`.
+   spike is therefore moot. Recorded as GO-but-no-consumer in `../benchmarks/OPENVINO_RESULTS.md` / `../resolved/HANDOFF_container_image.md`.
 3. **Actual work:** add an **OpenAI-compatible `/v1/audio/speech` endpoint** so the CPU service is a
    schema-identical drop-in for the MLX primary, replacing the bespoke `/generate {text,language}`
    fallback. This is higher value and lower risk than B.

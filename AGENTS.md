@@ -31,7 +31,7 @@ in `model_config.py` maps it to the checkpoint and IR paths. 1.7B is the recomme
 Reproducible Linux AMD64 container that accelerates 0.6B or 1.7B Qwen3-TTS Base voice-cloning
 checkpoints on Intel CPUs with OpenVINO while preserving a tested PyTorch rollback path.
 
-Read `docs/dev/OPENVINO_IMPLEMENTATION.md` before changing model export, cache handling,
+Read `docs/dev/architecture/OPENVINO_IMPLEMENTATION.md` before changing model export, cache handling,
 generation, quantization, memory loading, Docker packaging, or deployment behavior.
 
 ## Current state (v0.15.x)
@@ -106,7 +106,7 @@ git diff --check
 
 Container or dependency changes: apply `ready-to-test` to trigger the image build and import smoke test on `arc-general-docker`. Do this only after local validation passes.
 
-Model execution changes also require the staged gates from `docs/dev/OPENVINO_IMPLEMENTATION.md`:
+Model execution changes also require the staged gates from `docs/dev/architecture/OPENVINO_IMPLEMENTATION.md`:
 1. PyTorch baseline/profile
 2. FP32 OpenVINO tensor, token, position, and cache parity
 3. INT8 accuracy and greedy-code agreement

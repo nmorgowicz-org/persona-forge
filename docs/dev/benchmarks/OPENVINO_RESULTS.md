@@ -1,7 +1,7 @@
 # Qwen3-TTS OpenVINO — Benchmark & Results Log
 
 Measured data only. Design, contracts, and plans live in
-[`OPENVINO_IMPLEMENTATION.md`](OPENVINO_IMPLEMENTATION.md); this file is the audit record of every
+[`OPENVINO_IMPLEMENTATION.md`](../architecture/OPENVINO_IMPLEMENTATION.md); this file is the audit record of every
 run so options can be compared without wading through the implementation narrative.
 
 All runs: CPU only, dockermisc1 (8 vCPU i7-1360P, AVX2+VNNI, no AVX-512, 15 GiB RAM), 6 threads,
