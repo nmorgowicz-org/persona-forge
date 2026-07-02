@@ -189,14 +189,15 @@ IR load + first-inference JIT unless the OV kernel cache is warm for both graphs
 1. Add a second entry set to `model_config.py::MODEL_PRESETS`, or a parallel dict, e.g.:
    ```python
    VOICE_DESIGN_MODEL_PRESETS = {
-       "1.7B": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",  # verify exact HF repo id before using
+       "1.7B": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
    }
    ```
-   **Verify the exact HF repo name** on the Qwen org before hardcoding it — do not guess a repo id
-   that hasn't been confirmed to exist. Check https://huggingface.co/Qwen for the actual
-   VoiceDesign checkpoint id (search terms: "Qwen3-TTS VoiceDesign"). alexandria_ideas.md
-   confirms VoiceDesign exists as a same-class 1.7B checkpoint but does not give the exact repo
-   string — that must be confirmed against the live HF Hub before export.
+   **Confirmed** (2026-07-02, web search): `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign` exists on
+   Hugging Face — https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign — and its model card
+   documents using `generate_voice_design(text=<target text>, instruct=<natural-language voice
+   description>)`, matching the `qwen_tts` 0.1.1 signature already referenced in §B.4.1 step 4.
+   No 0.6B-VoiceDesign checkpoint was found; only the 1.7B-class checkpoint exists, consistent with
+   alexandria_ideas.md's "same 1.7B-class architecture as Base 1.7B" description.
 2. Extend `presets.py` with a `voice_design` preset (or a new sibling dict —
    `VOICE_DESIGN_PRESETS`), keyed by size (only `1.7B` needed, per alexandria_ideas.md — no
    0.6B-VoiceDesign requirement stated). Point its `_ir_paths()` at `/ov/1.7B-voicedesign/...`
