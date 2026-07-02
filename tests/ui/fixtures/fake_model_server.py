@@ -20,6 +20,7 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 import sys
@@ -120,6 +121,11 @@ def _install_fake_voice_design(app_module) -> None:
 
 def main() -> None:
     port = int(os.getenv("QWEN3_TTS_TEST_PORT", "8319"))
+
+    # Werkzeug logs every request at INFO ("GET /health HTTP/1.1" 200 -), which drowns out
+    # Playwright's own pass/fail lines with no signal. Unhandled exceptions still log via ERROR,
+    # so a 500 (a real test failure) stays visible; only the noisy per-request access log is cut.
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
     # Real voice_library, but scoped to a throwaway directory so E2E runs never touch (or
     # depend on) a real deployment's saved voices. Must be set before qwen3_tts.voice_library
