@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.19.0...qwen3-tts-openvino-v0.20.0) (2026-07-02)
+
+
+### Features
+
+* add TTS_MAX_SPEECH_SECONDS for configurable stateful capacity ceiling ([47b2706](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/47b2706321d9fff7705b71f361aab90268c03508))
+
 ## [0.19.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.18.0...qwen3-tts-openvino-v0.19.0) (2026-07-02)
 
 
