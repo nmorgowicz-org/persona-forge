@@ -34,7 +34,10 @@ def apply_preset_env(environ: MutableMapping[str, str] = os.environ) -> dict[str
     """
     model_size = environ.get("MODEL_SIZE", "0.6B")
     environ["MODEL_SIZE"] = normalize_size(model_size)
-    preset = get_preset(model_size)
+
+    max_speech_seconds = environ.get("TTS_MAX_SPEECH_SECONDS")
+    preset = get_preset(model_size, float(max_speech_seconds) if max_speech_seconds else None)
+    _setdefault(environ, "TTS_MAX_SPEECH_SECONDS", preset["max_speech_seconds"])
 
     # Backend (MODEL_REPO is resolved from MODEL_SIZE by model_config.resolve_model_repo).
     # An explicit TTS_BACKEND wins; otherwise the preset default (openvino).

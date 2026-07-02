@@ -10,6 +10,7 @@ from typing import Any, Callable
 # Apply thread and runtime envs before heavy imports
 from qwen3_tts.config import REF_AUDIO_PATH, apply_preset_env
 from qwen3_tts.openvino.runtime_config import apply_thread_env
+from qwen3_tts.presets import seconds_for_capacity
 
 apply_preset_env()
 
@@ -360,6 +361,12 @@ def health_state() -> dict[str, Any]:
                         "main": getattr(getattr(ov_runtime, "main", None), "capacity", None),
                         "predictor": getattr(getattr(ov_runtime, "pred", None), "capacity", None),
                     },
+                    "max_speech_seconds": (
+                        seconds_for_capacity(main_capacity)
+                        if (main_capacity := getattr(getattr(ov_runtime, "main", None), "capacity", None))
+                        is not None
+                        else None
+                    ),
                     "release_torch": OPENVINO_RELEASE_TORCH,
                     "vocoder": vocoder_info,
                 }
