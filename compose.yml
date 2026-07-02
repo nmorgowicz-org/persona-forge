@@ -29,10 +29,19 @@ services:
       TTS_BACKEND: ${TTS_BACKEND:-openvino}
       TZ: ${TZ:-America/Detroit}
       LOW_RAM_MODE: ${LOW_RAM_MODE:-0}
+      # Serves the built frontend/ static export at / (see src/qwen3_tts/app.py). Set to 0 to
+      # run this container as an API-only service with no web UI.
+      FRONTEND_ENABLED: ${FRONTEND_ENABLED:-1}
+      # Must match the export-voice-design service below — selects which VoiceDesign IR tree
+      # this container swaps into for POST /voice_design (see src/qwen3_tts/voice_design.py).
+      VOICE_DESIGN_MODEL_SIZE: ${VOICE_DESIGN_MODEL_SIZE:-1.7B}
+      VOICE_DESIGN_MODEL_REPO: ${VOICE_DESIGN_MODEL_REPO:-}
+      VOICE_DESIGN_MAX_SPEECH_SECONDS: ${VOICE_DESIGN_MAX_SPEECH_SECONDS:-}
     volumes:
       - ${MODEL_CACHE_PATH:-./data/model}:/root/.cache/huggingface/hub:rw
       - ${OV_DATA_PATH:-./data/ov}:/ov:rw
       - ${REF_AUDIO_PATH:?Set REF_AUDIO_PATH to the reference WAV file}:/voice/reference.wav:ro
+      - ${VOICE_LIBRARY_PATH:-./data/voices}:/voices:rw
     mem_limit: ${TTS_MEMORY_LIMIT:-10G}
     memswap_limit: ${TTS_MEMORY_SWAP_LIMIT:-11G}
     stop_grace_period: 45s
@@ -51,5 +60,26 @@ services:
     # The FP32 export + INT4/INT8 quantization needs more headroom than serving; the 1.7B
     # INT4 export can OOM at the 10G serving limit. Stop the serving container before exporting
     # on the 15 GiB box — never run a 13G export and a 10G serve concurrently (OOM).
+    mem_limit: ${EXPORT_MEMORY_LIMIT:-13G}
+    memswap_limit: ${EXPORT_MEMORY_SWAP_LIMIT:-14G}
+
+  export-voice-design:
+    # Same image/command as `export`; EXPORT_TARGET selects the VoiceDesign checkpoint and
+    # its separate /ov/<size>-voicedesign/... output tree (see scripts/export.py, VOICE_DESIGN
+    # section of docs/plans/PLAN_voice_design.md). Independent from the `export` service so a
+    # VoiceDesign export never overwrites a Base export for the same size.
+    image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:local}
+    build:
+      context: .
+    command: ["python", "scripts/export.py"]
+    profiles: [export]
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      EXPORT_TARGET: voice_design
+      VOICE_DESIGN_MODEL_SIZE: ${VOICE_DESIGN_MODEL_SIZE:-1.7B}
+      VOICE_DESIGN_MODEL_REPO: ${VOICE_DESIGN_MODEL_REPO:-}
+      VOICE_DESIGN_MAX_SPEECH_SECONDS: ${VOICE_DESIGN_MAX_SPEECH_SECONDS:-}
+      OV_OUTPUT_ROOT: /ov
+    volumes: *model-volumes
     mem_limit: ${EXPORT_MEMORY_LIMIT:-13G}
     memswap_limit: ${EXPORT_MEMORY_SWAP_LIMIT:-14G}

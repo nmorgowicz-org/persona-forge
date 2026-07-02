@@ -1193,6 +1193,18 @@ class OVTalkerRuntime:
             flush=True,
         )
 
+    @property
+    def codec_released(self) -> bool:
+        """Whether release_codec() has freed the PyTorch codec weights (one-way, fail-closed).
+
+        Callers that need to *encode* new reference audio (e.g. building a fresh
+        voice_clone_prompt for a not-yet-cached voice_id) must check this first — encoding
+        against freed weights doesn't raise, it silently runs on empty tensors and produces a
+        confusing downstream shape/AttributeError instead of a clear "restart with
+        OPENVINO_RELEASE_CODEC=0" message.
+        """
+        return self._codec_released
+
     def uninstall(self) -> None:
         if self._torch_cores_released:
             # Weights were freed for memory; restoring the eager forwards would only expose

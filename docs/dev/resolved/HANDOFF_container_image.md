@@ -23,7 +23,7 @@ curl -s localhost:8318/v1/audio/speech -H 'Content-Type: application/json' \
 
 **The refactor is DONE and validated.** One merged Flask app (`qwen3_tts.app:app`), `src/` package
 layout, `MODEL_SIZE` presets, one-command export, `serve.py`/port-8319 proxy removed, docs moved to
-`docs/dev/`. Details are in git history and `docs/dev/OPENVINO_RESULTS.md`; do not re-do them.
+`docs/dev/`. Details are in git history and `docs/dev/benchmarks/OPENVINO_RESULTS.md`; do not re-do them.
 
 Validated on `dockermisc1` (see OPENVINO_RESULTS.md for full provenance):
 - **1.7B is the product-preferred profile** (user listening decision 2026-06-30; slightly better than
@@ -37,7 +37,7 @@ Validated on `dockermisc1` (see OPENVINO_RESULTS.md for full provenance):
 ## 3. Memory — RESOLVED
 
 The "0.6B ≈ 1.7B memory" surprise is explained and the reduction work is done. Full analysis:
-`docs/dev/OPENVINO_RESULTS.md`. The short version:
+`docs/dev/benchmarks/OPENVINO_RESULTS.md`. The short version:
 
 - Steady RSS is a **large fixed OpenVINO floor** (FP32 vocoder + runtime ≈ 2.7 GiB) plus a tiny
   (~0.3 GiB) variable IR/embedding delta. So **0.6B is not meaningfully smaller than 1.7B** → ship 1.7B.
@@ -116,4 +116,4 @@ NNCF and the export/parity tools are included in the same image as the serving r
 
 ---
 *History: the full step-by-step refactor plan (§1–§10 of the old handoff), the streaming-validation
-handoff, and all milestone results are preserved in git history and `docs/dev/OPENVINO_RESULTS.md`.*
+handoff, and all milestone results are preserved in git history and `docs/dev/benchmarks/OPENVINO_RESULTS.md`.*

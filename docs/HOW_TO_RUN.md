@@ -74,6 +74,7 @@ run two model jobs concurrently.
 | `MODEL_CACHE_PATH` (default `./data/model`) | `/root/.cache/huggingface/hub` | read/write | Reuses downloaded checkpoint files |
 | `OV_DATA_PATH` (default `./data/ov`) | `/ov` | read/write | Stores generated IR by model size |
 | `REF_AUDIO_PATH` | `/voice/reference.wav` | read-only | Fixed voice-clone reference used at startup |
+| `VOICE_LIBRARY_PATH` (default `./data/voices`) | `/voices` | read/write | VoiceDesign reference samples saved via `POST /voice_design` |
 
 `REF_TEXT` is an environment value, not a mount. It must be the exact transcript of the reference
 WAV; a mismatch reduces speaker and pronunciation quality. Do not place tokens, private voices,
@@ -101,13 +102,21 @@ LOW_RAM_MODE=1
 
 This does three things together:
 
-1. **jemalloc allocator** — replaces glibc malloc via `LD_PRELOAD` before Gunicorn starts. PyTorch and OpenVINO hold large intermediate allocations that glibc never returns to the OS even after they are freed; jemalloc with a 1-second decay actively purges those pages back to the kernel.
-2. **Aggressive memory return** — `MALLOC_CONF=background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:1000` runs a jemalloc background thread that continuously returns unused pages.
-3. **Idle unload** — model weights (~5–6 GiB) are released after 30 minutes of idle. The next request reloads them automatically. With the OV kernel cache warm (default), reload takes ~5–10s; on a completely cold first boot it takes ~60–120s while OV compiles kernels and writes the cache. Override the timeout with `IDLE_UNLOAD_SECONDS=<seconds>`.
+1. **Aggressive memory return** — tunes glibc malloc with
+   `MALLOC_MMAP_THRESHOLD_=65536` and `MALLOC_ARENA_MAX=1` so large allocations use mmap and are
+   returned to the OS more eagerly. PyTorch and OpenVINO hold large intermediate allocations that
+   glibc normally never releases; these settings force it to return memory from large arenas.
+2. **Idle unload** — model weights (~5–6 GiB) are released after 30 minutes of idle. The next
+   request reloads them automatically. With the OV kernel cache warm (default), reload takes
+   ~5–10s; on a completely cold first boot it takes ~60–120s while OV compiles kernels and writes
+   the cache. Python also calls `malloc_trim(0)` after each unload to flush glibc arenas back to
+   the kernel. Override the timeout with `IDLE_UNLOAD_SECONDS=<seconds>`.
+3. **No allocator replacement** — previous attempts to swap glibc with jemalloc or tcmalloc via
+   `LD_PRELOAD` caused SIGABRT/SIGSEGV during OpenVINO `compile_model()` under transformers 5.x;
+   `LOW_RAM_MODE` intentionally avoids that and relies on glibc tuning.
 
-`LOW_RAM_MODE` requires the container image to have `libjemalloc2` installed. All released images built after this feature was added include it. If you built an older local image, rebuild it.
-
-The `/health` endpoint reports `model_loaded`, `process_rss_mib`, and `idle_unload_seconds` so you can observe the effect.
+The `/health` endpoint reports `model_loaded`, `process_rss_mib`, and `idle_unload_seconds` so you
+can observe the effect.
 
 ### Memory limits
 
@@ -143,7 +152,7 @@ of silently truncating or (pre-fix) free-running until it crashes.
 
 **This is a safety/latency cap, not a memory-saving knob.** Peak container RSS is dominated by fixed
 OpenVINO runtime + vocoder overhead (~7.3 GiB), with capacity contributing only ~0.5 MiB per second
-of headroom (measured from the 768-vs-2048-frame A/B in `docs/dev/OPENVINO_RESULTS.md`) — lowering it
+of headroom (measured from the 768-vs-2048-frame A/B in `docs/dev/benchmarks/OPENVINO_RESULTS.md`) — lowering it
 from 64s to 15s saves roughly 200 MiB, not gigabytes. Use it to bound worst-case latency and fail
 closed on runaway/misbehaving requests, not to fit a smaller memory budget.
 
@@ -192,8 +201,8 @@ curl -sS http://localhost:8318/v1/audio/speech \
 Listen blind if possible. Record intelligibility, speaker similarity, prosody, repetition,
 truncation, and artifacts. Also capture image ID, source commit, model revision, IR metadata hash,
 latency, peak container RSS, host available RAM, and swap delta. The acceptance methodology is in
-`docs/dev/OPENVINO_IMPLEMENTATION.md`; historical measurements are in
-`docs/dev/OPENVINO_RESULTS.md`.
+`docs/dev/architecture/OPENVINO_IMPLEMENTATION.md`; historical measurements are in
+`docs/dev/benchmarks/OPENVINO_RESULTS.md`.
 
 ## Presets and advanced settings
 
@@ -210,7 +219,7 @@ different `TTS_MAX_SPEECH_SECONDS` if you need a different ceiling.
 
 After startup the service releases ~0.3 GiB of load-time overhead; the startup log prints
 `released ~0.32 GiB of PyTorch codec` when this happens. Measured results are in
-`docs/dev/OPENVINO_RESULTS.md`.
+`docs/dev/benchmarks/OPENVINO_RESULTS.md`.
 
 Explicit advanced environment values override preset defaults. Common examples are:
 
@@ -237,6 +246,9 @@ Operational settings:
 | `TTS_BACKEND` | `openvino` | Set `pytorch` for the rollback backend (slower, no IR needed) |
 | `MODEL_REVISION` | unset | Pin a specific Hugging Face revision; must match exported IR |
 | `HF_TOKEN` | unset | Hugging Face token when required; do not commit it |
+| `VOICE_DESIGN_MODEL_SIZE` | `1.7B` | VoiceDesign checkpoint size preset; only `1.7B` ships one today |
+| `VOICE_DESIGN_MODEL_REPO` | unset | Override the HF repo instead of using the size preset |
+| `VOICE_DESIGN_MAX_SPEECH_SECONDS` | `20` | VoiceDesign IR capacity; must match between `export-voice-design` and `qwen3-tts` |
 | `TTS_MEMORY_LIMIT` / `TTS_MEMORY_SWAP_LIMIT` | `10G` / `11G` | Serving container memory limits; raise on hosts with more RAM |
 | `EXPORT_MEMORY_LIMIT` / `EXPORT_MEMORY_SWAP_LIMIT` | `13G` / `14G` | Export container memory limits |
 | `LOW_RAM_MODE` | `0` | Set to `1` to enable jemalloc allocator, aggressive memory return, and 30-min idle unload. Recommended on hosts with less than 20 GiB free. Requires a rebuilt or freshly pulled image (jemalloc is installed at build time). |
@@ -244,7 +256,7 @@ Operational settings:
 | `OV_CACHE_DIR` | `/ov/cache` | OpenVINO compiled kernel cache directory. Already on the persistent `OV_DATA_PATH` mount — no extra setup needed. Eliminates ~60–120s JIT recompilation on every restart or idle-unload reload. Set to empty string to disable. |
 | `OV_DYNAMIC_QUANT_GROUP_SIZE` | `32` | Inference speed/accuracy knob (`0` = off, `32` = default, `64` = faster/slightly lower accuracy) |
 | `IDLE_UNLOAD_SECONDS` | unset | Unload the model after this many idle seconds (e.g. `1800` = 30 min). Frees ~5–6 GiB. Reload is automatic: ~5–10s with OV cache warm, ~60–120s on first cold boot. Disabled by default. Set automatically to `1800` by `LOW_RAM_MODE=1`. |
-| `SILENCE_TRIM` | `1` | Trim trailing silence from output (`0` to disable if audio seems clipped) |
+| `SILENCE_TRIM` | `1` | Trim leading and trailing silence from output (`0` to disable if audio seems clipped) |
 | `SILENCE_TRIM_THRESH` | `0.01` | Silence threshold as a fraction of peak amplitude |
 | `SILENCE_TRIM_PAD_MS` | `30` | Milliseconds of audio kept after the silence boundary |
 | `OPENVINO_RELEASE_CODEC` | `1` | Frees ~0.3 GiB of load-time overhead after startup; set `0` to keep it |
@@ -256,8 +268,94 @@ requires its FP32 parity path.
 `OPENVINO_RELEASE_CODEC` frees the PyTorch codec after startup for a smaller footprint and defaults
 on (with the OpenVINO release-torch policy). The release is fail-closed: once freed there is no
 PyTorch decode fallback, so an OpenVINO vocoder failure errors the request instead of silently
-switching backends. Set it to `0` to keep the codec encoder resident — required for future
-per-request voice cloning, and useful if you want the PyTorch vocoder fallback available.
+switching backends. Set it to `0` to keep the codec encoder resident — **required for per-request
+voice cloning** (passing a new, not-yet-cached `voice_id` to a generate endpoint) — the codec
+encoder is what turns a saved reference sample into a `voice_clone_prompt`. With the default
+`OPENVINO_RELEASE_CODEC=1`, requesting an uncached `voice_id` fails fast with a clear error
+telling you to restart with `OPENVINO_RELEASE_CODEC=0`, rather than silently encoding against
+freed weights.
+
+## VoiceDesign (generate a new voice from a text description)
+
+1. Export the VoiceDesign checkpoint once, in addition to the Base export above (only 1.7B ships a
+   VoiceDesign checkpoint today, independent of `MODEL_SIZE`):
+
+   ```bash
+   docker compose run --rm export-voice-design
+   ```
+
+   This writes IR to `/ov/1.7B-voicedesign/...` — a separate tree from the Base 1.7B export, so
+   the two never collide.
+
+2. Call `POST /voice_design` with a free-text voice description and a short (~15s of speech)
+   sample of text to say in that voice. `seed` is optional (omit it for a random draw) and
+   `selections` is optional opaque chip state the frontend uses to let a voice be reopened and
+   tweaked later — the backend just stores it alongside the voice, it doesn't interpret it:
+
+   ```bash
+   curl -sS http://localhost:8318/voice_design \
+     -H 'Content-Type: application/json' \
+     -d '{"description":"An older British man, calm and gravelly.","sample_text":"The old lighthouse stood against the storm.","seed":12345}'
+   ```
+
+   The response is `{"voice_id", "sample_rate", "seed", "audio_base64"}` — `seed` is the resolved
+   seed actually used, so a good take can be reproduced exactly by passing it back in a later
+   call. The generated sample is saved to the voice library (`VOICE_LIBRARY_PATH`, default
+   `./data/voices`, mounted at `/voices` — see `src/qwen3_tts/voice_library.py`) so it survives
+   restarts.
+
+3. Pass the returned `voice_id` to any generate endpoint (`/generate`, `/v1/audio/speech`,
+   `/generate/stream`) to clone that voice instead of the container's default reference voice.
+   Omitting `voice_id` is unchanged from before this feature existed. This requires
+   `OPENVINO_RELEASE_CODEC=0` (see above) the first time a given `voice_id` is used; after that
+   its `voice_clone_prompt` is cached in-process.
+
+`GET /voices` lists saved voices; `GET /voices/<voice_id>` fetches one (metadata + `audio_base64`);
+`DELETE /voices/<voice_id>` removes one (used by the frontend's Voice Library to prune superseded
+voices after a tune/tweak, since editing forks a new voice rather than overwriting).
+
+`/generate` and `/v1/audio/speech` also accept an optional `seed`; whichever seed was actually used
+(random or caller-supplied) is reported back in the `X-Seed` response header.
+
+**This briefly unloads the resident Base model.** `POST /voice_design` swaps the container over to
+the VoiceDesign checkpoint, generates the one sample, then swaps back to Base — serialized through
+the same single-worker executor as every other request, so an in-flight `/generate` call can't race
+it. `GET /health` and all generate endpoints return `503` for the ~seconds-to-tens-of-seconds the
+swap takes (governed by the same JIT/cache behavior as a normal restart — see `OV_CACHE_DIR` above).
+If VoiceDesign generation itself fails, the service still restores Base before returning the error;
+it never gets stuck without a loaded model.
+
+## Runtime control panel
+
+`GET /runtime/config` and `POST /runtime/config` (and the "Runtime" tab in the web UI) expose the
+knobs that were previously env-var-only and required a container restart to change, split into
+three groups:
+
+- **Live-adjustable:** `TTS_BACKEND`, `IDLE_UNLOAD_SECONDS`, `SILENCE_TRIM`/`SILENCE_TRIM_THRESH`/
+  `SILENCE_TRIM_PAD_MS`, `OV_DYNAMIC_QUANT_GROUP_SIZE`. Changing `TTS_BACKEND` or
+  `OV_DYNAMIC_QUANT_GROUP_SIZE` triggers `force_unload()` + reload of the currently active profile
+  (Base or VoiceDesign, whichever was resident) — serialized through the same single-worker
+  executor as every other model operation, so it can't race an in-flight request. `GET /health` and
+  `_ready()` report `reconfig_in_progress` and 503 for the duration, the same way a VoiceDesign swap
+  does. The other keys take effect immediately with no reload.
+- **Read-only transparency:** mount read/write mode for the model cache, OpenVINO IR, and voice
+  library directories, plus whether `REF_AUDIO_PATH`/`HF_TOKEN` are set (never the token value
+  itself). These reflect how the container was actually started; there's no control here because
+  there's nothing this endpoint can do about them.
+- **Requires re-export:** `TTS_MAX_SPEECH_SECONDS` and quantization precision are baked into the
+  OpenVINO IR at export time — the API reports them but changing them means re-running `export`/
+  `export-voice-design` (see above), not a runtime toggle.
+
+There is deliberately no auth gate on `POST /runtime/config` — the whole service already runs
+unauthenticated on a trusted-network-only posture (see [SECURITY.md](../SECURITY.md)), and gating
+just this one route would be inconsistent with that. Example:
+
+```bash
+curl -sS http://localhost:8318/runtime/config
+curl -sS -X POST http://localhost:8318/runtime/config \
+  -H 'Content-Type: application/json' \
+  -d '{"IDLE_UNLOAD_SECONDS": 900}'
+```
 
 ## Streaming and validation endpoints
 

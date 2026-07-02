@@ -31,6 +31,7 @@ import time
 from pathlib import Path
 
 from qwen3_tts.model_config import configure_hf_token, resolve_model_repo
+from qwen3_tts.transformers_compat import repair_rotary_buffers
 
 COMPRESSION_CHOICES = ("fp32", "int8", "both")
 
@@ -107,6 +108,11 @@ def parse_args() -> argparse.Namespace:
         "--vocoder-only",
         action="store_true",
         help="export only the vocoder decoder into an isolated milestone directory",
+    )
+    graph_scope.add_argument(
+        "--main-only",
+        action="store_true",
+        help="export only main prefill/decode graphs (used by the 1.7B INT4 pass)",
     )
     args = parser.parse_args()
     if args.calibration:
@@ -303,6 +309,8 @@ def run() -> int:
         dtype=torch.float32,
         attn_implementation="eager",
     )
+    rotary_report = repair_rotary_buffers(wrapped.model, torch)
+    print(f"[export] repaired and validated RoPE buffers: {rotary_report}", flush=True)
     resolved_revision = _resolved_model_revision(wrapped, revision)
     talker = wrapped.model.talker
     vocoder_decoder = _resolve_vocoder_decoder(wrapped.model.speech_tokenizer)
@@ -316,7 +324,7 @@ def run() -> int:
     vocoder = wrappers.VocoderDecoderWrapper(vocoder_decoder)
 
     plan: dict[str, tuple] = {}
-    if not args.skip_vocoder:
+    if not args.skip_vocoder and not args.main_only:
         plan["vocoder_decoder"] = (vocoder, voc_dims, dict(vocoder_chunk=args.vocoder_chunk))
     main_dims = None
     pred_dims = None
@@ -324,9 +332,6 @@ def run() -> int:
         main_dims = wrappers.core_dims(talker.model.config)
         pred_dims = wrappers.core_dims(talker.code_predictor.model.config)
         main = wrappers.MainCoreWrapper(talker.model, main_dims["num_layers"])
-        predictor = wrappers.PredictorCoreWrapper(
-            talker.code_predictor.model, pred_dims["num_layers"]
-        )
         plan.update(
             {
                 "main_prefill": (
@@ -339,18 +344,26 @@ def run() -> int:
                     main_dims,
                     dict(seq=1, prior=args.decode_prior, predictor=False),
                 ),
-                "predictor_prefill": (
-                    predictor,
-                    pred_dims,
-                    dict(seq=args.prefill_seq, prior=0, predictor=True),
-                ),
-                "predictor_decode": (
-                    predictor,
-                    pred_dims,
-                    dict(seq=1, prior=args.decode_prior, predictor=True),
-                ),
             }
         )
+        if not args.main_only:
+            predictor = wrappers.PredictorCoreWrapper(
+                talker.code_predictor.model, pred_dims["num_layers"]
+            )
+            plan.update(
+                {
+                    "predictor_prefill": (
+                        predictor,
+                        pred_dims,
+                        dict(seq=args.prefill_seq, prior=0, predictor=True),
+                    ),
+                    "predictor_decode": (
+                        predictor,
+                        pred_dims,
+                        dict(seq=1, prior=args.decode_prior, predictor=True),
+                    ),
+                }
+            )
 
     out_parent = Path(args.output_dir)
     out_parent.mkdir(parents=True, exist_ok=True)
@@ -436,7 +449,9 @@ def run() -> int:
             "main_dims": main_dims,
             "predictor_dims": pred_dims,
             "vocoder_dims": voc_dims,
-            "vocoder_input_frames": args.vocoder_chunk if not args.skip_vocoder else None,
+            "vocoder_input_frames": (
+                args.vocoder_chunk if not args.skip_vocoder and not args.main_only else None
+            ),
             "num_code_groups": getattr(talker.model.config, "num_code_groups", None)
             or getattr(wrapped.model.config.talker_config, "num_code_groups", None),
             "source_hash": _source_hash(),

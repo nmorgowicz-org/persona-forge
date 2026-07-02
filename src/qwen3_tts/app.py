@@ -2,17 +2,47 @@
 
 from __future__ import annotations
 
+import base64
 import io
+import os
 import queue
 import time
+from pathlib import Path
 from typing import Any
 
 import soundfile as sf
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify, request, send_from_directory
 
-from qwen3_tts import model
+from qwen3_tts import model, voice_design, voice_library
 
 app = Flask(__name__)
+
+# Static frontend export (frontend/, built by `npm run build`; see docs/plans/PLAN_voice_design.md
+# §8.1). The Dockerfile copies the build output to /app/frontend/dist; app.py lives at
+# /app/src/qwen3_tts/app.py, so parent.parent.parent is /app in the container by construction.
+# Auto-disables (falls back to a bare API service) if the dist directory isn't present, e.g. a
+# local `python -m qwen3_tts.app` run without ever building the frontend.
+_FRONTEND_DIR = Path(
+    os.getenv("FRONTEND_DIST_DIR", str(Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"))
+)
+_frontend_enabled = os.getenv("FRONTEND_ENABLED", "1").strip().lower() not in (
+    "0",
+    "false",
+) and _FRONTEND_DIR.is_dir()
+
+if _frontend_enabled:
+
+    @app.get("/")
+    def frontend_index():
+        return send_from_directory(_FRONTEND_DIR, "index.html")
+
+    @app.get("/assets/<path:filename>")
+    def frontend_assets(filename: str):
+        return send_from_directory(_FRONTEND_DIR / "assets", filename)
+
+    @app.get("/favicon.svg")
+    def frontend_favicon():
+        return send_from_directory(_FRONTEND_DIR, "favicon.svg")
 
 
 def _openai_error(message: str, status: int, err_type: str = "invalid_request_error"):
@@ -45,7 +75,13 @@ def _encode(wav: Any, sr: int, response_format: str) -> tuple[bytes, str]:
 def _ready():
     # True once the service has successfully loaded at least once.
     # With IDLE_UNLOAD_SECONDS set, model may be None temporarily — requests reload it.
-    return model._service_started
+    # During a VoiceDesign swap or a runtime-config reload, Base is briefly unloaded so
+    # treat both as not-ready too (503).
+    return (
+        model._service_started
+        and not voice_design.swap_in_progress()
+        and not model.reconfig_in_progress()
+    )
 
 
 def _json_body():
@@ -58,7 +94,116 @@ def _generation_fields(data: dict[str, Any]) -> tuple[str, str]:
 
 @app.get("/health")
 def health():
-    return jsonify(model.health_state())
+    state = model.health_state()
+    # Swap-in-progress is tracked in voice_design.py, not model.py, to avoid a circular
+    # import; merged here so the frontend can poll one endpoint for a prominent
+    # swap-in-progress banner (PLAN_voice_design.md §3, §11 frontend checklist).
+    state["swap_in_progress"] = voice_design.swap_in_progress()
+    state["reconfig_in_progress"] = model.reconfig_in_progress()
+    return jsonify(state)
+
+
+@app.post("/voice_design")
+def voice_design_create():
+    # Checked separately from the generic _ready() 503 below: while a swap is already in
+    # flight this *is* the expected state (another /voice_design call is mid-swap), not an
+    # unloaded-model error, so it gets its own message.
+    if voice_design.swap_in_progress():
+        return jsonify({"error": "VoiceDesign swap already in progress"}), 503
+    if not model._service_started:
+        return jsonify({"error": "Model not loaded"}), 503
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    description = (data.get("description") or "").strip()
+    sample_text = (data.get("sample_text") or "").strip()
+    language = (data.get("language") or "English").strip()
+    seed = data.get("seed")
+    selections = data.get("selections")
+    if not description:
+        return jsonify({"error": "description is required"}), 400
+    if not sample_text:
+        return jsonify({"error": "sample_text is required"}), 400
+    if seed is not None and not isinstance(seed, int):
+        return jsonify({"error": "seed must be an integer"}), 400
+    try:
+        voice_design.validate_sample_text(sample_text)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    try:
+        wav, sr, resolved_seed = model.executor.submit(
+            voice_design.run_voice_design_request, description, sample_text, language, seed
+        ).result(timeout=300)
+        wav_bytes, _ = _encode(wav, sr, "wav")
+        meta = voice_library.save_voice(
+            wav_bytes,
+            description=description,
+            sample_text=sample_text,
+            language=language,
+            seed=resolved_seed,
+            selections=selections,
+        )
+    except Exception as exc:
+        return jsonify({"error": f"VoiceDesign error: {exc}"}), 500
+    return jsonify(
+        {
+            "voice_id": meta["voice_id"],
+            "sample_rate": sr,
+            "seed": resolved_seed,
+            "audio_base64": base64.b64encode(wav_bytes).decode("ascii"),
+        }
+    )
+
+
+@app.get("/voices")
+def voices_list():
+    return jsonify({"voices": voice_library.list_voices()})
+
+
+@app.get("/voices/<voice_id>")
+def voices_get(voice_id: str):
+    meta = voice_library.get_voice(voice_id)
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    wav_bytes = voice_library.get_voice_wav_bytes(voice_id)
+    response = dict(meta)
+    if wav_bytes is not None:
+        response["audio_base64"] = base64.b64encode(wav_bytes).decode("ascii")
+    response.pop("wav_path", None)
+    return jsonify(response)
+
+
+@app.delete("/voices/<voice_id>")
+def voices_delete(voice_id: str):
+    deleted = voice_library.delete_voice(voice_id)
+    if not deleted:
+        return jsonify({"error": "voice_id not found"}), 404
+    return jsonify({"deleted": voice_id})
+
+
+@app.get("/runtime/config")
+def runtime_config_get():
+    return jsonify(model.runtime_config_state())
+
+
+@app.post("/runtime/config")
+def runtime_config_post():
+    # No auth gate on this mutating route — deliberate decision (PLAN_voice_design.md §8.8
+    # security note): the whole service already runs unauthenticated on a trusted-network-only
+    # posture (SECURITY.md), and this stays consistent with that rather than special-casing
+    # one route.
+    if model.reconfig_in_progress() or voice_design.swap_in_progress():
+        return jsonify({"error": "Another runtime reconfiguration or swap is already in progress"}), 503
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    try:
+        state = model.executor.submit(model.apply_runtime_config, data).result(timeout=300)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Runtime config error: {exc}"}), 500
+    return jsonify(state)
 
 
 @app.post("/generate")
@@ -75,12 +220,27 @@ def generate():
     if fmt not in _SUPPORTED_FORMATS:
         return jsonify({"error": f"unsupported response_format {fmt!r}; supported: "
                         f"{', '.join(sorted(_SUPPORTED_FORMATS))}"}), 400
+    voice_id = (data.get("voice_id") or "").strip() or None
+    instruct = (data.get("instruct") or "").strip() or None
+    seed = data.get("seed")
+    if seed is not None and not isinstance(seed, int):
+        return jsonify({"error": "seed must be an integer"}), 400
+    resolved_seed = model.resolve_seed(seed)
     try:
-        wav, sr = model.executor.submit(model._run_generate, text, language).result(timeout=300)
+        wav, sr = model.executor.submit(
+            model._run_generate,
+            text,
+            language,
+            voice_id=voice_id,
+            seed_value=resolved_seed,
+            instruct=instruct,
+        ).result(timeout=300)
         audio, media_type = _encode(wav, sr, fmt)
     except Exception as exc:
         return jsonify({"error": f"Inference error: {exc}"}), 500
-    return Response(audio, content_type=media_type)
+    response = Response(audio, content_type=media_type)
+    response.headers["X-Seed"] = str(resolved_seed)
+    return response
 
 
 @app.post("/v1/audio/speech")
@@ -101,12 +261,27 @@ def openai_audio_speech():
             400,
         )
     language = (data.get("language") or "English").strip()
+    voice_id = (data.get("voice_id") or "").strip() or None
+    instruct = (data.get("instruct") or "").strip() or None
+    seed = data.get("seed")
+    if seed is not None and not isinstance(seed, int):
+        return _openai_error("seed must be an integer", 400)
+    resolved_seed = model.resolve_seed(seed)
     try:
-        wav, sr = model.executor.submit(model._run_generate, text, language).result(timeout=300)
+        wav, sr = model.executor.submit(
+            model._run_generate,
+            text,
+            language,
+            voice_id=voice_id,
+            seed_value=resolved_seed,
+            instruct=instruct,
+        ).result(timeout=300)
         audio, media_type = _encode(wav, sr, fmt)
     except Exception as exc:
         return _openai_error(f"Inference error: {exc}", 500, "api_error")
-    return Response(audio, content_type=media_type)
+    response = Response(audio, content_type=media_type)
+    response.headers["X-Seed"] = str(resolved_seed)
+    return response
 
 
 @app.post("/generate/stream")
@@ -125,6 +300,7 @@ def generate_stream():
     text, language = _generation_fields(data)
     if not text:
         return jsonify({"error": "text is required"}), 400
+    voice_id = (data.get("voice_id") or "").strip() or None
 
     events: queue.Queue[tuple[str, Any]] = queue.Queue()
 
@@ -138,7 +314,12 @@ def generate_stream():
     def produce() -> None:
         try:
             model._run_generate_with_streaming(
-                text, language, on_chunk, reuse_streamed_decode=True
+                text,
+                language,
+                on_chunk,
+                reuse_streamed_decode=True,
+                voice_id=voice_id,
+                seed_value=data.get("seed"),
             )
         except BaseException as exc:
             events.put(("error", exc))

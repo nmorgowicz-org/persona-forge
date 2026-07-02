@@ -49,7 +49,7 @@ Two findings from that baseline reshape the end-to-end picture and must be carri
 
 ## Implementation Status
 
-> **All measured benchmark data lives in [`OPENVINO_RESULTS.md`](OPENVINO_RESULTS.md).** This file
+> **All measured benchmark data lives in [`OPENVINO_RESULTS.md`](../benchmarks/OPENVINO_RESULTS.md).** This file
 > keeps design, contracts, and plans; results blocks here are short pointers into that log.
 
 **Milestone 4 — OpenVINO generation runtime: COMPLETE / measured (2026-06-28).** The explicit-cache
@@ -57,7 +57,7 @@ runtime accelerates both transformer cores, uses buffer-backed K/V cache, and us
 FP32 OpenVINO vocoder, with backend provenance printed at install and in the report JSON. INT8 +
 OV-vocoder measured **1.35x** speedup, codebook match **0.8165**, duration ratio **0.9642**; the
 vocoder is neither the quality problem nor a useful CPU speed lever.
-See [`OPENVINO_RESULTS.md` § Milestone 4](OPENVINO_RESULTS.md#milestone-4--generation-runtime-measured-2026-06-28).
+See [`OPENVINO_RESULTS.md` § Milestone 4](../benchmarks/OPENVINO_RESULTS.md#milestone-4--generation-runtime-measured-2026-06-28).
 
 **Milestone 6 — INT8 quality recovery: COMPLETE / CLOSED (2026-06-29).** **0.6B ships weight-only
 INT8 (~1.40x); the A/B listen confirmed the artifact is acceptable.** Every quality-recovery avenue
@@ -66,7 +66,7 @@ full W8A8 PTQ (~7 dB vs ~30 dB tensor accuracy), and whole-core precision mix (n
 useful speed — damage is distributed across both cores). Per-layer `ignored_scope` is the only
 untried lever and is not worth it for 0.6B. Next work is the **1.7B** track (quality lever) plus
 memory enablers (M5/M7).
-See [`OPENVINO_RESULTS.md` § Milestone 6 and the 0.6B decision summary](OPENVINO_RESULTS.md#0.6b-decision-summary-current).
+See [`OPENVINO_RESULTS.md` § Milestone 6 and the 0.6B decision summary](../benchmarks/OPENVINO_RESULTS.md#0.6b-decision-summary-current).
 
 **0.6B stateful-KV footprint track: IMPLEMENTED / measured (2026-06-29), pending release packaging.**
 Cap-768 main plus cap-32 predictor is bit-exact against the explicit INT8 graphs and produces a
@@ -74,7 +74,7 @@ byte-identical same-seed WAV. With bf16 serving load and early release, short-re
 **8,623 → 6,635 MiB** and trimmed retained RSS fell **8,247 → 6,394 MiB**. Warm median regressed
 3.8% (18.429 → 19.138 s), so this is a footprint feature, not a speed feature. A 177-word prompt
 completed at 45.28 s audio but peaked at 7,845 MiB: use 8 GiB for long-prompt deployments; 7 GiB is
-only valid for bounded short requests. See `PLAN_0.6B_STATEFUL_KV.md` and the results log.
+only valid for bounded short requests. See `../features/stateful-kv-0.6b.md` and the results log.
 
 **Milestone 1.5 — Vocoder decoder export: COMPLETE (2026-06-28)**
 
@@ -83,7 +83,7 @@ export change is planned. `OpenVinoVocoderRuntime.iter_decode_chunks` now expose
 300-frame/25-frame-context decode boundary, and batch decode consumes the same iterator. Model-free tests
 prove exact concatenation parity. This is foundation only: the autoregressive talker still returns the
 complete code sequence before vocoder decode begins. CPU-headroom measurement and a generation-loop code
-producer must precede pipelining or a streaming HTTP endpoint. See `PLAN_STREAMING_VOCODER.md`.
+producer must precede pipelining or a streaming HTTP endpoint. See `../features/streaming-vocoder.md`.
 
 - FP32 IR exported and validated: SNR **46.4 dB** vs PyTorch (mean_abs 1.76e-4, p99.9 6.8e-3).
   The 1e-4 max_abs gate is not the right criterion for a GAN conv decoder where floating-point
@@ -505,7 +505,7 @@ and prevents optimizing only one side of the nested generator.
 
 ### Measured baseline (first pass)
 
-> **Measured data moved to [`OPENVINO_RESULTS.md` § Milestone 0](OPENVINO_RESULTS.md#milestone-0--baseline-profile-fp32-pytorch-no-openvino).**
+> **Measured data moved to [`OPENVINO_RESULTS.md` § Milestone 0](../benchmarks/OPENVINO_RESULTS.md#milestone-0--baseline-profile-fp32-pytorch-no-openvino).**
 > Headline: end-to-end RTF 6.55; predictor 45.6% / tokenizer-decode 29.1% / main 20.8% / glue 4.5%;
 > predictor is ~69% of the transformer loop; peak RSS 6.4 GiB at FP32 baseline (<20% headroom under
 > the 7 GiB limit). A two-core-only backend caps speedup ~3.4x because the ~29% tokenizer decode is
@@ -1010,7 +1010,7 @@ the bounded generated-code agreement (greedy) and the warm sampling latency/RTF/
 
 ### M4 measured results: COMPLETE (2026-06-28, dockermisc1, 0.6B Base, 6 threads)
 
-> **Full measured runs moved to [`OPENVINO_RESULTS.md` § Milestone 4](OPENVINO_RESULTS.md#milestone-4--generation-runtime-measured-2026-06-28).**
+> **Full measured runs moved to [`OPENVINO_RESULTS.md` § Milestone 4](../benchmarks/OPENVINO_RESULTS.md#milestone-4--generation-runtime-measured-2026-06-28).**
 
 Bottom line from the M4 runs (first run, FP32/INT8 re-validations, the vocoder-wiring correction,
 and the OV-vocoder-genuinely-active run):
@@ -1074,7 +1074,7 @@ mid-utterance pause; listening remains required before attributing that artifact
 
 ### Investigation results — moved
 
-> **All M6 measured data moved to [`OPENVINO_RESULTS.md` § Milestone 6](OPENVINO_RESULTS.md#milestone-6--int8-quality-recovery-investigation-2026-06-2829)** (calibration capture + SHAs, the
+> **All M6 measured data moved to [`OPENVINO_RESULTS.md` § Milestone 6](../benchmarks/OPENVINO_RESULTS.md#milestone-6--int8-quality-recovery-investigation-2026-06-2829)** (calibration capture + SHAs, the
 > unsupported-calibration rejection, the W8A8 PTQ accuracy rejection, and the whole-core precision-mix
 > table), plus the **A/B listening verdict** and the **0.6B decision summary** at the top of that file.
 

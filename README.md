@@ -13,12 +13,16 @@ benchmark tooling.
 - Synthesizes speech in a cloned voice from a single reference WAV, no training required.
 - Two model sizes (`MODEL_SIZE=0.6B` or `1.7B`). Both use roughly the same memory; 1.7B sounds better.
 - OpenAI-compatible `POST /v1/audio/speech` — drop-in for clients that already speak the OpenAI TTS API.
+- `POST /voice_design` generates a new reference voice from a free-text description (`Qwen3-TTS-1.7B-VoiceDesign`
+  checkpoint) and saves it to a filesystem-backed voice library; pass its `voice_id` to any generate
+  endpoint to clone it. This briefly swaps the resident model — see [HOW_TO_RUN.md](docs/HOW_TO_RUN.md).
 - MP3 or WAV output; incremental PCM stream available for low-latency playback.
 - Generated IR and model weights persist on the host — restarts are fast, no re-download.
 - `TTS_BACKEND=pytorch` rollback if something goes wrong with the accelerated backend.
 
-One fixed reference voice per container. Per-request voices, Voice Design, authentication, and TLS
-are not implemented. The service must run on a trusted network or behind an authenticated reverse proxy.
+One fixed default reference voice per container, extendable at runtime via `POST /voice_design` +
+`voice_id`. Authentication and TLS are not implemented — the service must run on a trusted network or
+behind an authenticated reverse proxy.
 
 ## Quick start
 
@@ -59,11 +63,35 @@ a memory lever (lowering it saves tens of MiB, not GiB); see
 ## HTTP API
 
 ```text
-GET  /health
-POST /v1/audio/speech  {"input":"...", "language":"English", "response_format":"mp3|wav"}
-POST /generate         {"text":"...",  "language":"English", "response_format":"mp3|wav"}
-POST /generate/stream  {"text":"...",  "language":"English"}  -> mono f32le PCM
+GET    /health
+POST   /v1/audio/speech  {"input":"...", "language":"English", "response_format":"mp3|wav", "voice_id":"...", "instruct":"...", "seed":123}
+POST   /generate         {"text":"...",  "language":"English", "response_format":"mp3|wav", "voice_id":"...", "instruct":"...", "seed":123}
+POST   /generate/stream  {"text":"...",  "language":"English", "voice_id":"...", "seed":123}  -> mono f32le PCM
+
+POST   /voice_design      {"description":"...", "sample_text":"...", "language":"English", "seed":123, "selections":{...}}
+                          -> {"voice_id":"...", "sample_rate":24000, "seed":123, "audio_base64":"..."}
+GET    /voices            -> {"voices": [...]}
+GET    /voices/<voice_id> -> voice metadata + audio_base64
+DELETE /voices/<voice_id> -> {"deleted": "<voice_id>"}
+
+GET    /runtime/config    -> live/read-only/not-live runtime knobs (see below)
+POST   /runtime/config    {"TTS_BACKEND":"openvino|pytorch", "IDLE_UNLOAD_SECONDS":1800, ...}
 ```
+
+`GET/POST /runtime/config` expose the container's live-adjustable knobs (`TTS_BACKEND`,
+`IDLE_UNLOAD_SECONDS`, `SILENCE_TRIM*`, `OV_DYNAMIC_QUANT_GROUP_SIZE`) alongside read-only
+transparency fields (mount read/write mode, whether `REF_AUDIO_PATH`/`HF_TOKEN` are set) and
+knobs that need a re-export to change (`TTS_MAX_SPEECH_SECONDS`, quantization precision).
+Changing `TTS_BACKEND` or `OV_DYNAMIC_QUANT_GROUP_SIZE` briefly reloads the model — in-flight
+requests wait in the executor rather than failing, same as an idle-unload reload. This route has
+no auth gate, matching the rest of the API's "trusted network only" posture.
+
+`seed` is optional everywhere it's accepted — omit it for a fresh random draw. `/generate` and
+`/v1/audio/speech` report the seed actually used (random or caller-supplied) back in the
+`X-Seed` response header; `/voice_design` reports it in the JSON body. `selections` on
+`/voice_design` is opaque chip-selection state the frontend stores alongside the voice so it can
+be reopened and tweaked later — the backend doesn't interpret it, only `description` feeds the
+model.
 
 `/stream_internal` and `/batch_internal` are development parity endpoints, not stable public APIs.
 The public stream reports format, sample rate, and channel count in `X-Audio-*` headers. If an error
@@ -79,7 +107,7 @@ and generated speech are never included in the image; Compose bind-mounts them f
 
 See [HOW_TO_RUN.md](docs/HOW_TO_RUN.md) for deployment, streaming, rollback, memory measurement,
 A/B listening, and benchmark collection. The implementation contract and measured evidence are in
-[docs/dev/OPENVINO_IMPLEMENTATION.md](docs/dev/OPENVINO_IMPLEMENTATION.md) and
-[docs/dev/OPENVINO_RESULTS.md](docs/dev/OPENVINO_RESULTS.md). Security guidance is in
+[docs/dev/architecture/OPENVINO_IMPLEMENTATION.md](docs/dev/architecture/OPENVINO_IMPLEMENTATION.md) and
+[docs/dev/benchmarks/OPENVINO_RESULTS.md](docs/dev/benchmarks/OPENVINO_RESULTS.md). Security guidance is in
 [SECURITY.md](SECURITY.md); the service has no authentication or TLS and must remain on a trusted
 network or behind an authenticated TLS reverse proxy.

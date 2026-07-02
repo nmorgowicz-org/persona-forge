@@ -5,8 +5,8 @@
 
 Branch: `feat/0.6b-stateful-kv`. Implementation commit: `e5ab3cc`. Status: **implemented and measured;
 not merged or released.** This doc is the
-self-contained brief; deeper design lives in `OPENVINO_IMPLEMENTATION.md` § "M5/M9.3 design" and every
-1.7B number lives in `OPENVINO_RESULTS.md`.
+self-contained brief; deeper design lives in `../architecture/OPENVINO_IMPLEMENTATION.md` § "M5/M9.3 design" and every
+1.7B number lives in `../benchmarks/OPENVINO_RESULTS.md`.
 
 ## Result (2026-06-29)
 

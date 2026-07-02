@@ -140,7 +140,7 @@ def load_model() -> LoadedModel:
     # and the fp32 weights (~7.7 GiB) briefly coexist (~11.6 GiB), then the mmap
     # drops to ~8.5 GiB settled. OPENVINO_TORCH_DTYPE lets the *serving* path load in
     # native bf16 to skip that upcast; the exporter MUST stay fp32 for convert parity
-    # (do not set the env in export). See docs/dev/OPENVINO_RESULTS.md (M9).
+    # (do not set the env in export). See docs/dev/benchmarks/OPENVINO_RESULTS.md (M9).
     torch_dtype, dtype_name, low_cpu_mem_usage = resolve_torch_load_config(torch)
     print(
         f"[bench] loading {model_repo} (rev={revision}) on {device} at {dtype_name} "

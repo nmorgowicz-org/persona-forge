@@ -1,4 +1,17 @@
 ARG PYTHON_IMAGE=python:3.13-slim@sha256:eb43ff125d8d58d7449dcba7d336c23bcac412f526d861db493b9994d8010280
+# Not digest-pinned like PYTHON_IMAGE below (build-stage only, never shipped in the final
+# image) — override via --build-arg if you need reproducibility guarantees for CI.
+ARG NODE_IMAGE=node:22-slim
+
+# Static export, served by Flask at / (see src/qwen3_tts/app.py). Independent stage so the
+# final image never needs a Node toolchain.
+FROM ${NODE_IMAGE} AS frontend-build
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
 FROM ${PYTHON_IMAGE}
 
 ARG TORCH_VERSION=2.12.1
@@ -40,6 +53,8 @@ t = t.replace('module.weight.data.fill_(1.0)', 'init.ones_(module.weight)'); \
 t = t.replace('if module.padding_idx is not None:\n                module.weight.data[module.padding_idx].zero_()', 'if module.padding_idx is not None and not getattr(module.weight, \"_is_hf_initialized\", False):\n                module.weight.data[module.padding_idx].zero_()'); \
 t = t.replace('self.padding_idx = config.pad_token_id', 'self.padding_idx = getattr(config, \"pad_token_id\", None)'); \
 t = t.replace('input_embeds=inputs_embeds', 'inputs_embeds=inputs_embeds'); \
+t = t.replace('\"input_embeds\": inputs_embeds,', '\"inputs_embeds\": inputs_embeds,'); \
+t = t.replace('\n                \"cache_position\": cache_position,\n', '\n'); \
 t = t.replace('\n            cache_position=cache_position,\n', ''); \
 open(p, 'w').write(t)" && \
     python -c "\
@@ -63,6 +78,7 @@ RUN python -m pip install -r requirements/openvino.txt && \
 
 COPY src/ src/
 COPY scripts/ scripts/
+COPY --from=frontend-build /frontend/dist frontend/dist
 RUN chmod +x scripts/entrypoint.sh
 
 ENTRYPOINT ["scripts/entrypoint.sh"]

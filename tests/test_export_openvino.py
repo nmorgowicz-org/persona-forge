@@ -33,6 +33,17 @@ class ExportOpenVINOTests(unittest.TestCase):
         self.assertTrue(args.vocoder_only)
         self.assertFalse(args.skip_vocoder)
 
+    def test_main_only_cli_mode(self):
+        with mock.patch(
+            "sys.argv",
+            ["export_openvino.py", "--output-dir", "/tmp/ov", "--main-only"],
+        ):
+            args = parse_args()
+
+        self.assertTrue(args.main_only)
+        self.assertFalse(args.vocoder_only)
+        self.assertFalse(args.skip_vocoder)
+
     def test_rejects_unsupported_mix8_mode(self):
         with mock.patch(
             "sys.argv",
