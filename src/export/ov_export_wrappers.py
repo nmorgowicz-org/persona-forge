@@ -54,7 +54,7 @@ from transformers.cache_utils import DynamicCache, DynamicLayer
 # seed tensor with a rank-4 empty tensor that OV's aten::cat converter can validate (axis -2 is
 # out of range [-1, 0] for a rank-1 tensor).
 #
-# Signature tracks the transformers version pinned in requirements/runtime.txt — transformers
+# Signature tracks the transformers version pinned in requirements/requirements-runtime.txt — transformers
 # 4.57.3 called this with (key_states) only; 5.12.1 calls it with (key_states, value_states) (see
 # transformers.cache_utils.DynamicLayer.lazy_initialization). Keep both in sync with whatever
 # `Cache.update()` actually calls, not with what's convenient — a stale signature here fails
@@ -91,7 +91,7 @@ class CoreCacheWrapper(nn.Module):
             (past_kv[2 * i], past_kv[2 * i + 1]) for i in range(self.num_layers)
         )
         # DynamicCache.from_legacy_cache()/to_legacy_cache() were removed in transformers 5.x
-        # (see requirements/runtime.txt pin) — the ddp_cache_data constructor arg and per-layer
+        # (see requirements/requirements-runtime.txt pin) — the ddp_cache_data constructor arg and per-layer
         # .keys/.values below are the replacement (transformers.cache_utils.DynamicCache).
         return DynamicCache(legacy)
 
