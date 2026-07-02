@@ -24,6 +24,7 @@ export default defineConfig({
       '/v1': 'http://localhost:8318',
       '/voice_design': 'http://localhost:8318',
       '/voices': 'http://localhost:8318',
+      '/runtime': 'http://localhost:8318',
     },
   },
 })

@@ -100,6 +100,7 @@ export function VoiceLibraryPage() {
         {voices.map((voice, i) => (
           <motion.div
             key={voice.voice_id}
+            data-testid="voice-card"
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.03 }}

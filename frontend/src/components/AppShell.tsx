@@ -55,6 +55,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 {NAV_ITEMS.map((item) => (
                   <SidebarMenuItem key={item.page}>
                     <SidebarMenuButton
+                      data-testid={`nav-${item.page}`}
                       isActive={page === item.page}
                       tooltip={item.label}
                       onClick={() => setPage(item.page)}

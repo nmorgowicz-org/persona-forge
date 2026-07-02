@@ -273,6 +273,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
             )}
           </label>
           <textarea
+            data-testid="voice-design-description"
             className="min-h-16 w-full resize-y rounded-md border border-input bg-transparent p-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             value={description}
             onChange={(e) => setManualDescription(e.target.value)}
@@ -285,6 +286,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
             Sample text (max ~15s)
           </label>
           <textarea
+            data-testid="voice-design-sample-text"
             className="min-h-14 w-full resize-y rounded-md border border-input bg-transparent p-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             value={effectiveSampleText}
             onChange={(e) => {
@@ -327,6 +329,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
 
           <Button
             type="button"
+            data-testid="voice-design-generate-button"
             onClick={handleGenerate}
             disabled={!description.trim() || !effectiveSampleText.trim() || isGenerating}
           >
@@ -338,11 +341,16 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
           </Button>
         </div>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && (
+          <p data-testid="voice-design-error" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
 
         <AnimatePresence>
           {previewAudioUrl && previewVoiceId && (
             <motion.div
+              data-testid="voice-design-result"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 8 }}

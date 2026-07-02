@@ -86,6 +86,7 @@ export function SpeakPage() {
         transition={{ delay: 0.05 }}
       >
         <textarea
+          data-testid="speak-text-input"
           className="min-h-48 resize-y rounded-lg border border-input bg-transparent p-4 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           placeholder="Say something..."
           value={text}
@@ -155,15 +156,24 @@ export function SpeakPage() {
             </Tooltip>
           </div>
 
-          <Button type="button" onClick={handleGenerate} disabled={!text.trim() || isGenerating}>
+          <Button
+            type="button"
+            data-testid="speak-generate-button"
+            onClick={handleGenerate}
+            disabled={!text.trim() || isGenerating}
+          >
             {isGenerating ? 'Generating…' : 'Generate'}
           </Button>
         </div>
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && (
+          <p data-testid="speak-error" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
 
         {audioUrl && (
-          <div className="flex flex-col gap-2">
+          <div data-testid="speak-result" className="flex flex-col gap-2">
             <AudioPlayer src={audioUrl} blob={audioBlob} />
             {lastSeed !== null && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
