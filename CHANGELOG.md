@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.19.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.18.0...qwen3-tts-openvino-v0.19.0) (2026-07-02)
+
+
+### Features
+
+* **runtime:** add EOS conditioning fix, step-level diagnostics, and free-run handoff ([2092df3](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/2092df3d9a3b87adb26cb503cb7b106cb9435a6d))
+* **runtime:** add TTS_MAX_NEW_TOKENS cap, TTS_NON_STREAMING override, and prompt diagnostics ([2092df3](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/2092df3d9a3b87adb26cb503cb7b106cb9435a6d))
+
+
+### Bug Fixes
+
+* drop cache_position from create_causal_mask for transformers 5.x ([b8901c9](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/b8901c9646a9554e86df793911d5efdf0b4c0ccc))
+* fix Dockerfile indentation for input_embeds patch ([3bf171f](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/3bf171f1508f84c50ecf0c53b3aa70e180f65f0b))
+* patch codec_head.forward instead of replacing codec_head module ([9cc9863](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/9cc98630a9ce5dc52502ef9585cdfed30117ffcb))
+* patch qwen-tts input_embeds -&gt; inputs_embeds for transformers 5.x ([8159e7d](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/8159e7d85821793ef9ea475670a4b79cc1e33dd0))
+* **runtime:** fix transformers 5.x weight over-initialization randomizing talker embeddings and heads ([2092df3](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/2092df3d9a3b87adb26cb503cb7b106cb9435a6d))
+* **runtime:** restore Mimi causal mask for correct reference codec tokens under transformers 5.x ([2092df3](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/2092df3d9a3b87adb26cb503cb7b106cb9435a6d))
+
+
+### Miscellaneous Chores
+
+* add codec_head logits diagnostic for decode-step debugging ([6df7709](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/6df7709c12e00e27ccb2e639fcd4cfbcd0be9c08))
+
 ## [0.18.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.17.4...qwen3-tts-openvino-v0.18.0) (2026-07-01)
 
 
