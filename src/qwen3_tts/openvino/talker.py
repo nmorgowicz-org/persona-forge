@@ -786,7 +786,7 @@ class OVTalkerRuntime:
         # Diagnostic: wrap codec_head.forward to log top-5 logits at selected decode steps.
         # This tells us whether EOS is ever assigned high probability.
         # Gated by TTS_LOGITS_DIAG env var so it can be turned off in production.
-        if os.getenv("TTS_LOGITS_DIAG", "1").strip() == "1":
+        if os.getenv("TTS_LOGITS_DIAG", "0").strip() == "1":
             _orig_codec_forward = talker.codec_head.forward
             _diag_at = {1, 2, 3, 5, 10, 20, 50, 100, 200, 400}
             eos_id = 2150
@@ -888,22 +888,84 @@ class OVTalkerRuntime:
                 out.last_hidden_state = out.last_hidden_state.to(inputs_embeds.dtype)
             return out
 
+        _main_diag = {"n": 0, "prev_in": None, "prev_out": None}
+
         def main_forward(
             input_ids=None, attention_mask=None, position_ids=None, past_key_values=None,
             inputs_embeds=None, use_cache=None, output_attentions=None,
             output_hidden_states=None, cache_position=None, **kwargs,
         ):
-            return _match_dtype(main_runner.run(
+            out = _match_dtype(main_runner.run(
                 inputs_embeds=inputs_embeds, attention_mask=attention_mask,
                 position_ids=position_ids, cache_position=cache_position,
                 past_key_values=past_key_values,
             ), inputs_embeds)
+            try:
+                import os as _os2, numpy as _np2
+                if _os2.path.exists("/tmp/tts_dump") and inputs_embeds is not None and inputs_embeds.shape[1] > 1:
+                    _np2.save("/tmp/dump_ie_prefill.npy", inputs_embeds.detach().float().cpu().numpy())
+                    _np2.save("/tmp/dump_out_prefill.npy", out.last_hidden_state.detach().float().cpu().numpy())
+                    _np2.save("/tmp/dump_pos_prefill.npy",
+                              position_ids.detach().cpu().numpy() if position_ids is not None else _np2.array([]))
+                    _np2.save("/tmp/dump_cp_prefill.npy",
+                              cache_position.detach().cpu().numpy() if cache_position is not None else _np2.array([]))
+                    _np2.save("/tmp/dump_am_prefill.npy",
+                              attention_mask.detach().cpu().numpy() if attention_mask is not None else _np2.array([]))
+                    print(f"[dump] prefill ie={tuple(inputs_embeds.shape)} out={tuple(out.last_hidden_state.shape)} saved", flush=True)
+            except Exception as _e2:
+                print(f"[dump] err {_e2!r}", flush=True)
+            try:
+                if (
+                    os.path.exists("/tmp/tts_step_diag")
+                    and inputs_embeds is not None
+                    and inputs_embeds.shape[1] == 1  # decode only
+                    and _main_diag["n"] < 12
+                ):
+                    import torch as _t
+                    iv = inputs_embeds.float().reshape(-1)
+                    ov = out.last_hidden_state.float().reshape(-1)
+                    din = (
+                        (iv - _main_diag["prev_in"]).norm().item()
+                        if _main_diag["prev_in"] is not None else float("nan")
+                    )
+                    dout = (
+                        (ov - _main_diag["prev_out"]).norm().item()
+                        if _main_diag["prev_out"] is not None else float("nan")
+                    )
+                    print(
+                        f"[main_diag] dstep={_main_diag['n']} "
+                        f"in_norm={iv.norm().item():.3f} out_norm={ov.norm().item():.3f} "
+                        f"d_in_vs_prev={din:.4f} d_out_vs_prev={dout:.4f}",
+                        flush=True,
+                    )
+                    _main_diag["prev_in"] = iv.clone()
+                    _main_diag["prev_out"] = ov.clone()
+                    _main_diag["n"] += 1
+            except Exception as _e:
+                print(f"[main_diag] error: {_e!r}", flush=True)
+            return out
+
+        _pred_diag = {"n": 0}
 
         def predictor_forward(
             input_ids=None, attention_mask=None, position_ids=None, past_key_values=None,
             inputs_embeds=None, use_cache=None, output_attentions=None,
             output_hidden_states=None, cache_position=None, generation_steps=None, **kwargs,
         ):
+            if os.path.exists("/tmp/tts_step_diag") and _pred_diag["n"] < 40:
+                prior_p = (
+                    past_key_values.get_seq_length()
+                    if past_key_values is not None else 0
+                )
+                print(
+                    f"[pred_diag] call={_pred_diag['n']} gsteps={generation_steps} "
+                    f"prior={prior_p} "
+                    f"ie={tuple(inputs_embeds.shape) if inputs_embeds is not None else None} "
+                    f"ii={tuple(input_ids.shape) if input_ids is not None else None} "
+                    f"cp={cache_position.tolist() if cache_position is not None else None}",
+                    flush=True,
+                )
+                _pred_diag["n"] += 1
             return _match_dtype(pred_runner.run(
                 inputs_embeds=inputs_embeds, attention_mask=attention_mask,
                 position_ids=position_ids, cache_position=cache_position,
@@ -912,6 +974,63 @@ class OVTalkerRuntime:
 
         main_module.forward = main_forward
         pred_module.forward = predictor_forward
+
+        # Step-level EOS diagnostic on the OUTER talker forward. Transparent unless
+        # /tmp/tts_step_diag exists (toggle live, no restart). Logs the trailing-text
+        # advance state that drives codec-EOS: if generation_step never advances past
+        # trailing_text_hidden length, the talker never reaches the pad->EOS phase.
+        _orig_outer_forward = self._talker.forward
+        _step_diag = {"n": 0}
+
+        import functools as _functools
+
+        @_functools.wraps(_orig_outer_forward)
+        def _outer_forward_diag(*a, **kw):
+            out = _orig_outer_forward(*a, **kw)
+            try:
+                if os.path.exists("/tmp/tts_step_diag"):
+                    n = _step_diag["n"]
+                    ie0 = kw.get("inputs_embeds")
+                    if ie0 is not None and ie0.shape[1] > 1:
+                        import torch as _t
+                        f = ie0.float()
+                        # per-position norms reveal whether rows are distinct
+                        pnorm = f.norm(dim=-1)[0]
+                        print(
+                            f"[embed_diag] PREFILL ie={tuple(ie0.shape)} "
+                            f"mean={f.mean().item():.4f} std={f.std().item():.4f} "
+                            f"min={f.min().item():.3f} max={f.max().item():.3f} "
+                            f"nan={bool(_t.isnan(f).any())} "
+                            f"pnorm[min/mean/max]={pnorm.min().item():.2f}/"
+                            f"{pnorm.mean().item():.2f}/{pnorm.max().item():.2f} "
+                            f"n_distinct_rows≈{int((pnorm.round(decimals=2).unique().numel()))}",
+                            flush=True,
+                        )
+                    if n < 25 or n % 50 == 0:
+                        gs_in = kw.get("generation_step")
+                        tth = kw.get("trailing_text_hidden")
+                        ie = kw.get("inputs_embeds")
+                        ii = kw.get("input_ids")
+                        cp = kw.get("cache_position")
+                        tth_len = int(tth.shape[1]) if tth is not None else None
+                        pad_phase = (
+                            gs_in is not None and tth_len is not None and gs_in >= tth_len
+                        )
+                        print(
+                            f"[step_diag] call={n} gs_in={gs_in} tth_len={tth_len} "
+                            f"pad_phase={pad_phase} "
+                            f"ie={tuple(ie.shape) if ie is not None else None} "
+                            f"ii={tuple(ii.shape) if ii is not None else None} "
+                            f"cp={cp.tolist() if cp is not None else None} "
+                            f"gs_out={getattr(out, 'generation_step', None)}",
+                            flush=True,
+                        )
+            except Exception as _e:  # never let diagnostics break generation
+                print(f"[step_diag] error: {_e!r}", flush=True)
+            _step_diag["n"] += 1
+            return out
+
+        self._talker.forward = _outer_forward_diag
 
         # Patch speech_tokenizer.decode to use vocoder_runtime (if enabled).
         if self.vocoder_runtime and self.vocoder_runtime.enabled:
