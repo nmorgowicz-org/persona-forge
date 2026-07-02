@@ -88,10 +88,10 @@ class PresetTests(unittest.TestCase):
         self.assertEqual(preset["model_repo"], "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign")
         self.assertEqual(preset["ov_model_dir"], "/ov/1.7B-voicedesign/ir")
         self.assertEqual(preset["vocoder_dir"], "/ov/1.7B-voicedesign/vocoder")
-        # 20s default keeps capacity well below the Base preset's 64s (768-frame) default.
-        self.assertEqual(preset["stateful_capacity"], 240)
+        # 30s default keeps capacity well below the Base preset's 64s (768-frame) default.
+        self.assertEqual(preset["stateful_capacity"], 360)
         self.assertEqual(
-            preset["main_stateful_model"], "/ov/1.7B-voicedesign/main_stateful_cap240.xml"
+            preset["main_stateful_model"], "/ov/1.7B-voicedesign/main_stateful_cap360.xml"
         )
 
     def test_voice_design_preset_never_collides_with_base_preset_paths(self) -> None:
