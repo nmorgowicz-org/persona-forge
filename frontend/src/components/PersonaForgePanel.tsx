@@ -96,6 +96,175 @@ function InfoIcon({ text }: { text: string }) {
   )
 }
 
+interface SegmentRackRowProps {
+  segIndex: number
+  row: {
+    segmentId: string
+    text: string
+    candidates: { candidate_id: string; audio_base64: string; flagged: boolean; flag_reason: string | null }[]
+    selectedTakeIndex: number
+  }
+  isRackAuditioning: boolean
+  jobStatus: 'queued' | 'running' | 'completed' | 'failed' | null
+  jobCurrentSegmentIndex: number | null
+  onEdit: (segmentId: string, newText: string) => void
+  onRegen: (segmentId: string) => void
+  onSelectTake: (segmentId: string, index: number) => void
+}
+
+function SegmentRackRow({
+  segIndex,
+  row,
+  isRackAuditioning,
+  jobStatus,
+  jobCurrentSegmentIndex,
+  onEdit,
+  onRegen,
+  onSelectTake,
+}: SegmentRackRowProps) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(row.text)
+
+  const isCurrent =
+    jobStatus === 'running' &&
+    jobCurrentSegmentIndex != null &&
+    row.segmentId === `seg-${jobCurrentSegmentIndex}`
+
+  return (
+    <div
+      key={row.segmentId}
+      className="flex flex-col gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium">
+            {segIndex + 1}
+          </span>
+
+          {isCurrent && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/60 bg-primary/10 px-2 py-0.5 text-[9px] font-semibold text-primary">
+              Generating…
+            </span>
+          )}
+
+          {editing ? (
+            <input
+              autoFocus
+              type="text"
+              value={draft}
+              onChange={(e) =>
+                setDraft(e.target.value)
+              }
+              onBlur={() => {
+                onEdit(row.segmentId, draft)
+                setEditing(false)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  onEdit(row.segmentId, draft)
+                  setEditing(false)
+                }
+                if (e.key === 'Escape') {
+                  setDraft(row.text)
+                  setEditing(false)
+                }
+              }}
+              className="min-w-[200px] flex-1 rounded-md border border-input bg-transparent px-2 py-0.5 text-xs outline-none focus-visible:border-ring"
+            />
+          ) : (
+            <span className="max-w-[360px] truncate text-xs">
+              {row.text}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              setEditing(true)
+              setDraft(row.text)
+            }}
+            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground underline decoration-dotted underline-offset-1 hover:text-foreground"
+          >
+            <span>✎</span> Edit
+          </button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-6 px-2 text-[10px]"
+            onClick={() =>
+              onRegen(row.segmentId)
+            }
+            disabled={isRackAuditioning}
+          >
+            {isRackAuditioning
+              ? '⋯'
+              : 'Regen'}
+          </Button>
+        </div>
+      </div>
+
+      {/* Takes */}
+      {row.candidates.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {row.candidates.map((c, ci) => {
+            const selected = ci === row.selectedTakeIndex
+            return (
+              <div
+                key={c.candidate_id}
+                className={cn(
+                  'flex items-center gap-2 rounded-lg border px-2 py-1.5 transition-all',
+                  selected
+                    ? 'border-[hsl(190,90%,50%)] bg-[hsl(190,90%,50%)]/5 shadow-[0_0_10px_rgba(34,211,238,0.12)]'
+                    : 'border-border/60 bg-background',
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    onSelectTake(row.segmentId, ci)
+                  }
+                  className={cn(
+                    'shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors',
+                    selected
+                      ? 'bg-[hsl(190,90%,50%)] text-background'
+                      : 'bg-muted text-muted-foreground hover:bg-muted/80',
+                  )}
+                >
+                  Take {ci + 1}
+                </button>
+
+                {c.flagged && (
+                  <span
+                    title={
+                      c.flag_reason ?? undefined
+                    }
+                    className="shrink-0 rounded-full border border-amber-900/50 bg-amber-950/30 px-1.5 py-0.5 text-[9px] text-amber-300"
+                  >
+                    possibly bad take
+                    {c.flag_reason
+                      ? ` · ${c.flag_reason}`
+                      : ''}
+                  </span>
+                )}
+
+                <ClipPlayer
+                  audioBase64={c.audio_base64}
+                  className="flex-1"
+                  autoPlay={selected}
+                />
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface PersonaForgePanelProps {
   onVoiceCreated?: (voiceId: string) => void
 }
@@ -511,15 +680,21 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                 (r) => r.segmentId,
               ),
             )
-            for (const s of p.segments_completed) {
+            for (const s of p.segments_completed || []) {
               const segId = `seg-${s.segment_index}`
               if (!existingIds.has(segId)) {
+                const candidates =
+                  Array.isArray(s.candidates)
+                    ? s.candidates
+                    : []
                 next.push({
                   segmentId: segId,
-                  text: s.text,
-                  candidates:
-                    s.candidates,
-                  selectedTakeIndex: 0,
+                  text: s.text || '',
+                  candidates,
+                  selectedTakeIndex:
+                    candidates.length > 0
+                      ? 0
+                      : -1,
                 })
               }
             }
@@ -1530,216 +1705,48 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         </div>
       )}
 
-      {/* Segment rack */}
-      {segmentRack.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Segment rack
-          </p>
+       {/* Segment rack */}
+       {segmentRack.length > 0 && (
+         <div className="flex flex-col gap-2">
+           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+             Segment rack
+           </p>
 
-          <div className="flex max-h-[360px] flex-col gap-2 overflow-y-auto">
-            {segmentRack.map((row, segIndex) => {
-              const [editing, setEditing] =
-                useState(false)
-              const [draft, setDraft] = useState(row.text)
+           <div className="flex max-h-[360px] flex-col gap-2 overflow-y-auto">
+             {segmentRack.map((row, segIndex) => (
+               <SegmentRackRow
+                 key={row.segmentId}
+                 segIndex={segIndex}
+                 row={row}
+                 isRackAuditioning={isRackAuditioning}
+                 jobStatus={jobStatus}
+                 jobCurrentSegmentIndex={jobCurrentSegmentIndex}
+                 onEdit={editSegmentText}
+                 onRegen={regenerateSegment}
+                 onSelectTake={selectTake}
+               />
+             ))}
+           </div>
 
-              return (
-                <div
-                  key={row.segmentId}
-                  className="flex flex-col gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-                >
-                  {/* Header */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium">
-                        {segIndex + 1}
-                      </span>
-
-                      {jobStatus === 'running' &&
-                        jobCurrentSegmentIndex !=
-                          null &&
-                        row.segmentId ===
-                          `seg-${jobCurrentSegmentIndex}` && (
-                          <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/60 bg-primary/10 px-2 py-0.5 text-[9px] font-semibold text-primary">
-                            Generating…
-                          </span>
-                        )}
-
-                      {editing ? (
-                        <input
-                          autoFocus
-                          type="text"
-                          value={draft}
-                          onChange={(e) =>
-                            setDraft(
-                              e.target.value,
-                            )
-                          }
-                          onBlur={() => {
-                            editSegmentText(
-                              row.segmentId,
-                              draft,
-                            )
-                            setEditing(false)
-                          }}
-                          onKeyDown={(e) => {
-                            if (
-                              e.key ===
-                                'Enter'
-                            ) {
-                              editSegmentText(
-                                row.segmentId,
-                                draft,
-                              )
-                              setEditing(false)
-                            }
-                            if (
-                              e.key ===
-                                'Escape'
-                            ) {
-                              setDraft(row.text)
-                              setEditing(
-                                false,
-                              )
-                            }
-                          }}
-                          className="min-w-[200px] flex-1 rounded-md border border-input bg-transparent px-2 py-0.5 text-xs outline-none focus-visible:border-ring"
-                        />
-                      ) : (
-                        <span className="max-w-[360px] truncate text-xs">
-                          {row.text}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditing(
-                            true,
-                          )
-                          setDraft(
-                            row.text,
-                          )
-                        }}
-                        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground underline decoration-dotted underline-offset-1 hover:text-foreground"
-                      >
-                        <span>✎</span> Edit
-                      </button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="h-6 px-2 text-[10px]"
-                        onClick={() =>
-                          regenerateSegment(
-                            row.segmentId,
-                          )
-                        }
-                        disabled={
-                          isRackAuditioning
-                        }
-                      >
-                        {isRackAuditioning
-                          ? '⋯'
-                          : 'Regen'}
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Takes */}
-                  {row.candidates.length > 0 && (
-                    <div className="flex flex-col gap-1.5">
-                      {row.candidates.map(
-                        (c, ci) => {
-                          const selected =
-                            ci ===
-                            row.selectedTakeIndex
-                          return (
-                            <div
-                              key={
-                                c.candidate_id
-                              }
-                              className={cn(
-                                'flex items-center gap-2 rounded-lg border px-2 py-1.5 transition-all',
-                                selected
-                                  ? 'border-[hsl(190,90%,50%)] bg-[hsl(190,90%,50%)]/5 shadow-[0_0_10px_rgba(34,211,238,0.12)]'
-                                  : 'border-border/60 bg-background',
-                              )}
-                            >
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  selectTake(
-                                    row.segmentId,
-                                    ci,
-                                  )
-                                }
-                                className={cn(
-                                  'shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors',
-                                  selected
-                                    ? 'bg-[hsl(190,90%,50%)] text-background'
-                                    : 'bg-muted text-muted-foreground hover:bg-muted/80',
-                                )}
-                              >
-                                Take {ci + 1}
-                              </button>
-
-                              {c.flagged && (
-                                <span
-                                  title={
-                                    c.flag_reason ??
-                                    undefined
-                                  }
-                                  className="shrink-0 rounded-full border border-amber-900/50 bg-amber-950/30 px-1.5 py-0.5 text-[9px] text-amber-300"
-                                >
-                                  possibly bad take
-                                  {c.flag_reason
-                                    ? ` · ${c.flag_reason}`
-                                    : ''}
-                                </span>
-                              )}
-
-                              <ClipPlayer
-                                audioBase64={
-                                  c.audio_base64
-                                }
-                                className="flex-1"
-                                autoPlay={
-                                  selected
-                                }
-                              />
-                            </div>
-                          )
-                        },
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-
-          {/* Stitch / Save */}
-          <div className="mt-1 flex flex-wrap gap-2">
-            <Button
-              type="button"
-              data-testid="omnivoice-stitch-button"
-              onClick={handleStitch}
-              disabled={
-                segmentRack.length === 0 ||
-                isStitching
-              }
-              className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[hsl(190,90%,50%)] to-[hsl(210,90%,45%)] px-4 py-1.5 text-xs font-medium text-background shadow-[0_4px_15px_rgba(34,211,238,0.25)] transition-all hover:scale-[1.02] hover:shadow-[0_8px_25px_rgba(34,211,238,0.35)] disabled:opacity-50 disabled:shadow-none"
-            >
-              {isStitching
-                ? 'Stitching…'
-                : `Stitch all segments`}
-            </Button>
-          </div>
-        </div>
-      )}
+           {/* Stitch / Save */}
+           <div className="mt-1 flex flex-wrap gap-2">
+             <Button
+               type="button"
+               data-testid="omnivoice-stitch-button"
+               onClick={handleStitch}
+               disabled={
+                 segmentRack.length === 0 ||
+                 isStitching
+               }
+               className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[hsl(190,90%,50%)] to-[hsl(210,90%,45%)] px-4 py-1.5 text-xs font-medium text-background shadow-[0_4px_15px_rgba(34,211,238,0.25)] transition-all hover:scale-[1.02] hover:shadow-[0_8px_25px_rgba(34,211,238,0.35)] disabled:opacity-50 disabled:shadow-none"
+             >
+               {isStitching
+                 ? 'Stitching…'
+                 : `Stitch all segments`}
+             </Button>
+           </div>
+         </div>
+       )}
 
       {/* Stitched preview */}
       <AnimatePresence>
