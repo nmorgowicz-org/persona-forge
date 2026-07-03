@@ -53,10 +53,8 @@ export function Tooltip({
 
 export function TooltipTrigger({
   children,
-  asChild,
 }: {
   children: React.ReactNode
-  asChild?: boolean
 }) {
   return <>{children}</>
 }
@@ -64,10 +62,14 @@ export function TooltipTrigger({
 export function TooltipContent({
   children,
   side,
+  align,
+  hidden,
   className,
 }: {
   children: React.ReactNode
   side?: Side
+  align?: string
+  hidden?: boolean
   className?: string
 }) {
   const ctx = useTooltipContext()
