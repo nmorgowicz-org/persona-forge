@@ -1366,13 +1366,15 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                           setExamplesOpen((v) => !v)
                           setTagsOpen(false)
                         }}
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] font-semibold transition-colors",
-                          "pointer-events-none opacity-50",
-                          examplesOpen && jobStatus === 'completed'
-                            ? "bg-primary/10 text-primary border-primary/40"
-                            : "bg-muted/90 text-foreground/90",
-                        )}
+                         className={cn(
+                           "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] font-semibold transition-colors",
+                           (jobStatus === 'queued' || jobStatus === 'running')
+                             ? "pointer-events-none opacity-50"
+                             : "hover:bg-accent",
+                           examplesOpen && !(jobStatus === 'queued' || jobStatus === 'running')
+                             ? "bg-primary/10 text-primary border-primary/40"
+                             : "bg-muted/90 text-foreground/90",
+                         )}
                       >
                         ⚡ Examples
                       </button>
@@ -1391,13 +1393,15 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                         setTagsOpen((v) => !v)
                         setExamplesOpen(false)
                       }}
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] font-semibold transition-colors",
-                        "pointer-events-none opacity-50",
-                        tagsOpen && jobStatus === 'completed'
-                          ? "bg-primary/10 text-primary border-primary/40"
-                          : "bg-muted/90 text-foreground/90",
-                      )}
+                       className={cn(
+                         "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] font-semibold transition-colors",
+                         (jobStatus === 'queued' || jobStatus === 'running')
+                           ? "pointer-events-none opacity-50"
+                           : "hover:bg-accent",
+                         tagsOpen && !(jobStatus === 'queued' || jobStatus === 'running')
+                           ? "bg-primary/10 text-primary border-primary/40"
+                           : "bg-muted/90 text-foreground/90",
+                       )}
                     >
                       <span className="mr-0.5 text-[10px] text-foreground/70">✦</span>
                       Non-Verbals
