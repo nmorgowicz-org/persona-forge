@@ -928,145 +928,153 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
 
         {/* Script / Lines (composer-style) */}
         <div className="flex flex-col gap-2">
-          {/* Composer header bar */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Script
-              </p>
-              {scriptWordCount > 0 && (
-                <span className="text-[10px] text-muted-foreground/80">
-                  {lines.length} line{lines.length !== 1 ? 's' : ''} · {scriptWordCount} word{scriptWordCount !== 1 ? 's' : ''}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1">
-              {activeShowcaseSentences.length > 0 && (
+          {/* Script control-panel card */}
+          <div className="flex flex-col rounded-lg border border-border bg-card">
+            {/* Header bar */}
+            <div className="flex items-center justify-between gap-2 rounded-t-lg border-b border-border bg-muted/50 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-foreground/90">
+                  Script
+                </p>
+                {scriptWordCount > 0 && (
+                  <span className="text-[10px] text-foreground/60">
+                    {lines.length} line{lines.length !== 1 ? 's' : ''} · {scriptWordCount} word{scriptWordCount !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                {activeShowcaseSentences.length > 0 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExamplesOpen((v) => !v)
+                          setTagsOpen(false)
+                        }}
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] font-semibold transition-colors",
+                          examplesOpen
+                            ? "bg-primary/10 text-primary border-primary/40"
+                            : "bg-muted/90 text-foreground/90 hover:bg-accent",
+                        )}
+                      >
+                        ⚡ Examples
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      Accent-specific example lines to insert.
+                    </TooltipContent>
+                  </Tooltip>
+                )}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
                       type="button"
                       onClick={() => {
-                        setExamplesOpen((v) => !v)
-                        setTagsOpen(false)
+                        setTagsOpen((v) => !v)
+                        setExamplesOpen(false)
                       }}
                       className={cn(
-                        "inline-flex items-center gap-1 rounded-md border border-border/90 px-2 py-0.5 text-[9px] font-medium transition-colors",
-                        examplesOpen
-                          ? "bg-primary/10 text-primary"
-                          : "bg-muted/70 text-muted-foreground hover:bg-accent/80 hover:text-foreground",
+                        "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] font-semibold transition-colors",
+                        tagsOpen
+                          ? "bg-primary/10 text-primary border-primary/40"
+                          : "bg-muted/90 text-foreground/90 hover:bg-accent",
                       )}
                     >
-                      Examples
+                      <span className="mr-0.5 text-[10px] text-foreground/70">✦</span>
+                      Tags
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom">
-                    Accent-specific example lines to insert.
+                    Non-verbal tags: insert inline, e.g. "[laughter]".
                   </TooltipContent>
                 </Tooltip>
-              )}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTagsOpen((v) => !v)
-                      setExamplesOpen(false)
-                    }}
-                    className={cn(
-                      "inline-flex items-center gap-1 rounded-md border border-border/90 px-2 py-0.5 text-[9px] font-medium transition-colors",
-                      tagsOpen
-                        ? "bg-primary/10 text-primary"
-                        : "bg-muted/70 text-muted-foreground hover:bg-accent/80 hover:text-foreground",
-                    )}
-                  >
-                    <span className="mr-0.5 text-[9px] text-muted-foreground/70">✦</span>
-                    Tags
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  Non-verbal tags: insert inline, e.g. "[laughter]".
-                </TooltipContent>
-              </Tooltip>
+              </div>
             </div>
-          </div>
 
-          {/* Tags palette (compact) */}
-          <AnimatePresence initial={false}>
-            {tagsOpen && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="overflow-hidden"
-              >
-                <div className="flex flex-wrap gap-1 rounded-md border border-dashed border-border/90 bg-muted/40 px-2 py-1.5">
-                  {NON_VERBAL_TAGS.map((tag) => (
-                    <button
-                      key={tag}
-                      type="button"
-                      onClick={() => insertNonVerbalTag(tag)}
-                      className="inline-flex items-center gap-0.5 rounded-full border border-border/90 bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
-                    >
-                      {tag}
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+            {/* Tags palette */}
+            <AnimatePresence initial={false}>
+              {tagsOpen && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden border-b border-border"
+                >
+                  <div className="flex flex-wrap gap-1 px-2.5 py-2">
+                    {NON_VERBAL_TAGS.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => insertNonVerbalTag(tag)}
+                        className="inline-flex items-center gap-0.5 rounded-full border border-border/90 bg-muted/70 px-1.5 py-0.5 font-mono text-[10px] text-foreground/90 transition-colors hover:bg-accent hover:text-foreground"
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-          {/* Examples palette (compact dropdown) */}
-          <AnimatePresence initial={false}>
-            {examplesOpen && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="overflow-hidden"
-              >
-                <div className="flex flex-wrap gap-1.5 rounded-md border border-border/90 bg-muted/40 px-2 py-1.5">
-                  {activeShowcaseSentences.map((sentence) => (
-                    <button
-                      key={sentence.text}
-                      type="button"
-                      title={sentence.note}
-                      onClick={() => insertExampleSentence(sentence)}
-                      className="rounded-full border border-border bg-muted/60 px-2.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
-                    >
-                      {sentence.text}
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+            {/* Examples palette */}
+            <AnimatePresence initial={false}>
+              {examplesOpen && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden border-b border-border"
+                >
+                  <div className="flex flex-wrap gap-1.5 px-2.5 py-2">
+                    {activeShowcaseSentences.map((sentence) => (
+                      <button
+                        key={sentence.text}
+                        type="button"
+                        title={sentence.note}
+                        onClick={() => insertExampleSentence(sentence)}
+                        className="rounded-full border border-border/90 bg-muted/70 px-2.5 py-0.5 text-[10px] text-foreground/90 transition-colors hover:bg-accent hover:text-foreground"
+                      >
+                        {sentence.text}
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-          {/* Integrated textarea */}
-          <div className="relative">
-            <textarea
-              ref={setScriptRef}
-              data-testid="omnivoice-script"
-              placeholder="Paste or type your script (up to 10 lines recommended)…"
-              rows={4}
-              value={scriptText}
-              onChange={(e) =>
-                setScriptText(e.target.value)
-              }
-              className="w-full resize-none rounded-lg border border-input bg-muted/40 px-3 py-2 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
-            />
-          </div>
+            {/* Textarea */}
+            <div className="px-2.5 pt-2 pb-1">
+              <textarea
+                ref={setScriptRef}
+                data-testid="omnivoice-script"
+                placeholder="Paste or type your script (up to 10 lines recommended)…"
+                rows={4}
+                value={scriptText}
+                onChange={(e) =>
+                  setScriptText(e.target.value)
+                }
+                className="w-full resize-none rounded-md border border-input bg-muted/40 px-3 py-2 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+              />
+            </div>
 
-          {/* Short guidance */}
-          <div className="flex flex-wrap gap-2">
-            <p className="text-[10px] text-muted-foreground">
-              Recommended: 5–15 words per line. Best results in English.
-            </p>
-            {hasLongLines && (
-              <p className="text-[10px] text-amber-400">
-                Some lines are long; shorter lines produce more reliable results.
-              </p>
-            )}
+            {/* Guidance */}
+            <div className="px-3 pb-2">
+              <div className="flex flex-wrap items-center gap-x-3 text-[10px] text-muted-foreground">
+                <span>
+                  Recommended: 5–15 words per line.
+                </span>
+                <span>
+                  Use Tags for [laughter], [sigh], etc.
+                </span>
+              </div>
+              {hasLongLines && (
+                <p className="mt-0.5 text-[10px] text-amber-400">
+                  Some lines are long; shorter lines produce more reliable results.
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Language note */}
