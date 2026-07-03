@@ -117,6 +117,9 @@ def health():
     # swap-in-progress banner (PLAN_voice_design.md §3, §11 frontend checklist).
     state["swap_in_progress"] = voice_design.swap_in_progress() or omnivoice_engine.swap_in_progress()
     state["reconfig_in_progress"] = model.reconfig_in_progress()
+    # model_loaded only reflects Base/VoiceDesign (model.model) — OmniVoice bypasses that
+    # slot entirely (see omnivoice_engine.py docstring), so surface its residency too.
+    state["omnivoice_loaded"] = omnivoice_engine.omnivoice_loaded()
     return jsonify(state)
 
 

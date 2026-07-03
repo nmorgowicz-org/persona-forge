@@ -24,6 +24,10 @@ fake_model.apply_runtime_config = lambda updates: {"reconfig_in_progress": False
 fake_model._run_generate = lambda text, language, **kwargs: (np.zeros(240, dtype=np.float32), 24000)
 fake_model._apply_optional_seed = lambda seed: None
 fake_model.resolve_seed = lambda seed_value: seed_value if seed_value is not None else 12345
+fake_model._touch_last_request = lambda: None
+fake_model.force_unload = lambda: None
+fake_model.unload_foreign_models = lambda: None
+fake_model.register_foreign_engine = lambda is_loaded, unload: None
 
 
 def _stream(text, language, on_chunk, **kwargs):

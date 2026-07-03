@@ -25,7 +25,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONPATH=/app/src:/app/src/export
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential curl git libjemalloc2 libgomp1 libsox-fmt-all sox && \
+      build-essential curl git libjemalloc2 libgomp1 libsox-fmt-all sox ffmpeg && \
       apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

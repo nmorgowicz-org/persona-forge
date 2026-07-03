@@ -20,7 +20,7 @@ const ENGINE_OPTIONS: EngineOption[] = [
   },
   {
     id: 'omnivoice',
-    label: 'Persona Forge (OmniVoice)',
+    label: 'OmniVoice',
     description: 'Fixed trait chips, genuinely accent-capable — audition, cherry-pick, stitch.',
     icon: Wand2,
   },

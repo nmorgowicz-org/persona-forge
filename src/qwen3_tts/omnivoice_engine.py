@@ -3,9 +3,20 @@
 See docs/plans/PLAN_persona_forge_studio.md §1. OmniVoice reuses the same one-model-at-a-time
 swap discipline VoiceDesign already established (qwen3_tts.voice_design): unload Base, load
 OmniVoice, run a whole *job* (every reference segment, every candidate take) in one swap
-window, then restore Base. All of that must run serialized inside model.executor (the
-service's single inference thread), same as every other model operation, so no in-flight
-/generate call can race the swap.
+window. All of that must run serialized inside model.executor (the service's single
+inference thread), same as every other model operation, so no in-flight /generate call can
+race the swap.
+
+Unlike VoiceDesign, OmniVoice is a bespoke third-party checkpoint (k2-fsa/OmniVoice) that
+never goes through model.load_model()/model.active_profile — it isn't wired through
+OVTalkerRuntime, so its lifecycle is entirely local to this module. It registers itself with
+model.register_foreign_engine() so idle-unload and the Base-priority swap-back in
+model._ensure_base_loaded() (used by /generate and /v1/audio/speech) both know how to unload
+it. On success the OmniVoice checkpoint is left loaded — iterating on takes for the same
+accent is the common case — and is only unloaded when: the user explicitly swaps engines
+(another run_voice_design_request or run_omnivoice_job call unloads it via
+model.force_unload()/model.unload_foreign_models()), the idle-unload timeout fires, or a
+/generate or /v1/audio/speech request needs Base back.
 
 Unlike voice_design.run_voice_design_request, a job here produces multiple candidate takes
 per segment (the reliability findings in [[voicedesign-accent-investigation]] mean single-shot
@@ -36,6 +47,10 @@ def swap_in_progress() -> bool:
     return _swap_in_progress
 
 
+def omnivoice_loaded() -> bool:
+    return _omnivoice_model is not None
+
+
 def _malloc_trim() -> None:
     try:
         import ctypes
@@ -45,6 +60,20 @@ def _malloc_trim() -> None:
         pass
 
 
+def _unload_omnivoice() -> None:
+    global _omnivoice_model
+    if _omnivoice_model is None:
+        return
+    _omnivoice_model = None
+    gc.collect()
+    gc.collect()
+    _malloc_trim()
+    print("[omnivoice] checkpoint unloaded.", flush=True)
+
+
+model.register_foreign_engine(omnivoice_loaded, _unload_omnivoice)
+
+
 def run_omnivoice_job(
     segments: list[str],
     instruct: str,
@@ -52,13 +81,13 @@ def run_omnivoice_job(
     candidates_per_segment: int = 3,
     seed: int | None = None,
 ) -> list[list[tuple[Any, int]]]:
-    """Swap to OmniVoice, generate every segment x candidate, swap back to Base.
+    """Swap to OmniVoice and generate every segment x candidate. Leaves OmniVoice loaded on
+    success (see this module's docstring for why). On failure, the checkpoint is unloaded
+    fully rather than restoring Base; the next real /generate or /v1/audio/speech call
+    reloads Base on demand via model._ensure_base_loaded().
 
     Must run inside model.executor — callers submit this via
     ``model.executor.submit(run_omnivoice_job, ...)``, never call it directly off-thread.
-    Always attempts to restore the Base model on the way out (``finally``), even on failure,
-    same fail-safe reasoning as voice_design.run_voice_design_request — this is the only
-    other code path that unloads the otherwise-always-resident Base model.
 
     Returns a segments x candidates_per_segment list of (wav, sample_rate) tuples.
 
@@ -76,6 +105,7 @@ def run_omnivoice_job(
         raise ValueError("instruct must be non-empty")
 
     _swap_in_progress = True
+    model._touch_last_request()
     t0 = time.monotonic()
     try:
         print("[omnivoice] swapping out Base, loading OmniVoice...", flush=True)
@@ -105,19 +135,16 @@ def run_omnivoice_job(
                 candidates.append((wav, OMNIVOICE_SAMPLE_RATE))
             results.append(candidates)
         elapsed = time.monotonic() - t0
-        print(f"[omnivoice] job complete in {elapsed:.1f}s", flush=True)
+        print(f"[omnivoice] job complete in {elapsed:.1f}s, staying loaded", flush=True)
         return results
+    except Exception:
+        print("[omnivoice] job failed; unloading OmniVoice checkpoint...", flush=True)
+        _unload_omnivoice()
+        raise
     finally:
-        print("[omnivoice] swapping back to Base checkpoint...", flush=True)
-        _omnivoice_model = None
-        gc.collect()
-        gc.collect()
-        _malloc_trim()
-        model.force_unload()
-        model.load_model(model.BASE_PROFILE)
         _swap_in_progress = False
         print(
-            f"[omnivoice] swap complete, total elapsed={time.monotonic() - t0:.1f}s",
+            f"[omnivoice] done, total elapsed={time.monotonic() - t0:.1f}s",
             flush=True,
         )
 

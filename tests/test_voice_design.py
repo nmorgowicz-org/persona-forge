@@ -33,6 +33,8 @@ fake_model.model = None
 fake_model._trim_silence = lambda wav, sr: wav
 fake_model.resolve_seed = lambda seed_value: seed_value if seed_value is not None else 12345
 fake_model._apply_optional_seed = lambda seed_value: None
+fake_model._touch_last_request = lambda: None
+fake_model.unload_foreign_models = lambda: None
 
 
 def _force_unload() -> None:
@@ -68,7 +70,7 @@ class VoiceDesignSwapTests(unittest.TestCase):
         fake_model.model = None
         voice_design._swap_in_progress = False
 
-    def test_happy_path_swaps_to_voice_design_and_back_to_base(self) -> None:
+    def test_happy_path_swaps_to_voice_design_and_stays_loaded(self) -> None:
         wav, sr, resolved_seed = voice_design.run_voice_design_request(
             "a description", "hello there", "English"
         )
@@ -76,36 +78,27 @@ class VoiceDesignSwapTests(unittest.TestCase):
         self.assertEqual(sr, 24000)
         self.assertEqual(len(wav), 480)
         self.assertEqual(resolved_seed, 12345)
-        self.assertEqual(
-            calls,
-            [
-                "force_unload",
-                ("load_model", "VOICE_DESIGN"),
-                "force_unload",
-                ("load_model", "BASE"),
-            ],
-        )
+        # No swap back to Base on success — VoiceDesign is left resident so iterating on a
+        # design doesn't pay the reload cost on every single request.
+        self.assertEqual(calls, ["force_unload", ("load_model", "VOICE_DESIGN")])
         self.assertFalse(voice_design.swap_in_progress())
         self.assertIsInstance(fake_model.model, _FakeWrapped)
-        self.assertEqual(fake_model.model.model.tts_model_type, "base")
+        self.assertEqual(fake_model.model.model.tts_model_type, "voice_design")
 
-    def test_generation_failure_still_restores_base_model(self) -> None:
+    def test_generation_failure_unloads_without_restoring_base(self) -> None:
         fake_model._fail_generate = True
 
         with self.assertRaises(RuntimeError):
             voice_design.run_voice_design_request("a description", "hello there", "English")
 
+        # On failure the checkpoint is unloaded (not restored to Base) — the next real
+        # /generate call reloads Base on demand via model._ensure_base_loaded().
         self.assertEqual(
             calls,
-            [
-                "force_unload",
-                ("load_model", "VOICE_DESIGN"),
-                "force_unload",
-                ("load_model", "BASE"),
-            ],
+            ["force_unload", ("load_model", "VOICE_DESIGN"), "force_unload"],
         )
         self.assertFalse(voice_design.swap_in_progress())
-        self.assertEqual(fake_model.model.model.tts_model_type, "base")
+        self.assertIsNone(fake_model.model)
 
     def test_validate_sample_text_rejects_long_sample(self) -> None:
         long_text = " ".join(["word"] * (voice_design.MAX_SAMPLE_TEXT_WORDS + 5))

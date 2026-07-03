@@ -41,7 +41,8 @@ export function AccentBank({ selectedId, onSelect }: AccentBankProps) {
             </div>
             <p className="text-[11px] text-muted-foreground">{entry.instruct}</p>
             <p className="text-[11px] text-muted-foreground/70">
-              {entry.segments.length} reference segment{entry.segments.length === 1 ? '' : 's'}
+              {entry.showcaseSentences.length} showcase sentence
+              {entry.showcaseSentences.length === 1 ? '' : 's'}
             </p>
           </motion.button>
         )

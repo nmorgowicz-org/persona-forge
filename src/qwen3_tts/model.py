@@ -177,23 +177,55 @@ def force_unload():
     print("[app_worker] Model unloaded.", flush=True)
 
 
+_foreign_engines: list[tuple[Callable[[], bool], Callable[[], None]]] = []
+
+
+def register_foreign_engine(is_loaded: Callable[[], bool], unload: Callable[[], None]) -> None:
+    """Let a bespoke swap-manager participate in idle-unload and Base-priority swap-back.
+
+    OmniVoice (qwen3_tts.omnivoice_engine) is the only current user: unlike VoiceDesign,
+    it's a third-party checkpoint that never goes through load_model()/active_profile (it
+    isn't wired through OVTalkerRuntime), so this module has no visibility into it unless
+    the engine registers itself.
+    """
+    _foreign_engines.append((is_loaded, unload))
+
+
+def _any_foreign_loaded() -> bool:
+    return any(is_loaded() for is_loaded, _ in _foreign_engines)
+
+
+def unload_foreign_models() -> None:
+    for is_loaded, unload in _foreign_engines:
+        if is_loaded():
+            unload()
+
+
 def _do_unload():
     """Runs inside the executor thread; serialized with inference."""
     global _unload_pending
     _unload_pending = False
-    if model is None:
+    if model is None and not _any_foreign_loaded():
         return
     if time.time() - _last_request_time < IDLE_UNLOAD_SECONDS:
         return
     print("[app_worker] Idle timeout reached; unloading model to free RAM...", flush=True)
     force_unload()
+    unload_foreign_models()
 
 
-def _ensure_loaded():
-    """Runs inside the executor thread; reloads model if idle-unloaded."""
-    if model is None:
-        print("[app_worker] Reloading model after idle unload...", flush=True)
-        load_model(active_profile)
+def _ensure_base_loaded():
+    """Runs inside the executor thread. /generate and /v1/audio/speech always need the
+    Base voice-clone checkpoint. Design engines (VoiceDesign, OmniVoice) are left resident
+    after their own requests instead of eagerly swapping back to Base every time — so this
+    swaps back on demand, unloading whatever design engine was left loaded.
+    """
+    if model is not None and active_profile is BASE_PROFILE and not _any_foreign_loaded():
+        return
+    print("[app_worker] Swapping back to Base for generation request...", flush=True)
+    unload_foreign_models()
+    force_unload()
+    load_model(BASE_PROFILE)
 
 
 def _validate_ov_metadata(model_dir: str, model_repo: str, revision: str | None):
@@ -413,7 +445,7 @@ def _idle_watcher():
         if (
             IDLE_UNLOAD_SECONDS > 0
             and not _unload_pending
-            and model is not None
+            and (model is not None or _any_foreign_loaded())
             and time.time() - _last_request_time > IDLE_UNLOAD_SECONDS
         ):
             _unload_pending = True
@@ -724,7 +756,7 @@ def _run_generate(
 ):
     _touch_last_request()
     _apply_optional_seed(seed_value)
-    _ensure_loaded()
+    _ensure_base_loaded()
     if model is None:
         raise RuntimeError("Model not loaded")
     voice_prompt = get_voice_clone_prompt(voice_id)
@@ -840,7 +872,7 @@ def _run_generate_with_streaming(
 
     _touch_last_request()
     _apply_optional_seed(seed_value)
-    _ensure_loaded()
+    _ensure_base_loaded()
 
     if model is None:
         raise RuntimeError("Model not loaded")
