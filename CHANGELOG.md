@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.21.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.21.0...qwen3-tts-openvino-v0.21.1) (2026-07-03)
+
+
+### Bug Fixes
+
+* **model:** correct seed max from 2^63-1 to 2^32-1 ([6748b8b](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/6748b8bf4b622d024d059101ee7e942feff45959))
+
+
+### Tests
+
+* update voice design preset capacity to 360 ([6748b8b](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/6748b8bf4b622d024d059101ee7e942feff45959))
+
+
+### Documentation
+
+* add conventional commit scopes to AGENTS.md ([6748b8b](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/6748b8bf4b622d024d059101ee7e942feff45959))
+* restore advanced env var detail in .env.example and HOW_TO_RUN.md ([6748b8b](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/6748b8bf4b622d024d059101ee7e942feff45959))
+
+
+### Miscellaneous Chores
+
+* **deps:** pin dependencies ([#97](https://github.com/nmorgowicz-org/qwen3-tts-openvino/issues/97)) ([035afc7](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/035afc7353f8a1604fad48a18cd36ac70d6869c8))
+
 ## [0.21.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.20.0...qwen3-tts-openvino-v0.21.0) (2026-07-02)
 
 
