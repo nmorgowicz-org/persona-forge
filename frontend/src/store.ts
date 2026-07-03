@@ -89,6 +89,8 @@ interface StoreState {
   setVdPreviewBlob: (v: Blob | null) => void
   setVdPreviewId: (v: string | null) => void
   setVdPreviewSeed: (v: number | null) => void
+  setVdSavedVoiceId: (v: string | null) => void
+  setVdIsSaving: (v: boolean) => void
 
   // ---- OmniVoice (PersonaForge) ----
   ovSelections: OmniVoiceSelections
