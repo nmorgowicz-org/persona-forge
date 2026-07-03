@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   auditionOmniVoice,
@@ -13,15 +13,34 @@ import {
   type SegmentMeta,
 } from '@/lib/api'
 import { ACCENT_BANK, type AccentBankEntry, type ShowcaseSentence } from '@/lib/accentBank'
-import { AccentBank } from './AccentBank'
+import {
+  ACCENTS,
+  AGES,
+  EMPTY_OMNIVOICE_SELECTIONS,
+  GENDERS,
+  PITCHES,
+  STYLE_WHISPER,
+  composeInstruct,
+  selectionsFromInstruct,
+  type OmniVoiceSelections,
+} from '@/lib/omnivoiceChips'
+import { ChipButton } from './Chip'
 import { AudioPlayer } from './AudioPlayer'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 // Job-kickoff scaffolding for the OmniVoice engine (docs/plans/PLAN_persona_forge_studio.md
 // §4 step 4). Validates the audition -> cherry-pick -> lock-in -> stitch -> save contract
-// end-to-end with plain <audio> playback; the VST-level SegmentRack/StitchPreview waveform
-// surfaces (§3.3, step 5) replace this UI later without touching the API contract.
+// end-to-end; the VST-level SegmentRack/StitchPreview waveform surfaces (§3.3, step 5) replace
+// this UI later without touching the API contract.
+//
+// UI matches VoiceDesignPanel's chip-based composer look (nick's feedback, 2026-07-03: "why
+// isn't [the premium VST look] on omnivoice? ... how do i know what will work and what
+// won't?") — instead of a free-text instruct field with a one-line hint, every valid
+// instruct tag is a selectable chip (see lib/omnivoiceChips.ts), so the composed string is
+// always exactly the model's closed vocabulary and nothing else. Accent Bank presets remain
+// as one-click starting points but no longer own the instruct string — picking one just seeds
+// the chip selections, which stay editable afterward.
 //
 // One-sentence-at-a-time workflow (feedback from nick, 2026-07-03): rather than a single
 // multi-line textarea auditioned all at once, the user builds the reference clip
@@ -59,9 +78,15 @@ interface PersonaForgePanelProps {
 }
 
 export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
-  const [selectedAccent, setSelectedAccent] = useState<AccentBankEntry | null>(DEFAULT_ACCENT)
-  const [instruct, setInstruct] = useState(DEFAULT_ACCENT?.instruct ?? '')
+  const [selectedAccentPreset, setSelectedAccentPreset] = useState<AccentBankEntry | null>(
+    DEFAULT_ACCENT,
+  )
+  const [selections, setSelections] = useState<OmniVoiceSelections>(
+    DEFAULT_ACCENT ? selectionsFromInstruct(DEFAULT_ACCENT.instruct) : EMPTY_OMNIVOICE_SELECTIONS,
+  )
   const [candidatesPerSegment, setCandidatesPerSegment] = useState(3)
+
+  const instruct = useMemo(() => composeInstruct(selections), [selections])
 
   const [lockedSegments, setLockedSegments] = useState<LockedSegment[]>([])
   const [currentText, setCurrentText] = useState('')
@@ -117,15 +142,25 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     refreshLibrary()
   }, [])
 
-  function resetForAccent(entry: AccentBankEntry) {
-    setSelectedAccent(entry)
-    setInstruct(entry.instruct)
+  function applyAccentPreset(entry: AccentBankEntry) {
+    setSelectedAccentPreset(entry)
+    setSelections(selectionsFromInstruct(entry.instruct))
     setLockedSegments([])
     setCurrentText('')
     setCurrentCandidates(null)
     setStitchedUrl(null)
     setSavedVoiceId(null)
     setError(null)
+  }
+
+  function toggleSingle(key: 'gender' | 'age' | 'pitch' | 'accent', id: string) {
+    setSelections((prev) => ({ ...prev, [key]: prev[key] === id ? null : id }))
+    setSelectedAccentPreset(null)
+  }
+
+  function toggleWhisper() {
+    setSelections((prev) => ({ ...prev, whisper: !prev.whisper }))
+    setSelectedAccentPreset(null)
   }
 
   function applySuggestion(sentence: ShowcaseSentence) {
@@ -135,7 +170,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
 
   async function handleAuditionCurrent() {
     const text = currentText.trim()
-    if (!text || isAuditioning) return
+    if (!text || !instruct || isAuditioning) return
     setIsAuditioning(true)
     setError(null)
     setCurrentCandidates(null)
@@ -170,7 +205,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         candidateId: chosen.candidate_id,
         text: currentText.trim(),
         instruct,
-        accentId: selectedAccent?.id ?? null,
+        accentId: selectedAccentPreset?.id ?? null,
       })
       setLockedSegments((prev) => [
         ...prev,
@@ -252,7 +287,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         segmentIds: lockedSegments.map((s) => s.segmentId),
         instruct,
         segments: lockedSegments.map((s) => s.text),
-        accentId: selectedAccent?.id ?? null,
+        accentId: selectedAccentPreset?.id ?? null,
       })
       setSavedVoiceId(result.voice_id)
       onVoiceCreated?.(result.voice_id)
@@ -276,316 +311,415 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         }/${progress.candidates_per_segment || 1} (${progress.completed}/${progress.total})`
       : null
 
+  // Suggested sentences follow whichever accent bank preset is closest to the current accent
+  // chip, even if gender/age/pitch have since been tweaked away from that preset.
+  const activeShowcaseSentences =
+    ACCENT_BANK.find((entry) => entry.id === selections.accent)?.showcaseSentences ??
+    selectedAccentPreset?.showcaseSentences ??
+    []
+
   return (
-    <div className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm">
-      <div>
-        <h2 className="text-base font-semibold">Design an accent-cloned voice</h2>
-        <p className="text-sm text-muted-foreground">
-          Pick an accent, work one sentence at a time — generate a few candidates, pick the
-          best take, lock it in — then stitch your locked sentences into one reference clip.
-          Locked takes are saved to your segment library and can be reused in later sessions.
-        </p>
-      </div>
-
-      <div>
-        <p className="mb-1.5 text-xs font-medium text-muted-foreground">Accent</p>
-        <AccentBank selectedId={selectedAccent?.id ?? null} onSelect={resetForAccent} />
-      </div>
-
-      <div>
-        <label className="mb-1 block text-xs font-medium text-muted-foreground">
-          Instruct (comma-separated: gender, age, pitch, optional "whisper", accent — closed
-          vocabulary, no free-text tone words like "warm"/"sweet")
-        </label>
-        <input
-          type="text"
-          data-testid="omnivoice-instruct"
-          className="w-full rounded-md border border-input bg-transparent p-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-          value={instruct}
-          onChange={(e) => setInstruct(e.target.value)}
-        />
-      </div>
-
-      {lockedSegments.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <p className="text-xs font-medium text-muted-foreground">
-            Locked sentences ({lockedSegments.length})
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+      <div className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm">
+        <div>
+          <h2 className="text-base font-semibold">Design an accent-cloned voice</h2>
+          <p className="text-sm text-muted-foreground">
+            OmniVoice only accepts a fixed set of tags — every option below is guaranteed
+            valid. Pick a starting point, then adjust chips freely; the composed instruct
+            string on the right always matches exactly what the model understands.
           </p>
-          {lockedSegments.map((seg, i) => (
-            <div
-              key={seg.segmentId}
-              className="flex items-center gap-2 rounded-md border border-border bg-muted/30 p-2"
-            >
-              <span className="flex-1 text-sm">{seg.text}</span>
-              {seg.audioBase64 && (
-                <audio
-                  src={`data:audio/wav;base64,${seg.audioBase64}`}
-                  controls
-                  className="h-8 w-40"
-                />
-              )}
-              <Button type="button" size="sm" variant="ghost" onClick={() => removeLockedSegment(i)}>
-                Remove
+        </div>
+
+        {ACCENT_BANK.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {ACCENT_BANK.map((entry) => (
+              <Button
+                key={entry.id}
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => applyAccentPreset(entry)}
+                className="rounded-full"
+              >
+                {entry.label} starter
               </Button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-3">
-        <p className="text-xs font-medium text-muted-foreground">
-          {lockedSegments.length === 0 ? 'First sentence' : 'Next sentence'}
-        </p>
-
-        {selectedAccent && selectedAccent.showcaseSentences.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            <p className="text-[11px] text-muted-foreground">
-              Suggested lines that showcase this accent — click to use, then edit freely:
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {selectedAccent.showcaseSentences.map((sentence) => (
-                <button
-                  key={sentence.text}
-                  type="button"
-                  title={sentence.note}
-                  onClick={() => applySuggestion(sentence)}
-                  className={cn(
-                    'rounded-full border px-2.5 py-1 text-[11px] transition-colors',
-                    currentText === sentence.text
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border bg-transparent text-muted-foreground hover:bg-accent/40',
-                  )}
-                >
-                  {sentence.text}
-                </button>
-              ))}
-            </div>
+            ))}
           </div>
         )}
 
-        <input
-          type="text"
-          data-testid="omnivoice-current-sentence"
-          placeholder="Type or pick a sentence above…"
-          className="w-full rounded-md border border-input bg-transparent p-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-          value={currentText}
-          onChange={(e) => {
-            setCurrentText(e.target.value)
-            setCurrentCandidates(null)
-          }}
-        />
-
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
-            Candidates
-            <input
-              type="number"
-              min={1}
-              max={6}
-              value={candidatesPerSegment}
-              onChange={(e) => setCandidatesPerSegment(Number(e.target.value) || 1)}
-              className="h-8 w-16 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            />
-          </label>
-          <Button
-            type="button"
-            data-testid="omnivoice-audition-button"
-            onClick={handleAuditionCurrent}
-            disabled={!currentText.trim() || isAuditioning}
-          >
-            {isAuditioning ? 'Generating…' : 'Generate candidates for this line'}
-          </Button>
-        </div>
-
-        {isAuditioning && (
-          <div data-testid="omnivoice-progress" className="flex flex-col gap-1">
-            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-              <motion.div
-                className="h-full bg-primary"
-                animate={{
-                  width:
-                    progress && progress.total > 0
-                      ? `${Math.min(100, (progress.completed / progress.total) * 100)}%`
-                      : '8%',
-                }}
-                transition={{ ease: 'easeOut', duration: 0.3 }}
+        <ChipSection title="Accent">
+          <div className="flex flex-wrap gap-1.5">
+            {ACCENTS.map((chip) => (
+              <ChipButton
+                key={chip.id}
+                label={chip.label}
+                selected={selections.accent === chip.id}
+                onClick={() => toggleSingle('accent', chip.id)}
               />
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              {progress?.phase === 'loading'
-                ? 'Loading OmniVoice checkpoint…'
-                : candidateLabel ?? 'Starting…'}
-              {progress?.phase === 'generating' && progress.estimated_remaining_seconds != null && (
-                <> · {formatEta(progress.estimated_remaining_seconds)}</>
-              )}
+            ))}
+          </div>
+          <p className="mt-2 rounded-md bg-muted/60 px-2.5 py-2 text-[11px] leading-snug text-muted-foreground">
+            Only Australian has a curated showcase-sentence bank so far (validated hands-on —
+            see docs/plans/PLAN_omnivoice_integration.md). Other accents use this same closed
+            vocabulary tag but haven't been quality-checked yet.
+          </p>
+        </ChipSection>
+
+        <ChipSection title="Demographics">
+          <div className="flex flex-wrap gap-1.5">
+            {GENDERS.map((chip) => (
+              <ChipButton
+                key={chip.id}
+                label={chip.label}
+                selected={selections.gender === chip.id}
+                onClick={() => toggleSingle('gender', chip.id)}
+              />
+            ))}
+          </div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {AGES.map((chip) => (
+              <ChipButton
+                key={chip.id}
+                label={chip.label}
+                selected={selections.age === chip.id}
+                onClick={() => toggleSingle('age', chip.id)}
+              />
+            ))}
+          </div>
+        </ChipSection>
+
+        <ChipSection title="Pitch">
+          <div className="flex flex-wrap gap-1.5">
+            {PITCHES.map((chip) => (
+              <ChipButton
+                key={chip.id}
+                label={chip.label}
+                selected={selections.pitch === chip.id}
+                onClick={() => toggleSingle('pitch', chip.id)}
+              />
+            ))}
+          </div>
+          <p className="mt-1.5 text-[11px] text-muted-foreground">
+            "High pitch" trends tinnier in testing — "moderate" is usually the safer default.
+          </p>
+        </ChipSection>
+
+        <ChipSection title="Style">
+          <div className="flex flex-wrap gap-1.5">
+            <ChipButton
+              label={STYLE_WHISPER.label}
+              selected={selections.whisper}
+              onClick={toggleWhisper}
+            />
+          </div>
+          <p className="mt-1.5 text-[11px] text-muted-foreground">
+            The only style tag OmniVoice documents — there's no "warm"/"sweet"/tone lever here
+            (that's a VoiceDesign-only concept).
+          </p>
+        </ChipSection>
+      </div>
+
+      <div className="flex h-fit flex-col gap-4 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm lg:sticky lg:top-8">
+        <div>
+          <p className="mb-1 text-xs font-medium text-muted-foreground">Composed instruct</p>
+          <div
+            data-testid="omnivoice-instruct"
+            className="min-h-9 w-full rounded-md border border-input bg-muted/30 p-2 font-mono text-sm text-muted-foreground"
+          >
+            {instruct || <span className="italic">Pick at least one chip on the left…</span>}
+          </div>
+        </div>
+
+        {lockedSegments.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-medium text-muted-foreground">
+              Locked sentences ({lockedSegments.length})
             </p>
+            {lockedSegments.map((seg, i) => (
+              <div
+                key={seg.segmentId}
+                className="flex items-center gap-2 rounded-md border border-border bg-muted/30 p-2"
+              >
+                <span className="flex-1 text-sm">{seg.text}</span>
+                {seg.audioBase64 && (
+                  <audio
+                    src={`data:audio/wav;base64,${seg.audioBase64}`}
+                    controls
+                    className="h-8 w-40"
+                  />
+                )}
+                <Button type="button" size="sm" variant="ghost" onClick={() => removeLockedSegment(i)}>
+                  Remove
+                </Button>
+              </div>
+            ))}
           </div>
         )}
 
-        <AnimatePresence>
-          {currentCandidates && currentCandidates.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 6 }}
-              className="flex flex-col gap-2"
+        <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-3">
+          <p className="text-xs font-medium text-muted-foreground">
+            {lockedSegments.length === 0 ? 'First sentence' : 'Next sentence'}
+          </p>
+
+          {activeShowcaseSentences.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <p className="text-[11px] text-muted-foreground">
+                Suggested lines that showcase this accent — click to use, then edit freely:
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {activeShowcaseSentences.map((sentence) => (
+                  <button
+                    key={sentence.text}
+                    type="button"
+                    title={sentence.note}
+                    onClick={() => applySuggestion(sentence)}
+                    className={cn(
+                      'rounded-full border px-2.5 py-1 text-[11px] transition-colors',
+                      currentText === sentence.text
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border bg-transparent text-muted-foreground hover:bg-accent/40',
+                    )}
+                  >
+                    {sentence.text}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <input
+            type="text"
+            data-testid="omnivoice-current-sentence"
+            placeholder="Type or pick a sentence above…"
+            className="w-full rounded-md border border-input bg-transparent p-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            value={currentText}
+            onChange={(e) => {
+              setCurrentText(e.target.value)
+              setCurrentCandidates(null)
+            }}
+          />
+
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              Candidates
+              <input
+                type="number"
+                min={1}
+                max={6}
+                value={candidatesPerSegment}
+                onChange={(e) => setCandidatesPerSegment(Number(e.target.value) || 1)}
+                className="h-8 w-16 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              />
+            </label>
+            <Button
+              type="button"
+              data-testid="omnivoice-audition-button"
+              onClick={handleAuditionCurrent}
+              disabled={!currentText.trim() || !instruct || isAuditioning}
             >
-              {currentCandidates.map((candidate, i) => {
-                const url = `data:audio/wav;base64,${candidate.audio_base64}`
-                const selected = i === currentSelectedIndex
-                return (
-                  <div key={candidate.candidate_id} className="flex items-center gap-2">
+              {isAuditioning ? 'Generating…' : 'Generate candidates for this line'}
+            </Button>
+          </div>
+
+          {isAuditioning && (
+            <div data-testid="omnivoice-progress" className="flex flex-col gap-1">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <motion.div
+                  className="h-full bg-primary"
+                  animate={{
+                    width:
+                      progress && progress.total > 0
+                        ? `${Math.min(100, (progress.completed / progress.total) * 100)}%`
+                        : '8%',
+                  }}
+                  transition={{ ease: 'easeOut', duration: 0.3 }}
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {progress?.phase === 'loading'
+                  ? 'Loading OmniVoice checkpoint…'
+                  : candidateLabel ?? 'Starting…'}
+                {progress?.phase === 'generating' && progress.estimated_remaining_seconds != null && (
+                  <> · {formatEta(progress.estimated_remaining_seconds)}</>
+                )}
+              </p>
+            </div>
+          )}
+
+          <AnimatePresence>
+            {currentCandidates && currentCandidates.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 6 }}
+                className="flex flex-col gap-2"
+              >
+                {currentCandidates.map((candidate, i) => {
+                  const url = `data:audio/wav;base64,${candidate.audio_base64}`
+                  const selected = i === currentSelectedIndex
+                  return (
+                    <div key={candidate.candidate_id} className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={selected ? 'default' : 'outline'}
+                        onClick={() => setCurrentSelectedIndex(i)}
+                      >
+                        Take {i + 1}
+                      </Button>
+                      <audio src={url} controls className="h-8 flex-1" />
+                    </div>
+                  )
+                })}
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={lockInCurrentTake}
+                    disabled={isLockingIn}
+                  >
+                    {isLockingIn ? 'Locking in…' : 'Lock in this take'}
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={discardCandidates}>
+                    Discard all takes
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
+          <button
+            type="button"
+            className="flex items-center justify-between text-left text-xs font-medium text-muted-foreground"
+            onClick={() => setIsLibraryOpen((v) => !v)}
+          >
+            <span>Segment library ({library.length})</span>
+            <span>{isLibraryOpen ? 'Hide' : 'Browse'}</span>
+          </button>
+          {isLibraryOpen && (
+            <div className="flex flex-col gap-2">
+              <input
+                type="text"
+                placeholder="Filter by tag (e.g. australian, female)…"
+                value={libraryFilter}
+                onChange={(e) => setLibraryFilter(e.target.value)}
+                className="w-full rounded-md border border-input bg-transparent p-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              />
+              <div className="flex max-h-64 flex-col gap-1.5 overflow-y-auto">
+                {filteredLibrary.length === 0 && (
+                  <p className="text-[11px] text-muted-foreground">No segments match.</p>
+                )}
+                {filteredLibrary.map((m) => (
+                  <div
+                    key={m.segment_id}
+                    className={cn(
+                      'flex items-center gap-2 rounded-md border p-2',
+                      librarySelection.has(m.segment_id)
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border',
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={librarySelection.has(m.segment_id)}
+                      onChange={() => toggleLibrarySelection(m.segment_id)}
+                    />
+                    <div className="flex-1">
+                      <p className="text-sm">{m.text}</p>
+                      <p className="text-[11px] text-muted-foreground">{m.tags.join(', ')}</p>
+                    </div>
+                    {m.audio_base64 && (
+                      <audio
+                        src={`data:audio/wav;base64,${m.audio_base64}`}
+                        controls
+                        className="h-8 w-32"
+                      />
+                    )}
                     <Button
                       type="button"
                       size="sm"
-                      variant={selected ? 'default' : 'outline'}
-                      onClick={() => setCurrentSelectedIndex(i)}
+                      variant="ghost"
+                      onClick={() => handleDeleteFromLibrary(m.segment_id)}
                     >
-                      Take {i + 1}
+                      Delete
                     </Button>
-                    <audio src={url} controls className="h-8 flex-1" />
                   </div>
-                )
-              })}
-              <div className="flex gap-2">
+                ))}
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                className="self-start"
+                onClick={addSelectedFromLibrary}
+                disabled={librarySelection.size === 0}
+              >
+                Add selected to locked sentences
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {error && (
+          <p data-testid="omnivoice-error" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+
+        {lockedSegments.length > 0 && (
+          <Button
+            type="button"
+            data-testid="omnivoice-stitch-button"
+            onClick={handleStitch}
+            disabled={isStitching}
+            className="self-start"
+          >
+            {isStitching ? 'Stitching…' : `Stitch ${lockedSegments.length} locked sentence${lockedSegments.length === 1 ? '' : 's'}`}
+          </Button>
+        )}
+
+        <AnimatePresence>
+          {stitchedUrl && (
+            <motion.div
+              data-testid="omnivoice-result"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              className="flex flex-col gap-3 rounded-md border border-border bg-muted/40 p-3"
+            >
+              <AudioPlayer src={stitchedUrl} blob={stitchedBlob} />
+              {savedVoiceId ? (
+                <p className="text-xs text-muted-foreground">
+                  Saved to voice library as{' '}
+                  <span className="font-mono text-foreground">{savedVoiceId}</span>.
+                </p>
+              ) : (
                 <Button
                   type="button"
+                  data-testid="omnivoice-save-button"
+                  variant="outline"
                   size="sm"
-                  onClick={lockInCurrentTake}
-                  disabled={isLockingIn}
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className="self-start"
                 >
-                  {isLockingIn ? 'Locking in…' : 'Lock in this take'}
+                  {isSaving ? 'Saving…' : 'Save to voice library'}
                 </Button>
-                <Button type="button" size="sm" variant="ghost" onClick={discardCandidates}>
-                  Discard all takes
-                </Button>
-              </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
       </div>
+    </div>
+  )
+}
 
-      <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
-        <button
-          type="button"
-          className="flex items-center justify-between text-left text-xs font-medium text-muted-foreground"
-          onClick={() => setIsLibraryOpen((v) => !v)}
-        >
-          <span>Segment library ({library.length})</span>
-          <span>{isLibraryOpen ? 'Hide' : 'Browse'}</span>
-        </button>
-        {isLibraryOpen && (
-          <div className="flex flex-col gap-2">
-            <input
-              type="text"
-              placeholder="Filter by tag (e.g. australian, female)…"
-              value={libraryFilter}
-              onChange={(e) => setLibraryFilter(e.target.value)}
-              className="w-full rounded-md border border-input bg-transparent p-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            />
-            <div className="flex max-h-64 flex-col gap-1.5 overflow-y-auto">
-              {filteredLibrary.length === 0 && (
-                <p className="text-[11px] text-muted-foreground">No segments match.</p>
-              )}
-              {filteredLibrary.map((m) => (
-                <div
-                  key={m.segment_id}
-                  className={cn(
-                    'flex items-center gap-2 rounded-md border p-2',
-                    librarySelection.has(m.segment_id)
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border',
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    checked={librarySelection.has(m.segment_id)}
-                    onChange={() => toggleLibrarySelection(m.segment_id)}
-                  />
-                  <div className="flex-1">
-                    <p className="text-sm">{m.text}</p>
-                    <p className="text-[11px] text-muted-foreground">{m.tags.join(', ')}</p>
-                  </div>
-                  {m.audio_base64 && (
-                    <audio
-                      src={`data:audio/wav;base64,${m.audio_base64}`}
-                      controls
-                      className="h-8 w-32"
-                    />
-                  )}
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => handleDeleteFromLibrary(m.segment_id)}
-                  >
-                    Delete
-                  </Button>
-                </div>
-              ))}
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              className="self-start"
-              onClick={addSelectedFromLibrary}
-              disabled={librarySelection.size === 0}
-            >
-              Add selected to locked sentences
-            </Button>
-          </div>
-        )}
-      </div>
-
-      {error && (
-        <p data-testid="omnivoice-error" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
-
-      {lockedSegments.length > 0 && (
-        <Button
-          type="button"
-          data-testid="omnivoice-stitch-button"
-          onClick={handleStitch}
-          disabled={isStitching}
-          className="self-start"
-        >
-          {isStitching ? 'Stitching…' : `Stitch ${lockedSegments.length} locked sentence${lockedSegments.length === 1 ? '' : 's'}`}
-        </Button>
-      )}
-
-      <AnimatePresence>
-        {stitchedUrl && (
-          <motion.div
-            data-testid="omnivoice-result"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
-            className="flex flex-col gap-3 rounded-md border border-border bg-muted/40 p-3"
-          >
-            <AudioPlayer src={stitchedUrl} blob={stitchedBlob} />
-            {savedVoiceId ? (
-              <p className="text-xs text-muted-foreground">
-                Saved to voice library as{' '}
-                <span className="font-mono text-foreground">{savedVoiceId}</span>.
-              </p>
-            ) : (
-              <Button
-                type="button"
-                data-testid="omnivoice-save-button"
-                variant="outline"
-                size="sm"
-                onClick={handleSave}
-                disabled={isSaving}
-                className="self-start"
-              >
-                {isSaving ? 'Saving…' : 'Save to voice library'}
-              </Button>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+function ChipSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-medium text-muted-foreground">{title}</p>
+      {children}
     </div>
   )
 }
