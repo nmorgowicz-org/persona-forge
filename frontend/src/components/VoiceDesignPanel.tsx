@@ -174,6 +174,13 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
         >
           {showExperimentalAccents ? 'Hide experimental accents' : 'Show experimental accents'}
         </button>
+        {selections.accent && selections.accent !== 'us' && (
+          <p className="mt-2 rounded-md bg-muted/60 px-2.5 py-2 text-[11px] leading-snug text-muted-foreground">
+            Regional/non-US accents are hit-or-miss here — this engine is tuned for free-form
+            description, not accent precision. If the accent doesn't come through, that's expected
+            behavior, not a bug to retry away.
+          </p>
+        )}
       </ChipSection>
 
       <ChipSection title="Demographics">

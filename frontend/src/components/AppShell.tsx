@@ -42,7 +42,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <AudioLines className="size-4" />
             </div>
             <div className="flex flex-col group-data-[collapsible=icon]:hidden">
-              <span className="text-sm font-semibold leading-none">Qwen3-TTS</span>
+              <span className="text-sm font-semibold leading-none">Persona Forge</span>
               <span className="text-[11px] text-muted-foreground">Voice Studio</span>
             </div>
           </div>
