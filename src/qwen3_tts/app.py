@@ -21,6 +21,11 @@ from qwen3_tts import model, omnivoice_engine, segment_library, voice_design, vo
 # a candidate is only ever addressable up until the next audition job is kicked off.
 _omnivoice_candidates: dict[str, tuple[Any, int]] = {}
 
+# preview_id -> dict of metadata for a VoiceDesign preview that has NOT yet been saved to the
+# library. Single-user, ephemeral: overwritten on each new /voice_design call so only the latest
+# preview is addressable (consistent with the Omnivoice candidates pattern).
+_voice_design_previews: dict[str, dict[str, Any]] = {}
+
 app = Flask(__name__)
 
 # Static frontend export (frontend/, built by `npm run build`; see docs/plans/PLAN_voice_design.md
@@ -155,24 +160,61 @@ def voice_design_create():
             voice_design.run_voice_design_request, description, sample_text, language, seed
         ).result(timeout=300)
         wav_bytes, _ = _encode(wav, sr, "wav")
-        meta = voice_library.save_voice(
-            wav_bytes,
-            description=description,
-            sample_text=sample_text,
-            language=language,
-            seed=resolved_seed,
-            selections=selections,
-        )
+        # Generate an ephemeral preview_id — does NOT save to the voice library yet.
+        preview_id = uuid.uuid4().hex
+        _voice_design_previews[preview_id] = {
+            "wav_bytes": wav_bytes,
+            "sample_rate": sr,
+            "seed": resolved_seed,
+            "description": description,
+            "sample_text": sample_text,
+            "language": language,
+            "selections": selections,
+        }
     except Exception as exc:
         return jsonify({"error": f"VoiceDesign error: {exc}"}), 500
     return jsonify(
         {
-            "voice_id": meta["voice_id"],
+            "preview_id": preview_id,
             "sample_rate": sr,
             "seed": resolved_seed,
             "audio_base64": base64.b64encode(wav_bytes).decode("ascii"),
         }
     )
+
+
+@app.post("/voice_design/preview/<preview_id>/save")
+def voice_design_save(preview_id: str):
+    """Persist a VoiceDesign preview into the voice library (explicit user approval step)."""
+    if not model._service_started:
+        return jsonify({"error": "Model not loaded"}), 503
+    entry = _voice_design_previews.pop(preview_id, None)
+    if entry is None:
+        return jsonify({"error": "Unknown or expired preview_id"}), 400
+    try:
+        meta = voice_library.save_voice(
+            entry["wav_bytes"],
+            description=entry["description"],
+            sample_text=entry["sample_text"],
+            language=entry["language"],
+            seed=entry["seed"],
+            selections=entry["selections"],
+        )
+    except Exception as exc:
+        return jsonify({"error": f"VoiceDesign save error: {exc}"}), 500
+    return jsonify(
+        {
+            "voice_id": meta["voice_id"],
+        }
+    )
+
+
+@app.get("/voice_design/progress")
+def voice_design_progress():
+    # Mirrors GET /omnivoice/progress — polled by the frontend while a /voice_design call is
+    # in flight. See voice_design._progress for field semantics (phase + ETA from a running
+    # average, no completed/total counter since this checkpoint is a single blocking call).
+    return jsonify(voice_design.get_progress())
 
 
 @app.get("/voices")
@@ -228,6 +270,15 @@ def omnivoice_audition():
     seed = data.get("seed")
     if seed is not None and not isinstance(seed, int):
         return jsonify({"error": "seed must be an integer"}), 400
+    num_step = data.get("num_step")
+    if num_step is not None and not isinstance(num_step, int):
+        return jsonify({"error": "num_step must be an integer"}), 400
+    duration = data.get("duration")
+    if duration is not None and not isinstance(duration, (int, float)):
+        return jsonify({"error": "duration must be a number"}), 400
+    speed = data.get("speed")
+    if speed is not None and not isinstance(speed, (int, float)):
+        return jsonify({"error": "speed must be a number"}), 400
 
     try:
         results = model.executor.submit(
@@ -237,6 +288,9 @@ def omnivoice_audition():
             language,
             candidates_per_segment,
             seed,
+            num_step,
+            duration,
+            speed,
         ).result(timeout=1800)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -250,7 +304,7 @@ def omnivoice_audition():
     response_segments = []
     for seg_candidates in results:
         cand_payload = []
-        for wav, sr in seg_candidates:
+        for wav, sr, flagged, flag_reason in seg_candidates:
             candidate_id = uuid.uuid4().hex
             wav_bytes, _ = _encode(wav, sr, "wav")
             _omnivoice_candidates[candidate_id] = (wav, sr)
@@ -259,6 +313,8 @@ def omnivoice_audition():
                     "candidate_id": candidate_id,
                     "sample_rate": sr,
                     "audio_base64": base64.b64encode(wav_bytes).decode("ascii"),
+                    "flagged": flagged,
+                    "flag_reason": None if flag_reason == "ok" else flag_reason,
                 }
             )
         response_segments.append({"candidates": cand_payload})

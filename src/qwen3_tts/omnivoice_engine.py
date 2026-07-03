@@ -33,7 +33,24 @@ import time
 from typing import Any
 
 from qwen3_tts import model
-from qwen3_tts.audio_post import stitch_segments
+from qwen3_tts.asr_check import has_speech
+from qwen3_tts.audio_post import analyze_take, stitch_segments
+
+# Real bounds from the installed `omnivoice` package's OmniVoiceGenerationConfig
+# (num_step default 32, guidance_scale/duration/speed unset by default) — see
+# docs/plans/PLAN_omnivoice_integration.md and the 2026-07-03 upstream-docs review. Clamped
+# here rather than trusting the frontend, since these reach a third-party model call.
+MIN_NUM_STEP = 1
+MAX_NUM_STEP = 64
+MIN_SPEED = 0.25
+MAX_SPEED = 4.0
+
+# A take flagged by audio_post.analyze_take (dead air / drone / SFX — nick's report,
+# 2026-07-03: "just dead air/drones/sfx") gets exactly one silent retry before being
+# returned as-is; OmniVoice failures are known to be non-deterministic per-draw (see module
+# docstring), so a second independent draw has a real chance of landing clean, but retrying
+# indefinitely would turn one bad line into an unbounded generation loop.
+MAX_ATTEMPTS_PER_CANDIDATE = 2
 
 _swap_in_progress = False
 _omnivoice_model = None
@@ -102,7 +119,10 @@ def run_omnivoice_job(
     language: str = "english",
     candidates_per_segment: int = 3,
     seed: int | None = None,
-) -> list[list[tuple[Any, int]]]:
+    num_step: int | None = None,
+    duration: float | None = None,
+    speed: float | None = None,
+) -> list[list[tuple[Any, int, bool, str]]]:
     """Swap to OmniVoice and generate every segment x candidate. Leaves OmniVoice loaded on
     success (see this module's docstring for why). On failure, the checkpoint is unloaded
     fully rather than restoring Base; the next real /generate or /v1/audio/speech call
@@ -111,7 +131,15 @@ def run_omnivoice_job(
     Must run inside model.executor — callers submit this via
     ``model.executor.submit(run_omnivoice_job, ...)``, never call it directly off-thread.
 
-    Returns a segments x candidates_per_segment list of (wav, sample_rate) tuples.
+    Returns a segments x candidates_per_segment list of (wav, sample_rate, flagged,
+    flag_reason) tuples. ``flagged`` comes from audio_post.analyze_take's best-effort
+    dead-air/drone heuristic; a flagged candidate is retried once in-loop before being
+    returned (see MAX_ATTEMPTS_PER_CANDIDATE), so a flagged result already survived a retry.
+
+    ``num_step``/``duration``/``speed`` map straight onto the real ``OmniVoice.generate()``
+    kwargs (confirmed against the installed omnivoice==0.1.5 package, 2026-07-03 upstream
+    review) — omitted (None) ones are left out of the call entirely so the model's own
+    defaults apply rather than this repo silently overriding them.
 
     No manual seed by default: seeding a whole multi-segment/multi-candidate batch defeats
     the point of auditioning independent draws, and stitching validated in
@@ -154,9 +182,17 @@ def run_omnivoice_job(
         _omnivoice_model = OmniVoice.from_pretrained("k2-fsa/OmniVoice", dtype=torch.float32)
         _progress["phase"] = "generating"
 
-        results: list[list[tuple[Any, int]]] = []
+        gen_kwargs: dict[str, Any] = {}
+        if num_step is not None:
+            gen_kwargs["num_step"] = max(MIN_NUM_STEP, min(MAX_NUM_STEP, int(num_step)))
+        if duration is not None:
+            gen_kwargs["duration"] = float(duration)
+        if speed is not None:
+            gen_kwargs["speed"] = max(MIN_SPEED, min(MAX_SPEED, float(speed)))
+
+        results: list[list[tuple[Any, int, bool, str]]] = []
         for seg_idx, text in enumerate(segments):
-            candidates: list[tuple[Any, int]] = []
+            candidates: list[tuple[Any, int, bool, str]] = []
             for cand_idx in range(candidates_per_segment):
                 _progress["current_segment_index"] = seg_idx
                 _progress["current_candidate_index"] = cand_idx
@@ -166,12 +202,32 @@ def run_omnivoice_job(
                     flush=True,
                 )
                 cand_t0 = time.monotonic()
-                audio = _omnivoice_model.generate(
-                    text=text, instruct=instruct, language=language
-                )[0]
+                wav = None
+                flagged, reason = True, "empty"
+                for attempt in range(1, MAX_ATTEMPTS_PER_CANDIDATE + 1):
+                    audio = _omnivoice_model.generate(
+                        text=text, instruct=instruct, language=language, **gen_kwargs
+                    )[0]
+                    wav = model._trim_silence(audio, OMNIVOICE_SAMPLE_RATE)
+                    flagged, reason = analyze_take(wav, OMNIVOICE_SAMPLE_RATE)
+                    if not flagged:
+                        # analyze_take's spectral heuristic is a fast proxy and can miss
+                        # non-tonal dead-air (broadband hiss, babble, clipped garbage) — run
+                        # the more expensive but more direct Whisper no-speech gate only on
+                        # takes that already passed the cheap check.
+                        speech_found, _transcript = has_speech(wav, OMNIVOICE_SAMPLE_RATE)
+                        if not speech_found:
+                            flagged, reason = True, "no-speech-detected"
+                        else:
+                            break
+                    if attempt < MAX_ATTEMPTS_PER_CANDIDATE:
+                        print(
+                            f"[omnivoice] candidate flagged ({reason}), retrying "
+                            f"(attempt {attempt + 1}/{MAX_ATTEMPTS_PER_CANDIDATE})...",
+                            flush=True,
+                        )
                 cand_elapsed = time.monotonic() - cand_t0
-                wav = model._trim_silence(audio, OMNIVOICE_SAMPLE_RATE)
-                candidates.append((wav, OMNIVOICE_SAMPLE_RATE))
+                candidates.append((wav, OMNIVOICE_SAMPLE_RATE, flagged, reason))
 
                 completed = _progress["completed"] + 1
                 prev_avg = _progress["avg_seconds"]

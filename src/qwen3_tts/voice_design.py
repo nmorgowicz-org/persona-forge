@@ -22,6 +22,28 @@ from typing import Any
 
 from qwen3_tts import model
 
+# Mirrors omnivoice_engine._progress (GET /omnivoice/progress) — nick's feedback, 2026-07-03:
+# "you did not add that [progress/ETA] in for the qwen3-tts voice design". This checkpoint's
+# generate_voice_design() is a single blocking autoregressive call (no per-candidate loop to
+# report mid-flight progress on, unlike OmniVoice's diffusion-style per-step model), so
+# "progress" here is phase (loading the checkpoint vs. generating) plus an ETA derived from a
+# running average of past request durations, rather than a true completed/total counter.
+_progress: dict[str, Any] = {
+    "phase": "idle",
+    "avg_seconds": None,
+    "estimated_remaining_seconds": None,
+}
+_phase_started_at: float | None = None
+_completed_requests = 0
+
+
+def get_progress() -> dict[str, Any]:
+    snapshot = dict(_progress)
+    if snapshot["phase"] == "generating" and snapshot["avg_seconds"] is not None and _phase_started_at is not None:
+        elapsed = time.monotonic() - _phase_started_at
+        snapshot["estimated_remaining_seconds"] = max(0.0, snapshot["avg_seconds"] - elapsed)
+    return snapshot
+
 # ~130-150 words/min speech rate heuristic (PLAN_voice_design.md §8.4). VoiceDesign's IR
 # capacity (§4.1) is larger to leave headroom for testing; this is the API-level cap on the
 # *stored* reference sample, kept intentionally short because shorter, clearer reference
@@ -66,11 +88,13 @@ def run_voice_design_request(
     for the tune/tweak workflow (PLAN_voice_design.md §8.3) to mean anything: re-rolling a
     voice needs a real new random draw, and locking onto a good take needs its exact seed.
     """
-    global _swap_in_progress
+    global _swap_in_progress, _phase_started_at, _completed_requests
     _swap_in_progress = True
     model._touch_last_request()
     resolved_seed = model.resolve_seed(seed)
     t0 = time.monotonic()
+    _progress.update(phase="loading", estimated_remaining_seconds=_progress["avg_seconds"])
+    _phase_started_at = t0
     try:
         print("[voice_design] swapping to VoiceDesign checkpoint...", flush=True)
         model.unload_foreign_models()
@@ -89,6 +113,8 @@ def run_voice_design_request(
             f"[voice_design] generating sample (lang={language!r}, seed={resolved_seed})...",
             flush=True,
         )
+        _progress["phase"] = "generating"
+        _phase_started_at = time.monotonic()
         wavs, sr = model.model.generate_voice_design(
             text=sample_text,
             language=language,
@@ -97,6 +123,12 @@ def run_voice_design_request(
         wav = model._trim_silence(wavs[0], sr)
         elapsed = time.monotonic() - t0
         print(f"[voice_design] sample generated in {elapsed:.1f}s", flush=True)
+
+        _completed_requests += 1
+        prev_avg = _progress["avg_seconds"]
+        _progress["avg_seconds"] = (
+            elapsed if prev_avg is None else prev_avg + (elapsed - prev_avg) / _completed_requests
+        )
         return wav, sr, resolved_seed
     except Exception:
         print("[voice_design] request failed; unloading VoiceDesign checkpoint...", flush=True)
@@ -104,6 +136,9 @@ def run_voice_design_request(
         raise
     finally:
         _swap_in_progress = False
+        _progress["phase"] = "idle"
+        _progress["estimated_remaining_seconds"] = None
+        _phase_started_at = None
         print(
             f"[voice_design] done, total elapsed={time.monotonic() - t0:.1f}s",
             flush=True,

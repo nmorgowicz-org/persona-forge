@@ -19,6 +19,7 @@ export function AudioPlayer({ src, blob, className, autoPlay = true }: AudioPlay
   const [peaks, setPeaks] = useState<number[] | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [duration, setDuration] = useState<number | null>(null)
 
   useEffect(() => {
     setPeaks(null)
@@ -58,9 +59,17 @@ export function AudioPlayer({ src, blob, className, autoPlay = true }: AudioPlay
       <audio
         ref={audioRef}
         src={src}
+        onLoadedMetadata={(e) => {
+          const d = e.currentTarget.duration
+          if (d != null && isFinite(d)) setDuration(d)
+        }}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
-        onEnded={() => setIsPlaying(false)}
+        onEnded={() => {
+          setIsPlaying(false)
+          setProgress(0)
+          setDuration(null)
+        }}
         onTimeUpdate={(e) => {
           const audio = e.currentTarget
           if (audio.duration) setProgress(audio.currentTime / audio.duration)
@@ -77,7 +86,12 @@ export function AudioPlayer({ src, blob, className, autoPlay = true }: AudioPlay
         >
           {isPlaying ? <Pause className="size-4" /> : <Play className="size-4" />}
         </Button>
-        <Waveform peaks={peaks ?? Array(64).fill(0.15)} progress={progress} className="flex-1" />
+        <Waveform
+          peaks={peaks ?? Array(64).fill(0.15)}
+          progress={progress}
+          duration={peaks != null ? duration : null}
+          className="flex-1"
+        />
       </div>
     </div>
   )

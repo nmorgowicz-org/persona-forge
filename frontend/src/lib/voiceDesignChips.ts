@@ -9,26 +9,9 @@ export interface Chip {
   text?: string
 }
 
-export interface AccentChip extends Chip {
-  tier: 1 | 2
-}
-
 export interface PersonaChip extends Chip {
   group: 'assistant' | 'companion' | 'power'
 }
-
-export const ACCENTS: AccentChip[] = [
-  { id: 'us', label: 'English (US)', text: 'American', tier: 1 },
-  { id: 'uk', label: 'English (UK)', text: 'British', tier: 1 },
-  { id: 'au', label: 'English (AU)', text: 'Australian', tier: 1 },
-  { id: 'ie', label: 'English (IE)', text: 'Irish', tier: 1 },
-  { id: 'boston', label: 'Boston', text: 'Boston-accented American', tier: 2 },
-  { id: 'nyc', label: 'New York', text: 'New York-accented American', tier: 2 },
-  { id: 'southern', label: 'Southern US', text: 'Southern American', tier: 2 },
-  { id: 'scottish', label: 'Scottish', text: 'Scottish', tier: 2 },
-  { id: 'rp', label: 'Received Pronunciation', text: 'Received Pronunciation British', tier: 2 },
-  { id: 'kiwi', label: 'Kiwi (NZ)', text: 'New Zealand', tier: 2 },
-]
 
 export const GENDERS: Chip[] = [
   { id: 'female', label: 'Female' },
@@ -121,7 +104,6 @@ export const SAMPLE_TEXT_BY_PERSONA: Record<string, string> = {
 export const DEFAULT_SAMPLE_TEXT = "Hi, I'm here to help. What can I do for you today?"
 
 export interface ChipSelections {
-  accent: string | null
   gender: string | null
   age: string | null
   register: string | null
@@ -130,7 +112,6 @@ export interface ChipSelections {
 }
 
 export const EMPTY_SELECTIONS: ChipSelections = {
-  accent: null,
   gender: null,
   age: null,
   register: null,
@@ -145,12 +126,17 @@ function findLabel(chips: Chip[], id: string | null): string | undefined {
 
 /**
  * Assemble a single description string, in the fixed anatomy order the model responds to
- * best: accent -> demographics -> register -> texture/timbre -> persona/character. This is a
- * UX assembly rule (alexandria empirical findings), not a model-enforced field — the
+ * best: demographics -> register -> texture/timbre -> persona/character. This is a UX
+ * assembly rule (alexandria empirical findings), not a model-enforced field — the
  * `/voice_design` API takes one free-text `description`.
+ *
+ * No accent field: this checkpoint's regional/non-US English accent control doesn't work
+ * reliably (nick's feedback, 2026-07-03, confirmed via testing) — the engine only produces
+ * plain English regardless of accent instruction, so the chip was actively misleading users
+ * into thinking accent control was available here. OmniVoice (Persona Forge) is the engine
+ * that's actually accent-capable — see [[voicedesign-accent-investigation]].
  */
 export function composeDescription(sel: ChipSelections): string {
-  const accent = findLabel(ACCENTS, sel.accent)
   const age = findLabel(AGES, sel.age)
   const gender = findLabel(GENDERS, sel.gender)
   const register = REGISTERS.find((c) => c.id === sel.register)?.label
@@ -161,7 +147,7 @@ export function composeDescription(sel: ChipSelections): string {
     .map((id) => PERSONAS.find((c) => c.id === id)?.label)
     .filter((v): v is string => Boolean(v))
 
-  const leadParts = [accent, age, gender].filter(Boolean)
+  const leadParts = [age, gender].filter(Boolean)
   const lead = leadParts.length > 0 ? leadParts.join(' ') : ''
 
   const clauses: string[] = []
@@ -212,10 +198,9 @@ export interface VoiceDesignPreset {
 // Starter presets (§8.3) — one-click, no composing required.
 export const PRESETS: VoiceDesignPreset[] = [
   {
-    id: 'warm-assistant-us-female',
-    label: 'Warm Assistant (US, female)',
+    id: 'warm-assistant-female',
+    label: 'Warm Assistant (female)',
     selections: {
-      accent: 'us',
       gender: 'female',
       age: 'adult',
       register: 'mezzo',
@@ -224,10 +209,9 @@ export const PRESETS: VoiceDesignPreset[] = [
     },
   },
   {
-    id: 'confident-professional-uk-male',
-    label: 'Confident Professional (UK, male)',
+    id: 'confident-professional-male',
+    label: 'Confident Professional (male)',
     selections: {
-      accent: 'uk',
       gender: 'male',
       age: 'adult',
       register: 'baritone',
@@ -236,10 +220,9 @@ export const PRESETS: VoiceDesignPreset[] = [
     },
   },
   {
-    id: 'playful-companion-au-female',
-    label: 'Playful Companion (AU, female)',
+    id: 'playful-companion-female',
+    label: 'Playful Companion (female)',
     selections: {
-      accent: 'au',
       gender: 'female',
       age: 'young',
       register: 'mezzo',

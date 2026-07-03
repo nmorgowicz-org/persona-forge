@@ -62,14 +62,14 @@ export interface VoiceDesignParams {
   selections?: unknown
 }
 
-export interface VoiceDesignResult {
-  voice_id: string
+export interface VoiceDesignPreviewResult {
+  preview_id: string
   sample_rate: number
   seed: number
   audio_base64: string
 }
 
-export async function createVoiceDesign(params: VoiceDesignParams): Promise<VoiceDesignResult> {
+export async function createVoiceDesign(params: VoiceDesignParams): Promise<VoiceDesignPreviewResult> {
   const res = await fetch('/voice_design', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -80,6 +80,20 @@ export async function createVoiceDesign(params: VoiceDesignParams): Promise<Voic
       seed: params.seed ?? undefined,
       selections: params.selections ?? undefined,
     }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export interface VoiceDesignSaveResult {
+  voice_id: string
+}
+
+export async function saveVoiceDesign(previewId: string): Promise<VoiceDesignSaveResult> {
+  const res = await fetch(`/voice_design/preview/${encodeURIComponent(previewId)}/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
@@ -124,12 +138,24 @@ export interface OmniVoiceAuditionParams {
   language?: string
   candidatesPerSegment?: number
   seed?: number | null
+  /** Diffusion step count — quality/speed tradeoff. Server clamps to [1, 64]; omit for the
+   * model's own default (32). */
+  numStep?: number | null
+  /** Target clip duration in seconds. Overrides `speed` when both are set (real
+   * OmniVoice.generate() behavior). */
+  durationSeconds?: number | null
+  /** Playback-rate-style multiplier. Server clamps to [0.25, 4.0]. */
+  speed?: number | null
 }
 
 export interface OmniVoiceCandidate {
   candidate_id: string
   sample_rate: number
   audio_base64: string
+  /** True if audio_post.analyze_take's drone/silence heuristic (or the Whisper no-speech
+   * gate) flagged this take even after one in-server retry. */
+  flagged: boolean
+  flag_reason: string | null
 }
 
 export interface OmniVoiceAuditionResult {
@@ -148,6 +174,9 @@ export async function auditionOmniVoice(
       language: params.language ?? 'english',
       candidates_per_segment: params.candidatesPerSegment ?? 3,
       seed: params.seed ?? undefined,
+      num_step: params.numStep ?? undefined,
+      duration: params.durationSeconds ?? undefined,
+      speed: params.speed ?? undefined,
     }),
   })
   if (!res.ok) throw new Error(await readError(res))
@@ -168,6 +197,18 @@ export interface OmniVoiceProgress {
 
 export async function getOmniVoiceProgress(): Promise<OmniVoiceProgress> {
   const res = await fetch('/omnivoice/progress')
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export interface VoiceDesignProgress {
+  phase: 'idle' | 'loading' | 'generating'
+  avg_seconds: number | null
+  estimated_remaining_seconds: number | null
+}
+
+export async function getVoiceDesignProgress(): Promise<VoiceDesignProgress> {
+  const res = await fetch('/voice_design/progress')
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
 }

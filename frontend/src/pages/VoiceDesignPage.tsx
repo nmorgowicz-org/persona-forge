@@ -12,7 +12,9 @@ export function VoiceDesignPage() {
   const setPage = useAppStore((s) => s.setPage)
   const editingVoice = useAppStore((s) => s.editingVoice)
   const setEditingVoice = useAppStore((s) => s.setEditingVoice)
-  const [engine, setEngine] = useState<DesignEngine>('qwen')
+
+  const designEngine = useAppStore((s) => s.designEngine)
+  const setDesignEngine = useAppStore((s) => s.setDesignEngine)
 
   // Capture the queued edit once on mount, then clear it from the store — a plain later visit
   // to this page (e.g. via the sidebar) should start fresh, not silently reuse stale edit state.
@@ -32,21 +34,37 @@ export function VoiceDesignPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-2xl font-semibold tracking-tight">Voice Design</h1>
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Voice Design
+        </h1>
         <p className="text-sm text-muted-foreground">
-          Compose a voice from traits, preview it, and save it to the library.
+          Compose a voice from traits, preview it, and
+          save it to the library.
         </p>
       </motion.div>
 
-      <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}>
-        <EngineSelector value={engine} onChange={setEngine} />
+      <motion.div
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <EngineSelector
+          value={designEngine}
+          onChange={setDesignEngine}
+        />
       </motion.div>
 
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} key={engine}>
-        {engine === 'qwen' ? (
+      {/* No key on this wrapper so panels are not unmounted when switching engines —
+          their state lives in Zustand now. */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        {designEngine === 'qwen' ? (
           <VoiceDesignPanel
-            key={initial?.voiceId ?? 'new'}
             initial={initial}
             onVoiceCreated={(newVoiceId) => {
               setVoiceId(newVoiceId)

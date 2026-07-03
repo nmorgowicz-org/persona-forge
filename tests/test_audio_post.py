@@ -5,6 +5,7 @@ import unittest
 import numpy as np
 
 from qwen3_tts.audio_post import (
+    analyze_take,
     compress,
     crossfade_concat,
     limit_peak,
@@ -123,6 +124,40 @@ class StitchSegmentsTests(unittest.TestCase):
         seg = _sine(220.0, 0.3, sr)
         final = stitch_segments([seg], sr)
         self.assertGreater(final.size, 0)
+
+
+class AnalyzeTakeTests(unittest.TestCase):
+    def test_empty_audio_is_flagged(self) -> None:
+        flagged, reason = analyze_take(np.zeros(0, dtype=np.float32), 24000)
+        self.assertTrue(flagged)
+        self.assertEqual(reason, "empty")
+
+    def test_silence_is_flagged(self) -> None:
+        sr = 24000
+        flagged, reason = analyze_take(np.zeros(sr * 2, dtype=np.float32), sr)
+        self.assertTrue(flagged)
+        self.assertEqual(reason, "near-silent")
+
+    def test_sustained_pure_tone_is_flagged_as_drone(self) -> None:
+        # A pure sine held for a couple seconds is exactly the narrowband, near-zero-variance
+        # spectral-flatness signature the drone heuristic targets — this is the failure mode
+        # from nick's report (2026-07-03: candidates that are "just dead air/drones/sfx").
+        sr = 24000
+        tone = _sine(220.0, 2.0, sr, amplitude=0.6)
+        flagged, reason = analyze_take(tone, sr)
+        self.assertTrue(flagged)
+        self.assertEqual(reason, "tonal/drone-like")
+
+    def test_broadband_noise_is_not_flagged(self) -> None:
+        # White noise has high, frame-to-frame-varying spectral flatness — the opposite
+        # signature from a drone — so it's a reasonable stand-in for "not obviously broken"
+        # audio given the test suite has no real speech samples available.
+        sr = 24000
+        rng = np.random.default_rng(0)
+        noise = (rng.standard_normal(sr * 2) * 0.2).astype(np.float32)
+        flagged, reason = analyze_take(noise, sr)
+        self.assertFalse(flagged)
+        self.assertEqual(reason, "ok")
 
 
 if __name__ == "__main__":

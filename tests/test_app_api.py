@@ -248,9 +248,9 @@ class AppTests(unittest.TestCase):
         self.assertEqual(generate_result.status_code, 200)
 
     def test_omnivoice_audition_returns_candidates_with_ids(self) -> None:
-        def fake_run_omnivoice_job(segments, instruct, language, candidates_per_segment, seed):
+        def fake_run_omnivoice_job(segments, instruct, language, candidates_per_segment, seed, num_step=None, duration=None, speed=None):
             return [
-                [(np.zeros(240, dtype=np.float32), 24000) for _ in range(candidates_per_segment)]
+                [(np.zeros(240, dtype=np.float32), 24000, False, 'ok') for _ in range(candidates_per_segment)]
                 for _ in segments
             ]
 
@@ -299,8 +299,8 @@ class AppTests(unittest.TestCase):
         self.assertEqual(result.status_code, 503)
 
     def test_omnivoice_stitch_combines_selected_candidates(self) -> None:
-        def fake_run_omnivoice_job(segments, instruct, language, candidates_per_segment, seed):
-            return [[(np.zeros(240, dtype=np.float32), 24000)] for _ in segments]
+        def fake_run_omnivoice_job(segments, instruct, language, candidates_per_segment, seed, num_step=None, duration=None, speed=None):
+            return [[(np.zeros(240, dtype=np.float32), 24000, False, 'ok')] for _ in segments]
 
         with patch.object(
             app_module.omnivoice_engine, "run_omnivoice_job", fake_run_omnivoice_job
@@ -336,8 +336,8 @@ class AppTests(unittest.TestCase):
         self.assertEqual(result.status_code, 400)
 
     def _seed_omnivoice_candidate(self) -> str:
-        def fake_run_omnivoice_job(segments, instruct, language, candidates_per_segment, seed):
-            return [[(np.zeros(240, dtype=np.float32), 24000)] for _ in segments]
+        def fake_run_omnivoice_job(segments, instruct, language, candidates_per_segment, seed, num_step=None, duration=None, speed=None):
+            return [[(np.zeros(240, dtype=np.float32), 24000, False, 'ok')] for _ in segments]
 
         with patch.object(
             app_module.omnivoice_engine, "run_omnivoice_job", fake_run_omnivoice_job

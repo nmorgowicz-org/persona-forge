@@ -115,6 +115,55 @@ def crossfade_concat(
     return result
 
 
+_SILENT_RMS_DBFS = -45.0
+# Frame-level spectral flatness (geometric mean / arithmetic mean of the magnitude
+# spectrum) is near 0 for a pure tone/drone and much higher, and highly *variable*, for
+# speech (voiced/unvoiced/silence alternate constantly). A "bad take" — drone, SFX, or a
+# stuck tone — shows up as almost every frame sitting in the tonal band with very little
+# frame-to-frame variance, which normal speech essentially never does even in a 2-3s clip.
+_DRONE_FLATNESS_THRESHOLD = 0.15
+_DRONE_LOW_FLATNESS_FRACTION = 0.85
+_DRONE_FLATNESS_STD_MAX = 0.05
+_FRAME_MS = 50.0
+
+
+def analyze_take(audio: np.ndarray, sr: int) -> tuple[bool, str]:
+    """Best-effort heuristic flag for a broken OmniVoice take (dead air / drone / SFX).
+
+    Not a real speech-quality classifier — just two cheap numpy-only checks (locked
+    decision: no new DSP dependency, see module docstring) good enough to catch the
+    failure modes observed in practice (nick, 2026-07-03: candidates that are "just dead
+    air/drones/sfx"). False negatives are expected; genuine speech should essentially
+    never trip the drone check because it flattens/varies too much frame to frame.
+    Returns (flagged, reason) — reason is "ok" when not flagged.
+    """
+    x = np.asarray(audio, dtype=np.float32).ravel()
+    if x.size == 0:
+        return True, "empty"
+    if _rms(x) <= 10.0 ** (_SILENT_RMS_DBFS / 20.0):
+        return True, "near-silent"
+
+    win = max(1, int(sr * _FRAME_MS / 1000.0))
+    hop = max(1, win // 2)
+    window = np.hanning(win) if win > 1 else np.ones(1, dtype=np.float32)
+    flatness_vals: list[float] = []
+    for start in range(0, x.size - win + 1, hop):
+        frame = x[start : start + win] * window
+        spec = np.abs(np.fft.rfft(frame)) + _EPS
+        gmean = np.exp(np.mean(np.log(spec)))
+        amean = np.mean(spec)
+        flatness_vals.append(float(gmean / amean))
+
+    if not flatness_vals:
+        return False, "ok"
+    flatness = np.array(flatness_vals)
+    low_flat_frac = float(np.mean(flatness < _DRONE_FLATNESS_THRESHOLD))
+    flat_std = float(np.std(flatness))
+    if low_flat_frac > _DRONE_LOW_FLATNESS_FRACTION and flat_std < _DRONE_FLATNESS_STD_MAX:
+        return True, "tonal/drone-like"
+    return False, "ok"
+
+
 def stitch_segments(
     segments: list[np.ndarray],
     sr: int,
