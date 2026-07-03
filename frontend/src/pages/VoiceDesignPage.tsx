@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { VoiceDesignPanel } from '@/components/VoiceDesignPanel'
+import { PersonaForgePanel } from '@/components/PersonaForgePanel'
+import { EngineSelector, type DesignEngine } from '@/components/EngineSelector'
 import { useAppStore, type EditingVoice } from '@/store'
 import { listVoices } from '@/lib/api'
 
@@ -10,6 +12,7 @@ export function VoiceDesignPage() {
   const setPage = useAppStore((s) => s.setPage)
   const editingVoice = useAppStore((s) => s.editingVoice)
   const setEditingVoice = useAppStore((s) => s.setEditingVoice)
+  const [engine, setEngine] = useState<DesignEngine>('qwen')
 
   // Capture the queued edit once on mount, then clear it from the store — a plain later visit
   // to this page (e.g. via the sidebar) should start fresh, not silently reuse stale edit state.
@@ -36,16 +39,24 @@ export function VoiceDesignPage() {
         </p>
       </motion.div>
 
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
-        <VoiceDesignPanel
-          key={initial?.voiceId ?? 'new'}
-          initial={initial}
-          onVoiceCreated={(newVoiceId) => {
-            setVoiceId(newVoiceId)
-            refreshVoices()
-            setPage('speak')
-          }}
-        />
+      <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}>
+        <EngineSelector value={engine} onChange={setEngine} />
+      </motion.div>
+
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} key={engine}>
+        {engine === 'qwen' ? (
+          <VoiceDesignPanel
+            key={initial?.voiceId ?? 'new'}
+            initial={initial}
+            onVoiceCreated={(newVoiceId) => {
+              setVoiceId(newVoiceId)
+              refreshVoices()
+              setPage('speak')
+            }}
+          />
+        ) : (
+          <PersonaForgePanel />
+        )}
       </motion.div>
     </div>
   )

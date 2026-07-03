@@ -118,6 +118,52 @@ export async function getHealth(): Promise<HealthState> {
   return res.json()
 }
 
+export interface OmniVoiceAuditionParams {
+  segments: string[]
+  instruct: string
+  language?: string
+  candidatesPerSegment?: number
+  seed?: number | null
+}
+
+export interface OmniVoiceCandidate {
+  candidate_id: string
+  sample_rate: number
+  audio_base64: string
+}
+
+export interface OmniVoiceAuditionResult {
+  segments: { candidates: OmniVoiceCandidate[] }[]
+}
+
+export async function auditionOmniVoice(
+  params: OmniVoiceAuditionParams,
+): Promise<OmniVoiceAuditionResult> {
+  const res = await fetch('/omnivoice/audition', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      segments: params.segments,
+      instruct: params.instruct,
+      language: params.language ?? 'english',
+      candidates_per_segment: params.candidatesPerSegment ?? 3,
+      seed: params.seed ?? undefined,
+    }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function stitchOmniVoice(selections: string[]): Promise<Blob> {
+  const res = await fetch('/omnivoice/stitch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ selections }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.blob()
+}
+
 export interface RuntimeConfigState {
   reconfig_in_progress: boolean
   live: {
