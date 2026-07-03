@@ -60,15 +60,27 @@ function ThemePaletteButton() {
   const theme = useAppStore((s) => s.theme)
   const setTheme = useAppStore((s) => s.setTheme)
   const [open, setOpen] = React.useState(false)
+  const ref = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
 
   return (
     <div
-      className="relative"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      ref={ref}
+      className="relative inline-flex"
     >
       <button
         type="button"
+        onClick={() => setOpen((v) => !v)}
         className="flex size-8 items-center justify-center rounded-md border border-border/90 bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         title="Theme"
       >
@@ -76,14 +88,17 @@ function ThemePaletteButton() {
       </button>
 
       {open && (
-        <div className="absolute right-0 bottom-10 mb-1 flex gap-1.5 rounded-lg border border-border bg-popover px-2 py-1.5 shadow-lg">
+        <div className="absolute right-0 bottom-11 mb-1 flex gap-1.5 rounded-lg border border-border bg-popover px-2.5 py-1.5 shadow-lg">
           {THEMES.map((t) => {
             const active = theme === t
             return (
               <button
                 key={t}
                 type="button"
-                onClick={() => setTheme(t)}
+                onClick={() => {
+                  setTheme(t)
+                  // keep panel open so they can change again
+                }}
                 className={cn(
                   'flex size-5 shrink-0 items-center justify-center rounded-full ring-1 ring-white/10 transition-transform hover:scale-110',
                   active && 'ring-2 ring-white/80',
@@ -188,8 +203,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
         <SwapBanner />
-        <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-5xl px-6 py-8">{children}</div>
+        <div className="min-w-0 flex-1 overflow-y-auto">
+          <div className="w-full px-6 py-8">{children}</div>
         </div>
       </SidebarInset>
     </SidebarProvider>

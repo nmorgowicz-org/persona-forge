@@ -185,6 +185,12 @@ export interface OmniVoiceAuditionProgressResult {
   current_segment_index: number | null
   segments_completed: OmniVoiceCandidateSegment[]
   message: string | null
+  eta?: number | null
+  total_candidates?: number
+  completed_candidates?: number
+  avg_seconds?: number | null
+  estimated_remaining_seconds?: number | null
+  current_candidate_index?: number | null
 }
 
 /**

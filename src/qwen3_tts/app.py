@@ -588,6 +588,7 @@ def omnivoice_audition_progress():
         job = _OV_AUDITION_JOBS.get(job_id)
     if job is None:
         return jsonify({"error": "Unknown or expired job_id"}), 404
+    prog = omnivoice_engine.get_progress()
     return jsonify(
         {
             "status": job["status"],
@@ -596,6 +597,12 @@ def omnivoice_audition_progress():
             "current_segment_index": job["current_segment_index"],
             "segments_completed": job["segments_completed"],
             "message": job.get("message"),
+            "eta": prog.get("estimated_remaining_seconds"),
+            "total_candidates": prog.get("total"),
+            "completed_candidates": prog.get("completed"),
+            "avg_seconds": prog.get("avg_seconds"),
+            "estimated_remaining_seconds": prog.get("estimated_remaining_seconds"),
+            "current_candidate_index": prog.get("current_candidate_index"),
         }
     )
 

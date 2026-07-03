@@ -517,9 +517,13 @@ function SidebarMenuButton({
   }
 
   if (typeof tooltip === "string") {
-    tooltip = {
-      children: tooltip,
+    // When collapsed, use native title tooltip (more reliable).
+    if (state === "collapsed" && !isMobile) {
+      return React.cloneElement(button, {
+        title: tooltip,
+      })
     }
+    tooltip = { children: tooltip }
   }
 
   return (

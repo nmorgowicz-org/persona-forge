@@ -291,15 +291,26 @@ def run_omnivoice_job(
                         **cand_gen,
                     )[0]
                     wav = model._trim_silence(audio, OMNIVOICE_SAMPLE_RATE)
-                    flagged, reason = analyze_take(wav, OMNIVOICE_SAMPLE_RATE)
-                    if not flagged:
+                    cand_flagged, cand_reason = analyze_take(wav, OMNIVOICE_SAMPLE_RATE)
+
+                    if not cand_flagged:
                         speech_found, _transcript = has_speech(
                             wav, OMNIVOICE_SAMPLE_RATE
                         )
                         if not speech_found:
-                            flagged, reason = True, "no-speech-detected"
+                            cand_flagged, cand_reason = True, "no-speech-detected"
                         else:
-                            break
+                            # Valid candidate — override any prior flagged state
+                            # from a previous attempt so we never carry "dubious" into
+                            # the final candidate on a successful retry.
+                            cand_flagged = False
+                            cand_reason = "ok"
+
+                    flagged, reason = cand_flagged, cand_reason
+
+                    if not flagged:
+                        break
+
                     if attempt < MAX_ATTEMPTS_PER_CANDIDATE:
                         print(
                             f"[omnivoice] candidate flagged ({reason}), retrying "

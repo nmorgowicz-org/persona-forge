@@ -132,9 +132,13 @@ interface StoreState {
    ovCurrentJobId: string | null
    ovJobTotalSegments: number
    ovJobStatus: 'queued' | 'running' | 'completed' | 'failed' | null
-   ovJobSegmentsCompleted: OmniVoiceAuditionProgressResult['segments_completed']
-   ovJobCurrentSegmentIndex: number | null
-   ovJobMessage: string | null
+    ovJobSegmentsCompleted: OmniVoiceAuditionProgressResult['segments_completed']
+    ovJobCurrentSegmentIndex: number | null
+    ovJobMessage: string | null
+    ovJobEtaSeconds: number | null
+    ovJobCandidatesTotal: number
+    ovJobCandidatesCompleted: number
+    ovJobCurrentCandidateIndex: number | null
    ovAutoplayTakes: boolean
   ovLibrary: SegmentMeta[]
   ovLibraryFilter: string
@@ -185,8 +189,12 @@ interface StoreState {
    setOvJobTotalSegments: (v: number) => void
    setOvJobStatus: (v: 'running' | 'completed' | 'failed' | null) => void
    setOvJobSegmentsCompleted: (v: OmniVoiceAuditionProgressResult['segments_completed']) => void
-   setOvJobCurrentSegmentIndex: (v: number | null) => void
-   setOvJobMessage: (v: string | null) => void
+    setOvJobCurrentSegmentIndex: (v: number | null) => void
+    setOvJobMessage: (v: string | null) => void
+    setOvJobEtaSeconds: (v: number | null) => void
+    setOvJobCandidatesTotal: (v: number) => void
+    setOvJobCandidatesCompleted: (v: number) => void
+    setOvJobCurrentCandidateIndex: (v: number | null) => void
    setOvAutoplayTakes: (v: boolean) => void
    setOvLibrary: (v: SegmentMeta[]) => void
    setOvLibraryFilter: (v: string) => void
@@ -320,6 +328,10 @@ export const useAppStore = create<StoreState>((set) => ({
   ovJobSegmentsCompleted: [],
   ovJobCurrentSegmentIndex: null,
    ovJobMessage: null,
+   ovJobEtaSeconds: null,
+   ovJobCandidatesTotal: 0,
+   ovJobCandidatesCompleted: 0,
+   ovJobCurrentCandidateIndex: null,
    ovAutoplayTakes: true,
    ovLibrary: [],
   ovLibraryFilter: '',
@@ -390,6 +402,10 @@ export const useAppStore = create<StoreState>((set) => ({
   setOvJobSegmentsCompleted: (v) => set({ ovJobSegmentsCompleted: v }),
   setOvJobCurrentSegmentIndex: (v) => set({ ovJobCurrentSegmentIndex: v }),
    setOvJobMessage: (v) => set({ ovJobMessage: v }),
+   setOvJobEtaSeconds: (v) => set({ ovJobEtaSeconds: v }),
+   setOvJobCandidatesTotal: (v) => set({ ovJobCandidatesTotal: v }),
+   setOvJobCandidatesCompleted: (v) => set({ ovJobCandidatesCompleted: v }),
+   setOvJobCurrentCandidateIndex: (v) => set({ ovJobCurrentCandidateIndex: v }),
    setOvAutoplayTakes: (v: boolean) => set({ ovAutoplayTakes: v }),
    setOvLibrary: (v) => set({ ovLibrary: v }),
   setOvLibraryFilter: (v) => set({ ovLibraryFilter: v }),

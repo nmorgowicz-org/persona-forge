@@ -36,6 +36,17 @@ export function AudioPlayer({ src, blob, className, autoPlay = true }: AudioPlay
   }, [blob])
 
   useEffect(() => {
+    if (!blob || duration == null || !isFinite(duration)) return
+    let cancelled = false
+    computePeaks(blob, Math.max(24, Math.min(120, Math.round(duration * 24)))).then((p) => {
+      if (!cancelled) setPeaks(p)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [blob, duration])
+
+  useEffect(() => {
     if (!autoPlay) return
     const audio = audioRef.current
     if (!audio) return
@@ -68,7 +79,7 @@ export function AudioPlayer({ src, blob, className, autoPlay = true }: AudioPlay
         onEnded={() => {
           setIsPlaying(false)
           setProgress(0)
-          setDuration(null)
+          // Keep duration so time axis remains visible
         }}
         onTimeUpdate={(e) => {
           const audio = e.currentTarget
@@ -89,7 +100,7 @@ export function AudioPlayer({ src, blob, className, autoPlay = true }: AudioPlay
         <Waveform
           peaks={peaks ?? Array(64).fill(0.15)}
           progress={progress}
-          duration={peaks != null ? duration : null}
+          duration={duration}
           className="flex-1"
         />
       </div>

@@ -62,6 +62,7 @@ export function VoiceDesignPage() {
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
+        className="min-w-0 w-full"
       >
         {designEngine === 'qwen' ? (
           <VoiceDesignPanel

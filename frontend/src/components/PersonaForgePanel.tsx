@@ -311,6 +311,10 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   )
   // Intentionally subscribed (Zustand batching); used in this component.
   useAppStore((s) => s.ovJobMessage)
+  const jobEtaSeconds = useAppStore((s) => s.ovJobEtaSeconds)
+  const jobCandidatesTotal = useAppStore((s) => s.ovJobCandidatesTotal)
+  const jobCandidatesCompleted = useAppStore((s) => s.ovJobCandidatesCompleted)
+  const jobCurrentCandidateIndex = useAppStore((s) => s.ovJobCurrentCandidateIndex)
   const autoplayTakes = useAppStore((s) => s.ovAutoplayTakes)
   const setAutoplayTakes = useAppStore(
     (s) => s.setOvAutoplayTakes,
@@ -377,6 +381,18 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   )
   const setJobMessage = useAppStore(
     (s) => s.setOvJobMessage,
+  )
+  const setJobEtaSeconds = useAppStore(
+    (s) => s.setOvJobEtaSeconds,
+  )
+  const setJobCandidatesTotal = useAppStore(
+    (s) => s.setOvJobCandidatesTotal,
+  )
+  const setJobCandidatesCompleted = useAppStore(
+    (s) => s.setOvJobCandidatesCompleted,
+  )
+  const setJobCurrentCandidateIndex = useAppStore(
+    (s) => s.setOvJobCurrentCandidateIndex,
   )
   const setLibrary = useAppStore((s) => s.setOvLibrary)
   const setLibraryFilter = useAppStore(
@@ -720,6 +736,15 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
           )
           setJobSegmentsCompleted(p.segments_completed)
           setJobMessage(p.message || null)
+          setJobEtaSeconds(
+            p.eta ?? p.estimated_remaining_seconds ?? null,
+          )
+          if (typeof p.total_candidates === 'number')
+            setJobCandidatesTotal(p.total_candidates)
+          if (typeof p.completed_candidates === 'number')
+            setJobCandidatesCompleted(p.completed_candidates)
+          if (typeof p.current_candidate_index === 'number')
+            setJobCurrentCandidateIndex(p.current_candidate_index)
 
           if (
             p.segments_completed.length >
@@ -802,6 +827,10 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       setJobSegmentsCompleted([])
       setJobCurrentSegmentIndex(null)
       setJobMessage(null)
+      setJobEtaSeconds(null)
+      setJobCandidatesTotal(0)
+      setJobCandidatesCompleted(0)
+      setJobCurrentCandidateIndex(null)
     }
   }, [
     scriptText,
@@ -824,6 +853,10 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     setJobSegmentsCompleted,
     setJobCurrentSegmentIndex,
     setJobMessage,
+    setJobEtaSeconds,
+    setJobCandidatesTotal,
+    setJobCandidatesCompleted,
+    setJobCurrentCandidateIndex,
   ])
 
   const selectTake = useCallback(
@@ -903,6 +936,15 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
             p.current_segment_index,
           )
           setJobSegmentsCompleted(p.segments_completed)
+          setJobEtaSeconds(
+            p.eta ?? p.estimated_remaining_seconds ?? null,
+          )
+          if (typeof p.total_candidates === 'number')
+            setJobCandidatesTotal(p.total_candidates)
+          if (typeof p.completed_candidates === 'number')
+            setJobCandidatesCompleted(p.completed_candidates)
+          if (typeof p.current_candidate_index === 'number')
+            setJobCurrentCandidateIndex(p.current_candidate_index)
 
           if (p.status === 'completed') {
             const seg = p.segments_completed[0]
@@ -931,6 +973,10 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
             setJobSegmentsCompleted([])
             setJobCurrentSegmentIndex(null)
             setJobMessage(null)
+            setJobEtaSeconds(null)
+            setJobCandidatesTotal(0)
+            setJobCandidatesCompleted(0)
+            setJobCurrentCandidateIndex(null)
             break
           }
           if (p.status === 'failed') {
@@ -958,6 +1004,10 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         setJobSegmentsCompleted([])
         setJobCurrentSegmentIndex(null)
         setJobMessage(null)
+        setJobEtaSeconds(null)
+        setJobCandidatesTotal(0)
+        setJobCandidatesCompleted(0)
+        setJobCurrentCandidateIndex(null)
       }
     },
     [
@@ -980,6 +1030,10 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       setJobSegmentsCompleted,
       setJobCurrentSegmentIndex,
       setJobMessage,
+      setJobEtaSeconds,
+      setJobCandidatesTotal,
+      setJobCandidatesCompleted,
+      setJobCurrentCandidateIndex,
     ],
   )
 
@@ -1747,40 +1801,54 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
 
           {/* Status line */}
           <p className="text-[10px] text-muted-foreground">
-            {jobStatus === 'queued'
-              ? 'Queued — waiting for model to load…'
-              : jobStatus === 'running'
-                ? jobTotalSegments > 0
-                  ? `Generating segment ${
-                      (jobCurrentSegmentIndex ??
-                        0) + 1
-                    } of ${jobTotalSegments} (${
-                        jobSegmentsCompleted.length
-                      }/${
-                        jobTotalSegments
-                      } ready)` +
-                    (estimatedRemainingSeconds != null
-                      ? ` · ~${estimatedRemainingSeconds}s remaining`
-                      : '')
-                  : 'Starting…'
-                : jobStatus === 'failed'
-                  ? 'Job failed'
-                  : 'Finalizing…'}
+            {(() => {
+              const running = jobStatus === 'running'
+              if (jobStatus === 'queued') {
+                return 'Queued — waiting for model to load…'
+              }
+              if (running && jobTotalSegments > 0) {
+                const seg = (jobCurrentSegmentIndex ?? 0) + 1
+                const ready = jobSegmentsCompleted.length
+                let parts = [`Generating segment ${seg} of ${jobTotalSegments}`]
+                if (ready > 0)
+                  parts.push(
+                    `${ready}/${jobTotalSegments} segment${ready === 1 ? '' : 's'} ready`,
+                  )
+
+                // Candidate-level detail
+                if (
+                  typeof jobCandidatesTotal === 'number' &&
+                  jobCandidatesTotal > 0 &&
+                  typeof jobCandidatesCompleted === 'number'
+                ) {
+                  parts.push(
+                    `Candidate ${jobCandidatesCompleted}/${jobCandidatesTotal}`,
+                  )
+                }
+
+                const base = parts.join(' · ')
+
+                // ETA from backend
+                if (
+                  jobEtaSeconds != null &&
+                  jobEtaSeconds >= 5 &&
+                  jobEtaSeconds <= 1800
+                ) {
+                  parts.length = 0
+                  parts.push(base, formatEta(jobEtaSeconds))
+                  return parts.join(' · ')
+                }
+
+                return base
+              }
+              if (running) return 'Starting…'
+              if (jobStatus === 'failed')
+                return 'Job failed'
+              return 'Finalizing…'
+            })()}
 
             {progress?.phase === 'loading' &&
               ' — loading OmniVoice checkpoint…'}
-            {progress?.phase ===
-              'generating' &&
-              progress.estimated_remaining_seconds !=
-                null && (
-                <span>
-                  {' '}
-                  ·{' '}
-                  {formatEta(
-                    progress.estimated_remaining_seconds,
-                  )}
-                </span>
-              )}
           </p>
 
           {jobStatus === 'running' &&
@@ -2049,7 +2117,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   )
 
   return (
-    <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,280px)_minmax(0,1.4fr)]">
+    <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
       {leftColumn}
       {rightColumn}
     </div>

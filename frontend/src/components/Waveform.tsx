@@ -91,7 +91,7 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
           />
         ))}
 
-      <div className="relative flex h-full items-center gap-px">
+      <div className="relative -m-px flex h-full items-center">
         {peaks.map((peak, i) => {
           const played = (i / peaks.length) * 100 <= playheadPct
           const height = Math.max(0.06, peak)
@@ -100,7 +100,7 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
           return (
             <motion.div
               key={i}
-              className="h-full w-full max-w-[3px] flex-1 rounded-full"
+              className="h-full min-w-[1px] flex-1 rounded-full"
               style={{
                 transformOrigin: 'center',
                 background: color,
@@ -135,7 +135,7 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
       )}
 
       {/* bottom time axis */}
-      {ticks != null && (
+      {hasTimeAxis && ticks != null && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end">
           {ticks.map((t, i) => (
             <span
