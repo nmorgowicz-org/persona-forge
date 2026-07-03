@@ -6,8 +6,9 @@ import {
 } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
-  auditionOmniVoice,
+  auditionOmniVoiceStreaming,
   deleteOmniVoiceSegment,
+  getOmniVoiceAuditionProgress,
   listOmniVoiceSegments,
   saveOmniVoice,
   stitchOmniVoice,
@@ -129,6 +130,18 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const stitchedBlob = useAppStore((s) => s.ovStitchedBlob)
   const savedVoiceId = useAppStore((s) => s.ovSavedVoiceId)
   const progress = useAppStore((s) => s.ovProgress)
+  // Intentionally subscribed to keep Zustand batched; value used via store hooks in this component.
+  useAppStore((s) => s.ovCurrentJobId)
+  const jobTotalSegments = useAppStore((s) => s.ovJobTotalSegments)
+  const jobStatus = useAppStore((s) => s.ovJobStatus)
+  const jobSegmentsCompleted = useAppStore(
+    (s) => s.ovJobSegmentsCompleted,
+  )
+  const jobCurrentSegmentIndex = useAppStore(
+    (s) => s.ovJobCurrentSegmentIndex,
+  )
+  // Intentionally subscribed (Zustand batching); used in this component.
+  useAppStore((s) => s.ovJobMessage)
   const library = useAppStore((s) => s.ovLibrary)
   const libraryFilter = useAppStore((s) => s.ovLibraryFilter)
   const isLibraryOpen = useAppStore((s) => s.ovIsLibraryOpen)
@@ -174,6 +187,24 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     (s) => s.setOvSavedVoiceId,
   )
   const setProgress = useAppStore((s) => s.setOvProgress)
+  const setCurrentJobId = useAppStore(
+    (s) => s.setOvCurrentJobId,
+  )
+  const setJobTotalSegments = useAppStore(
+    (s) => s.setOvJobTotalSegments,
+  )
+  const setJobStatus = useAppStore(
+    (s) => s.setOvJobStatus,
+  )
+  const setJobSegmentsCompleted = useAppStore(
+    (s) => s.setOvJobSegmentsCompleted,
+  )
+  const setJobCurrentSegmentIndex = useAppStore(
+    (s) => s.setOvJobCurrentSegmentIndex,
+  )
+  const setJobMessage = useAppStore(
+    (s) => s.setOvJobMessage,
+  )
   const setLibrary = useAppStore((s) => s.setOvLibrary)
   const setLibraryFilter = useAppStore(
     (s) => s.setOvLibraryFilter,
@@ -425,44 +456,108 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     setError(null)
     setSegmentRack([])
     setProgress(null)
+    setJobMessage(null)
+    setJobStatus(null)
+    setJobSegmentsCompleted([])
+    setJobCurrentSegmentIndex(null)
 
     try {
-      const result = await auditionOmniVoice({
-        segments,
-        instruct,
-        candidatesPerSegment,
-        numStep: numStepInput.trim()
-          ? Number(numStepInput)
-          : undefined,
-        durationSeconds: durationInput.trim()
-          ? Number(durationInput)
-          : undefined,
-        speed: speedInput.trim()
-          ? Number(speedInput)
-          : undefined,
-        guidanceScale: guidanceScaleInput.trim()
-          ? Number(guidanceScaleInput)
-          : undefined,
-        diverseCandidates,
-      })
+      const { job_id, total_segments } =
+        await auditionOmniVoiceStreaming({
+          segments,
+          instruct,
+          candidatesPerSegment,
+          numStep: numStepInput.trim()
+            ? Number(numStepInput)
+            : undefined,
+          durationSeconds: durationInput.trim()
+            ? Number(durationInput)
+            : undefined,
+          speed: speedInput.trim()
+            ? Number(speedInput)
+            : undefined,
+          guidanceScale: guidanceScaleInput.trim()
+            ? Number(guidanceScaleInput)
+            : undefined,
+          diverseCandidates,
+        })
 
-      const rack = result.segments.map(
-        (seg, idx) => ({
-          segmentId: `seg-${idx}`,
-          text: seg.text ?? '',
-          candidates: seg.candidates ?? [],
-          selectedTakeIndex: 0,
-        }),
-      )
+      setCurrentJobId(job_id)
+      setJobTotalSegments(total_segments)
+      setJobStatus('running')
 
-      setSegmentRack(rack)
+      const jobDone = false
+      let lastHandledCount = 0
+
+      while (!jobDone) {
+        const p = await getOmniVoiceAuditionProgress(
+          job_id,
+        )
+        setJobStatus(p.status)
+        setJobCurrentSegmentIndex(
+          p.current_segment_index,
+        )
+        setJobSegmentsCompleted(p.segments_completed)
+        setJobMessage(p.message || null)
+
+        if (
+          p.segments_completed.length >
+          lastHandledCount
+        ) {
+          setSegmentRack((prev) => {
+            const next = [...prev]
+            const existingIds = new Set(
+              next.map(
+                (r) => r.segmentId,
+              ),
+            )
+            for (const s of p.segments_completed) {
+              const segId = `seg-${s.segment_index}`
+              if (!existingIds.has(segId)) {
+                next.push({
+                  segmentId: segId,
+                  text: s.text,
+                  candidates:
+                    s.candidates,
+                  selectedTakeIndex: 0,
+                })
+              }
+            }
+            return next
+          })
+          lastHandledCount =
+            p.segments_completed.length
+        }
+
+        if (p.status === 'completed') {
+          break
+        }
+        if (p.status === 'failed') {
+          setError(
+            p.message ||
+              'OmniVoice job failed.',
+          )
+          break
+        }
+        await new Promise(
+          (r) => setTimeout(r, 500),
+        )
+      }
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : String(err),
+        err instanceof Error
+          ? err.message
+          : String(err),
       )
     } finally {
       setIsRackAuditioning(false)
       setProgress(null)
+      setCurrentJobId(null)
+      setJobStatus(null)
+      setJobTotalSegments(0)
+      setJobSegmentsCompleted([])
+      setJobCurrentSegmentIndex(null)
+      setJobMessage(null)
     }
   }, [
     scriptText,
@@ -479,6 +574,12 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     setError,
     setSegmentRack,
     setProgress,
+    setCurrentJobId,
+    setJobTotalSegments,
+    setJobStatus,
+    setJobSegmentsCompleted,
+    setJobCurrentSegmentIndex,
+    setJobMessage,
   ])
 
   const selectTake = useCallback(
@@ -517,40 +618,77 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       setIsRackAuditioning(true)
       setError(null)
       setProgress(null)
+      setJobMessage(null)
+      setJobStatus(null)
+      setJobSegmentsCompleted([])
+      setJobCurrentSegmentIndex(null)
 
       try {
-        const result = await auditionOmniVoice({
-          segments: [row.text],
-          instruct,
-          candidatesPerSegment,
-          numStep: numStepInput.trim()
-            ? Number(numStepInput)
-            : undefined,
-          durationSeconds: durationInput.trim()
-            ? Number(durationInput)
-            : undefined,
-          speed: speedInput.trim()
-            ? Number(speedInput)
-            : undefined,
-          guidanceScale: guidanceScaleInput.trim()
-            ? Number(guidanceScaleInput)
-            : undefined,
-          diverseCandidates,
-        })
+        const { job_id } =
+          await auditionOmniVoiceStreaming({
+            segments: [row.text],
+            instruct,
+            candidatesPerSegment,
+            numStep: numStepInput.trim()
+              ? Number(numStepInput)
+              : undefined,
+            durationSeconds: durationInput.trim()
+              ? Number(durationInput)
+              : undefined,
+            speed: speedInput.trim()
+              ? Number(speedInput)
+              : undefined,
+            guidanceScale: guidanceScaleInput.trim()
+              ? Number(guidanceScaleInput)
+              : undefined,
+            diverseCandidates,
+          })
 
-        setSegmentRack((prev) =>
-          prev.map((r) =>
-            r.segmentId === segmentId
-              ? {
-                  ...r,
-                  candidates:
-                    result.segments[0]
-                      ?.candidates ?? [],
-                  selectedTakeIndex: 0,
-                }
-              : r,
-          ),
-        )
+        setCurrentJobId(job_id)
+        setJobTotalSegments(1)
+        setJobStatus('running')
+
+        while (true) {
+          const p = await getOmniVoiceAuditionProgress(
+            job_id,
+          )
+          setJobStatus(p.status)
+          setJobCurrentSegmentIndex(
+            p.current_segment_index,
+          )
+          setJobSegmentsCompleted(p.segments_completed)
+
+          if (p.status === 'completed') {
+            const seg = p.segments_completed[0]
+            if (seg) {
+              setSegmentRack((prev) =>
+                prev.map((r) =>
+                  r.segmentId ===
+                  segmentId
+                    ? {
+                        ...r,
+                        candidates:
+                          seg.candidates,
+                        selectedTakeIndex:
+                          0,
+                      }
+                    : r,
+                ),
+              )
+            }
+            break
+          }
+          if (p.status === 'failed') {
+            setError(
+              p.message ||
+                'OmniVoice job failed.',
+            )
+            break
+          }
+          await new Promise(
+            (r) => setTimeout(r, 500),
+          )
+        }
       } catch (err) {
         setError(
           err instanceof Error
@@ -560,6 +698,12 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       } finally {
         setIsRackAuditioning(false)
         setProgress(null)
+        setCurrentJobId(null)
+        setJobStatus(null)
+        setJobTotalSegments(0)
+        setJobSegmentsCompleted([])
+        setJobCurrentSegmentIndex(null)
+        setJobMessage(null)
       }
     },
     [
@@ -576,6 +720,12 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       setError,
       setSegmentRack,
       setProgress,
+      setCurrentJobId,
+      setJobTotalSegments,
+      setJobStatus,
+      setJobSegmentsCompleted,
+      setJobCurrentSegmentIndex,
+      setJobMessage,
     ],
   )
 
@@ -1311,17 +1461,18 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
           data-testid="omnivoice-progress"
           className="flex flex-col gap-1"
         >
+          {/* Segment-level progress (streaming job) */}
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
             <motion.div
               className="h-full bg-primary"
               animate={{
                 width:
-                  progress &&
-                  progress.total > 0
+                  jobStatus &&
+                  jobTotalSegments > 0
                     ? `${Math.min(
                         100,
-                        (progress.completed /
-                          progress.total) *
+                        (jobSegmentsCompleted.length /
+                          jobTotalSegments) *
                           100,
                       )}%`
                     : '8%',
@@ -1332,26 +1483,26 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
               }}
             />
           </div>
+
+          {/* Status line */}
           <p className="text-[10px] text-muted-foreground">
-            {progress?.phase === 'loading'
-              ? 'Loading OmniVoice checkpoint…'
-              : progress
-                ? `Segment ${
-                    progress.current_segment_index + 1
-                  }/${
-                    progress.segment_count || 1
-                  } · Candidate ${
-                      progress.current_candidate_index +
-                      1
+            {jobStatus === 'running'
+              ? jobTotalSegments > 0
+                ? `Generating segment ${
+                    (jobCurrentSegmentIndex ??
+                      0) + 1
+                  } of ${jobTotalSegments} (${
+                      jobSegmentsCompleted.length
                     }/${
-                        progress.candidates_per_segment ||
-                        1
-                      } (${
-                          progress.completed
-                        }/${
-                          progress.total
-                        })`
-                : 'Starting…'}
+                      jobTotalSegments
+                    } ready)`
+                : 'Starting…'
+              : jobStatus === 'failed'
+                ? 'Job failed'
+                : 'Finalizing…'}
+
+            {progress?.phase === 'loading' &&
+              ' — loading OmniVoice checkpoint…'}
             {progress?.phase ===
               'generating' &&
               progress.estimated_remaining_seconds !=
@@ -1365,6 +1516,15 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                 </span>
               )}
           </p>
+
+          {jobStatus === 'running' &&
+            jobSegmentsCompleted.length > 0 && (
+              <p className="text-[9px] text-muted-foreground">
+                New segments will appear below as each
+                one finishes — you can preview and
+                select takes live.
+              </p>
+            )}
         </div>
       )}
 
@@ -1392,6 +1552,17 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                       <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium">
                         {segIndex + 1}
                       </span>
+
+                      {jobStatus === 'running' &&
+                        jobCurrentSegmentIndex !=
+                          null &&
+                        row.segmentId ===
+                          `seg-${jobCurrentSegmentIndex}` && (
+                          <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/60 bg-primary/10 px-2 py-0.5 text-[9px] font-semibold text-primary">
+                            Generating…
+                          </span>
+                        )}
+
                       {editing ? (
                         <input
                           autoFocus

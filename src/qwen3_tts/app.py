@@ -7,6 +7,7 @@ import io
 import os
 import queue
 import time
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,41 @@ _omnivoice_candidates: dict[str, tuple[Any, int]] = {}
 # library. Single-user, ephemeral: overwritten on each new /voice_design call so only the latest
 # preview is addressable (consistent with the Omnivoice candidates pattern).
 _voice_design_previews: dict[str, dict[str, Any]] = {}
+
+# Streaming audition jobs: job_id -> dict.
+# Fields:
+#   - status: "running" | "completed" | "failed"
+#   - total_segments
+#   - segments_completed: list of {segment_index, text, candidates}
+#   - current_segment_index: 0-based or null
+#   - message: error text if failed
+#   - created_at: time.time()
+# Eviction runs lazily on each /audition or /audition/progress call.
+_OV_AUDITION_JOBS: dict[str, dict[str, Any]] = {}
+_OV_AUDITION_JOBS_LOCK = threading.Lock()
+_OV_AUDITION_MAX_JOBS = 50
+_OV_AUDITION_TTL_SECONDS = 600  # 10 minutes
+
+
+def _evict_old_audition_jobs() -> None:
+    now = time.time()
+    with _OV_AUDITION_JOBS_LOCK:
+        if len(_OV_AUDITION_JOBS) <= _OV_AUDITION_MAX_JOBS:
+            return
+        to_remove = []
+        for jid, job in _OV_AUDITION_JOBS.items():
+            if now - job.get("created_at", now) >= _OV_AUDITION_TTL_SECONDS:
+                to_remove.append(jid)
+        for jid in to_remove:
+            _OV_AUDITION_JOBS.pop(jid, None)
+        if len(_OV_AUDITION_JOBS) > _OV_AUDITION_MAX_JOBS:
+            sorted_ids = sorted(
+                _OV_AUDITION_JOBS.keys(),
+                key=lambda k: _OV_AUDITION_JOBS[k].get("created_at", 0),
+            )
+            excess = len(sorted_ids) - _OV_AUDITION_MAX_JOBS
+            for jid in sorted_ids[:excess]:
+                _OV_AUDITION_JOBS.pop(jid, None)
 
 app = Flask(__name__)
 
@@ -251,6 +287,7 @@ def voices_delete(voice_id: str):
 
 @app.post("/omnivoice/audition")
 def omnivoice_audition():
+    _evict_old_audition_jobs()
     # Same "in-flight swap is expected, not an error" framing as /voice_design above.
     if voice_design.swap_in_progress() or omnivoice_engine.swap_in_progress():
         return jsonify({"error": "Another swap already in progress"}), 503
@@ -290,35 +327,26 @@ def omnivoice_audition():
         guidance_scale, (int, float)
     ):
         return jsonify({"error": "guidance_scale must be a number"}), 400
-    diverse_candidates = data.get("diverse_candidates")
-    if diverse_candidates is not None:
-        diverse_candidates = bool(diverse_candidates)
+    diverse_candidates_raw = data.get("diverse_candidates")
+    diverse_candidates = (
+        bool(diverse_candidates_raw)
+        if diverse_candidates_raw is not None
+        else False
+    )
 
-    try:
-        results = model.executor.submit(
-            omnivoice_engine.run_omnivoice_job,
-            segments,
-            instruct,
-            language,
-            candidates_per_segment,
-            seed,
-            num_step,
-            duration,
-            speed,
-            guidance_scale,
-            diverse_candidates,
-        ).result(timeout=1800)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    except Exception as exc:
-        return jsonify({"error": f"OmniVoice error: {exc}"}), 500
+    job_id = uuid.uuid4().hex
 
-    # Cleared here rather than TTL-expired (locked decision, PLAN_persona_forge_studio.md §5):
-    # single-user local tool, no concurrent-job requirement, so "candidates from the previous
-    # audition call" is a simple and sufficient invalidation rule.
-    _omnivoice_candidates.clear()
-    response_segments = []
-    for seg_idx, seg_candidates in enumerate(results):
+    with _OV_AUDITION_JOBS_LOCK:
+        _OV_AUDITION_JOBS[job_id] = {
+            "status": "running",
+            "total_segments": len(segments),
+            "segments_completed": [],
+            "current_segment_index": None,
+            "message": None,
+            "created_at": time.time(),
+        }
+
+    def _segment_callback(seg_idx, text, seg_candidates):
         cand_payload = []
         for wav, sr, flagged, flag_reason in seg_candidates:
             candidate_id = uuid.uuid4().hex
@@ -337,13 +365,55 @@ def omnivoice_audition():
                     else flag_reason,
                 }
             )
-        response_segments.append(
-            {
-                "text": segments[seg_idx],
-                "candidates": cand_payload,
-            }
-        )
-    return jsonify({"segments": response_segments})
+        with _OV_AUDITION_JOBS_LOCK:
+            job = _OV_AUDITION_JOBS.get(job_id)
+            if job is not None:
+                job["current_segment_index"] = seg_idx
+                job["segments_completed"].append(
+                    {
+                        "segment_index": seg_idx,
+                        "text": text,
+                        "candidates": cand_payload,
+                    }
+                )
+
+    def _run_job():
+        try:
+            model.executor.submit(
+                omnivoice_engine.run_omnivoice_job,
+                segments,
+                instruct,
+                language,
+                candidates_per_segment,
+                seed,
+                num_step,
+                duration,
+                speed,
+                guidance_scale,
+                diverse_candidates,
+                on_segment_complete=_segment_callback,
+            ).result(timeout=1800)
+            with _OV_AUDITION_JOBS_LOCK:
+                job = _OV_AUDITION_JOBS.get(job_id)
+                if job is not None:
+                    job["status"] = "completed"
+                    job["current_segment_index"] = None
+        except Exception as exc:
+            with _OV_AUDITION_JOBS_LOCK:
+                job = _OV_AUDITION_JOBS.get(job_id)
+                if job is not None:
+                    job["status"] = "failed"
+                    job["current_segment_index"] = None
+                    job["message"] = f"OmniVoice error: {exc}"
+
+    threading.Thread(target=_run_job, daemon=True).start()
+
+    return jsonify(
+        {
+            "job_id": job_id,
+            "total_segments": len(segments),
+        }
+    )
 
 
 @app.get("/omnivoice/progress")
@@ -352,6 +422,28 @@ def omnivoice_progress():
     # the prior indeterminate top-of-page banner gave no sense of what was happening or how
     # long it'd take). See omnivoice_engine._progress for field semantics.
     return jsonify(omnivoice_engine.get_progress())
+
+
+@app.get("/omnivoice/audition/progress")
+def omnivoice_audition_progress():
+    _evict_old_audition_jobs()
+    job_id = request.args.get("job_id")
+    if not job_id:
+        return jsonify({"error": "job_id query parameter is required"}), 400
+    with _OV_AUDITION_JOBS_LOCK:
+        job = _OV_AUDITION_JOBS.get(job_id)
+    if job is None:
+        return jsonify({"error": "Unknown or expired job_id"}), 404
+    return jsonify(
+        {
+            "status": job["status"],
+            "job_id": job_id,
+            "total_segments": job["total_segments"],
+            "current_segment_index": job["current_segment_index"],
+            "segments_completed": job["segments_completed"],
+            "message": job.get("message"),
+        }
+    )
 
 
 def _resolve_omnivoice_selections(selections: Any) -> list[tuple[Any, int]] | None:

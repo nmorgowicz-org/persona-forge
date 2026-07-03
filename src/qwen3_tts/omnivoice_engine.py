@@ -136,6 +136,7 @@ def run_omnivoice_job(
     speed: float | None = None,
     guidance_scale: float | None = None,
     diverse_candidates: bool = False,
+    on_segment_complete=None,
 ) -> list[list[tuple[Any, int, bool, str]]]:
     """Swap to OmniVoice and generate every segment x candidate. Leaves OmniVoice loaded on
     success (see this module's docstring for why). On failure, the checkpoint is unloaded
@@ -158,6 +159,11 @@ def run_omnivoice_job(
     When ``diverse_candidates=True``, position_temperature cycles through [5.0, 7.0, 10.0]
     across candidates to produce prosodically different takes; when False, the first
     candidate uses 5.0 and the rest use 7.0. class_temperature is always 0.0 (greedy).
+
+    If ``on_segment_complete`` is provided and callable, it is invoked after each segment's
+    candidates are ready:
+        on_segment_complete(segment_index, text, candidates_list)
+    This is used to stream segment results into job state for the streaming audition API.
 
     No manual seed by default: seeding a whole multi-segment/multi-candidate batch defeats
     the point of auditioning independent draws, and stitching validated in
@@ -324,6 +330,8 @@ def run_omnivoice_job(
                     f"({completed}/{total}, ~{remaining * avg:.0f}s remaining)",
                     flush=True,
                 )
+            if on_segment_complete is not None and callable(on_segment_complete):
+                on_segment_complete(seg_idx, text, candidates)
             results.append(candidates)
         elapsed = time.monotonic() - t0
         print(

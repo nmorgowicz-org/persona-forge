@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type {
+  OmniVoiceAuditionProgressResult,
   OmniVoiceCandidate,
   OmniVoiceProgress,
   SegmentMeta,
@@ -128,6 +129,12 @@ interface StoreState {
   ovStitchedBlob: Blob | null
   ovSavedVoiceId: string | null
   ovProgress: OmniVoiceProgress | null
+  ovCurrentJobId: string | null
+  ovJobTotalSegments: number
+  ovJobStatus: 'running' | 'completed' | 'failed' | null
+  ovJobSegmentsCompleted: OmniVoiceAuditionProgressResult['segments_completed']
+  ovJobCurrentSegmentIndex: number | null
+  ovJobMessage: string | null
   ovLibrary: SegmentMeta[]
   ovLibraryFilter: string
   ovIsLibraryOpen: boolean
@@ -173,6 +180,12 @@ interface StoreState {
   setOvStitchedBlob: (v: Blob | null) => void
   setOvSavedVoiceId: (v: string | null) => void
   setOvProgress: (v: OmniVoiceProgress | null) => void
+  setOvCurrentJobId: (v: string | null) => void
+  setOvJobTotalSegments: (v: number) => void
+  setOvJobStatus: (v: 'running' | 'completed' | 'failed' | null) => void
+  setOvJobSegmentsCompleted: (v: OmniVoiceAuditionProgressResult['segments_completed']) => void
+  setOvJobCurrentSegmentIndex: (v: number | null) => void
+  setOvJobMessage: (v: string | null) => void
   setOvLibrary: (v: SegmentMeta[]) => void
   setOvLibraryFilter: (v: string) => void
   setOvIsLibraryOpen: (
@@ -299,6 +312,12 @@ export const useAppStore = create<StoreState>((set) => ({
   ovStitchedBlob: null,
   ovSavedVoiceId: null,
   ovProgress: null,
+  ovCurrentJobId: null,
+  ovJobTotalSegments: 0,
+  ovJobStatus: null,
+  ovJobSegmentsCompleted: [],
+  ovJobCurrentSegmentIndex: null,
+  ovJobMessage: null,
   ovLibrary: [],
   ovLibraryFilter: '',
   ovIsLibraryOpen: false,
@@ -362,6 +381,12 @@ export const useAppStore = create<StoreState>((set) => ({
   setOvStitchedBlob: (v) => set({ ovStitchedBlob: v }),
   setOvSavedVoiceId: (v) => set({ ovSavedVoiceId: v }),
   setOvProgress: (v) => set({ ovProgress: v }),
+  setOvCurrentJobId: (v) => set({ ovCurrentJobId: v }),
+  setOvJobTotalSegments: (v) => set({ ovJobTotalSegments: v }),
+  setOvJobStatus: (v) => set({ ovJobStatus: v }),
+  setOvJobSegmentsCompleted: (v) => set({ ovJobSegmentsCompleted: v }),
+  setOvJobCurrentSegmentIndex: (v) => set({ ovJobCurrentSegmentIndex: v }),
+  setOvJobMessage: (v) => set({ ovJobMessage: v }),
   setOvLibrary: (v) => set({ ovLibrary: v }),
   setOvLibraryFilter: (v) => set({ ovLibraryFilter: v }),
   setOvIsLibraryOpen: (v) =>

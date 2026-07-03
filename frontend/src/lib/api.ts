@@ -167,9 +167,33 @@ export interface OmniVoiceAuditionResult {
   segments: { text: string; candidates: OmniVoiceCandidate[] }[]
 }
 
-export async function auditionOmniVoice(
+export interface OmniVoiceCandidateSegment {
+  segment_index: number
+  text: string
+  candidates: OmniVoiceCandidate[]
+}
+
+export interface OmniVoiceStreamingJobResult {
+  job_id: string
+  total_segments: number
+}
+
+export interface OmniVoiceAuditionProgressResult {
+  status: 'running' | 'completed' | 'failed'
+  job_id: string
+  total_segments: number
+  current_segment_index: number | null
+  segments_completed: OmniVoiceCandidateSegment[]
+  message: string | null
+}
+
+/**
+ * Streaming audition: starts job and returns immediately with job_id.
+ * Call getOmniVoiceAuditionProgress(job_id) to poll for incremental results.
+ */
+export async function auditionOmniVoiceStreaming(
   params: OmniVoiceAuditionParams,
-): Promise<OmniVoiceAuditionResult> {
+): Promise<OmniVoiceStreamingJobResult> {
   const res = await fetch('/omnivoice/audition', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -186,6 +210,46 @@ export async function auditionOmniVoice(
       diverse_candidates: params.diverseCandidates ?? undefined,
     }),
   })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+/**
+ * Legacy single-shot audition (still wired to same endpoint; for backward compat).
+ */
+export async function auditionOmniVoice(
+  params: OmniVoiceAuditionParams,
+): Promise<OmniVoiceAuditionResult> {
+  // Reuses streaming job internally; wait for completion here for backward compatibility.
+  const { job_id } = await auditionOmniVoiceStreaming(params)
+  const deadline = Date.now() + 1800_000
+  let lastSegments: OmniVoiceCandidateSegment[] = []
+  while (Date.now() < deadline) {
+    const progress = await getOmniVoiceAuditionProgress(job_id)
+    if (progress.status === 'completed') {
+      lastSegments = progress.segments_completed
+      break
+    }
+    if (progress.status === 'failed') {
+      throw new Error(progress.message ?? 'OmniVoice job failed')
+    }
+    lastSegments = progress.segments_completed
+    await new Promise((r) => setTimeout(r, 600))
+  }
+  if (lastSegments.length === 0 && Date.now() >= deadline) {
+    throw new Error('OmniVoice audition timed out')
+  }
+  const segments = lastSegments.map((s) => ({
+    text: s.text,
+    candidates: s.candidates,
+  }))
+  return { segments }
+}
+
+export async function getOmniVoiceAuditionProgress(
+  jobId: string,
+): Promise<OmniVoiceAuditionProgressResult> {
+  const res = await fetch(`/omnivoice/audition/progress?job_id=${encodeURIComponent(jobId)}`)
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
 }
