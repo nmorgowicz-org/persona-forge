@@ -1,4 +1,5 @@
-import { createContext, useContext, useMemo, useState } from 'react'
+import { createContext, useContext, useMemo, useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Slot } from 'radix-ui'
 import { cn } from '@/lib/utils'
@@ -97,6 +98,20 @@ export function TooltipContent({
   const ctx = useTooltipContext()
   const resolvedSide = side ?? ctx.side
 
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const el = document.createElement('div')
+    el.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:9999;'
+    document.body.appendChild(el)
+    containerRef.current = el
+    return () => {
+      if (containerRef.current && containerRef.current.parentNode) {
+        containerRef.current.parentNode.removeChild(containerRef.current)
+      }
+    }
+  }, [])
+
   const posClass = useMemo(() => {
     switch (resolvedSide) {
       case 'top':
@@ -110,7 +125,7 @@ export function TooltipContent({
     }
   }, [resolvedSide])
 
-  return (
+  const inner = (
     <AnimatePresence>
       {ctx.open && (
         <motion.div
@@ -130,6 +145,13 @@ export function TooltipContent({
         </motion.div>
       )}
     </AnimatePresence>
+  )
+
+  if (!containerRef.current) return null
+
+  return createPortal(
+    inner,
+    containerRef.current,
   )
 }
 
