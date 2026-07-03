@@ -1,6 +1,11 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { auditionOmniVoice, stitchOmniVoice, type OmniVoiceCandidate } from '@/lib/api'
+import {
+  auditionOmniVoice,
+  saveOmniVoice,
+  stitchOmniVoice,
+  type OmniVoiceCandidate,
+} from '@/lib/api'
 import { ACCENT_BANK, type AccentBankEntry } from '@/lib/accentBank'
 import { AccentBank } from './AccentBank'
 import { AudioPlayer } from './AudioPlayer'
@@ -8,9 +13,10 @@ import { Button } from '@/components/ui/button'
 
 // Job-kickoff scaffolding for the Persona Forge (OmniVoice) engine
 // (docs/plans/PLAN_persona_forge_studio.md §4 step 4). Validates the
-// audition -> cherry-pick -> stitch contract end-to-end with plain <audio>
-// playback; the VST-level SegmentRack/StitchPreview waveform surfaces
-// (§3.3, step 5) replace this UI later without touching the API contract.
+// audition -> cherry-pick -> stitch -> save contract end-to-end with plain
+// <audio> playback; the VST-level SegmentRack/StitchPreview waveform
+// surfaces (§3.3, step 5) replace this UI later without touching the API
+// contract.
 
 interface SegmentCandidates {
   text: string
@@ -20,7 +26,11 @@ interface SegmentCandidates {
 
 const DEFAULT_ACCENT = ACCENT_BANK[0] ?? null
 
-export function PersonaForgePanel() {
+interface PersonaForgePanelProps {
+  onVoiceCreated?: (voiceId: string) => void
+}
+
+export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const [selectedAccent, setSelectedAccent] = useState<AccentBankEntry | null>(DEFAULT_ACCENT)
   const [segmentsText, setSegmentsText] = useState(
     DEFAULT_ACCENT ? DEFAULT_ACCENT.segments.join('\n') : '',
@@ -29,10 +39,12 @@ export function PersonaForgePanel() {
   const [candidatesPerSegment, setCandidatesPerSegment] = useState(3)
   const [isAuditioning, setIsAuditioning] = useState(false)
   const [isStitching, setIsStitching] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [segments, setSegments] = useState<SegmentCandidates[] | null>(null)
   const [stitchedUrl, setStitchedUrl] = useState<string | null>(null)
   const [stitchedBlob, setStitchedBlob] = useState<Blob | null>(null)
+  const [savedVoiceId, setSavedVoiceId] = useState<string | null>(null)
 
   function selectAccent(entry: AccentBankEntry) {
     setSelectedAccent(entry)
@@ -40,6 +52,7 @@ export function PersonaForgePanel() {
     setInstruct(entry.instruct)
     setSegments(null)
     setStitchedUrl(null)
+    setSavedVoiceId(null)
   }
 
   async function handleAudition() {
@@ -53,6 +66,7 @@ export function PersonaForgePanel() {
     setError(null)
     setSegments(null)
     setStitchedUrl(null)
+    setSavedVoiceId(null)
     try {
       const result = await auditionOmniVoice({
         segments: lines,
@@ -87,6 +101,7 @@ export function PersonaForgePanel() {
     if (!segments || isStitching) return
     setIsStitching(true)
     setError(null)
+    setSavedVoiceId(null)
     try {
       const selections = segments.map((seg) => seg.candidates[seg.selectedIndex].candidate_id)
       const blob = await stitchOmniVoice(selections)
@@ -97,6 +112,27 @@ export function PersonaForgePanel() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setIsStitching(false)
+    }
+  }
+
+  async function handleSave() {
+    if (!segments || isSaving) return
+    setIsSaving(true)
+    setError(null)
+    try {
+      const selections = segments.map((seg) => seg.candidates[seg.selectedIndex].candidate_id)
+      const result = await saveOmniVoice({
+        selections,
+        instruct,
+        segments: segments.map((seg) => seg.text),
+        accentId: selectedAccent?.id ?? null,
+      })
+      setSavedVoiceId(result.voice_id)
+      onVoiceCreated?.(result.voice_id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -222,9 +258,27 @@ export function PersonaForgePanel() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}
-            className="rounded-md border border-border bg-muted/40 p-3"
+            className="flex flex-col gap-3 rounded-md border border-border bg-muted/40 p-3"
           >
             <AudioPlayer src={stitchedUrl} blob={stitchedBlob} />
+            {savedVoiceId ? (
+              <p className="text-xs text-muted-foreground">
+                Saved to voice library as{' '}
+                <span className="font-mono text-foreground">{savedVoiceId}</span>.
+              </p>
+            ) : (
+              <Button
+                type="button"
+                data-testid="omnivoice-save-button"
+                variant="outline"
+                size="sm"
+                onClick={handleSave}
+                disabled={isSaving}
+                className="self-start"
+              >
+                {isSaving ? 'Saving…' : 'Save to voice library'}
+              </Button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

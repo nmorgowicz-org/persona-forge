@@ -326,6 +326,67 @@ class AppTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, 400)
 
+    def _seed_omnivoice_candidate(self) -> str:
+        def fake_run_omnivoice_job(segments, instruct, language, candidates_per_segment, seed):
+            return [[(np.zeros(240, dtype=np.float32), 24000)] for _ in segments]
+
+        with patch.object(
+            app_module.omnivoice_engine, "run_omnivoice_job", fake_run_omnivoice_job
+        ), patch.object(app_module, "_encode", return_value=(b"raw", "audio/wav")):
+            audition = self.client.post(
+                "/omnivoice/audition",
+                json={"segments": ["G'day"], "instruct": "female, young adult, high pitch"},
+            )
+        return audition.get_json()["segments"][0]["candidates"][0]["candidate_id"]
+
+    def test_omnivoice_save_persists_to_voice_library(self) -> None:
+        candidate_id = self._seed_omnivoice_candidate()
+        saved_kwargs: dict[str, object] = {}
+
+        def fake_save_voice(wav_bytes, **kwargs):
+            saved_kwargs.update(kwargs)
+            return {"voice_id": "ov_new123456"}
+
+        with patch.object(
+            app_module.omnivoice_engine,
+            "stitch_selected",
+            lambda selected: (np.zeros(480, dtype=np.float32), 24000),
+        ), patch.object(app_module, "_encode", return_value=(b"stitched", "audio/wav")), patch.object(
+            app_module.voice_library, "save_voice", fake_save_voice
+        ):
+            result = self.client.post(
+                "/omnivoice/save",
+                json={
+                    "selections": [candidate_id],
+                    "instruct": "female, young adult, high pitch, australian accent",
+                    "segments": ["G'day"],
+                    "accent_id": "au",
+                },
+            )
+
+        self.assertEqual(result.status_code, 200)
+        body = result.get_json()
+        self.assertEqual(body["voice_id"], "ov_new123456")
+        self.assertEqual(saved_kwargs["selections"]["engine"], "omnivoice")
+        self.assertEqual(saved_kwargs["selections"]["accent_id"], "au")
+
+    def test_omnivoice_save_rejects_missing_instruct(self) -> None:
+        candidate_id = self._seed_omnivoice_candidate()
+
+        result = self.client.post(
+            "/omnivoice/save", json={"selections": [candidate_id], "segments": ["G'day"]}
+        )
+
+        self.assertEqual(result.status_code, 400)
+
+    def test_omnivoice_save_rejects_unknown_candidate_id(self) -> None:
+        result = self.client.post(
+            "/omnivoice/save",
+            json={"selections": ["nope"], "instruct": "female", "segments": ["G'day"]},
+        )
+
+        self.assertEqual(result.status_code, 400)
+
     def test_voices_list_returns_library_contents(self) -> None:
         with patch.object(
             app_module.voice_library,

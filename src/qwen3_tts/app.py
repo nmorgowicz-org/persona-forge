@@ -262,25 +262,32 @@ def omnivoice_audition():
     return jsonify({"segments": response_segments})
 
 
+def _resolve_omnivoice_selections(selections: Any) -> list[tuple[Any, int]] | None:
+    """Look up each candidate_id in the audition cache; returns None on the first miss."""
+    if (
+        not isinstance(selections, list)
+        or not selections
+        or not all(isinstance(c, str) for c in selections)
+    ):
+        return None
+    selected = []
+    for candidate_id in selections:
+        entry = _omnivoice_candidates.get(candidate_id)
+        if entry is None:
+            return None
+        selected.append(entry)
+    return selected
+
+
 @app.post("/omnivoice/stitch")
 def omnivoice_stitch():
     data = _json_body()
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
     selections = data.get("selections")
-    if (
-        not isinstance(selections, list)
-        or not selections
-        or not all(isinstance(c, str) for c in selections)
-    ):
-        return jsonify({"error": "selections must be a non-empty list of candidate_id strings"}), 400
-
-    selected = []
-    for candidate_id in selections:
-        entry = _omnivoice_candidates.get(candidate_id)
-        if entry is None:
-            return jsonify({"error": f"unknown or expired candidate_id: {candidate_id}"}), 400
-        selected.append(entry)
+    selected = _resolve_omnivoice_selections(selections)
+    if selected is None:
+        return jsonify({"error": "selections must be a list of known, non-expired candidate_ids"}), 400
 
     try:
         wav, sr = omnivoice_engine.stitch_selected(selected)
@@ -290,6 +297,61 @@ def omnivoice_stitch():
     except Exception as exc:
         return jsonify({"error": f"Stitch error: {exc}"}), 500
     return Response(wav_bytes, content_type=media_type)
+
+
+@app.post("/omnivoice/save")
+def omnivoice_save():
+    # Persists a stitched OmniVoice clip into the same voice library /voice_design writes to
+    # (voice_library.save_voice), so a clip auditioned here is reusable everywhere voices are
+    # (Speak page, /generate, /v1/audio/speech) instead of only existing as an ephemeral
+    # in-browser preview blob.
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    selections = data.get("selections")
+    selected = _resolve_omnivoice_selections(selections)
+    if selected is None:
+        return jsonify({"error": "selections must be a list of known, non-expired candidate_ids"}), 400
+    instruct = (data.get("instruct") or "").strip()
+    if not instruct:
+        return jsonify({"error": "instruct is required"}), 400
+    segments = data.get("segments")
+    if (
+        not isinstance(segments, list)
+        or not segments
+        or not all(isinstance(s, str) and s.strip() for s in segments)
+    ):
+        return jsonify({"error": "segments must be a non-empty list of non-empty strings"}), 400
+    language = (data.get("language") or "english").strip()
+    accent_id = data.get("accent_id")
+
+    try:
+        wav, sr = omnivoice_engine.stitch_selected(selected)
+        wav_bytes, _ = _encode(wav, sr, "wav")
+        meta = voice_library.save_voice(
+            wav_bytes,
+            description=instruct,
+            sample_text=" ".join(segments),
+            language=language,
+            selections={
+                "engine": "omnivoice",
+                "accent_id": accent_id,
+                "instruct": instruct,
+                "segments": segments,
+                "candidate_ids": selections,
+            },
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": f"OmniVoice save error: {exc}"}), 500
+    return jsonify(
+        {
+            "voice_id": meta["voice_id"],
+            "sample_rate": sr,
+            "audio_base64": base64.b64encode(wav_bytes).decode("ascii"),
+        }
+    )
 
 
 @app.get("/runtime/config")

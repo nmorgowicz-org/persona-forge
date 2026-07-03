@@ -55,7 +55,16 @@ export function VoiceDesignPage() {
             }}
           />
         ) : (
-          <PersonaForgePanel />
+          // Deliberately does not auto-jump to Speak like VoiceDesignPanel's onVoiceCreated
+          // does above — auditioning register/accent variants is expected to take several
+          // save attempts in a row (see PersonaForgePanel), not a single generate-then-done
+          // flow, so staying put after a save is the less disruptive default.
+          <PersonaForgePanel
+            onVoiceCreated={(newVoiceId) => {
+              setVoiceId(newVoiceId)
+              refreshVoices()
+            }}
+          />
         )}
       </motion.div>
     </div>

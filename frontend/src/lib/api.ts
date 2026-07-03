@@ -164,6 +164,36 @@ export async function stitchOmniVoice(selections: string[]): Promise<Blob> {
   return res.blob()
 }
 
+export interface OmniVoiceSaveParams {
+  selections: string[]
+  instruct: string
+  segments: string[]
+  language?: string
+  accentId?: string | null
+}
+
+export interface OmniVoiceSaveResult {
+  voice_id: string
+  sample_rate: number
+  audio_base64: string
+}
+
+export async function saveOmniVoice(params: OmniVoiceSaveParams): Promise<OmniVoiceSaveResult> {
+  const res = await fetch('/omnivoice/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      selections: params.selections,
+      instruct: params.instruct,
+      segments: params.segments,
+      language: params.language ?? 'english',
+      accent_id: params.accentId ?? undefined,
+    }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 export interface RuntimeConfigState {
   reconfig_in_progress: boolean
   live: {
