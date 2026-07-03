@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import type {
-  OmniVoiceAuditionResult,
   OmniVoiceCandidate,
   OmniVoiceProgress,
   SegmentMeta,
@@ -145,7 +144,11 @@ interface StoreState {
   setOvScriptText: (
     updater: string | ((prev: string) => string),
   ) => void
-  setOvSegmentRack: (v: SegmentRackRow[]) => void
+  setOvSegmentRack: (
+    updater:
+      | SegmentRackRow[]
+      | ((prev: SegmentRackRow[]) => SegmentRackRow[]),
+  ) => void
   setOvIsRackAuditioning: (v: boolean) => void
   setOvCurrentText: (
     updater: string | ((prev: string) => string),
@@ -316,8 +319,13 @@ export const useAppStore = create<StoreState>((set) => ({
           ? updater(s.ovScriptText)
           : updater,
     })),
-  setOvSegmentRack: (v) =>
-    set({ ovSegmentRack: v }),
+  setOvSegmentRack: (updater) =>
+    set((s) => ({
+      ovSegmentRack:
+        typeof updater === 'function'
+          ? updater(s.ovSegmentRack)
+          : updater,
+    })),
   setOvIsRackAuditioning: (v) =>
     set({ ovIsRackAuditioning: v }),
   setOvCurrentText: (updater) =>

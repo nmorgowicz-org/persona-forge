@@ -2,7 +2,6 @@ import {
   useEffect,
   useMemo,
   useCallback,
-  useRef,
   useState,
 } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
@@ -10,14 +9,12 @@ import {
   auditionOmniVoice,
   deleteOmniVoiceSegment,
   listOmniVoiceSegments,
-  lockInOmniVoiceSegment,
   saveOmniVoice,
   stitchOmniVoice,
 } from '@/lib/api'
 import {
   ACCENT_BANK,
   type AccentBankEntry,
-  type ShowcaseSentence,
 } from '@/lib/accentBank'
 import {
   ACCENTS,
@@ -35,7 +32,6 @@ import { base64ToBlob, cn } from '@/lib/utils'
 import { useAppStore } from '@/store'
 
 const DEFAULT_ACCENT = ACCENT_BANK[0] ?? null
-const ACENT_RING = 'hsl(190, 90%, 50%)'
 
 const NON_VERBAL_TAGS = [
   '[laughter]',
@@ -85,13 +81,13 @@ function ClipPlayer({
 }
 
 function InfoIcon({ text }: { text: string }) {
-  const [show, setShow] = useState(false)
   return (
-    <TooltipTrigger tip={text}>
-      <span className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground/40 text-[10px] font-medium text-muted-foreground">
-        ?
-      </span>
-    </TooltipTrigger>
+    <span
+      title={text}
+      className="ml-1 inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-muted-foreground/40 text-[10px] font-medium text-muted-foreground"
+    >
+      ?
+    </span>
   )
 }
 
@@ -144,9 +140,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   )
   const setNumStepInput = useAppStore(
     (s) => s.setOvNumStepInput,
-  )
-  const setDurationInput = useAppStore(
-    (s) => s.setOvDurationInput,
   )
   const setSpeedInput = useAppStore((s) => s.setOvSpeedInput)
   const setGuidanceScaleInput = useAppStore(
@@ -257,9 +250,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       )
     : library
 
-  const activeShowcaseSentences =
-    matchedAccentBankEntry?.showcaseSentences ?? []
-
   // -- Handlers --
   const refreshLibrary = useCallback(async () => {
     try {
@@ -311,16 +301,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       whisper: !prev.whisper,
     }))
   }, [setSelections])
-
-  const applySuggestion = useCallback(
-    (sentence: ShowcaseSentence) => {
-      setScriptText((prev) => {
-        const base = (prev.trim() ? prev.trim() + '\n' : '')
-        return base + sentence.text
-      })
-    },
-    [setScriptText],
-  )
 
   const insertNonVerbalTag = useCallback(
     (tag: string) => {
