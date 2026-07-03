@@ -53,8 +53,10 @@ export function Tooltip({
 
 export function TooltipTrigger({
   children,
+  asChild,
 }: {
   children: React.ReactNode
+  asChild?: boolean
 }) {
   return <>{children}</>
 }
@@ -72,6 +74,7 @@ export function TooltipContent({
   hidden?: boolean
   className?: string
 }) {
+  if (hidden) return null
   const ctx = useTooltipContext()
   const resolvedSide = side ?? ctx.side
 
@@ -99,6 +102,8 @@ export function TooltipContent({
           className={cn(
             'absolute z-50 whitespace-nowrap rounded-lg border border-border/80 bg-popover px-2 py-1 text-[10px] leading-tight text-popover-foreground shadow-lg',
             posClass,
+            align === 'start' && 'left-0 -translate-x-0',
+            align === 'end' && 'right-0',
             className,
           )}
         >
