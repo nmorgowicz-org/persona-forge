@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
-import React from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   AudioLines,
   Check,
@@ -59,26 +60,70 @@ const NAV_ITEMS: { page: Page; label: string; icon: typeof Mic2; description: st
 function ThemePaletteButton() {
   const theme = useAppStore((s) => s.theme)
   const setTheme = useAppStore((s) => s.setTheme)
-  const [open, setOpen] = React.useState(false)
-  const ref = React.useRef<HTMLDivElement>(null)
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!open) return
+    const update = () => {
+      if (!btnRef.current) return
+      const r = btnRef.current.getBoundingClientRect()
+      setPos({ x: r.left, y: r.top - 6 })
+    }
+    update()
+    window.addEventListener('resize', update)
     const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) {
+      const el = btnRef.current
+      if (!el?.contains(e.target as Node)) {
         setOpen(false)
       }
     }
     document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
+    return () => {
+      window.removeEventListener('resize', update)
+      document.removeEventListener('mousedown', onDown)
+    }
   }, [open])
 
+  const panel =
+    open &&
+    createPortal(
+      <div
+        style={{
+          position: 'fixed',
+          left: pos.x,
+          top: pos.y,
+          zIndex: 9999,
+        }}
+        className="flex gap-1.5 rounded-lg border border-border bg-popover px-2.5 py-1.5 shadow-lg"
+      >
+        {THEMES.map((t) => {
+          const active = theme === t
+          return (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTheme(t)}
+              className={cn(
+                'flex size-5 shrink-0 items-center justify-center rounded-full ring-1 ring-white/10 transition-transform hover:scale-110',
+                active && 'ring-2 ring-white/80',
+              )}
+              style={{ background: SWATCH_COLOR[t] }}
+              title={SWATCH_LABEL[t]}
+            >
+              {active && <Check className="size-3 text-black/70" strokeWidth={3} />}
+            </button>
+          )
+        })}
+      </div>,
+      document.body,
+    )
+
   return (
-    <div
-      ref={ref}
-      className="relative inline-flex"
-    >
+    <>
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex size-8 items-center justify-center rounded-md border border-border/90 bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -86,33 +131,8 @@ function ThemePaletteButton() {
       >
         <Palette className="size-3.5" />
       </button>
-
-      {open && (
-        <div className="absolute right-0 bottom-11 mb-1 flex gap-1.5 rounded-lg border border-border bg-popover px-2.5 py-1.5 shadow-lg">
-          {THEMES.map((t) => {
-            const active = theme === t
-            return (
-              <button
-                key={t}
-                type="button"
-                onClick={() => {
-                  setTheme(t)
-                  // keep panel open so they can change again
-                }}
-                className={cn(
-                  'flex size-5 shrink-0 items-center justify-center rounded-full ring-1 ring-white/10 transition-transform hover:scale-110',
-                  active && 'ring-2 ring-white/80',
-                )}
-                style={{ background: SWATCH_COLOR[t] }}
-                title={SWATCH_LABEL[t]}
-              >
-                {active && <Check className="size-3 text-black/70" strokeWidth={3} />}
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </div>
+      {panel}
+    </>
   )
 }
 
