@@ -31,7 +31,7 @@ import { AudioPlayer } from './AudioPlayer'
 import { Button } from '@/components/ui/button'
 import { base64ToBlob, cn } from '@/lib/utils'
 import { useAppStore } from '@/store'
-import { Tooltip } from '@/components/ui/Tooltip'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 const DEFAULT_ACCENT = ACCENT_BANK[0] ?? null
 
@@ -84,10 +84,13 @@ function ClipPlayer({
 
 function InfoIcon({ text }: { text: string }) {
   return (
-    <Tooltip tip={text}>
-      <span className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground/40 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:border-muted-foreground hover:text-muted-foreground">
-        ?
-      </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground/40 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:border-muted-foreground hover:text-muted-foreground cursor-help">
+          ?
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right">{text}</TooltipContent>
     </Tooltip>
   )
 }
