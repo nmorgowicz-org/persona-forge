@@ -66,6 +66,7 @@ def main() -> int:
         preset = get_voice_design_preset(
             os.environ.get("VOICE_DESIGN_MODEL_SIZE"),
             float(max_speech_seconds_env) if max_speech_seconds_env else None,
+            os.environ.get("VOICE_DESIGN_MAIN_COMPRESSION") or None,
         )
         # export_openvino.py resolves its checkpoint via qwen3_tts.model_config.resolve_model_repo(),
         # which honors an explicit MODEL_REPO override — set it so the subprocess below (which
