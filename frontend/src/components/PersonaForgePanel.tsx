@@ -3,6 +3,7 @@ import {
   useMemo,
   useCallback,
   useState,
+  useRef,
 } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -133,21 +134,21 @@ function SegmentRackRow({
   return (
     <div
       key={row.segmentId}
-      className="flex flex-col gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+      className="flex min-w-0 flex-col gap-1 rounded-md border border-border bg-muted/30 px-2 py-1.5"
     >
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium">
-            {segIndex + 1}
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className="shrink-0 inline-flex h-4 w-4 items-center justify-center rounded-full bg-muted text-[9px] font-medium">
+          {segIndex + 1}
+        </span>
+
+        {isCurrent && (
+          <span className="shrink-0 inline-flex items-center gap-1 rounded-full border border-primary/60 bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">
+            Generating…
           </span>
+        )}
 
-          {isCurrent && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/60 bg-primary/10 px-2 py-0.5 text-[9px] font-semibold text-primary">
-              Generating…
-            </span>
-          )}
-
+        <div className="min-w-0 flex-1">
           {editing ? (
             <input
               autoFocus
@@ -170,31 +171,31 @@ function SegmentRackRow({
                   setEditing(false)
                 }
               }}
-              className="min-w-[200px] flex-1 rounded-md border border-input bg-transparent px-2 py-0.5 text-xs outline-none focus-visible:border-ring"
+              className="w-full min-w-0 rounded-md border border-input bg-transparent px-2 py-0.5 text-[10px] outline-none focus-visible:border-ring"
             />
           ) : (
-            <span className="max-w-[360px] truncate text-xs">
+            <span className="block truncate text-[10px]">
               {row.text}
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
             onClick={() => {
               setEditing(true)
               setDraft(row.text)
             }}
-            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground underline decoration-dotted underline-offset-1 hover:text-foreground"
+            className="shrink-0 rounded px-1 py-0.5 text-[9px] text-muted-foreground underline decoration-dotted underline-offset-1 hover:text-foreground"
           >
-            <span>✎</span> Edit
+            ✎
           </button>
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="h-6 px-2 text-[10px]"
+            className="shrink-0 h-5 px-1.5 text-[9px]"
             onClick={() =>
               onRegen(row.segmentId)
             }
@@ -209,14 +210,14 @@ function SegmentRackRow({
 
       {/* Takes */}
       {row.candidates.length > 0 && (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex min-w-0 flex-col gap-1">
           {row.candidates.map((c, ci) => {
             const selected = ci === row.selectedTakeIndex
             return (
               <div
                 key={c.candidate_id}
                 className={cn(
-                  'flex items-center gap-2 rounded-lg border px-2 py-1.5 transition-all',
+                  'flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-1 transition-all',
                   selected
                     ? 'border-[hsl(190,90%,50%)] bg-[hsl(190,90%,50%)]/5 shadow-[0_0_10px_rgba(34,211,238,0.12)]'
                     : 'border-border/60 bg-background',
@@ -228,13 +229,13 @@ function SegmentRackRow({
                     onSelectTake(row.segmentId, ci)
                   }
                   className={cn(
-                    'shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors',
+                    'shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium transition-colors',
                     selected
                       ? 'bg-[hsl(190,90%,50%)] text-background'
                       : 'bg-muted text-muted-foreground hover:bg-muted/80',
                   )}
                 >
-                  Take {ci + 1}
+                  T{ci + 1}
                 </button>
 
                 {c.flagged && (
@@ -242,18 +243,15 @@ function SegmentRackRow({
                     title={
                       c.flag_reason ?? undefined
                     }
-                    className="shrink-0 rounded-full border border-amber-900/50 bg-amber-950/30 px-1.5 py-0.5 text-[9px] text-amber-300"
+                    className="shrink-0 rounded-full border border-amber-900/50 bg-amber-950/30 px-1 py-0.5 text-[9px] text-amber-300"
                   >
-                    possibly bad take
-                    {c.flag_reason
-                      ? ` · ${c.flag_reason}`
-                      : ''}
+                    dubious
                   </span>
                 )}
 
                 <ClipPlayer
                   audioBase64={c.audio_base64}
-                  className="flex-1"
+                  className="min-w-0 flex-1"
                   autoPlay={selected}
                 />
               </div>
@@ -463,6 +461,47 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const [tagsOpen, setTagsOpen] = useState(false)
   const [examplesOpen, setExamplesOpen] = useState(false)
 
+  // -- ETA tracking (simple, segment-based) --
+  const [estimatedRemainingSeconds, setEstimatedRemainingSeconds] = useState<number | null>(null)
+  const jobTimingsRef = useRef({
+    startedAt: null as number | null,
+    perSegment: new Map<number, number>(),
+  })
+
+  // Recompute ETA when segments complete or job status changes
+  useEffect(() => {
+    if (jobStatus !== 'running' || !jobTotalSegments || jobTotalSegments <= 0) {
+      setEstimatedRemainingSeconds(null)
+      return
+    }
+
+    const completed = jobSegmentsCompleted.length
+    if (completed === 0 || completed >= jobTotalSegments) {
+      setEstimatedRemainingSeconds(null)
+      return
+    }
+
+    const timings = jobTimingsRef.current
+    const startedAt = timings.startedAt
+    if (!startedAt) {
+      setEstimatedRemainingSeconds(null)
+      return
+    }
+
+    const elapsedMs = Date.now() - startedAt
+    const avgMsPerSegment = elapsedMs / completed
+    const remaining = jobTotalSegments - completed
+    const etaMs = avgMsPerSegment * remaining
+    const etaSec = Math.round(etaMs / 1000)
+
+    // Only show ETA if it’s reasonable
+    if (etaSec >= 2 && etaSec <= 600) {
+      setEstimatedRemainingSeconds(etaSec)
+    } else {
+      setEstimatedRemainingSeconds(null)
+    }
+  }, [jobStatus, jobSegmentsCompleted.length, jobTotalSegments])
+
   // -- Handlers --
   const insertAtCursor = useCallback(
     (insert: string) => {
@@ -651,60 +690,82 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
           diverseCandidates,
         })
 
-      setCurrentJobId(job_id)
-      setJobTotalSegments(total_segments)
-      setJobStatus('running')
+        setCurrentJobId(job_id)
+        setJobTotalSegments(total_segments)
+        setJobStatus('running')
 
-      const jobDone = false
-      let lastHandledCount = 0
-
-      while (!jobDone) {
-        const p = await getOmniVoiceAuditionProgress(
-          job_id,
-        )
-        setJobStatus(p.status)
-        setJobCurrentSegmentIndex(
-          p.current_segment_index,
-        )
-        setJobSegmentsCompleted(p.segments_completed)
-        setJobMessage(p.message || null)
-
-        if (
-          p.segments_completed.length >
-          lastHandledCount
-        ) {
-          setSegmentRack((prev) => {
-            const next = [...prev]
-            const existingIds = new Set(
-              next.map(
-                (r) => r.segmentId,
-              ),
-            )
-            for (const s of p.segments_completed || []) {
-              const segId = `seg-${s.segment_index}`
-              if (!existingIds.has(segId)) {
-                const candidates =
-                  Array.isArray(s.candidates)
-                    ? s.candidates
-                    : []
-                next.push({
-                  segmentId: segId,
-                  text: s.text || '',
-                  candidates,
-                  selectedTakeIndex:
-                    candidates.length > 0
-                      ? 0
-                      : -1,
-                })
-              }
-            }
-            return next
-          })
-          lastHandledCount =
-            p.segments_completed.length
+        // Initialize job timings
+        if (!jobTimingsRef.current.startedAt) {
+          jobTimingsRef.current.startedAt = Date.now()
         }
 
+        const jobDone = false
+        let lastHandledCount = 0
+
+        while (!jobDone) {
+          const p = await getOmniVoiceAuditionProgress(
+            job_id,
+          )
+          setJobStatus(p.status)
+          setJobCurrentSegmentIndex(
+            p.current_segment_index,
+          )
+          setJobSegmentsCompleted(p.segments_completed)
+          setJobMessage(p.message || null)
+
+          if (
+            p.segments_completed.length >
+            lastHandledCount
+          ) {
+            // Record segment completion times
+            const now = Date.now()
+            for (const s of p.segments_completed || []) {
+              const idx = s.segment_index ?? -1
+              if (idx >= 0 && !jobTimingsRef.current.perSegment.has(idx)) {
+                jobTimingsRef.current.perSegment.set(idx, now)
+              }
+            }
+
+            setSegmentRack((prev) => {
+              const next = [...prev]
+              const existingIds = new Set(
+                next.map(
+                  (r) => r.segmentId,
+                ),
+              )
+              for (const s of p.segments_completed || []) {
+                const segId = `seg-${s.segment_index}`
+                if (!existingIds.has(segId)) {
+                  const candidates =
+                    Array.isArray(s.candidates)
+                      ? s.candidates
+                      : []
+                  next.push({
+                    segmentId: segId,
+                    text: s.text || '',
+                    candidates,
+                    selectedTakeIndex:
+                      candidates.length > 0
+                        ? 0
+                        : -1,
+                  })
+                }
+              }
+              return next
+            })
+            lastHandledCount =
+              p.segments_completed.length
+          }
+
         if (p.status === 'completed') {
+          // Finalize: keep segment rack + completed list intact
+          setIsRackAuditioning(false)
+          setProgress(null)
+          setCurrentJobId(null)
+          setJobStatus('completed')
+          setJobCurrentSegmentIndex(null)
+          setJobMessage('All segments generated.')
+          setEstimatedRemainingSeconds(null)
           break
         }
         if (p.status === 'failed') {
@@ -724,7 +785,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
           ? err.message
           : String(err),
       )
-    } finally {
+      // On error: fully reset
       setIsRackAuditioning(false)
       setProgress(null)
       setCurrentJobId(null)
@@ -851,6 +912,15 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                 ),
               )
             }
+            // Clean up for single-seg regen
+            setIsRackAuditioning(false)
+            setProgress(null)
+            setCurrentJobId(null)
+            setJobStatus(null)
+            setJobTotalSegments(0)
+            setJobSegmentsCompleted([])
+            setJobCurrentSegmentIndex(null)
+            setJobMessage(null)
             break
           }
           if (p.status === 'failed') {
@@ -870,7 +940,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
             ? err.message
             : String(err),
         )
-      } finally {
         setIsRackAuditioning(false)
         setProgress(null)
         setCurrentJobId(null)
@@ -1095,12 +1164,12 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
 
   // -- Render: Left column --
   const leftColumn = (
-    <div className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm">
+    <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 text-card-foreground shadow-sm">
       <div>
-        <h2 className="text-base font-semibold tracking-tight">
+        <h2 className="text-[13px] font-semibold tracking-tight">
           Design an accent-cloned voice
         </h2>
-        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+        <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
           OmniVoice uses a fixed tag vocabulary — every
           option below is validated. Pick a starting
           preset, then adjust chips; the right panel
@@ -1234,15 +1303,15 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
 
   // -- Render: Right column --
   const rightColumn = (
-    <div className="flex h-fit flex-col gap-4 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm lg:sticky lg:top-4">
+    <div className="flex h-fit flex-col gap-2.5 rounded-xl border border-border bg-card p-3 text-card-foreground shadow-sm lg:sticky lg:top-4">
       {/* Composed instruct */}
       <div>
-        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           Composed instruct
         </p>
         <div
           data-testid="omnivoice-instruct"
-          className="min-h-9 w-full rounded-lg border border-input bg-muted/40 px-3 py-2 font-mono text-[11px] leading-tight text-muted-foreground"
+          className="min-h-8 w-full rounded-md border border-input bg-muted/40 px-2.5 py-1.5 font-mono text-[10px] leading-tight text-muted-foreground"
         >
           {instruct || (
             <span className="italic">
@@ -1252,12 +1321,12 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         </div>
       </div>
 
-        {/* Script / Lines (composer-style) */}
-        <div className="flex flex-col gap-2">
-          {/* Script control-panel card */}
-          <div className="flex flex-col rounded-lg border border-border bg-card">
-            {/* Header bar */}
-            <div className="flex items-center justify-between gap-2 rounded-t-lg border-b border-border bg-muted/50 px-3 py-2">
+          {/* Script / Lines (composer-style) */}
+          <div className="flex flex-col gap-1">
+            {/* Script control-panel card */}
+            <div className="flex flex-col rounded-lg border border-border bg-card">
+              {/* Header bar */}
+              <div className="flex items-center justify-between gap-2 rounded-t-lg border-b border-border bg-muted/50 px-2.5 py-1.5">
               <div className="flex items-center gap-2">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-foreground/90">
                   Script
@@ -1452,11 +1521,11 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="flex flex-col gap-3 overflow-hidden rounded-lg border border-border/70 bg-muted/50 p-3"
+              className="flex flex-col gap-2 overflow-hidden rounded-lg border border-border/70 bg-muted/50 p-2.5"
             >
               {/* Steps */}
               <div className="flex items-center gap-3">
-                <label className="flex min-w-[140px] items-center gap-2 text-[10px] text-muted-foreground">
+                <label className="flex min-w-[110px] items-center gap-1 text-[10px] text-muted-foreground">
                   <span>
                     Steps
                     <InfoIcon text="Diffusion step count (16–32). Higher is slower but can be cleaner." />
@@ -1497,9 +1566,9 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
 
               {/* Guidance scale */}
               <div className="flex items-center gap-3">
-                <label className="flex min-w-[140px] items-center gap-2 text-[10px] text-muted-foreground">
+                <label className="flex min-w-[110px] items-center gap-1 text-[10px] text-muted-foreground">
                   <span>
-                    Guidance scale
+                    Guidance
                     <InfoIcon text="Improves accent and voice fidelity (1.5–3.0). Higher = tighter accent but slightly less natural." />
                   </span>
                 </label>
@@ -1546,7 +1615,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
 
               {/* Speed */}
               <div className="flex items-center gap-3">
-                <label className="flex min-w-[140px] items-center gap-2 text-[10px] text-muted-foreground">
+                <label className="flex min-w-[110px] items-center gap-1 text-[10px] text-muted-foreground">
                   <span>
                     Speed
                     <InfoIcon text="Playback-rate multiplier. 0.8–1.5 recommended; server clamps 0.5–2.5." />
@@ -1672,7 +1741,10 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                         jobSegmentsCompleted.length
                       }/${
                         jobTotalSegments
-                      } ready)`
+                      } ready)` +
+                    (estimatedRemainingSeconds != null
+                      ? ` · ~${estimatedRemainingSeconds}s remaining`
+                      : '')
                   : 'Starting…'
                 : jobStatus === 'failed'
                   ? 'Job failed'
@@ -1705,45 +1777,45 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         </div>
       )}
 
-       {/* Segment rack */}
-       {segmentRack.length > 0 && (
-         <div className="flex flex-col gap-2">
-           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-             Segment rack
-           </p>
+        {/* Segment rack */}
+        {segmentRack.length > 0 && (
+          <div className="flex min-w-0 flex-col gap-1">
+            <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Segment rack
+            </p>
 
-           <div className="flex max-h-[360px] flex-col gap-2 overflow-y-auto">
-             {segmentRack.map((row, segIndex) => (
-               <SegmentRackRow
-                 key={row.segmentId}
-                 segIndex={segIndex}
-                 row={row}
-                 isRackAuditioning={isRackAuditioning}
-                 jobStatus={jobStatus}
-                 jobCurrentSegmentIndex={jobCurrentSegmentIndex}
-                 onEdit={editSegmentText}
-                 onRegen={regenerateSegment}
-                 onSelectTake={selectTake}
-               />
-             ))}
-           </div>
+            <div className="flex min-w-0 flex-col gap-1 overflow-y-auto">
+              {segmentRack.map((row, segIndex) => (
+                <SegmentRackRow
+                  key={row.segmentId}
+                  segIndex={segIndex}
+                  row={row}
+                  isRackAuditioning={isRackAuditioning}
+                  jobStatus={jobStatus}
+                  jobCurrentSegmentIndex={jobCurrentSegmentIndex}
+                  onEdit={editSegmentText}
+                  onRegen={regenerateSegment}
+                  onSelectTake={selectTake}
+                />
+              ))}
+            </div>
 
-           {/* Stitch / Save */}
-           <div className="mt-1 flex flex-wrap gap-2">
-             <Button
-               type="button"
-               data-testid="omnivoice-stitch-button"
-               onClick={handleStitch}
-               disabled={
-                 segmentRack.length === 0 ||
-                 isStitching
-               }
-               className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[hsl(190,90%,50%)] to-[hsl(210,90%,45%)] px-4 py-1.5 text-xs font-medium text-background shadow-[0_4px_15px_rgba(34,211,238,0.25)] transition-all hover:scale-[1.02] hover:shadow-[0_8px_25px_rgba(34,211,238,0.35)] disabled:opacity-50 disabled:shadow-none"
-             >
-               {isStitching
-                 ? 'Stitching…'
-                 : `Stitch all segments`}
-             </Button>
+            {/* Stitch / Save */}
+            <div className="mt-0.5 flex flex-wrap gap-1.5">
+              <Button
+                type="button"
+                data-testid="omnivoice-stitch-button"
+                onClick={handleStitch}
+                disabled={
+                  segmentRack.length === 0 ||
+                  isStitching
+                }
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[hsl(190,90%,50%)] to-[hsl(210,90%,45%)] px-3 py-1 text-[11px] font-medium text-background shadow-[0_4px_15px_rgba(34,211,238,0.25)] transition-all hover:scale-[1.02] hover:shadow-[0_8px_25px_rgba(34,211,238,0.35)] disabled:opacity-50 disabled:shadow-none"
+              >
+                {isStitching
+                  ? 'Stitching…'
+                  : 'Stitch all'}
+              </Button>
            </div>
          </div>
        )}
@@ -1945,7 +2017,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   )
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+    <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,280px)_minmax(0,1.4fr)]">
       {leftColumn}
       {rightColumn}
     </div>
@@ -1960,8 +2032,8 @@ function ChipSection({
   children: React.ReactNode
 }) {
   return (
-    <div>
-      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+    <div className="flex flex-col gap-1">
+      <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
         {title}
       </p>
       {children}

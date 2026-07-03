@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { Slot } from 'radix-ui'
 import { cn } from '@/lib/utils'
 
 type Side = 'top' | 'bottom' | 'left' | 'right'
@@ -27,12 +28,6 @@ export function Tooltip({
 }) {
   const [open, setOpen] = useState(false)
 
-  useEffect(() => {
-    if (!open) return
-    const id = setTimeout(() => setOpen(true), 150)
-    return () => clearTimeout(id)
-  }, [open])
-
   const value = useMemo(
     () => ({ open, setOpen, side }),
     [open, side],
@@ -40,25 +35,49 @@ export function Tooltip({
 
   return (
     <TooltipContext.Provider value={value}>
-      <span
-        className="relative inline-flex"
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => setOpen(false)}
-      >
-        {children}
-      </span>
+      {children}
     </TooltipContext.Provider>
   )
 }
 
 export function TooltipTrigger({
   children,
-  asChild: _asChild,
+  asChild,
+  className,
+  ...props
 }: {
   children: React.ReactNode
   asChild?: boolean
+  className?: string
 }) {
-  return <>{children}</>
+  const { setOpen } = useTooltipContext()
+
+  const hoverProps = {
+    onMouseEnter: () => setOpen(true),
+    onMouseLeave: () => setOpen(false),
+  }
+
+  if (asChild) {
+    return (
+      <Slot.Root
+        {...props}
+        {...hoverProps}
+        className={cn('relative inline-flex', className)}
+      >
+        {children}
+      </Slot.Root>
+    )
+  }
+
+  return (
+    <span
+      className={cn('relative inline-flex', className)}
+      {...hoverProps}
+      {...props}
+    >
+      {children}
+    </span>
+  )
 }
 
 export function TooltipContent({

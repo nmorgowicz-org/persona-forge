@@ -100,7 +100,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter className="gap-3 px-3 py-3">
-          <ThemeSwitcher />
+          <div className="group-data-[collapsible=icon]:hidden">
+            <ThemeSwitcher />
+          </div>
           <p className="text-[11px] leading-snug text-muted-foreground group-data-[collapsible=icon]:hidden">
             Voices designed here are served over the OpenAI-compatible endpoint for Hermes and
             other apps.
