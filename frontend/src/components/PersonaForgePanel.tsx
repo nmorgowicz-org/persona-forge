@@ -3,7 +3,6 @@ import {
   useMemo,
   useCallback,
   useState,
-  useRef,
 } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
@@ -314,7 +313,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const jobEtaSeconds = useAppStore((s) => s.ovJobEtaSeconds)
   const jobCandidatesTotal = useAppStore((s) => s.ovJobCandidatesTotal)
   const jobCandidatesCompleted = useAppStore((s) => s.ovJobCandidatesCompleted)
-  const jobCurrentCandidateIndex = useAppStore((s) => s.ovJobCurrentCandidateIndex)
   const autoplayTakes = useAppStore((s) => s.ovAutoplayTakes)
   const setAutoplayTakes = useAppStore(
     (s) => s.setOvAutoplayTakes,
@@ -483,46 +481,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const [tagsOpen, setTagsOpen] = useState(false)
   const [examplesOpen, setExamplesOpen] = useState(false)
 
-  // -- ETA tracking (simple, segment-based) --
-  const [estimatedRemainingSeconds, setEstimatedRemainingSeconds] = useState<number | null>(null)
-  const jobTimingsRef = useRef({
-    startedAt: null as number | null,
-    perSegment: new Map<number, number>(),
-  })
 
-  // Recompute ETA when segments complete or job status changes
-  useEffect(() => {
-    if (jobStatus !== 'running' || !jobTotalSegments || jobTotalSegments <= 0) {
-      setEstimatedRemainingSeconds(null)
-      return
-    }
-
-    const completed = jobSegmentsCompleted.length
-    if (completed === 0 || completed >= jobTotalSegments) {
-      setEstimatedRemainingSeconds(null)
-      return
-    }
-
-    const timings = jobTimingsRef.current
-    const startedAt = timings.startedAt
-    if (!startedAt) {
-      setEstimatedRemainingSeconds(null)
-      return
-    }
-
-    const elapsedMs = Date.now() - startedAt
-    const avgMsPerSegment = elapsedMs / completed
-    const remaining = jobTotalSegments - completed
-    const etaMs = avgMsPerSegment * remaining
-    const etaSec = Math.round(etaMs / 1000)
-
-    // Only show ETA if it’s reasonable
-    if (etaSec >= 2 && etaSec <= 600) {
-      setEstimatedRemainingSeconds(etaSec)
-    } else {
-      setEstimatedRemainingSeconds(null)
-    }
-  }, [jobStatus, jobSegmentsCompleted.length, jobTotalSegments])
 
   // -- Handlers --
   const insertAtCursor = useCallback(
@@ -718,11 +677,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         setExamplesOpen(false)
         setTagsOpen(false)
 
-        // Initialize job timings
-        if (!jobTimingsRef.current.startedAt) {
-          jobTimingsRef.current.startedAt = Date.now()
-        }
-
         const jobDone = false
         let lastHandledCount = 0
 
@@ -750,15 +704,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
             p.segments_completed.length >
             lastHandledCount
           ) {
-            // Record segment completion times
-            const now = Date.now()
-            for (const s of p.segments_completed || []) {
-              const idx = s.segment_index ?? -1
-              if (idx >= 0 && !jobTimingsRef.current.perSegment.has(idx)) {
-                jobTimingsRef.current.perSegment.set(idx, now)
-              }
-            }
-
             setSegmentRack((prev) => {
               const next = [...prev]
               const existingIds = new Set(
@@ -798,7 +743,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
           setJobStatus('completed')
           setJobCurrentSegmentIndex(null)
           setJobMessage('All segments generated.')
-          setEstimatedRemainingSeconds(null)
           break
         }
         if (p.status === 'failed') {
