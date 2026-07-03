@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { VoiceDesignPanel } from '@/components/VoiceDesignPanel'
 import { PersonaForgePanel } from '@/components/PersonaForgePanel'
-import { EngineSelector, type DesignEngine } from '@/components/EngineSelector'
+import { EngineSelector } from '@/components/EngineSelector'
 import { useAppStore, type EditingVoice } from '@/store'
 import { listVoices } from '@/lib/api'
 

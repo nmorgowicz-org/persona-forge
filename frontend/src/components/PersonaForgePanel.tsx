@@ -7,14 +7,11 @@ import {
   lockInOmniVoiceSegment,
   saveOmniVoice,
   stitchOmniVoice,
-  type OmniVoiceCandidate,
-  type SegmentMeta,
 } from '@/lib/api'
 import { ACCENT_BANK, type AccentBankEntry, type ShowcaseSentence } from '@/lib/accentBank'
 import {
   ACCENTS,
   AGES,
-  EMPTY_OMNIVOICE_SELECTIONS,
   GENDERS,
   PITCHES,
   STYLE_WHISPER,
@@ -924,11 +921,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
             </Button>
             <button
               type="button"
-              onClick={() =>
-                setShowAdvanced(
-                  (v) => !v,
-                )
-              }
+              onClick={() => setShowAdvanced(!showAdvanced)}
               className="text-[11px] text-muted-foreground underline decoration-dotted hover:text-foreground"
             >
               {showAdvanced

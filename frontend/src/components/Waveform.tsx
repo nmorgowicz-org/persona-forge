@@ -44,7 +44,7 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
         const targetMin = 3
         const targetMax = 8
         const mid = (targetMin + targetMax) / 2
-        const candidates: number[] = []
+         const candidates: Array<{ n: number; step: number }> = []
         for (let n = targetMin; n <= targetMax; n++) {
           const step = duration / n
           candidates.push({ n, step })

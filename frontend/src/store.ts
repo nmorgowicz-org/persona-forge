@@ -87,7 +87,7 @@ interface StoreState {
   setVdProgress: (v: VoiceDesignProgress | null) => void
   setVdPreviewAudioUrl: (v: string | null) => void
   setVdPreviewBlob: (v: Blob | null) => void
-  setVdPreviewVoiceId: (v: string | null) => void
+  setVdPreviewId: (v: string | null) => void
   setVdPreviewSeed: (v: number | null) => void
 
   // ---- OmniVoice (PersonaForge) ----
@@ -230,10 +230,10 @@ export const useAppStore = create<StoreState>((set) => ({
   setVdProgress: (v) => set({ vdProgress: v }),
   setVdPreviewAudioUrl: (v) => set({ vdPreviewAudioUrl: v }),
   setVdPreviewBlob: (v) => set({ vdPreviewBlob: v }),
-  setVdPreviewId: (v) => set({ vdPreviewId: v }),
-  setVdPreviewSeed: (v) => set({ vdPreviewSeed: v }),
-  setVdSavedVoiceId: (v) => set({ vdSavedVoiceId: v }),
-  setVdIsSaving: (v) => set({ vdIsSaving: v }),
+  setVdPreviewId: (v: string | null) => set({ vdPreviewId: v }),
+  setVdPreviewSeed: (v: number | null) => set({ vdPreviewSeed: v }),
+  setVdSavedVoiceId: (v: string | null) => set({ vdSavedVoiceId: v }),
+  setVdIsSaving: (v: boolean) => set({ vdIsSaving: v }),
 
   // -- OmniVoice --
   ovSelections: {
@@ -369,13 +369,9 @@ function updateOvPollHandle(isAuditioning: boolean) {
   }
 }
 
-useAppStore.subscribe(
-  (state) => ({
-    vdGen: state.vdIsGenerating,
-    ovAud: state.ovIsAuditioning,
-  }),
-  (next, prev) => {
-    if (next.vdGen !== prev.vdGen) updateVdPollHandle(next.vdGen)
-    if (next.ovAud !== prev.ovAud) updateOvPollHandle(next.ovAud)
-  },
-)
+useAppStore.subscribe((state, prevState) => {
+  if (state.vdIsGenerating !== prevState.vdIsGenerating)
+    updateVdPollHandle(state.vdIsGenerating)
+  if (state.ovIsAuditioning !== prevState.ovIsAuditioning)
+    updateOvPollHandle(state.ovIsAuditioning)
+})
