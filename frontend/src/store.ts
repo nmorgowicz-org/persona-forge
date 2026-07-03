@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type {
+  OmniVoiceAuditionResult,
   OmniVoiceCandidate,
   OmniVoiceProgress,
   SegmentMeta,
@@ -29,6 +30,13 @@ export interface LockedSegment {
   segmentId: string
   text: string
   audioBase64: string
+}
+
+export interface SegmentRackRow {
+  segmentId: string
+  text: string
+  candidates: OmniVoiceCandidate[]
+  selectedTakeIndex: number
 }
 
 interface StoreState {
@@ -99,6 +107,11 @@ interface StoreState {
   ovNumStepInput: string
   ovDurationInput: string
   ovSpeedInput: string
+  ovGuidanceScaleInput: string
+  ovDiverseCandidates: boolean
+  ovScriptText: string
+  ovSegmentRack: SegmentRackRow[]
+  ovIsRackAuditioning: boolean
   ovCurrentText: string
   ovCurrentCandidates: OmniVoiceCandidate[] | null
   ovCurrentSelectedIndex: number
@@ -127,6 +140,13 @@ interface StoreState {
   setOvNumStepInput: (v: string) => void
   setOvDurationInput: (v: string) => void
   setOvSpeedInput: (v: string) => void
+  setOvGuidanceScaleInput: (v: string) => void
+  setOvDiverseCandidates: (v: boolean) => void
+  setOvScriptText: (
+    updater: string | ((prev: string) => string),
+  ) => void
+  setOvSegmentRack: (v: SegmentRackRow[]) => void
+  setOvIsRackAuditioning: (v: boolean) => void
   setOvCurrentText: (
     updater: string | ((prev: string) => string),
   ) => void
@@ -250,6 +270,11 @@ export const useAppStore = create<StoreState>((set) => ({
   ovNumStepInput: '',
   ovDurationInput: '',
   ovSpeedInput: '',
+  ovGuidanceScaleInput: '',
+  ovDiverseCandidates: false,
+  ovScriptText: '',
+  ovSegmentRack: [],
+  ovIsRackAuditioning: false,
   ovCurrentText: '',
   ovCurrentCandidates: null,
   ovCurrentSelectedIndex: 0,
@@ -280,6 +305,21 @@ export const useAppStore = create<StoreState>((set) => ({
   setOvNumStepInput: (v) => set({ ovNumStepInput: v }),
   setOvDurationInput: (v) => set({ ovDurationInput: v }),
   setOvSpeedInput: (v) => set({ ovSpeedInput: v }),
+  setOvGuidanceScaleInput: (v) =>
+    set({ ovGuidanceScaleInput: v }),
+  setOvDiverseCandidates: (v) =>
+    set({ ovDiverseCandidates: v }),
+  setOvScriptText: (updater) =>
+    set((s) => ({
+      ovScriptText:
+        typeof updater === 'function'
+          ? updater(s.ovScriptText)
+          : updater,
+    })),
+  setOvSegmentRack: (v) =>
+    set({ ovSegmentRack: v }),
+  setOvIsRackAuditioning: (v) =>
+    set({ ovIsRackAuditioning: v }),
   setOvCurrentText: (updater) =>
     set((s) => ({
       ovCurrentText:

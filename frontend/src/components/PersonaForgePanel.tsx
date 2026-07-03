@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useCallback } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+  useState,
+} from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   auditionOmniVoice,
@@ -8,7 +14,11 @@ import {
   saveOmniVoice,
   stitchOmniVoice,
 } from '@/lib/api'
-import { ACCENT_BANK, type AccentBankEntry, type ShowcaseSentence } from '@/lib/accentBank'
+import {
+  ACCENT_BANK,
+  type AccentBankEntry,
+  type ShowcaseSentence,
+} from '@/lib/accentBank'
 import {
   ACCENTS,
   AGES,
@@ -25,6 +35,7 @@ import { base64ToBlob, cn } from '@/lib/utils'
 import { useAppStore } from '@/store'
 
 const DEFAULT_ACCENT = ACCENT_BANK[0] ?? null
+const ACENT_RING = 'hsl(190, 90%, 50%)'
 
 const NON_VERBAL_TAGS = [
   '[laughter]',
@@ -64,7 +75,23 @@ function ClipPlayer({
     [audioBase64],
   )
   return (
-    <AudioPlayer src={src} blob={blob} autoPlay={autoPlay} className={className} />
+    <AudioPlayer
+      src={src}
+      blob={blob}
+      autoPlay={autoPlay}
+      className={className}
+    />
+  )
+}
+
+function InfoIcon({ text }: { text: string }) {
+  const [show, setShow] = useState(false)
+  return (
+    <TooltipTrigger tip={text}>
+      <span className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground/40 text-[10px] font-medium text-muted-foreground">
+        ?
+      </span>
+    </TooltipTrigger>
   )
 }
 
@@ -82,16 +109,18 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const numStepInput = useAppStore((s) => s.ovNumStepInput)
   const durationInput = useAppStore((s) => s.ovDurationInput)
   const speedInput = useAppStore((s) => s.ovSpeedInput)
+  const guidanceScaleInput = useAppStore(
+    (s) => s.ovGuidanceScaleInput,
+  )
+  const diverseCandidates = useAppStore(
+    (s) => s.ovDiverseCandidates,
+  )
+  const scriptText = useAppStore((s) => s.ovScriptText)
+  const segmentRack = useAppStore((s) => s.ovSegmentRack)
+  const isRackAuditioning = useAppStore(
+    (s) => s.ovIsRackAuditioning,
+  )
   const lockedSegments = useAppStore((s) => s.ovLockedSegments)
-  const currentText = useAppStore((s) => s.ovCurrentText)
-  const currentCandidates = useAppStore(
-    (s) => s.ovCurrentCandidates,
-  )
-  const currentSelectedIndex = useAppStore(
-    (s) => s.ovCurrentSelectedIndex,
-  )
-  const isAuditioning = useAppStore((s) => s.ovIsAuditioning)
-  const isLockingIn = useAppStore((s) => s.ovIsLockingIn)
   const isStitching = useAppStore((s) => s.ovIsStitching)
   const isSaving = useAppStore((s) => s.ovIsSaving)
   const error = useAppStore((s) => s.ovError)
@@ -120,20 +149,22 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     (s) => s.setOvDurationInput,
   )
   const setSpeedInput = useAppStore((s) => s.setOvSpeedInput)
-  const setCurrentText = useAppStore((s) => s.setOvCurrentText)
-  const setCurrentCandidates = useAppStore(
-    (s) => s.setOvCurrentCandidates,
+  const setGuidanceScaleInput = useAppStore(
+    (s) => s.setOvGuidanceScaleInput,
   )
-  const setCurrentSelectedIndex = useAppStore(
-    (s) => s.setOvCurrentSelectedIndex,
+  const setDiverseCandidates = useAppStore(
+    (s) => s.setOvDiverseCandidates,
+  )
+  const setScriptText = useAppStore((s) => s.setOvScriptText)
+  const setSegmentRack = useAppStore(
+    (s) => s.setOvSegmentRack,
+  )
+  const setIsRackAuditioning = useAppStore(
+    (s) => s.setOvIsRackAuditioning,
   )
   const setLockedSegments = useAppStore(
     (s) => s.setOvLockedSegments,
   )
-  const setIsAuditioning = useAppStore(
-    (s) => s.setOvIsAuditioning,
-  )
-  const setIsLockingIn = useAppStore((s) => s.setOvIsLockingIn)
   const setIsStitching = useAppStore((s) => s.setOvIsStitching)
   const setIsSaving = useAppStore((s) => s.setOvIsSaving)
   const setError = useAppStore((s) => s.setOvError)
@@ -199,13 +230,20 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     [selections.accent],
   )
 
-  const wordCount = currentText.trim()
-    ? currentText.trim().split(/\s+/).length
+  const lines = scriptText
+    .split(/\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+
+  const scriptWordCount = scriptText
+    .trim()
+    ? scriptText.trim().split(/\s+/).length
     : 0
-  const isShortLine = wordCount > 0 && wordCount < 4
-  const effectiveCandidatesPerSegment = isShortLine
-    ? Math.max(candidatesPerSegment, 5)
-    : candidatesPerSegment
+
+  const hasLongLines =
+    lines.some(
+      (l) => l.length > 120 || l.split(/\s+/).length > 15,
+    )
 
   const filteredLibrary = libraryFilter.trim()
     ? library.filter((m) =>
@@ -218,19 +256,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         ),
       )
     : library
-
-  const candidateLabel =
-    progress && progress.total > 0
-      ? `segment ${progress.current_segment_index + 1}/${
-          progress.segment_count || 1
-        }, candidate ${
-            progress.current_candidate_index + 1
-          }/${
-              progress.candidates_per_segment || 1
-            } (${progress.completed}/${
-              progress.total
-            })`
-      : null
 
   const activeShowcaseSentences =
     matchedAccentBankEntry?.showcaseSentences ?? []
@@ -250,8 +275,8 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     (entry: AccentBankEntry) => {
       setSelections(selectionsFromInstruct(entry.instruct))
       setLockedSegments([])
-      setCurrentText('')
-      setCurrentCandidates(null)
+      setScriptText('')
+      setSegmentRack([])
       setStitchedUrl(null)
       setSavedVoiceId(null)
       setError(null)
@@ -259,8 +284,8 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     [
       setSelections,
       setLockedSegments,
-      setCurrentText,
-      setCurrentCandidates,
+      setScriptText,
+      setSegmentRack,
       setStitchedUrl,
       setSavedVoiceId,
       setError,
@@ -289,33 +314,63 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
 
   const applySuggestion = useCallback(
     (sentence: ShowcaseSentence) => {
-      setCurrentText(sentence.text)
+      setScriptText((prev) => {
+        const base = (prev.trim() ? prev.trim() + '\n' : '')
+        return base + sentence.text
+      })
     },
-    [setCurrentText],
+    [setScriptText],
   )
 
   const insertNonVerbalTag = useCallback(
     (tag: string) => {
-      setCurrentText((prev) =>
-        prev.trim() ? `${prev.trim()} ${tag}` : tag,
+      setScriptText((prev) =>
+        prev.trim()
+          ? prev.trim() + ' ' + tag
+          : tag,
       )
     },
-    [setCurrentText],
+    [setScriptText],
   )
 
-  const handleAuditionCurrent = useCallback(async () => {
-    const text = currentText.trim()
-    if (!text || !instruct || isAuditioning) return
-    setIsAuditioning(true)
+  const splitScriptToSegments = useCallback(
+    (text: string): string[] => {
+      return text
+        .split(/\n/)
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .flatMap((line) => {
+          if (line.split(/\s+/).length <= 15) return [line]
+          // Rough sentence-split fallback
+          const parts = line
+            .split(/(?<=[.!?])\s+/)
+            .map((p) => p.trim())
+            .filter(Boolean)
+          return parts.length > 1
+            ? parts
+            : [line]
+        })
+    },
+    [],
+  )
+
+  const handleBatchAudition = useCallback(async () => {
+    const text = scriptText.trim()
+    if (!text || !instruct || isRackAuditioning) return
+
+    const segments = splitScriptToSegments(text)
+    if (segments.length === 0) return
+
+    setIsRackAuditioning(true)
     setError(null)
-    setCurrentCandidates(null)
+    setSegmentRack([])
     setProgress(null)
+
     try {
       const result = await auditionOmniVoice({
-        segments: [text],
+        segments,
         instruct,
-        candidatesPerSegment:
-          effectiveCandidatesPerSegment,
+        candidatesPerSegment,
         numStep: numStepInput.trim()
           ? Number(numStepInput)
           : undefined,
@@ -325,88 +380,172 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         speed: speedInput.trim()
           ? Number(speedInput)
           : undefined,
+        guidanceScale: guidanceScaleInput.trim()
+          ? Number(guidanceScaleInput)
+          : undefined,
+        diverseCandidates,
       })
-      setCurrentCandidates(
-        result.segments[0]?.candidates ?? [],
+
+      const rack = result.segments.map(
+        (seg, idx) => ({
+          segmentId: `seg-${idx}`,
+          text: seg.text ?? '',
+          candidates: seg.candidates ?? [],
+          selectedTakeIndex: 0,
+        }),
       )
-      setCurrentSelectedIndex(0)
+
+      setSegmentRack(rack)
     } catch (err) {
       setError(
         err instanceof Error ? err.message : String(err),
       )
     } finally {
-      setIsAuditioning(false)
+      setIsRackAuditioning(false)
       setProgress(null)
     }
   }, [
-    currentText,
+    scriptText,
     instruct,
-    isAuditioning,
-    effectiveCandidatesPerSegment,
+    isRackAuditioning,
+    splitScriptToSegments,
+    candidatesPerSegment,
     numStepInput,
     durationInput,
     speedInput,
-    setIsAuditioning,
+    guidanceScaleInput,
+    diverseCandidates,
+    setIsRackAuditioning,
     setError,
-    setCurrentCandidates,
+    setSegmentRack,
     setProgress,
-    setCurrentSelectedIndex,
   ])
 
-  const mergeWithPreviousLine = useCallback(async () => {
-    if (lockedSegments.length === 0) return
-    const prev =
-      lockedSegments[lockedSegments.length - 1]
-    setCurrentText(
-      (curr) => `${prev.text} ${curr}`.trim(),
-    )
-    await handleDeleteFromLibrary(prev.segmentId)
-  }, [
-    lockedSegments,
-    setCurrentText,
-  ])
-
-  const discardCandidates = useCallback(
-    () => {
-      setCurrentCandidates(null)
+  const selectTake = useCallback(
+    (segmentId: string, index: number) => {
+      setSegmentRack((prev) =>
+        prev.map((row) =>
+          row.segmentId === segmentId
+            ? { ...row, selectedTakeIndex: index }
+            : row,
+        ),
+      )
     },
-    [setCurrentCandidates],
+    [setSegmentRack],
   )
 
-  const lockInCurrentTake = useCallback(async () => {
-    if (
-      !currentCandidates ||
-      !currentCandidates[currentSelectedIndex] ||
-      isLockingIn
+  const editSegmentText = useCallback(
+    (segmentId: string, newText: string) => {
+      setSegmentRack((prev) =>
+        prev.map((row) =>
+          row.segmentId === segmentId
+            ? { ...row, text: newText }
+            : row,
+        ),
+      )
+    },
+    [setSegmentRack],
+  )
+
+  const regenerateSegment = useCallback(
+    async (segmentId: string) => {
+      const row = segmentRack.find(
+        (r) => r.segmentId === segmentId,
+      )
+      if (!row || isRackAuditioning) return
+
+      setIsRackAuditioning(true)
+      setError(null)
+      setProgress(null)
+
+      try {
+        const result = await auditionOmniVoice({
+          segments: [row.text],
+          instruct,
+          candidatesPerSegment,
+          numStep: numStepInput.trim()
+            ? Number(numStepInput)
+            : undefined,
+          durationSeconds: durationInput.trim()
+            ? Number(durationInput)
+            : undefined,
+          speed: speedInput.trim()
+            ? Number(speedInput)
+            : undefined,
+          guidanceScale: guidanceScaleInput.trim()
+            ? Number(guidanceScaleInput)
+            : undefined,
+          diverseCandidates,
+        })
+
+        setSegmentRack((prev) =>
+          prev.map((r) =>
+            r.segmentId === segmentId
+              ? {
+                  ...r,
+                  candidates:
+                    result.segments[0]
+                      ?.candidates ?? [],
+                  selectedTakeIndex: 0,
+                }
+              : r,
+          ),
+        )
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : String(err),
+        )
+      } finally {
+        setIsRackAuditioning(false)
+        setProgress(null)
+      }
+    },
+    [
+      segmentRack,
+      isRackAuditioning,
+      instruct,
+      candidatesPerSegment,
+      numStepInput,
+      durationInput,
+      speedInput,
+      guidanceScaleInput,
+      diverseCandidates,
+      setIsRackAuditioning,
+      setError,
+      setSegmentRack,
+      setProgress,
+    ],
+  )
+
+  const handleStitch = useCallback(async () => {
+    if (segmentRack.length === 0 || isStitching) return
+
+    const selectedCandidates = segmentRack.map(
+      (row) =>
+        row.candidates[row.selectedTakeIndex],
     )
+
+    if (
+      selectedCandidates.some(
+        (c) => !c || !c.candidate_id,
+      )
+    ) {
+      setError('Select a take for each segment first.')
       return
-    const chosen =
-      currentCandidates[currentSelectedIndex]
-    setIsLockingIn(true)
+    }
+
+    setIsStitching(true)
     setError(null)
+    setSavedVoiceId(null)
     try {
-      const meta = await lockInOmniVoiceSegment({
-        candidateId: chosen.candidate_id,
-        text: currentText.trim(),
-        instruct,
-        accentId:
-          matchedAccentBankEntry?.id ?? null,
-      })
-      setLockedSegments((prev) => [
-        ...prev,
-        {
-          segmentId: meta.segment_id,
-          text: meta.text,
-          audioBase64:
-            meta.audio_base64 ??
-            chosen.audio_base64,
-        },
-      ])
-      setCurrentText('')
-      setCurrentCandidates(null)
-      setStitchedUrl(null)
-      setSavedVoiceId(null)
-      refreshLibrary()
+      const candidateIds = selectedCandidates.map(
+        (c) => c.candidate_id,
+      )
+      const blob = await stitchOmniVoice(candidateIds)
+      setStitchedUrl(URL.createObjectURL(blob))
+      setStitchedBlob(blob)
     } catch (err) {
       setError(
         err instanceof Error
@@ -414,23 +553,70 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
           : String(err),
       )
     } finally {
-      setIsLockingIn(false)
+      setIsStitching(false)
     }
   }, [
-    currentCandidates,
-    currentSelectedIndex,
-    isLockingIn,
-    currentText,
+    segmentRack,
+    isStitching,
+    setIsStitching,
+    setError,
+    setSavedVoiceId,
+    setStitchedUrl,
+    setStitchedBlob,
+  ])
+
+  const handleSave = useCallback(async () => {
+    if (segmentRack.length === 0 || isSaving) return
+
+    const segments = segmentRack.map((r) => r.text)
+
+    const selectedCandidates = segmentRack.map(
+      (row) =>
+        row.candidates[row.selectedTakeIndex],
+    )
+
+    if (
+      selectedCandidates.some(
+        (c) => !c || !c.candidate_id,
+      )
+    ) {
+      setError('Select a take for each segment first.')
+      return
+    }
+
+    setIsSaving(true)
+    setError(null)
+    try {
+      const candidateIds = selectedCandidates.map(
+        (c) => c.candidate_id,
+      )
+      const result = await saveOmniVoice({
+        selections: candidateIds,
+        instruct,
+        segments,
+        accentId:
+          matchedAccentBankEntry?.id ?? null,
+      })
+      setSavedVoiceId(result.voice_id)
+      onVoiceCreated?.(result.voice_id)
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : String(err),
+      )
+    } finally {
+      setIsSaving(false)
+    }
+  }, [
+    segmentRack,
+    isSaving,
     instruct,
     matchedAccentBankEntry,
-    setIsLockingIn,
+    onVoiceCreated,
+    setIsSaving,
     setError,
-    setLockedSegments,
-    setCurrentText,
-    setCurrentCandidates,
-    setStitchedUrl,
     setSavedVoiceId,
-    refreshLibrary,
   ])
 
   const removeLockedSegment = useCallback(
@@ -522,334 +708,203 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     ],
   )
 
-  const handleStitch = useCallback(async () => {
-    if (
-      lockedSegments.length === 0 ||
-      isStitching
-    )
-      return
-    setIsStitching(true)
-    setError(null)
-    setSavedVoiceId(null)
-    try {
-      const blob = await stitchOmniVoice({
-        segmentIds: lockedSegments.map(
-          (s) => s.segmentId,
-        ),
-      })
-      setStitchedUrl(
-        URL.createObjectURL(blob),
-      )
-      setStitchedBlob(blob)
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : String(err),
-      )
-    } finally {
-      setIsStitching(false)
-    }
-  }, [
-    lockedSegments,
-    isStitching,
-    setIsStitching,
-    setError,
-    setSavedVoiceId,
-    setStitchedUrl,
-    setStitchedBlob,
-  ])
-
-  const handleSave = useCallback(async () => {
-    if (
-      lockedSegments.length === 0 ||
-      isSaving
-    )
-      return
-    setIsSaving(true)
-    setError(null)
-    try {
-      const result = await saveOmniVoice({
-        segmentIds: lockedSegments.map(
-          (s) => s.segmentId,
-        ),
-        instruct,
-        segments: lockedSegments.map(
-          (s) => s.text,
-        ),
-        accentId:
-          matchedAccentBankEntry?.id ??
-          null,
-      })
-      setSavedVoiceId(
-        result.voice_id,
-      )
-      onVoiceCreated?.(result.voice_id)
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : String(err),
-      )
-    } finally {
-      setIsSaving(false)
-    }
-  }, [
-    lockedSegments,
-    isSaving,
-    instruct,
-    matchedAccentBankEntry,
-    onVoiceCreated,
-    setIsSaving,
-    setError,
-    setSavedVoiceId,
-  ])
-
-  return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-      <div className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm">
-        <div>
-          <h2 className="text-base font-semibold">
-            Design an accent-cloned voice
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            OmniVoice only accepts a fixed set of tags —
-            every option below is guaranteed valid. Pick a
-            starting point, then adjust chips freely; the
-            composed instruct string on the right always
-            matches exactly what the model understands.
-          </p>
-        </div>
-
-        {ACCENT_BANK.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {ACCENT_BANK.map((entry) => (
-              <Button
-                key={entry.id}
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() =>
-                  applyAccentPreset(entry)
-                }
-                className="rounded-full"
-              >
-                {entry.label} starter
-              </Button>
-            ))}
-          </div>
-        )}
-
-        <ChipSection title="Accent">
-          <div className="flex flex-wrap gap-1.5">
-            {ACCENTS.map((chip) => (
-              <ChipButton
-                key={chip.id}
-                label={chip.label}
-                selected={
-                  selections.accent ===
-                  chip.id
-                }
-                onClick={() =>
-                  toggleSingle(
-                    'accent',
-                    chip.id,
-                  )
-                }
-              />
-            ))}
-          </div>
-          <p className="mt-2 rounded-md bg-muted/60 px-2.5 py-2 text-[11px] leading-snug text-muted-foreground">
-            Only Australian has a curated
-            showcase-sentence bank so far (validated
-            hands-on — see
-            docs/plans/PLAN_omnivoice_integration.md).
-            Other accents use this same closed vocabulary
-            tag but haven't been quality-checked yet.
-          </p>
-        </ChipSection>
-
-        <ChipSection title="Demographics">
-          <div className="flex flex-wrap gap-1.5">
-            {GENDERS.map((chip) => (
-              <ChipButton
-                key={chip.id}
-                label={chip.label}
-                selected={
-                  selections.gender ===
-                  chip.id
-                }
-                onClick={() =>
-                  toggleSingle(
-                    'gender',
-                    chip.id,
-                  )
-                }
-              />
-            ))}
-          </div>
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {AGES.map((chip) => (
-              <ChipButton
-                key={chip.id}
-                label={chip.label}
-                selected={
-                  selections.age === chip.id
-                }
-                onClick={() =>
-                  toggleSingle('age', chip.id)
-                }
-              />
-            ))}
-          </div>
-        </ChipSection>
-
-        <ChipSection title="Pitch">
-          <div className="flex flex-wrap gap-1.5">
-            {PITCHES.map((chip) => (
-              <ChipButton
-                key={chip.id}
-                label={chip.label}
-                selected={
-                  selections.pitch ===
-                  chip.id
-                }
-                onClick={() =>
-                  toggleSingle(
-                    'pitch',
-                    chip.id,
-                  )
-                }
-              />
-            ))}
-          </div>
-          <p className="mt-1.5 text-[11px] text-muted-foreground">
-            "High pitch" trends tinnier in testing —
-            "moderate" is usually the safer default.
-          </p>
-        </ChipSection>
-
-        <ChipSection title="Style">
-          <div className="flex flex-wrap gap-1.5">
-            <ChipButton
-              label={STYLE_WHISPER.label}
-              selected={selections.whisper}
-              onClick={toggleWhisper}
-            />
-          </div>
-          <p className="mt-1.5 text-[11px] text-muted-foreground">
-            The only style tag OmniVoice documents —
-            there's no "warm"/"sweet"/tone lever here
-            (that's a VoiceDesign-only concept).
-          </p>
-        </ChipSection>
+  // -- Render: Left column --
+  const leftColumn = (
+    <div className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm">
+      <div>
+        <h2 className="text-base font-semibold tracking-tight">
+          Design an accent-cloned voice
+        </h2>
+        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+          OmniVoice uses a fixed tag vocabulary — every
+          option below is validated. Pick a starting
+          preset, then adjust chips; the right panel
+          always reflects the exact instruct string
+          being sent.
+        </p>
       </div>
 
-      <div className="flex h-fit flex-col gap-4 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm lg:sticky lg:top-8">
-        <div>
-          <p className="mb-1 text-xs font-medium text-muted-foreground">
-            Composed instruct
+      {ACCENT_BANK.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {ACCENT_BANK.map((entry) => (
+            <Button
+              key={entry.id}
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() =>
+                applyAccentPreset(entry)
+              }
+              className="rounded-full"
+            >
+              {entry.label} starter
+            </Button>
+          ))}
+        </div>
+      )}
+
+      <ChipSection title="Accent">
+        <div className="flex flex-wrap gap-1.5">
+          {ACCENTS.map((chip) => (
+            <ChipButton
+              key={chip.id}
+              label={chip.label}
+              selected={
+                selections.accent ===
+                chip.id
+              }
+              onClick={() =>
+                toggleSingle(
+                  'accent',
+                  chip.id,
+                )
+              }
+            />
+          ))}
+        </div>
+        <p className="mt-2 rounded-md bg-muted/60 px-2.5 py-2 text-[10px] leading-tight text-muted-foreground">
+          Only Australian has a curated showcase-sentence
+          bank (validated hands-on). Other accents use the
+          same closed tag set but are not yet
+          quality-checked.
+        </p>
+      </ChipSection>
+
+      <ChipSection title="Demographics">
+        <div className="flex flex-wrap gap-1.5">
+          {GENDERS.map((chip) => (
+            <ChipButton
+              key={chip.id}
+              label={chip.label}
+              selected={
+                selections.gender ===
+                chip.id
+              }
+              onClick={() =>
+                toggleSingle(
+                  'gender',
+                  chip.id,
+                )
+              }
+            />
+          ))}
+        </div>
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {AGES.map((chip) => (
+            <ChipButton
+              key={chip.id}
+              label={chip.label}
+              selected={
+                selections.age === chip.id
+              }
+              onClick={() =>
+                toggleSingle('age', chip.id)
+              }
+            />
+          ))}
+        </div>
+      </ChipSection>
+
+      <ChipSection title="Pitch">
+        <div className="flex flex-wrap gap-1.5">
+          {PITCHES.map((chip) => (
+            <ChipButton
+              key={chip.id}
+              label={chip.label}
+              selected={
+                selections.pitch ===
+                chip.id
+              }
+              onClick={() =>
+                toggleSingle(
+                  'pitch',
+                  chip.id,
+                )
+              }
+            />
+          ))}
+        </div>
+        <p className="mt-1.5 text-[10px] text-muted-foreground">
+          "High pitch" trends tinnier in testing —
+          "moderate" is usually the safer default.
+        </p>
+      </ChipSection>
+
+      <ChipSection title="Style">
+        <div className="flex flex-wrap gap-1.5">
+          <ChipButton
+            label={STYLE_WHISPER.label}
+            selected={selections.whisper}
+            onClick={toggleWhisper}
+          />
+        </div>
+        <p className="mt-1.5 text-[10px] text-muted-foreground">
+          The only style tag OmniVoice documents — there's
+          no "warm" or "sweet" here (that's
+          VoiceDesign-only).
+        </p>
+      </ChipSection>
+    </div>
+  )
+
+  // -- Render: Right column --
+  const rightColumn = (
+    <div className="flex h-fit flex-col gap-4 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm lg:sticky lg:top-4">
+      {/* Composed instruct */}
+      <div>
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Composed instruct
+        </p>
+        <div
+          data-testid="omnivoice-instruct"
+          className="min-h-9 w-full rounded-lg border border-input bg-muted/40 px-3 py-2 font-mono text-[11px] leading-tight text-muted-foreground"
+        >
+          {instruct || (
+            <span className="italic">
+              Pick at least one chip on the left…
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Script / Lines */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Script (Lines)
           </p>
-          <div
-            data-testid="omnivoice-instruct"
-            className="min-h-9 w-full rounded-md border border-input bg-muted/30 p-2 font-mono text-sm text-muted-foreground"
-          >
-            {instruct || (
-              <span className="italic">
-                Pick at least one chip on the left…
-              </span>
-            )}
-          </div>
+          {scriptWordCount > 0 && (
+            <span className="text-[10px] text-muted-foreground/80">
+              {lines.length} line{lines.length !== 1 ? 's' : ''} · {scriptWordCount} word{scriptWordCount !== 1 ? 's' : ''}
+            </span>
+          )}
         </div>
 
-        {lockedSegments.length > 0 && (
-          <div className="flex flex-col gap-2">
-            <p className="text-xs font-medium text-muted-foreground">
-              Locked sentences (
-              {lockedSegments.length})
-            </p>
-            {lockedSegments.map((seg, i) => (
-              <div
-                key={seg.segmentId}
-                className="flex items-center gap-2 rounded-md border border-border bg-muted/30 p-2"
-              >
-                <span className="flex-1 text-sm">
-                  {seg.text}
-                </span>
-                {seg.audioBase64 && (
-                  <ClipPlayer
-                    audioBase64={seg.audioBase64}
-                    className="w-56"
-                  />
-                )}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() =>
-                    removeLockedSegment(i)
-                  }
-                >
-                  Remove
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
+        <textarea
+          data-testid="omnivoice-script"
+          placeholder="Paste or type your script (up to 10 lines recommended)…"
+          rows={4}
+          value={scriptText}
+          onChange={(e) =>
+            setScriptText(e.target.value)
+          }
+          className="w-full resize-none rounded-lg border border-input bg-muted/40 px-3 py-2 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+        />
 
-        <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-3">
-          <p className="text-xs font-medium text-muted-foreground">
-            {lockedSegments.length === 0
-              ? 'First sentence'
-              : 'Next sentence'}
+        <div className="flex flex-wrap gap-2">
+          <p className="text-[10px] text-muted-foreground">
+            Recommended: 5–15 words per line. Best results in English.
           </p>
-
-          {activeShowcaseSentences.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              <p className="text-[11px] text-muted-foreground">
-                Suggested lines that showcase this
-                accent — click to use, then edit freely:
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {activeShowcaseSentences.map(
-                  (sentence) => (
-                    <button
-                      key={sentence.text}
-                      type="button"
-                      title={sentence.note}
-                      onClick={() =>
-                        applySuggestion(
-                          sentence,
-                        )
-                      }
-                      className={cn(
-                        'rounded-full border px-2.5 py-1 text-[11px] transition-colors',
-                        currentText ===
-                          sentence.text
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-border bg-transparent text-muted-foreground hover:bg-accent/40',
-                      )}
-                    >
-                      {sentence.text}
-                    </button>
-                  ),
-                )}
-              </div>
-            </div>
+          {hasLongLines && (
+            <p className="text-[10px] text-amber-400">
+              Some lines are long; shorter lines produce more reliable results.
+            </p>
           )}
+        </div>
 
-          <input
-            type="text"
-            data-testid="omnivoice-current-sentence"
-            placeholder="Type or pick a sentence above…"
-            className="w-full rounded-md border border-input bg-transparent p-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            value={currentText}
-            onChange={(e) =>
-              setCurrentText(e.target.value)
-            }
-          />
-
-          <div className="flex flex-wrap items-center gap-1.5">
+        {/* Non-verbal tags */}
+        <div className="flex flex-col gap-1">
+          <div className="flex flex-wrap gap-1">
             {NON_VERBAL_TAGS.map((tag) => (
               <button
                 key={tag}
@@ -857,494 +912,703 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                 onClick={() =>
                   insertNonVerbalTag(tag)
                 }
-                className="rounded-full border border-border bg-transparent px-2 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-accent/40"
+                className="rounded-full border border-border bg-transparent px-2 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent/50"
               >
                 {tag}
               </button>
             ))}
-            {lockedSegments.length > 0 && (
-              <button
-                type="button"
-                onClick={mergeWithPreviousLine}
-                className="ml-1 text-[11px] text-muted-foreground underline decoration-dotted hover:text-foreground"
-              >
-                Merge with previous line
-              </button>
-            )}
           </div>
+          <p className="text-[9px] text-muted-foreground">
+            Insert inline, e.g. "
+            [laughter] That's what she said".
+            Don't stack many at once.
+          </p>
+        </div>
 
-          {isShortLine && (
-            <p className="text-[11px] text-amber-400">
-              Short lines are the least reliable
-              single-shot case — using{' '}
-              {effectiveCandidatesPerSegment}{' '}
-              candidates for this take instead of{' '}
-              {candidatesPerSegment}. Consider "Merge
-              with previous line" instead if this line
-              stands alone.
-            </p>
-          )}
+        {/* Language note */}
+        <p className="text-[9px] text-muted-foreground">
+          Best quality: English. For other languages,
+          consider using a reference audio instead.
+        </p>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              Candidates
-              <input
-                type="number"
-                min={1}
-                max={6}
-                value={candidatesPerSegment}
-                onChange={(e) =>
-                  setCandidatesPerSegment(
-                    Number(
-                      e.target.value,
-                    ) || 1,
-                  )
-                }
-                className="h-8 w-16 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-              />
-            </label>
-            <Button
-              type="button"
-              data-testid="omnivoice-audition-button"
-              onClick={
-                handleAuditionCurrent
-              }
-              disabled={
-                !currentText.trim() ||
-                !instruct ||
-                isAuditioning
-              }
+        {/* Generate button */}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            data-testid="omnivoice-audition-button"
+            onClick={handleBatchAudition}
+            disabled={
+              !scriptText.trim() ||
+              !instruct ||
+              isRackAuditioning
+            }
+            className="min-w-[160px]"
+          >
+            {isRackAuditioning
+              ? 'Generating…'
+              : 'Generate candidates'}
+          </Button>
+          <button
+            type="button"
+            onClick={() =>
+              setShowAdvanced(!showAdvanced)
+            }
+            className="text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+          >
+            {showAdvanced
+              ? 'Hide advanced'
+              : 'Advanced (quality / pacing)'}
+          </button>
+        </div>
+
+        {/* Advanced controls */}
+        <AnimatePresence initial={false}>
+          {showAdvanced && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="flex flex-col gap-3 overflow-hidden rounded-lg border border-border/70 bg-muted/50 p-3"
             >
-              {isAuditioning
-                ? 'Generating…'
-                : 'Generate candidates for this line'}
-            </Button>
-            <button
-              type="button"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="text-[11px] text-muted-foreground underline decoration-dotted hover:text-foreground"
-            >
-              {showAdvanced
-                ? 'Hide advanced'
-                : 'Advanced (quality / pacing)'}
-            </button>
-          </div>
-
-          <AnimatePresence initial={false}>
-            {showAdvanced && (
-              <motion.div
-                initial={{
-                  opacity: 0,
-                  height: 0,
-                }}
-                animate={{
-                  opacity: 1,
-                  height: 'auto',
-                }}
-                exit={{
-                  opacity: 0,
-                  height: 0,
-                }}
-                className="flex flex-wrap items-center gap-3 overflow-hidden rounded-md bg-muted/40 p-2.5"
-              >
-                <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  Steps
+              {/* Steps */}
+              <div className="flex items-center gap-3">
+                <label className="flex min-w-[140px] items-center gap-2 text-[10px] text-muted-foreground">
+                  <span>
+                    Steps
+                    <InfoIcon text="Diffusion step count (16–32). Higher is slower but can be cleaner." />
+                  </span>
+                </label>
+                <div className="flex flex-1 items-center gap-2">
+                  <input
+                    type="range"
+                    min={16}
+                    max={32}
+                    step={1}
+                    value={
+                      numStepInput
+                        ? Number(numStepInput) || 24
+                        : 24
+                    }
+                    onChange={(e) =>
+                      setNumStepInput(
+                        String(e.target.value),
+                      )
+                    }
+                    className="flex-1 accent-primary"
+                  />
                   <input
                     type="number"
-                    min={1}
-                    max={64}
-                    placeholder="32"
+                    min={16}
+                    max={32}
                     value={numStepInput}
                     onChange={(e) =>
                       setNumStepInput(
                         e.target.value,
                       )
                     }
-                    title="Diffusion step count — higher is slower but can be cleaner. Server clamps to 1–64; leave blank for the model's default (32)."
-                    className="h-8 w-16 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                    className="w-14 rounded-md border border-input bg-transparent px-1.5 py-1 text-xs outline-none focus-visible:border-ring"
                   />
-                </label>
-                <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  Duration (s)
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.1}
-                    placeholder="auto"
-                    value={
-                      durationInput
-                    }
-                    onChange={(e) =>
-                      setDurationInput(
-                        e.target.value,
-                      )
-                    }
-                    title="Target clip length in seconds. Overrides Speed when both are set."
-                    className="h-8 w-20 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                  />
-                </label>
-                <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  Speed
-                  <input
-                    type="number"
-                    min={0.25}
-                    max={4}
-                    step={0.05}
-                    placeholder="1.0"
-                    value={speedInput}
-                    onChange={(e) =>
-                      setSpeedInput(
-                        e.target.value,
-                      )
-                    }
-                    title="Playback-rate-style multiplier. Server clamps to 0.25–4.0."
-                    className="h-8 w-20 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                  />
-                </label>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                </div>
+              </div>
 
-          {isAuditioning && (
-            <div
-              data-testid="omnivoice-progress"
-              className="flex flex-col gap-1"
-            >
-              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                <motion.div
-                  className="h-full bg-primary"
-                  animate={{
-                    width:
-                      progress &&
-                      progress.total > 0
-                      ? `${Math.min(
-                          100,
-                          (progress.completed /
-                            progress.total) *
-                            100,
-                        )}%`
-                      : '8%',
-                  }}
-                  transition={{
-                    ease: 'easeOut',
-                    duration: 0.3,
-                  }}
+              {/* Guidance scale */}
+              <div className="flex items-center gap-3">
+                <label className="flex min-w-[140px] items-center gap-2 text-[10px] text-muted-foreground">
+                  <span>
+                    Guidance scale
+                    <InfoIcon text="Improves accent and voice fidelity (1.5–3.0). Higher = tighter accent but slightly less natural." />
+                  </span>
+                </label>
+                <div className="flex flex-1 items-center gap-2">
+                  <input
+                    type="range"
+                    min={1.5}
+                    max={3}
+                    step={0.1}
+                    value={
+                      guidanceScaleInput
+                        ? Number(guidanceScaleInput) || 2
+                        : 2
+                    }
+                    onChange={(e) =>
+                      setGuidanceScaleInput(
+                        String(
+                          Number(
+                            e.target.value,
+                          ).toFixed(1),
+                        ),
+                      )
+                    }
+                    className="flex-1 accent-primary"
+                  />
+                  <input
+                    type="number"
+                    min={1.5}
+                    max={3}
+                    step={0.1}
+                    value={
+                      guidanceScaleInput
+                    }
+                    onChange={(e) =>
+                      setGuidanceScaleInput(
+                        e.target.value,
+                      )
+                    }
+                    placeholder="auto"
+                    className="w-14 rounded-md border border-input bg-transparent px-1.5 py-1 text-xs outline-none focus-visible:border-ring"
+                  />
+                </div>
+              </div>
+
+              {/* Speed */}
+              <div className="flex items-center gap-3">
+                <label className="flex min-w-[140px] items-center gap-2 text-[10px] text-muted-foreground">
+                  <span>
+                    Speed
+                    <InfoIcon text="Playback-rate multiplier. 0.8–1.5 recommended; server clamps 0.5–2.5." />
+                  </span>
+                </label>
+                <input
+                  type="number"
+                  min={0.5}
+                  max={2.5}
+                  step={0.05}
+                  placeholder="1.0"
+                  value={speedInput}
+                  onChange={(e) =>
+                    setSpeedInput(
+                      e.target.value,
+                    )
+                  }
+                  className="w-24 rounded-md border border-input bg-transparent px-2 py-1 text-xs outline-none focus-visible:border-ring"
                 />
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                {progress?.phase === 'loading'
-                  ? 'Loading OmniVoice checkpoint…'
-                  : candidateLabel ??
-                    'Starting…'}
-                {progress?.phase ===
-                  'generating' &&
-                  progress.estimated_remaining_seconds !=
-                    null && (
-                    <>
-                      {' '}
-                      ·{' '}
-                      {formatEta(
-                        progress.estimated_remaining_seconds,
-                      )}
-                    </>
-                  )}
-              </p>
-            </div>
-          )}
 
-          <AnimatePresence>
-            {currentCandidates &&
-              currentCandidates.length >
-                0 && (
-                <motion.div
-                  initial={{
-                    opacity: 0,
-                    y: 6,
-                  }}
-                  animate={{
-                    opacity: 1,
-                    y: 0,
-                  }}
-                  exit={{
-                    opacity: 0,
-                    y: 6,
-                  }}
-                  className="flex flex-col gap-2"
-                >
-                  {currentCandidates.map(
-                    (
-                      candidate,
-                      i,
-                    ) => {
-                      const selected =
-                        i ===
-                        currentSelectedIndex
-                      return (
-                        <div
-                          key={candidate.candidate_id}
-                          className="flex items-center gap-2"
-                        >
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={
-                              selected
-                                ? 'default'
-                                : 'outline'
-                            }
-                            onClick={() =>
-                              setCurrentSelectedIndex(
-                                i,
-                              )
-                            }
-                          >
-                            Take {i + 1}
-                          </Button>
-                          {candidate.flagged && (
-                            <span
-                              title={
-                                candidate.flag_reason ??
-                                undefined
-                              }
-                              className="shrink-0 rounded-full border border-amber-900/50 bg-amber-950/30 px-2 py-0.5 text-[10px] text-amber-300"
-                            >
-                              possibly bad take
-                              {candidate.flag_reason
-                                ? ` · ${candidate.flag_reason}`
-                                : ''}
-                            </span>
-                          )}
-                          <ClipPlayer
-                            audioBase64={
-                              candidate.audio_base64
-                            }
-                            className="flex-1"
-                          />
-                        </div>
-                      )
-                    },
-                  )}
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={
-                        lockInCurrentTake
-                      }
-                      disabled={
-                        isLockingIn
-                      }
-                    >
-                      {isLockingIn
-                        ? 'Locking in…'
-                        : 'Lock in this take'}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={
-                        discardCandidates
-                      }
-                    >
-                      Discard all takes
-                    </Button>
-                  </div>
-                </motion.div>
-              )}
-          </AnimatePresence>
-        </div>
-
-        <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
-          <button
-            type="button"
-            className="flex items-center justify-between text-left text-xs font-medium text-muted-foreground"
-            onClick={() =>
-              setIsLibraryOpen(
-                (v) => !v,
-              )
-            }
-          >
-            <span>
-              Segment library ({library.length})
-            </span>
-            <span>
-              {isLibraryOpen
-                ? 'Hide'
-                : 'Browse'}
-            </span>
-          </button>
-          {isLibraryOpen && (
-            <div className="flex flex-col gap-2">
-              <input
-                type="text"
-                placeholder="Filter by tag (e.g. australian, female)…"
-                value={
-                  libraryFilter
-                }
-                onChange={(e) =>
-                  setLibraryFilter(
-                    e.target.value,
-                  )
-                }
-                className="w-full rounded-md border border-input bg-transparent p-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-              />
-              <div className="flex max-h-64 flex-col gap-1.5 overflow-y-auto">
-                {filteredLibrary.length ===
-                  0 && (
-                  <p className="text-[11px] text-muted-foreground">
-                    No segments match.
-                  </p>
-                )}
-                {filteredLibrary.map((m) => (
-                  <div
-                    key={m.segment_id}
-                    className={cn(
-                      'flex items-center gap-2 rounded-md border p-2',
-                      librarySelection.has(
-                        m.segment_id,
-                      )
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border',
-                    )}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={librarySelection.has(
-                        m.segment_id,
-                      )}
-                      onChange={() =>
-                        toggleLibrarySelection(
-                          m.segment_id,
-                        )
-                      }
-                    />
-                    <div className="flex-1">
-                      <p className="text-sm">
-                        {m.text}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground">
-                        {m.tags.join(
-                          ', ',
-                        )}
-                      </p>
-                    </div>
-                    {m.audio_base64 && (
-                      <ClipPlayer
-                        audioBase64={
-                          m.audio_base64
-                        }
-                        className="w-48"
-                      />
-                    )}
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() =>
-                        handleDeleteFromLibrary(
-                          m.segment_id,
-                        )
-                      }
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                ))}
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                className="self-start"
-                onClick={
-                  addSelectedFromLibrary
-                }
-                disabled={
-                  librarySelection.size ===
-                  0
-                }
-              >
-                Add selected to locked
-                sentences
-              </Button>
-            </div>
-          )}
-        </div>
-
-        {error && (
-          <p
-            data-testid="omnivoice-error"
-            className="text-sm text-destructive"
-          >
-            {error}
-          </p>
-        )}
-
-        {lockedSegments.length > 0 && (
-          <Button
-            type="button"
-            data-testid="omnivoice-stitch-button"
-            onClick={handleStitch}
-            disabled={isStitching}
-            className="self-start"
-          >
-            {isStitching
-              ? 'Stitching…'
-              : `Stitch ${lockedSegments.length} locked sentence${lockedSegments.length === 1 ? '' : 's'}`}
-          </Button>
-        )}
-
-        <AnimatePresence>
-          {stitchedUrl && (
-            <motion.div
-              data-testid="omnivoice-result"
-              initial={{
-                opacity: 0,
-                y: 8,
-              }}
-              animate={{
-                opacity: 1,
-                y: 0,
-              }}
-              exit={{
-                opacity: 0,
-                y: 8,
-              }}
-              className="flex flex-col gap-3 rounded-md border border-border bg-muted/40 p-3"
-            >
-              <AudioPlayer
-                src={stitchedUrl}
-                blob={stitchedBlob}
-              />
-              {savedVoiceId ? (
-                <p className="text-xs text-muted-foreground">
-                  Saved to voice library as{' '}
-                  <span className="font-mono text-foreground">
-                    {savedVoiceId}
+              {/* Diverse candidates */}
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <span>
+                    Diverse candidates
+                    <InfoIcon text="Generates takes with different delivery and prosody by varying internal temperatures." />
                   </span>
-                  .
-                </p>
-              ) : (
-                <Button
+                </label>
+                <button
                   type="button"
-                  data-testid="omnivoice-save-button"
-                  variant="outline"
-                  size="sm"
-                  onClick={
-                    handleSave
+                  role="switch"
+                  aria-checked={
+                    diverseCandidates
                   }
-                  disabled={isSaving}
-                  className="self-start"
+                  onClick={() =>
+                    setDiverseCandidates(
+                      !diverseCandidates,
+                    )
+                  }
+                  className={cn(
+                    'relative inline-flex h-5 w-9 cursor-pointer rounded-full border border-border transition-colors',
+                    diverseCandidates
+                      ? 'bg-primary'
+                      : 'bg-muted',
+                  )}
                 >
-                  {isSaving
-                    ? 'Saving…'
-                    : 'Save to voice library'}
-                </Button>
-              )}
+                  <span
+                    className={cn(
+                      'absolute top-[3px] left-[3px] h-3.5 w-3.5 rounded-full bg-background shadow transition-transform',
+                      diverseCandidates
+                        ? 'translate-x-4'
+                        : 'translate-x-0',
+                    )}
+                  />
+                </button>
+              </div>
+
+              {/* Candidates count */}
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  Candidates per segment
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={6}
+                  value={candidatesPerSegment}
+                  onChange={(e) =>
+                    setCandidatesPerSegment(
+                      Number(
+                        e.target.value,
+                      ) || 1,
+                    )
+                  }
+                  className="w-16 rounded-md border border-input bg-transparent px-2 py-1 text-xs outline-none focus-visible:border-ring"
+                />
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
+
+      {/* Progress bar */}
+      {isRackAuditioning && (
+        <div
+          data-testid="omnivoice-progress"
+          className="flex flex-col gap-1"
+        >
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <motion.div
+              className="h-full bg-primary"
+              animate={{
+                width:
+                  progress &&
+                  progress.total > 0
+                    ? `${Math.min(
+                        100,
+                        (progress.completed /
+                          progress.total) *
+                          100,
+                      )}%`
+                    : '8%',
+              }}
+              transition={{
+                ease: 'easeOut',
+                duration: 0.3,
+              }}
+            />
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            {progress?.phase === 'loading'
+              ? 'Loading OmniVoice checkpoint…'
+              : progress
+                ? `Segment ${
+                    progress.current_segment_index + 1
+                  }/${
+                    progress.segment_count || 1
+                  } · Candidate ${
+                      progress.current_candidate_index +
+                      1
+                    }/${
+                        progress.candidates_per_segment ||
+                        1
+                      } (${
+                          progress.completed
+                        }/${
+                          progress.total
+                        })`
+                : 'Starting…'}
+            {progress?.phase ===
+              'generating' &&
+              progress.estimated_remaining_seconds !=
+                null && (
+                <span>
+                  {' '}
+                  ·{' '}
+                  {formatEta(
+                    progress.estimated_remaining_seconds,
+                  )}
+                </span>
+              )}
+          </p>
+        </div>
+      )}
+
+      {/* Segment rack */}
+      {segmentRack.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Segment rack
+          </p>
+
+          <div className="flex max-h-[360px] flex-col gap-2 overflow-y-auto">
+            {segmentRack.map((row, segIndex) => {
+              const [editing, setEditing] =
+                useState(false)
+              const [draft, setDraft] = useState(row.text)
+
+              return (
+                <div
+                  key={row.segmentId}
+                  className="flex flex-col gap-2 rounded-xl border border-border bg-muted/30 px-3 py-2.5 shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                >
+                  {/* Header */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium">
+                        {segIndex + 1}
+                      </span>
+                      {editing ? (
+                        <input
+                          autoFocus
+                          type="text"
+                          value={draft}
+                          onChange={(e) =>
+                            setDraft(
+                              e.target.value,
+                            )
+                          }
+                          onBlur={() => {
+                            editSegmentText(
+                              row.segmentId,
+                              draft,
+                            )
+                            setEditing(false)
+                          }}
+                          onKeyDown={(e) => {
+                            if (
+                              e.key ===
+                                'Enter'
+                            ) {
+                              editSegmentText(
+                                row.segmentId,
+                                draft,
+                              )
+                              setEditing(false)
+                            }
+                            if (
+                              e.key ===
+                                'Escape'
+                            ) {
+                              setDraft(row.text)
+                              setEditing(
+                                false,
+                              )
+                            }
+                          }}
+                          className="min-w-[200px] flex-1 rounded-md border border-input bg-transparent px-2 py-0.5 text-xs outline-none focus-visible:border-ring"
+                        />
+                      ) : (
+                        <span className="max-w-[360px] truncate text-xs">
+                          {row.text}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditing(
+                            true,
+                          )
+                          setDraft(
+                            row.text,
+                          )
+                        }}
+                        className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground underline decoration-dotted underline-offset-1 hover:text-foreground"
+                      >
+                        <span>✎</span> Edit
+                      </button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-6 px-2 text-[10px]"
+                        onClick={() =>
+                          regenerateSegment(
+                            row.segmentId,
+                          )
+                        }
+                        disabled={
+                          isRackAuditioning
+                        }
+                      >
+                        {isRackAuditioning
+                          ? '⋯'
+                          : 'Regen'}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Takes */}
+                  {row.candidates.length > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      {row.candidates.map(
+                        (c, ci) => {
+                          const selected =
+                            ci ===
+                            row.selectedTakeIndex
+                          return (
+                            <div
+                              key={
+                                c.candidate_id
+                              }
+                              className={cn(
+                                'flex items-center gap-2 rounded-lg border px-2 py-1.5 transition-all',
+                                selected
+                                  ? 'border-[hsl(190,90%,50%)] bg-[hsl(190,90%,50%)]/5 shadow-[0_0_10px_rgba(34,211,238,0.12)]'
+                                  : 'border-border/60 bg-background',
+                              )}
+                            >
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  selectTake(
+                                    row.segmentId,
+                                    ci,
+                                  )
+                                }
+                                className={cn(
+                                  'shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium transition-colors',
+                                  selected
+                                    ? 'bg-[hsl(190,90%,50%)] text-background'
+                                    : 'bg-muted text-muted-foreground hover:bg-muted/80',
+                                )}
+                              >
+                                Take {ci + 1}
+                              </button>
+
+                              {c.flagged && (
+                                <span
+                                  title={
+                                    c.flag_reason ??
+                                    undefined
+                                  }
+                                  className="shrink-0 rounded-full border border-amber-900/50 bg-amber-950/30 px-1.5 py-0.5 text-[9px] text-amber-300"
+                                >
+                                  possibly bad take
+                                  {c.flag_reason
+                                    ? ` · ${c.flag_reason}`
+                                    : ''}
+                                </span>
+                              )}
+
+                              <ClipPlayer
+                                audioBase64={
+                                  c.audio_base64
+                                }
+                                className="flex-1"
+                                autoPlay={
+                                  selected
+                                }
+                              />
+                            </div>
+                          )
+                        },
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Stitch / Save */}
+          <div className="mt-1 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              data-testid="omnivoice-stitch-button"
+              onClick={handleStitch}
+              disabled={
+                segmentRack.length === 0 ||
+                isStitching
+              }
+              className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[hsl(190,90%,50%)] to-[hsl(210,90%,45%)] px-4 py-1.5 text-xs font-medium text-background shadow-[0_4px_15px_rgba(34,211,238,0.25)] transition-all hover:scale-[1.02] hover:shadow-[0_8px_25px_rgba(34,211,238,0.35)] disabled:opacity-50 disabled:shadow-none"
+            >
+              {isStitching
+                ? 'Stitching…'
+                : `Stitch all segments`}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Stitched preview */}
+      <AnimatePresence>
+        {stitchedUrl && (
+          <motion.div
+            data-testid="omnivoice-result"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            className="flex flex-col gap-3 rounded-xl border border-border bg-muted/50 px-4 py-3"
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Stitched preview
+            </p>
+            <AudioPlayer
+              src={stitchedUrl}
+              blob={stitchedBlob}
+            />
+            {savedVoiceId ? (
+              <p className="text-xs text-muted-foreground">
+                Saved to voice library as{' '}
+                <span className="font-mono text-foreground">
+                  {savedVoiceId}
+                </span>
+                .
+              </p>
+            ) : (
+              <Button
+                type="button"
+                data-testid="omnivoice-save-button"
+                variant="outline"
+                size="sm"
+                onClick={handleSave}
+                disabled={isSaving}
+                className="self-start rounded-full px-3 py-1 text-[11px]"
+              >
+                {isSaving
+                  ? 'Saving…'
+                  : 'Save to voice library'}
+              </Button>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Segment library */}
+      <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
+        <button
+          type="button"
+          className="flex items-center justify-between text-left text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+          onClick={() =>
+            setIsLibraryOpen((v) => !v)
+          }
+        >
+          <span>
+            Segment library ({library.length})
+          </span>
+          <span>{isLibraryOpen ? 'Hide' : 'Browse'}</span>
+        </button>
+        {isLibraryOpen && (
+          <div className="flex flex-col gap-2">
+            <input
+              type="text"
+              placeholder="Filter by tag…"
+              value={libraryFilter}
+              onChange={(e) =>
+                setLibraryFilter(e.target.value)
+              }
+              className="w-full rounded-md border border-input bg-transparent p-2 text-xs outline-none focus-visible:border-ring"
+            />
+            <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto">
+              {filteredLibrary.length ===
+                0 && (
+                <p className="text-[10px] text-muted-foreground">
+                  No segments match.
+                </p>
+              )}
+              {filteredLibrary.map((m) => (
+                <div
+                  key={m.segment_id}
+                  className={cn(
+                    'flex items-center gap-2 rounded-md border p-2',
+                    librarySelection.has(
+                      m.segment_id,
+                    )
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border',
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={librarySelection.has(
+                      m.segment_id,
+                    )}
+                    onChange={() =>
+                      toggleLibrarySelection(
+                        m.segment_id,
+                      )
+                    }
+                  />
+                  <div className="flex-1">
+                    <p className="text-xs">
+                      {m.text}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {m.tags.join(', ')}
+                    </p>
+                  </div>
+                  {m.audio_base64 && (
+                    <ClipPlayer
+                      audioBase64={
+                        m.audio_base64
+                      }
+                      className="w-40"
+                    />
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                      handleDeleteFromLibrary(
+                        m.segment_id,
+                      )
+                    }
+                  >
+                    Delete
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              className="self-start"
+              onClick={
+                addSelectedFromLibrary
+              }
+              disabled={
+                librarySelection.size === 0
+              }
+            >
+              Add selected to locked sentences
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Locked segments */}
+      {lockedSegments.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Locked sentences ({lockedSegments.length})
+          </p>
+          {lockedSegments.map((seg, i) => (
+            <div
+              key={seg.segmentId}
+              className="flex items-center gap-2 rounded-md border border-border bg-muted/30 p-2"
+            >
+              <span className="flex-1 text-xs">
+                {seg.text}
+              </span>
+              {seg.audioBase64 && (
+                <ClipPlayer
+                  audioBase64={
+                    seg.audioBase64
+                  }
+                  className="w-40"
+                />
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  removeLockedSegment(i)
+                }
+              >
+                Remove
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Error */}
+      {error && (
+        <p
+          data-testid="omnivoice-error"
+          className="text-xs text-destructive"
+        >
+          {error}
+        </p>
+      )}
+    </div>
+  )
+
+  return (
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+      {leftColumn}
+      {rightColumn}
     </div>
   )
 }
@@ -1358,7 +1622,7 @@ function ChipSection({
 }) {
   return (
     <div>
-      <p className="mb-1.5 text-xs font-medium text-muted-foreground">
+      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         {title}
       </p>
       {children}

@@ -138,14 +138,18 @@ export interface OmniVoiceAuditionParams {
   language?: string
   candidatesPerSegment?: number
   seed?: number | null
-  /** Diffusion step count — quality/speed tradeoff. Server clamps to [1, 64]; omit for the
+  /** Diffusion step count — quality/speed tradeoff. Server clamps to [16, 32]; omit for the
    * model's own default (32). */
   numStep?: number | null
   /** Target clip duration in seconds. Overrides `speed` when both are set (real
    * OmniVoice.generate() behavior). */
   durationSeconds?: number | null
-  /** Playback-rate-style multiplier. Server clamps to [0.25, 4.0]. */
+  /** Playback-rate-style multiplier. Server clamps to [0.5, 2.5]. */
   speed?: number | null
+  /** Classifier-free guidance scale for accent/voice fidelity. Server clamps to [1.5, 3.0]. */
+  guidanceScale?: number | null
+  /** When true, candidates use varied position_temperatures [5, 7, 10] for prosodic diversity. */
+  diverseCandidates?: boolean
 }
 
 export interface OmniVoiceCandidate {
@@ -159,7 +163,7 @@ export interface OmniVoiceCandidate {
 }
 
 export interface OmniVoiceAuditionResult {
-  segments: { candidates: OmniVoiceCandidate[] }[]
+  segments: { text: string; candidates: OmniVoiceCandidate[] }[]
 }
 
 export async function auditionOmniVoice(
@@ -177,6 +181,8 @@ export async function auditionOmniVoice(
       num_step: params.numStep ?? undefined,
       duration: params.durationSeconds ?? undefined,
       speed: params.speed ?? undefined,
+      guidance_scale: params.guidanceScale ?? undefined,
+      diverse_candidates: params.diverseCandidates ?? undefined,
     }),
   })
   if (!res.ok) throw new Error(await readError(res))

@@ -279,6 +279,14 @@ def omnivoice_audition():
     speed = data.get("speed")
     if speed is not None and not isinstance(speed, (int, float)):
         return jsonify({"error": "speed must be a number"}), 400
+    guidance_scale = data.get("guidance_scale")
+    if guidance_scale is not None and not isinstance(
+        guidance_scale, (int, float)
+    ):
+        return jsonify({"error": "guidance_scale must be a number"}), 400
+    diverse_candidates = data.get("diverse_candidates")
+    if diverse_candidates is not None:
+        diverse_candidates = bool(diverse_candidates)
 
     try:
         results = model.executor.submit(
@@ -291,6 +299,8 @@ def omnivoice_audition():
             num_step,
             duration,
             speed,
+            guidance_scale,
+            diverse_candidates,
         ).result(timeout=1800)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -302,7 +312,7 @@ def omnivoice_audition():
     # audition call" is a simple and sufficient invalidation rule.
     _omnivoice_candidates.clear()
     response_segments = []
-    for seg_candidates in results:
+    for seg_idx, seg_candidates in enumerate(results):
         cand_payload = []
         for wav, sr, flagged, flag_reason in seg_candidates:
             candidate_id = uuid.uuid4().hex
@@ -312,12 +322,21 @@ def omnivoice_audition():
                 {
                     "candidate_id": candidate_id,
                     "sample_rate": sr,
-                    "audio_base64": base64.b64encode(wav_bytes).decode("ascii"),
+                    "audio_base64": base64.b64encode(wav_bytes).decode(
+                        "ascii"
+                    ),
                     "flagged": flagged,
-                    "flag_reason": None if flag_reason == "ok" else flag_reason,
+                    "flag_reason": None
+                    if flag_reason == "ok"
+                    else flag_reason,
                 }
             )
-        response_segments.append({"candidates": cand_payload})
+        response_segments.append(
+            {
+                "text": segments[seg_idx],
+                "candidates": cand_payload,
+            }
+        )
     return jsonify({"segments": response_segments})
 
 

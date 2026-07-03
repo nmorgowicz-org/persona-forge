@@ -29,6 +29,7 @@ sentence-segmented text and stitch the chosen takes afterward via audio_post.sti
 from __future__ import annotations
 
 import gc
+import logging
 import time
 from typing import Any
 
@@ -36,14 +37,25 @@ from qwen3_tts import model
 from qwen3_tts.asr_check import has_speech
 from qwen3_tts.audio_post import analyze_take, stitch_segments
 
+logger = logging.getLogger(__name__)
+
 # Real bounds from the installed `omnivoice` package's OmniVoiceGenerationConfig
 # (num_step default 32, guidance_scale/duration/speed unset by default) — see
 # docs/plans/PLAN_omnivoice_integration.md and the 2026-07-03 upstream-docs review. Clamped
 # here rather than trusting the frontend, since these reach a third-party model call.
-MIN_NUM_STEP = 1
-MAX_NUM_STEP = 64
-MIN_SPEED = 0.25
-MAX_SPEED = 4.0
+MIN_NUM_STEP = 16
+MAX_NUM_STEP = 32
+MIN_SPEED = 0.5
+MAX_SPEED = 2.5
+MIN_GUIDANCE = 1.5
+MAX_GUIDANCE = 3.0
+
+# Temperature schedule for diverse candidates (when diverse_candidates=True)
+DIVERSE_TEMPS = [5.0, 7.0, 10.0]
+
+# Soft guard for segment length
+WARNING_CHARS = 120
+WARNING_WORDS = 15
 
 # A take flagged by audio_post.analyze_take (dead air / drone / SFX — nick's report,
 # 2026-07-03: "just dead air/drones/sfx") gets exactly one silent retry before being
@@ -122,6 +134,8 @@ def run_omnivoice_job(
     num_step: int | None = None,
     duration: float | None = None,
     speed: float | None = None,
+    guidance_scale: float | None = None,
+    diverse_candidates: bool = False,
 ) -> list[list[tuple[Any, int, bool, str]]]:
     """Swap to OmniVoice and generate every segment x candidate. Leaves OmniVoice loaded on
     success (see this module's docstring for why). On failure, the checkpoint is unloaded
@@ -136,10 +150,14 @@ def run_omnivoice_job(
     dead-air/drone heuristic; a flagged candidate is retried once in-loop before being
     returned (see MAX_ATTEMPTS_PER_CANDIDATE), so a flagged result already survived a retry.
 
-    ``num_step``/``duration``/``speed`` map straight onto the real ``OmniVoice.generate()``
-    kwargs (confirmed against the installed omnivoice==0.1.5 package, 2026-07-03 upstream
-    review) — omitted (None) ones are left out of the call entirely so the model's own
-    defaults apply rather than this repo silently overriding them.
+    ``num_step``/``duration``/``speed``/``guidance_scale`` map onto the real
+    ``OmniVoice.generate()`` kwargs (confirmed against the installed omnivoice==0.1.5
+    package, 2026-07-03 upstream review) — omitted (None) ones are left out of the call
+    entirely so the model's own defaults apply.
+
+    When ``diverse_candidates=True``, position_temperature cycles through [5.0, 7.0, 10.0]
+    across candidates to produce prosodically different takes; when False, the first
+    candidate uses 5.0 and the rest use 7.0. class_temperature is always 0.0 (greedy).
 
     No manual seed by default: seeding a whole multi-segment/multi-candidate batch defeats
     the point of auditioning independent draws, and stitching validated in
@@ -153,6 +171,40 @@ def run_omnivoice_job(
         raise ValueError("candidates_per_segment must be >= 1")
     if not instruct.strip():
         raise ValueError("instruct must be non-empty")
+
+    # English-first note
+    lang = language.strip().lower()
+    if lang != "english":
+        logger.warning(
+            "OmniVoice: language='%s' — best quality is English; consider using a "
+            "reference audio for other languages.",
+            language,
+        )
+
+    # Soft segment length guard (warning only)
+    for idx, seg in enumerate(segments):
+        words = len(seg.split())
+        chars = len(seg)
+        if chars > WARNING_CHARS or words > WARNING_WORDS:
+            logger.warning(
+                "OmniVoice: segment[%d] length high (%d chars, %d words) — "
+                "output may be unreliable",
+                idx,
+                chars,
+                words,
+            )
+
+    # Clamp guidance_scale
+    if guidance_scale is not None:
+        guidance_scale = float(guidance_scale)
+        if guidance_scale < MIN_GUIDANCE or guidance_scale > MAX_GUIDANCE:
+            logger.warning(
+                "OmniVoice: guidance_scale %s out of range, clamping to [%s, %s]",
+                guidance_scale,
+                MIN_GUIDANCE,
+                MAX_GUIDANCE,
+            )
+        guidance_scale = float(max(MIN_GUIDANCE, min(MAX_GUIDANCE, guidance_scale)))
 
     _swap_in_progress = True
     model._touch_last_request()
@@ -179,16 +231,24 @@ def run_omnivoice_job(
         if seed is not None:
             model._apply_optional_seed(seed)
 
-        _omnivoice_model = OmniVoice.from_pretrained("k2-fsa/OmniVoice", dtype=torch.float32)
+        # float16 instead of float32 for memory/perf (OmniVoice supports it)
+        _omnivoice_model = OmniVoice.from_pretrained(
+            "k2-fsa/OmniVoice",
+            dtype=torch.float16,
+        )
         _progress["phase"] = "generating"
 
+        # Base gen_kwargs shared by all candidates
         gen_kwargs: dict[str, Any] = {}
+        gen_kwargs["denoise"] = True
         if num_step is not None:
             gen_kwargs["num_step"] = max(MIN_NUM_STEP, min(MAX_NUM_STEP, int(num_step)))
         if duration is not None:
             gen_kwargs["duration"] = float(duration)
         if speed is not None:
             gen_kwargs["speed"] = max(MIN_SPEED, min(MAX_SPEED, float(speed)))
+        if guidance_scale is not None:
+            gen_kwargs["guidance_scale"] = guidance_scale
 
         results: list[list[tuple[Any, int, bool, str]]] = []
         for seg_idx, text in enumerate(segments):
@@ -204,18 +264,32 @@ def run_omnivoice_job(
                 cand_t0 = time.monotonic()
                 wav = None
                 flagged, reason = True, "empty"
+
+                # Temperature diversity:
+                # - diverse_candidates=True: cycle [5.0, 7.0, 10.0] across candidates
+                # - else: first candidate 5.0, rest 7.0
+                if diverse_candidates:
+                    pos_temp = DIVERSE_TEMPS[cand_idx % len(DIVERSE_TEMPS)]
+                else:
+                    pos_temp = 5.0 if cand_idx == 0 else 7.0
+
+                cand_gen = dict(gen_kwargs)
+                cand_gen["class_temperature"] = 0.0
+                cand_gen["position_temperature"] = pos_temp
+
                 for attempt in range(1, MAX_ATTEMPTS_PER_CANDIDATE + 1):
                     audio = _omnivoice_model.generate(
-                        text=text, instruct=instruct, language=language, **gen_kwargs
+                        text=text,
+                        instruct=instruct,
+                        language=language,
+                        **cand_gen,
                     )[0]
                     wav = model._trim_silence(audio, OMNIVOICE_SAMPLE_RATE)
                     flagged, reason = analyze_take(wav, OMNIVOICE_SAMPLE_RATE)
                     if not flagged:
-                        # analyze_take's spectral heuristic is a fast proxy and can miss
-                        # non-tonal dead-air (broadband hiss, babble, clipped garbage) — run
-                        # the more expensive but more direct Whisper no-speech gate only on
-                        # takes that already passed the cheap check.
-                        speech_found, _transcript = has_speech(wav, OMNIVOICE_SAMPLE_RATE)
+                        speech_found, _transcript = has_speech(
+                            wav, OMNIVOICE_SAMPLE_RATE
+                        )
                         if not speech_found:
                             flagged, reason = True, "no-speech-detected"
                         else:
@@ -227,11 +301,18 @@ def run_omnivoice_job(
                             flush=True,
                         )
                 cand_elapsed = time.monotonic() - cand_t0
-                candidates.append((wav, OMNIVOICE_SAMPLE_RATE, flagged, reason))
+                candidates.append(
+                    (wav, OMNIVOICE_SAMPLE_RATE, flagged, reason)
+                )
 
                 completed = _progress["completed"] + 1
                 prev_avg = _progress["avg_seconds"]
-                avg = cand_elapsed if prev_avg is None else prev_avg + (cand_elapsed - prev_avg) / completed
+                avg = (
+                    cand_elapsed
+                    if prev_avg is None
+                    else prev_avg
+                    + (cand_elapsed - prev_avg) / completed
+                )
                 remaining = total - completed
                 _progress.update(
                     completed=completed,
@@ -245,10 +326,16 @@ def run_omnivoice_job(
                 )
             results.append(candidates)
         elapsed = time.monotonic() - t0
-        print(f"[omnivoice] job complete in {elapsed:.1f}s, staying loaded", flush=True)
+        print(
+            f"[omnivoice] job complete in {elapsed:.1f}s, staying loaded",
+            flush=True,
+        )
         return results
     except Exception:
-        print("[omnivoice] job failed; unloading OmniVoice checkpoint...", flush=True)
+        print(
+            "[omnivoice] job failed; unloading OmniVoice checkpoint...",
+            flush=True,
+        )
         _unload_omnivoice()
         raise
     finally:
