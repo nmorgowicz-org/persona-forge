@@ -984,11 +984,11 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                       )}
                     >
                       <span className="mr-0.5 text-[10px] text-foreground/70">✦</span>
-                      Tags
+                      Non-Verbals
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom">
-                    Non-verbal tags: insert inline, e.g. "[laughter]".
+                    Insert non-verbal expressions inline, e.g. "[laughter]".
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -1067,7 +1067,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                   Recommended: 5–15 words per line.
                 </span>
                 <span>
-                  Use Tags for [laughter], [sigh], etc.
+                  Use Non-Verbals for [laughter], [sigh], etc.
                 </span>
               </div>
               {hasLongLines && (
