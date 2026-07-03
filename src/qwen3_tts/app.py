@@ -29,17 +29,22 @@ _voice_design_previews: dict[str, dict[str, Any]] = {}
 
 # Streaming audition jobs: job_id -> dict.
 # Fields:
-#   - status: "running" | "completed" | "failed"
+#   - status: "queued" | "running" | "completed" | "failed"
 #   - total_segments
 #   - segments_completed: list of {segment_index, text, candidates}
 #   - current_segment_index: 0-based or null
-#   - message: error text if failed
+#   - message: info/error text
 #   - created_at: time.time()
 # Eviction runs lazily on each /audition or /audition/progress call.
 _OV_AUDITION_JOBS: dict[str, dict[str, Any]] = {}
 _OV_AUDITION_JOBS_LOCK = threading.Lock()
 _OV_AUDITION_MAX_JOBS = 50
 _OV_AUDITION_TTL_SECONDS = 600  # 10 minutes
+
+# Queue + lock to serialize job dispatch when model is not yet loaded.
+_OV_AUDITION_QUEUE: list[str] = []
+_OV_AUDITION_QUEUE_LOCK = threading.Lock()
+_OV_AUDITION_DISPATCH_IN_PROGRESS = False
 
 
 def _evict_old_audition_jobs() -> None:
@@ -285,68 +290,116 @@ def voices_delete(voice_id: str):
     return jsonify({"deleted": voice_id})
 
 
-@app.post("/omnivoice/audition")
-def omnivoice_audition():
-    _evict_old_audition_jobs()
-    # Same "in-flight swap is expected, not an error" framing as /voice_design above.
-    if voice_design.swap_in_progress() or omnivoice_engine.swap_in_progress():
-        return jsonify({"error": "Another swap already in progress"}), 503
-    if not model._service_started:
-        return jsonify({"error": "Model not loaded"}), 503
-    data = _json_body()
-    if not data:
-        return jsonify({"error": "Invalid JSON"}), 400
-    segments = data.get("segments")
-    if (
-        not isinstance(segments, list)
-        or not segments
-        or not all(isinstance(s, str) and s.strip() for s in segments)
-    ):
-        return jsonify({"error": "segments must be a non-empty list of non-empty strings"}), 400
-    instruct = (data.get("instruct") or "").strip()
-    if not instruct:
-        return jsonify({"error": "instruct is required"}), 400
-    language = (data.get("language") or "english").strip()
-    candidates_per_segment = data.get("candidates_per_segment", 3)
-    if not isinstance(candidates_per_segment, int) or candidates_per_segment < 1:
-        return jsonify({"error": "candidates_per_segment must be a positive integer"}), 400
-    seed = data.get("seed")
-    if seed is not None and not isinstance(seed, int):
-        return jsonify({"error": "seed must be an integer"}), 400
-    num_step = data.get("num_step")
-    if num_step is not None and not isinstance(num_step, int):
-        return jsonify({"error": "num_step must be an integer"}), 400
-    duration = data.get("duration")
-    if duration is not None and not isinstance(duration, (int, float)):
-        return jsonify({"error": "duration must be a number"}), 400
-    speed = data.get("speed")
-    if speed is not None and not isinstance(speed, (int, float)):
-        return jsonify({"error": "speed must be a number"}), 400
-    guidance_scale = data.get("guidance_scale")
-    if guidance_scale is not None and not isinstance(
-        guidance_scale, (int, float)
-    ):
-        return jsonify({"error": "guidance_scale must be a number"}), 400
-    diverse_candidates_raw = data.get("diverse_candidates")
-    diverse_candidates = (
-        bool(diverse_candidates_raw)
-        if diverse_candidates_raw is not None
-        else False
-    )
+def _ensure_service_started(timeout_seconds: int = 900):
+    # Wait until the service has started, with a timeout.
+    # Used by the queue dispatcher when a job is queued because model wasn't ready.
+    deadline = time.monotonic() + timeout_seconds
+    while not model._service_started:
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
+    return True
 
-    job_id = uuid.uuid4().hex
 
-    with _OV_AUDITION_JOBS_LOCK:
-        _OV_AUDITION_JOBS[job_id] = {
-            "status": "running",
-            "total_segments": len(segments),
-            "segments_completed": [],
-            "current_segment_index": None,
-            "message": None,
-            "created_at": time.time(),
-        }
+def _dispatch_audition_jobs():
+    # Single-entrypoint dispatcher: picks queued jobs in order and submits them to the executor.
+    # Uses a global flag so only one dispatch loop is active at a time.
+    global _OV_AUDITION_DISPATCH_IN_PROGRESS
 
-    def _segment_callback(seg_idx, text, seg_candidates):
+    # Start if not already running
+    with _OV_AUDITION_QUEUE_LOCK:
+        if _OV_AUDITION_DISPATCH_IN_PROGRESS:
+            return
+        _OV_AUDITION_DISPATCH_IN_PROGRESS = True
+
+    # Run in current thread (daemon thread caller will wrap)
+    try:
+        while True:
+            # Grab next job_id (if any)
+            next_job_id = None
+            with _OV_AUDITION_QUEUE_LOCK:
+                if _OV_AUDITION_QUEUE:
+                    next_job_id = _OV_AUDITION_QUEUE.pop(0)
+
+            if next_job_id is None:
+                # No more queued jobs: stop
+                break
+
+            # Read job params
+            job = None
+            with _OV_AUDITION_JOBS_LOCK:
+                job = _OV_AUDITION_JOBS.get(next_job_id)
+
+            if job is None:
+                continue
+
+            # Ensure the base service is started (if not, wait)
+            if not _ensure_service_started(timeout_seconds=900):
+                with _OV_AUDITION_JOBS_LOCK:
+                    _OV_AUDITION_JOBS[next_job_id].update(
+                        status="failed",
+                        message="Service did not become ready in time.",
+                    )
+                continue
+
+            # Now mark job as running and submit to executor
+            with _OV_AUDITION_JOBS_LOCK:
+                job["status"] = "running"
+                job["message"] = "Starting OmniVoice generation…"
+            params = job.get("_params")
+            if not params:
+                with _OV_AUDITION_JOBS_LOCK:
+                    job["status"] = "failed"
+                    job["message"] = "Invalid job: missing parameters."
+                continue
+
+            (
+                segments,
+                instruct,
+                language,
+                candidates_per_segment,
+                seed,
+                num_step,
+                duration,
+                speed,
+                guidance_scale,
+                diverse_candidates,
+            ) = params
+
+            def _run_job(job_id, job):
+                try:
+                    model.executor.submit(
+                        omnivoice_engine.run_omnivoice_job,
+                        segments,
+                        instruct,
+                        language,
+                        candidates_per_segment,
+                        seed,
+                        num_step,
+                        duration,
+                        speed,
+                        guidance_scale,
+                        diverse_candidates,
+                        on_segment_complete=_segment_callback_factory(job_id),
+                    ).result(timeout=1800)
+                    with _OV_AUDITION_JOBS_LOCK:
+                        _OV_AUDITION_JOBS[job_id]["status"] = "completed"
+                        _OV_AUDITION_JOBS[job_id]["current_segment_index"] = None
+                except Exception as exc:
+                    with _OV_AUDITION_JOBS_LOCK:
+                        _OV_AUDITION_JOBS[job_id]["status"] = "failed"
+                        _OV_AUDITION_JOBS[job_id]["current_segment_index"] = None
+                        _OV_AUDITION_JOBS[job_id]["message"] = f"OmniVoice error: {exc}"
+
+            threading.Thread(target=_run_job, args=(next_job_id, job), daemon=True).start()
+    finally:
+        with _OV_AUDITION_QUEUE_LOCK:
+            _OV_AUDITION_DISPATCH_IN_PROGRESS = False
+
+
+def _segment_callback_factory(job_id: str):
+    # Build segment callback that updates the job state.
+    def _cb(seg_idx, text, seg_candidates):
         cand_payload = []
         for wav, sr, flagged, flag_reason in seg_candidates:
             candidate_id = uuid.uuid4().hex
@@ -376,11 +429,87 @@ def omnivoice_audition():
                         "candidates": cand_payload,
                     }
                 )
+    return _cb
 
-    def _run_job():
-        try:
-            model.executor.submit(
-                omnivoice_engine.run_omnivoice_job,
+
+@app.post("/omnivoice/audition")
+def omnivoice_audition():
+    _evict_old_audition_jobs()
+
+    # If another swap is explicitly in progress, treat as busy (still 503).
+    if voice_design.swap_in_progress() or omnivoice_engine.swap_in_progress():
+        return jsonify({"error": "Another swap already in progress"}), 503
+
+    # Parse and validate request.
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    segments = data.get("segments")
+    if (
+        not isinstance(segments, list)
+        or not segments
+        or not all(isinstance(s, str) and s.strip() for s in segments)
+    ):
+        return jsonify({"error": "segments must be a non-empty list of non-empty strings"}), 400
+
+    instruct = (data.get("instruct") or "").strip()
+    if not instruct:
+        return jsonify({"error": "instruct is required"}), 400
+
+    language = (data.get("language") or "english").strip()
+    candidates_per_segment = data.get("candidates_per_segment", 3)
+    if not isinstance(candidates_per_segment, int) or candidates_per_segment < 1:
+        return jsonify({"error": "candidates_per_segment must be a positive integer"}), 400
+
+    seed = data.get("seed")
+    if seed is not None and not isinstance(seed, int):
+        return jsonify({"error": "seed must be an integer"}), 400
+
+    num_step = data.get("num_step")
+    if num_step is not None and not isinstance(num_step, int):
+        return jsonify({"error": "num_step must be an integer"}), 400
+
+    duration = data.get("duration")
+    if duration is not None and not isinstance(duration, (int, float)):
+        return jsonify({"error": "duration must be a number"}), 400
+
+    speed = data.get("speed")
+    if speed is not None and not isinstance(speed, (int, float)):
+        return jsonify({"error": "speed must be a number"}), 400
+
+    guidance_scale = data.get("guidance_scale")
+    if guidance_scale is not None and not isinstance(
+        guidance_scale, (int, float)
+    ):
+        return jsonify({"error": "guidance_scale must be a number"}), 400
+
+    diverse_candidates_raw = data.get("diverse_candidates")
+    diverse_candidates = (
+        bool(diverse_candidates_raw)
+        if diverse_candidates_raw is not None
+        else False
+    )
+
+    job_id = uuid.uuid4().hex
+
+    # Decide whether we can run immediately or must queue.
+    if model._service_started:
+        initial_status = "running"
+        initial_message = "Starting OmniVoice generation…"
+    else:
+        initial_status = "queued"
+        initial_message = "Waiting for model to load…"
+
+    with _OV_AUDITION_JOBS_LOCK:
+        _OV_AUDITION_JOBS[job_id] = {
+            "status": initial_status,
+            "total_segments": len(segments),
+            "segments_completed": [],
+            "current_segment_index": None,
+            "message": initial_message,
+            "created_at": time.time(),
+            "_params": (
                 segments,
                 instruct,
                 language,
@@ -391,22 +520,47 @@ def omnivoice_audition():
                 speed,
                 guidance_scale,
                 diverse_candidates,
-                on_segment_complete=_segment_callback,
-            ).result(timeout=1800)
-            with _OV_AUDITION_JOBS_LOCK:
-                job = _OV_AUDITION_JOBS.get(job_id)
-                if job is not None:
-                    job["status"] = "completed"
-                    job["current_segment_index"] = None
-        except Exception as exc:
-            with _OV_AUDITION_JOBS_LOCK:
-                job = _OV_AUDITION_JOBS.get(job_id)
-                if job is not None:
-                    job["status"] = "failed"
-                    job["current_segment_index"] = None
-                    job["message"] = f"OmniVoice error: {exc}"
+            ),
+        }
 
-    threading.Thread(target=_run_job, daemon=True).start()
+    if initial_status == "running":
+        # Start immediately on the executor
+        def _run_job():
+            try:
+                model.executor.submit(
+                    omnivoice_engine.run_omnivoice_job,
+                    segments,
+                    instruct,
+                    language,
+                    candidates_per_segment,
+                    seed,
+                    num_step,
+                    duration,
+                    speed,
+                    guidance_scale,
+                    diverse_candidates,
+                    on_segment_complete=_segment_callback_factory(job_id),
+                ).result(timeout=1800)
+                with _OV_AUDITION_JOBS_LOCK:
+                    job = _OV_AUDITION_JOBS.get(job_id)
+                    if job is not None:
+                        job["status"] = "completed"
+                        job["current_segment_index"] = None
+            except Exception as exc:
+                with _OV_AUDITION_JOBS_LOCK:
+                    job = _OV_AUDITION_JOBS.get(job_id)
+                    if job is not None:
+                        job["status"] = "failed"
+                        job["current_segment_index"] = None
+                        job["message"] = f"OmniVoice error: {exc}"
+
+        threading.Thread(target=_run_job, daemon=True).start()
+    else:
+        # Enqueue for dispatcher; kick it if not already running.
+        with _OV_AUDITION_QUEUE_LOCK:
+            _OV_AUDITION_QUEUE.append(job_id)
+            if not _OV_AUDITION_DISPATCH_IN_PROGRESS:
+                threading.Thread(target=_dispatch_audition_jobs, daemon=True).start()
 
     return jsonify(
         {

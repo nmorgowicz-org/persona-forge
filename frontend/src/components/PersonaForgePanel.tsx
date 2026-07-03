@@ -1486,20 +1486,22 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
 
           {/* Status line */}
           <p className="text-[10px] text-muted-foreground">
-            {jobStatus === 'running'
-              ? jobTotalSegments > 0
-                ? `Generating segment ${
-                    (jobCurrentSegmentIndex ??
-                      0) + 1
-                  } of ${jobTotalSegments} (${
-                      jobSegmentsCompleted.length
-                    }/${
-                      jobTotalSegments
-                    } ready)`
-                : 'Starting…'
-              : jobStatus === 'failed'
-                ? 'Job failed'
-                : 'Finalizing…'}
+            {jobStatus === 'queued'
+              ? 'Queued — waiting for model to load…'
+              : jobStatus === 'running'
+                ? jobTotalSegments > 0
+                  ? `Generating segment ${
+                      (jobCurrentSegmentIndex ??
+                        0) + 1
+                    } of ${jobTotalSegments} (${
+                        jobSegmentsCompleted.length
+                      }/${
+                        jobTotalSegments
+                      } ready)`
+                  : 'Starting…'
+                : jobStatus === 'failed'
+                  ? 'Job failed'
+                  : 'Finalizing…'}
 
             {progress?.phase === 'loading' &&
               ' — loading OmniVoice checkpoint…'}

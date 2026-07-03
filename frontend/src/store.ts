@@ -131,7 +131,7 @@ interface StoreState {
   ovProgress: OmniVoiceProgress | null
   ovCurrentJobId: string | null
   ovJobTotalSegments: number
-  ovJobStatus: 'running' | 'completed' | 'failed' | null
+  ovJobStatus: 'queued' | 'running' | 'completed' | 'failed' | null
   ovJobSegmentsCompleted: OmniVoiceAuditionProgressResult['segments_completed']
   ovJobCurrentSegmentIndex: number | null
   ovJobMessage: string | null
