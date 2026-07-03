@@ -129,12 +129,13 @@ interface StoreState {
   ovStitchedBlob: Blob | null
   ovSavedVoiceId: string | null
   ovProgress: OmniVoiceProgress | null
-  ovCurrentJobId: string | null
-  ovJobTotalSegments: number
-  ovJobStatus: 'queued' | 'running' | 'completed' | 'failed' | null
-  ovJobSegmentsCompleted: OmniVoiceAuditionProgressResult['segments_completed']
-  ovJobCurrentSegmentIndex: number | null
-  ovJobMessage: string | null
+   ovCurrentJobId: string | null
+   ovJobTotalSegments: number
+   ovJobStatus: 'queued' | 'running' | 'completed' | 'failed' | null
+   ovJobSegmentsCompleted: OmniVoiceAuditionProgressResult['segments_completed']
+   ovJobCurrentSegmentIndex: number | null
+   ovJobMessage: string | null
+   ovAutoplayTakes: boolean
   ovLibrary: SegmentMeta[]
   ovLibraryFilter: string
   ovIsLibraryOpen: boolean
@@ -180,20 +181,21 @@ interface StoreState {
   setOvStitchedBlob: (v: Blob | null) => void
   setOvSavedVoiceId: (v: string | null) => void
   setOvProgress: (v: OmniVoiceProgress | null) => void
-  setOvCurrentJobId: (v: string | null) => void
-  setOvJobTotalSegments: (v: number) => void
-  setOvJobStatus: (v: 'running' | 'completed' | 'failed' | null) => void
-  setOvJobSegmentsCompleted: (v: OmniVoiceAuditionProgressResult['segments_completed']) => void
-  setOvJobCurrentSegmentIndex: (v: number | null) => void
-  setOvJobMessage: (v: string | null) => void
-  setOvLibrary: (v: SegmentMeta[]) => void
-  setOvLibraryFilter: (v: string) => void
-  setOvIsLibraryOpen: (
-    v: boolean | ((p: boolean) => boolean),
-  ) => void
-  setOvLibrarySelection: (
-    updater: Set<string> | ((prev: Set<string>) => Set<string>),
-  ) => void
+   setOvCurrentJobId: (v: string | null) => void
+   setOvJobTotalSegments: (v: number) => void
+   setOvJobStatus: (v: 'running' | 'completed' | 'failed' | null) => void
+   setOvJobSegmentsCompleted: (v: OmniVoiceAuditionProgressResult['segments_completed']) => void
+   setOvJobCurrentSegmentIndex: (v: number | null) => void
+   setOvJobMessage: (v: string | null) => void
+   setOvAutoplayTakes: (v: boolean) => void
+   setOvLibrary: (v: SegmentMeta[]) => void
+   setOvLibraryFilter: (v: string) => void
+   setOvIsLibraryOpen: (
+     v: boolean | ((p: boolean) => boolean),
+   ) => void
+   setOvLibrarySelection: (
+     updater: Set<string> | ((prev: Set<string>) => Set<string>),
+   ) => void
 }
 
 const initialTheme = loadStoredTheme()
@@ -317,8 +319,9 @@ export const useAppStore = create<StoreState>((set) => ({
   ovJobStatus: null,
   ovJobSegmentsCompleted: [],
   ovJobCurrentSegmentIndex: null,
-  ovJobMessage: null,
-  ovLibrary: [],
+   ovJobMessage: null,
+   ovAutoplayTakes: true,
+   ovLibrary: [],
   ovLibraryFilter: '',
   ovIsLibraryOpen: false,
   ovLibrarySelection: new Set(),
@@ -386,8 +389,9 @@ export const useAppStore = create<StoreState>((set) => ({
   setOvJobStatus: (v) => set({ ovJobStatus: v }),
   setOvJobSegmentsCompleted: (v) => set({ ovJobSegmentsCompleted: v }),
   setOvJobCurrentSegmentIndex: (v) => set({ ovJobCurrentSegmentIndex: v }),
-  setOvJobMessage: (v) => set({ ovJobMessage: v }),
-  setOvLibrary: (v) => set({ ovLibrary: v }),
+   setOvJobMessage: (v) => set({ ovJobMessage: v }),
+   setOvAutoplayTakes: (v: boolean) => set({ ovAutoplayTakes: v }),
+   setOvLibrary: (v) => set({ ovLibrary: v }),
   setOvLibraryFilter: (v) => set({ ovLibraryFilter: v }),
   setOvIsLibraryOpen: (v) =>
     set((s) => ({

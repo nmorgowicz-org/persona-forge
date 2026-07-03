@@ -108,6 +108,7 @@ interface SegmentRackRowProps {
   isRackAuditioning: boolean
   jobStatus: 'queued' | 'running' | 'completed' | 'failed' | null
   jobCurrentSegmentIndex: number | null
+  autoplayTakes: boolean
   onEdit: (segmentId: string, newText: string) => void
   onRegen: (segmentId: string) => void
   onSelectTake: (segmentId: string, index: number) => void
@@ -119,6 +120,7 @@ function SegmentRackRow({
   isRackAuditioning,
   jobStatus,
   jobCurrentSegmentIndex,
+  autoplayTakes,
   onEdit,
   onRegen,
   onSelectTake,
@@ -252,7 +254,7 @@ function SegmentRackRow({
                 <ClipPlayer
                   audioBase64={c.audio_base64}
                   className="min-w-0 flex-1"
-                  autoPlay={selected}
+                  autoPlay={selected && autoplayTakes}
                 />
               </div>
             )
@@ -309,6 +311,10 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   )
   // Intentionally subscribed (Zustand batching); used in this component.
   useAppStore((s) => s.ovJobMessage)
+  const autoplayTakes = useAppStore((s) => s.ovAutoplayTakes)
+  const setAutoplayTakes = useAppStore(
+    (s) => s.setOvAutoplayTakes,
+  )
   const library = useAppStore((s) => s.ovLibrary)
   const libraryFilter = useAppStore((s) => s.ovLibraryFilter)
   const isLibraryOpen = useAppStore((s) => s.ovIsLibraryOpen)
@@ -693,6 +699,8 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         setCurrentJobId(job_id)
         setJobTotalSegments(total_segments)
         setJobStatus('running')
+        setExamplesOpen(false)
+        setTagsOpen(false)
 
         // Initialize job timings
         if (!jobTimingsRef.current.startedAt) {
@@ -883,6 +891,8 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         setCurrentJobId(job_id)
         setJobTotalSegments(1)
         setJobStatus('running')
+        setExamplesOpen(false)
+        setTagsOpen(false)
 
         while (true) {
           const p = await getOmniVoiceAuditionProgress(
@@ -1327,6 +1337,14 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
             <div className="flex flex-col rounded-lg border border-border bg-card">
               {/* Header bar */}
               <div className="flex items-center justify-between gap-2 rounded-t-lg border-b border-border bg-muted/50 px-2.5 py-1.5">
+              {/* Locked-while-generating hint */}
+              {jobStatus && jobStatus !== 'completed' && (
+                <div className="absolute left-16 right-2 top-8 z-20">
+                  <p className="text-[9px] text-muted-foreground">
+                    Editing locked while generating — changes will apply after.
+                  </p>
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-foreground/90">
                   Script
@@ -1343,15 +1361,17 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                     <TooltipTrigger asChild>
                       <button
                         type="button"
+                        disabled={!!(jobStatus && jobStatus !== 'completed')}
                         onClick={() => {
                           setExamplesOpen((v) => !v)
                           setTagsOpen(false)
                         }}
                         className={cn(
                           "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] font-semibold transition-colors",
-                          examplesOpen
+                          "pointer-events-none opacity-50",
+                          examplesOpen && jobStatus === 'completed'
                             ? "bg-primary/10 text-primary border-primary/40"
-                            : "bg-muted/90 text-foreground/90 hover:bg-accent",
+                            : "bg-muted/90 text-foreground/90",
                         )}
                       >
                         ⚡ Examples
@@ -1366,15 +1386,17 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                   <TooltipTrigger asChild>
                     <button
                       type="button"
+                      disabled={!!(jobStatus && jobStatus !== 'completed')}
                       onClick={() => {
                         setTagsOpen((v) => !v)
                         setExamplesOpen(false)
                       }}
                       className={cn(
                         "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] font-semibold transition-colors",
-                        tagsOpen
+                        "pointer-events-none opacity-50",
+                        tagsOpen && jobStatus === 'completed'
                           ? "bg-primary/10 text-primary border-primary/40"
-                          : "bg-muted/90 text-foreground/90 hover:bg-accent",
+                          : "bg-muted/90 text-foreground/90",
                       )}
                     >
                       <span className="mr-0.5 text-[10px] text-foreground/70">✦</span>
@@ -1780,9 +1802,23 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         {/* Segment rack */}
         {segmentRack.length > 0 && (
           <div className="flex min-w-0 flex-col gap-1">
-            <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Segment rack
-            </p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Segment rack
+              </p>
+              <button
+                type="button"
+                onClick={() => setAutoplayTakes(!autoplayTakes)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full border border-border/90 px-2 py-0.5 text-[9px] font-medium transition-colors",
+                  autoplayTakes
+                    ? "border-primary/60 bg-primary/10 text-primary"
+                    : "bg-muted/80 text-muted-foreground",
+                )}
+              >
+                {autoplayTakes ? 'Autoplay takes: On' : 'Autoplay takes: Off'}
+              </button>
+            </div>
 
             <div className="flex min-w-0 flex-col gap-1 overflow-y-auto">
               {segmentRack.map((row, segIndex) => (
@@ -1793,6 +1829,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                   isRackAuditioning={isRackAuditioning}
                   jobStatus={jobStatus}
                   jobCurrentSegmentIndex={jobCurrentSegmentIndex}
+                  autoplayTakes={autoplayTakes}
                   onEdit={editSegmentText}
                   onRegen={regenerateSegment}
                   onSelectTake={selectTake}
