@@ -7,13 +7,19 @@ import io
 import os
 import queue
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 import soundfile as sf
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from qwen3_tts import model, voice_design, voice_library
+from qwen3_tts import model, omnivoice_engine, voice_design, voice_library
+
+# candidate_id -> (wav, sample_rate). In-memory only, single-user local tool (locked decision,
+# PLAN_persona_forge_studio.md §5): cleared at the start of every /omnivoice/audition call, so
+# a candidate is only ever addressable up until the next audition job is kicked off.
+_omnivoice_candidates: dict[str, tuple[Any, int]] = {}
 
 app = Flask(__name__)
 
@@ -75,13 +81,24 @@ def _encode(wav: Any, sr: int, response_format: str) -> tuple[bytes, str]:
 def _ready():
     # True once the service has successfully loaded at least once.
     # With IDLE_UNLOAD_SECONDS set, model may be None temporarily — requests reload it.
-    # During a VoiceDesign swap or a runtime-config reload, Base is briefly unloaded so
-    # treat both as not-ready too (503).
+    # During a VoiceDesign/OmniVoice swap or a runtime-config reload, Base is briefly
+    # unloaded so treat all three as not-ready too (503).
     return (
         model._service_started
         and not voice_design.swap_in_progress()
+        and not omnivoice_engine.swap_in_progress()
         and not model.reconfig_in_progress()
     )
+
+
+def _generation_ready():
+    # Like _ready(), but deliberately does NOT treat an in-flight VoiceDesign swap as
+    # not-ready: /generate and /v1/audio/speech both submit through model.executor, the
+    # same single-worker queue voice_design.run_voice_design_request runs on, so a
+    # generation request submitted mid-swap just queues behind it (FIFO) and runs once
+    # Base is reloaded, instead of failing fast with 503. A runtime-config reload is a
+    # separate, much shorter operation and is still treated as not-ready.
+    return model._service_started and not model.reconfig_in_progress()
 
 
 def _json_body():
@@ -98,7 +115,7 @@ def health():
     # Swap-in-progress is tracked in voice_design.py, not model.py, to avoid a circular
     # import; merged here so the frontend can poll one endpoint for a prominent
     # swap-in-progress banner (PLAN_voice_design.md §3, §11 frontend checklist).
-    state["swap_in_progress"] = voice_design.swap_in_progress()
+    state["swap_in_progress"] = voice_design.swap_in_progress() or omnivoice_engine.swap_in_progress()
     state["reconfig_in_progress"] = model.reconfig_in_progress()
     return jsonify(state)
 
@@ -181,6 +198,100 @@ def voices_delete(voice_id: str):
     return jsonify({"deleted": voice_id})
 
 
+@app.post("/omnivoice/audition")
+def omnivoice_audition():
+    # Same "in-flight swap is expected, not an error" framing as /voice_design above.
+    if voice_design.swap_in_progress() or omnivoice_engine.swap_in_progress():
+        return jsonify({"error": "Another swap already in progress"}), 503
+    if not model._service_started:
+        return jsonify({"error": "Model not loaded"}), 503
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    segments = data.get("segments")
+    if (
+        not isinstance(segments, list)
+        or not segments
+        or not all(isinstance(s, str) and s.strip() for s in segments)
+    ):
+        return jsonify({"error": "segments must be a non-empty list of non-empty strings"}), 400
+    instruct = (data.get("instruct") or "").strip()
+    if not instruct:
+        return jsonify({"error": "instruct is required"}), 400
+    language = (data.get("language") or "english").strip()
+    candidates_per_segment = data.get("candidates_per_segment", 3)
+    if not isinstance(candidates_per_segment, int) or candidates_per_segment < 1:
+        return jsonify({"error": "candidates_per_segment must be a positive integer"}), 400
+    seed = data.get("seed")
+    if seed is not None and not isinstance(seed, int):
+        return jsonify({"error": "seed must be an integer"}), 400
+
+    try:
+        results = model.executor.submit(
+            omnivoice_engine.run_omnivoice_job,
+            segments,
+            instruct,
+            language,
+            candidates_per_segment,
+            seed,
+        ).result(timeout=1800)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": f"OmniVoice error: {exc}"}), 500
+
+    # Cleared here rather than TTL-expired (locked decision, PLAN_persona_forge_studio.md §5):
+    # single-user local tool, no concurrent-job requirement, so "candidates from the previous
+    # audition call" is a simple and sufficient invalidation rule.
+    _omnivoice_candidates.clear()
+    response_segments = []
+    for seg_candidates in results:
+        cand_payload = []
+        for wav, sr in seg_candidates:
+            candidate_id = uuid.uuid4().hex
+            wav_bytes, _ = _encode(wav, sr, "wav")
+            _omnivoice_candidates[candidate_id] = (wav, sr)
+            cand_payload.append(
+                {
+                    "candidate_id": candidate_id,
+                    "sample_rate": sr,
+                    "audio_base64": base64.b64encode(wav_bytes).decode("ascii"),
+                }
+            )
+        response_segments.append({"candidates": cand_payload})
+    return jsonify({"segments": response_segments})
+
+
+@app.post("/omnivoice/stitch")
+def omnivoice_stitch():
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    selections = data.get("selections")
+    if (
+        not isinstance(selections, list)
+        or not selections
+        or not all(isinstance(c, str) for c in selections)
+    ):
+        return jsonify({"error": "selections must be a non-empty list of candidate_id strings"}), 400
+
+    selected = []
+    for candidate_id in selections:
+        entry = _omnivoice_candidates.get(candidate_id)
+        if entry is None:
+            return jsonify({"error": f"unknown or expired candidate_id: {candidate_id}"}), 400
+        selected.append(entry)
+
+    try:
+        wav, sr = omnivoice_engine.stitch_selected(selected)
+        wav_bytes, media_type = _encode(wav, sr, "wav")
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Stitch error: {exc}"}), 500
+    return Response(wav_bytes, content_type=media_type)
+
+
 @app.get("/runtime/config")
 def runtime_config_get():
     return jsonify(model.runtime_config_state())
@@ -208,7 +319,7 @@ def runtime_config_post():
 
 @app.post("/generate")
 def generate():
-    if not _ready():
+    if not _generation_ready():
         return jsonify({"error": "Model not loaded"}), 503
     data = _json_body()
     if not data:
@@ -227,6 +338,9 @@ def generate():
         return jsonify({"error": "seed must be an integer"}), 400
     resolved_seed = model.resolve_seed(seed)
     try:
+        # Longer than the other routes' 300s: this can now queue behind an in-flight
+        # VoiceDesign swap (unload + load + generate + unload + reload, observed ~90-120s,
+        # longer on a cold OpenVINO kernel cache) before its own generation even starts.
         wav, sr = model.executor.submit(
             model._run_generate,
             text,
@@ -234,7 +348,7 @@ def generate():
             voice_id=voice_id,
             seed_value=resolved_seed,
             instruct=instruct,
-        ).result(timeout=300)
+        ).result(timeout=480)
         audio, media_type = _encode(wav, sr, fmt)
     except Exception as exc:
         return jsonify({"error": f"Inference error: {exc}"}), 500
@@ -245,7 +359,7 @@ def generate():
 
 @app.post("/v1/audio/speech")
 def openai_audio_speech():
-    if not _ready():
+    if not _generation_ready():
         return _openai_error("Model not loaded", 503, "api_error")
     data = _json_body()
     if not data:
@@ -268,6 +382,8 @@ def openai_audio_speech():
         return _openai_error("seed must be an integer", 400)
     resolved_seed = model.resolve_seed(seed)
     try:
+        # See /generate's matching comment: this can queue behind an in-flight VoiceDesign
+        # swap, so it gets the same longer timeout.
         wav, sr = model.executor.submit(
             model._run_generate,
             text,
@@ -275,7 +391,7 @@ def openai_audio_speech():
             voice_id=voice_id,
             seed_value=resolved_seed,
             instruct=instruct,
-        ).result(timeout=300)
+        ).result(timeout=480)
         audio, media_type = _encode(wav, sr, fmt)
     except Exception as exc:
         return _openai_error(f"Inference error: {exc}", 500, "api_error")

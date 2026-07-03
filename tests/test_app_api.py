@@ -223,17 +223,108 @@ class AppTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, 503)
 
-    def test_ready_is_false_during_voice_design_swap(self) -> None:
+    def test_generate_queues_through_voice_design_swap(self) -> None:
         app_module.voice_design._swap_in_progress = True
         try:
             result = self.client.get("/health")
+            # /generate queues on model.executor instead of 503ing during a swap, so a
+            # request submitted mid-swap still completes once its turn comes up.
             generate_result = self.client.post("/generate", json={"text": "hello"})
         finally:
             app_module.voice_design._swap_in_progress = False
 
-        # /health reports raw model state regardless of swap; /generate is gated by _ready().
+        # /health reports raw model state regardless of swap; /generate is not gated by
+        # swap_in_progress (see _generation_ready in app.py).
         self.assertEqual(result.status_code, 200)
-        self.assertEqual(generate_result.status_code, 503)
+        self.assertEqual(generate_result.status_code, 200)
+
+    def test_omnivoice_audition_returns_candidates_with_ids(self) -> None:
+        def fake_run_omnivoice_job(segments, instruct, language, candidates_per_segment, seed):
+            return [
+                [(np.zeros(240, dtype=np.float32), 24000) for _ in range(candidates_per_segment)]
+                for _ in segments
+            ]
+
+        with patch.object(
+            app_module.omnivoice_engine, "run_omnivoice_job", fake_run_omnivoice_job
+        ), patch.object(app_module, "_encode", return_value=(b"audio", "audio/wav")):
+            result = self.client.post(
+                "/omnivoice/audition",
+                json={
+                    "segments": ["G'day, how are you?", "Fancy a barbie later on?"],
+                    "instruct": "female, young adult, moderate pitch, australian accent",
+                    "candidates_per_segment": 2,
+                },
+            )
+
+        self.assertEqual(result.status_code, 200)
+        body = result.get_json()
+        self.assertEqual(len(body["segments"]), 2)
+        self.assertEqual(len(body["segments"][0]["candidates"]), 2)
+        candidate_ids = [c["candidate_id"] for seg in body["segments"] for c in seg["candidates"]]
+        self.assertEqual(len(candidate_ids), len(set(candidate_ids)))
+        self.assertIn("audio_base64", body["segments"][0]["candidates"][0])
+
+    def test_omnivoice_audition_rejects_missing_segments(self) -> None:
+        result = self.client.post(
+            "/omnivoice/audition", json={"instruct": "female, young adult, moderate pitch"}
+        )
+
+        self.assertEqual(result.status_code, 400)
+
+    def test_omnivoice_audition_rejects_missing_instruct(self) -> None:
+        result = self.client.post("/omnivoice/audition", json={"segments": ["hello"]})
+
+        self.assertEqual(result.status_code, 400)
+
+    def test_omnivoice_audition_returns_503_when_swap_already_in_progress(self) -> None:
+        app_module.omnivoice_engine._swap_in_progress = True
+        try:
+            result = self.client.post(
+                "/omnivoice/audition",
+                json={"segments": ["hello"], "instruct": "female, young adult"},
+            )
+        finally:
+            app_module.omnivoice_engine._swap_in_progress = False
+
+        self.assertEqual(result.status_code, 503)
+
+    def test_omnivoice_stitch_combines_selected_candidates(self) -> None:
+        def fake_run_omnivoice_job(segments, instruct, language, candidates_per_segment, seed):
+            return [[(np.zeros(240, dtype=np.float32), 24000)] for _ in segments]
+
+        with patch.object(
+            app_module.omnivoice_engine, "run_omnivoice_job", fake_run_omnivoice_job
+        ), patch.object(app_module, "_encode", return_value=(b"raw", "audio/wav")):
+            audition = self.client.post(
+                "/omnivoice/audition",
+                json={"segments": ["hello", "world"], "instruct": "female, young adult"},
+            )
+        candidate_ids = [
+            c["candidate_id"]
+            for seg in audition.get_json()["segments"]
+            for c in seg["candidates"]
+        ]
+
+        with patch.object(
+            app_module.omnivoice_engine,
+            "stitch_selected",
+            lambda selected: (np.zeros(480, dtype=np.float32), 24000),
+        ), patch.object(app_module, "_encode", return_value=(b"stitched", "audio/wav")):
+            result = self.client.post("/omnivoice/stitch", json={"selections": candidate_ids})
+
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.data, b"stitched")
+
+    def test_omnivoice_stitch_rejects_unknown_candidate_id(self) -> None:
+        result = self.client.post("/omnivoice/stitch", json={"selections": ["not-a-real-id"]})
+
+        self.assertEqual(result.status_code, 400)
+
+    def test_omnivoice_stitch_rejects_missing_selections(self) -> None:
+        result = self.client.post("/omnivoice/stitch", json={})
+
+        self.assertEqual(result.status_code, 400)
 
     def test_voices_list_returns_library_contents(self) -> None:
         with patch.object(

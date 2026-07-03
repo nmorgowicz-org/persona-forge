@@ -35,7 +35,8 @@ RUN python -m pip install \
       --index-url https://download.pytorch.org/whl/cpu \
       "torch==${TORCH_VERSION}" "torchaudio==${TORCHAUDIO_VERSION}" && \
     python -m pip install qwen-tts==0.1.1 --no-deps && \
-    python -m pip install -r requirements/requirements-runtime.txt
+    python -m pip install -r requirements/requirements-runtime.txt && \
+    python -m pip install omnivoice==0.1.5 --no-deps
 
 RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/' \
     /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_25hz/vq/speech_vq.py || true && \
