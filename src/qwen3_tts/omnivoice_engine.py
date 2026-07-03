@@ -237,10 +237,10 @@ def run_omnivoice_job(
         if seed is not None:
             model._apply_optional_seed(seed)
 
-        # float16 instead of float32 for memory/perf (OmniVoice supports it)
+        # float32 for stable CPU performance (float16 can be slower on many CPUs)
         _omnivoice_model = OmniVoice.from_pretrained(
             "k2-fsa/OmniVoice",
-            dtype=torch.float16,
+            dtype=torch.float32,
         )
         _progress["phase"] = "generating"
 
