@@ -15,6 +15,7 @@ import {
 import {
   ACCENT_BANK,
   type AccentBankEntry,
+  type ShowcaseSentence,
 } from '@/lib/accentBank'
 import {
   ACCENTS,
@@ -30,6 +31,7 @@ import { AudioPlayer } from './AudioPlayer'
 import { Button } from '@/components/ui/button'
 import { base64ToBlob, cn } from '@/lib/utils'
 import { useAppStore } from '@/store'
+import { Tooltip } from '@/components/ui/Tooltip'
 
 const DEFAULT_ACCENT = ACCENT_BANK[0] ?? null
 
@@ -82,12 +84,11 @@ function ClipPlayer({
 
 function InfoIcon({ text }: { text: string }) {
   return (
-    <span
-      title={text}
-      className="ml-1 inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-muted-foreground/40 text-[10px] font-medium text-muted-foreground"
-    >
-      ?
-    </span>
+    <Tooltip tip={text}>
+      <span className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground/40 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:border-muted-foreground hover:text-muted-foreground">
+        ?
+      </span>
+    </Tooltip>
   )
 }
 
@@ -250,7 +251,21 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       )
     : library
 
+  const activeShowcaseSentences =
+    matchedAccentBankEntry?.showcaseSentences ?? []
+
   // -- Handlers --
+  const insertExampleSentence = useCallback(
+    (sentence: ShowcaseSentence) => {
+      setScriptText((prev) => {
+        const base = prev.trim()
+          ? prev.trim() + '\n'
+          : ''
+        return base + sentence.text
+      })
+    },
+    [setScriptText],
+  )
   const refreshLibrary = useCallback(async () => {
     try {
       setLibrary(await listOmniVoiceSegments())
@@ -882,6 +897,28 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
           )}
         </div>
 
+        {/* Australian / accent example sentences */}
+        {activeShowcaseSentences.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <p className="text-[10px] text-muted-foreground">
+              Suggested lines that showcase this accent — click to insert:
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {activeShowcaseSentences.map((sentence) => (
+                <button
+                  key={sentence.text}
+                  type="button"
+                  title={sentence.note}
+                  onClick={() => insertExampleSentence(sentence)}
+                  className="rounded-full border border-border bg-transparent px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent/50"
+                >
+                  {sentence.text}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Non-verbal tags */}
         <div className="flex flex-col gap-1">
           <div className="flex flex-wrap gap-1">
@@ -976,18 +1013,18 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                     }
                     className="flex-1 accent-primary"
                   />
-                  <input
-                    type="number"
-                    min={16}
-                    max={32}
-                    value={numStepInput}
-                    onChange={(e) =>
-                      setNumStepInput(
-                        e.target.value,
-                      )
-                    }
-                    className="w-14 rounded-md border border-input bg-transparent px-1.5 py-1 text-xs outline-none focus-visible:border-ring"
-                  />
+                   <input
+                     type="number"
+                     min={16}
+                     max={32}
+                     value={numStepInput || 24}
+                     onChange={(e) =>
+                       setNumStepInput(
+                         e.target.value,
+                       )
+                     }
+                     className="w-14 rounded-md border border-input bg-transparent px-1.5 py-1 text-xs outline-none focus-visible:border-ring"
+                   />
                 </div>
               </div>
 
