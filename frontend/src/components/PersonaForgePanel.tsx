@@ -1337,14 +1337,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
             <div className="flex flex-col rounded-lg border border-border bg-card">
               {/* Header bar */}
               <div className="flex items-center justify-between gap-2 rounded-t-lg border-b border-border bg-muted/50 px-2.5 py-1.5">
-              {/* Locked-while-generating hint */}
-              {jobStatus && jobStatus !== 'completed' && (
-                <div className="absolute left-16 right-2 top-8 z-20">
-                  <p className="text-[9px] text-muted-foreground">
-                    Editing locked while generating — changes will apply after.
-                  </p>
-                </div>
-              )}
               <div className="flex items-center gap-2">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-foreground/90">
                   Script
@@ -1461,6 +1453,23 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                       </button>
                     ))}
                   </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Locked-while-generating hint */}
+            <AnimatePresence initial={false}>
+              {jobStatus && jobStatus !== 'completed' && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="border-t border-border bg-muted/60 px-2.5 py-1 flex items-center gap-1.5"
+                >
+                  <span className="inline-flex h-1.5 w-1.5 rounded-full bg-amber-400" />
+                  <p className="text-[9px] text-muted-foreground">
+                    Editing locked while generating — changes will apply after.
+                  </p>
                 </motion.div>
               )}
             </AnimatePresence>
