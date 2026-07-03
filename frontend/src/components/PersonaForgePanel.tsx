@@ -27,7 +27,7 @@ import {
 import { ChipButton } from './Chip'
 import { AudioPlayer } from './AudioPlayer'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import { base64ToBlob, cn } from '@/lib/utils'
 
 // Job-kickoff scaffolding for the OmniVoice engine (docs/plans/PLAN_persona_forge_studio.md
 // §4 step 4). Validates the audition -> cherry-pick -> lock-in -> stitch -> save contract
@@ -40,14 +40,20 @@ import { cn } from '@/lib/utils'
 // instruct tag is a selectable chip (see lib/omnivoiceChips.ts), so the composed string is
 // always exactly the model's closed vocabulary and nothing else. Accent Bank presets remain
 // as one-click starting points but no longer own the instruct string — picking one just seeds
-// the chip selections, which stay editable afterward.
+// the chip selections, which stay editable afterward. Suggested sentences and the accent_id
+// sent to the backend are both derived from the *accent chip*, not from which preset button
+// was last clicked (nick's feedback, 2026-07-03: clicking any left-side chip was wiping the
+// suggestions — the old code nulled out a separate "selected preset" on every chip click).
 //
 // One-sentence-at-a-time workflow (feedback from nick, 2026-07-03): rather than a single
 // multi-line textarea auditioned all at once, the user builds the reference clip
 // incrementally — work one sentence, generate candidates, pick a take, lock it in, then
 // move to the next sentence. This matches how OmniVoice is actually reliable (single-shot
 // short-sentence generation, per [[voicedesign-accent-investigation]]) and lets the user
-// react to each take before committing to the next line.
+// react to each take before committing to the next line. Candidates only clear when a new
+// audition is explicitly kicked off — editing the sentence text or clicking a different
+// suggestion does NOT discard them (nick's feedback, 2026-07-03: typing a tweak was wiping
+// out takes before he could even listen to them).
 //
 // Second feedback round (nick, 2026-07-03): lock-in now persists immediately to the durable
 // segment library (POST /omnivoice/segments) instead of only living in local React state —
@@ -56,6 +62,10 @@ import { cn } from '@/lib/utils'
 // segment_ids rather than only the current session's candidate_ids. A real progress bar
 // (polling GET /omnivoice/progress) replaces the old indeterminate top-of-page banner, and
 // candidates can be explicitly discarded instead of only "not picked."
+//
+// Every audio surface (candidates, locked sentences, library entries, stitched result) uses
+// the same waveform AudioPlayer VoiceDesign's preview uses, not a bare <audio> element
+// (nick's feedback, 2026-07-03: "no VST style waveforms for any of the segments").
 
 interface LockedSegment {
   segmentId: string
@@ -73,20 +83,41 @@ function formatEta(seconds: number | null): string {
   return `~${Math.round(seconds / 60)}m ${Math.round(seconds % 60)}s remaining`
 }
 
+/** Base64-encoded clip -> waveform AudioPlayer, memoizing the decoded Blob per clip so
+ * re-renders of a candidate/segment list don't re-decode audio on every keystroke elsewhere
+ * in the panel. */
+function ClipPlayer({
+  audioBase64,
+  className,
+  autoPlay = false,
+}: {
+  audioBase64: string
+  className?: string
+  autoPlay?: boolean
+}) {
+  const blob = useMemo(() => base64ToBlob(audioBase64), [audioBase64])
+  const src = useMemo(() => `data:audio/wav;base64,${audioBase64}`, [audioBase64])
+  return <AudioPlayer src={src} blob={blob} autoPlay={autoPlay} className={className} />
+}
+
 interface PersonaForgePanelProps {
   onVoiceCreated?: (voiceId: string) => void
 }
 
 export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
-  const [selectedAccentPreset, setSelectedAccentPreset] = useState<AccentBankEntry | null>(
-    DEFAULT_ACCENT,
-  )
   const [selections, setSelections] = useState<OmniVoiceSelections>(
     DEFAULT_ACCENT ? selectionsFromInstruct(DEFAULT_ACCENT.instruct) : EMPTY_OMNIVOICE_SELECTIONS,
   )
   const [candidatesPerSegment, setCandidatesPerSegment] = useState(3)
 
   const instruct = useMemo(() => composeInstruct(selections), [selections])
+
+  // Derived purely from the accent chip, so any other chip (gender/age/pitch/whisper) never
+  // affects which sentence suggestions or accent_id are used.
+  const matchedAccentBankEntry = useMemo(
+    () => ACCENT_BANK.find((entry) => selectionsFromInstruct(entry.instruct).accent === selections.accent) ?? null,
+    [selections.accent],
+  )
 
   const [lockedSegments, setLockedSegments] = useState<LockedSegment[]>([])
   const [currentText, setCurrentText] = useState('')
@@ -143,7 +174,8 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   }, [])
 
   function applyAccentPreset(entry: AccentBankEntry) {
-    setSelectedAccentPreset(entry)
+    // An explicit "starter" click is the one action that's allowed to reset the working
+    // session — unlike individual chip toggles, this is unambiguously "start over".
     setSelections(selectionsFromInstruct(entry.instruct))
     setLockedSegments([])
     setCurrentText('')
@@ -155,17 +187,14 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
 
   function toggleSingle(key: 'gender' | 'age' | 'pitch' | 'accent', id: string) {
     setSelections((prev) => ({ ...prev, [key]: prev[key] === id ? null : id }))
-    setSelectedAccentPreset(null)
   }
 
   function toggleWhisper() {
     setSelections((prev) => ({ ...prev, whisper: !prev.whisper }))
-    setSelectedAccentPreset(null)
   }
 
   function applySuggestion(sentence: ShowcaseSentence) {
     setCurrentText(sentence.text)
-    setCurrentCandidates(null)
   }
 
   async function handleAuditionCurrent() {
@@ -205,7 +234,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         candidateId: chosen.candidate_id,
         text: currentText.trim(),
         instruct,
-        accentId: selectedAccentPreset?.id ?? null,
+        accentId: matchedAccentBankEntry?.id ?? null,
       })
       setLockedSegments((prev) => [
         ...prev,
@@ -287,7 +316,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         segmentIds: lockedSegments.map((s) => s.segmentId),
         instruct,
         segments: lockedSegments.map((s) => s.text),
-        accentId: selectedAccentPreset?.id ?? null,
+        accentId: matchedAccentBankEntry?.id ?? null,
       })
       setSavedVoiceId(result.voice_id)
       onVoiceCreated?.(result.voice_id)
@@ -311,12 +340,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         }/${progress.candidates_per_segment || 1} (${progress.completed}/${progress.total})`
       : null
 
-  // Suggested sentences follow whichever accent bank preset is closest to the current accent
-  // chip, even if gender/age/pitch have since been tweaked away from that preset.
-  const activeShowcaseSentences =
-    ACCENT_BANK.find((entry) => entry.id === selections.accent)?.showcaseSentences ??
-    selectedAccentPreset?.showcaseSentences ??
-    []
+  const activeShowcaseSentences = matchedAccentBankEntry?.showcaseSentences ?? []
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
@@ -442,11 +466,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
               >
                 <span className="flex-1 text-sm">{seg.text}</span>
                 {seg.audioBase64 && (
-                  <audio
-                    src={`data:audio/wav;base64,${seg.audioBase64}`}
-                    controls
-                    className="h-8 w-40"
-                  />
+                  <ClipPlayer audioBase64={seg.audioBase64} className="w-56" />
                 )}
                 <Button type="button" size="sm" variant="ghost" onClick={() => removeLockedSegment(i)}>
                   Remove
@@ -493,10 +513,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
             placeholder="Type or pick a sentence above…"
             className="w-full rounded-md border border-input bg-transparent p-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             value={currentText}
-            onChange={(e) => {
-              setCurrentText(e.target.value)
-              setCurrentCandidates(null)
-            }}
+            onChange={(e) => setCurrentText(e.target.value)}
           />
 
           <div className="flex flex-wrap items-center gap-3">
@@ -555,7 +572,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                 className="flex flex-col gap-2"
               >
                 {currentCandidates.map((candidate, i) => {
-                  const url = `data:audio/wav;base64,${candidate.audio_base64}`
                   const selected = i === currentSelectedIndex
                   return (
                     <div key={candidate.candidate_id} className="flex items-center gap-2">
@@ -567,7 +583,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                       >
                         Take {i + 1}
                       </Button>
-                      <audio src={url} controls className="h-8 flex-1" />
+                      <ClipPlayer audioBase64={candidate.audio_base64} className="flex-1" />
                     </div>
                   )
                 })}
@@ -630,13 +646,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                       <p className="text-sm">{m.text}</p>
                       <p className="text-[11px] text-muted-foreground">{m.tags.join(', ')}</p>
                     </div>
-                    {m.audio_base64 && (
-                      <audio
-                        src={`data:audio/wav;base64,${m.audio_base64}`}
-                        controls
-                        className="h-8 w-32"
-                      />
-                    )}
+                    {m.audio_base64 && <ClipPlayer audioBase64={m.audio_base64} className="w-48" />}
                     <Button
                       type="button"
                       size="sm"

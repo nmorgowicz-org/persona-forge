@@ -8,9 +8,13 @@ interface AudioPlayerProps {
   src: string
   blob?: Blob | null
   className?: string
+  /** Auto-play as soon as src is (re)set. Defaults to true; pass false for list items where
+   * several players render at once (candidate takes, locked segments, library browser) — auto-
+   * playing every one of those simultaneously would be jarring. */
+  autoPlay?: boolean
 }
 
-export function AudioPlayer({ src, blob, className }: AudioPlayerProps) {
+export function AudioPlayer({ src, blob, className, autoPlay = true }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const [peaks, setPeaks] = useState<number[] | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -31,9 +35,12 @@ export function AudioPlayer({ src, blob, className }: AudioPlayerProps) {
   }, [blob])
 
   useEffect(() => {
+    if (!autoPlay) return
     const audio = audioRef.current
     if (!audio) return
     audio.play().catch(() => {})
+    // Only re-trigger on src change — toggling autoPlay itself shouldn't restart playback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src])
 
   function togglePlay() {
