@@ -900,11 +900,15 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
           )}
         </div>
 
-        {/* Australian / accent example sentences */}
+        {/* Accent-specific example sentences */}
         {activeShowcaseSentences.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <p className="text-[10px] text-muted-foreground">
-              Suggested lines that showcase this accent — click to insert:
+          <div className="mt-1 flex flex-col gap-1.5 rounded-lg border border-border/80 bg-muted/40 p-2.5">
+            <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <span className="inline-flex h-1.5 w-1.5 rounded-full bg-primary/70" />
+              Example lines ({selections.accent})
+            </p>
+            <p className="text-[10px] text-muted-foreground/90">
+              Suggested lines that showcase this accent — click to insert into your script.
             </p>
             <div className="flex flex-wrap gap-1.5">
               {activeShowcaseSentences.map((sentence) => (
@@ -913,7 +917,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                   type="button"
                   title={sentence.note}
                   onClick={() => insertExampleSentence(sentence)}
-                  className="rounded-full border border-border bg-transparent px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent/50"
+                  className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
                 >
                   {sentence.text}
                 </button>
@@ -922,8 +926,15 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
           </div>
         )}
 
-        {/* Non-verbal tags */}
-        <div className="flex flex-col gap-1">
+        {/* Non-verbal tags (insertable) */}
+        <div className="mt-1 flex flex-col gap-1.5 rounded-lg border border-dashed border-border/80 bg-muted/30 p-2.5">
+          <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <span className="inline-flex h-1.5 w-1.5 rounded-full bg-amber-400/80" />
+            Non-verbal tags
+          </p>
+          <p className="text-[10px] text-muted-foreground/90">
+            Insert these inline inside your script (e.g. "[laughter] That's what she said").
+          </p>
           <div className="flex flex-wrap gap-1">
             {NON_VERBAL_TAGS.map((tag) => (
               <button
@@ -932,16 +943,15 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                 onClick={() =>
                   insertNonVerbalTag(tag)
                 }
-                className="rounded-full border border-border bg-transparent px-2 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent/50"
+                className="inline-flex items-center gap-0.5 rounded-full border border-border/90 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
               >
+                <span className="mr-0.5 text-[9px] text-muted-foreground/70">✦</span>
                 {tag}
               </button>
             ))}
           </div>
-          <p className="text-[9px] text-muted-foreground">
-            Insert inline, e.g. "
-            [laughter] That's what she said".
-            Don't stack many at once.
+          <p className="text-[9px] text-muted-foreground/90">
+            Don't stack many at once — 1–2 per line is enough.
           </p>
         </div>
 
