@@ -1353,20 +1353,16 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                     <TooltipTrigger asChild>
                       <button
                         type="button"
-                        disabled={!!(jobStatus && jobStatus !== 'completed')}
-                        onClick={() => {
-                          setExamplesOpen((v) => !v)
-                          setTagsOpen(false)
-                        }}
-                         className={cn(
-                           "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] font-semibold transition-colors",
-                           (jobStatus === 'queued' || jobStatus === 'running')
-                             ? "pointer-events-none opacity-50"
-                             : "hover:bg-accent",
-                           examplesOpen && !(jobStatus === 'queued' || jobStatus === 'running')
-                             ? "bg-primary/10 text-primary border-primary/40"
-                             : "bg-muted/90 text-foreground/90",
-                         )}
+                         onClick={() => {
+                           setExamplesOpen((v) => !v)
+                           setTagsOpen(false)
+                         }}
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] font-semibold transition-colors hover:bg-accent",
+                            examplesOpen
+                              ? "bg-primary/10 text-primary border-primary/40"
+                              : "bg-muted/90 text-foreground/90",
+                          )}
                       >
                         ⚡ Examples
                       </button>
@@ -1379,21 +1375,17 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
-                      type="button"
-                      disabled={!!(jobStatus && jobStatus !== 'completed')}
-                      onClick={() => {
-                        setTagsOpen((v) => !v)
-                        setExamplesOpen(false)
-                      }}
-                       className={cn(
-                         "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] font-semibold transition-colors",
-                         (jobStatus === 'queued' || jobStatus === 'running')
-                           ? "pointer-events-none opacity-50"
-                           : "hover:bg-accent",
-                         tagsOpen && !(jobStatus === 'queued' || jobStatus === 'running')
-                           ? "bg-primary/10 text-primary border-primary/40"
-                           : "bg-muted/90 text-foreground/90",
-                       )}
+                       type="button"
+                       onClick={() => {
+                         setTagsOpen((v) => !v)
+                         setExamplesOpen(false)
+                       }}
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] font-semibold transition-colors hover:bg-accent",
+                          tagsOpen
+                            ? "bg-primary/10 text-primary border-primary/40"
+                            : "bg-muted/90 text-foreground/90",
+                        )}
                     >
                       <span className="mr-0.5 text-[10px] text-foreground/70">✦</span>
                       Non-Verbals
@@ -1453,23 +1445,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                       </button>
                     ))}
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Locked-while-generating hint */}
-            <AnimatePresence initial={false}>
-              {jobStatus && jobStatus !== 'completed' && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="border-t border-border bg-muted/60 px-2.5 py-1 flex items-center gap-1.5"
-                >
-                  <span className="inline-flex h-1.5 w-1.5 rounded-full bg-amber-400" />
-                  <p className="text-[9px] text-muted-foreground">
-                    Editing locked while generating — changes will apply after.
-                  </p>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -1547,7 +1522,14 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
               ? 'Hide advanced'
               : 'Advanced (quality / pacing)'}
           </button>
-        </div>
+          </div>
+
+        {/* Live hint while generating */}
+        {isRackAuditioning && (
+          <p className="text-[9px] text-muted-foreground">
+            You can keep editing, add tags, or queue another generation; it won’t affect this run.
+          </p>
+        )}
 
         {/* Advanced controls */}
         <AnimatePresence initial={false}>
