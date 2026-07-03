@@ -123,6 +123,7 @@ export interface HealthState {
   swap_in_progress: boolean
   backend: string
   model: string
+  loading_message?: string
   [key: string]: unknown
 }
 

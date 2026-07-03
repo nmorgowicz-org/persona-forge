@@ -42,6 +42,8 @@ interface StoreState {
   // ---- Core ----
   page: Page
   theme: Theme
+  modelLoaded: boolean
+  loadingMessage: string | null
   text: string
   voiceId: string | null
   voices: VoiceMeta[]
@@ -53,6 +55,8 @@ interface StoreState {
 
   setPage: (page: Page) => void
   setTheme: (theme: Theme) => void
+  setModelLoaded: (v: boolean) => void
+  setLoadingMessage: (v: string | null) => void
   setText: (text: string) => void
   setVoiceId: (voiceId: string | null) => void
   setVoices: (voices: VoiceMeta[]) => void
@@ -186,6 +190,8 @@ export const useAppStore = create<StoreState>((set) => ({
   // -- Core --
   page: 'speak',
   theme: initialTheme,
+  modelLoaded: false,
+  loadingMessage: null,
   text: '',
   voiceId: null,
   voices: [],
@@ -200,6 +206,8 @@ export const useAppStore = create<StoreState>((set) => ({
     applyTheme(theme)
     set({ theme })
   },
+  setModelLoaded: (modelLoaded) => set({ modelLoaded }),
+  setLoadingMessage: (loadingMessage) => set({ loadingMessage }),
   setText: (text) => set({ text }),
   setVoiceId: (voiceId) => set({ voiceId }),
   setVoices: (voices) => set({ voices }),
@@ -374,6 +382,39 @@ export const useAppStore = create<StoreState>((set) => ({
 // Centralized so in-flight jobs keep updating when user navigates away and back.
 
 const PROGRESS_POLL_MS = 700
+
+// Model-loading poller: runs until model_loaded is true.
+;(async () => {
+  async function poll() {
+    try {
+      const res = await fetch('/health')
+      if (!res.ok) return
+      const data = await res.json()
+      const store = useAppStore.getState()
+      if (data.model_loaded !== store.modelLoaded) {
+        store.setModelLoaded(Boolean(data.model_loaded))
+      }
+      if (data.loading_message !== store.loadingMessage) {
+        store.setLoadingMessage(data.loading_message || null)
+      }
+    } catch {
+      // Transient; will retry
+    }
+  }
+
+  // First fetch immediately
+  await poll()
+
+  // Then poll every second until model is loaded
+  const interval = setInterval(() => {
+    const store = useAppStore.getState()
+    if (store.modelLoaded) {
+      clearInterval(interval)
+      return
+    }
+    void poll()
+  }, 1000)
+})()
 
 // VoiceDesign poller
 let vdPollHandle: ReturnType<typeof setInterval> | null = null

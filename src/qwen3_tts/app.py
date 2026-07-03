@@ -116,6 +116,7 @@ def _generation_fields(data: dict[str, Any]) -> tuple[str, str]:
 
 @app.get("/health")
 def health():
+    # Always 200: lets the container be considered "up" while the model loads in the background.
     state = model.health_state()
     # Swap-in-progress is tracked in voice_design.py, not model.py, to avoid a circular
     # import; merged here so the frontend can poll one endpoint for a prominent
@@ -125,6 +126,11 @@ def health():
     # model_loaded only reflects Base/VoiceDesign (model.model) — OmniVoice bypasses that
     # slot entirely (see omnivoice_engine.py docstring), so surface its residency too.
     state["omnivoice_loaded"] = omnivoice_engine.omnivoice_loaded()
+
+    # Human-readable hint when model is still loading at startup.
+    if not model._service_started:
+        state["loading_message"] = "Loading model…"
+
     return jsonify(state)
 
 

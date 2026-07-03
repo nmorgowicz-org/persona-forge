@@ -30,6 +30,7 @@ export function SpeakPage() {
     setGenerating,
     error,
     setError,
+    modelLoaded,
   } = useAppStore()
   const [language, setLanguage] = useState('English')
   const [tone, setTone] = useState('neutral')
@@ -160,7 +161,8 @@ export function SpeakPage() {
             type="button"
             data-testid="speak-generate-button"
             onClick={handleGenerate}
-            disabled={!text.trim() || isGenerating}
+            disabled={!text.trim() || isGenerating || !modelLoaded}
+            title={modelLoaded ? undefined : 'Model is still loading'}
           >
             {isGenerating ? 'Generating…' : 'Generate'}
           </Button>

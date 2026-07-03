@@ -130,6 +130,7 @@ ov_runtime = None
 executor = ThreadPoolExecutor(max_workers=1)
 
 _service_started: bool = False
+_model_loaded: bool = False
 _last_request_time: float = time.time()
 _unload_pending: bool = False
 
@@ -429,10 +430,24 @@ def load_model(profile: ModelProfile | None = None):
 
     global _service_started
     _service_started = True
+    _model_loaded = True
     print(f"[app_worker] Model loaded and ready (profile={profile.name!r}).")
 
 
-load_model()
+def model_loaded() -> bool:
+    return _model_loaded
+
+
+def _load_model_background():
+    try:
+        load_model(BASE_PROFILE)
+    except Exception as exc:
+        print(f"[app_worker] FATAL: model load failed: {exc}", flush=True, file=sys.stderr)
+        raise
+
+
+import sys
+threading.Thread(target=_load_model_background, daemon=True, name="model-loader").start()
 
 
 def _idle_watcher():
