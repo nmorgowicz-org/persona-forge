@@ -257,17 +257,89 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const activeShowcaseSentences =
     matchedAccentBankEntry?.showcaseSentences ?? []
 
+  // -- Script composer state --
+  const [scriptRef, setScriptRef] = useState<HTMLTextAreaElement | null>(null)
+  const [tagsOpen, setTagsOpen] = useState(false)
+  const [examplesOpen, setExamplesOpen] = useState(false)
+
   // -- Handlers --
-  const insertExampleSentence = useCallback(
-    (sentence: ShowcaseSentence) => {
-      setScriptText((prev) => {
-        const base = prev.trim()
-          ? prev.trim() + '\n'
-          : ''
-        return base + sentence.text
+  const insertAtCursor = useCallback(
+    (insert: string) => {
+      const el = scriptRef
+      if (!el) {
+        setScriptText((prev) =>
+          prev.trim()
+            ? prev.trim() + ' ' + insert
+            : insert,
+        )
+        return
+      }
+      const start = el.selectionStart
+      const end = el.selectionEnd
+      const before = scriptText.slice(0, start)
+      const after = scriptText.slice(end)
+
+      const needsSpaceBefore =
+        before.length > 0 && !/[\s\n]/.test(before[before.length - 1])
+      const needsSpaceAfter =
+        after.length > 0 && !/[\s\n]/.test(after[0])
+
+      const next =
+        before +
+        (needsSpaceBefore ? ' ' : '') +
+        insert +
+        (needsSpaceAfter ? ' ' : '') +
+        after
+
+      setScriptText(next)
+      // Restore cursor
+      requestAnimationFrame(() => {
+        const pos =
+          start +
+          (needsSpaceBefore ? 1 : 0) +
+          insert.length +
+          (needsSpaceAfter ? 1 : 0)
+        el.focus()
+        el.setSelectionRange(pos, pos)
       })
     },
-    [setScriptText],
+    [scriptRef, scriptText, setScriptText],
+  )
+
+  const insertExampleSentence = useCallback(
+    (sentence: ShowcaseSentence) => {
+      const insert = sentence.text
+      const el = scriptRef
+
+      if (scriptText.trim()) {
+        // Insert as new line
+        const newline = '\n' + insert
+        if (!el) {
+          setScriptText((prev) => prev.trim() + newline)
+          return
+        }
+        const start = el.selectionStart
+        const before = scriptText.slice(0, start)
+        const after = scriptText.slice(start)
+        const next = before + newline + after
+        setScriptText(next)
+        requestAnimationFrame(() => {
+          const pos = start + newline.length
+          el.focus()
+          el.setSelectionRange(pos, pos)
+        })
+      } else {
+        insertAtCursor(insert)
+      }
+    },
+    [scriptRef, scriptText, setScriptText, insertAtCursor],
+  )
+
+  const insertNonVerbalTag = useCallback(
+    (tag: string) => {
+      insertAtCursor(tag)
+    },
+    [insertAtCursor],
   )
   const refreshLibrary = useCallback(async () => {
     try {
@@ -319,17 +391,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       whisper: !prev.whisper,
     }))
   }, [setSelections])
-
-  const insertNonVerbalTag = useCallback(
-    (tag: string) => {
-      setScriptText((prev) =>
-        prev.trim()
-          ? prev.trim() + ' ' + tag
-          : tag,
-      )
-    },
-    [setScriptText],
-  )
 
   const splitScriptToSegments = useCallback(
     (text: string): string[] => {
@@ -865,101 +926,154 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         </div>
       </div>
 
-      {/* Script / Lines */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Script (Lines)
-          </p>
-          {scriptWordCount > 0 && (
-            <span className="text-[10px] text-muted-foreground/80">
-              {lines.length} line{lines.length !== 1 ? 's' : ''} · {scriptWordCount} word{scriptWordCount !== 1 ? 's' : ''}
-            </span>
-          )}
-        </div>
-
-        <textarea
-          data-testid="omnivoice-script"
-          placeholder="Paste or type your script (up to 10 lines recommended)…"
-          rows={4}
-          value={scriptText}
-          onChange={(e) =>
-            setScriptText(e.target.value)
-          }
-          className="w-full resize-none rounded-lg border border-input bg-muted/40 px-3 py-2 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
-        />
-
-        <div className="flex flex-wrap gap-2">
-          <p className="text-[10px] text-muted-foreground">
-            Recommended: 5–15 words per line. Best results in English.
-          </p>
-          {hasLongLines && (
-            <p className="text-[10px] text-amber-400">
-              Some lines are long; shorter lines produce more reliable results.
-            </p>
-          )}
-        </div>
-
-        {/* Accent-specific example sentences */}
-        {activeShowcaseSentences.length > 0 && (
-          <div className="mt-1 flex flex-col gap-1.5 rounded-lg border border-border/80 bg-muted/40 p-2.5">
-            <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              <span className="inline-flex h-1.5 w-1.5 rounded-full bg-primary/70" />
-              Example lines ({selections.accent})
-            </p>
-            <p className="text-[10px] text-muted-foreground/90">
-              Suggested lines that showcase this accent — click to insert into your script.
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {activeShowcaseSentences.map((sentence) => (
-                <button
-                  key={sentence.text}
-                  type="button"
-                  title={sentence.note}
-                  onClick={() => insertExampleSentence(sentence)}
-                  className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
-                >
-                  {sentence.text}
-                </button>
-              ))}
+        {/* Script / Lines (composer-style) */}
+        <div className="flex flex-col gap-2">
+          {/* Composer header bar */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Script
+              </p>
+              {scriptWordCount > 0 && (
+                <span className="text-[10px] text-muted-foreground/80">
+                  {lines.length} line{lines.length !== 1 ? 's' : ''} · {scriptWordCount} word{scriptWordCount !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              {activeShowcaseSentences.length > 0 && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExamplesOpen((v) => !v)
+                        setTagsOpen(false)
+                      }}
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-md border border-border/90 px-2 py-0.5 text-[9px] font-medium transition-colors",
+                        examplesOpen
+                          ? "bg-primary/10 text-primary"
+                          : "bg-muted/70 text-muted-foreground hover:bg-accent/80 hover:text-foreground",
+                      )}
+                    >
+                      Examples
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    Accent-specific example lines to insert.
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTagsOpen((v) => !v)
+                      setExamplesOpen(false)
+                    }}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-md border border-border/90 px-2 py-0.5 text-[9px] font-medium transition-colors",
+                      tagsOpen
+                        ? "bg-primary/10 text-primary"
+                        : "bg-muted/70 text-muted-foreground hover:bg-accent/80 hover:text-foreground",
+                    )}
+                  >
+                    <span className="mr-0.5 text-[9px] text-muted-foreground/70">✦</span>
+                    Tags
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  Non-verbal tags: insert inline, e.g. "[laughter]".
+                </TooltipContent>
+              </Tooltip>
             </div>
           </div>
-        )}
 
-        {/* Non-verbal tags (insertable) */}
-        <div className="mt-1 flex flex-col gap-1.5 rounded-lg border border-dashed border-border/80 bg-muted/30 p-2.5">
-          <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <span className="inline-flex h-1.5 w-1.5 rounded-full bg-amber-400/80" />
-            Non-verbal tags
-          </p>
-          <p className="text-[10px] text-muted-foreground/90">
-            Insert these inline inside your script (e.g. "[laughter] That's what she said").
-          </p>
-          <div className="flex flex-wrap gap-1">
-            {NON_VERBAL_TAGS.map((tag) => (
-              <button
-                key={tag}
-                type="button"
-                onClick={() =>
-                  insertNonVerbalTag(tag)
-                }
-                className="inline-flex items-center gap-0.5 rounded-full border border-border/90 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+          {/* Tags palette (compact) */}
+          <AnimatePresence initial={false}>
+            {tagsOpen && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
               >
-                <span className="mr-0.5 text-[9px] text-muted-foreground/70">✦</span>
-                {tag}
-              </button>
-            ))}
-          </div>
-          <p className="text-[9px] text-muted-foreground/90">
-            Don't stack many at once — 1–2 per line is enough.
-          </p>
-        </div>
+                <div className="flex flex-wrap gap-1 rounded-md border border-dashed border-border/90 bg-muted/40 px-2 py-1.5">
+                  {NON_VERBAL_TAGS.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => insertNonVerbalTag(tag)}
+                      className="inline-flex items-center gap-0.5 rounded-full border border-border/90 bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-        {/* Language note */}
-        <p className="text-[9px] text-muted-foreground">
-          Best quality: English. For other languages,
-          consider using a reference audio instead.
-        </p>
+          {/* Examples palette (compact dropdown) */}
+          <AnimatePresence initial={false}>
+            {examplesOpen && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="flex flex-wrap gap-1.5 rounded-md border border-border/90 bg-muted/40 px-2 py-1.5">
+                  {activeShowcaseSentences.map((sentence) => (
+                    <button
+                      key={sentence.text}
+                      type="button"
+                      title={sentence.note}
+                      onClick={() => insertExampleSentence(sentence)}
+                      className="rounded-full border border-border bg-muted/60 px-2.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+                    >
+                      {sentence.text}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Integrated textarea */}
+          <div className="relative">
+            <textarea
+              ref={setScriptRef}
+              data-testid="omnivoice-script"
+              placeholder="Paste or type your script (up to 10 lines recommended)…"
+              rows={4}
+              value={scriptText}
+              onChange={(e) =>
+                setScriptText(e.target.value)
+              }
+              className="w-full resize-none rounded-lg border border-input bg-muted/40 px-3 py-2 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/40"
+            />
+          </div>
+
+          {/* Short guidance */}
+          <div className="flex flex-wrap gap-2">
+            <p className="text-[10px] text-muted-foreground">
+              Recommended: 5–15 words per line. Best results in English.
+            </p>
+            {hasLongLines && (
+              <p className="text-[10px] text-amber-400">
+                Some lines are long; shorter lines produce more reliable results.
+              </p>
+            )}
+          </div>
+
+          {/* Language note */}
+          <p className="text-[9px] text-muted-foreground">
+            Best quality: English. For other languages,
+            consider using a reference audio instead.
+          </p>
 
         {/* Generate button */}
         <div className="flex flex-wrap items-center gap-3">
