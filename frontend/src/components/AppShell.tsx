@@ -1,5 +1,13 @@
 import type { ReactNode } from 'react'
-import { AudioLines, Mic2, Plug, Settings2, Sparkles } from 'lucide-react'
+import {
+  AudioLines,
+  ChevronLeft,
+  ChevronRight,
+  Mic2,
+  Plug,
+  Settings2,
+  Sparkles,
+} from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
@@ -14,6 +22,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
+  useSidebar,
 } from '@/components/ui/sidebar'
 import { Separator } from '@/components/ui/separator'
 import { ThemeSwitcher } from '@/components/ThemeSwitcher'
@@ -27,6 +36,27 @@ const NAV_ITEMS: { page: Page; label: string; icon: typeof Mic2; description: st
   { page: 'integrations', label: 'Integrations', icon: Plug, description: 'API & apps' },
   { page: 'runtime', label: 'Runtime', icon: Settings2, description: 'Live server config' },
 ]
+
+function SidebarCollapseButton() {
+  const { open, toggleSidebar } = useSidebar()
+  return (
+    <button
+      type="button"
+      onClick={toggleSidebar}
+      className="group/collapse flex w-full items-center justify-between rounded-md border border-border/90 px-2.5 py-1.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground group-data-[collapsible=icon]:flex"
+      title={open ? 'Collapse sidebar' : 'Expand sidebar'}
+    >
+      <span className="group-data-[collapsible=icon]:hidden">
+        {open ? 'Collapse sidebar' : 'Expand sidebar'}
+      </span>
+      {open ? (
+        <ChevronRight className="size-3.5 text-muted-foreground/80 transition-colors group-hover/collapse:text-foreground" />
+      ) : (
+        <ChevronLeft className="size-3.5 text-muted-foreground/80 transition-colors group-hover/collapse:text-foreground" />
+      )}
+    </button>
+  )
+}
 
 export function AppShell({ children }: { children: ReactNode }) {
   const page = useAppStore((s) => s.page)
@@ -69,12 +99,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
-        <SidebarFooter className="gap-3 px-3 py-3 group-data-[collapsible=icon]:hidden">
+        <SidebarFooter className="gap-3 px-3 py-3">
           <ThemeSwitcher />
-          <p className="text-[11px] leading-snug text-muted-foreground">
+          <p className="text-[11px] leading-snug text-muted-foreground group-data-[collapsible=icon]:hidden">
             Voices designed here are served over the OpenAI-compatible endpoint for Hermes and
             other apps.
           </p>
+          <SidebarCollapseButton />
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
