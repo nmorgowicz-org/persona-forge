@@ -42,6 +42,7 @@ services:
       - ${OV_DATA_PATH:-./data/ov}:/ov:rw
       - ${REF_AUDIO_PATH:?Set REF_AUDIO_PATH to the reference WAV file}:/voice/reference.wav:ro
       - ${VOICE_LIBRARY_PATH:-./data/voices}:/voices:rw
+      - ${SEGMENT_LIBRARY_PATH:-./data/segments}:/segments:rw
     mem_limit: ${TTS_MEMORY_LIMIT:-10G}
     memswap_limit: ${TTS_MEMORY_SWAP_LIMIT:-11G}
     stop_grace_period: 45s

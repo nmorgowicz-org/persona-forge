@@ -154,18 +154,50 @@ export async function auditionOmniVoice(
   return res.json()
 }
 
-export async function stitchOmniVoice(selections: string[]): Promise<Blob> {
+export interface OmniVoiceProgress {
+  phase: 'idle' | 'loading' | 'generating'
+  total: number
+  completed: number
+  current_segment_index: number
+  current_candidate_index: number
+  segment_count: number
+  candidates_per_segment: number
+  avg_seconds: number | null
+  estimated_remaining_seconds: number | null
+}
+
+export async function getOmniVoiceProgress(): Promise<OmniVoiceProgress> {
+  const res = await fetch('/omnivoice/progress')
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export interface OmniVoiceStitchParams {
+  segmentIds?: string[]
+  selections?: string[]
+}
+
+export async function stitchOmniVoice(params: OmniVoiceStitchParams | string[]): Promise<Blob> {
+  // Accepts the legacy bare-array form (candidate_id selections) or the newer
+  // {segmentIds | selections} form so callers can stitch from the persistent library.
+  const body = Array.isArray(params)
+    ? { selections: params }
+    : {
+        segment_ids: params.segmentIds ?? undefined,
+        selections: params.selections ?? undefined,
+      }
   const res = await fetch('/omnivoice/stitch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ selections }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.blob()
 }
 
 export interface OmniVoiceSaveParams {
-  selections: string[]
+  selections?: string[]
+  segmentIds?: string[]
   instruct: string
   segments: string[]
   language?: string
@@ -183,7 +215,8 @@ export async function saveOmniVoice(params: OmniVoiceSaveParams): Promise<OmniVo
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      selections: params.selections,
+      selections: params.selections ?? undefined,
+      segment_ids: params.segmentIds ?? undefined,
       instruct: params.instruct,
       segments: params.segments,
       language: params.language ?? 'english',
@@ -192,6 +225,52 @@ export async function saveOmniVoice(params: OmniVoiceSaveParams): Promise<OmniVo
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
+}
+
+export interface SegmentMeta {
+  segment_id: string
+  text: string
+  instruct: string
+  tags: string[]
+  engine: string
+  accent_id: string | null
+  sample_rate: number
+  created_at: number
+  audio_base64?: string
+}
+
+export async function lockInOmniVoiceSegment(params: {
+  candidateId: string
+  text: string
+  instruct: string
+  accentId?: string | null
+}): Promise<SegmentMeta> {
+  const res = await fetch('/omnivoice/segments', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      candidate_id: params.candidateId,
+      text: params.text,
+      instruct: params.instruct,
+      accent_id: params.accentId ?? undefined,
+    }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function listOmniVoiceSegments(): Promise<SegmentMeta[]> {
+  const res = await fetch('/omnivoice/segments')
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  return body.segments
+}
+
+export async function deleteOmniVoiceSegment(segmentId: string): Promise<void> {
+  const res = await fetch(`/omnivoice/segments/${encodeURIComponent(segmentId)}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok) throw new Error(await readError(res))
 }
 
 export interface RuntimeConfigState {

@@ -14,7 +14,7 @@ from typing import Any
 import soundfile as sf
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from qwen3_tts import model, omnivoice_engine, voice_design, voice_library
+from qwen3_tts import model, omnivoice_engine, segment_library, voice_design, voice_library
 
 # candidate_id -> (wav, sample_rate). In-memory only, single-user local tool (locked decision,
 # PLAN_persona_forge_studio.md §5): cleared at the start of every /omnivoice/audition call, so
@@ -265,6 +265,14 @@ def omnivoice_audition():
     return jsonify({"segments": response_segments})
 
 
+@app.get("/omnivoice/progress")
+def omnivoice_progress():
+    # Polled by the frontend while an audition job is in flight (nick's feedback 2026-07-03:
+    # the prior indeterminate top-of-page banner gave no sense of what was happening or how
+    # long it'd take). See omnivoice_engine._progress for field semantics.
+    return jsonify(omnivoice_engine.get_progress())
+
+
 def _resolve_omnivoice_selections(selections: Any) -> list[tuple[Any, int]] | None:
     """Look up each candidate_id in the audition cache; returns None on the first miss."""
     if (
@@ -282,15 +290,101 @@ def _resolve_omnivoice_selections(selections: Any) -> list[tuple[Any, int]] | No
     return selected
 
 
+def _resolve_omnivoice_clips(data: dict[str, Any]) -> list[tuple[Any, int]] | None:
+    """Resolve either persisted segment_ids (the segment library) or ephemeral candidate_id
+    ``selections`` (the pre-lock-in audition cache) into (wav, sample_rate) tuples.
+
+    segment_ids is the primary path now that lock-in persists immediately (see
+    /omnivoice/segments below) — it's what lets stitching mix segments from any past session,
+    not just the current one. ``selections`` stays supported for stitching a preview straight
+    from freshly-generated, not-yet-locked-in candidates.
+    """
+    segment_ids = data.get("segment_ids")
+    if segment_ids is not None:
+        if (
+            not isinstance(segment_ids, list)
+            or not segment_ids
+            or not all(isinstance(s, str) for s in segment_ids)
+        ):
+            return None
+        selected = []
+        for segment_id in segment_ids:
+            wav_bytes = segment_library.get_segment_wav_bytes(segment_id)
+            if wav_bytes is None:
+                return None
+            wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+            selected.append((wav, sr))
+        return selected
+    return _resolve_omnivoice_selections(data.get("selections"))
+
+
+@app.post("/omnivoice/segments")
+def omnivoice_segments_create():
+    # Locks in one audition candidate by persisting it to the durable segment library —
+    # separate from /omnivoice/save, which persists a *stitched, multi-segment* reference
+    # voice. This is the "keep this take" step; discarding a bad take is just not calling
+    # this (the ephemeral audition cache is dropped on the next audition call).
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    candidate_id = data.get("candidate_id")
+    if not isinstance(candidate_id, str) or not candidate_id:
+        return jsonify({"error": "candidate_id is required"}), 400
+    entry = _omnivoice_candidates.get(candidate_id)
+    if entry is None:
+        return jsonify({"error": "Unknown or expired candidate_id"}), 400
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    instruct = (data.get("instruct") or "").strip()
+    if not instruct:
+        return jsonify({"error": "instruct is required"}), 400
+    accent_id = data.get("accent_id")
+
+    wav, sr = entry
+    wav_bytes, _ = _encode(wav, sr, "wav")
+    meta = segment_library.save_segment(
+        wav_bytes,
+        text=text,
+        instruct=instruct,
+        engine="omnivoice",
+        sample_rate=sr,
+        accent_id=accent_id,
+    )
+    meta["audio_base64"] = base64.b64encode(wav_bytes).decode("ascii")
+    return jsonify(meta)
+
+
+@app.get("/omnivoice/segments")
+def omnivoice_segments_list():
+    segments = []
+    for meta in segment_library.list_segments():
+        wav_bytes = Path(meta["wav_path"]).read_bytes() if meta.get("wav_path") else None
+        entry = dict(meta)
+        if wav_bytes is not None:
+            entry["audio_base64"] = base64.b64encode(wav_bytes).decode("ascii")
+        entry.pop("wav_path", None)
+        segments.append(entry)
+    return jsonify({"segments": segments})
+
+
+@app.delete("/omnivoice/segments/<segment_id>")
+def omnivoice_segments_delete(segment_id: str):
+    if not segment_library.delete_segment(segment_id):
+        return jsonify({"error": "Unknown segment_id"}), 404
+    return jsonify({"deleted": True})
+
+
 @app.post("/omnivoice/stitch")
 def omnivoice_stitch():
     data = _json_body()
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
-    selections = data.get("selections")
-    selected = _resolve_omnivoice_selections(selections)
+    selected = _resolve_omnivoice_clips(data)
     if selected is None:
-        return jsonify({"error": "selections must be a list of known, non-expired candidate_ids"}), 400
+        return jsonify(
+            {"error": "segment_ids or selections must be a list of known ids"}
+        ), 400
 
     try:
         wav, sr = omnivoice_engine.stitch_selected(selected)
@@ -305,16 +399,17 @@ def omnivoice_stitch():
 @app.post("/omnivoice/save")
 def omnivoice_save():
     # Persists a stitched OmniVoice clip into the same voice library /voice_design writes to
-    # (voice_library.save_voice), so a clip auditioned here is reusable everywhere voices are
+    # (voice_library.save_voice), so a clip assembled here is reusable everywhere voices are
     # (Speak page, /generate, /v1/audio/speech) instead of only existing as an ephemeral
     # in-browser preview blob.
     data = _json_body()
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
-    selections = data.get("selections")
-    selected = _resolve_omnivoice_selections(selections)
+    selected = _resolve_omnivoice_clips(data)
     if selected is None:
-        return jsonify({"error": "selections must be a list of known, non-expired candidate_ids"}), 400
+        return jsonify(
+            {"error": "segment_ids or selections must be a list of known ids"}
+        ), 400
     instruct = (data.get("instruct") or "").strip()
     if not instruct:
         return jsonify({"error": "instruct is required"}), 400
@@ -341,7 +436,8 @@ def omnivoice_save():
                 "accent_id": accent_id,
                 "instruct": instruct,
                 "segments": segments,
-                "candidate_ids": selections,
+                "segment_ids": data.get("segment_ids"),
+                "candidate_ids": data.get("selections"),
             },
         )
     except ValueError as exc:

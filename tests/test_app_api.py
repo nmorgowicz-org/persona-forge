@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import io
+import shutil
 import sys
+import tempfile
 import types
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+import soundfile as sf
 
 
 fake_model = types.ModuleType("qwen3_tts.model")
@@ -388,6 +393,89 @@ class AppTests(unittest.TestCase):
             "/omnivoice/save",
             json={"selections": ["nope"], "instruct": "female", "segments": ["G'day"]},
         )
+
+        self.assertEqual(result.status_code, 400)
+
+    def test_omnivoice_progress_returns_engine_state(self) -> None:
+        with patch.object(
+            app_module.omnivoice_engine,
+            "get_progress",
+            lambda: {"phase": "generating", "total": 4, "completed": 1},
+        ):
+            result = self.client.get("/omnivoice/progress")
+
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.get_json()["phase"], "generating")
+
+    def test_omnivoice_segments_lock_in_persists_and_lists(self) -> None:
+        candidate_id = self._seed_omnivoice_candidate()
+        tmpdir = tempfile.mkdtemp()
+        try:
+            with patch.object(app_module.segment_library, "SEGMENT_LIBRARY_DIR", Path(tmpdir)):
+                create = self.client.post(
+                    "/omnivoice/segments",
+                    json={
+                        "candidate_id": candidate_id,
+                        "text": "G'day",
+                        "instruct": "female, young adult, high pitch, australian accent",
+                        "accent_id": "au",
+                    },
+                )
+                self.assertEqual(create.status_code, 200)
+                body = create.get_json()
+                self.assertIn("segment_id", body)
+                self.assertEqual(body["tags"], ["female", "young adult", "high pitch", "australian accent"])
+                self.assertIn("audio_base64", body)
+
+                listing = self.client.get("/omnivoice/segments")
+                self.assertEqual(listing.status_code, 200)
+                segment_ids = [s["segment_id"] for s in listing.get_json()["segments"]]
+                self.assertIn(body["segment_id"], segment_ids)
+
+                delete = self.client.delete(f"/omnivoice/segments/{body['segment_id']}")
+                self.assertEqual(delete.status_code, 200)
+                delete_again = self.client.delete(f"/omnivoice/segments/{body['segment_id']}")
+                self.assertEqual(delete_again.status_code, 404)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_omnivoice_segments_lock_in_rejects_unknown_candidate(self) -> None:
+        result = self.client.post(
+            "/omnivoice/segments",
+            json={"candidate_id": "nope", "text": "hi", "instruct": "female"},
+        )
+
+        self.assertEqual(result.status_code, 400)
+
+    def test_omnivoice_stitch_accepts_segment_ids_from_library(self) -> None:
+        tmpdir = tempfile.mkdtemp()
+        try:
+            with patch.object(app_module.segment_library, "SEGMENT_LIBRARY_DIR", Path(tmpdir)):
+                buf = io.BytesIO()
+                sf.write(buf, np.zeros(240, dtype=np.float32), 24000, format="WAV")
+                meta = app_module.segment_library.save_segment(
+                    buf.getvalue(),
+                    text="G'day",
+                    instruct="female, young adult",
+                    engine="omnivoice",
+                    sample_rate=24000,
+                )
+                with patch.object(
+                    app_module.omnivoice_engine,
+                    "stitch_selected",
+                    lambda selected: (np.zeros(480, dtype=np.float32), 24000),
+                ), patch.object(app_module, "_encode", return_value=(b"stitched", "audio/wav")):
+                    result = self.client.post(
+                        "/omnivoice/stitch", json={"segment_ids": [meta["segment_id"]]}
+                    )
+
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.data, b"stitched")
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_omnivoice_stitch_rejects_unknown_segment_id(self) -> None:
+        result = self.client.post("/omnivoice/stitch", json={"segment_ids": ["seg_deadbeef0000"]})
 
         self.assertEqual(result.status_code, 400)
 

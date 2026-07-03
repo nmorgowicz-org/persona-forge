@@ -42,6 +42,24 @@ _omnivoice_model = None
 # model's vocoder rate.
 OMNIVOICE_SAMPLE_RATE = 24000
 
+# Polled by GET /omnivoice/progress (app.py) so the frontend can render a real progress bar
+# with an ETA instead of an indeterminate banner — nick's feedback 2026-07-03: the prior
+# top-of-page banner gave no sense of what was happening or how long it'd take. "loading"
+# covers the OmniVoice checkpoint load (can take a while on first use), "generating" covers
+# the per-candidate loop; ``avg_seconds`` is a running average over completed candidates in
+# *this* job, used to estimate remaining time for the candidates left.
+_progress: dict[str, Any] = {
+    "phase": "idle",
+    "total": 0,
+    "completed": 0,
+    "current_segment_index": 0,
+    "current_candidate_index": 0,
+    "segment_count": 0,
+    "candidates_per_segment": 0,
+    "avg_seconds": None,
+    "estimated_remaining_seconds": None,
+}
+
 
 def swap_in_progress() -> bool:
     return _swap_in_progress
@@ -49,6 +67,10 @@ def swap_in_progress() -> bool:
 
 def omnivoice_loaded() -> bool:
     return _omnivoice_model is not None
+
+
+def get_progress() -> dict[str, Any]:
+    return dict(_progress)
 
 
 def _malloc_trim() -> None:
@@ -106,6 +128,18 @@ def run_omnivoice_job(
 
     _swap_in_progress = True
     model._touch_last_request()
+    total = len(segments) * candidates_per_segment
+    _progress.update(
+        phase="loading",
+        total=total,
+        completed=0,
+        current_segment_index=0,
+        current_candidate_index=0,
+        segment_count=len(segments),
+        candidates_per_segment=candidates_per_segment,
+        avg_seconds=None,
+        estimated_remaining_seconds=None,
+    )
     t0 = time.monotonic()
     try:
         print("[omnivoice] swapping out Base, loading OmniVoice...", flush=True)
@@ -118,21 +152,41 @@ def run_omnivoice_job(
             model._apply_optional_seed(seed)
 
         _omnivoice_model = OmniVoice.from_pretrained("k2-fsa/OmniVoice", dtype=torch.float32)
+        _progress["phase"] = "generating"
 
         results: list[list[tuple[Any, int]]] = []
         for seg_idx, text in enumerate(segments):
             candidates: list[tuple[Any, int]] = []
             for cand_idx in range(candidates_per_segment):
+                _progress["current_segment_index"] = seg_idx
+                _progress["current_candidate_index"] = cand_idx
                 print(
                     f"[omnivoice] segment {seg_idx + 1}/{len(segments)}, "
                     f"candidate {cand_idx + 1}/{candidates_per_segment}...",
                     flush=True,
                 )
+                cand_t0 = time.monotonic()
                 audio = _omnivoice_model.generate(
                     text=text, instruct=instruct, language=language
                 )[0]
+                cand_elapsed = time.monotonic() - cand_t0
                 wav = model._trim_silence(audio, OMNIVOICE_SAMPLE_RATE)
                 candidates.append((wav, OMNIVOICE_SAMPLE_RATE))
+
+                completed = _progress["completed"] + 1
+                prev_avg = _progress["avg_seconds"]
+                avg = cand_elapsed if prev_avg is None else prev_avg + (cand_elapsed - prev_avg) / completed
+                remaining = total - completed
+                _progress.update(
+                    completed=completed,
+                    avg_seconds=avg,
+                    estimated_remaining_seconds=remaining * avg,
+                )
+                print(
+                    f"[omnivoice] candidate done in {cand_elapsed:.1f}s "
+                    f"({completed}/{total}, ~{remaining * avg:.0f}s remaining)",
+                    flush=True,
+                )
             results.append(candidates)
         elapsed = time.monotonic() - t0
         print(f"[omnivoice] job complete in {elapsed:.1f}s, staying loaded", flush=True)
@@ -143,6 +197,7 @@ def run_omnivoice_job(
         raise
     finally:
         _swap_in_progress = False
+        _progress["phase"] = "idle"
         print(
             f"[omnivoice] done, total elapsed={time.monotonic() - t0:.1f}s",
             flush=True,
