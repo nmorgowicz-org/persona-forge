@@ -280,7 +280,7 @@ function SegmentRackRow({
             <Tooltip.Trigger asChild>
               <div className="relative flex items-center gap-0.5">
                 <span className="text-[9px] text-muted-foreground">
-                  Dur
+                  Duration
                 </span>
                 <input
                   type="number"
@@ -693,6 +693,9 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     Record<string, number | null>
   >({})
   const [postProcess, setPostProcess] = useState(true)
+  const anySegmentHasDuration = Object.values(segmentDurations).some(
+    (d) => d != null,
+  )
 
 
 
@@ -1988,6 +1991,13 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                   />
                 </button>
               </div>
+              {anySegmentHasDuration && (
+                <p className="text-[9px] leading-snug text-amber-500/90">
+                  One or more segments have an explicit Duration set — post-processing is
+                  automatically disabled for those segments regardless of this toggle, to
+                  keep their length accurate.
+                </p>
+              )}
 
               {/* Candidates count */}
               <div className="flex items-center justify-between">
