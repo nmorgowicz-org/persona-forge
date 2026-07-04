@@ -156,10 +156,10 @@ function StitchTimelineClip({
       className={cn("group relative flex w-full flex-col", isReordering && 'cursor-grab')}
     >
       <div className="flex items-center justify-between gap-2 px-1.5 pt-1 pb-1">
-        <span className="truncate text-xs font-medium text-foreground" title={clip.text}>
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={clip.text}>
           {clip.text || '(untitled)'}
         </span>
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           {isReordering && (
             <div className="flex items-center text-muted-foreground/60">
               <GripVertical className="size-3.5" />
