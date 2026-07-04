@@ -140,8 +140,8 @@ export interface HealthState {
   [key: string]: unknown
 }
 
-export async function getHealth(): Promise<HealthState> {
-  const res = await fetch('/health')
+export async function getHealth(signal?: AbortSignal): Promise<HealthState> {
+  const res = await fetch('/health', { signal })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
 }
