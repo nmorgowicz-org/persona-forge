@@ -1,10 +1,14 @@
 # Plan: VST-style Stitch Editor for Persona Forge / OmniVoice
 
-Status (2026-07-04): Part B (the stitch editor itself, backend + frontend,
-steps 1-7 below) is **approved, not yet implemented**. The smaller
-"Persona Forge polish" items bundled in the same session (see bottom
-section) are **done, not yet deployed**. Serves as both the implementation
-plan and the handoff doc for this feature.
+Status (2026-07-04): Part A ("Persona Forge polish" items, see bottom
+section) is **done and deployed to dockermisc1**. Part B (the stitch editor
+itself, backend + frontend, steps 1-7 below) is in progress: **step 1
+(`audio_post.py` primitives: `trim`, `apply_fades`, `concat_with_padding`,
+extended `stitch_segments` kwargs) is done** — implemented, unit-tested
+(34/34 passing in `tests/test_audio_post.py`, including an explicit
+default-kwargs-match-original-output parity test), not yet deployed. Steps
+2-7 (API wiring, frontend timeline) not yet started. Serves as both the
+implementation plan and the handoff doc for this feature.
 
 ## Context / motivation
 
@@ -414,9 +418,9 @@ second DSP implementation drifting from `audio_post.py`.
 ## Related, smaller work bundled in the same session (Persona Forge polish)
 
 Tracked separately/informally, not part of this doc's scope, but landed
-alongside it. **All four items DONE as of 2026-07-04** (implemented,
-`tsc --noEmit` + `npm run build` clean, `py_compile` clean on backend
-changes; not yet deployed to dockermisc1):
+alongside it. **All four items DONE and deployed to dockermisc1 as of
+2026-07-04** (implemented, `tsc --noEmit` + `npm run build` clean,
+`py_compile` clean on backend changes):
 - ✅ Moved the "Autoplay takes" toggle out of the segments-only-visible
   header into the always-visible advanced-options panel
   (`PersonaForgePanel.tsx`), so it can be set before generation starts.

@@ -83,6 +83,98 @@ def limit_peak(audio: np.ndarray, ceiling_db: float = -1.0) -> np.ndarray:
     return (x * (ceiling / peak)).astype(np.float32)
 
 
+def trim(audio: np.ndarray, sr: int, start_ms: float = 0.0, end_ms: float = 0.0) -> np.ndarray:
+    """Cut start_ms off the head and end_ms off the tail.
+
+    Clamped so it never produces a negative-length result (falls back to a single
+    remaining sample) — callers at the API boundary should also clamp against the
+    clip's actual duration, this is defense in depth, not the primary validation.
+    """
+    x = np.asarray(audio, dtype=np.float32).ravel()
+    if x.size == 0:
+        return x
+    start = max(0, int(sr * start_ms / 1000.0))
+    end = max(0, int(sr * end_ms / 1000.0))
+    start = min(start, x.size - 1)
+    end = min(end, x.size - 1 - start)
+    return x[start : x.size - end]
+
+
+def apply_fades(
+    audio: np.ndarray, sr: int, fade_in_ms: float = 0.0, fade_out_ms: float = 0.0
+) -> np.ndarray:
+    """Per-clip user-controlled fade in/out at the clip's own head/tail.
+
+    Distinct from crossfade_concat's join-fades (which blend two adjacent clips into each
+    other) — this shapes a single clip's own edges, applied before any joining happens.
+    Uses the same equal-power curve as crossfade_concat for consistent character.
+    """
+    x = np.asarray(audio, dtype=np.float32).ravel()
+    if x.size == 0:
+        return x
+    x = x.copy()
+    fade_in_len = min(int(sr * fade_in_ms / 1000.0), x.size)
+    if fade_in_len > 0:
+        t = np.linspace(0.0, 1.0, fade_in_len, dtype=np.float32)
+        x[:fade_in_len] *= np.sin(t * np.pi / 2.0) ** 2
+    fade_out_len = min(int(sr * fade_out_ms / 1000.0), x.size)
+    if fade_out_len > 0:
+        t = np.linspace(0.0, 1.0, fade_out_len, dtype=np.float32)
+        x[x.size - fade_out_len :] *= np.cos(t * np.pi / 2.0) ** 2
+    return x
+
+
+def concat_with_padding(
+    segments: list[np.ndarray],
+    sr: int,
+    *,
+    padding_ms: list[float] | None = None,
+    crossfade_ms: float = 100.0,
+) -> np.ndarray:
+    """Join segments; for gap i, insert silence if padding_ms[i] > 0, else crossfade.
+
+    padding_ms must have len(segments) - 1 entries (one per gap) when provided; None (or
+    all-zero) reproduces crossfade_concat's today's-default all-crossfade behavior exactly.
+    A short equal-power fade is applied into and out of each inserted silence gap (distinct
+    from any user-set per-clip fade) so a padded gap doesn't introduce a click at its own
+    boundaries — this is not a hard butt join.
+    """
+    if not segments:
+        return np.zeros(0, dtype=np.float32)
+    segs = [np.asarray(s, dtype=np.float32).ravel() for s in segments]
+    if len(segs) == 1:
+        return segs[0]
+
+    gaps = list(padding_ms) if padding_ms is not None else [0.0] * (len(segs) - 1)
+    if len(gaps) != len(segs) - 1:
+        raise ValueError("padding_ms must have len(segments) - 1 entries")
+
+    seam_fade_ms = min(crossfade_ms, 20.0)
+    seam_fade_len_default = max(1, int(sr * seam_fade_ms / 1000.0))
+
+    result = segs[0]
+    for seg, pad_ms in zip(segs[1:], gaps):
+        if pad_ms and pad_ms > 0:
+            pad_len = int(sr * pad_ms / 1000.0)
+            gap = np.zeros(pad_len, dtype=np.float32)
+            fade_len = min(seam_fade_len_default, result.size, pad_len // 2 if pad_len > 1 else 0)
+            if fade_len > 0:
+                t = np.linspace(0.0, 1.0, fade_len, dtype=np.float32)
+                fade_out = np.cos(t * np.pi / 2.0) ** 2
+                result = result.copy()
+                result[-fade_len:] *= fade_out
+            fade_len_in = min(seam_fade_len_default, seg.size, pad_len // 2 if pad_len > 1 else 0)
+            if fade_len_in > 0:
+                t = np.linspace(0.0, 1.0, fade_len_in, dtype=np.float32)
+                fade_in = np.sin(t * np.pi / 2.0) ** 2
+                seg = seg.copy()
+                seg[:fade_len_in] *= fade_in
+            result = np.concatenate([result, gap, seg])
+        else:
+            result = crossfade_concat([result, seg], sr, crossfade_ms)
+    return result
+
+
 def crossfade_concat(
     segments: list[np.ndarray], sr: int, crossfade_ms: float = 100.0
 ) -> np.ndarray:
@@ -172,12 +264,36 @@ def stitch_segments(
     final_target_dbfs: float = -18.0,
     crossfade_ms: float = 100.0,
     final_ceiling_db: float = -1.0,
+    padding_ms: list[float] | None = None,
+    trims: list[tuple[float, float]] | None = None,
+    fades: list[tuple[float, float]] | None = None,
+    compress_params: dict | None = None,
 ) -> np.ndarray:
-    """Full pipeline: compress+normalize each segment, crossfade-join, then final limit+normalize."""
-    processed = [
-        normalize_rms(compress(seg, sr), segment_target_dbfs) for seg in segments
-    ]
-    combined = crossfade_concat(processed, sr, crossfade_ms)
+    """Full pipeline: trim, compress+normalize, fade each segment, then join and final limit+normalize.
+
+    New optional kwargs (stitch-editor support, PLAN_stitch_editor.md §3) all default to
+    None, which reproduces the original behavior exactly:
+      - trims: per-segment (start_ms, end_ms) applied before compress/normalize.
+      - compress_params: kwargs forwarded to compress(); None uses its own defaults, same
+        as calling compress(seg, sr) did before this parameter existed.
+      - fades: per-segment (fade_in_ms, fade_out_ms) applied after normalize, before joining.
+      - padding_ms: per-gap silence override; None reproduces crossfade_concat's all-crossfade
+        default via concat_with_padding (which falls back to crossfade_concat per-gap).
+    """
+    n = len(segments)
+    trims = trims or [(0.0, 0.0)] * n
+    fades = fades or [(0.0, 0.0)] * n
+    compress_kwargs = compress_params or {}
+
+    processed = []
+    for seg, (start_ms, end_ms), (fade_in_ms, fade_out_ms) in zip(segments, trims, fades):
+        clip = trim(seg, sr, start_ms, end_ms) if (start_ms or end_ms) else seg
+        clip = normalize_rms(compress(clip, sr, **compress_kwargs), segment_target_dbfs)
+        if fade_in_ms or fade_out_ms:
+            clip = apply_fades(clip, sr, fade_in_ms, fade_out_ms)
+        processed.append(clip)
+
+    combined = concat_with_padding(processed, sr, padding_ms=padding_ms, crossfade_ms=crossfade_ms)
     combined = limit_peak(combined, final_ceiling_db)
     final = normalize_rms(combined, final_target_dbfs)
     final = limit_peak(final, final_ceiling_db)

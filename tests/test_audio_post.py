@@ -6,11 +6,14 @@ import numpy as np
 
 from qwen3_tts.audio_post import (
     analyze_take,
+    apply_fades,
     compress,
+    concat_with_padding,
     crossfade_concat,
     limit_peak,
     normalize_rms,
     stitch_segments,
+    trim,
 )
 
 
@@ -124,6 +127,109 @@ class StitchSegmentsTests(unittest.TestCase):
         seg = _sine(220.0, 0.3, sr)
         final = stitch_segments([seg], sr)
         self.assertGreater(final.size, 0)
+
+
+class TrimTests(unittest.TestCase):
+    def test_trims_head_and_tail(self) -> None:
+        sr = 24000
+        seg = _sine(220.0, 1.0, sr)
+        trimmed = trim(seg, sr, start_ms=100.0, end_ms=200.0)
+        expected = seg.size - int(sr * 0.1) - int(sr * 0.2)
+        self.assertEqual(trimmed.size, expected)
+
+    def test_zero_trim_is_noop_length(self) -> None:
+        sr = 24000
+        seg = _sine(220.0, 0.3, sr)
+        trimmed = trim(seg, sr)
+        self.assertEqual(trimmed.size, seg.size)
+
+    def test_empty_input_returns_empty(self) -> None:
+        result = trim(np.zeros(0, dtype=np.float32), 24000, start_ms=50.0)
+        self.assertEqual(result.size, 0)
+
+    def test_never_goes_negative_length(self) -> None:
+        sr = 24000
+        seg = _sine(220.0, 0.05, sr)
+        trimmed = trim(seg, sr, start_ms=1000.0, end_ms=1000.0)
+        self.assertGreaterEqual(trimmed.size, 1)
+
+
+class ApplyFadesTests(unittest.TestCase):
+    def test_fade_in_starts_near_zero(self) -> None:
+        sr = 24000
+        seg = _sine(220.0, 0.5, sr, amplitude=0.8)
+        faded = apply_fades(seg, sr, fade_in_ms=100.0)
+        self.assertLess(abs(faded[0]), abs(seg[0]) + 1e-6)
+        self.assertAlmostEqual(faded[0], 0.0, places=2)
+
+    def test_fade_out_ends_near_zero(self) -> None:
+        sr = 24000
+        seg = _sine(220.0, 0.5, sr, amplitude=0.8)
+        faded = apply_fades(seg, sr, fade_out_ms=100.0)
+        self.assertAlmostEqual(faded[-1], 0.0, places=2)
+
+    def test_no_fades_is_noop(self) -> None:
+        sr = 24000
+        seg = _sine(220.0, 0.3, sr)
+        faded = apply_fades(seg, sr)
+        np.testing.assert_array_equal(faded, seg)
+
+    def test_empty_input_returns_empty(self) -> None:
+        result = apply_fades(np.zeros(0, dtype=np.float32), 24000, fade_in_ms=50.0)
+        self.assertEqual(result.size, 0)
+
+
+class ConcatWithPaddingTests(unittest.TestCase):
+    def test_no_padding_matches_crossfade_concat_length(self) -> None:
+        sr = 24000
+        segs = [_sine(220.0, 0.3, sr), _sine(330.0, 0.3, sr)]
+        padded = concat_with_padding(segs, sr, crossfade_ms=50.0)
+        crossfaded = crossfade_concat(segs, sr, crossfade_ms=50.0)
+        self.assertEqual(padded.size, crossfaded.size)
+
+    def test_padding_inserts_extra_length(self) -> None:
+        sr = 24000
+        segs = [_sine(220.0, 0.3, sr), _sine(330.0, 0.3, sr)]
+        pad_ms = 150.0
+        result = concat_with_padding(segs, sr, padding_ms=[pad_ms])
+        self.assertGreater(result.size, segs[0].size + segs[1].size)
+
+    def test_mismatched_padding_length_raises(self) -> None:
+        sr = 24000
+        segs = [_sine(220.0, 0.2, sr) for _ in range(3)]
+        with self.assertRaises(ValueError):
+            concat_with_padding(segs, sr, padding_ms=[10.0])
+
+    def test_single_segment_passthrough(self) -> None:
+        sr = 24000
+        seg = _sine(220.0, 0.3, sr)
+        result = concat_with_padding([seg], sr)
+        np.testing.assert_array_equal(result, seg)
+
+
+class StitchSegmentsExtendedTests(unittest.TestCase):
+    def test_default_kwargs_match_original_behavior(self) -> None:
+        sr = 24000
+        segs = [_sine(220.0, 0.3, sr, amplitude=0.3), _sine(330.0, 0.3, sr, amplitude=0.6)]
+        original = stitch_segments(segs, sr)
+        with_defaults = stitch_segments(
+            segs, sr, padding_ms=None, trims=None, fades=None, compress_params=None
+        )
+        np.testing.assert_array_equal(original, with_defaults)
+
+    def test_padding_ms_extends_output(self) -> None:
+        sr = 24000
+        segs = [_sine(220.0, 0.3, sr), _sine(330.0, 0.3, sr)]
+        no_pad = stitch_segments(segs, sr)
+        with_pad = stitch_segments(segs, sr, padding_ms=[200.0])
+        self.assertGreater(with_pad.size, no_pad.size)
+
+    def test_trims_reduce_output(self) -> None:
+        sr = 24000
+        segs = [_sine(220.0, 0.5, sr), _sine(330.0, 0.5, sr)]
+        untrimmed = stitch_segments(segs, sr)
+        trimmed = stitch_segments(segs, sr, trims=[(100.0, 0.0), (0.0, 100.0)])
+        self.assertLess(trimmed.size, untrimmed.size)
 
 
 class AnalyzeTakeTests(unittest.TestCase):
