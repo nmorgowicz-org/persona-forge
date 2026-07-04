@@ -2223,7 +2223,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                         onClick={() =>
                           setGuidanceScaleInput(
                             guidanceScaleInput === ''
-                              ? '2.0'
+                              ? '2.5'
                               : '',
                           )
                         }
@@ -2250,8 +2250,8 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                     step={0.1}
                     value={
                       guidanceScaleInput
-                        ? Number(guidanceScaleInput) || 2
-                        : 2
+                        ? Number(guidanceScaleInput) || 2.5
+                        : 2.5
                     }
                     onChange={(e) =>
                       setGuidanceScaleInput(
@@ -2277,7 +2277,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                         e.target.value,
                       )
                     }
-                    placeholder="2.0"
+                    placeholder="2.5"
                     className="w-14 rounded-md border border-input bg-transparent px-1.5 py-1 text-xs outline-none focus-visible:border-ring"
                   />
                 </div>
