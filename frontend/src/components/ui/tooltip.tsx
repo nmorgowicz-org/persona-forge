@@ -4,21 +4,50 @@ import { cn } from '@/lib/utils'
 
 const T = Radix.Tooltip
 
-export const TooltipRoot = T.Root
-export const TooltipTrigger = T.Trigger
-export const TooltipProvider = T.Provider
+export function Tooltip({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <T.Provider delayDuration={150}>
+      <T.Root defaultOpen={false}>
+        {children}
+      </T.Root>
+    </T.Provider>
+  )
+}
+
+export function TooltipTrigger({
+  children,
+  asChild,
+  ...props
+}: {
+  children: React.ReactNode
+  asChild?: boolean
+} & React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <T.Trigger asChild={asChild} {...props}>
+      {children}
+    </T.Trigger>
+  )
+}
 
 export function TooltipContent({
   children,
   side = 'top',
   align = 'center',
+  hidden,
   className,
 }: {
   children: React.ReactNode
   side?: 'top' | 'bottom' | 'left' | 'right'
   align?: 'center' | 'start' | 'end'
+  hidden?: boolean
   className?: string
 }) {
+  if (hidden) return null
+
   return (
     <T.Portal>
       <T.Content
@@ -36,11 +65,4 @@ export function TooltipContent({
       </T.Content>
     </T.Portal>
   )
-}
-
-// Convenience wrapper: <Tooltip.Root><Tooltip.Trigger/><Tooltip.Content/></Tooltip.Root>
-export const Tooltip = {
-  Root: TooltipRoot,
-  Trigger: TooltipTrigger,
-  Content: TooltipContent,
 }
