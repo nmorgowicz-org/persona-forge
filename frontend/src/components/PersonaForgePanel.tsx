@@ -843,6 +843,32 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     (d) => d != null,
   )
 
+  // Running tally of the currently-selected takes across the rack — same override-or-actual
+  // fallback each SegmentRackRow uses for its own duration box, summed, so there's a rough
+  // preview of the final stitched length before hitting Stitch (which itself requires every
+  // row to have a selection). Reuses the hero-take target band for coloring since a stitched
+  // rack *is* the reference clip this whole workflow is trying to land in 10-15s.
+  const segmentRackTally = useMemo(() => {
+    let totalSec = 0
+    let selectedCount = 0
+    for (const row of segmentRack) {
+      if (row.selectedTakeIndex < 0) continue
+      selectedCount += 1
+      const candidate = row.candidates[row.selectedTakeIndex]
+      const override = segmentDurations[row.segmentId] ?? null
+      const actual = candidate?.duration_sec ?? null
+      totalSec += override ?? actual ?? 0
+    }
+    return { totalSec, selectedCount }
+  }, [segmentRack, segmentDurations])
+
+  const segmentRackTallyState: 'under' | 'in-range' | 'over' =
+    segmentRackTally.totalSec < HERO_TARGET_MIN_SEC
+      ? 'under'
+      : segmentRackTally.totalSec > HERO_TARGET_MAX_SEC
+        ? 'over'
+        : 'in-range'
+
 
 
   // -- Handlers --
@@ -1411,17 +1437,13 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const handleStitch = useCallback(async () => {
     if (segmentRack.length === 0 || isStitching) return
 
-    const selectedCandidates = segmentRack.map(
-      (row) =>
-        row.candidates[row.selectedTakeIndex],
-    )
+    const selectedCandidates = segmentRack
+      .filter((row) => row.selectedTakeIndex >= 0)
+      .map((row) => row.candidates[row.selectedTakeIndex])
+      .filter((c) => c && c.candidate_id)
 
-    if (
-      selectedCandidates.some(
-        (c) => !c || !c.candidate_id,
-      )
-    ) {
-      setError('Select one take for each line first.')
+    if (selectedCandidates.length === 0) {
+      setError('Select at least one take before stitching.')
       return
     }
 
@@ -1457,21 +1479,19 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const handleSave = useCallback(async () => {
     if (segmentRack.length === 0 || isSaving) return
 
-    const segments = segmentRack.map((r) => r.text)
-
-    const selectedCandidates = segmentRack.map(
-      (row) =>
-        row.candidates[row.selectedTakeIndex],
+    const selectedRows = segmentRack.filter(
+      (row) => row.selectedTakeIndex >= 0 && row.candidates[row.selectedTakeIndex]?.candidate_id,
     )
 
-    if (
-      selectedCandidates.some(
-        (c) => !c || !c.candidate_id,
-      )
-    ) {
-      setError('Select one take for each line first.')
+    if (selectedRows.length === 0) {
+      setError('Select at least one take before saving.')
       return
     }
+
+    const segments = selectedRows.map((r) => r.text)
+    const selectedCandidates = selectedRows.map(
+      (row) => row.candidates[row.selectedTakeIndex],
+    )
 
     setIsSaving(true)
     setError(null)
@@ -1526,12 +1546,9 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     const clips: (StitchPlanClip & { durationMs?: number })[] = []
 
     for (const row of segmentRack) {
+      if (row.selectedTakeIndex < 0) continue
       const candidate = row.candidates[row.selectedTakeIndex]
-      if (!candidate || !candidate.candidate_id) {
-        setError('Select one take for each line first.')
-        ctx.close()
-        return
-      }
+      if (!candidate || !candidate.candidate_id) continue
 
       const b64 = candidate.audio_base64
       if (!b64) {
@@ -1574,7 +1591,10 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
 
     await ctx.close()
 
-    if (clips.length === 0) return
+    if (clips.length === 0) {
+      setError('Select at least one take before opening the stitch editor.')
+      return
+    }
 
     const paddingLen = Math.max(0, clips.length - 1)
     for (let i = 0; i < paddingLen; i++) {
@@ -2597,10 +2617,39 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         {/* Segment rack */}
         {segmentRack.length > 0 && (
           <div className="flex min-w-0 flex-col gap-1">
-            <div className="flex items-center justify-between gap-2">
+            <div className="sticky top-0 z-10 flex items-center justify-between gap-2 bg-card/95 py-1 backdrop-blur supports-[backdrop-filter]:bg-card/80">
               <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Segment rack
               </p>
+              <Tooltip.Root>
+                <Tooltip.Trigger asChild>
+                  <span
+                    className={cn(
+                      'rounded-full px-1.5 py-0.5 text-[9px] font-semibold tabular-nums',
+                      segmentRackTally.selectedCount === 0 &&
+                        'bg-muted text-muted-foreground',
+                      segmentRackTally.selectedCount > 0 &&
+                        segmentRackTallyState === 'in-range' &&
+                        'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+                      segmentRackTally.selectedCount > 0 &&
+                        segmentRackTallyState === 'under' &&
+                        'bg-muted text-muted-foreground',
+                      segmentRackTally.selectedCount > 0 &&
+                        segmentRackTallyState === 'over' &&
+                        'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+                    )}
+                  >
+                    {segmentRackTally.selectedCount}/{segmentRack.length} selected
+                    {segmentRackTally.selectedCount > 0 &&
+                      ` · ~${segmentRackTally.totalSec.toFixed(1)}s`}
+                  </span>
+                </Tooltip.Trigger>
+                <Tooltip.Content side="bottom">
+                  Rough total of the currently-selected takes' durations — a preview of the
+                  final stitched length. Hero-take target is {HERO_TARGET_MIN_SEC}-
+                  {HERO_TARGET_MAX_SEC}s; select a take per segment to update this.
+                </Tooltip.Content>
+              </Tooltip.Root>
             </div>
 
             <div className="flex min-w-0 flex-col gap-1 overflow-y-auto">
