@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAppStore } from '@/store'
-import { StitchEditorPanel } from '@/components/StitchTimeline'
+import { StitchEditorInline } from '@/components/StitchTimeline'
 import { AudioPlayer } from '@/components/AudioPlayer'
 import {
   listOmniVoiceSegments,
@@ -19,10 +19,8 @@ import { insertSegmentIntoStitchTimeline, insertVoiceIntoStitchTimeline } from '
 // reference voice without first running an audition. Shares the same store-backed stitch
 // plan, so switching between this page and Persona Forge's editor doesn't lose the timeline.
 export function StitchStudioPage() {
-  const setPage = useAppStore((s) => s.setPage)
   const voices = useAppStore((s) => s.voices)
   const setVoices = useAppStore((s) => s.setVoices)
-  const clips = useAppStore((s) => s.ovStitchPlanClips)
 
   const stitchedUrl = useAppStore((s) => s.ovStitchedUrl)
   const stitchedBlob = useAppStore((s) => s.ovStitchedBlob)
@@ -120,14 +118,7 @@ export function StitchStudioPage() {
         <p className="text-xs text-muted-foreground">{isSaving ? 'Saving…' : 'Rendering…'}</p>
       )}
 
-      {clips.length === 0 && (
-        <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 px-4 py-6 text-center text-sm text-muted-foreground">
-          Timeline is empty — use "Add saved segments" or "Add voice library" below to get started.
-        </div>
-      )}
-
-      <StitchEditorPanel
-        onClose={() => setPage('speak')}
+      <StitchEditorInline
         library={library}
         onInsertFromLibrary={insertFromLibrary}
         voiceLibrary={voices}

@@ -4,7 +4,15 @@ import { AnimatePresence, motion, Reorder } from 'framer-motion'
 import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play, Pause } from 'lucide-react'
 import { useAppStore, type StitchPlanClip } from '@/store'
 import { base64ToBlob, cn } from '@/lib/utils'
-import { renderStitchPlan, type StitchPlanPayload, type SegmentMeta, type VoiceMeta } from '@/lib/api'
+import {
+  renderStitchPlan,
+  getSegmentAudioBase64,
+  getVoice,
+  type StitchPlanPayload,
+  type SegmentMeta,
+  type VoiceMeta,
+} from '@/lib/api'
+import { AudioPlayer } from './AudioPlayer'
 
 /* ---------- helpers ---------- */
 
@@ -285,17 +293,37 @@ function LibraryPickerButton<T>({
   items,
   getId,
   getLabel,
+  getMeta,
+  getDurationSec,
+  getAudioBase64,
   onInsertMany,
 }: {
   label: string
   items: T[]
   getId: (item: T) => string
   getLabel: (item: T) => string
+  /** Optional secondary line under the label (accent/tags for segments, language/sample text
+   * for voices) — the whole point is to give enough context to choose without inserting blind. */
+  getMeta?: (item: T) => string | null
+  getDurationSec?: (item: T) => number | null | undefined
+  /** Lazily resolves full audio for the inline preview player — list endpoints omit audio for
+   * payload size, so this is only called once, on first preview, and cached per item. */
+  getAudioBase64?: (item: T) => Promise<string | null>
   onInsertMany: (items: T[]) => void
 }) {
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [loadingId, setLoadingId] = useState<string | null>(null)
+  const [audioCache, setAudioCache] = useState<Record<string, { url: string; blob: Blob }>>({})
+
+  useEffect(() => {
+    return () => {
+      Object.values(audioCache).forEach((a) => URL.revokeObjectURL(a.url))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase()
@@ -336,6 +364,28 @@ function LibraryPickerButton<T>({
     setFilter('')
   }
 
+  const togglePreview = async (item: T) => {
+    const id = getId(item)
+    if (expandedId === id) {
+      setExpandedId(null)
+      return
+    }
+    setExpandedId(id)
+    if (!audioCache[id] && getAudioBase64) {
+      setLoadingId(id)
+      try {
+        const b64 = await getAudioBase64(item)
+        if (b64) {
+          const blob = base64ToBlob(b64)
+          const url = URL.createObjectURL(blob)
+          setAudioCache((prev) => ({ ...prev, [id]: { url, blob } }))
+        }
+      } finally {
+        setLoadingId(null)
+      }
+    }
+  }
+
   return (
     <div className="relative">
       <button
@@ -352,7 +402,7 @@ function LibraryPickerButton<T>({
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
-            className="absolute right-0 top-9 z-30 flex max-h-72 w-80 flex-col gap-1.5 overflow-hidden rounded-lg border border-border bg-background p-2 shadow-lg"
+            className="absolute right-0 top-9 z-30 flex max-h-96 w-96 flex-col gap-1.5 overflow-hidden rounded-lg border border-border bg-background p-2 shadow-lg"
           >
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] uppercase text-muted-foreground">{label}</span>
@@ -379,19 +429,59 @@ function LibraryPickerButton<T>({
               {filtered.map((it) => {
                 const id = getId(it)
                 const checked = selected.has(id)
+                const meta = getMeta?.(it)
+                const duration = getDurationSec?.(it)
+                const isExpanded = expandedId === id
+                const cached = audioCache[id]
                 return (
-                  <label
+                  <div
                     key={id}
-                    className="flex items-center gap-2 rounded-md border border-transparent px-2 py-1 text-xs text-foreground hover:border-border hover:bg-muted"
+                    className="rounded-md border border-transparent hover:border-border hover:bg-muted"
                   >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggle(id)}
-                      className="size-3.5 shrink-0 accent-cyan-500"
-                    />
-                    <span className="truncate">{getLabel(it)}</span>
-                  </label>
+                    <label className="flex cursor-pointer items-center gap-2 px-2 py-1 text-xs text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggle(id)}
+                        className="size-3.5 shrink-0 accent-cyan-500"
+                      />
+                      {getAudioBase64 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            void togglePreview(it)
+                          }}
+                          title="Preview"
+                          className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                        >
+                          {loadingId === id ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : isExpanded ? (
+                            <Pause className="size-3.5" />
+                          ) : (
+                            <Play className="size-3.5" />
+                          )}
+                        </button>
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{getLabel(it)}</span>
+                        {meta && (
+                          <span className="block truncate text-[10px] text-muted-foreground">{meta}</span>
+                        )}
+                      </span>
+                      {duration != null && (
+                        <span className="shrink-0 text-[10px] text-muted-foreground">
+                          {duration.toFixed(1)}s
+                        </span>
+                      )}
+                    </label>
+                    {isExpanded && cached && (
+                      <div className="px-2 pb-1.5">
+                        <AudioPlayer src={cached.url} blob={cached.blob} autoPlay />
+                      </div>
+                    )}
+                  </div>
                 )
               })}
             </div>
@@ -476,6 +566,9 @@ export const StitchTimeline = memo(function StitchTimeline({
               items={library}
               getId={(seg) => seg.segment_id}
               getLabel={(seg) => seg.text}
+              getMeta={(seg) => [seg.language, ...(seg.tags ?? [])].filter(Boolean).join(' · ') || null}
+              getDurationSec={(seg) => seg.duration_sec ?? null}
+              getAudioBase64={async (seg) => seg.audio_base64 ?? (await getSegmentAudioBase64(seg.segment_id))}
               onInsertMany={(segs) => segs.forEach(onInsertFromLibrary)}
             />
           )}
@@ -485,6 +578,12 @@ export const StitchTimeline = memo(function StitchTimeline({
               items={voiceLibrary!}
               getId={(v) => v.voice_id}
               getLabel={(v) => v.description || v.voice_id}
+              getMeta={(v) =>
+                [v.language, v.sample_text ? `"${v.sample_text.slice(0, 60)}${v.sample_text.length > 60 ? '…' : ''}"` : null]
+                  .filter(Boolean)
+                  .join(' · ') || null
+              }
+              getAudioBase64={async (v) => v.audio_base64 ?? (await getVoice(v.voice_id)).audio_base64 ?? null}
               onInsertMany={(vs) => vs.forEach(onInsertVoiceFromLibrary!)}
             />
           )}
@@ -670,7 +769,23 @@ function SliderField({
 
 /* ---------- Editor shell ---------- */
 
-export function StitchEditorPanel({
+interface StitchEditorBodyProps {
+  onRender: (plan: StitchPlanPayload) => Promise<void>
+  onSave: (plan: StitchPlanPayload) => Promise<void>
+  library: SegmentMeta[]
+  onInsertFromLibrary: (seg: SegmentMeta) => void
+  voiceLibrary?: VoiceMeta[]
+  onInsertVoiceFromLibrary?: (voice: VoiceMeta) => void
+  /** Renders a close button in the header when set — the standalone Stitch Studio page has
+   * nothing to "close" back to, so it omits this. */
+  onClose?: () => void
+}
+
+// Shared editor internals (timeline + DSP controls + live preview + render/save footer), with
+// no opinion on how it's framed — StitchEditorPanel wraps it in a full-screen modal (used from
+// Persona Forge's OmniVoice flow, popping over an existing workflow); StitchEditorInline renders
+// it as plain page content (used by the standalone Stitch Studio page).
+function StitchEditorBody({
   onClose,
   onRender,
   onSave,
@@ -678,15 +793,7 @@ export function StitchEditorPanel({
   onInsertFromLibrary,
   voiceLibrary,
   onInsertVoiceFromLibrary,
-}: {
-  onClose: () => void
-  onRender: (plan: StitchPlanPayload) => Promise<void>
-  onSave: (plan: StitchPlanPayload) => Promise<void>
-  library: SegmentMeta[]
-  onInsertFromLibrary: (seg: SegmentMeta) => void
-  voiceLibrary?: VoiceMeta[]
-  onInsertVoiceFromLibrary?: (voice: VoiceMeta) => void
-}) {
+}: StitchEditorBodyProps) {
   const clips = useAppStore((s) => s.ovStitchPlanClips)
   const paddingMs = useAppStore((s) => s.ovStitchPlanPaddingMs)
   const dsp = useAppStore((s) => s.ovStitchPlanDsp)
@@ -810,6 +917,80 @@ export function StitchEditorPanel({
     return Math.max(1, sum)
   }, [clips, paddingMs])
 
+  return (
+    <>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <span className="text-sm font-semibold uppercase tracking-wider text-foreground">Arrange your reference clip</span>
+          <span className="text-xs text-muted-foreground/70">{clips.length} clip{clips.length !== 1 ? 's' : ''}</span>
+          {staleFlags && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-400">
+              changes pending
+            </span>
+          )}
+        </div>
+        {onClose && (
+          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="Close editor">
+            <X className="size-4" />
+          </button>
+        )}
+      </div>
+
+      <StitchTimeline
+        totalDurationMs={totalMs}
+        isPreviewStale={staleFlags}
+        library={library}
+        onInsertFromLibrary={onInsertFromLibrary}
+        voiceLibrary={voiceLibrary}
+        onInsertVoiceFromLibrary={onInsertVoiceFromLibrary}
+      />
+      <StitchDspControls open={showDsp} onToggle={() => setShowDsp((v) => !v)} />
+
+      {previewUrl && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold uppercase text-muted-foreground">Live preview</span>
+              {isRendering && (
+                <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <Loader2 className="size-3 animate-spin" />
+                  rendering…
+                </span>
+              )}
+            </div>
+          </div>
+          <PreviewPlayer src={previewUrl} />
+        </div>
+      )}
+
+      <div className="mt-1 flex items-center justify-between border-t border-border/60 pt-3">
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={handleRender}
+            disabled={isRendering || clips.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[hsl(190,90%,50%)] to-[hsl(210,90%,45%)] px-4 py-1.5 text-xs font-medium text-background shadow-[0_4px_15px_rgba(34,211,238,0.25)] transition-all hover:scale-[1.02] hover:shadow-[0_8px_25px_rgba(34,211,238,0.35)] disabled:opacity-50 disabled:shadow-none"
+          >
+            <Play className="size-3.5" />
+            {isRendering ? 'Updating…' : 'Update preview'}
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isRendering || clips.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-1.5 text-xs font-medium text-foreground transition-all hover:bg-muted disabled:opacity-50"
+            title="This will be used as a reusable cloning source for text-to-speech."
+          >
+            Save as reference voice
+          </button>
+        </div>
+        <div className="text-[10px] text-muted-foreground">{(totalMs / 1000).toFixed(1)}s total</div>
+      </div>
+    </>
+  )
+}
+
+export function StitchEditorPanel(props: StitchEditorBodyProps & { onClose: () => void }) {
   return createPortal(
     <motion.div
       initial={{ opacity: 0 }}
@@ -817,7 +998,7 @@ export function StitchEditorPanel({
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose()
+        if (e.target === e.currentTarget) props.onClose()
       }}
     >
       <motion.div
@@ -826,74 +1007,20 @@ export function StitchEditorPanel({
         exit={{ opacity: 0, y: 12, scale: 0.98 }}
         className="flex max-h-[88vh] w-full max-w-5xl flex-col gap-4 overflow-y-auto rounded-2xl border border-border bg-background px-6 py-5 shadow-2xl"
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <span className="text-sm font-semibold uppercase tracking-wider text-foreground">Arrange your reference clip</span>
-            <span className="text-xs text-muted-foreground/70">{clips.length} clip{clips.length !== 1 ? 's' : ''}</span>
-            {staleFlags && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-400">
-                changes pending
-              </span>
-            )}
-          </div>
-          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="Close editor">
-            <X className="size-4" />
-          </button>
-        </div>
-
-        <StitchTimeline
-          totalDurationMs={totalMs}
-          isPreviewStale={staleFlags}
-          library={library}
-          onInsertFromLibrary={onInsertFromLibrary}
-          voiceLibrary={voiceLibrary}
-          onInsertVoiceFromLibrary={onInsertVoiceFromLibrary}
-        />
-        <StitchDspControls open={showDsp} onToggle={() => setShowDsp((v) => !v)} />
-
-        {previewUrl && (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold uppercase text-muted-foreground">Live preview</span>
-                {isRendering && (
-                  <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                    <Loader2 className="size-3 animate-spin" />
-                    rendering…
-                  </span>
-                )}
-              </div>
-            </div>
-            <PreviewPlayer src={previewUrl} />
-          </div>
-        )}
-
-        <div className="mt-1 flex items-center justify-between border-t border-border/60 pt-3">
-          <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={handleRender}
-              disabled={isRendering || clips.length === 0}
-              className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[hsl(190,90%,50%)] to-[hsl(210,90%,45%)] px-4 py-1.5 text-xs font-medium text-background shadow-[0_4px_15px_rgba(34,211,238,0.25)] transition-all hover:scale-[1.02] hover:shadow-[0_8px_25px_rgba(34,211,238,0.35)] disabled:opacity-50 disabled:shadow-none"
-            >
-              <Play className="size-3.5" />
-              {isRendering ? 'Updating…' : 'Update preview'}
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={isRendering || clips.length === 0}
-              className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-1.5 text-xs font-medium text-foreground transition-all hover:bg-muted disabled:opacity-50"
-              title="This will be used as a reusable cloning source for text-to-speech."
-            >
-              Save as reference voice
-            </button>
-          </div>
-          <div className="text-[10px] text-muted-foreground">{(totalMs / 1000).toFixed(1)}s total</div>
-        </div>
+        <StitchEditorBody {...props} />
       </motion.div>
     </motion.div>,
     document.body,
+  )
+}
+
+// Plain page content, no portal/backdrop/close button — used by the standalone Stitch Studio
+// page, which is the editor's home rather than something popping over another workflow.
+export function StitchEditorInline(props: Omit<StitchEditorBodyProps, 'onClose'>) {
+  return (
+    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-background/50 px-6 py-5">
+      <StitchEditorBody {...props} />
+    </div>
   )
 }
 
