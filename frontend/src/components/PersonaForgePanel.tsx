@@ -77,17 +77,44 @@ function ClipPlayer({
   className?: string
   autoPlay?: boolean
 }) {
-  const src = useMemo(() => {
-    if (audioUrl) return audioUrl
-    if (audioBase64) return `data:audio/wav;base64,${audioBase64}`
-    return null
-  }, [audioUrl, audioBase64])
+  const [blob, setBlob] = useState<Blob | null>(null)
+  const [src, setSrc] = useState<string | null>(null)
 
-  const blob = useMemo(() => {
-    if (audioUrl) return null
-    if (audioBase64) return base64ToBlob(audioBase64)
-    return null
-  }, [audioBase64])
+  useEffect(() => {
+    if (audioBase64 && !audioUrl) {
+      const b = base64ToBlob(audioBase64)
+      setBlob(b)
+      setSrc(`data:audio/wav;base64,${audioBase64}`)
+      return
+    }
+    if (audioUrl) {
+      let cancelled = false
+      fetch(audioUrl)
+        .then((r) => {
+          if (!r.ok || cancelled) return
+          return r.blob()
+        })
+        .then((b) => {
+          if (b && !cancelled) {
+            setBlob(b)
+            setSrc(URL.createObjectURL(b))
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setSrc(audioUrl)
+        })
+      return () => {
+        cancelled = true
+      }
+    }
+  }, [audioBase64, audioUrl])
+
+  useEffect(() => {
+    const url = src
+    return () => {
+      if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
+    }
+  }, [src])
 
   if (!src) return null
 
