@@ -155,6 +155,9 @@ export interface OmniVoiceAuditionParams {
   durations?: (number | null)[]
   /** When false, disables trailing-silence trimming post-processing. */
   postprocessOutput?: boolean | null
+  /** Overrides the ASR match-score acceptance threshold [0-1] for this job; null/omitted
+   * uses the server's env-var defaults (word-count-based short/long thresholds). */
+  minMatchScore?: number | null
 }
 
 export interface OmniVoiceCandidate {
@@ -225,6 +228,7 @@ export async function auditionOmniVoiceStreaming(
       diverse_candidates: params.diverseCandidates ?? undefined,
       durations: params.durations ?? undefined,
       postprocess_output: params.postprocessOutput ?? undefined,
+      min_match_score: params.minMatchScore ?? undefined,
     }),
   })
   if (!res.ok) throw new Error(await readError(res))

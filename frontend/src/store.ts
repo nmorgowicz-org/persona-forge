@@ -124,6 +124,7 @@ interface StoreState {
   ovSpeedInput: string
   ovGuidanceScaleInput: string
   ovDiverseCandidates: boolean
+  ovMinMatchScore: number | null
   ovScriptText: string
   ovSegmentRack: SegmentRackRow[]
   ovIsRackAuditioning: boolean
@@ -168,6 +169,7 @@ interface StoreState {
   setOvSpeedInput: (v: string) => void
   setOvGuidanceScaleInput: (v: string) => void
   setOvDiverseCandidates: (v: boolean) => void
+  setOvMinMatchScore: (v: number | null) => void
   setOvScriptText: (
     updater: string | ((prev: string) => string),
   ) => void
@@ -319,6 +321,7 @@ export const useAppStore = create<StoreState>((set) => ({
   ovSpeedInput: '',
   ovGuidanceScaleInput: '',
   ovDiverseCandidates: true,
+  ovMinMatchScore: null,
   ovScriptText: '',
   ovSegmentRack: [],
   ovIsRackAuditioning: false,
@@ -367,6 +370,8 @@ export const useAppStore = create<StoreState>((set) => ({
     set({ ovGuidanceScaleInput: v }),
   setOvDiverseCandidates: (v) =>
     set({ ovDiverseCandidates: v }),
+  setOvMinMatchScore: (v) =>
+    set({ ovMinMatchScore: v }),
   setOvScriptText: (updater) =>
     set((s) => ({
       ovScriptText:

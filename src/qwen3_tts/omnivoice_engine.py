@@ -137,6 +137,7 @@ def run_omnivoice_job(
     guidance_scale: float | None = None,
     diverse_candidates: bool = False,
     postprocess_output: bool | None = None,
+    min_match_score: float | None = None,
     on_candidate_complete=None,
 ) -> list[list[tuple[Any, int, bool, str, str, float | None]]]:
     """Swap to OmniVoice and generate every segment x candidate. Leaves OmniVoice loaded on
@@ -355,13 +356,19 @@ def run_omnivoice_job(
                                 last_transcript,
                             )
 
-                            # Choose threshold based on reference word count
-                            ref_words = len(text.split())
-                            min_score = (
-                                _MIN_MATCH_SCORE_SHORT
-                                if ref_words <= _MAX_WORDS_SHORT
-                                else _MIN_MATCH_SCORE_LONG
-                            )
+                            # Choose threshold based on reference word count, unless the
+                            # caller passed an explicit per-request override (UI slider).
+                            # The 0.6 hard floor below is unaffected by this override — it's
+                            # an absolute sanity floor, not the tunable knob.
+                            if min_match_score is not None:
+                                min_score = min_match_score
+                            else:
+                                ref_words = len(text.split())
+                                min_score = (
+                                    _MIN_MATCH_SCORE_SHORT
+                                    if ref_words <= _MAX_WORDS_SHORT
+                                    else _MIN_MATCH_SCORE_LONG
+                                )
 
                             # Decide if this candidate is OK based on match + logprob
                             ok = True

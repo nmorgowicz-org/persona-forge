@@ -268,7 +268,14 @@ function SegmentRackRow({
               className="w-full min-w-0 rounded-md border border-input bg-transparent px-2 py-0.5 text-[10px] outline-none focus-visible:border-ring"
             />
           ) : (
-            <span className="block truncate text-[10px]">
+            <span
+              onClick={() => {
+                setEditing(true)
+                setDraft(row.text)
+              }}
+              className="block cursor-text truncate text-[10px] hover:text-foreground"
+              title="Click to edit"
+            >
               {row.text}
             </span>
           )}
@@ -490,6 +497,9 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const diverseCandidates = useAppStore(
     (s) => s.ovDiverseCandidates,
   )
+  const minMatchScore = useAppStore(
+    (s) => s.ovMinMatchScore,
+  )
   const scriptText = useAppStore((s) => s.ovScriptText)
   const segmentRack = useAppStore((s) => s.ovSegmentRack)
   const isRackAuditioning = useAppStore(
@@ -549,6 +559,9 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   )
   const setDiverseCandidates = useAppStore(
     (s) => s.setOvDiverseCandidates,
+  )
+  const setMinMatchScore = useAppStore(
+    (s) => s.setOvMinMatchScore,
   )
   const setScriptText = useAppStore((s) => s.setOvScriptText)
   const setSegmentRack = useAppStore(
@@ -888,6 +901,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
             diverseCandidates,
             durations,
             postprocessOutput: postProcess || null,
+            minMatchScore,
           })
 
         setCurrentJobId(job_id)
@@ -1017,6 +1031,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     speedInput,
     guidanceScaleInput,
     diverseCandidates,
+    minMatchScore,
     segmentDurations,
     postProcess,
     setIsRackAuditioning,
@@ -1098,6 +1113,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
             diverseCandidates,
             durations: [segDuration],
             postprocessOutput: postProcess || null,
+            minMatchScore,
           })
 
         setCurrentJobId(job_id)
@@ -1203,6 +1219,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       speedInput,
       guidanceScaleInput,
       diverseCandidates,
+      minMatchScore,
       segmentDurations,
       postProcess,
       setIsRackAuditioning,
@@ -1972,6 +1989,93 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                 </button>
               </div>
 
+              {/* Match confidence threshold */}
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-3">
+                  <label className="flex min-w-[110px] items-center gap-1 text-[10px] text-muted-foreground">
+                    <span>
+                      Match confidence
+                      <InfoIcon text="Minimum whisper-transcript match score a candidate must hit to avoid being flagged. Lower = more lenient (fewer retries, more borderline takes pass); higher = stricter. Auto uses word-count-based defaults." />
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMinMatchScore(
+                        minMatchScore === null
+                          ? 0.75
+                          : null,
+                      )
+                    }
+                    className={cn(
+                      'ml-1 inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[9px] font-medium transition-colors',
+                      minMatchScore === null
+                        ? 'border-primary/60 bg-primary/10 text-primary'
+                        : 'bg-muted text-muted-foreground hover:bg-muted/80',
+                    )}
+                  >
+                    Auto
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={0.95}
+                    step={0.01}
+                    value={minMatchScore ?? 0.75}
+                    onChange={(e) =>
+                      setMinMatchScore(
+                        Number(e.target.value),
+                      )
+                    }
+                    className="flex-1 accent-primary"
+                  />
+                  <span className="w-10 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">
+                    {minMatchScore === null
+                      ? '—'
+                      : minMatchScore.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Autoplay takes */}
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <span>
+                    Autoplay takes
+                    <InfoIcon text="Automatically plays each take's audio as soon as it's selected or finishes rendering." />
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={
+                    autoplayTakes
+                  }
+                  onClick={() =>
+                    setAutoplayTakes(
+                      !autoplayTakes,
+                    )
+                  }
+                  className={cn(
+                    'relative inline-flex h-5 w-9 cursor-pointer rounded-full border border-border transition-colors',
+                    autoplayTakes
+                      ? 'bg-primary'
+                      : 'bg-muted',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'absolute top-[3px] left-[3px] h-3.5 w-3.5 rounded-full bg-background shadow transition-transform',
+                      autoplayTakes
+                        ? 'translate-x-4'
+                        : 'translate-x-0',
+                    )}
+                  />
+                </button>
+              </div>
+
               {/* Post-process toggle */}
               <div className="flex items-center justify-between">
                 <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
@@ -2142,18 +2246,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
               <p className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Segment rack
               </p>
-              <button
-                type="button"
-                onClick={() => setAutoplayTakes(!autoplayTakes)}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-full border border-border/90 px-2 py-0.5 text-[9px] font-medium transition-colors",
-                  autoplayTakes
-                    ? "border-primary/60 bg-primary/10 text-primary"
-                    : "bg-muted/80 text-muted-foreground",
-                )}
-              >
-                {autoplayTakes ? 'Autoplay takes: On' : 'Autoplay takes: Off'}
-              </button>
             </div>
 
             <div className="flex min-w-0 flex-col gap-1 overflow-y-auto">

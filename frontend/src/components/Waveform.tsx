@@ -79,6 +79,12 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
             text: formatTime(t),
           })
         }
+        // Always show the clip's exact total duration at the far right, even if
+        // the last evenly-spaced tick landed short of it.
+        const lastLabel = labels[labels.length - 1]
+        if (!lastLabel || lastLabel.pos < 99.5) {
+          labels.push({ pos: 100, text: formatTime(dur) })
+        }
         return labels
       })()
     : null
@@ -153,7 +159,10 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
           {ticks.map((t, i) => (
             <span
               key={i}
-              className="absolute -bottom-0 -translate-x-1/2 text-[9px] font-mono text-muted-foreground/50"
+              className={cn(
+                'absolute -bottom-0 text-[9px] font-mono text-muted-foreground/50',
+                t.pos >= 99.5 ? '-translate-x-full' : '-translate-x-1/2',
+              )}
               style={{ left: `${t.pos}%` }}
             >
               {t.text}

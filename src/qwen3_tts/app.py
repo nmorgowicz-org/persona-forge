@@ -365,6 +365,7 @@ def _dispatch_audition_jobs():
                 guidance_scale,
                 diverse_candidates,
                 postprocess_output,
+                min_match_score,
             ) = params
 
             def _run_job(job_id, job):
@@ -382,6 +383,7 @@ def _dispatch_audition_jobs():
                         guidance_scale,
                         diverse_candidates,
                         postprocess_output=postprocess_output,
+                        min_match_score=min_match_score,
                         on_candidate_complete=_candidate_callback_factory(job_id),
                     ).result(timeout=1800)
                     with _OV_AUDITION_JOBS_LOCK:
@@ -526,6 +528,12 @@ def omnivoice_audition():
     if postprocess_output is not None and not isinstance(postprocess_output, bool):
         return jsonify({"error": "postprocess_output must be a boolean"}), 400
 
+    min_match_score = data.get("min_match_score")
+    if min_match_score is not None:
+        if not isinstance(min_match_score, (int, float)):
+            return jsonify({"error": "min_match_score must be a number"}), 400
+        min_match_score = max(0.0, min(1.0, float(min_match_score)))
+
     job_id = uuid.uuid4().hex
 
     # Decide whether we can run immediately or must queue.
@@ -556,6 +564,7 @@ def omnivoice_audition():
                 guidance_scale,
                 diverse_candidates,
                 postprocess_output,
+                min_match_score,
             ),
         }
 
@@ -576,6 +585,7 @@ def omnivoice_audition():
                     guidance_scale,
                     diverse_candidates,
                     postprocess_output=postprocess_output,
+                    min_match_score=min_match_score,
                     on_candidate_complete=_candidate_callback_factory(job_id),
                 ).result(timeout=1800)
                 with _OV_AUDITION_JOBS_LOCK:
