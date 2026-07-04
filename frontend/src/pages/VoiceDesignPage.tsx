@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { VoiceDesignPanel } from '@/components/VoiceDesignPanel'
-import { PersonaForgePanel } from '@/components/PersonaForgePanel'
+import { OmniVoicePanel } from '@/components/OmniVoicePanel'
 import { EngineSelector } from '@/components/EngineSelector'
 import { useAppStore, type EditingVoice } from '@/store'
 import { listVoices } from '@/lib/api'
@@ -76,9 +76,9 @@ export function VoiceDesignPage() {
         ) : (
           // Deliberately does not auto-jump to Speak like VoiceDesignPanel's onVoiceCreated
           // does above — auditioning register/accent variants is expected to take several
-          // save attempts in a row (see PersonaForgePanel), not a single generate-then-done
+          // save attempts in a row (see OmniVoicePanel), not a single generate-then-done
           // flow, so staying put after a save is the less disruptive default.
-          <PersonaForgePanel
+          <OmniVoicePanel
             onVoiceCreated={(newVoiceId) => {
               setVoiceId(newVoiceId)
               refreshVoices()

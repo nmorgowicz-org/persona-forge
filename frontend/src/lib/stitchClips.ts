@@ -1,5 +1,5 @@
 // Shared "insert a library item into the stitch timeline" logic, used by both
-// PersonaForgePanel's stitch editor entry point and the standalone Stitch Studio page.
+// OmniVoicePanel's stitch editor entry point and the standalone Stitch Studio page.
 import { useAppStore, type StitchPlanClip } from '@/store'
 import { getSegmentAudioBase64, getVoice, type SegmentMeta, type VoiceMeta } from '@/lib/api'
 

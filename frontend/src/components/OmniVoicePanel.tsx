@@ -74,11 +74,11 @@ function formatEta(seconds: number | null): string {
 }
 
 
-interface PersonaForgePanelProps {
+interface OmniVoicePanelProps {
   onVoiceCreated?: (voiceId: string) => void
 }
 
-export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
+export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
   // -- State from store --
   const selections = useAppStore((s) => s.ovSelections)
   const candidatesPerSegment = useAppStore(

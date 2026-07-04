@@ -198,7 +198,7 @@ manual test: tune DSP, save preset, reload page, reapply preset, confirm identic
 **Problem:** ASR-confidence data (`whisper_transcript`, `match_score`, computed via
 `asr_check.py`'s fuzzy-match scoring against `ASR_MIN_MATCH_SHORT=0.70`/`ASR_MIN_MATCH_LONG=0.80`
 thresholds) is already computed and durably stored **per segment**, but is only ever shown
-transiently during generation (`TakeDebugButton`, PersonaForgePanel) — never surfaced again once a
+transiently during generation (`TakeDebugButton`, OmniVoicePanel) — never surfaced again once a
 segment is locked in or a voice is saved from it. Voices themselves have no direct quality signal.
 
 **Backend:** no new computation needed for the segment-level signal (already stored) — just a new
@@ -214,7 +214,7 @@ match_score at all — either leave health "N/A" for those (simplest, honest) or
 before building, don't assume).
 
 **Frontend:** a small badge on `VoiceCard` (reusing the same color-coding thresholds already
-defined in `TakeDebugButton`, `PersonaForgePanel.tsx` ~lines 136-143) showing aggregate confidence
+defined in `TakeDebugButton`, `OmniVoicePanel.tsx` ~lines 136-143) showing aggregate confidence
 for stitch_plan-based voices; clicking it expands the per-clip breakdown (which segment scored
 what) — this doubles as a discovery mechanism for "which segment should I re-take" without leaving
 the Voice Library. A dedicated "dashboard" page/view (sortable table: voice, avg confidence, #
@@ -298,7 +298,7 @@ should copy this template rather than inventing a new visual language.
   `VoiceAudioAutoPlayer`'s loading state) but a first-load of the Voice Library or Stitch Studio
   with zero content just shows nothing. A simple "No voices yet — build one in Persona Forge" empty
   state with a CTA button is cheap and reads as more finished.
-- **Native `window.confirm()` for destructive actions** — `PersonaForgePanel.tsx:1677`,
+- **Native `window.confirm()` for destructive actions** — `OmniVoicePanel.tsx:1677`,
   `VoiceLibraryPage.tsx:507`, `VoiceLibraryPage.tsx:521` all pop the raw unstyled browser confirm
   dialog for delete-voice/delete-segment. It's the single most jarring visual break in the app —
   no theming, no animation, looks like a different program. `components/ui/dialog.tsx` (shadcn over
@@ -313,7 +313,7 @@ should copy this template rather than inventing a new visual language.
   feedback across every page in one pass rather than each page inventing its own inline message.
 
 ### Larger investment (flag, don't block the roadmap on it)
-- **Status: partially done.** `PersonaForgePanel.tsx` was ~3,100 lines mixing generation, audition,
+- **Status: partially done.** `OmniVoicePanel.tsx` was ~3,100 lines mixing generation, audition,
   segment rack, and the stitch-editor trigger in one file. `ClipPlayer`, `InfoIcon`,
   `TakeDebugButton`, `SegmentRackRow`, `ChipSection`, and `AccentChipPanel` (the chip-based instruct
   composer) have been extracted into `frontend/src/components/OmniVoice/` (named for the engine
@@ -346,7 +346,7 @@ should copy this template rather than inventing a new visual language.
 2. §2 (subtitle export) — nearly free, no audio/model risk, good standalone win.
 3. §4 (DSP presets) — small, self-contained, reuses an existing UI pattern.
 4. §5 (voice health dashboard, per-card badge only) — aggregation-only, low risk.
-5. Finish the `PersonaForgePanel.tsx` split (prep work, not user-visible; the easy extractions are
+5. Finish the `OmniVoicePanel.tsx` split (prep work, not user-visible; the easy extractions are
    already done, see §8's "Larger investment" note) — do before §3 starts, not after.
 6. §3 (multi-speaker script mode) — largest item, deliver in its own sub-phases (parse+assign UI →
    real rendering → per-line re-take/waveform).
