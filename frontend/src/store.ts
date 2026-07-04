@@ -75,6 +75,7 @@ interface StoreState {
   page: Page
   theme: Theme
   modelLoaded: boolean
+  serviceStarted: boolean
   loadingMessage: string | null
   text: string
   voiceId: string | null
@@ -89,6 +90,7 @@ interface StoreState {
   setPage: (page: Page) => void
   setTheme: (theme: Theme) => void
   setModelLoaded: (v: boolean) => void
+  setServiceStarted: (v: boolean) => void
   setLoadingMessage: (v: string | null) => void
   setText: (text: string) => void
   setVoiceId: (voiceId: string | null) => void
@@ -267,6 +269,7 @@ export const useAppStore = create<StoreState>((set) => ({
   page: 'speak',
   theme: initialTheme,
   modelLoaded: false,
+  serviceStarted: false,
   loadingMessage: null,
   text: '',
   voiceId: null,
@@ -284,6 +287,7 @@ export const useAppStore = create<StoreState>((set) => ({
     set({ theme })
   },
   setModelLoaded: (modelLoaded) => set({ modelLoaded }),
+  setServiceStarted: (serviceStarted) => set({ serviceStarted }),
   setLoadingMessage: (loadingMessage) => set({ loadingMessage }),
   setText: (text) => set({ text }),
   setVoiceId: (voiceId) => set({ voiceId }),
@@ -537,7 +541,10 @@ export const useAppStore = create<StoreState>((set) => ({
 
 const PROGRESS_POLL_MS = 700
 
-// Model-loading poller: runs until model_loaded is true.
+// Model-loading poller: runs at 1s until the service has started at least once (true cold
+// boot), then backs off to a slow keep-alive poll — service_started never goes back to false,
+// but model_loaded can (idle-unload), and later requests reload it lazily/transparently, so
+// there's no need to keep hammering /health once we've seen the service come up once.
 ;(async () => {
   async function poll() {
     try {
@@ -547,6 +554,9 @@ const PROGRESS_POLL_MS = 700
       const store = useAppStore.getState()
       if (data.model_loaded !== store.modelLoaded) {
         store.setModelLoaded(Boolean(data.model_loaded))
+      }
+      if (Boolean(data.service_started) !== store.serviceStarted) {
+        store.setServiceStarted(Boolean(data.service_started))
       }
       if (data.loading_message !== store.loadingMessage) {
         store.setLoadingMessage(data.loading_message || null)
@@ -559,10 +569,10 @@ const PROGRESS_POLL_MS = 700
   // First fetch immediately
   await poll()
 
-  // Then poll every second until model is loaded
+  // Then poll every second until the service has started at least once
   const interval = setInterval(() => {
     const store = useAppStore.getState()
-    if (store.modelLoaded) {
+    if (store.serviceStarted) {
       clearInterval(interval)
       return
     }

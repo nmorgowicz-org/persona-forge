@@ -120,6 +120,9 @@ export async function deleteVoice(voiceId: string): Promise<void> {
 export interface HealthState {
   status: string
   model_loaded: boolean
+  // True forever after the first successful load, even through later idle-unload cycles —
+  // distinguishes true cold-boot loading from a transparent lazy-reload-on-next-request idle.
+  service_started?: boolean
   swap_in_progress: boolean
   backend: string
   model: string

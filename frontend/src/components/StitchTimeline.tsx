@@ -171,7 +171,7 @@ function StitchTimelineClip({
         {fadeOverlay('right', clip.fadeOutMs)}
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1.5">
         <MsStepper label="Trim start" value={clip.trimStartMs} min={0} max={durMs ?? 0} step={10} onChange={(v) => onUpdate(clip.clipId, { trimStartMs: clampTrimStart(v) })} />
         <MsStepper label="Trim end" value={clip.trimEndMs} min={0} max={durMs ?? 0} step={10} onChange={(v) => onUpdate(clip.clipId, { trimEndMs: clampTrimEnd(v) })} />
         <MsStepper label="Fade in" value={clip.fadeInMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeInMs: clampFade(v) })} />
@@ -220,10 +220,10 @@ function MsStepper({
   compact?: boolean
 }) {
   return (
-    <div className={cn('inline-flex items-center gap-1', compact && 'gap-0.5')} title={label}>
-      {!compact && <span className="shrink-0 text-[10px] uppercase text-muted-foreground/70">{label}</span>}
+    <div className={cn('flex min-w-0 items-center gap-1', compact && 'gap-0.5')} title={label}>
+      {!compact && <span className="min-w-0 flex-1 truncate text-[10px] uppercase text-muted-foreground/70">{label}</span>}
       <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" onClick={() => onChange(Math.max(min, value - step))}>−</button>
-      <span className="inline-flex min-w-[32px] justify-center text-xs font-mono tabular-nums text-foreground">{value}</span>
+      <span className="inline-flex min-w-[28px] shrink-0 justify-center text-xs font-mono tabular-nums text-foreground">{value}</span>
       <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" onClick={() => onChange(Math.min(max, value + step))}>+</button>
     </div>
   )
@@ -394,7 +394,7 @@ export const StitchTimeline = memo(function StitchTimeline({
               <Reorder.Item
                 value={clip}
                 className={cn('group relative flex flex-col', i > 0 && 'ml-3')}
-                style={{ flex: `${Math.max(300, clipEffectiveDurationMs(clip))} 0 auto`, minWidth: 140 }}
+                style={{ flex: `${Math.max(300, clipEffectiveDurationMs(clip))} 0 auto`, minWidth: 170 }}
               >
                 {/* Keyboard-accessible reorder buttons */}
                 <div className="absolute -left-5 top-6 flex flex-col gap-0.5 opacity-40 group-hover:opacity-100 z-10">

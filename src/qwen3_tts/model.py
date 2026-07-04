@@ -478,6 +478,10 @@ def health_state() -> dict[str, Any]:
     base = {
         "status": "ok",
         "model_loaded": model is not None,
+        # Distinct from model_loaded: stays true forever after the first successful load,
+        # even through later idle-unload cycles. Lets callers tell "never loaded yet, please
+        # wait" apart from "idle-unloaded, will lazy-reload transparently on next request".
+        "service_started": _service_started,
         "process_rss_mib": _process_rss_mib(),
         "idle_unload_seconds": idle_unload_seconds,
         "backend": TTS_BACKEND,
