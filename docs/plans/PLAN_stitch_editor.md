@@ -3,7 +3,7 @@
 Status (2026-07-04): Part A ("Persona Forge polish" items, see bottom
 section) is **done and deployed to dockermisc1**. Part B (the stitch editor
 itself, backend + frontend, steps 1-7 below) is in progress:
-- **Steps 1-6 done** (backend + frontend v1-v3, not yet deployed):
+- **Steps 1-7 done** (backend + frontend, not yet deployed):
   - Step 1: `audio_post.py` primitives (`trim`, `apply_fades`, `concat_with_padding`,
     extended `stitch_segments` kwargs) — unit-tested (34/34 in
     `tests/test_audio_post.py`, including an explicit
@@ -20,7 +20,9 @@ itself, backend + frontend, steps 1-7 below) is in progress:
   - Step 6: Frontend v3 — fade-in/out per clip, DSP controls panel
     (segment/final target, ceiling, crossfade, compression
     threshold/ratio).
-- Step 7 (drag-and-drop reorder, insert from library) is a fast-follow, not yet started.
+  - Step 7: Drag-and-drop reorder (framer-motion Reorder.Group/Item),
+    "Add from library" dropdown in timeline header to insert
+    SegmentMeta-based clips at end of timeline.
 Serves as both the implementation plan and the handoff doc for this feature.
 
 ## Context / motivation
