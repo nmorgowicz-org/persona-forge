@@ -20,9 +20,15 @@ import {
 } from '@/lib/api'
 import {
   ACCENT_BANK,
+  ESTIMATED_WORDS_PER_SECOND,
+  FEATURE_INFO,
+  HERO_TARGET_MAX_SEC,
+  HERO_TARGET_MIN_SEC,
+  buildHeroTake,
   type AccentBankEntry,
   type ShowcaseSentence,
 } from '@/lib/accentBank'
+import { AccentBank } from '@/components/AccentBank'
 import {
   ACCENTS,
   AGES,
@@ -42,6 +48,13 @@ import * as Tooltip from '@/components/ui/tooltip'
 import { StitchEditorPanel } from '@/components/StitchTimeline'
 
 const DEFAULT_ACCENT = ACCENT_BANK[0] ?? null
+
+// Per-segment duration target bounds. Was capped at 4s, but nick got a successful, natural
+// take noticeably longer than that (2026-07-04) — the cap was just a UI convention, not a real
+// model/backend limit (omnivoice_engine forwards `duration` straight to the model, no server-
+// side clamp) — so it's raised to give slower/pausier deliveries room without hitting a wall.
+const SEGMENT_DURATION_MIN_SEC = 0.5
+const SEGMENT_DURATION_MAX_SEC = 7.0
 
 const NON_VERBAL_TAGS = [
   '[laughter]',
@@ -256,7 +269,7 @@ function SegmentRackRow({
       onSegmentDurationChange(row.segmentId, null)
       return
     }
-    const clamped = Math.max(0.5, Math.min(4.0, v))
+    const clamped = Math.max(SEGMENT_DURATION_MIN_SEC, Math.min(SEGMENT_DURATION_MAX_SEC, v))
     onSegmentDurationChange(row.segmentId, clamped)
   }
 
@@ -266,7 +279,7 @@ function SegmentRackRow({
       onSegmentDurationChange(row.segmentId, segmentDuration ?? null)
       return
     }
-    const clamped = Math.max(0.5, Math.min(4.0, v))
+    const clamped = Math.max(SEGMENT_DURATION_MIN_SEC, Math.min(SEGMENT_DURATION_MAX_SEC, v))
     onSegmentDurationChange(row.segmentId, clamped)
   }
 
@@ -346,8 +359,8 @@ function SegmentRackRow({
                 </span>
                 <input
                   type="number"
-                  min={0.5}
-                  max={4}
+                  min={SEGMENT_DURATION_MIN_SEC}
+                  max={SEGMENT_DURATION_MAX_SEC}
                   step={0.1}
                   value={displayDuration != null ? Math.round(displayDuration * 10) / 10 : ''}
                   onChange={handleDurChange}
@@ -366,7 +379,7 @@ function SegmentRackRow({
             <Tooltip.Content side="top">
               {isDirty
                 ? `Currently ${actualDurationSec?.toFixed(1)}s — hit Regen to retarget at ${displayDuration?.toFixed(1)}s.`
-                : 'Target duration for this segment (0.5–4s). Change it, then hit Regen to apply.'}
+                : 'Target duration for this segment (0.5–7s). Change it, then hit Regen to apply.'}
             </Tooltip.Content>
           </Tooltip.Root>
 
@@ -787,6 +800,17 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     ? scriptText.trim().split(/\s+/).length
     : 0
 
+  // Rough estimate only (ESTIMATED_WORDS_PER_SECOND) — real duration always comes back from
+  // the render itself; this just gives a live sense of "am I near the 10-15s hero target"
+  // while building a script, before generating anything.
+  const estimatedScriptSeconds = scriptWordCount / ESTIMATED_WORDS_PER_SECOND
+  const heroMeterState: 'under' | 'in-range' | 'over' =
+    estimatedScriptSeconds < HERO_TARGET_MIN_SEC
+      ? 'under'
+      : estimatedScriptSeconds > HERO_TARGET_MAX_SEC
+        ? 'over'
+        : 'in-range'
+
   const hasLongLines =
     lines.some(
       (l) => l.length > 120 || l.split(/\s+/).length > 15,
@@ -899,6 +923,27 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       insertAtCursor(tag)
     },
     [insertAtCursor],
+  )
+
+  const applyHeroTake = useCallback(
+    (entry: AccentBankEntry) => {
+      const hero = buildHeroTake(entry)
+      setScriptText(hero.map((s) => s.text).join('\n'))
+      setLockedSegments([])
+      setSegmentRack([])
+      setStitchedUrl(null)
+      setSavedVoiceId(null)
+      setError(null)
+      setExamplesOpen(false)
+    },
+    [
+      setScriptText,
+      setLockedSegments,
+      setSegmentRack,
+      setStitchedUrl,
+      setSavedVoiceId,
+      setError,
+    ],
   )
   const refreshLibrary = useCallback(async () => {
     try {
@@ -1356,7 +1401,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
           delete next[segmentId]
           return next
         }
-        const clamped = Math.max(0.5, Math.min(4, value))
+        const clamped = Math.max(SEGMENT_DURATION_MIN_SEC, Math.min(SEGMENT_DURATION_MAX_SEC, value))
         return { ...prev, [segmentId]: clamped }
       })
     },
@@ -1719,22 +1764,10 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       </div>
 
       {ACCENT_BANK.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {ACCENT_BANK.map((entry) => (
-            <Button
-              key={entry.id}
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() =>
-                applyAccentPreset(entry)
-              }
-              className="rounded-full"
-            >
-              {entry.label} starter
-            </Button>
-          ))}
-        </div>
+        <AccentBank
+          selectedId={matchedAccentBankEntry?.id ?? null}
+          onSelect={applyAccentPreset}
+        />
       )}
 
       <ChipSection title="Accent">
@@ -1876,8 +1909,51 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                     {lines.length} line{lines.length !== 1 ? 's' : ''} · {scriptWordCount} word{scriptWordCount !== 1 ? 's' : ''}
                   </span>
                 )}
+                {scriptWordCount > 0 && (
+                  <Tooltip.Root>
+                    <Tooltip.Trigger asChild>
+                      <span
+                        className={cn(
+                          'rounded-full px-1.5 py-0.5 text-[9px] font-semibold tabular-nums',
+                          heroMeterState === 'in-range' &&
+                            'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+                          heroMeterState === 'under' &&
+                            'bg-muted text-muted-foreground',
+                          heroMeterState === 'over' &&
+                            'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+                        )}
+                      >
+                        ~{estimatedScriptSeconds.toFixed(1)}s
+                      </span>
+                    </Tooltip.Trigger>
+                    <Tooltip.Content side="bottom">
+                      Estimated duration (words ÷ {ESTIMATED_WORDS_PER_SECOND} wps). Hero-take
+                      target is {HERO_TARGET_MIN_SEC}-{HERO_TARGET_MAX_SEC}s — actual render
+                      time may differ, this is just a live guide while you build the script.
+                    </Tooltip.Content>
+                  </Tooltip.Root>
+                )}
               </div>
               <div className="flex items-center gap-1.5">
+                {matchedAccentBankEntry &&
+                  matchedAccentBankEntry.showcaseSentences.length > 0 && (
+                    <Tooltip.Root>
+                      <Tooltip.Trigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => applyHeroTake(matchedAccentBankEntry)}
+                          className="inline-flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 px-2.5 py-1 text-[10px] font-semibold text-primary transition-colors hover:bg-primary/20"
+                        >
+                          ⚡ Build Hero Take
+                        </button>
+                      </Tooltip.Trigger>
+                      <Tooltip.Content side="bottom">
+                        One click: auto-picks a {HERO_TARGET_MIN_SEC}-{HERO_TARGET_MAX_SEC}s,
+                        feature-diverse set of {matchedAccentBankEntry.label} showcase
+                        sentences and replaces the script with them.
+                      </Tooltip.Content>
+                    </Tooltip.Root>
+                  )}
                 {activeShowcaseSentences.length > 0 && (
                   <Tooltip.Root>
                     <Tooltip.Trigger asChild>
@@ -1962,18 +2038,38 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                   exit={{ opacity: 0, height: 0 }}
                   className="overflow-hidden border-b border-border"
                 >
-                  <div className="flex flex-wrap gap-1.5 px-2.5 py-2">
+                  <div className="flex flex-col gap-1.5 px-2.5 py-2">
                     {activeShowcaseSentences.map((sentence) => (
-                      <button
+                      <div
                         key={sentence.text}
-                        type="button"
-                        title={sentence.note}
-                        onClick={() => insertExampleSentence(sentence)}
-                        className="rounded-full border border-border/90 bg-muted/70 px-2.5 py-0.5 text-[10px] text-foreground/90 transition-colors hover:bg-accent hover:text-foreground"
+                        className="flex flex-wrap items-center gap-1"
                       >
-                        {sentence.text}
-                      </button>
+                        <button
+                          type="button"
+                          title={sentence.note}
+                          onClick={() => insertExampleSentence(sentence)}
+                          className="rounded-full border border-border/90 bg-muted/70 px-2.5 py-0.5 text-[10px] text-foreground/90 transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                          {sentence.text}
+                        </button>
+                        {sentence.features.map((feature) => (
+                          <Tooltip.Root key={feature}>
+                            <Tooltip.Trigger asChild>
+                              <span className="cursor-help rounded border border-border/60 bg-muted/40 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                                {FEATURE_INFO[feature].label}
+                              </span>
+                            </Tooltip.Trigger>
+                            <Tooltip.Content side="bottom" className="max-w-64">
+                              {FEATURE_INFO[feature].description}
+                            </Tooltip.Content>
+                          </Tooltip.Root>
+                        ))}
+                      </div>
                     ))}
+                    <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground/80">
+                      Hover a tag above to learn what it's listening for — these are the
+                      specific sounds that make an accent recognizable, not just labels.
+                    </p>
                   </div>
                 </motion.div>
               )}
