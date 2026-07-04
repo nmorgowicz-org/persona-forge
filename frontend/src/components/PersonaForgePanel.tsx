@@ -1006,7 +1006,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
               : undefined,
             guidanceScale: guidanceScaleInput.trim()
               ? Number(guidanceScaleInput)
-              : undefined,
+              : 2.5,
             diverseCandidates,
             durations,
             postprocessOutput: postProcess || null,
@@ -1218,7 +1218,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
               : undefined,
             guidanceScale: guidanceScaleInput.trim()
               ? Number(guidanceScaleInput)
-              : undefined,
+              : 2.5,
             diverseCandidates,
             durations: [segDuration],
             postprocessOutput: postProcess || null,
@@ -2142,7 +2142,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                       </button>
                     </Tooltip.Trigger>
                     <Tooltip.Content side="top">
-                      Use OmniVoice default (effective 2.0).
+                      Use recommended default (effective 2.5).
                     </Tooltip.Content>
                   </Tooltip.Root>
                 </div>
