@@ -26,7 +26,6 @@ function barColor(peak: number) {
 function StitchTimelineClip({
   clip,
   gapIndex,
-  totalDurationMs,
   onRemove,
   onUpdate,
   onSetPadding,
@@ -34,7 +33,6 @@ function StitchTimelineClip({
 }: {
   clip: StitchPlanClip
   gapIndex: number | null
-  totalDurationMs: number
   onRemove: (clipId: string) => void
   onUpdate: (clipId: string, patch: Partial<StitchPlanClip>) => void
   onSetPadding: (gapIndex: number, ms: number) => void
@@ -78,7 +76,6 @@ function StitchTimelineClip({
   }, [clip.sourceAudioBase64])
 
   const effectiveDuration = clipEffectiveDurationMs(clip)
-  const widthPct = totalDurationMs > 0 ? Math.max(3, (effectiveDuration / totalDurationMs) * 100) : 3
 
   const clampTrimStart = (v: number) => {
     const nv = Math.max(0, Math.min(v, (durMs ?? 0) - 20))
@@ -124,8 +121,7 @@ function StitchTimelineClip({
 
   return (
     <div
-      className={cn("group relative flex flex-col", isReordering && 'cursor-grab')}
-      style={{ width: `${widthPct}%`, minWidth: 140 }}
+      className={cn("group relative flex w-full flex-col", isReordering && 'cursor-grab')}
     >
       <div className="flex items-center justify-between gap-2 px-1.5 pt-1 pb-1">
         <span className="truncate text-xs font-medium text-foreground" title={clip.text}>
@@ -382,33 +378,43 @@ export const StitchTimeline = memo(function StitchTimeline({
           axis="x"
           values={clips}
           onReorder={handleReorder}
-          className="mt-3 flex flex-1 items-start gap-3"
+          className="mt-3 flex flex-1 items-start gap-0"
         >
           {clips.map((clip, i) => (
-            <Reorder.Item
-              key={clip.clipId}
-              value={clip}
-              className="group relative flex flex-col"
-            >
-              {/* Keyboard-accessible reorder buttons */}
-              <div className="absolute -left-5 top-6 flex flex-col gap-0.5 opacity-40 group-hover:opacity-100 z-10">
-                <button type="button" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'left')} title="Move left">
-                  <ChevronUp className="size-3" />
-                </button>
-                <button type="button" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'right')} title="Move right">
-                  <ChevronDown className="size-3" />
-                </button>
-              </div>
-              <StitchTimelineClip
-                clip={clip}
-                gapIndex={i < clips.length - 1 ? i : null}
-                totalDurationMs={effectiveTotalMs}
-                onRemove={removeClip}
-                onUpdate={updateClip}
-                onSetPadding={setPadding}
-                isReordering
-              />
-            </Reorder.Item>
+            <div key={clip.clipId} className="flex items-start">
+              {i > 0 && (paddingMs[i - 1] || 0) > 0 && (
+                <div
+                  className="mx-1.5 mt-3 flex h-24 shrink-0 items-center justify-center rounded border border-dashed border-border/50 text-[10px] text-muted-foreground/70"
+                  style={{ flex: `${Math.max(1, paddingMs[i - 1])} 0 auto`, minWidth: 28 }}
+                  title={`${paddingMs[i - 1]}ms gap`}
+                >
+                  {paddingMs[i - 1]}ms
+                </div>
+              )}
+              <Reorder.Item
+                value={clip}
+                className={cn('group relative flex flex-col', i > 0 && 'ml-3')}
+                style={{ flex: `${Math.max(300, clipEffectiveDurationMs(clip))} 0 auto`, minWidth: 140 }}
+              >
+                {/* Keyboard-accessible reorder buttons */}
+                <div className="absolute -left-5 top-6 flex flex-col gap-0.5 opacity-40 group-hover:opacity-100 z-10">
+                  <button type="button" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'left')} title="Move left">
+                    <ChevronUp className="size-3" />
+                  </button>
+                  <button type="button" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'right')} title="Move right">
+                    <ChevronDown className="size-3" />
+                  </button>
+                </div>
+                <StitchTimelineClip
+                  clip={clip}
+                  gapIndex={i < clips.length - 1 ? i : null}
+                  onRemove={removeClip}
+                  onUpdate={updateClip}
+                  onSetPadding={setPadding}
+                  isReordering
+                />
+              </Reorder.Item>
+            </div>
           ))}
         </Reorder.Group>
       </div>
