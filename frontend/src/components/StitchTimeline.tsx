@@ -721,7 +721,7 @@ export function StitchEditorPanel({
           fadeOutMs: c.fadeOutMs,
         }
       }),
-      paddingMs: paddingMs.length ? paddingMs : new Array(clips.length - 1).fill(0),
+      paddingMs: paddingMs.length ? paddingMs : new Array(Math.max(0, clips.length - 1)).fill(0),
       crossfadeMs: dsp.crossfadeMs,
       segmentTargetDbfs: dsp.segmentTargetDbfs,
       finalTargetDbfs: dsp.finalTargetDbfs,
