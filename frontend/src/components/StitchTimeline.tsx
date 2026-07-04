@@ -1,9 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
-import { ChevronUp, ChevronDown, X, Loader2, Play } from 'lucide-react'
+import { AnimatePresence, motion, Reorder } from 'framer-motion'
+import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play } from 'lucide-react'
 import { useAppStore, type StitchPlanClip } from '@/store'
 import { base64ToBlob, cn } from '@/lib/utils'
-import { renderStitchPlan, type StitchPlanPayload } from '@/lib/api'
+import { renderStitchPlan, type StitchPlanPayload, type SegmentMeta } from '@/lib/api'
 
 /* ---------- helpers ---------- */
 
@@ -29,6 +29,7 @@ function StitchTimelineClip({
   onRemove,
   onUpdate,
   onSetPadding,
+  isReordering,
 }: {
   clip: StitchPlanClip
   gapIndex: number | null
@@ -36,6 +37,7 @@ function StitchTimelineClip({
   onRemove: (clipId: string) => void
   onUpdate: (clipId: string, patch: Partial<StitchPlanClip>) => void
   onSetPadding: (gapIndex: number, ms: number) => void
+  isReordering?: boolean
 }) {
   const [peaks, setPeaks] = useState<number[] | null>(null)
   const [durMs, setDurMs] = useState<number | null>(null)
@@ -121,22 +123,31 @@ function StitchTimelineClip({
 
   return (
     <div
-      className="group relative flex flex-col"
+      className={cn("group relative flex flex-col", isReordering && 'cursor-grab')}
       style={{ width: `${widthPct}%`, minWidth: 56 }}
     >
       <div className="flex items-center justify-between gap-1 px-1.5 pt-1 pb-0.5">
         <span className="truncate text-[9px] text-muted-foreground">
           {clip.text || '(untitled)'}
         </span>
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            type="button"
-            className="rounded p-0.5 text-muted-foreground hover:text-destructive"
-            onClick={() => onRemove(clip.clipId)}
-            title="Remove clip"
-          >
-            <X className="size-3" />
-          </button>
+        <div className="flex items-center gap-1">
+          {isReordering && (
+            <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="p-0.5 text-muted-foreground/60">
+                <GripVertical className="size-2.5" />
+              </div>
+            </div>
+          )}
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              type="button"
+              className="rounded p-0.5 text-muted-foreground hover:text-destructive"
+              onClick={() => onRemove(clip.clipId)}
+              title="Remove clip"
+            >
+              <X className="size-3" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -230,11 +241,15 @@ function MsStepper({
 interface StitchTimelineProps {
   totalDurationMs: number
   isPreviewStale: boolean
+  library: SegmentMeta[]
+  onInsertFromLibrary: (seg: SegmentMeta) => void
 }
 
 export const StitchTimeline = memo(function StitchTimeline({
   totalDurationMs: _totalDurationMs,
   isPreviewStale: _isPreviewStale,
+  library,
+  onInsertFromLibrary,
 }: StitchTimelineProps) {
   const clips = useAppStore((s) => s.ovStitchPlanClips)
   const paddingMs = useAppStore((s) => s.ovStitchPlanPaddingMs)
@@ -242,6 +257,26 @@ export const StitchTimeline = memo(function StitchTimeline({
   const removeClip = useAppStore((s) => s.removeOvStitchPlanClip)
   const updateClip = useAppStore((s) => s.updateOvStitchPlanClip)
   const setPadding = useAppStore((s) => s.setOvStitchPlanPaddingAt)
+  const [libraryPickerOpen, setLibraryPickerOpen] = useState(false)
+
+  const handleReorder = useCallback(
+    (next: StitchPlanClip[]) => {
+      const newIndices: number[] = []
+      for (const c of next) {
+        const idx = clips.findIndex((oc) => oc.clipId === c.clipId)
+        if (idx !== -1) newIndices.push(idx)
+      }
+      // Build a mapping: for each new position, find the original index
+      for (let i = 0; i < next.length; i++) {
+        const from = clips.findIndex((oc) => oc.clipId === next[i].clipId)
+        if (from !== i) {
+          reorderClip(from, i)
+          break
+        }
+      }
+    },
+    [clips, reorderClip],
+  )
 
   const moveClip = useCallback(
     (index: number, direction: 'left' | 'right') => {
@@ -254,8 +289,17 @@ export const StitchTimeline = memo(function StitchTimeline({
 
   if (!clips.length) {
     return (
-      <div className="flex h-24 items-center justify-center text-[10px] text-muted-foreground">
-        No clips in timeline
+      <div className="flex h-24 flex-col items-center justify-center gap-2 text-[10px] text-muted-foreground">
+        <span>No clips in timeline</span>
+        {library.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setLibraryPickerOpen(true)}
+            className="rounded-full border border-border px-2 py-0.5 text-[9px] text-muted-foreground hover:bg-muted"
+          >
+            Add from library
+          </button>
+        )}
       </div>
     )
   }
@@ -270,46 +314,106 @@ export const StitchTimeline = memo(function StitchTimeline({
   }, [clips, paddingMs])
 
   return (
-    <div className="relative flex items-stretch gap-0 overflow-x-auto overflow-y-visible" style={{ minWidth: 0 }}>
-      {effectiveTotalMs > 0 && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 flex h-4 items-start border-b border-border/30">
-          {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-            const ms = ratio * effectiveTotalMs
-            const sec = ms / 1000
-            return (
-              <div
-                key={ratio}
-                className="absolute text-[7px] font-mono text-muted-foreground/40"
-                style={{ left: `${ratio * 100}%`, transform: 'translateX(-50%)' }}
-              >
-                {sec < 10 ? `${sec.toFixed(1)}s` : `${Math.floor(sec / 60)}:${(sec % 60).toFixed(0).padStart(2, '0')}`}
-              </div>
-            )
-          })}
+    <div className="relative flex flex-col gap-2">
+      {/* Library insert bar */}
+      {library.length > 0 && (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] text-muted-foreground">
+              Drag clips to reorder
+            </span>
+          </div>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setLibraryPickerOpen((v) => !v)}
+              className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[9px] text-muted-foreground hover:bg-muted"
+            >
+              {libraryPickerOpen ? 'Hide library' : 'Add from library'}
+            </button>
+
+            <AnimatePresence>
+              {libraryPickerOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  className="absolute right-0 top-8 z-30 flex max-h-40 w-64 flex-col gap-1 overflow-y-auto rounded-lg border border-border bg-background p-2 shadow-lg"
+                >
+                  <span className="text-[8px] uppercase text-muted-foreground">Segment library</span>
+                  {library.map((seg) => (
+                    <button
+                      key={seg.segment_id}
+                      type="button"
+                      onClick={() => {
+                        onInsertFromLibrary(seg)
+                        setLibraryPickerOpen(false)
+                      }}
+                      className="flex items-center justify-between gap-2 rounded-md border border-transparent px-1.5 py-0.5 text-[9px] text-foreground hover:border-border hover:bg-muted"
+                    >
+                      <span className="truncate">{seg.text}</span>
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       )}
 
-      <div className="mt-3 flex flex-1 items-start gap-0">
-        {clips.map((clip, i) => (
-          <div key={clip.clipId} className="relative flex flex-col">
-            <div className="absolute -left-4 top-6 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 hover:flex z-10">
-              <button type="button" className="size-4 rounded bg-muted/70 text-[8px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'left')} title="Move left">
-                <ChevronUp className="size-3" />
-              </button>
-              <button type="button" className="size-4 rounded bg-muted/70 text-[8px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'right')} title="Move right">
-                <ChevronDown className="size-3" />
-              </button>
-            </div>
-            <StitchTimelineClip
-              clip={clip}
-              gapIndex={i < clips.length - 1 ? i : null}
-              totalDurationMs={effectiveTotalMs}
-              onRemove={removeClip}
-              onUpdate={updateClip}
-              onSetPadding={setPadding}
-            />
+      {/* Timeline */}
+      <div className="relative flex items-stretch gap-0 overflow-x-auto overflow-y-visible" style={{ minWidth: 0 }}>
+        {effectiveTotalMs > 0 && (
+          <div className="pointer-events-none absolute inset-x-0 top-0 flex h-4 items-start border-b border-border/30">
+            {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+              const ms = ratio * effectiveTotalMs
+              const sec = ms / 1000
+              return (
+                <div
+                  key={ratio}
+                  className="absolute text-[7px] font-mono text-muted-foreground/40"
+                  style={{ left: `${ratio * 100}%`, transform: 'translateX(-50%)' }}
+                >
+                  {sec < 10 ? `${sec.toFixed(1)}s` : `${Math.floor(sec / 60)}:${(sec % 60).toFixed(0).padStart(2, '0')}`}
+                </div>
+              )
+            })}
           </div>
-        ))}
+        )}
+
+        <Reorder.Group
+          axis="x"
+          values={clips}
+          onReorder={handleReorder}
+          className="mt-3 flex flex-1 items-start gap-0"
+        >
+          {clips.map((clip, i) => (
+            <Reorder.Item
+              key={clip.clipId}
+              value={clip}
+              className="relative flex flex-col"
+            >
+              {/* Keyboard-accessible reorder buttons */}
+              <div className="absolute -left-4 top-6 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 hover:flex z-10">
+                <button type="button" className="size-4 rounded bg-muted/70 text-[8px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'left')} title="Move left">
+                  <ChevronUp className="size-3" />
+                </button>
+                <button type="button" className="size-4 rounded bg-muted/70 text-[8px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'right')} title="Move right">
+                  <ChevronDown className="size-3" />
+                </button>
+              </div>
+              <StitchTimelineClip
+                clip={clip}
+                gapIndex={i < clips.length - 1 ? i : null}
+                totalDurationMs={effectiveTotalMs}
+                onRemove={removeClip}
+                onUpdate={updateClip}
+                onSetPadding={setPadding}
+                isReordering
+              />
+            </Reorder.Item>
+          ))}
+        </Reorder.Group>
       </div>
     </div>
   )
@@ -396,10 +500,14 @@ export function StitchEditorPanel({
   onClose,
   onRender,
   onSave,
+  library,
+  onInsertFromLibrary,
 }: {
   onClose: () => void
   onRender: (plan: StitchPlanPayload) => Promise<void>
   onSave: (plan: StitchPlanPayload) => Promise<void>
+  library: SegmentMeta[]
+  onInsertFromLibrary: (seg: SegmentMeta) => void
 }) {
   const clips = useAppStore((s) => s.ovStitchPlanClips)
   const paddingMs = useAppStore((s) => s.ovStitchPlanPaddingMs)
@@ -531,7 +639,7 @@ export function StitchEditorPanel({
         </button>
       </div>
 
-      <StitchTimeline totalDurationMs={totalMs} isPreviewStale={staleFlags} />
+      <StitchTimeline totalDurationMs={totalMs} isPreviewStale={staleFlags} library={library} onInsertFromLibrary={onInsertFromLibrary} />
       <StitchDspControls open={showDsp} onToggle={() => setShowDsp((v) => !v)} />
 
       {previewUrl && (

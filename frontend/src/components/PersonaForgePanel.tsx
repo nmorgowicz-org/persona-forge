@@ -15,6 +15,7 @@ import {
   saveOmniVoice,
   stitchOmniVoice,
   type StitchPlanPayload,
+  type SegmentMeta,
 } from '@/lib/api'
 import {
   ACCENT_BANK,
@@ -1452,6 +1453,73 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     setStitchEditorOpen,
   ])
 
+  const insertFromLibraryToTimeline = useCallback(
+    async (seg: SegmentMeta) => {
+      if (!seg.audio_base64) {
+        setError('No audio available for this segment')
+        return
+      }
+
+      const ctx = (() => {
+        if (typeof window !== 'undefined' && window.AudioContext) {
+          return new (window.AudioContext)()
+        }
+        return null
+      })()
+
+      if (!ctx) {
+        setError('AudioContext not available')
+        return
+      }
+
+      const byteStr = atob(seg.audio_base64)
+      const bytes = new Uint8Array(byteStr.length)
+      for (let i = 0; i < byteStr.length; i++) {
+        bytes[i] = byteStr.charCodeAt(i)
+      }
+
+      let durationMs = 0
+      try {
+        const arrayBuffer = bytes.buffer
+        const audioBuffer = await ctx.decodeAudioData(
+          arrayBuffer.slice(0) as ArrayBuffer,
+        )
+        durationMs = Math.round(audioBuffer.duration * 1000)
+      } catch {
+        durationMs = 0
+      }
+      await ctx.close()
+
+      const newClip: StitchPlanClip = {
+        clipId: seg.segment_id + '-insert-' + Date.now(),
+        ref: { segmentId: seg.segment_id },
+        text: seg.text,
+        sourceAudioBase64: seg.audio_base64,
+        sampleRate: seg.sample_rate,
+        trimStartMs: 0,
+        trimEndMs: 0,
+        fadeInMs: 0,
+        fadeOutMs: 0,
+        durationMs,
+      }
+
+      setStitchPlanClips((prev: StitchPlanClip[]) => {
+        const next = [...prev, newClip]
+        // Update padding array length
+        const needed = Math.max(0, next.length - 1)
+        const current = useAppStore.getState().ovStitchPlanPaddingMs || []
+        for (let i = current.length; i < needed; i++) {
+          useAppStore.getState().setOvStitchPlanPaddingAt(i, 0)
+        }
+        return next
+      })
+    },
+    [
+      setError,
+      setStitchPlanClips,
+    ],
+  )
+
   const removeLockedSegment = useCallback(
     (index: number) => {
       setLockedSegments((prev) =>
@@ -2452,6 +2520,8 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         {stitchEditorOpen && (
           <StitchEditorPanel
             onClose={() => setStitchEditorOpen(false)}
+            library={library}
+            onInsertFromLibrary={insertFromLibraryToTimeline}
             onRender={async (plan: StitchPlanPayload) => {
               try {
                 setIsStitching(true)
