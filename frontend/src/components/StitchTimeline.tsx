@@ -153,7 +153,10 @@ function StitchTimelineClip({
 
   return (
     <div
-      className={cn("group relative flex w-full min-w-0 flex-col overflow-hidden", isReordering && 'cursor-grab')}
+      className={cn(
+        "group relative flex w-full min-w-0 flex-col overflow-hidden rounded-lg border border-border/50 bg-muted/10 p-1.5",
+        isReordering && 'cursor-grab',
+      )}
     >
       <div className="flex items-center justify-between gap-2 px-1.5 pt-1 pb-1">
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={clip.text}>
@@ -667,14 +670,14 @@ export const StitchTimeline = memo(function StitchTimeline({
           className="mt-3 flex flex-1 items-start gap-0"
         >
           {clips.map((clip, i) => (
-            <div key={clip.clipId} className="flex items-start gap-3">
+            <div key={clip.clipId} className="flex items-start gap-4">
               {i > 0 && (
                 <GapControl gapIndex={i - 1} paddingMs={paddingMs[i - 1] || 0} onSetPadding={setPadding} />
               )}
               <Reorder.Item
                 value={clip}
                 className="group relative flex flex-col"
-                style={{ flex: `${Math.max(300, clipEffectiveDurationMs(clip))} 0 auto`, minWidth: 220 }}
+                style={{ flex: `${Math.max(300, clipEffectiveDurationMs(clip))} 0 auto`, minWidth: 320 }}
               >
                 {/* Keyboard-accessible reorder buttons */}
                 <div className="absolute -left-5 top-6 flex flex-col gap-0.5 opacity-40 group-hover:opacity-100 z-10">
