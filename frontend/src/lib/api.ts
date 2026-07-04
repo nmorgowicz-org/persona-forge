@@ -157,6 +157,7 @@ export interface OmniVoiceCandidate {
   candidate_id: string
   sample_rate: number
   audio_base64: string
+  duration_sec: number | null
   /** True if audio_post.analyze_take's drone/silence heuristic (or the Whisper no-speech
    * gate) flagged this take even after one in-server retry. */
   flagged: boolean

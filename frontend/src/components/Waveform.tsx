@@ -10,7 +10,13 @@ interface WaveformProps {
 }
 
 function formatTime(sec: number): string {
-  if (sec < 0 || !isFinite(sec)) return '0:00'
+  if (sec < 0 || !isFinite(sec)) return '0.0s'
+  // For short clips (< 10s) or small intervals, prefer compact seconds with decimals.
+  // For longer clips, use m:ss.
+  const isShort = sec < 10
+  if (isShort) {
+    return `${sec.toFixed(1)}s`
+  }
   const m = Math.floor(sec / 60)
   const s = Math.floor(sec % 60)
   return `${m}:${s.toString().padStart(2, '0')}`
@@ -37,34 +43,41 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
   const playheadPct = Math.min(100, Math.max(0, progress * 100))
   const hasTimeAxis = duration != null && duration > 0 && isFinite(duration)
 
-  // Compute time ticks based on container width and duration:
-  // Target 3-8 ticks; prefer step sizes that are readable (0.5, 1, 2, 3, 5, 10, 15, 20, 30, 60).
+  // Compute time ticks: simple, evenly spaced, 3-7 labels.
+  // For short clips (< 5s) use small step (0.2–1s) and decimal labels.
+  // For longer clips use m:ss labels.
   const ticks = hasTimeAxis
     ? (() => {
-        const targetMin = 3
-        const targetMax = 8
-        const mid = (targetMin + targetMax) / 2
-         const candidates: Array<{ n: number; step: number }> = []
-        for (let n = targetMin; n <= targetMax; n++) {
-          const step = duration / n
-          candidates.push({ n, step })
-        }
-        const ideal = candidates[Math.floor(mid - targetMin)]
-        let chosen = ideal
-        const nice = [0.5, 1, 2, 3, 5, 10, 15, 20, 30, 60]
+        const dur = duration as number
+        const isShort = dur < 5
+        // Decide target number of ticks
+        const targetTicks = isShort ? 5 : 4
+        // Compute ideal step
+        const idealStep = dur / targetTicks
+
+        const niceShort = [0.2, 0.3, 0.5, 1]
+        const niceLong = [1, 2, 3, 5, 10, 15, 20]
+        const scale = isShort ? niceShort : niceLong
+
+        let step = idealStep
         let bestDiff = Infinity
-        for (const s of nice) {
-          const diff = Math.abs(s - ideal.step)
+        for (const s of scale) {
+          const diff = Math.abs(s - idealStep)
           if (diff < bestDiff) {
             bestDiff = diff
-            chosen = { n: Math.max(2, Math.round(duration / s)), step: s }
+            step = s
           }
         }
+
+        const n = Math.max(2, Math.round(dur / step))
         const labels: { pos: number; text: string }[] = []
-        for (let i = 0; i <= chosen.n; i++) {
-          const t = i * chosen.step
-          if (t > duration) break
-          labels.push({ pos: (i / chosen.n) * 100, text: formatTime(t) })
+        for (let i = 0; i <= n; i++) {
+          const t = i * step
+          if (t > dur + 0.001) break
+          labels.push({
+            pos: (i / n) * 100,
+            text: formatTime(t),
+          })
         }
         return labels
       })()

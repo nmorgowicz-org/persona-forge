@@ -62,7 +62,7 @@ WARNING_WORDS = 15
 # returned as-is; OmniVoice failures are known to be non-deterministic per-draw (see module
 # docstring), so a second independent draw has a real chance of landing clean, but retrying
 # indefinitely would turn one bad line into an unbounded generation loop.
-MAX_ATTEMPTS_PER_CANDIDATE = 2
+MAX_ATTEMPTS_PER_CANDIDATE = 3
 
 _swap_in_progress = False
 _omnivoice_model = None

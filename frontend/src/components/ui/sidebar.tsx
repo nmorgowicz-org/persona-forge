@@ -500,9 +500,11 @@ function SidebarMenuButton({
 } & VariantProps<typeof sidebarMenuButtonVariants>) {
   const Comp = asChild ? Slot.Root : "button"
   const { isMobile, state } = useSidebar()
+  const btnRef = React.useRef<HTMLButtonElement>(null)
 
   const button = (
     <Comp
+      ref={btnRef}
       data-slot="sidebar-menu-button"
       data-sidebar="menu-button"
       data-size={size}
@@ -516,13 +518,21 @@ function SidebarMenuButton({
     return button
   }
 
+  // When collapsed and tooltip is a string: use a small portal tooltip for nav icons.
+  if (
+    typeof tooltip === "string" &&
+    state === "collapsed" &&
+    !isMobile
+  ) {
+    return (
+      <SidebarIconTooltip label={tooltip}>
+        {button}
+      </SidebarIconTooltip>
+    )
+  }
+
+  // Expanded mode: use the existing Tooltip; content hidden unless needed.
   if (typeof tooltip === "string") {
-    // When collapsed, use native title tooltip (more reliable).
-    if (state === "collapsed" && !isMobile) {
-      return React.cloneElement(button, {
-        title: tooltip,
-      })
-    }
     tooltip = { children: tooltip }
   }
 
@@ -536,6 +546,56 @@ function SidebarMenuButton({
         {...tooltip}
       />
     </Tooltip>
+  )
+}
+
+function SidebarIconTooltip({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactElement
+}) {
+  const [show, setShow] = React.useState(false)
+  const ref = React.useRef<HTMLDivElement>(null)
+  const [pos, setPos] = React.useState<{ x: number; y: number }>({ x: 0, y: 0 })
+
+  React.useEffect(() => {
+    if (!show) return
+    const btn = ref.current?.querySelector<HTMLButtonElement>('[data-sidebar="menu-button"]')
+    if (!btn) return
+    const r = btn.getBoundingClientRect()
+    setPos({ x: r.right + 6, y: r.top + r.height / 2 })
+  }, [show])
+
+  const tooltip =
+    show &&
+    React.createElement(
+      "div",
+      {
+        style: {
+          position: 'fixed',
+          left: pos.x,
+          top: pos.y - 10,
+          transform: 'translateY(-50%)',
+          zIndex: 9999,
+        },
+        className:
+          'whitespace-nowrap rounded-xl border border-border/80 bg-popover px-2.5 py-1.5 text-[11px] leading-tight text-popover-foreground shadow-lg',
+      },
+      label,
+    )
+
+  return (
+    <div
+      ref={ref}
+      className="relative inline-flex"
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      {children}
+      {tooltip}
+    </div>
   )
 }
 

@@ -405,10 +405,12 @@ def _segment_callback_factory(job_id: str):
             candidate_id = uuid.uuid4().hex
             wav_bytes, _ = _encode(wav, sr, "wav")
             _omnivoice_candidates[candidate_id] = (wav, sr)
+            duration_sec = len(wav) / sr if sr > 0 else 0.0
             cand_payload.append(
                 {
                     "candidate_id": candidate_id,
                     "sample_rate": sr,
+                    "duration_sec": round(duration_sec, 2),
                     "audio_base64": base64.b64encode(wav_bytes).decode(
                         "ascii"
                     ),
@@ -707,6 +709,146 @@ def omnivoice_segments_delete(segment_id: str):
     if not segment_library.delete_segment(segment_id):
         return jsonify({"error": "Unknown segment_id"}), 404
     return jsonify({"deleted": True})
+
+
+@app.post("/omnivoice/segments/<segment_id>/adjust_duration")
+def omnivoice_segment_adjust_duration(segment_id: str):
+    """Time-stretch an existing segment clip to a target duration.
+
+    Uses librosa.effects.time_stretch (preserves pitch/timbre; changes speed).
+    Safe range enforced to avoid extreme artifacts.
+    """
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    target_duration = data.get("target_duration_sec")
+    if not isinstance(target_duration, (int, float)) or target_duration <= 0:
+        return jsonify({"error": "target_duration_sec must be a positive number"}), 400
+
+    meta = segment_library.get_segment(segment_id)
+    if not meta:
+        return jsonify({"error": "Unknown segment_id"}), 404
+
+    wav_path = meta.get("wav_path")
+    if not wav_path or not Path(wav_path).is_file():
+        return jsonify({"error": "Segment audio not found"}), 404
+
+    wav, sr = sf.read(wav_path, dtype="float32")
+    original_duration = len(wav) / sr
+
+    # If difference is tiny, no-op
+    if abs(target_duration - original_duration) < 0.05:
+        entry = dict(meta)
+        entry.pop("wav_path", None)
+        entry["original_duration_sec"] = round(original_duration, 2)
+        entry["target_duration_sec"] = round(original_duration, 2)
+        wav_bytes, _ = _encode(wav, sr, "wav")
+        entry["audio_base64"] = base64.b64encode(wav_bytes).decode("ascii")
+        return jsonify(entry)
+
+    factor = original_duration / target_duration
+
+    # Clamp factor to [0.5, 2.0] to avoid extreme artifacts.
+    factor = max(0.5, min(2.0, factor))
+    effective_duration = original_duration / factor
+
+    import librosa
+
+    # time_stretch expects mono; ensure shape
+    if wav.ndim > 1:
+        wav = wav.mean(axis=1)
+
+    stretched = librosa.effects.time_stretch(wav, rate=factor)
+    stretched = stretched.astype("float32")
+
+    # Overwrite segment clip with adjusted audio.
+    wav_bytes, _ = _encode(stretched, sr, "wav")
+    Path(wav_path).write_bytes(wav_bytes)
+
+    # Update meta with duration info.
+    try:
+        import json
+        meta["original_duration_sec"] = round(original_duration, 2)
+        meta["target_duration_sec"] = round(effective_duration, 2)
+        meta["time_stretch_factor"] = round(float(factor), 3)
+        (Path(wav_path).parent / "meta.json").write_text(
+            json.dumps(meta, indent=2),
+            encoding="utf-8",
+        )
+    except Exception:
+        # Best-effort; continue returning results.
+        pass
+
+    entry = dict(meta)
+    entry.pop("wav_path", None)
+    entry["original_duration_sec"] = round(original_duration, 2)
+    entry["target_duration_sec"] = round(effective_duration, 2)
+    entry["time_stretch_factor"] = round(float(factor), 3)
+    entry["audio_base64"] = base64.b64encode(wav_bytes).decode("ascii")
+
+    return jsonify(entry)
+
+
+@app.post("/omnivoice/adjust_candidate_duration")
+def omnivoice_adjust_candidate_duration():
+    """Time-stretch an in-memory candidate audio to a target duration.
+
+    Used from the segment rack to adjust an audition candidate's duration
+    without persisting it to the segment library first.
+    """
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+
+    audio_b64 = data.get("audio_base64")
+    if not isinstance(audio_b64, str) or not audio_b64:
+        return jsonify({"error": "audio_base64 is required"}), 400
+
+    target_duration = data.get("target_duration_sec")
+    if not isinstance(target_duration, (int, float)) or target_duration <= 0:
+        return jsonify({"error": "target_duration_sec must be a positive number"}), 400
+
+    try:
+        wav_bytes = base64.b64decode(audio_b64)
+    except Exception:
+        return jsonify({"error": "Invalid audio_base64"}), 400
+
+    wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+    original_duration = len(wav) / sr
+
+    # If difference is tiny, no-op
+    if abs(target_duration - original_duration) < 0.05:
+        wav_out_bytes, _ = _encode(wav, sr, "wav")
+        return jsonify({
+            "audio_base64": base64.b64encode(wav_out_bytes).decode("ascii"),
+            "original_duration_sec": round(original_duration, 2),
+            "target_duration_sec": round(original_duration, 2),
+        })
+
+    factor = original_duration / target_duration
+
+    # Clamp factor to [0.5, 2.0]
+    factor = max(0.5, min(2.0, factor))
+    effective_duration = original_duration / factor
+
+    import librosa
+
+    # time_stretch expects mono
+    if wav.ndim > 1:
+        wav = wav.mean(axis=1)
+
+    stretched = librosa.effects.time_stretch(wav, rate=factor)
+    stretched = stretched.astype("float32")
+
+    wav_out_bytes, _ = _encode(stretched, sr, "wav")
+
+    return jsonify({
+        "audio_base64": base64.b64encode(wav_out_bytes).decode("ascii"),
+        "original_duration_sec": round(original_duration, 2),
+        "target_duration_sec": round(effective_duration, 2),
+        "time_stretch_factor": round(float(factor), 3),
+    })
 
 
 @app.post("/omnivoice/stitch")

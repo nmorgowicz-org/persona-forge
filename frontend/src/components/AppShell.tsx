@@ -29,7 +29,6 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar'
 import { Separator } from '@/components/ui/separator'
-import { ThemeSwitcher } from '@/components/ThemeSwitcher'
 import { SwapBanner } from '@/components/SwapBanner'
 import { type Page, useAppStore } from '@/store'
 import { THEMES, type Theme } from '@/lib/theme'
@@ -57,11 +56,40 @@ const NAV_ITEMS: { page: Page; label: string; icon: typeof Mic2; description: st
   { page: 'runtime', label: 'Runtime', icon: Settings2, description: 'Live server config' },
 ]
 
+function ThemePaletteBar() {
+  const theme = useAppStore((s) => s.theme)
+  const setTheme = useAppStore((s) => s.setTheme)
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {THEMES.map((t) => {
+        const active = theme === t
+        return (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTheme(t)}
+            className={cn(
+              'flex size-4.5 shrink-0 items-center justify-center rounded-full ring-1 ring-white/10 transition-transform hover:scale-110',
+              active && 'ring-2 ring-white/80',
+            )}
+            style={{ background: SWATCH_COLOR[t] }}
+            title={SWATCH_LABEL[t]}
+          >
+            {active && <Check className="size-2.5 text-black/70" strokeWidth={3} />}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function ThemePaletteButton() {
   const theme = useAppStore((s) => s.theme)
   const setTheme = useAppStore((s) => s.setTheme)
   const [open, setOpen] = useState(false)
   const btnRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
 
   useEffect(() => {
@@ -69,13 +97,17 @@ function ThemePaletteButton() {
     const update = () => {
       if (!btnRef.current) return
       const r = btnRef.current.getBoundingClientRect()
-      setPos({ x: r.left, y: r.top - 6 })
+      setPos({ x: r.left, y: r.top - 24 })
     }
     update()
     window.addEventListener('resize', update)
     const onDown = (e: MouseEvent) => {
-      const el = btnRef.current
-      if (!el?.contains(e.target as Node)) {
+      const target = e.target as Node
+      const btn = btnRef.current
+      const panel = panelRef.current
+      const insideBtn = btn?.contains(target)
+      const insidePanel = panel?.contains(target)
+      if (!insideBtn && !insidePanel) {
         setOpen(false)
       }
     }
@@ -90,6 +122,7 @@ function ThemePaletteButton() {
     open &&
     createPortal(
       <div
+        ref={panelRef}
         style={{
           position: 'fixed',
           left: pos.x,
@@ -199,17 +232,18 @@ export function AppShell({ children }: { children: ReactNode }) {
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter className="gap-3 px-3 py-3">
-          <div className="group-data-[collapsible=icon]:hidden">
-            <ThemeSwitcher />
+          {/* Expanded: inline color palette bar + short note */}
+          <div className="group-data-[collapsible=icon]:hidden flex flex-col gap-1.5">
+            <ThemePaletteBar />
+            <p className="text-[10px] leading-tight text-muted-foreground">
+              Voices designed here are served over the OpenAI-compatible endpoint for Hermes and
+              other apps.
+            </p>
           </div>
-          {/* Palette button when collapsed */}
+          {/* Collapsed: single palette button */}
           <div className="hidden group-data-[collapsible=icon]:flex justify-center">
             <ThemePaletteButton />
           </div>
-          <p className="text-[11px] leading-snug text-muted-foreground group-data-[collapsible=icon]:hidden">
-            Voices designed here are served over the OpenAI-compatible endpoint for Hermes and
-            other apps.
-          </p>
           <SidebarCollapseButton />
         </SidebarFooter>
       </Sidebar>

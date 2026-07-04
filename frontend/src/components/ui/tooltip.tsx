@@ -1,158 +1,70 @@
-import { createContext, useContext, useMemo, useState, useRef, useEffect } from 'react'
-import { createPortal } from 'react-dom'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Slot } from 'radix-ui'
+import * as React from 'react'
+import * as TooltipPrimitive from 'radix-ui/Tooltip'
 import { cn } from '@/lib/utils'
 
-type Side = 'top' | 'bottom' | 'left' | 'right'
-
-interface TooltipContextValue {
-  open: boolean
-  setOpen: (v: boolean) => void
-  side: Side
-}
-
-const TooltipContext = createContext<TooltipContextValue | null>(null)
-
-function useTooltipContext() {
-  const ctx = useContext(TooltipContext)
-  if (!ctx) throw new Error('TooltipContent/TooltipTrigger must be inside Tooltip')
-  return ctx
-}
+const TooltipProvider = TooltipPrimitive.Provider
+const TooltipRoot = TooltipPrimitive.Root
+const TooltipTrigger = TooltipPrimitive.Trigger
 
 export function Tooltip({
   children,
   side = 'top',
+  delayDuration = 150,
 }: {
   children: React.ReactNode
-  side?: Side
+  side?: 'top' | 'bottom' | 'left' | 'right'
+  delayDuration?: number
 }) {
-  const [open, setOpen] = useState(false)
-
-  const value = useMemo(
-    () => ({ open, setOpen, side }),
-    [open, side],
-  )
-
   return (
-    <TooltipContext.Provider value={value}>
-      {children}
-    </TooltipContext.Provider>
-  )
-}
-
-export function TooltipTrigger({
-  children,
-  asChild,
-  className,
-  ...props
-}: {
-  children: React.ReactNode
-  asChild?: boolean
-  className?: string
-}) {
-  const { setOpen } = useTooltipContext()
-
-  const hoverProps = {
-    onMouseEnter: () => setOpen(true),
-    onMouseLeave: () => setOpen(false),
-  }
-
-  if (asChild) {
-    return (
-      <Slot.Root
-        {...props}
-        {...hoverProps}
-        className={cn('relative inline-flex', className)}
-      >
+    <TooltipProvider delayDuration={delayDuration}>
+      <TooltipRoot>
         {children}
-      </Slot.Root>
-    )
-  }
-
-  return (
-    <span
-      className={cn('relative inline-flex', className)}
-      {...hoverProps}
-      {...props}
-    >
-      {children}
-    </span>
+      </TooltipRoot>
+    </TooltipProvider>
   )
 }
+
+export const TooltipTriggerBase = ({
+  asChild = false,
+  children,
+}: {
+  asChild?: boolean
+  children: React.ReactNode
+}) => (
+  <TooltipPrimitive.Trigger asChild={asChild}>
+    {children}
+  </TooltipPrimitive.Trigger>
+)
 
 export function TooltipContent({
   children,
-  side,
-  align,
-  hidden,
+  side = 'top',
+  align = 'center',
   className,
 }: {
   children: React.ReactNode
-  side?: Side
-  align?: string
-  hidden?: boolean
+  side?: 'top' | 'bottom' | 'left' | 'right'
+  align?: 'center' | 'start' | 'end'
   className?: string
 }) {
-  if (hidden) return null
-  const ctx = useTooltipContext()
-  const resolvedSide = side ?? ctx.side
-
-  const containerRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    const el = document.createElement('div')
-    el.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:9999;'
-    document.body.appendChild(el)
-    containerRef.current = el
-    return () => {
-      if (containerRef.current && containerRef.current.parentNode) {
-        containerRef.current.parentNode.removeChild(containerRef.current)
-      }
-    }
-  }, [])
-
-  const posClass = useMemo(() => {
-    switch (resolvedSide) {
-      case 'top':
-        return 'bottom-full left-1/2 mb-1.5 -translate-x-1/2'
-      case 'bottom':
-        return 'top-full left-1/2 mt-1.5 -translate-x-1/2'
-      case 'left':
-        return 'right-full top-1/2 mr-1.5 -translate-y-1/2'
-      case 'right':
-        return 'left-full top-1/2 ml-1.5 -translate-y-1/2'
-    }
-  }, [resolvedSide])
-
-  const inner = (
-    <AnimatePresence>
-      {ctx.open && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.97 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.97 }}
-          transition={{ duration: 0.12, ease: 'easeOut' }}
-          className={cn(
-            'absolute z-50 whitespace-nowrap rounded-lg border border-border/80 bg-popover px-2 py-1 text-[10px] leading-tight text-popover-foreground shadow-lg',
-            posClass,
-            align === 'start' && 'left-0 -translate-x-0',
-            align === 'end' && 'right-0',
-            className,
-          )}
-        >
-          {children}
-        </motion.div>
-      )}
-    </AnimatePresence>
-  )
-
-  if (!containerRef.current) return null
-
-  return createPortal(
-    inner,
-    containerRef.current,
+  return (
+    <TooltipPrimitive.Portal>
+      <TooltipPrimitive.Content
+        side={side}
+        align={align}
+        sideOffset={6}
+        className={cn(
+          'z-50 max-w-[240px] rounded-lg border border-border/90 bg-popover px-2.5 py-1.5',
+          'text-[11px] leading-snug text-popover-foreground shadow-lg',
+          'animate-in fade-in-0 zoom-in-95 duration-150',
+          className,
+        )}
+      >
+        {children}
+      </TooltipPrimitive.Content>
+    </TooltipPrimitive.Portal>
   )
 }
 
-export const TooltipProvider = ({ children }: { children: React.ReactNode }) => children
+// Simple wrapper that matches previous usage where Tooltip wraps Trigger + Content.
+// For PersonaForgePanel-style usage, we'll wire with the primitives directly where needed.
