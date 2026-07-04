@@ -14,7 +14,6 @@ import {
   lockInOmniVoiceSegment,
   renderStitchPlan,
   saveOmniVoice,
-  stitchOmniVoice,
   type StitchPlanPayload,
   type SegmentMeta,
 } from '@/lib/api'
@@ -615,7 +614,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const isRackAuditioning = useAppStore(
     (s) => s.ovIsRackAuditioning,
   )
-  const lockedSegments = useAppStore((s) => s.ovLockedSegments)
   const isStitching = useAppStore((s) => s.ovIsStitching)
   const isSaving = useAppStore((s) => s.ovIsSaving)
   const modelLoaded = useAppStore((s) => s.modelLoaded)
@@ -679,9 +677,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   )
   const setIsRackAuditioning = useAppStore(
     (s) => s.setOvIsRackAuditioning,
-  )
-  const setLockedSegments = useAppStore(
-    (s) => s.setOvLockedSegments,
   )
   const setIsStitching = useAppStore((s) => s.setOvIsStitching)
   const setIsSaving = useAppStore((s) => s.setOvIsSaving)
@@ -955,7 +950,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     (entry: AccentBankEntry) => {
       const hero = buildHeroTake(entry)
       setScriptText(hero.map((s) => s.text).join('\n'))
-      setLockedSegments([])
       setSegmentRack([])
       setStitchedUrl(null)
       setSavedVoiceId(null)
@@ -964,7 +958,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     },
     [
       setScriptText,
-      setLockedSegments,
       setSegmentRack,
       setStitchedUrl,
       setSavedVoiceId,
@@ -984,7 +977,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const applyAccentPreset = useCallback(
     (entry: AccentBankEntry) => {
       setSelections(selectionsFromInstruct(entry.instruct))
-      setLockedSegments([])
       setScriptText('')
       setSegmentRack([])
       setStitchedUrl(null)
@@ -993,7 +985,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     },
     [
       setSelections,
-      setLockedSegments,
       setScriptText,
       setSegmentRack,
       setStitchedUrl,
@@ -1437,12 +1428,11 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const handleStitch = useCallback(async () => {
     if (segmentRack.length === 0 || isStitching) return
 
-    const selectedCandidates = segmentRack
-      .filter((row) => row.selectedTakeIndex >= 0)
-      .map((row) => row.candidates[row.selectedTakeIndex])
-      .filter((c) => c && c.candidate_id)
+    const selectedRows = segmentRack.filter(
+      (row) => row.selectedTakeIndex >= 0 && row.candidates[row.selectedTakeIndex]?.candidate_id,
+    )
 
-    if (selectedCandidates.length === 0) {
+    if (selectedRows.length === 0) {
       setError('Select at least one take before stitching.')
       return
     }
@@ -1451,10 +1441,27 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     setError(null)
     setSavedVoiceId(null)
     try {
-      const candidateIds = selectedCandidates.map(
-        (c) => c.candidate_id,
-      )
-      const blob = await stitchOmniVoice(candidateIds)
+      const plan: StitchPlanPayload = {
+        clips: selectedRows.map((row) => {
+          const candidate = row.candidates[row.selectedTakeIndex]
+          const fromLibrary = candidate.candidate_id.startsWith('lib:')
+          return {
+            segmentId: fromLibrary ? row.segmentId : undefined,
+            candidateId: fromLibrary ? undefined : candidate.candidate_id,
+            trimStartMs: 0,
+            trimEndMs: 0,
+            fadeInMs: 0,
+            fadeOutMs: 0,
+          }
+        }),
+        paddingMs: new Array(Math.max(0, selectedRows.length - 1)).fill(0),
+        crossfadeMs: 100,
+        segmentTargetDbfs: -20,
+        finalTargetDbfs: -18,
+        finalCeilingDb: -1,
+        compress: null,
+      }
+      const blob = await renderStitchPlan(plan)
       setStitchedUrl(URL.createObjectURL(blob))
       setStitchedBlob(blob)
     } catch (err) {
@@ -1489,18 +1496,32 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     }
 
     const segments = selectedRows.map((r) => r.text)
-    const selectedCandidates = selectedRows.map(
-      (row) => row.candidates[row.selectedTakeIndex],
-    )
 
     setIsSaving(true)
     setError(null)
     try {
-      const candidateIds = selectedCandidates.map(
-        (c) => c.candidate_id,
-      )
+      const plan: StitchPlanPayload = {
+        clips: selectedRows.map((row) => {
+          const candidate = row.candidates[row.selectedTakeIndex]
+          const fromLibrary = candidate.candidate_id.startsWith('lib:')
+          return {
+            segmentId: fromLibrary ? row.segmentId : undefined,
+            candidateId: fromLibrary ? undefined : candidate.candidate_id,
+            trimStartMs: 0,
+            trimEndMs: 0,
+            fadeInMs: 0,
+            fadeOutMs: 0,
+          }
+        }),
+        paddingMs: new Array(Math.max(0, selectedRows.length - 1)).fill(0),
+        crossfadeMs: 100,
+        segmentTargetDbfs: -20,
+        finalTargetDbfs: -18,
+        finalCeilingDb: -1,
+        compress: null,
+      }
       const result = await saveOmniVoice({
-        selections: candidateIds,
+        stitchPlan: plan,
         instruct,
         segments,
         accentId:
@@ -1575,9 +1596,12 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         durationMs = 0
       }
 
+      const fromLibrary = candidate.candidate_id.startsWith('lib:')
       clips.push({
         clipId: row.segmentId + '-clip',
-        ref: { candidateId: candidate.candidate_id },
+        ref: fromLibrary
+          ? { segmentId: row.segmentId }
+          : { candidateId: candidate.candidate_id },
         text: row.text,
         sourceAudioBase64: b64,
         sampleRate: candidate.sample_rate,
@@ -1678,21 +1702,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     ],
   )
 
-  const removeLockedSegment = useCallback(
-    (index: number) => {
-      setLockedSegments((prev) =>
-        prev.filter((_, i) => i !== index),
-      )
-      setStitchedUrl(null)
-      setSavedVoiceId(null)
-    },
-    [
-      setLockedSegments,
-      setStitchedUrl,
-      setSavedVoiceId,
-    ],
-  )
-
   const toggleLibrarySelection = useCallback(
     (segmentId: string) => {
       setLibrarySelection((prev) => {
@@ -1706,26 +1715,36 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     [setLibrarySelection],
   )
 
-  const addSelectedFromLibrary = useCallback(
+  const addSelectedLibraryToRack = useCallback(
     () => {
       const chosen = library.filter(
         (m) => librarySelection.has(m.segment_id),
       )
-      setLockedSegments((prev) => [
+      setSegmentRack((prev) => [
         ...prev,
         ...chosen
           .filter(
             (m) =>
               !prev.some(
-                (s) =>
-                  s.segmentId === m.segment_id,
+                (row) => row.segmentId === m.segment_id,
               ),
           )
           .map((m) => ({
             segmentId: m.segment_id,
             text: m.text,
-            audioBase64:
-              m.audio_base64 ?? '',
+            candidates: [
+              {
+                candidate_id: `lib:${m.segment_id}`,
+                sample_rate: m.sample_rate,
+                audio_base64: m.audio_base64 ?? '',
+                duration_sec: m.duration_sec ?? null,
+                flagged: false,
+                flag_reason: null,
+                whisper_transcript: null,
+                match_score: null,
+              },
+            ],
+            selectedTakeIndex: 0,
           })),
       ])
       setLibrarySelection(new Set())
@@ -1735,7 +1754,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     [
       library,
       librarySelection,
-      setLockedSegments,
+      setSegmentRack,
       setLibrarySelection,
       setStitchedUrl,
       setSavedVoiceId,
@@ -1746,11 +1765,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     async (segmentId: string) => {
       try {
         await deleteOmniVoiceSegment(segmentId)
-        setLockedSegments((prev) =>
-          prev.filter(
-            (s) => s.segmentId !== segmentId,
-          ),
-        )
         refreshLibrary()
       } catch (err) {
         setError(
@@ -1760,11 +1774,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         )
       }
     },
-    [
-      setLockedSegments,
-      refreshLibrary,
-      setError,
-    ],
+    [refreshLibrary, setError],
   )
 
   // -- Render: Left column --
@@ -2928,57 +2938,17 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
               size="sm"
               className="self-start"
               onClick={
-                addSelectedFromLibrary
+                addSelectedLibraryToRack
               }
               disabled={
                 librarySelection.size === 0
               }
             >
-              Pin selected to current project
+              Add selected to segment rack
             </Button>
           </div>
         )}
       </div>
-
-      {/* Locked segments */}
-      {lockedSegments.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Pinned segments ({lockedSegments.length})
-          </p>
-          <p className="text-[9px] text-muted-foreground/70">
-            These segments are pinned for reuse in future reference clips.
-          </p>
-          {lockedSegments.map((seg, i) => (
-            <div
-              key={seg.segmentId}
-              className="flex items-center gap-2 rounded-md border border-border bg-muted/30 p-2"
-            >
-              <span className="flex-1 text-xs">
-                {seg.text}
-              </span>
-              {seg.audioBase64 && (
-                <ClipPlayer
-                  audioBase64={
-                    seg.audioBase64
-                  }
-                  className="w-40"
-                />
-              )}
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() =>
-                  removeLockedSegment(i)
-                }
-              >
-                Remove
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Error */}
       {error && (

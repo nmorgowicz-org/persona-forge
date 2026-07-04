@@ -35,12 +35,6 @@ export interface EditingVoice {
   selections: ChipSelections | null
 }
 
-export interface LockedSegment {
-  segmentId: string
-  text: string
-  audioBase64: string
-}
-
 export interface SegmentRackRow {
   segmentId: string
   text: string
@@ -159,7 +153,6 @@ interface StoreState {
   ovCurrentText: string
   ovCurrentCandidates: OmniVoiceCandidate[] | null
   ovCurrentSelectedIndex: number
-  ovLockedSegments: LockedSegment[]
   ovIsAuditioning: boolean
   ovIsLockingIn: boolean
   ovIsStitching: boolean
@@ -212,11 +205,6 @@ interface StoreState {
   ) => void
   setOvCurrentCandidates: (v: OmniVoiceCandidate[] | null) => void
   setOvCurrentSelectedIndex: (v: number) => void
-  setOvLockedSegments: (
-    updater:
-      | LockedSegment[]
-      | ((prev: LockedSegment[]) => LockedSegment[]),
-  ) => void
   setOvIsAuditioning: (v: boolean) => void
   setOvIsLockingIn: (v: boolean) => void
   setOvIsStitching: (v: boolean) => void
@@ -380,7 +368,6 @@ export const useAppStore = create<StoreState>((set) => ({
   ovCurrentText: '',
   ovCurrentCandidates: null,
   ovCurrentSelectedIndex: 0,
-  ovLockedSegments: [],
   ovIsAuditioning: false,
   ovIsLockingIn: false,
   ovIsStitching: false,
@@ -467,13 +454,6 @@ export const useAppStore = create<StoreState>((set) => ({
   setOvCurrentCandidates: (v) => set({ ovCurrentCandidates: v }),
   setOvCurrentSelectedIndex: (v) =>
     set({ ovCurrentSelectedIndex: v }),
-  setOvLockedSegments: (updater) =>
-    set((s) => ({
-      ovLockedSegments:
-        typeof updater === 'function'
-          ? updater(s.ovLockedSegments)
-          : updater,
-    })),
   setOvIsAuditioning: (v) => set({ ovIsAuditioning: v }),
   setOvIsLockingIn: (v) => set({ ovIsLockingIn: v }),
   setOvIsStitching: (v) => set({ ovIsStitching: v }),

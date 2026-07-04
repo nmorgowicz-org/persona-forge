@@ -345,11 +345,40 @@ export interface StitchPlanPayload {
   compress: { thresholdDb: number; ratio: number; attackMs: number; releaseMs: number } | null
 }
 
+// Backend (_resolve_stitch_plan/_resolve_one_clip_ref in app.py) reads snake_case keys only —
+// StitchPlanPayload is camelCase on the frontend, so every stitch_plan request must go through
+// this converter or every clip ref (and every trim/fade/dsp override) silently fails to resolve.
+function serializeStitchPlan(plan: StitchPlanPayload) {
+  return {
+    clips: plan.clips.map((c) => ({
+      segment_id: c.segmentId ?? undefined,
+      candidate_id: c.candidateId ?? undefined,
+      trim_start_ms: c.trimStartMs,
+      trim_end_ms: c.trimEndMs,
+      fade_in_ms: c.fadeInMs,
+      fade_out_ms: c.fadeOutMs,
+    })),
+    padding_ms: plan.paddingMs,
+    crossfade_ms: plan.crossfadeMs,
+    segment_target_dbfs: plan.segmentTargetDbfs,
+    final_target_dbfs: plan.finalTargetDbfs,
+    final_ceiling_db: plan.finalCeilingDb,
+    compress: plan.compress
+      ? {
+          threshold_db: plan.compress.thresholdDb,
+          ratio: plan.compress.ratio,
+          attack_ms: plan.compress.attackMs,
+          release_ms: plan.compress.releaseMs,
+        }
+      : undefined,
+  }
+}
+
 export async function renderStitchPlan(plan: StitchPlanPayload): Promise<Blob> {
   const res = await fetch('/omnivoice/stitch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ stitch_plan: plan }),
+    body: JSON.stringify({ stitch_plan: serializeStitchPlan(plan) }),
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.blob()
@@ -383,7 +412,9 @@ export async function saveOmniVoice(params: OmniVoiceSaveParams): Promise<OmniVo
       segments: params.segments,
       language: params.language ?? 'english',
       accent_id: params.accentId ?? undefined,
-      stitch_plan: params.stitchPlan ?? undefined,
+      stitch_plan: params.stitchPlan
+        ? serializeStitchPlan(params.stitchPlan)
+        : undefined,
     }),
   })
   if (!res.ok) throw new Error(await readError(res))
