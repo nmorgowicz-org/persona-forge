@@ -911,13 +911,24 @@ def omnivoice_segments_create():
 def omnivoice_segments_list():
     segments = []
     for meta in segment_library.list_segments():
-        wav_bytes = Path(meta["wav_path"]).read_bytes() if meta.get("wav_path") else None
         entry = dict(meta)
-        if wav_bytes is not None:
-            entry["audio_base64"] = base64.b64encode(wav_bytes).decode("ascii")
         entry.pop("wav_path", None)
         segments.append(entry)
     return jsonify({"segments": segments})
+
+
+@app.get("/omnivoice/segments/<segment_id>/audio")
+def omnivoice_segments_audio(segment_id: str):
+    meta = segment_library.get_segment_meta(segment_id)
+    if not meta or not meta.get("wav_path"):
+        return jsonify({"error": "Unknown segment_id"}), 404
+    wav_bytes = Path(meta["wav_path"]).read_bytes()
+    return Response(
+        wav_bytes,
+        status=200,
+        mimetype="audio/wav",
+        headers={"Content-Disposition": f'inline; filename="{segment_id}.wav"'},
+    )
 
 
 @app.delete("/omnivoice/segments/<segment_id>")

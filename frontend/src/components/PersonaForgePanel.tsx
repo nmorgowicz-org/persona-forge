@@ -68,18 +68,29 @@ function formatEta(seconds: number | null): string {
 
 function ClipPlayer({
   audioBase64,
+  audioUrl,
   className,
   autoPlay = false,
 }: {
-  audioBase64: string
+  audioBase64?: string
+  audioUrl?: string
   className?: string
   autoPlay?: boolean
 }) {
-  const blob = useMemo(() => base64ToBlob(audioBase64), [audioBase64])
-  const src = useMemo(
-    () => `data:audio/wav;base64,${audioBase64}`,
-    [audioBase64],
-  )
+  const src = useMemo(() => {
+    if (audioUrl) return audioUrl
+    if (audioBase64) return `data:audio/wav;base64,${audioBase64}`
+    return null
+  }, [audioUrl, audioBase64])
+
+  const blob = useMemo(() => {
+    if (audioUrl) return null
+    if (audioBase64) return base64ToBlob(audioBase64)
+    return null
+  }, [audioBase64])
+
+  if (!src) return null
+
   return (
     <AudioPlayer
       src={src}
@@ -2721,14 +2732,10 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                       )}
                     </div>
                   </div>
-                  {m.audio_base64 && (
-                    <ClipPlayer
-                      audioBase64={
-                        m.audio_base64
-                      }
-                      className="w-40"
-                    />
-                  )}
+                  <ClipPlayer
+                    audioUrl={`/omnivoice/segments/${encodeURIComponent(m.segment_id)}/audio`}
+                    className="w-44"
+                  />
                   <Button
                     type="button"
                     size="sm"
