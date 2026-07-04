@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { AnimatePresence, motion, Reorder } from 'framer-motion'
 import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play } from 'lucide-react'
 import { useAppStore, type StitchPlanClip } from '@/store'
@@ -613,7 +614,7 @@ export function StitchEditorPanel({
     return Math.max(1, sum)
   }, [clips, paddingMs])
 
-  return (
+  return createPortal(
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -688,7 +689,8 @@ export function StitchEditorPanel({
           <div className="text-[10px] text-muted-foreground">{(totalMs / 1000).toFixed(1)}s total</div>
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body,
   )
 }
 
