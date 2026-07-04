@@ -313,14 +313,19 @@ should copy this template rather than inventing a new visual language.
   feedback across every page in one pass rather than each page inventing its own inline message.
 
 ### Larger investment (flag, don't block the roadmap on it)
-- `PersonaForgePanel.tsx` is ~3,100 lines mixing generation, audition, segment rack, and the
-  stitch-editor trigger in one file. Every feature above that touches this page (DSP presets UI,
-  multi-speaker's reuse of the clip-row visual language) will keep growing it unless it's split into
-  subcomponents (e.g. `GenerationControls`, `SegmentRack`, `AuditionResults` as separate files under
-  a `PersonaForge/` directory). This is a refactor, not styling, but it directly gates how painful
-  the feature work above will be to land cleanly — worth doing as a preparatory step before §3
-  (the largest new surface) rather than after, since script mode will otherwise be tempted to bolt
-  onto the same monolith.
+- **Status: partially done.** `PersonaForgePanel.tsx` was ~3,100 lines mixing generation, audition,
+  segment rack, and the stitch-editor trigger in one file. `ClipPlayer`, `InfoIcon`,
+  `TakeDebugButton`, `SegmentRackRow`, `ChipSection`, and `AccentChipPanel` (the chip-based instruct
+  composer) have been extracted into `frontend/src/components/OmniVoice/` (named for the engine
+  these components are specific to — OmniVoice — not the app's overall "Persona Forge" branding),
+  bringing the main file down to ~2,440 lines. What's left — the script composer, advanced-options
+  panel, segment-rack orchestration, and generate/stitch triggers — is ~2,100 lines of JSX threaded
+  through 20+ pieces of interdependent local state (`scriptWordCount`, `heroMeterState`,
+  `examplesOpen`, `applyHeroTake`, etc.), so further splitting isn't a mechanical move anymore: it
+  needs either prop-drilling two dozen values into new components or moving that state into a
+  shared hook/context first. Worth doing as its own scoped task before §3 (the largest new surface,
+  which will otherwise be tempted to bolt onto the same monolith) — but treat it as a real refactor,
+  not a continuation of the quick extraction already done.
 - No dedicated "dashboard" visual language exists yet (tables, sortable columns, aggregate stat
   cards) — only card grids so far. §5's v2 (a real health dashboard view, if wanted) and any future
   "library at scale" overview would benefit from establishing one dashboard layout pattern once,
@@ -341,7 +346,8 @@ should copy this template rather than inventing a new visual language.
 2. §2 (subtitle export) — nearly free, no audio/model risk, good standalone win.
 3. §4 (DSP presets) — small, self-contained, reuses an existing UI pattern.
 4. §5 (voice health dashboard, per-card badge only) — aggregation-only, low risk.
-5. `PersonaForgePanel.tsx` split (prep work, not user-visible) — do before §3 starts, not after.
+5. Finish the `PersonaForgePanel.tsx` split (prep work, not user-visible; the easy extractions are
+   already done, see §8's "Larger investment" note) — do before §3 starts, not after.
 6. §3 (multi-speaker script mode) — largest item, deliver in its own sub-phases (parse+assign UI →
    real rendering → per-line re-take/waveform).
 7. §6 (in-place audio replace) — smallest technical lift but needs nick's explicit sign-off on the

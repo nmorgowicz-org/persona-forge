@@ -39,14 +39,14 @@ import { useAppStore, type StitchPlanClip } from '@/store'
 import * as Tooltip from '@/components/ui/tooltip'
 import { StitchEditorPanel } from '@/components/StitchTimeline'
 import { insertSegmentIntoStitchTimeline, insertVoiceIntoStitchTimeline } from '@/lib/stitchClips'
-import { ClipPlayer } from './PersonaForge/ClipPlayer'
-import { InfoIcon } from './PersonaForge/InfoIcon'
-import { AccentChipPanel } from './PersonaForge/AccentChipPanel'
+import { ClipPlayer } from './OmniVoice/ClipPlayer'
+import { InfoIcon } from './OmniVoice/InfoIcon'
+import { AccentChipPanel } from './OmniVoice/AccentChipPanel'
 import {
   SegmentRackRow,
   SEGMENT_DURATION_MIN_SEC,
   SEGMENT_DURATION_MAX_SEC,
-} from './PersonaForge/SegmentRackRow'
+} from './OmniVoice/SegmentRackRow'
 
 const DEFAULT_ACCENT = ACCENT_BANK[0] ?? null
 
