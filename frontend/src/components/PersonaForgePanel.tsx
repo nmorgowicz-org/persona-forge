@@ -529,7 +529,12 @@ function SegmentRackRow({
                   </button>
 
                   <ClipPlayer
-                    audioBase64={c.audio_base64}
+                    audioBase64={c.audio_base64 || undefined}
+                    audioUrl={
+                      !c.audio_base64
+                        ? `/omnivoice/segments/${encodeURIComponent(row.segmentId)}/audio`
+                        : undefined
+                    }
                     className="min-w-0 flex-1"
                     autoPlay={selected && autoplayTakes}
                   />
