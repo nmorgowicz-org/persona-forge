@@ -254,6 +254,7 @@ interface StoreState {
   updateOvStitchPlanClip: (clipId: string, patch: Partial<StitchPlanClip>) => void
   removeOvStitchPlanClip: (clipId: string) => void
   setOvStitchPlanPaddingAt: (gapIndex: number, ms: number) => void
+  setOvStitchPlanPaddingMs: (v: number[]) => void
   setOvStitchPlanDsp: (patch: Partial<StitchPlanDsp>) => void
   setOvStitchEditorOpen: (v: boolean) => void
   setOvStitchPreviewUrl: (v: string | null) => void
@@ -534,6 +535,7 @@ export const useAppStore = create<StoreState>((set) => ({
       pad[gapIndex] = ms
       return { ovStitchPlanPaddingMs: pad }
     }),
+  setOvStitchPlanPaddingMs: (v) => set({ ovStitchPlanPaddingMs: v }),
   setOvStitchPlanDsp: (patch) =>
     set((s) => ({
       ovStitchPlanDsp: { ...s.ovStitchPlanDsp, ...patch },

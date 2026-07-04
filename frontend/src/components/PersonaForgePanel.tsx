@@ -743,6 +743,9 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const setStitchPlanPaddingAt = useAppStore(
     (s) => s.setOvStitchPlanPaddingAt,
   )
+  const setStitchPlanPaddingMs = useAppStore(
+    (s) => s.setOvStitchPlanPaddingMs,
+  )
   const setStitchEditorOpen = useAppStore(
     (s) => s.setOvStitchEditorOpen,
   )
@@ -1663,6 +1666,41 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     setStitchPlanClips,
     setStitchPlanPaddingAt,
     setStitchEditorOpen,
+  ])
+
+  const handleResetSegments = useCallback(() => {
+    if (segmentRack.length === 0 && !stitchedUrl) return
+    if (
+      !window.confirm(
+        'Reset all segments? This clears every generated take for this script. Your script text and instruct are kept, and anything already saved to the segment library is unaffected.',
+      )
+    ) {
+      return
+    }
+    if (stitchedUrl) URL.revokeObjectURL(stitchedUrl)
+    setSegmentRack([])
+    setStitchPlanClips([])
+    setStitchPlanPaddingMs([])
+    setStitchEditorOpen(false)
+    setStitchedUrl(null)
+    setStitchedBlob(null)
+    setError(null)
+    setCurrentJobId(null)
+    setJobTotalSegments(0)
+    setJobStatus(null)
+  }, [
+    segmentRack.length,
+    stitchedUrl,
+    setSegmentRack,
+    setStitchPlanClips,
+    setStitchPlanPaddingMs,
+    setStitchEditorOpen,
+    setStitchedUrl,
+    setStitchedBlob,
+    setError,
+    setCurrentJobId,
+    setJobTotalSegments,
+    setJobStatus,
   ])
 
   const insertFromLibraryToTimeline = useCallback(
@@ -2705,6 +2743,15 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                   {HERO_TARGET_MAX_SEC}s; select a take per segment to update this.
                 </Tooltip.Content>
               </Tooltip.Root>
+              <button
+                type="button"
+                onClick={handleResetSegments}
+                disabled={isRackAuditioning}
+                title="Clear every generated segment and take, starting fresh with the same script"
+                className="ml-auto shrink-0 whitespace-nowrap rounded-md border border-input px-2 py-1 text-[9px] font-medium text-muted-foreground hover:bg-accent hover:text-destructive disabled:opacity-40"
+              >
+                Reset segments
+              </button>
             </div>
 
             <div className="flex min-w-0 flex-col gap-1 overflow-y-auto">
