@@ -4,36 +4,40 @@ import { cn } from '@/lib/utils'
 
 const T = Radix.Tooltip
 
-export function Tooltip({
+export function TooltipProvider({
+  delayDuration = 150,
+  skipDelayDuration = 0,
   children,
 }: {
+  delayDuration?: number
+  skipDelayDuration?: number
   children: React.ReactNode
 }) {
   return (
-    <T.Provider delayDuration={150}>
-      <T.Root defaultOpen={false}>
-        {children}
-      </T.Root>
+    <T.Provider delayDuration={delayDuration} skipDelayDuration={skipDelayDuration}>
+      {children}
     </T.Provider>
   )
 }
 
-export function TooltipTrigger({
+export function Root({ children }: { children: React.ReactNode }) {
+  return <T.Root>{children}</T.Root>
+}
+
+export function Trigger({
   children,
   asChild,
+  className,
   ...props
-}: {
-  children: React.ReactNode
-  asChild?: boolean
-} & React.HTMLAttributes<HTMLDivElement>) {
+}: React.ComponentProps<typeof T.Trigger> & { className?: string }) {
   return (
-    <T.Trigger asChild={asChild} {...props}>
+    <T.Trigger asChild={asChild} className={cn('relative inline-flex', className)} {...props}>
       {children}
     </T.Trigger>
   )
 }
 
-export function TooltipContent({
+export function Content({
   children,
   side = 'top',
   align = 'center',
@@ -66,3 +70,8 @@ export function TooltipContent({
     </T.Portal>
   )
 }
+
+// Backwards-compatible names
+export const Tooltip = Root
+export const TooltipTrigger = Trigger
+export const TooltipContent = Content

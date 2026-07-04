@@ -87,15 +87,15 @@ export function AudioPlayer({ src, blob, className, autoPlay = true }: AudioPlay
         }}
         className="hidden"
       />
-      <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
+      <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2 transition-colors hover:bg-muted/40">
         <Button
           type="button"
           size="icon"
           variant="secondary"
-          className="shrink-0 rounded-full"
+          className="shrink-0 rounded-full transition-transform duration-150 hover:scale-105 active:scale-95"
           onClick={togglePlay}
         >
-          {isPlaying ? <Pause className="size-4" /> : <Play className="size-4" />}
+          {isPlaying ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
         </Button>
         <Waveform
           peaks={peaks ?? Array(64).fill(0.15)}

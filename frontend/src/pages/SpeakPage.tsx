@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
+import { Loader2 } from 'lucide-react'
 import { generateSpeech, listVoices } from '@/lib/api'
 import { TONE_OPTIONS } from '@/lib/voiceDesignChips'
 import { useAppStore } from '@/store'
+import { cn } from '@/lib/utils'
 import { VoiceSelector } from '@/components/VoiceSelector'
 import { AudioPlayer } from '@/components/AudioPlayer'
 import { Button } from '@/components/ui/button'
@@ -88,7 +90,7 @@ export function SpeakPage() {
       >
         <textarea
           data-testid="speak-text-input"
-          className="min-h-48 resize-y rounded-lg border border-input bg-transparent p-4 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="min-h-48 resize-y rounded-lg border border-input bg-transparent p-4 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           placeholder="Say something..."
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -163,8 +165,22 @@ export function SpeakPage() {
             onClick={handleGenerate}
             disabled={!text.trim() || isGenerating || !modelLoaded}
             title={modelLoaded ? undefined : 'Model is still loading'}
+            className={cn(
+              'transition-all duration-200',
+              !isGenerating &&
+                text.trim() &&
+                modelLoaded &&
+                'shadow-[0_4px_20px_-6px_color-mix(in_oklch,var(--primary),transparent_35%)] hover:shadow-[0_6px_24px_-6px_color-mix(in_oklch,var(--primary),transparent_20%)]',
+            )}
           >
-            {isGenerating ? 'Generating…' : 'Generate'}
+            {isGenerating ? (
+              <span className="flex items-center gap-1.5">
+                <Loader2 className="size-4 animate-spin" />
+                Generating…
+              </span>
+            ) : (
+              'Generate'
+            )}
           </Button>
         </div>
 

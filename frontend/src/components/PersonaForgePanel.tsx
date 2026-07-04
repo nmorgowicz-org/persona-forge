@@ -5,7 +5,7 @@ import {
   useState,
 } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Loader2 } from 'lucide-react'
+import { FlaskConical } from 'lucide-react'
 import {
   auditionOmniVoiceStreaming,
   deleteOmniVoiceSegment,
@@ -33,6 +33,7 @@ import { AudioPlayer } from './AudioPlayer'
 import { Button } from '@/components/ui/button'
 import { base64ToBlob, cn } from '@/lib/utils'
 import { useAppStore } from '@/store'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import * as Tooltip from '@/components/ui/tooltip'
 
 const DEFAULT_ACCENT = ACCENT_BANK[0] ?? null
@@ -86,12 +87,20 @@ function ClipPlayer({
 
 function InfoIcon({ text }: { text: string }) {
   return (
-    <span
-      title={text}
-      className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground/40 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:border-muted-foreground hover:text-muted-foreground cursor-help"
-    >
-      ?
-    </span>
+    <TooltipProvider delayDuration={60} skipDelayDuration={0}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>
+          <span
+            className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground/40 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:border-muted-foreground hover:text-muted-foreground cursor-help"
+          >
+            ?
+          </span>
+        </Tooltip.Trigger>
+        <Tooltip.Content side="top" align="start">
+          {text}
+        </Tooltip.Content>
+      </Tooltip.Root>
+    </TooltipProvider>
   )
 }
 
@@ -100,17 +109,61 @@ interface SegmentRackRowProps {
   row: {
     segmentId: string
     text: string
-    candidates: { candidate_id: string; audio_base64: string; flagged: boolean; flag_reason: string | null; duration_sec: number | null | undefined }[]
+    candidates: { candidate_id: string; audio_base64: string; flagged: boolean; flag_reason: string | null; duration_sec: number | null | undefined; whisper_transcript: string | null; match_score: number | null }[]
     selectedTakeIndex: number
   }
   isRackAuditioning: boolean
   jobStatus: 'queued' | 'running' | 'completed' | 'failed' | null
   jobCurrentSegmentIndex: number | null
   autoplayTakes: boolean
+  segmentDuration: number | null
   onEdit: (segmentId: string, newText: string) => void
   onRegen: (segmentId: string) => void
   onSelectTake: (segmentId: string, index: number) => void
-  onAdjustDuration?: (segmentId: string, targetDurationSec: number) => void
+  onSegmentDurationChange: (segmentId: string, duration: number | null) => void
+}
+
+// Surfaces the ASR (Whisper) transcript + match-score confidence the backend computed for a
+// take, plus its flag status. The match score renders inline (not just on hover) so a low-
+// confidence take is visible at a glance, not just buried in a tooltip.
+function TakeDebugButton({
+  lines,
+  matchScore,
+}: {
+  lines: string[]
+  matchScore?: number | null
+}) {
+  const scoreColor =
+    matchScore == null
+      ? 'text-muted-foreground'
+      : matchScore >= 0.9
+        ? 'text-emerald-400'
+        : matchScore >= 0.7
+          ? 'text-amber-400'
+          : 'text-red-400'
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>
+        <button
+          type="button"
+          className={cn(
+            'ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[9px] transition-colors hover:bg-muted/60',
+            scoreColor,
+          )}
+        >
+          <FlaskConical className="size-2.5" />
+          {matchScore != null && <span className="font-mono">{matchScore.toFixed(2)}</span>}
+        </button>
+      </Tooltip.Trigger>
+      <Tooltip.Content side="top" align="end">
+        <div className="flex flex-col gap-0.5 text-[9px]">
+          {lines.map((l, i) => (
+            <div key={i}>{l}</div>
+          ))}
+        </div>
+      </Tooltip.Content>
+    </Tooltip.Root>
+  )
 }
 
 function SegmentRackRow({
@@ -120,60 +173,56 @@ function SegmentRackRow({
   jobStatus,
   jobCurrentSegmentIndex,
   autoplayTakes,
+  segmentDuration,
   onEdit,
   onRegen,
   onSelectTake,
-  onAdjustDuration,
+  onSegmentDurationChange,
 }: SegmentRackRowProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(row.text)
-
-  const [durEditing, setDurEditing] = useState(false)
-  const [durInput, setDurInput] = useState('')
-
   const isCurrent =
     jobStatus === 'running' &&
     jobCurrentSegmentIndex != null &&
     row.segmentId === `seg-${jobCurrentSegmentIndex}`
 
+  // The box shows the user's explicit override once set; otherwise it falls back to the
+  // actual length of the currently selected take, so there's always a starting point to
+  // nudge from instead of an empty field.
   const selectedCandidate =
-    row.selectedTakeIndex != null && row.selectedTakeIndex >= 0
-      ? row.candidates[row.selectedTakeIndex]
-      : null
+    row.selectedTakeIndex != null ? row.candidates[row.selectedTakeIndex] : undefined
+  const actualDurationSec = selectedCandidate?.duration_sec ?? null
+  const displayDuration = segmentDuration ?? actualDurationSec ?? null
+  const isDirty =
+    segmentDuration != null &&
+    actualDurationSec != null &&
+    Math.abs(segmentDuration - actualDurationSec) > 0.05
 
-  const currentDuration =
-    selectedCandidate && typeof selectedCandidate.duration_sec === 'number'
-      ? selectedCandidate.duration_sec
-      : null
-
-  const applyDurationChange = (target: number) => {
-    if (!currentDuration || !onAdjustDuration) return
-    const value = Number(target)
-    if (Number.isNaN(value) || value <= 0 || Math.abs(value - currentDuration) < 0.05) return
-    onAdjustDuration(row.segmentId, value)
+  const handleDurChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = Number(e.target.value)
+    if (Number.isNaN(v)) {
+      onSegmentDurationChange(row.segmentId, null)
+      return
+    }
+    const clamped = Math.max(0.5, Math.min(4.0, v))
+    onSegmentDurationChange(row.segmentId, clamped)
   }
 
-  const handleDurInputBlur = () => {
-    setDurEditing(false)
-    const value = Number(durInput)
-    if (!Number.isNaN(value) && value > 0) applyDurationChange(value)
+  const handleDurBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    const v = Number(e.target.value)
+    if (Number.isNaN(v) || v <= 0) {
+      onSegmentDurationChange(row.segmentId, segmentDuration ?? null)
+      return
+    }
+    const clamped = Math.max(0.5, Math.min(4.0, v))
+    onSegmentDurationChange(row.segmentId, clamped)
   }
 
-  const handleDurKeyDown = (e: React.KeyboardEvent) => {
+  const handleDurKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
-      handleDurInputBlur()
+      e.currentTarget.blur()
     }
-    if (e.key === 'Escape') {
-      setDurEditing(false)
-      setDurInput('')
-    }
-  }
-
-  const openDurationEdit = () => {
-    if (!currentDuration) return
-    setDurEditing(true)
-    setDurInput(String(currentDuration.toFixed(2)))
   }
 
   return (
@@ -226,70 +275,38 @@ function SegmentRackRow({
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
-          {currentDuration != null && (
-            <div className="flex items-center gap-0.5">
-              <Tooltip.Root>
-                <Tooltip.Trigger asChild>
-                  <div>
-                    {durEditing ? (
-                      <div className="flex items-center gap-0.5">
-                        <span className="text-[9px] text-muted-foreground">
-                          Dur
-                        </span>
-                        <input
-                          type="number"
-                          min={0.5}
-                          max={10}
-                          step={0.05}
-                          autoFocus
-                          value={durInput}
-                          onChange={(e) => setDurInput(e.target.value)}
-                          onBlur={handleDurInputBlur}
-                          onKeyDown={handleDurKeyDown}
-                          className="w-14 rounded-md border border-input bg-transparent px-1 py-0.5 text-[9px] outline-none focus-visible:border-ring"
-                        />
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-0.5">
-                        <button
-                          type="button"
-                          onClick={openDurationEdit}
-                          className="shrink-0 rounded-md border border-border/80 bg-muted/90 px-1 py-0.5 text-[9px] font-medium text-foreground/90 transition-colors hover:bg-muted"
-                        >
-                          {currentDuration.toFixed(1)}s
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!currentDuration) return
-                            const target = +(currentDuration * 0.9).toFixed(2)
-                            applyDurationChange(target)
-                          }}
-                          className="shrink-0 rounded px-1 py-0.5 text-[9px] text-muted-foreground underline decoration-dotted underline-offset-1 hover:text-foreground"
-                        >
-                          -10%
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!currentDuration) return
-                            const target = +(currentDuration * 1.1).toFixed(2)
-                            applyDurationChange(target)
-                          }}
-                          className="shrink-0 rounded px-1 py-0.5 text-[9px] text-muted-foreground underline decoration-dotted underline-offset-1 hover:text-foreground"
-                        >
-                          +10%
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </Tooltip.Trigger>
-                <Tooltip.Content side="top">
-                  Adjust this segment’s playback duration (time-stretch).
-                </Tooltip.Content>
-              </Tooltip.Root>
-            </div>
-          )}
+          {/* Per-segment Duration */}
+          <Tooltip.Root>
+            <Tooltip.Trigger asChild>
+              <div className="relative flex items-center gap-0.5">
+                <span className="text-[9px] text-muted-foreground">
+                  Dur
+                </span>
+                <input
+                  type="number"
+                  min={0.5}
+                  max={4}
+                  step={0.1}
+                  value={displayDuration != null ? Math.round(displayDuration * 10) / 10 : ''}
+                  onChange={handleDurChange}
+                  onBlur={handleDurBlur}
+                  onKeyDown={handleDurKeyDown}
+                  className={cn(
+                    'w-14 rounded-md border bg-transparent px-1 py-0.5 text-[9px] outline-none transition-colors focus-visible:border-ring',
+                    isDirty ? 'border-amber-500/70' : 'border-input',
+                  )}
+                />
+                {isDirty && (
+                  <span className="absolute -top-1 -right-1 size-1.5 rounded-full bg-amber-500" />
+                )}
+              </div>
+            </Tooltip.Trigger>
+            <Tooltip.Content side="top">
+              {isDirty
+                ? `Currently ${actualDurationSec?.toFixed(1)}s — hit Regen to retarget at ${displayDuration?.toFixed(1)}s.`
+                : 'Target duration for this segment (0.5–4s). Change it, then hit Regen to apply.'}
+            </Tooltip.Content>
+          </Tooltip.Root>
 
           <button
             type="button"
@@ -307,7 +324,10 @@ function SegmentRackRow({
                 type="button"
                 size="sm"
                 variant="outline"
-                className="shrink-0 h-5 px-1.5 text-[9px]"
+                className={cn(
+                  'shrink-0 h-5 px-1.5 text-[9px] transition-all',
+                  isDirty && !isRackAuditioning && 'border-amber-500/70 text-amber-500 hover:text-amber-400',
+                )}
                 onClick={() =>
                   onRegen(row.segmentId)
                 }
@@ -326,7 +346,9 @@ function SegmentRackRow({
             <Tooltip.Content side="left">
               {isRackAuditioning
                 ? 'Regenerate this segment after current job finishes.'
-                : 'Regenerate this segment with current settings.'}
+                : isDirty
+                  ? 'Duration changed — regenerate to apply the new target length.'
+                  : 'Regenerate this segment with current settings.'}
             </Tooltip.Content>
           </Tooltip.Root>
         </div>
@@ -350,6 +372,28 @@ function SegmentRackRow({
             {row.candidates.map((c, ci) => {
               const selected = ci === row.selectedTakeIndex
               const isFlagged = !!c.flagged
+
+              // Simple debug info for this candidate
+              const debugLines: string[] = []
+              if (isFlagged) {
+                debugLines.push(`Flag: ${c.flag_reason || "no-speech"}`)
+              } else {
+                debugLines.push("Flag: ok")
+              }
+              if (c.whisper_transcript) {
+                debugLines.push(`Whisper: "${c.whisper_transcript}"`)
+              } else {
+                debugLines.push("Whisper: (no speech detected)")
+              }
+              if (c.match_score != null) {
+                const label =
+                  c.match_score >= 0.9
+                    ? "Match: " + c.match_score.toFixed(2) + " (strong)"
+                    : c.match_score >= 0.7
+                      ? "Match: " + c.match_score.toFixed(2) + " (ok)"
+                      : "Match: " + c.match_score.toFixed(2) + " (low)"
+                debugLines.push(label)
+              }
 
               if (isFlagged) {
                 return (
@@ -379,6 +423,8 @@ function SegmentRackRow({
                     <span className="text-[9px] text-muted-foreground">
                       No usable audio (3 attempts)
                     </span>
+
+                    <TakeDebugButton lines={debugLines} matchScore={c.match_score} />
                   </div>
                 )
               }
@@ -413,6 +459,8 @@ function SegmentRackRow({
                     className="min-w-0 flex-1"
                     autoPlay={selected && autoplayTakes}
                   />
+
+                  <TakeDebugButton lines={debugLines} matchScore={c.match_score} />
                 </div>
               )
             })}
@@ -435,7 +483,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   )
   const showAdvanced = useAppStore((s) => s.ovShowAdvanced)
   const numStepInput = useAppStore((s) => s.ovNumStepInput)
-  const durationInput = useAppStore((s) => s.ovDurationInput)
   const speedInput = useAppStore((s) => s.ovSpeedInput)
   const guidanceScaleInput = useAppStore(
     (s) => s.ovGuidanceScaleInput,
@@ -475,6 +522,9 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const autoplayTakes = useAppStore((s) => s.ovAutoplayTakes)
   const setAutoplayTakes = useAppStore(
     (s) => s.setOvAutoplayTakes,
+  )
+  const setActivityStatus = useAppStore(
+    (s) => s.setActivityStatus,
   )
   const library = useAppStore((s) => s.ovLibrary)
   const libraryFilter = useAppStore((s) => s.ovLibraryFilter)
@@ -639,6 +689,10 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const [scriptRef, setScriptRef] = useState<HTMLTextAreaElement | null>(null)
   const [tagsOpen, setTagsOpen] = useState(false)
   const [examplesOpen, setExamplesOpen] = useState(false)
+  const [segmentDurations, setSegmentDurations] = useState<
+    Record<string, number | null>
+  >({})
+  const [postProcess, setPostProcess] = useState(true)
 
 
 
@@ -810,25 +864,28 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     setJobCurrentSegmentIndex(null)
 
     try {
-      const { job_id, total_segments } =
-        await auditionOmniVoiceStreaming({
-          segments,
-          instruct,
-          candidatesPerSegment,
-          numStep: numStepInput.trim()
-            ? Number(numStepInput)
-            : undefined,
-          durationSeconds: durationInput.trim()
-            ? Number(durationInput)
-            : undefined,
-          speed: speedInput.trim()
-            ? Number(speedInput)
-            : undefined,
-          guidanceScale: guidanceScaleInput.trim()
-            ? Number(guidanceScaleInput)
-            : undefined,
-          diverseCandidates,
-        })
+        const durations = segments.map(
+          (_, i) => segmentDurations[`seg-${i}`] ?? null,
+        )
+
+        const { job_id, total_segments } =
+          await auditionOmniVoiceStreaming({
+            segments,
+            instruct,
+            candidatesPerSegment,
+            numStep: numStepInput.trim()
+              ? Number(numStepInput)
+              : undefined,
+            speed: speedInput.trim()
+              ? Number(speedInput)
+              : undefined,
+            guidanceScale: guidanceScaleInput.trim()
+              ? Number(guidanceScaleInput)
+              : undefined,
+            diverseCandidates,
+            durations,
+            postprocessOutput: postProcess || null,
+          })
 
         setCurrentJobId(job_id)
         setJobTotalSegments(total_segments)
@@ -942,10 +999,11 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     splitScriptToSegments,
     candidatesPerSegment,
     numStepInput,
-    durationInput,
     speedInput,
     guidanceScaleInput,
     diverseCandidates,
+    segmentDurations,
+    postProcess,
     setIsRackAuditioning,
     setError,
     setSegmentRack,
@@ -1005,6 +1063,9 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       setJobCurrentSegmentIndex(null)
 
       try {
+        const segDuration =
+          segmentDurations[row.segmentId] ?? null
+
         const { job_id } =
           await auditionOmniVoiceStreaming({
             segments: [row.text],
@@ -1013,9 +1074,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
             numStep: numStepInput.trim()
               ? Number(numStepInput)
               : undefined,
-            durationSeconds: durationInput.trim()
-              ? Number(durationInput)
-              : undefined,
             speed: speedInput.trim()
               ? Number(speedInput)
               : undefined,
@@ -1023,6 +1081,8 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
               ? Number(guidanceScaleInput)
               : undefined,
             diverseCandidates,
+            durations: [segDuration],
+            postprocessOutput: postProcess || null,
           })
 
         setCurrentJobId(job_id)
@@ -1120,10 +1180,11 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       instruct,
       candidatesPerSegment,
       numStepInput,
-      durationInput,
       speedInput,
       guidanceScaleInput,
       diverseCandidates,
+      segmentDurations,
+      postProcess,
       setIsRackAuditioning,
       setError,
       setSegmentRack,
@@ -1141,65 +1202,19 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     ],
   )
 
-  const adjustSegmentDuration = useCallback(
-    async (segmentId: string, targetDurationSec: number) => {
-      const row = segmentRack.find(
-        (r) => r.segmentId === segmentId,
-      )
-      if (!row || row.selectedTakeIndex == null) return
-      const candidate = row.candidates[row.selectedTakeIndex]
-      if (!candidate || candidate.flagged || !candidate.audio_base64) return
-
-      try {
-        const res = await fetch('/omnivoice/adjust_candidate_duration', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            audio_base64: candidate.audio_base64,
-            target_duration_sec: targetDurationSec,
-          }),
-        })
-
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}))
-          setError(err.error || 'Failed to adjust duration')
-          return
+  const onSegmentDurationChange = useCallback(
+    (segmentId: string, value: number | null) => {
+      setSegmentDurations((prev) => {
+        if (value == null || value <= 0) {
+          const next = { ...prev }
+          delete next[segmentId]
+          return next
         }
-
-        const data = await res.json()
-        if (!data.audio_base64) {
-          setError('No audio returned from duration adjustment')
-          return
-        }
-
-        setSegmentRack((prev) =>
-          prev.map((r) => {
-            if (r.segmentId !== segmentId) return r
-            const idx = r.selectedTakeIndex
-            if (idx == null) return r
-            const updated = [...r.candidates]
-            updated[idx] = {
-              ...updated[idx],
-              audio_base64: data.audio_base64,
-              duration_sec:
-                data.target_duration_sec
-                  ?? (candidate.duration_sec ?? null),
-            }
-            return {
-              ...r,
-              candidates: updated,
-            }
-          }),
-        )
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : String(err),
-        )
-      }
+        const clamped = Math.max(0.5, Math.min(4, value))
+        return { ...prev, [segmentId]: clamped }
+      })
     },
-    [segmentRack, setSegmentRack, setError],
+    [],
   )
 
   const handleStitch = useCallback(async () => {
@@ -1739,7 +1754,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
           >
             {showAdvanced
               ? 'Hide advanced'
-              : 'Advanced (quality / pacing)'}
+              : 'Advanced'}
           </button>
           </div>
 
@@ -1775,8 +1790,8 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                     step={1}
                     value={
                       numStepInput
-                        ? Number(numStepInput) || 24
-                        : 24
+                        ? Number(numStepInput) || 32
+                        : 32
                     }
                     onChange={(e) =>
                       setNumStepInput(
@@ -1789,7 +1804,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                      type="number"
                      min={16}
                      max={32}
-                     value={numStepInput || 24}
+                      value={numStepInput || 32}
                      onChange={(e) =>
                        setNumStepInput(
                          e.target.value,
@@ -1841,7 +1856,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                     min={1.5}
                     max={3}
                     step={0.1}
-                    disabled={guidanceScaleInput === ''}
                     value={
                       guidanceScaleInput
                         ? Number(guidanceScaleInput) || 2
@@ -1863,7 +1877,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                     min={1.5}
                     max={3}
                     step={0.1}
-                    disabled={guidanceScaleInput === ''}
                     value={
                       guidanceScaleInput || ''
                     }
@@ -1873,7 +1886,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                       )
                     }
                     placeholder="2.0"
-                    className="w-14 rounded-md border border-input bg-transparent px-1.5 py-1 text-xs outline-none focus-visible:border-ring disabled:opacity-50"
+                    className="w-14 rounded-md border border-input bg-transparent px-1.5 py-1 text-xs outline-none focus-visible:border-ring"
                   />
                 </div>
               </div>
@@ -1886,13 +1899,13 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                     <InfoIcon text="Playback-rate multiplier. 0.8–1.5 recommended; server clamps 0.5–2.5." />
                   </span>
                 </label>
-                <input
-                  type="number"
-                  min={0.5}
-                  max={2.5}
-                  step={0.05}
-                  placeholder="1.0"
-                  value={speedInput}
+              <input
+                type="number"
+                min={0.5}
+                max={2.5}
+                step={0.1}
+                placeholder="1.0"
+                value={speedInput}
                   onChange={(e) =>
                     setSpeedInput(
                       e.target.value,
@@ -1932,6 +1945,43 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                     className={cn(
                       'absolute top-[3px] left-[3px] h-3.5 w-3.5 rounded-full bg-background shadow transition-transform',
                       diverseCandidates
+                        ? 'translate-x-4'
+                        : 'translate-x-0',
+                    )}
+                  />
+                </button>
+              </div>
+
+              {/* Post-process toggle */}
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <span>
+                    Post-process (trim silence)
+                    <InfoIcon text="On: trims trailing silence and normalizes (may shorten clips). Off: preserves raw output; use this when you set explicit durations to avoid clips being cut short." />
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={
+                    postProcess
+                  }
+                  onClick={() =>
+                    setPostProcess(
+                      !postProcess,
+                    )
+                  }
+                  className={cn(
+                    'relative inline-flex h-5 w-9 cursor-pointer rounded-full border border-border transition-colors',
+                    postProcess
+                      ? 'bg-primary'
+                      : 'bg-muted',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'absolute top-[3px] left-[3px] h-3.5 w-3.5 rounded-full bg-background shadow transition-transform',
+                      postProcess
                         ? 'translate-x-4'
                         : 'translate-x-0',
                     )}
@@ -2095,7 +2145,12 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                   onEdit={editSegmentText}
                   onRegen={regenerateSegment}
                   onSelectTake={selectTake}
-                  onAdjustDuration={adjustSegmentDuration}
+                  segmentDuration={
+                    segmentDurations[row.segmentId] ?? null
+                  }
+                  onSegmentDurationChange={
+                    onSegmentDurationChange
+                  }
                 />
               ))}
             </div>
@@ -2316,54 +2371,81 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     </div>
   )
 
-  // Small live status bar inside the panel when generating
+  // Feed global ActivityStatusBar from this panel's OmniVoice job state
   const showLiveStatus =
     isRackAuditioning &&
     jobStatus === 'running' &&
     jobTotalSegments > 0
 
-  const liveStatusContent = (
-    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-      <Loader2 className="size-3 shrink-0 animate-spin text-primary" />
-      <span className="font-medium text-foreground">
-        Generating…
-      </span>
-      <span>
-        Segment {(jobCurrentSegmentIndex ?? 0) + 1}/{jobTotalSegments}
-        {typeof jobCandidatesTotal === 'number' &&
-          jobCandidatesTotal > 0 &&
-          typeof jobCandidatesCompleted === 'number'
-          ? ` · Candidate ${jobCandidatesCompleted}/${jobCandidatesTotal}`
-          : ''}
-      </span>
-      {jobEtaSeconds != null &&
-        jobEtaSeconds >= 5 &&
-        jobEtaSeconds <= 1800 && (
-          <span className="text-foreground">
-            · Est. remaining: {formatEta(jobEtaSeconds)}
-          </span>
-        )}
-      <span className="ml-auto text-[9px] text-muted-foreground">
-        You can keep working; new segments appear as they finish.
-      </span>
-    </div>
-  )
+  const progressFraction = (() => {
+    if (!showLiveStatus || jobTotalSegments <= 0) return 0
+    const segsCompleted =
+      Array.isArray(jobSegmentsCompleted) ? jobSegmentsCompleted.length : 0
+    const candidatesDone =
+      typeof jobCandidatesCompleted === 'number'
+        ? jobCandidatesCompleted
+        : 0
+    const candidatesAll =
+      typeof jobCandidatesTotal === 'number'
+        ? jobCandidatesTotal
+        : 0
+
+    const segFrac =
+      jobTotalSegments > 0
+        ? segsCompleted / jobTotalSegments
+        : 0
+    const candFrac =
+      candidatesAll > 0
+        ? candidatesDone / candidatesAll
+        : 0
+
+    return Math.min(1, segFrac * 0.6 + candFrac * 0.4)
+  })()
+
+  useEffect(() => {
+    if (!showLiveStatus) {
+      setActivityStatus(null)
+      return
+    }
+
+    const segIndex = jobCurrentSegmentIndex ?? 0
+    const candDone = typeof jobCandidatesCompleted === 'number' ? jobCandidatesCompleted : 0
+    const candTotal = typeof jobCandidatesTotal === 'number' && jobCandidatesTotal > 0
+      ? jobCandidatesTotal
+      : 0
+
+    const detail =
+      candTotal > 0
+        ? `Segment ${segIndex + 1}/${jobTotalSegments} · Candidate ${candDone}/${candTotal}`
+        : `Segment ${segIndex + 1}/${jobTotalSegments}`
+
+    setActivityStatus({
+      active: true,
+      title: 'Generating speech',
+      message: '',
+      detail,
+      progress: progressFraction,
+      etaSeconds: jobEtaSeconds,
+    })
+  }, [
+    showLiveStatus,
+    jobTotalSegments,
+    jobCurrentSegmentIndex,
+    jobCandidatesCompleted,
+    jobCandidatesTotal,
+    jobEtaSeconds,
+    progressFraction,
+    setActivityStatus,
+  ])
 
   return (
     <div className="relative">
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
+      <div
+        className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]"
+      >
         {leftColumn}
         {rightColumn}
       </div>
-
-      {/* Inline live status (when generating), no full-viewport bar */}
-      {showLiveStatus && (
-        <div className="flex justify-end">
-          <div className="mt-2 w-full max-w-[min(100%,36rem)] rounded-lg border border-border/70 bg-muted/90 px-3 py-1.5 shadow-sm backdrop-blur">
-            {liveStatusContent}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

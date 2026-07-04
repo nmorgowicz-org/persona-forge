@@ -143,7 +143,7 @@ export interface OmniVoiceAuditionParams {
    * model's own default (32). */
   numStep?: number | null
   /** Target clip duration in seconds. Overrides `speed` when both are set (real
-   * OmniVoice.generate() behavior). */
+   * OmniVoice.generate() behavior). Legacy global; prefer `durations` per-segment now. */
   durationSeconds?: number | null
   /** Playback-rate-style multiplier. Server clamps to [0.5, 2.5]. */
   speed?: number | null
@@ -151,6 +151,10 @@ export interface OmniVoiceAuditionParams {
   guidanceScale?: number | null
   /** When true, candidates use varied position_temperatures [5, 7, 10] for prosodic diversity. */
   diverseCandidates?: boolean
+  /** Per-segment target durations (aligned with segments list); null = auto. */
+  durations?: (number | null)[]
+  /** When false, disables trailing-silence trimming post-processing. */
+  postprocessOutput?: boolean | null
 }
 
 export interface OmniVoiceCandidate {
@@ -162,6 +166,10 @@ export interface OmniVoiceCandidate {
    * gate) flagged this take even after one in-server retry. */
   flagged: boolean
   flag_reason: string | null
+  whisper_transcript: string | null
+  /** Fuzzy match score between Whisper transcript and the reference text [0–1].
+   * Higher is better; null if not computed. */
+  match_score: number | null
 }
 
 export interface OmniVoiceAuditionResult {
@@ -215,6 +223,8 @@ export async function auditionOmniVoiceStreaming(
       speed: params.speed ?? undefined,
       guidance_scale: params.guidanceScale ?? undefined,
       diverse_candidates: params.diverseCandidates ?? undefined,
+      durations: params.durations ?? undefined,
+      postprocess_output: params.postprocessOutput ?? undefined,
     }),
   })
   if (!res.ok) throw new Error(await readError(res))

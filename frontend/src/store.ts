@@ -14,6 +14,15 @@ import type { OmniVoiceSelections } from './lib/omnivoiceChips'
 export type Page = 'speak' | 'voice-design' | 'voice-library' | 'integrations' | 'runtime'
 export type DesignEngine = 'qwen' | 'omnivoice'
 
+export interface ActivityStatus {
+  active: boolean
+  title: string
+  message: string
+  detail: string | null
+  progress: number
+  etaSeconds: number | null
+}
+
 // A voice queued up from the Voice Library's "Edit" action, to be consumed once by
 // VoiceDesignPage and cleared — see VoiceDesignPage.tsx. Editing forks a new voice on save
 // (there's no in-place update), so this only ever pre-fills the design panel.
@@ -53,6 +62,7 @@ interface StoreState {
   error: string | null
   editingVoice: EditingVoice | null
   designEngine: DesignEngine
+  activityStatus: ActivityStatus | null
 
   setPage: (page: Page) => void
   setTheme: (theme: Theme) => void
@@ -66,6 +76,7 @@ interface StoreState {
   setError: (error: string | null) => void
   setEditingVoice: (voice: EditingVoice | null) => void
   setDesignEngine: (engine: DesignEngine) => void
+  setActivityStatus: (v: ActivityStatus | null) => void
 
   // ---- VoiceDesign (Qwen) ----
   vdSelections: ChipSelections
@@ -223,6 +234,7 @@ export const useAppStore = create<StoreState>((set) => ({
   error: null,
   editingVoice: null,
   designEngine: 'qwen',
+  activityStatus: null,
 
   setPage: (page) => set({ page }),
   setTheme: (theme) => {
@@ -239,6 +251,7 @@ export const useAppStore = create<StoreState>((set) => ({
   setError: (error) => set({ error }),
   setEditingVoice: (editingVoice) => set({ editingVoice }),
   setDesignEngine: (engine) => set({ designEngine: engine }),
+  setActivityStatus: (activityStatus) => set({ activityStatus }),
 
   // -- VoiceDesign --
   vdSelections: {
@@ -301,7 +314,7 @@ export const useAppStore = create<StoreState>((set) => ({
   },
   ovCandidatesPerSegment: 3,
   ovShowAdvanced: false,
-  ovNumStepInput: '',
+  ovNumStepInput: '32',
   ovDurationInput: '',
   ovSpeedInput: '',
   ovGuidanceScaleInput: '',

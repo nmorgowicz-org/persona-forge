@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   AudioLines,
-  Check,
   ChevronLeft,
   ChevronRight,
   Mic2,
@@ -28,6 +27,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from '@/components/ui/sidebar'
+import { ActivityStatusBar } from '@/components/ui/ActivityStatusBar'
 import { Separator } from '@/components/ui/separator'
 import { SwapBanner } from '@/components/SwapBanner'
 import { type Page, useAppStore } from '@/store'
@@ -70,14 +70,12 @@ function ThemePaletteBar() {
             type="button"
             onClick={() => setTheme(t)}
             className={cn(
-              'flex size-4.5 shrink-0 items-center justify-center rounded-full ring-1 ring-white/10 transition-transform hover:scale-110',
-              active && 'ring-2 ring-white/80',
+              'h-2 w-6 shrink-0 overflow-hidden rounded-full border border-transparent transition-all hover:scale-110',
+              active && 'border-white/80 ring-2 ring-white/80',
             )}
             style={{ background: SWATCH_COLOR[t] }}
             title={SWATCH_LABEL[t]}
-          >
-            {active && <Check className="size-2.5 text-black/70" strokeWidth={3} />}
-          </button>
+          />
         )
       })}
     </div>
@@ -97,7 +95,7 @@ function ThemePaletteButton() {
     const update = () => {
       if (!btnRef.current) return
       const r = btnRef.current.getBoundingClientRect()
-      setPos({ x: r.left, y: r.top - 24 })
+      setPos({ x: r.right + 6, y: r.top + r.height / 2 - 10 })
     }
     update()
     window.addEventListener('resize', update)
@@ -139,14 +137,12 @@ function ThemePaletteButton() {
               type="button"
               onClick={() => setTheme(t)}
               className={cn(
-                'flex size-5 shrink-0 items-center justify-center rounded-full ring-1 ring-white/10 transition-transform hover:scale-110',
-                active && 'ring-2 ring-white/80',
+                'h-2 w-6 shrink-0 rounded-full border border-transparent transition-all hover:scale-110',
+                active && 'border-white/80 ring-2 ring-white/80',
               )}
               style={{ background: SWATCH_COLOR[t] }}
               title={SWATCH_LABEL[t]}
-            >
-              {active && <Check className="size-3 text-black/70" strokeWidth={3} />}
-            </button>
+            />
           )
         })}
       </div>,
@@ -155,15 +151,13 @@ function ThemePaletteButton() {
 
   return (
     <>
-      <button
+      <SidebarMenuButton
         ref={btnRef}
-        type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex size-8 items-center justify-center rounded-md border border-border/90 bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        title="Theme"
+        tooltip="Theme"
       >
-        <Palette className="size-3.5" />
-      </button>
+        <Palette className="size-4" />
+      </SidebarMenuButton>
       {panel}
     </>
   )
@@ -171,21 +165,24 @@ function ThemePaletteButton() {
 
 function SidebarCollapseButton() {
   const { open, toggleSidebar } = useSidebar()
+
+  if (!open) {
+    return (
+      <SidebarMenuButton onClick={toggleSidebar} tooltip="Expand sidebar">
+        <ChevronLeft className="size-4" />
+      </SidebarMenuButton>
+    )
+  }
+
   return (
     <button
       type="button"
       onClick={toggleSidebar}
-      className="group/collapse flex w-full items-center justify-between rounded-md border border-border/90 px-2.5 py-1.5 text-[10px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground group-data-[collapsible=icon]:flex"
-      title={open ? 'Collapse sidebar' : 'Expand sidebar'}
+      className="group/collapse flex w-full items-center justify-between gap-2 rounded-xl border border-border/90 px-3 py-2 text-xs font-medium text-foreground/90 shadow-sm transition-all hover:border-border hover:bg-accent hover:text-foreground hover:shadow"
+      title="Collapse sidebar"
     >
-      <span className="group-data-[collapsible=icon]:hidden">
-        {open ? 'Collapse sidebar' : 'Expand sidebar'}
-      </span>
-      {open ? (
-        <ChevronRight className="size-3.5 text-muted-foreground/80 transition-colors group-hover/collapse:text-foreground" />
-      ) : (
-        <ChevronLeft className="size-3.5 text-muted-foreground/80 transition-colors group-hover/collapse:text-foreground" />
-      )}
+      <span>Collapse sidebar</span>
+      <ChevronRight className="size-4 shrink-0 text-foreground/90 transition-transform group-hover/collapse:translate-x-0.5 group-hover/collapse:text-foreground" />
     </button>
   )
 }
@@ -199,12 +196,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     <SidebarProvider>
       <Sidebar collapsible="icon">
         <SidebarHeader className="px-3 py-4">
-          <div className="flex items-center gap-2 px-1">
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <div className="flex items-center gap-2.5 px-1">
+            <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm ring-1 ring-primary/20">
               <AudioLines className="size-4" />
             </div>
             <div className="flex flex-col group-data-[collapsible=icon]:hidden">
-              <span className="text-sm font-semibold leading-none">Persona Forge</span>
+              <span className="text-sm font-semibold leading-none tracking-tight">Persona Forge</span>
               <span className="text-[11px] text-muted-foreground">Voice Studio</span>
             </div>
           </div>
@@ -214,24 +211,32 @@ export function AppShell({ children }: { children: ReactNode }) {
             <SidebarGroupLabel>Studio</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {NAV_ITEMS.map((item) => (
-                  <SidebarMenuItem key={item.page}>
-                    <SidebarMenuButton
-                      data-testid={`nav-${item.page}`}
-                      isActive={page === item.page}
-                      tooltip={item.label}
-                      onClick={() => setPage(item.page)}
-                    >
-                      <item.icon />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                {NAV_ITEMS.map((item) => {
+                  const isActive = page === item.page
+                  return (
+                    <SidebarMenuItem key={item.page}>
+                      <SidebarMenuButton
+                        data-testid={`nav-${item.page}`}
+                        isActive={isActive}
+                        tooltip={item.label}
+                        onClick={() => setPage(item.page)}
+                        className={cn(
+                          'relative transition-all',
+                          isActive &&
+                            'before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-primary group-data-[collapsible=icon]:before:hidden',
+                        )}
+                      >
+                        <item.icon />
+                        <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )
+                })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
-        <SidebarFooter className="gap-3 px-3 py-3">
+        <SidebarFooter className="flex flex-col gap-2 px-3 py-3">
           {/* Expanded: inline color palette bar + short note */}
           <div className="group-data-[collapsible=icon]:hidden flex flex-col gap-1.5">
             <ThemePaletteBar />
@@ -240,7 +245,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               other apps.
             </p>
           </div>
-          {/* Collapsed: single palette button */}
+          {/* Collapsed: theme button (same size as expand button) */}
           <div className="hidden group-data-[collapsible=icon]:flex justify-center">
             <ThemePaletteButton />
           </div>
@@ -248,7 +253,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/80 bg-background/80 px-4 backdrop-blur-sm">
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-5" />
           <div className="flex flex-col">
@@ -261,6 +266,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="w-full px-6 py-8">{children}</div>
         </div>
       </SidebarInset>
+      <ActivityStatusBar />
     </SidebarProvider>
   )
 }
