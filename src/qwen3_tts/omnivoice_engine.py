@@ -34,7 +34,7 @@ import time
 from typing import Any
 
 from qwen3_tts import model
-from qwen3_tts.asr_check import has_speech
+from qwen3_tts.asr_check import has_speech, compute_transcript_match_score, _MIN_MATCH_SCORE_SHORT, _MIN_MATCH_SCORE_LONG, _MAX_WORDS_SHORT, _MAX_SOFT_MATCH_SCORE, _SOFT_REJECT_IF_LOGPROB_BELOW
 from qwen3_tts.audio_post import analyze_take, stitch_segments
 
 logger = logging.getLogger(__name__)
@@ -132,12 +132,13 @@ def run_omnivoice_job(
     candidates_per_segment: int = 3,
     seed: int | None = None,
     num_step: int | None = None,
-    duration: float | None = None,
+    durations: list[float | None] | None = None,
     speed: float | None = None,
     guidance_scale: float | None = None,
     diverse_candidates: bool = False,
+    postprocess_output: bool | None = None,
     on_segment_complete=None,
-) -> list[list[tuple[Any, int, bool, str]]]:
+) -> list[list[tuple[Any, int, bool, str, str, float | None]]]:
     """Swap to OmniVoice and generate every segment x candidate. Leaves OmniVoice loaded on
     success (see this module's docstring for why). On failure, the checkpoint is unloaded
     fully rather than restoring Base; the next real /generate or /v1/audio/speech call
@@ -147,14 +148,33 @@ def run_omnivoice_job(
     ``model.executor.submit(run_omnivoice_job, ...)``, never call it directly off-thread.
 
     Returns a segments x candidates_per_segment list of (wav, sample_rate, flagged,
-    flag_reason) tuples. ``flagged`` comes from audio_post.analyze_take's best-effort
-    dead-air/drone heuristic; a flagged candidate is retried once in-loop before being
-    returned (see MAX_ATTEMPTS_PER_CANDIDATE), so a flagged result already survived a retry.
+    flag_reason, whisper_transcript) tuples. ``flagged`` comes from audio_post.analyze_take's
+    best-effort dead-air/drone heuristic; a flagged candidate is retried once in-loop before
+    being returned (see MAX_ATTEMPTS_PER_CANDIDATE), so a flagged result already survived
+    a retry. ``whisper_transcript`` is the transcript produced by faster-whisper when it
+    ran (empty string if no speech detected or Whisper was skipped).
 
-    ``num_step``/``duration``/``speed``/``guidance_scale`` map onto the real
-    ``OmniVoice.generate()`` kwargs (confirmed against the installed omnivoice==0.1.5
-    package, 2026-07-03 upstream review) — omitted (None) ones are left out of the call
-    entirely so the model's own defaults apply.
+    ``num_step``/``durations``/``speed``/``guidance_scale`` map onto the real
+    ``OmniVoice.generate()`` kwargs (confirmed against omnivoice pinned at commit
+    398b6113 — past 0.1.5 on PyPI, see Dockerfile note — 2026-07-04 upstream review).
+
+    - ``durations`` is per-segment: a list aligned with ``segments`` where each entry is
+      either None (auto) or an explicit target duration in seconds (e.g. 2.4). This maps
+      onto real token-level length control inside OmniVoice.generate() (target_tokens =
+      duration * frame_rate), so it's not a post-hoc trim — the model itself is asked to
+      decode that many frames.
+    - ``postprocess_output`` controls OmniVoice’s own silence-trimming / normalization:
+      - True: apply post-processing (may shorten audio).
+      - False: disable (closer to exact duration, may keep trailing silence).
+      - None: use model default.
+      When a segment has an explicit duration, we force postprocess_output=False for
+      that segment so timing is not silently altered.
+    - We do NOT run our own silence-trim on top of OmniVoice's output (see history: an
+      earlier version called model._trim_silence() unconditionally here, which silently
+      undid postprocess_output=False and defeated duration targeting). Silence handling
+      for this engine is entirely OmniVoice's own — postprocess_output plus
+      pad_duration/fade_duration (also forced to 0.0/near-zero for duration-targeted
+      segments, since OmniVoice unconditionally pads +0.1s per side otherwise).
 
     When ``diverse_candidates=True``, position_temperature cycles through [5.0, 7.0, 10.0]
     across candidates to produce prosodically different takes; when False, the first
@@ -249,16 +269,19 @@ def run_omnivoice_job(
         gen_kwargs["denoise"] = True
         if num_step is not None:
             gen_kwargs["num_step"] = max(MIN_NUM_STEP, min(MAX_NUM_STEP, int(num_step)))
-        if duration is not None:
-            gen_kwargs["duration"] = float(duration)
         if speed is not None:
             gen_kwargs["speed"] = max(MIN_SPEED, min(MAX_SPEED, float(speed)))
         if guidance_scale is not None:
             gen_kwargs["guidance_scale"] = guidance_scale
 
-        results: list[list[tuple[Any, int, bool, str]]] = []
+        # Normalize durations: list aligned with segments; None means “auto”.
+        durations_list: list[float | None] = durations or []
+        if len(durations_list) != len(segments):
+            durations_list = [None] * len(segments)
+
+        results: list[list[tuple[Any, int, bool, str, str, float | None]]] = []
         for seg_idx, text in enumerate(segments):
-            candidates: list[tuple[Any, int, bool, str]] = []
+            candidates: list[tuple[Any, int, bool, str, str, float | None]] = []
             for cand_idx in range(candidates_per_segment):
                 _progress["current_segment_index"] = seg_idx
                 _progress["current_candidate_index"] = cand_idx
@@ -283,6 +306,22 @@ def run_omnivoice_job(
                 cand_gen["class_temperature"] = 0.0
                 cand_gen["position_temperature"] = pos_temp
 
+                # Per-segment duration + postprocess_output behavior:
+                seg_duration = durations_list[seg_idx] if seg_idx < len(durations_list) else None
+                if seg_duration is not None:
+                    seg_duration = float(seg_duration)
+                    cand_gen["duration"] = seg_duration
+                    # When user specifies an explicit duration, disable post-processing
+                    # and OmniVoice's own edge padding to avoid silent shortening/lengthening.
+                    # A small fade is kept (not 0) so segment edges don't click when stitched.
+                    cand_gen["postprocess_output"] = False
+                    cand_gen["pad_duration"] = 0.0
+                    cand_gen["fade_duration"] = 0.02
+                elif postprocess_output is not None:
+                    cand_gen["postprocess_output"] = bool(postprocess_output)
+
+                last_transcript = ""
+                last_match_score: float | None = None
                 for attempt in range(1, MAX_ATTEMPTS_PER_CANDIDATE + 1):
                     audio = _omnivoice_model.generate(
                         text=text,
@@ -290,21 +329,65 @@ def run_omnivoice_job(
                         language=language,
                         **cand_gen,
                     )[0]
-                    wav = model._trim_silence(audio, OMNIVOICE_SAMPLE_RATE)
+                    # Silence handling is left entirely to OmniVoice's own
+                    # postprocess_output/pad_duration/fade_duration above — we used to
+                    # also run model._trim_silence() here, which ignored
+                    # postprocess_output=False and defeated duration targeting.
+                    wav = audio
                     cand_flagged, cand_reason = analyze_take(wav, OMNIVOICE_SAMPLE_RATE)
+                    last_transcript = ""
+                    last_logprob: float | None = None
+                    last_match_score: float | None = None
 
                     if not cand_flagged:
-                        speech_found, _transcript = has_speech(
+                        speech_found, last_transcript, last_logprob = has_speech(
                             wav, OMNIVOICE_SAMPLE_RATE
                         )
                         if not speech_found:
                             cand_flagged, cand_reason = True, "no-speech-detected"
                         else:
-                            # Valid candidate — override any prior flagged state
-                            # from a previous attempt so we never carry "dubious" into
-                            # the final candidate on a successful retry.
-                            cand_flagged = False
-                            cand_reason = "ok"
+                            # Compute fuzzy transcript match score
+                            last_match_score = compute_transcript_match_score(
+                                text,
+                                last_transcript,
+                            )
+
+                            # Choose threshold based on reference word count
+                            ref_words = len(text.split())
+                            min_score = (
+                                _MIN_MATCH_SCORE_SHORT
+                                if ref_words <= _MAX_WORDS_SHORT
+                                else _MIN_MATCH_SCORE_LONG
+                            )
+
+                            # Decide if this candidate is OK based on match + logprob
+                            ok = True
+                            if last_match_score < 0.6:
+                                # Clearly wrong
+                                ok = False
+                            elif last_match_score < min_score:
+                                # Borderline: only accept if confidence is decent
+                                if (
+                                    last_logprob is not None
+                                    and last_logprob >= _SOFT_REJECT_IF_LOGPROB_BELOW
+                                ):
+                                    # Confident enough to accept borderline
+                                    ok = True
+                                else:
+                                    # Low confidence + poor match → reject
+                                    ok = False
+                            else:
+                                # Good match
+                                ok = True
+
+                            if not ok:
+                                cand_flagged, cand_reason = True, "poor-transcript-match"
+                            else:
+                                # Valid candidate — override any prior flagged state
+                                # from a previous attempt so we never carry "dubious" into
+                                # the final candidate on a successful retry.
+                                cand_flagged = False
+                                cand_reason = "ok"
 
                     flagged, reason = cand_flagged, cand_reason
 
@@ -319,7 +402,7 @@ def run_omnivoice_job(
                         )
                 cand_elapsed = time.monotonic() - cand_t0
                 candidates.append(
-                    (wav, OMNIVOICE_SAMPLE_RATE, flagged, reason)
+                    (wav, OMNIVOICE_SAMPLE_RATE, flagged, reason, last_transcript or "", last_match_score)
                 )
 
                 completed = _progress["completed"] + 1
