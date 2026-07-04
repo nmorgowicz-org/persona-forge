@@ -1,40 +1,12 @@
 import * as React from 'react'
-import * as TooltipPrimitive from 'radix-ui/Tooltip'
+import * as Radix from 'radix-ui'
 import { cn } from '@/lib/utils'
 
-const TooltipProvider = TooltipPrimitive.Provider
-const TooltipRoot = TooltipPrimitive.Root
-const TooltipTrigger = TooltipPrimitive.Trigger
+const T = Radix.Tooltip
 
-export function Tooltip({
-  children,
-  side = 'top',
-  delayDuration = 150,
-}: {
-  children: React.ReactNode
-  side?: 'top' | 'bottom' | 'left' | 'right'
-  delayDuration?: number
-}) {
-  return (
-    <TooltipProvider delayDuration={delayDuration}>
-      <TooltipRoot>
-        {children}
-      </TooltipRoot>
-    </TooltipProvider>
-  )
-}
-
-export const TooltipTriggerBase = ({
-  asChild = false,
-  children,
-}: {
-  asChild?: boolean
-  children: React.ReactNode
-}) => (
-  <TooltipPrimitive.Trigger asChild={asChild}>
-    {children}
-  </TooltipPrimitive.Trigger>
-)
+export const TooltipRoot = T.Root
+export const TooltipTrigger = T.Trigger
+export const TooltipProvider = T.Provider
 
 export function TooltipContent({
   children,
@@ -48,8 +20,8 @@ export function TooltipContent({
   className?: string
 }) {
   return (
-    <TooltipPrimitive.Portal>
-      <TooltipPrimitive.Content
+    <T.Portal>
+      <T.Content
         side={side}
         align={align}
         sideOffset={6}
@@ -61,10 +33,14 @@ export function TooltipContent({
         )}
       >
         {children}
-      </TooltipPrimitive.Content>
-    </TooltipPrimitive.Portal>
+      </T.Content>
+    </T.Portal>
   )
 }
 
-// Simple wrapper that matches previous usage where Tooltip wraps Trigger + Content.
-// For PersonaForgePanel-style usage, we'll wire with the primitives directly where needed.
+// Convenience wrapper: <Tooltip.Root><Tooltip.Trigger/><Tooltip.Content/></Tooltip.Root>
+export const Tooltip = {
+  Root: TooltipRoot,
+  Trigger: TooltipTrigger,
+  Content: TooltipContent,
+}
