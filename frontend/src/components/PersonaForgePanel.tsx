@@ -1089,11 +1089,24 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
 
         const jobDone = false
         let lastHandledCount = 0
+        let consecutivePollFailures = 0
 
         while (!jobDone) {
-          const p = await getOmniVoiceAuditionProgress(
-            job_id,
-          )
+          let p
+          try {
+            p = await getOmniVoiceAuditionProgress(job_id)
+            consecutivePollFailures = 0
+          } catch (pollErr) {
+            // A single missed poll (e.g. the server is momentarily busy servicing
+            // the heavy generation request itself) doesn't mean the job died — it's
+            // running as an independent background thread server-side. Only give up
+            // after several consecutive misses so a transient blip can't strand the
+            // UI on "Failed to fetch" while the container keeps generating fine.
+            consecutivePollFailures += 1
+            if (consecutivePollFailures >= 6) throw pollErr
+            await new Promise((r) => setTimeout(r, 500))
+            continue
+          }
           setJobStatus(p.status)
           setJobCurrentSegmentIndex(
             p.current_segment_index,
@@ -1299,10 +1312,18 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         setExamplesOpen(false)
         setTagsOpen(false)
 
+        let consecutivePollFailures = 0
         while (true) {
-          const p = await getOmniVoiceAuditionProgress(
-            job_id,
-          )
+          let p
+          try {
+            p = await getOmniVoiceAuditionProgress(job_id)
+            consecutivePollFailures = 0
+          } catch (pollErr) {
+            consecutivePollFailures += 1
+            if (consecutivePollFailures >= 6) throw pollErr
+            await new Promise((r) => setTimeout(r, 500))
+            continue
+          }
           setJobStatus(p.status)
           setJobCurrentSegmentIndex(
             p.current_segment_index,
