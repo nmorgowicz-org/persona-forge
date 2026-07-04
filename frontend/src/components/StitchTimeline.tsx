@@ -555,6 +555,20 @@ export const StitchTimeline = memo(function StitchTimeline({
     [clips.length, reorderClip],
   )
 
+  // Hooks must run unconditionally on every render — this used to sit after an early return
+  // for the empty-timeline case, which threw "rendered more hooks than previous render" (React
+  // error #310) the instant a first clip was inserted (0 clips -> hook skipped, 1+ clips -> hook
+  // ran), crashing the page. Stitch Studio hits the empty state on first load, so it surfaced
+  // this immediately; Persona Forge's editor rarely opened with zero clips, so it went unnoticed.
+  const effectiveTotalMs = useMemo(() => {
+    let sum = 0
+    for (const c of clips) {
+      sum += clipEffectiveDurationMs(c)
+    }
+    sum += (paddingMs || []).reduce((a, b) => a + b, 0)
+    return Math.max(1, sum)
+  }, [clips, paddingMs])
+
   if (!clips.length) {
     return (
       <div className="flex h-24 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
@@ -591,15 +605,6 @@ export const StitchTimeline = memo(function StitchTimeline({
       </div>
     )
   }
-
-  const effectiveTotalMs = useMemo(() => {
-    let sum = 0
-    for (const c of clips) {
-      sum += clipEffectiveDurationMs(c)
-    }
-    sum += (paddingMs || []).reduce((a, b) => a + b, 0)
-    return Math.max(1, sum)
-  }, [clips, paddingMs])
 
   return (
     <div className="relative flex flex-col gap-2">
