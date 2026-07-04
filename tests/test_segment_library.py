@@ -104,3 +104,40 @@ class SegmentLibraryTests(unittest.TestCase):
         segment_library.SEGMENT_LIBRARY_DIR = self._tmpdir / "does-not-exist"
 
         self.assertEqual(segment_library.list_segments(), [])
+
+    def test_save_segment_persists_extra_metadata(self) -> None:
+        meta = segment_library.save_segment(
+            b"RIFF....",
+            text="hi",
+            instruct="female",
+            engine="omnivoice",
+            sample_rate=24000,
+            accent_id="au",
+            language="english",
+            seed=42,
+            num_step=32,
+            speed=1.1,
+            guidance_scale=2.5,
+            diverse_candidates=True,
+            postprocess_output=False,
+            duration_target=2.4,
+            candidate_id="cand_abc",
+            job_id="job_xyz",
+            whisper_transcript="hi there",
+            match_score=0.94,
+            duration_sec=2.37,
+        )
+
+        self.assertEqual(meta["language"], "english")
+        self.assertEqual(meta["seed"], 42)
+        self.assertEqual(meta["num_step"], 32)
+        self.assertEqual(meta["speed"], 1.1)
+        self.assertEqual(meta["guidance_scale"], 2.5)
+        self.assertTrue(meta["diverse_candidates"])
+        self.assertFalse(meta["postprocess_output"])
+        self.assertEqual(meta["duration_target"], 2.4)
+        self.assertEqual(meta["candidate_id"], "cand_abc")
+        self.assertEqual(meta["job_id"], "job_xyz")
+        self.assertEqual(meta["whisper_transcript"], "hi there")
+        self.assertEqual(meta["match_score"], 0.94)
+        self.assertEqual(meta["duration_sec"], 2.37)

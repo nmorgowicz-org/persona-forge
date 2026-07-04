@@ -297,7 +297,7 @@ export const StitchTimeline = memo(function StitchTimeline({
             onClick={() => setLibraryPickerOpen(true)}
             className="rounded-full border border-border px-2 py-0.5 text-[9px] text-muted-foreground hover:bg-muted"
           >
-            Add from library
+            Add saved segment
           </button>
         )}
       </div>
@@ -320,7 +320,7 @@ export const StitchTimeline = memo(function StitchTimeline({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-[9px] text-muted-foreground">
-              Drag clips to reorder
+              Drag to reorder clips, trim edges, and adjust gaps to build your 10–15s reference voice.
             </span>
           </div>
           <div className="relative">
@@ -329,7 +329,7 @@ export const StitchTimeline = memo(function StitchTimeline({
               onClick={() => setLibraryPickerOpen((v) => !v)}
               className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[9px] text-muted-foreground hover:bg-muted"
             >
-              {libraryPickerOpen ? 'Hide library' : 'Add from library'}
+              {libraryPickerOpen ? 'Hide segments' : 'Add saved segment'}
             </button>
 
             <AnimatePresence>
@@ -340,7 +340,7 @@ export const StitchTimeline = memo(function StitchTimeline({
                   exit={{ opacity: 0, y: -4 }}
                   className="absolute right-0 top-8 z-30 flex max-h-40 w-64 flex-col gap-1 overflow-y-auto rounded-lg border border-border bg-background p-2 shadow-lg"
                 >
-                  <span className="text-[8px] uppercase text-muted-foreground">Segment library</span>
+                  <span className="text-[8px] uppercase text-muted-foreground">Saved segments</span>
                   {library.map((seg) => (
                     <button
                       key={seg.segment_id}
@@ -626,7 +626,7 @@ export function StitchEditorPanel({
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Stitch editor</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Arrange your reference clip</span>
           <span className="text-[9px] text-muted-foreground/70">{clips.length} clip{clips.length !== 1 ? 's' : ''}</span>
           {staleFlags && (
             <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[8px] font-medium text-amber-400">
@@ -668,15 +668,16 @@ export function StitchEditorPanel({
             className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[hsl(190,90%,50%)] to-[hsl(210,90%,45%)] px-3 py-1 text-[11px] font-medium text-background shadow-[0_4px_15px_rgba(34,211,238,0.25)] transition-all hover:scale-[1.02] hover:shadow-[0_8px_25px_rgba(34,211,238,0.35)] disabled:opacity-50 disabled:shadow-none"
           >
             <Play className="size-3" />
-            {isRendering ? 'Rendering…' : 'Render'}
+            {isRendering ? 'Updating…' : 'Update preview'}
           </button>
           <button
             type="button"
             onClick={handleSave}
             disabled={isRendering || clips.length === 0}
             className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-[11px] font-medium text-foreground transition-all hover:bg-muted disabled:opacity-50"
+            title="This will be used as a reusable cloning source for text-to-speech."
           >
-            Save to library
+            Save as reference voice
           </button>
         </div>
         <div className="text-[8px] text-muted-foreground">{(totalMs / 1000).toFixed(1)}s total</div>

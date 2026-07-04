@@ -418,6 +418,26 @@ def _encode_omnivoice_candidate(wav, sr, flagged, flag_reason, whisper_transcrip
     }
 
 
+def _find_candidate_job(candidate_id: str):
+    """Return (job_id, params, candidate_payload, segment_index) or (None, None, None, None).
+
+    Scans in-memory audition jobs for the candidate. Used when saving a segment to
+    attach generation parameters (language, seed, etc.) instead of leaving them empty.
+    """
+    with _OV_AUDITION_JOBS_LOCK:
+        for jid, job in _OV_AUDITION_JOBS.items():
+            for seg in job.get("segments_completed", []):
+                for cand in seg.get("candidates", []):
+                    if cand.get("candidate_id") == candidate_id:
+                        return (
+                            jid,
+                            job.get("_params"),
+                            cand,
+                            seg.get("segment_index"),
+                        )
+    return None, None, None, None
+
+
 def _candidate_callback_factory(job_id: str):
     # Build per-candidate callback that updates job state as soon as each candidate is
     # ready, so the frontend can show/play a take without waiting for the rest of that
@@ -828,6 +848,40 @@ def omnivoice_segments_create():
 
     wav, sr = entry
     wav_bytes, _ = _encode(wav, sr, "wav")
+    duration_sec = len(wav) / sr if sr > 0 else 0.0
+
+    # Enrich metadata from audition job (if candidate still resolvable)
+    job_id, params, candidate_payload, segment_index = _find_candidate_job(candidate_id)
+
+    # _params tuple: (segments, instruct, language, candidates_per_segment, seed, num_step,
+    #                 cleaned_durations, speed, guidance_scale, diverse_candidates,
+    #                 postprocess_output, min_match_score)
+    p_len = len(params) if params else 0
+    language = params[2] if p_len > 2 else None
+    seed = params[4] if p_len > 4 else None
+    num_step = params[5] if p_len > 5 else None
+    cleaned_durations = params[6] if p_len > 6 else None
+    speed = params[7] if p_len > 7 else None
+    guidance_scale = params[8] if p_len > 8 else None
+    diverse_candidates = params[9] if p_len > 9 else None
+    postprocess_output = params[10] if p_len > 10 else None
+
+    # duration_target from per-segment durations list
+    duration_target = None
+    if (
+        isinstance(cleaned_durations, list)
+        and isinstance(segment_index, int)
+        and 0 <= segment_index < len(cleaned_durations)
+    ):
+        duration_target = cleaned_durations[segment_index]
+
+    whisper_transcript = (
+        (candidate_payload.get("whisper_transcript") or "").strip() or None
+        if candidate_payload
+        else None
+    )
+    match_score = candidate_payload.get("match_score") if candidate_payload else None
+
     meta = segment_library.save_segment(
         wav_bytes,
         text=text,
@@ -835,6 +889,19 @@ def omnivoice_segments_create():
         engine="omnivoice",
         sample_rate=sr,
         accent_id=accent_id,
+        language=language,
+        seed=seed,
+        num_step=num_step,
+        speed=speed,
+        guidance_scale=guidance_scale,
+        diverse_candidates=diverse_candidates,
+        postprocess_output=postprocess_output,
+        duration_target=duration_target,
+        candidate_id=candidate_id,
+        job_id=job_id,
+        whisper_transcript=whisper_transcript,
+        match_score=match_score,
+        duration_sec=round(duration_sec, 2),
     )
     meta["audio_base64"] = base64.b64encode(wav_bytes).decode("ascii")
     return jsonify(meta)

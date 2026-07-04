@@ -5,12 +5,13 @@ import {
   useState,
 } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { FlaskConical, Scissors } from 'lucide-react'
+import { Check, FlaskConical, Scissors } from 'lucide-react'
 import {
   auditionOmniVoiceStreaming,
   deleteOmniVoiceSegment,
   getOmniVoiceAuditionProgress,
   listOmniVoiceSegments,
+  lockInOmniVoiceSegment,
   renderStitchPlan,
   saveOmniVoice,
   stitchOmniVoice,
@@ -125,6 +126,10 @@ interface SegmentRackRowProps {
   onRegen: (segmentId: string) => void
   onSelectTake: (segmentId: string, index: number) => void
   onSegmentDurationChange: (segmentId: string, duration: number | null) => void
+  onSaveToLibrary: (segMeta: SegmentMeta) => void
+  isMissingTake: boolean
+  instruct: string
+  accentId?: string | null
 }
 
 // Surfaces the ASR (Whisper) transcript + match-score confidence the backend computed for a
@@ -182,9 +187,14 @@ function SegmentRackRow({
   onRegen,
   onSelectTake,
   onSegmentDurationChange,
+  onSaveToLibrary,
+  isMissingTake,
+  instruct,
+  accentId,
 }: SegmentRackRowProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(row.text)
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
   const isCurrent =
     jobStatus === 'running' &&
     jobCurrentSegmentIndex != null &&
@@ -232,7 +242,10 @@ function SegmentRackRow({
   return (
     <div
       key={row.segmentId}
-      className="flex min-w-0 flex-col gap-1 rounded-md border border-border bg-muted/30 px-2 py-1.5"
+      className={cn(
+        'flex min-w-0 flex-col gap-1 rounded-md border bg-muted/30 px-2 py-1.5',
+        isMissingTake ? 'border-amber-400/60' : 'border-border',
+      )}
     >
       {/* Header */}
       <div className="flex min-w-0 items-center gap-1.5">
@@ -472,6 +485,48 @@ function SegmentRackRow({
                   />
 
                   <TakeDebugButton lines={debugLines} matchScore={c.match_score} />
+
+                  <Tooltip.Root>
+                    <Tooltip.Trigger asChild>
+                      <button
+                        type="button"
+                        disabled={savedIds.has(c.candidate_id)}
+                        onClick={async () => {
+                          try {
+                            const meta = await lockInOmniVoiceSegment({
+                              candidateId: c.candidate_id,
+                              text: row.text,
+                              instruct,
+                              accentId,
+                            })
+                            setSavedIds((prev) => {
+                              const next = new Set(prev)
+                              next.add(c.candidate_id)
+                              return next
+                            })
+                            onSaveToLibrary(meta)
+                          } catch {
+                            // Non-fatal: API will show its own error at global level
+                          }
+                        }}
+                        className={cn(
+                          'ml-0.5 shrink-0 inline-flex h-5 w-5 items-center justify-center rounded-full border border-border bg-muted/60 text-[9px] text-muted-foreground transition-colors',
+                          savedIds.has(c.candidate_id)
+                            ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-400'
+                            : 'hover:bg-muted hover:text-foreground disabled:opacity-60',
+                        )}
+                      >
+                        {savedIds.has(c.candidate_id)
+                          ? <Check className="size-3" />
+                          : '🔖'}
+                      </button>
+                    </Tooltip.Trigger>
+                    <Tooltip.Content side="top" align="end">
+                      {savedIds.has(c.candidate_id)
+                        ? 'Saved to segment library'
+                        : 'Save this take to segment library'}
+                    </Tooltip.Content>
+                  </Tooltip.Root>
                 </div>
               )
             })}
@@ -1283,7 +1338,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         (c) => !c || !c.candidate_id,
       )
     ) {
-      setError('Select a take for each segment first.')
+      setError('Select one take for each line first.')
       return
     }
 
@@ -1331,7 +1386,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         (c) => !c || !c.candidate_id,
       )
     ) {
-      setError('Select a take for each segment first.')
+      setError('Select one take for each line first.')
       return
     }
 
@@ -1390,7 +1445,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     for (const row of segmentRack) {
       const candidate = row.candidates[row.selectedTakeIndex]
       if (!candidate || !candidate.candidate_id) {
-        setError('Select a take for each segment first.')
+        setError('Select one take for each line first.')
         ctx.close()
         return
       }
@@ -2418,26 +2473,46 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
               <p className="text-[9px] text-muted-foreground">
                 Click a take to select it for stitching; click again to deselect.
               </p>
-              {segmentRack.map((row, segIndex) => (
-                <SegmentRackRow
-                  key={row.segmentId}
-                  segIndex={segIndex}
-                  row={row}
-                  isRackAuditioning={isRackAuditioning}
-                  jobStatus={jobStatus}
-                  jobCurrentSegmentIndex={jobCurrentSegmentIndex}
-                  autoplayTakes={autoplayTakes}
-                  onEdit={editSegmentText}
-                  onRegen={regenerateSegment}
-                  onSelectTake={selectTake}
-                  segmentDuration={
-                    segmentDurations[row.segmentId] ?? null
-                  }
-                  onSegmentDurationChange={
-                    onSegmentDurationChange
-                  }
-                />
-              ))}
+              {segmentRack.some((r) => r.selectedTakeIndex >= 0) && (
+                <p className="text-[9px] text-muted-foreground/70">
+                  Your selections are temporary. Use Save to library on individual takes to keep them across sessions.
+                </p>
+              )}
+              {segmentRack.map((row, segIndex) => {
+                const isMissing =
+                  row.candidates.length > 0 &&
+                  row.selectedTakeIndex < 0
+                return (
+                  <SegmentRackRow
+                    key={row.segmentId}
+                    segIndex={segIndex}
+                    row={row}
+                    isRackAuditioning={isRackAuditioning}
+                    jobStatus={jobStatus}
+                    jobCurrentSegmentIndex={jobCurrentSegmentIndex}
+                    autoplayTakes={autoplayTakes}
+                    onEdit={editSegmentText}
+                    onRegen={regenerateSegment}
+                    onSelectTake={selectTake}
+                    segmentDuration={
+                      segmentDurations[row.segmentId] ?? null
+                    }
+                    onSegmentDurationChange={
+                      onSegmentDurationChange
+                    }
+                    onSaveToLibrary={(meta) => {
+                      setLibrary((prev) => {
+                        if (prev.some((m) => m.segment_id === meta.segment_id))
+                          return prev
+                        return [meta, ...prev]
+                      })
+                    }}
+                    isMissingTake={isMissing}
+                    instruct={instruct}
+                    accentId={matchedAccentBankEntry?.id ?? null}
+                  />
+                )
+              })}
             </div>
 
             {/* Stitch / Save */}
@@ -2454,7 +2529,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
               >
                 {isStitching
                   ? 'Stitching…'
-                  : 'Stitch all'}
+                  : 'Stitch selected takes'}
               </Button>
               <Button
                 type="button"
@@ -2465,8 +2540,11 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                 className="shrink-0 inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px]"
               >
                 <Scissors className="h-3 w-3" />
-                Edit in timeline
+                Open stitch editor
               </Button>
+              <span className="self-center text-[9px] text-muted-foreground/70">
+                trim, reorder, add gaps
+              </span>
             </div>
          </div>
        )}
@@ -2578,6 +2656,9 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
           </span>
           <span>{isLibraryOpen ? 'Hide' : 'Browse'}</span>
         </button>
+        <p className="text-[9px] text-muted-foreground/80">
+          Saved takes you can reuse in future reference clips.
+        </p>
         {isLibraryOpen && (
           <div className="flex flex-col gap-2">
             <input
@@ -2623,9 +2704,22 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                     <p className="text-xs">
                       {m.text}
                     </p>
-                    <p className="text-[10px] text-muted-foreground">
-                      {m.tags.join(', ')}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-x-2 text-[10px] text-muted-foreground">
+                      <span>{m.tags.join(', ')}</span>
+                      {((typeof m.duration_sec === 'number' && m.duration_sec > 0) || m.created_at) && (
+                        <span className="text-muted-foreground/60">
+                          {typeof m.duration_sec === 'number' && m.duration_sec > 0
+                            ? `${m.duration_sec.toFixed(1)}s`
+                            : ''}
+                          {typeof m.duration_sec === 'number' && m.duration_sec > 0 && m.created_at
+                            ? ' · '
+                            : ''}
+                          {m.created_at
+                            ? new Date(m.created_at * 1000).toLocaleDateString('en-GB', { month: 'short', day: '2-digit' })
+                            : ''}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   {m.audio_base64 && (
                     <ClipPlayer
@@ -2661,7 +2755,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                 librarySelection.size === 0
               }
             >
-              Add selected to locked sentences
+              Pin selected to current project
             </Button>
           </div>
         )}
@@ -2671,7 +2765,10 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       {lockedSegments.length > 0 && (
         <div className="flex flex-col gap-2">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Locked sentences ({lockedSegments.length})
+            Pinned segments ({lockedSegments.length})
+          </p>
+          <p className="text-[9px] text-muted-foreground/70">
+            These segments are pinned for reuse in future reference clips.
           </p>
           {lockedSegments.map((seg, i) => (
             <div
