@@ -919,10 +919,10 @@ def omnivoice_segments_list():
 
 @app.get("/omnivoice/segments/<segment_id>/audio")
 def omnivoice_segments_audio(segment_id: str):
-    meta = segment_library.get_segment_meta(segment_id)
-    if not meta or not meta.get("wav_path"):
+    seg = segment_library.get_segment(segment_id)
+    if not seg or not seg.get("wav_path"):
         return jsonify({"error": "Unknown segment_id"}), 404
-    wav_bytes = Path(meta["wav_path"]).read_bytes()
+    wav_bytes = Path(seg["wav_path"]).read_bytes()
     return Response(
         wav_bytes,
         status=200,
