@@ -35,14 +35,22 @@ def _get_model():
     return _whisper_model
 
 
-def has_speech(audio: np.ndarray, sr: int) -> tuple[bool, str]:
-    """Return (has_speech, transcript). Empty/whitespace-only transcript means Whisper found
-    nothing to transcribe (silence, drone, noise, SFX) — treated as "no speech". Uses
-    faster-whisper's built-in VAD filter so pure silence/noise short-circuits fast instead of
-    wasting decode steps on it."""
+def has_speech(
+    audio: np.ndarray,
+    sr: int,
+) -> tuple[bool, str, float | None]:
+    """Return (has_speech, transcript, avg_logprob).
+    
+    - has_speech: True if Whisper produced any non-empty transcript.
+    - transcript: concatenated text.
+    - avg_logprob: approximate average log-prob across segments (None if not available
+      or no segments). Used as a secondary quality signal, not as a hard gate.
+    
+    Uses faster-whisper's built-in VAD filter so pure silence/noise short-circuits fast.
+    """
     x = np.asarray(audio, dtype=np.float32).ravel()
     if x.size == 0:
-        return False, ""
+        return False, "", None
 
     if sr != _WHISPER_TARGET_SR:
         import librosa
@@ -57,5 +65,75 @@ def has_speech(audio: np.ndarray, sr: int) -> tuple[bool, str]:
         beam_size=1,
         condition_on_previous_text=False,
     )
-    text = " ".join(seg.text for seg in segments).strip()
-    return bool(text), text
+    parts: list[str] = []
+    logprobs: list[float] = []
+
+    for seg in segments:
+        parts.append(seg.text.strip())
+        # faster-whisper segments expose `avg_logprob`
+        lp = getattr(seg, "avg_logprob", None)
+        if lp is not None and not np.isnan(lp):
+            logprobs.append(float(lp))
+
+    text = " ".join(parts).strip()
+    avg_logprob = (float(np.mean(logprobs)) if logprobs else None)
+    return bool(text), text, avg_logprob
+
+
+import re
+import os
+
+# Tunable thresholds (overridable via env).
+# These are initial conservative settings — to be refined with listening tests.
+_MIN_MATCH_SCORE_SHORT = float(os.environ.get("ASR_MIN_MATCH_SHORT", "0.70"))
+_MIN_MATCH_SCORE_LONG = float(os.environ.get("ASR_MIN_MATCH_LONG", "0.80"))
+_MAX_WORDS_SHORT = int(os.environ.get("ASR_SHORT_SEGMENT_WORDS", "5"))
+_MAX_SOFT_MATCH_SCORE = float(os.environ.get("ASR_SOFT_MAX_SCORE", "0.75"))
+_SOFT_REJECT_IF_LOGPROB_BELOW = float(os.environ.get("ASR_SOFT_LOGPROB", "-1.5"))
+
+
+def _normalize_for_match(text: str) -> list[str]:
+    """Normalize text for fuzzy transcript matching: remove brackets/non-verbals,
+    punctuation, lowercase, tokenize to words."""
+    # Remove bracketed non-verbals: [sigh], [laughter], etc.
+    s = re.sub(r"\[.*?\]", "", text, flags=re.IGNORECASE)
+    # Lowercase
+    s = s.lower()
+    # Remove non-alphanumeric characters except spaces and basic punctuation we'll strip.
+    s = re.sub(r"[^a-z0-9\s']", " ", s)
+    # Tokenize into words (apostrophe kept to avoid splitting contractions).
+    words = s.split()
+    return [w.strip("'") for w in words if w]
+
+
+def compute_transcript_match_score(
+    reference_text: str,
+    whisper_text: str,
+) -> float:
+    """Compute an in-order word match score between reference and Whisper transcript.
+    
+    Returns a value in [0, 1]:
+      - 1.0: all reference words appear in order in the transcript.
+      - 0.0: no alignment.
+    
+    This is intentionally fuzzy: small variations and fillers are tolerated;
+    the goal is to catch obviously wrong/garbled takes.
+    """
+    ref_words = _normalize_for_match(reference_text)
+    hyp_words = _normalize_for_match(whisper_text)
+
+    if not ref_words:
+        # Nothing to match against → treat as pass (don't over-constrain).
+        return 1.0
+
+    ref_idx = 0
+    hyp_idx = 0
+    matched = 0
+
+    while ref_idx < len(ref_words) and hyp_idx < len(hyp_words):
+        if hyp_words[hyp_idx] == ref_words[ref_idx]:
+            matched += 1
+            ref_idx += 1
+        hyp_idx += 1
+
+    return matched / len(ref_words)
