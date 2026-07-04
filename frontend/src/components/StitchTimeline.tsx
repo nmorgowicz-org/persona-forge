@@ -47,6 +47,29 @@ function StitchTimelineClip({
   const [clipPlaying, setClipPlaying] = useState(false)
   const clipAudioRef = useRef<HTMLAudioElement | null>(null)
   const clipAudioUrlRef = useRef<string | null>(null)
+  const [editingText, setEditingText] = useState(false)
+  const [draftText, setDraftText] = useState(clip.text ?? '')
+  const textInputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (editingText) textInputRef.current?.focus()
+  }, [editingText])
+
+  const beginEditText = () => {
+    setDraftText(clip.text ?? '')
+    setEditingText(true)
+  }
+
+  const commitText = () => {
+    setEditingText(false)
+    const trimmed = draftText.trim()
+    if (trimmed !== (clip.text ?? '')) onUpdate(clip.clipId, { text: trimmed })
+  }
+
+  const cancelEditText = () => {
+    setEditingText(false)
+    setDraftText(clip.text ?? '')
+  }
 
   useEffect(() => {
     return () => {
@@ -159,9 +182,33 @@ function StitchTimelineClip({
       )}
     >
       <div className="flex items-center justify-between gap-2 px-1.5 pt-1 pb-1">
-        <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground" title={clip.text}>
-          {clip.text || '(untitled)'}
-        </span>
+        {editingText ? (
+          <input
+            ref={textInputRef}
+            type="text"
+            value={draftText}
+            onChange={(e) => setDraftText(e.target.value)}
+            onBlur={commitText}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                commitText()
+              } else if (e.key === 'Escape') {
+                e.preventDefault()
+                cancelEditText()
+              }
+            }}
+            className="min-w-0 flex-1 rounded border border-cyan-500/40 bg-muted/40 px-1.5 py-0.5 text-xs font-medium text-foreground outline-none"
+          />
+        ) : (
+          <span
+            className="min-w-0 flex-1 cursor-text truncate text-xs font-medium text-foreground hover:text-cyan-400"
+            title={`${clip.text ?? ''}\n(click to edit reference text)`}
+            onClick={beginEditText}
+          >
+            {clip.text || '(untitled — click to add reference text)'}
+          </span>
+        )}
         <div className="flex shrink-0 items-center gap-1.5">
           {isReordering && (
             <div className="flex items-center text-muted-foreground/60">
@@ -781,8 +828,10 @@ function SliderField({
 /* ---------- Editor shell ---------- */
 
 interface StitchEditorBodyProps {
-  onRender: (plan: StitchPlanPayload) => Promise<void>
-  onSave: (plan: StitchPlanPayload) => Promise<void>
+  /** Reference texts, in clip order, used as the transcript for the saved voice's cloning
+   * reference audio -- kept separate from onSave's plan payload because it's derived from the
+   * clips' (possibly user-edited) text, not from DSP/trim/fade params. */
+  onSave: (plan: StitchPlanPayload, segments: string[]) => Promise<void>
   library: SegmentMeta[]
   onInsertFromLibrary: (seg: SegmentMeta) => void
   voiceLibrary?: VoiceMeta[]
@@ -798,7 +847,6 @@ interface StitchEditorBodyProps {
 // it as plain page content (used by the standalone Stitch Studio page).
 function StitchEditorBody({
   onClose,
-  onRender,
   onSave,
   library,
   onInsertFromLibrary,
@@ -899,16 +947,6 @@ function StitchEditorBody({
     }
   }, [hash, planPayload, clips.length, setPreviewUrl, setPreviewBlob, setIsRendering, previewUrl])
 
-  const handleRender = useCallback(async () => {
-    renderSeqRef.current++ // invalidate any in-flight auto-preview response
-    if (debounceRef.current != null) {
-      clearTimeout(debounceRef.current)
-      debounceRef.current = null
-    }
-    setStaleFlags(false)
-    await onRender(planPayload)
-  }, [planPayload, onRender])
-
   const handleSave = useCallback(async () => {
     renderSeqRef.current++
     if (debounceRef.current != null) {
@@ -916,8 +954,9 @@ function StitchEditorBody({
       debounceRef.current = null
     }
     setStaleFlags(false)
-    await onSave(planPayload)
-  }, [planPayload, onSave])
+    const segments = clips.map((c) => c.text?.trim()).filter((t): t is string => !!t)
+    await onSave(planPayload, segments)
+  }, [planPayload, onSave, clips])
 
   const totalMs = useMemo(() => {
     let sum = 0
@@ -957,7 +996,7 @@ function StitchEditorBody({
       />
       <StitchDspControls open={showDsp} onToggle={() => setShowDsp((v) => !v)} />
 
-      {previewUrl && (
+      {clips.length > 0 && (
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -970,7 +1009,13 @@ function StitchEditorBody({
               )}
             </div>
           </div>
-          <PreviewPlayer src={previewUrl} />
+          {previewUrl ? (
+            <PreviewPlayer src={previewUrl} />
+          ) : (
+            <div className="flex h-10 items-center px-3 text-xs text-muted-foreground">
+              Generating preview…
+            </div>
+          )}
         </div>
       )}
 
@@ -978,18 +1023,9 @@ function StitchEditorBody({
         <div className="flex items-center gap-2.5">
           <button
             type="button"
-            onClick={handleRender}
-            disabled={isRendering || clips.length === 0}
-            className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[hsl(190,90%,50%)] to-[hsl(210,90%,45%)] px-4 py-1.5 text-xs font-medium text-background shadow-[0_4px_15px_rgba(34,211,238,0.25)] transition-all hover:scale-[1.02] hover:shadow-[0_8px_25px_rgba(34,211,238,0.35)] disabled:opacity-50 disabled:shadow-none"
-          >
-            <Play className="size-3.5" />
-            {isRendering ? 'Updating…' : 'Update preview'}
-          </button>
-          <button
-            type="button"
             onClick={handleSave}
             disabled={isRendering || clips.length === 0}
-            className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-1.5 text-xs font-medium text-foreground transition-all hover:bg-muted disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[hsl(190,90%,50%)] to-[hsl(210,90%,45%)] px-4 py-1.5 text-xs font-medium text-background shadow-[0_4px_15px_rgba(34,211,238,0.25)] transition-all hover:scale-[1.02] hover:shadow-[0_8px_25px_rgba(34,211,238,0.35)] disabled:opacity-50 disabled:shadow-none"
             title="This will be used as a reusable cloning source for text-to-speech."
           >
             Save as reference voice

@@ -1,12 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
 import { useAppStore } from '@/store'
 import { StitchEditorInline } from '@/components/StitchTimeline'
-import { AudioPlayer } from '@/components/AudioPlayer'
 import {
   listOmniVoiceSegments,
   listVoices,
-  renderStitchPlan,
   saveOmniVoice,
   type SegmentMeta,
   type StitchPlanPayload,
@@ -22,18 +19,13 @@ export function StitchStudioPage() {
   const voices = useAppStore((s) => s.voices)
   const setVoices = useAppStore((s) => s.setVoices)
 
-  const stitchedUrl = useAppStore((s) => s.ovStitchedUrl)
-  const stitchedBlob = useAppStore((s) => s.ovStitchedBlob)
   const savedVoiceId = useAppStore((s) => s.ovSavedVoiceId)
-  const setStitchedUrl = useAppStore((s) => s.setOvStitchedUrl)
-  const setStitchedBlob = useAppStore((s) => s.setOvStitchedBlob)
   const setSavedVoiceId = useAppStore((s) => s.setOvSavedVoiceId)
 
   const [library, setLibrary] = useState<SegmentMeta[]>([])
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
-  const [isRendering, setIsRendering] = useState(false)
 
   useEffect(() => {
     listOmniVoiceSegments().then(setLibrary).catch(() => {})
@@ -48,28 +40,8 @@ export function StitchStudioPage() {
     await insertVoiceIntoStitchTimeline(voice, setError)
   }, [])
 
-  const handleRender = useCallback(
-    async (plan: StitchPlanPayload) => {
-      try {
-        setIsRendering(true)
-        setError(null)
-        const blob = await renderStitchPlan(plan)
-        if (stitchedUrl) URL.revokeObjectURL(stitchedUrl)
-        const url = URL.createObjectURL(blob)
-        setStitchedUrl(url)
-        setStitchedBlob(blob)
-        setSavedVoiceId(null)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        setIsRendering(false)
-      }
-    },
-    [stitchedUrl, setStitchedUrl, setStitchedBlob, setSavedVoiceId],
-  )
-
   const handleSave = useCallback(
-    async (plan: StitchPlanPayload) => {
+    async (plan: StitchPlanPayload, segments: string[]) => {
       if (!name.trim()) {
         setError('Give this voice a name before saving.')
         return
@@ -79,7 +51,7 @@ export function StitchStudioPage() {
         setError(null)
         const result = await saveOmniVoice({
           instruct: name.trim(),
-          segments: [name.trim()],
+          segments: segments.length ? segments : [name.trim()],
           stitchPlan: plan,
         })
         setSavedVoiceId(result.voice_id)
@@ -114,40 +86,21 @@ export function StitchStudioPage() {
       </div>
 
       {error && <p className="text-xs text-red-400">{error}</p>}
-      {(isRendering || isSaving) && (
-        <p className="text-xs text-muted-foreground">{isSaving ? 'Saving…' : 'Rendering…'}</p>
-      )}
+      {isSaving && <p className="text-xs text-muted-foreground">Saving…</p>}
 
       <StitchEditorInline
         library={library}
         onInsertFromLibrary={insertFromLibrary}
         voiceLibrary={voices}
         onInsertVoiceFromLibrary={insertVoiceFromLibrary}
-        onRender={handleRender}
         onSave={handleSave}
       />
 
-      <AnimatePresence>
-        {stitchedUrl && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
-            className="flex flex-col gap-3 rounded-xl border border-border bg-muted/50 px-4 py-3"
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Rendered preview
-            </p>
-            <AudioPlayer src={stitchedUrl} blob={stitchedBlob} />
-            {savedVoiceId && (
-              <p className="text-xs text-muted-foreground">
-                Saved to voice library as{' '}
-                <span className="font-mono text-foreground">{savedVoiceId}</span>.
-              </p>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {savedVoiceId && (
+        <p className="text-xs text-muted-foreground">
+          Saved to voice library as <span className="font-mono text-foreground">{savedVoiceId}</span>.
+        </p>
+      )}
     </div>
   )
 }

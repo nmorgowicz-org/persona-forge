@@ -2832,24 +2832,10 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
             onInsertFromLibrary={insertFromLibraryToTimeline}
             voiceLibrary={voices}
             onInsertVoiceFromLibrary={insertVoiceToTimeline}
-            onRender={async (plan: StitchPlanPayload) => {
-              try {
-                setIsStitching(true)
-                const blob = await renderStitchPlan(plan)
-                if (stitchedUrl) URL.revokeObjectURL(stitchedUrl)
-                const url = URL.createObjectURL(blob)
-                setStitchedUrl(url)
-                setStitchedBlob(blob)
-                setStitchEditorOpen(false)
-              } finally {
-                setIsStitching(false)
-              }
-            }}
-            onSave={async (plan: StitchPlanPayload) => {
+            onSave={async (plan: StitchPlanPayload, segments: string[]) => {
               try {
                 setIsSaving(true)
                 setError(null)
-                const segments = segmentRack.map((r) => r.text)
                 const result = await saveOmniVoice({
                   instruct,
                   segments,
