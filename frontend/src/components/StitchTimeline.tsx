@@ -124,34 +124,30 @@ function StitchTimelineClip({
   return (
     <div
       className={cn("group relative flex flex-col", isReordering && 'cursor-grab')}
-      style={{ width: `${widthPct}%`, minWidth: 56 }}
+      style={{ width: `${widthPct}%`, minWidth: 140 }}
     >
-      <div className="flex items-center justify-between gap-1 px-1.5 pt-1 pb-0.5">
-        <span className="truncate text-[9px] text-muted-foreground">
+      <div className="flex items-center justify-between gap-2 px-1.5 pt-1 pb-1">
+        <span className="truncate text-xs font-medium text-foreground" title={clip.text}>
           {clip.text || '(untitled)'}
         </span>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
           {isReordering && (
-            <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-              <div className="p-0.5 text-muted-foreground/60">
-                <GripVertical className="size-2.5" />
-              </div>
+            <div className="flex items-center text-muted-foreground/60">
+              <GripVertical className="size-3.5" />
             </div>
           )}
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              type="button"
-              className="rounded p-0.5 text-muted-foreground hover:text-destructive"
-              onClick={() => onRemove(clip.clipId)}
-              title="Remove clip"
-            >
-              <X className="size-3" />
-            </button>
-          </div>
+          <button
+            type="button"
+            className="rounded p-0.5 text-muted-foreground hover:text-destructive"
+            onClick={() => onRemove(clip.clipId)}
+            title="Remove clip"
+          >
+            <X className="size-3.5" />
+          </button>
         </div>
       </div>
 
-      <div className="relative flex-1 overflow-hidden rounded-md bg-black/40">
+      <div className="relative h-24 overflow-hidden rounded-md bg-black/40">
         {visiblePeaks && visiblePeaks.length > 0 ? (
           <div className="flex h-full items-center gap-[0.5px] px-0.5">
             {visiblePeaks.map((p, i) => {
@@ -170,7 +166,7 @@ function StitchTimelineClip({
             })}
           </div>
         ) : (
-          <div className="flex h-full items-center justify-center text-[9px] text-muted-foreground/60">
+          <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground/60">
             loading…
           </div>
         )}
@@ -178,7 +174,7 @@ function StitchTimelineClip({
         {fadeOverlay('right', clip.fadeOutMs)}
       </div>
 
-      <div className="mt-1 flex flex-wrap items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <MsStepper label="Trim start" value={clip.trimStartMs} min={0} max={durMs ?? 0} step={10} onChange={(v) => onUpdate(clip.clipId, { trimStartMs: clampTrimStart(v) })} />
         <MsStepper label="Trim end" value={clip.trimEndMs} min={0} max={durMs ?? 0} step={10} onChange={(v) => onUpdate(clip.clipId, { trimEndMs: clampTrimEnd(v) })} />
         <MsStepper label="Fade in" value={clip.fadeInMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeInMs: clampFade(v) })} />
@@ -202,8 +198,8 @@ function GapControl({
   const padding = useAppStore((s) => s.ovStitchPlanPaddingMs)
   const value = padding[gapIndex] ?? 0
   return (
-    <div className="mx-1 flex items-center gap-1 rounded border border-dashed border-border/60 px-1 py-0.5 bg-black/10">
-      <span className="text-[8px] uppercase text-muted-foreground">gap</span>
+    <div className="mx-1.5 flex items-center gap-1.5 rounded border border-dashed border-border/60 px-1.5 py-1 bg-black/10">
+      <span className="text-[10px] uppercase text-muted-foreground">gap</span>
       <MsStepper label="gap" value={value} min={0} max={3000} step={10} onChange={(v) => onSetPadding(gapIndex, v)} compact />
     </div>
   )
@@ -227,11 +223,11 @@ function MsStepper({
   compact?: boolean
 }) {
   return (
-    <div className={cn('inline-flex items-center gap-0.5', compact && 'gap-0')} title={label}>
-      {!compact && <span className="shrink-0 text-[8px] uppercase text-muted-foreground/60">{label}</span>}
-      <button type="button" className="inline-flex size-4 shrink-0 items-center justify-center rounded bg-muted/70 text-[9px] text-muted-foreground hover:bg-muted" onClick={() => onChange(Math.max(min, value - step))}>−</button>
-      <span className="inline-flex min-w-[26px] justify-center text-[9px] font-mono tabular-nums text-foreground">{value}</span>
-      <button type="button" className="inline-flex size-4 shrink-0 items-center justify-center rounded bg-muted/70 text-[9px] text-muted-foreground hover:bg-muted" onClick={() => onChange(Math.min(max, value + step))}>+</button>
+    <div className={cn('inline-flex items-center gap-1', compact && 'gap-0.5')} title={label}>
+      {!compact && <span className="shrink-0 text-[10px] uppercase text-muted-foreground/70">{label}</span>}
+      <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" onClick={() => onChange(Math.max(min, value - step))}>−</button>
+      <span className="inline-flex min-w-[32px] justify-center text-xs font-mono tabular-nums text-foreground">{value}</span>
+      <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" onClick={() => onChange(Math.min(max, value + step))}>+</button>
     </div>
   )
 }
@@ -289,13 +285,13 @@ export const StitchTimeline = memo(function StitchTimeline({
 
   if (!clips.length) {
     return (
-      <div className="flex h-24 flex-col items-center justify-center gap-2 text-[10px] text-muted-foreground">
+      <div className="flex h-24 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
         <span>No clips in timeline</span>
         {library.length > 0 && (
           <button
             type="button"
             onClick={() => setLibraryPickerOpen(true)}
-            className="rounded-full border border-border px-2 py-0.5 text-[9px] text-muted-foreground hover:bg-muted"
+            className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted"
           >
             Add saved segment
           </button>
@@ -319,7 +315,7 @@ export const StitchTimeline = memo(function StitchTimeline({
       {library.length > 0 && (
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-[9px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               Drag to reorder clips, trim edges, and adjust gaps to build your 10–15s reference voice.
             </span>
           </div>
@@ -327,7 +323,7 @@ export const StitchTimeline = memo(function StitchTimeline({
             <button
               type="button"
               onClick={() => setLibraryPickerOpen((v) => !v)}
-              className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[9px] text-muted-foreground hover:bg-muted"
+              className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted"
             >
               {libraryPickerOpen ? 'Hide segments' : 'Add saved segment'}
             </button>
@@ -338,9 +334,9 @@ export const StitchTimeline = memo(function StitchTimeline({
                   initial={{ opacity: 0, y: -4 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -4 }}
-                  className="absolute right-0 top-8 z-30 flex max-h-40 w-64 flex-col gap-1 overflow-y-auto rounded-lg border border-border bg-background p-2 shadow-lg"
+                  className="absolute right-0 top-9 z-30 flex max-h-52 w-72 flex-col gap-1 overflow-y-auto rounded-lg border border-border bg-background p-2 shadow-lg"
                 >
-                  <span className="text-[8px] uppercase text-muted-foreground">Saved segments</span>
+                  <span className="text-[10px] uppercase text-muted-foreground">Saved segments</span>
                   {library.map((seg) => (
                     <button
                       key={seg.segment_id}
@@ -349,7 +345,7 @@ export const StitchTimeline = memo(function StitchTimeline({
                         onInsertFromLibrary(seg)
                         setLibraryPickerOpen(false)
                       }}
-                      className="flex items-center justify-between gap-2 rounded-md border border-transparent px-1.5 py-0.5 text-[9px] text-foreground hover:border-border hover:bg-muted"
+                      className="flex items-center justify-between gap-2 rounded-md border border-transparent px-2 py-1 text-xs text-foreground hover:border-border hover:bg-muted"
                     >
                       <span className="truncate">{seg.text}</span>
                     </button>
@@ -362,16 +358,16 @@ export const StitchTimeline = memo(function StitchTimeline({
       )}
 
       {/* Timeline */}
-      <div className="relative flex items-stretch gap-0 overflow-x-auto overflow-y-visible" style={{ minWidth: 0 }}>
+      <div className="relative flex items-stretch gap-0 overflow-x-auto overflow-y-visible pl-5" style={{ minWidth: 0 }}>
         {effectiveTotalMs > 0 && (
-          <div className="pointer-events-none absolute inset-x-0 top-0 flex h-4 items-start border-b border-border/30">
+          <div className="pointer-events-none absolute inset-x-5 top-0 flex h-4 items-start border-b border-border/30">
             {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
               const ms = ratio * effectiveTotalMs
               const sec = ms / 1000
               return (
                 <div
                   key={ratio}
-                  className="absolute text-[7px] font-mono text-muted-foreground/40"
+                  className="absolute text-[10px] font-mono text-muted-foreground/50"
                   style={{ left: `${ratio * 100}%`, transform: 'translateX(-50%)' }}
                 >
                   {sec < 10 ? `${sec.toFixed(1)}s` : `${Math.floor(sec / 60)}:${(sec % 60).toFixed(0).padStart(2, '0')}`}
@@ -385,20 +381,20 @@ export const StitchTimeline = memo(function StitchTimeline({
           axis="x"
           values={clips}
           onReorder={handleReorder}
-          className="mt-3 flex flex-1 items-start gap-0"
+          className="mt-3 flex flex-1 items-start gap-3"
         >
           {clips.map((clip, i) => (
             <Reorder.Item
               key={clip.clipId}
               value={clip}
-              className="relative flex flex-col"
+              className="group relative flex flex-col"
             >
               {/* Keyboard-accessible reorder buttons */}
-              <div className="absolute -left-4 top-6 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 hover:flex z-10">
-                <button type="button" className="size-4 rounded bg-muted/70 text-[8px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'left')} title="Move left">
+              <div className="absolute -left-5 top-6 flex flex-col gap-0.5 opacity-40 group-hover:opacity-100 z-10">
+                <button type="button" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'left')} title="Move left">
                   <ChevronUp className="size-3" />
                 </button>
-                <button type="button" className="size-4 rounded bg-muted/70 text-[8px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'right')} title="Move right">
+                <button type="button" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'right')} title="Move right">
                   <ChevronDown className="size-3" />
                 </button>
               </div>
@@ -430,7 +426,7 @@ export function StitchDspControls({ open, onToggle }: { open: boolean; onToggle:
       <button
         type="button"
         onClick={onToggle}
-        className="self-start text-[9px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+        className="self-start text-xs text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
       >
         {open ? 'Hide DSP controls' : 'DSP controls'}
       </button>
@@ -441,18 +437,18 @@ export function StitchDspControls({ open, onToggle }: { open: boolean; onToggle:
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="grid grid-cols-2 gap-x-4 gap-y-1.5 overflow-hidden rounded-lg border border-border/60 bg-muted/40 px-3 py-2"
+            className="grid grid-cols-2 gap-x-6 gap-y-3 overflow-hidden rounded-lg border border-border/60 bg-muted/40 px-4 py-3"
           >
             <SliderField label="Segment target" value={dsp.segmentTargetDbfs} min={-40} max={-10} step={0.5} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ segmentTargetDbfs: v })} />
             <SliderField label="Final target" value={dsp.finalTargetDbfs} min={-40} max={-10} step={0.5} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ finalTargetDbfs: v })} />
             <SliderField label="Final ceiling" value={dsp.finalCeilingDb} min={-6} max={0} step={0.2} format={(v) => `${v} dB`} onChange={(v) => setDsp({ finalCeilingDb: v })} />
             <SliderField label="Crossfade" value={dsp.crossfadeMs} min={0} max={400} step={5} format={(v) => `${v} ms`} onChange={(v) => setDsp({ crossfadeMs: v })} />
-            <div className="col-span-2 flex items-center justify-between pt-0.5">
-              <label className="flex items-center gap-2 text-[9px] text-foreground">
-                <input type="checkbox" checked={dsp.compressEnabled} onChange={(e) => setDsp({ compressEnabled: e.currentTarget.checked })} className="h-3 w-3 accent-cyan-500" />
+            <div className="col-span-2 flex items-center justify-between pt-1">
+              <label className="flex items-center gap-2 text-xs text-foreground">
+                <input type="checkbox" checked={dsp.compressEnabled} onChange={(e) => setDsp({ compressEnabled: e.currentTarget.checked })} className="h-3.5 w-3.5 accent-cyan-500" />
                 Compression
               </label>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-4">
                 <SliderField label="Threshold" value={dsp.compressThresholdDb} min={-60} max={-12} step={0.5} format={(v) => `${v} dB`} onChange={(v) => setDsp({ compressThresholdDb: v })} disabled={!dsp.compressEnabled} />
                 <SliderField label="Ratio" value={dsp.compressRatio} min={1} max={10} step={0.1} format={(v) => `${v}:1`} onChange={(v) => setDsp({ compressRatio: v })} disabled={!dsp.compressEnabled} />
               </div>
@@ -484,10 +480,10 @@ function SliderField({
   disabled?: boolean
 }) {
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
-        <span className="text-[8px] text-muted-foreground">{label}</span>
-        <span className="text-[8px] font-mono tabular-nums text-foreground">{format(value)}</span>
+        <span className="text-[11px] text-muted-foreground">{label}</span>
+        <span className="text-[11px] font-mono tabular-nums text-foreground">{format(value)}</span>
       </div>
       <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} disabled={disabled} className="h-1.5 w-full cursor-pointer accent-cyan-500" />
     </div>
@@ -619,69 +615,79 @@ export function StitchEditorPanel({
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 6 }}
-      className="flex flex-col gap-3 rounded-xl border border-border bg-muted/50 px-4 py-3"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Arrange your reference clip</span>
-          <span className="text-[9px] text-muted-foreground/70">{clips.length} clip{clips.length !== 1 ? 's' : ''}</span>
-          {staleFlags && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[8px] font-medium text-amber-400">
-              changes pending
-            </span>
-          )}
-        </div>
-        <button type="button" onClick={onClose} className="rounded-full p-1 text-muted-foreground hover:text-foreground" title="Close editor">
-          <X className="size-3.5" />
-        </button>
-      </div>
-
-      <StitchTimeline totalDurationMs={totalMs} isPreviewStale={staleFlags} library={library} onInsertFromLibrary={onInsertFromLibrary} />
-      <StitchDspControls open={showDsp} onToggle={() => setShowDsp((v) => !v)} />
-
-      {previewUrl && (
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-[9px] font-semibold uppercase text-muted-foreground">Live preview</span>
-              {isRendering && (
-                <span className="flex items-center gap-1 text-[8px] text-muted-foreground">
-                  <Loader2 className="size-3 animate-spin" />
-                  rendering…
-                </span>
-              )}
-            </div>
+      <motion.div
+        initial={{ opacity: 0, y: 12, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 12, scale: 0.98 }}
+        className="flex max-h-[88vh] w-full max-w-5xl flex-col gap-4 overflow-y-auto rounded-2xl border border-border bg-background px-6 py-5 shadow-2xl"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="text-sm font-semibold uppercase tracking-wider text-foreground">Arrange your reference clip</span>
+            <span className="text-xs text-muted-foreground/70">{clips.length} clip{clips.length !== 1 ? 's' : ''}</span>
+            {staleFlags && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-400">
+                changes pending
+              </span>
+            )}
           </div>
-          <PreviewPlayer src={previewUrl} />
+          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="Close editor">
+            <X className="size-4" />
+          </button>
         </div>
-      )}
 
-      <div className="mt-0.5 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleRender}
-            disabled={isRendering || clips.length === 0}
-            className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[hsl(190,90%,50%)] to-[hsl(210,90%,45%)] px-3 py-1 text-[11px] font-medium text-background shadow-[0_4px_15px_rgba(34,211,238,0.25)] transition-all hover:scale-[1.02] hover:shadow-[0_8px_25px_rgba(34,211,238,0.35)] disabled:opacity-50 disabled:shadow-none"
-          >
-            <Play className="size-3" />
-            {isRendering ? 'Updating…' : 'Update preview'}
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isRendering || clips.length === 0}
-            className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-[11px] font-medium text-foreground transition-all hover:bg-muted disabled:opacity-50"
-            title="This will be used as a reusable cloning source for text-to-speech."
-          >
-            Save as reference voice
-          </button>
+        <StitchTimeline totalDurationMs={totalMs} isPreviewStale={staleFlags} library={library} onInsertFromLibrary={onInsertFromLibrary} />
+        <StitchDspControls open={showDsp} onToggle={() => setShowDsp((v) => !v)} />
+
+        {previewUrl && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold uppercase text-muted-foreground">Live preview</span>
+                {isRendering && (
+                  <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <Loader2 className="size-3 animate-spin" />
+                    rendering…
+                  </span>
+                )}
+              </div>
+            </div>
+            <PreviewPlayer src={previewUrl} />
+          </div>
+        )}
+
+        <div className="mt-1 flex items-center justify-between border-t border-border/60 pt-3">
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleRender}
+              disabled={isRendering || clips.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[hsl(190,90%,50%)] to-[hsl(210,90%,45%)] px-4 py-1.5 text-xs font-medium text-background shadow-[0_4px_15px_rgba(34,211,238,0.25)] transition-all hover:scale-[1.02] hover:shadow-[0_8px_25px_rgba(34,211,238,0.35)] disabled:opacity-50 disabled:shadow-none"
+            >
+              <Play className="size-3.5" />
+              {isRendering ? 'Updating…' : 'Update preview'}
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={isRendering || clips.length === 0}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-1.5 text-xs font-medium text-foreground transition-all hover:bg-muted disabled:opacity-50"
+              title="This will be used as a reusable cloning source for text-to-speech."
+            >
+              Save as reference voice
+            </button>
+          </div>
+          <div className="text-[10px] text-muted-foreground">{(totalMs / 1000).toFixed(1)}s total</div>
         </div>
-        <div className="text-[8px] text-muted-foreground">{(totalMs / 1000).toFixed(1)}s total</div>
-      </div>
+      </motion.div>
     </motion.div>
   )
 }
