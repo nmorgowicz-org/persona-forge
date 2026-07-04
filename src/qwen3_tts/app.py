@@ -699,6 +699,110 @@ def _resolve_omnivoice_clips(data: dict[str, Any]) -> list[tuple[Any, int]] | No
     return _resolve_omnivoice_selections(data.get("selections"))
 
 
+def _resolve_one_clip_ref(ref: dict[str, Any]) -> tuple[Any, int] | None:
+    """Resolve a single stitch-plan clip ref (``{segment_id}`` or ``{candidate_id}``) into a
+    (wav, sample_rate) tuple. Returns None on any unknown/malformed ref.
+    """
+    segment_id = ref.get("segment_id")
+    if isinstance(segment_id, str) and segment_id:
+        wav_bytes = segment_library.get_segment_wav_bytes(segment_id)
+        if wav_bytes is None:
+            return None
+        wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+        return wav, sr
+    candidate_id = ref.get("candidate_id")
+    if isinstance(candidate_id, str) and candidate_id:
+        return _omnivoice_candidates.get(candidate_id)
+    return None
+
+
+def _resolve_stitch_plan(
+    stitch_plan: Any,
+) -> tuple[list[tuple[Any, int]], dict[str, Any]] | None:
+    """Resolve a stitch-editor ``stitch_plan`` payload into (clips, stitch_segments kwargs).
+
+    Shape (all optional except ``clips``):
+      {
+        "clips": [{"segment_id"|"candidate_id": str,
+                   "trim_start_ms": float, "trim_end_ms": float,
+                   "fade_in_ms": float, "fade_out_ms": float}, ...],
+        "padding_ms": [float, ...],       # len(clips) - 1
+        "crossfade_ms": float,
+        "segment_target_dbfs": float,
+        "final_target_dbfs": float,
+        "final_ceiling_db": float,
+        "compress": {"threshold_db": float, "ratio": float,
+                     "attack_ms": float, "release_ms": float},
+      }
+
+    Returns None on any structural/validation failure (caller responds 400). Only
+    segment_id-based clips are durably re-editable across restarts; candidate_id clips rely
+    on the ephemeral in-memory audition cache, same caveat as the existing selections path.
+    """
+    if not isinstance(stitch_plan, dict):
+        return None
+    clips = stitch_plan.get("clips")
+    if not isinstance(clips, list) or not clips:
+        return None
+
+    selected: list[tuple[Any, int]] = []
+    trims: list[tuple[float, float]] = []
+    fades: list[tuple[float, float]] = []
+    for clip in clips:
+        if not isinstance(clip, dict):
+            return None
+        entry = _resolve_one_clip_ref(clip)
+        if entry is None:
+            return None
+        selected.append(entry)
+        try:
+            trims.append(
+                (float(clip.get("trim_start_ms") or 0.0), float(clip.get("trim_end_ms") or 0.0))
+            )
+            fades.append(
+                (float(clip.get("fade_in_ms") or 0.0), float(clip.get("fade_out_ms") or 0.0))
+            )
+        except (TypeError, ValueError):
+            return None
+
+    kwargs: dict[str, Any] = {}
+    if any(t != (0.0, 0.0) for t in trims):
+        kwargs["trims"] = trims
+    if any(f != (0.0, 0.0) for f in fades):
+        kwargs["fades"] = fades
+
+    padding_ms = stitch_plan.get("padding_ms")
+    if padding_ms is not None:
+        if not isinstance(padding_ms, list) or len(padding_ms) != len(clips) - 1:
+            return None
+        try:
+            kwargs["padding_ms"] = [float(p) for p in padding_ms]
+        except (TypeError, ValueError):
+            return None
+
+    for key in ("crossfade_ms", "segment_target_dbfs", "final_target_dbfs", "final_ceiling_db"):
+        value = stitch_plan.get(key)
+        if value is not None:
+            try:
+                kwargs[key] = float(value)
+            except (TypeError, ValueError):
+                return None
+
+    compress_params = stitch_plan.get("compress")
+    if compress_params is not None:
+        if not isinstance(compress_params, dict):
+            return None
+        allowed = {"threshold_db", "ratio", "attack_ms", "release_ms"}
+        if not set(compress_params).issubset(allowed):
+            return None
+        try:
+            kwargs["compress_params"] = {k: float(v) for k, v in compress_params.items()}
+        except (TypeError, ValueError):
+            return None
+
+    return selected, kwargs
+
+
 @app.post("/omnivoice/segments")
 def omnivoice_segments_create():
     # Locks in one audition candidate by persisting it to the durable segment library —
@@ -764,14 +868,22 @@ def omnivoice_stitch():
     data = _json_body()
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
-    selected = _resolve_omnivoice_clips(data)
-    if selected is None:
-        return jsonify(
-            {"error": "segment_ids or selections must be a list of known ids"}
-        ), 400
+
+    plan_kwargs: dict[str, Any] = {}
+    if data.get("stitch_plan") is not None:
+        resolved = _resolve_stitch_plan(data["stitch_plan"])
+        if resolved is None:
+            return jsonify({"error": "stitch_plan is malformed or references unknown clips"}), 400
+        selected, plan_kwargs = resolved
+    else:
+        selected = _resolve_omnivoice_clips(data)
+        if selected is None:
+            return jsonify(
+                {"error": "segment_ids or selections must be a list of known ids"}
+            ), 400
 
     try:
-        wav, sr = omnivoice_engine.stitch_selected(selected)
+        wav, sr = omnivoice_engine.stitch_selected(selected, plan=plan_kwargs or None)
         wav_bytes, media_type = _encode(wav, sr, "wav")
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -789,11 +901,18 @@ def omnivoice_save():
     data = _json_body()
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
-    selected = _resolve_omnivoice_clips(data)
-    if selected is None:
-        return jsonify(
-            {"error": "segment_ids or selections must be a list of known ids"}
-        ), 400
+    plan_kwargs: dict[str, Any] = {}
+    if data.get("stitch_plan") is not None:
+        resolved = _resolve_stitch_plan(data["stitch_plan"])
+        if resolved is None:
+            return jsonify({"error": "stitch_plan is malformed or references unknown clips"}), 400
+        selected, plan_kwargs = resolved
+    else:
+        selected = _resolve_omnivoice_clips(data)
+        if selected is None:
+            return jsonify(
+                {"error": "segment_ids or selections must be a list of known ids"}
+            ), 400
     instruct = (data.get("instruct") or "").strip()
     if not instruct:
         return jsonify({"error": "instruct is required"}), 400
@@ -808,7 +927,7 @@ def omnivoice_save():
     accent_id = data.get("accent_id")
 
     try:
-        wav, sr = omnivoice_engine.stitch_selected(selected)
+        wav, sr = omnivoice_engine.stitch_selected(selected, plan=plan_kwargs or None)
         wav_bytes, _ = _encode(wav, sr, "wav")
         meta = voice_library.save_voice(
             wav_bytes,
@@ -822,6 +941,7 @@ def omnivoice_save():
                 "segments": segments,
                 "segment_ids": data.get("segment_ids"),
                 "candidate_ids": data.get("selections"),
+                "stitch_plan": data.get("stitch_plan"),
             },
         )
     except ValueError as exc:

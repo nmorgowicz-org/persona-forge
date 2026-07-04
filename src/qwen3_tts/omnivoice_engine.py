@@ -460,11 +460,18 @@ def run_omnivoice_job(
         )
 
 
-def stitch_selected(selected: list[tuple[Any, int]]) -> tuple[Any, int]:
+def stitch_selected(
+    selected: list[tuple[Any, int]], *, plan: dict[str, Any] | None = None
+) -> tuple[Any, int]:
     """Combine one chosen candidate per segment into a final reference clip.
 
     Pure numpy post-processing (audio_post.stitch_segments) — does not touch the model,
     model.executor, or the swap machinery, so it can run outside a job/swap window.
+
+    ``plan=None`` (the default) reproduces today's behavior exactly. When present, it's the
+    stitch-editor's DSP override dict (already validated/shaped by app.py's
+    ``_resolve_stitch_plan``) — trims/fades/padding/compression/crossfade/target-level
+    overrides — forwarded straight through to ``stitch_segments``' matching kwargs.
     """
     if not selected:
         raise ValueError("selected must be non-empty")
@@ -472,5 +479,6 @@ def stitch_selected(selected: list[tuple[Any, int]]) -> tuple[Any, int]:
     if len(sample_rates) != 1:
         raise ValueError(f"mixed sample rates in selection: {sample_rates}")
     sr = selected[0][1]
-    final = stitch_segments([wav for wav, _ in selected], sr)
+    kwargs = dict(plan) if plan else {}
+    final = stitch_segments([wav for wav, _ in selected], sr, **kwargs)
     return final, sr

@@ -2,13 +2,18 @@
 
 Status (2026-07-04): Part A ("Persona Forge polish" items, see bottom
 section) is **done and deployed to dockermisc1**. Part B (the stitch editor
-itself, backend + frontend, steps 1-7 below) is in progress: **step 1
-(`audio_post.py` primitives: `trim`, `apply_fades`, `concat_with_padding`,
-extended `stitch_segments` kwargs) is done** — implemented, unit-tested
-(34/34 passing in `tests/test_audio_post.py`, including an explicit
-default-kwargs-match-original-output parity test), not yet deployed. Steps
-2-7 (API wiring, frontend timeline) not yet started. Serves as both the
-implementation plan and the handoff doc for this feature.
+itself, backend + frontend, steps 1-7 below) is in progress:
+- **Steps 1-3 done** (backend only, not yet deployed):
+  - Step 1: `audio_post.py` primitives (`trim`, `apply_fades`, `concat_with_padding`,
+    extended `stitch_segments` kwargs) — unit-tested (34/34 in
+    `tests/test_audio_post.py`, including an explicit
+    default-kwargs-match-original-output parity test).
+  - Step 2: `/omnivoice/stitch` accepts `stitch_plan`; `_resolve_stitch_plan`,
+    `_resolve_one_clip_ref`, widened `stitch_selected(plan=...)`.
+  - Step 3: `/omnivoice/save` accepts `stitch_plan`, persists it into
+    `voice_library` `selections["stitch_plan"]`.
+- Steps 4-7 (frontend timeline) not yet started.
+Serves as both the implementation plan and the handoff doc for this feature.
 
 ## Context / motivation
 
