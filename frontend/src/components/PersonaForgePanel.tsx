@@ -622,7 +622,6 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   )
   const isStitching = useAppStore((s) => s.ovIsStitching)
   const isSaving = useAppStore((s) => s.ovIsSaving)
-  const modelLoaded = useAppStore((s) => s.modelLoaded)
   const error = useAppStore((s) => s.ovError)
   const stitchedUrl = useAppStore((s) => s.ovStitchedUrl)
   const stitchedBlob = useAppStore((s) => s.ovStitchedBlob)
@@ -2205,13 +2204,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
             disabled={
               !scriptText.trim() ||
               !instruct ||
-              isRackAuditioning ||
-              !modelLoaded
-            }
-            title={
-              modelLoaded
-                ? undefined
-                : 'Model is still loading'
+              isRackAuditioning
             }
             className="min-w-[160px]"
           >
