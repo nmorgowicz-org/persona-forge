@@ -360,10 +360,11 @@ def _dispatch_audition_jobs():
                 candidates_per_segment,
                 seed,
                 num_step,
-                duration,
+                cleaned_durations,
                 speed,
                 guidance_scale,
                 diverse_candidates,
+                postprocess_output,
             ) = params
 
             def _run_job(job_id, job):
@@ -376,11 +377,12 @@ def _dispatch_audition_jobs():
                         candidates_per_segment,
                         seed,
                         num_step,
-                        duration,
+                        cleaned_durations,
                         speed,
                         guidance_scale,
                         diverse_candidates,
-                        on_segment_complete=_segment_callback_factory(job_id),
+                        postprocess_output=postprocess_output,
+                        on_candidate_complete=_candidate_callback_factory(job_id),
                     ).result(timeout=1800)
                     with _OV_AUDITION_JOBS_LOCK:
                         _OV_AUDITION_JOBS[job_id]["status"] = "completed"
@@ -397,42 +399,49 @@ def _dispatch_audition_jobs():
             _OV_AUDITION_DISPATCH_IN_PROGRESS = False
 
 
-def _segment_callback_factory(job_id: str):
-    # Build segment callback that updates the job state.
-    def _cb(seg_idx, text, seg_candidates):
-        cand_payload = []
-        for wav, sr, flagged, flag_reason, whisper_transcript, match_score in seg_candidates:
-            candidate_id = uuid.uuid4().hex
-            wav_bytes, _ = _encode(wav, sr, "wav")
-            _omnivoice_candidates[candidate_id] = (wav, sr)
-            duration_sec = len(wav) / sr if sr > 0 else 0.0
-            cand_payload.append(
-                {
-                    "candidate_id": candidate_id,
-                    "sample_rate": sr,
-                    "duration_sec": round(duration_sec, 2),
-                    "audio_base64": base64.b64encode(wav_bytes).decode(
-                        "ascii"
-                    ),
-                    "flagged": flagged,
-                    "flag_reason": None
-                    if flag_reason == "ok"
-                    else flag_reason,
-                    "whisper_transcript": (whisper_transcript or "").strip() or None,
-                    "match_score": round(float(match_score), 2) if match_score is not None else None,
-                }
-            )
+def _encode_omnivoice_candidate(wav, sr, flagged, flag_reason, whisper_transcript, match_score):
+    candidate_id = uuid.uuid4().hex
+    wav_bytes, _ = _encode(wav, sr, "wav")
+    _omnivoice_candidates[candidate_id] = (wav, sr)
+    duration_sec = len(wav) / sr if sr > 0 else 0.0
+    return {
+        "candidate_id": candidate_id,
+        "sample_rate": sr,
+        "duration_sec": round(duration_sec, 2),
+        "audio_base64": base64.b64encode(wav_bytes).decode("ascii"),
+        "flagged": flagged,
+        "flag_reason": None if flag_reason == "ok" else flag_reason,
+        "whisper_transcript": (whisper_transcript or "").strip() or None,
+        "match_score": round(float(match_score), 2) if match_score is not None else None,
+    }
+
+
+def _candidate_callback_factory(job_id: str):
+    # Build per-candidate callback that updates job state as soon as each candidate is
+    # ready, so the frontend can show/play a take without waiting for the rest of that
+    # segment's candidates (or the whole job) to finish.
+    def _cb(seg_idx, cand_idx, text, candidate):
+        wav, sr, flagged, flag_reason, whisper_transcript, match_score = candidate
+        cand_payload = _encode_omnivoice_candidate(
+            wav, sr, flagged, flag_reason, whisper_transcript, match_score
+        )
         with _OV_AUDITION_JOBS_LOCK:
             job = _OV_AUDITION_JOBS.get(job_id)
-            if job is not None:
-                job["current_segment_index"] = seg_idx
-                job["segments_completed"].append(
-                    {
-                        "segment_index": seg_idx,
-                        "text": text,
-                        "candidates": cand_payload,
-                    }
-                )
+            if job is None:
+                return
+            job["current_segment_index"] = seg_idx
+            segs = job["segments_completed"]
+            seg_entry = next(
+                (s for s in segs if s["segment_index"] == seg_idx), None
+            )
+            if seg_entry is None:
+                seg_entry = {
+                    "segment_index": seg_idx,
+                    "text": text,
+                    "candidates": [],
+                }
+                segs.append(seg_entry)
+            seg_entry["candidates"].append(cand_payload)
     return _cb
 
 
@@ -567,7 +576,7 @@ def omnivoice_audition():
                     guidance_scale,
                     diverse_candidates,
                     postprocess_output=postprocess_output,
-                    on_segment_complete=_segment_callback_factory(job_id),
+                    on_candidate_complete=_candidate_callback_factory(job_id),
                 ).result(timeout=1800)
                 with _OV_AUDITION_JOBS_LOCK:
                     job = _OV_AUDITION_JOBS.get(job_id)

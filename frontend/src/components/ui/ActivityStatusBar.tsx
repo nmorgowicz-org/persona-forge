@@ -1,6 +1,8 @@
 import * as React from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Timer } from 'lucide-react'
 import { useAppStore } from '@/store'
+import { useSidebar } from '@/components/ui/sidebar'
+import { cn } from '@/lib/utils'
 
 function formatEta(s: number) {
   const total = Math.round(s)
@@ -21,6 +23,7 @@ function adaptiveMessage(active: boolean, progress: number, eta: number | null) 
 
 export function ActivityStatusBar() {
   const status = useAppStore((s) => s.activityStatus)
+  const { open: sidebarOpen } = useSidebar()
   const [hovered, setHovered] = React.useState(false)
   const [countdown, setCountdown] = React.useState<number | null>(
     status?.etaSeconds != null ? Math.round(status.etaSeconds) : null
@@ -71,7 +74,14 @@ export function ActivityStatusBar() {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div className="ml-14 w-full border-t border-border/70 bg-[#0B0B0F]/96 backdrop-blur-xl">
+      <div
+        className={cn(
+          'w-full border-t border-border/70 bg-[#0B0B0F]/96 backdrop-blur-xl transition-[margin,width] duration-200 ease-linear',
+          sidebarOpen
+            ? 'md:ml-64 md:w-[calc(100%-16rem)]'
+            : 'md:ml-12 md:w-[calc(100%-3rem)]',
+        )}
+      >
         {/* Gradient progress bar */}
         <div className="h-[2px] bg-neutral-900/80 overflow-hidden">
           <div
@@ -86,12 +96,19 @@ export function ActivityStatusBar() {
 
         <div className="relative">
           {/* Primary row */}
-          <div className="flex items-center gap-2 px-4 py-1.5 text-[10px] text-muted-foreground">
+          <div className="flex items-center gap-2.5 px-4 py-1.5 text-[10px] text-muted-foreground">
             <Loader2 className="size-3 shrink-0 animate-spin text-primary" />
 
             <span className="font-medium text-foreground">
               {title}
             </span>
+
+            {etaDisplay && (
+              <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary tabular-nums">
+                <Timer className="size-3" />
+                {etaDisplay}
+              </span>
+            )}
 
             {message && (
               <span className="truncate">
@@ -100,14 +117,8 @@ export function ActivityStatusBar() {
             )}
 
             {detail && (
-              <span className="shrink-0">
+              <span className="ml-auto shrink-0">
                 {detail}
-              </span>
-            )}
-
-            {etaDisplay && (
-              <span className="ml-auto shrink-0 text-foreground">
-                {etaDisplay} remaining
               </span>
             )}
           </div>

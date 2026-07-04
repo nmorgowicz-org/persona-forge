@@ -137,7 +137,7 @@ def run_omnivoice_job(
     guidance_scale: float | None = None,
     diverse_candidates: bool = False,
     postprocess_output: bool | None = None,
-    on_segment_complete=None,
+    on_candidate_complete=None,
 ) -> list[list[tuple[Any, int, bool, str, str, float | None]]]:
     """Swap to OmniVoice and generate every segment x candidate. Leaves OmniVoice loaded on
     success (see this module's docstring for why). On failure, the checkpoint is unloaded
@@ -180,10 +180,13 @@ def run_omnivoice_job(
     across candidates to produce prosodically different takes; when False, the first
     candidate uses 5.0 and the rest use 7.0. class_temperature is always 0.0 (greedy).
 
-    If ``on_segment_complete`` is provided and callable, it is invoked after each segment's
-    candidates are ready:
-        on_segment_complete(segment_index, text, candidates_list)
-    This is used to stream segment results into job state for the streaming audition API.
+    If ``on_candidate_complete`` is provided and callable, it is invoked as soon as each
+    individual candidate is ready (not batched per-segment), so callers can stream results
+    to the client before the rest of the segment's candidates finish:
+        on_candidate_complete(segment_index, candidate_index, text, candidate_tuple)
+    where ``candidate_tuple`` is (wav, sample_rate, flagged, flag_reason, whisper_transcript,
+    match_score) — the same shape appended to this segment's candidates list. Used to stream
+    results into job state for the streaming audition API.
 
     No manual seed by default: seeding a whole multi-segment/multi-candidate batch defeats
     the point of auditioning independent draws, and stitching validated in
@@ -401,9 +404,12 @@ def run_omnivoice_job(
                             flush=True,
                         )
                 cand_elapsed = time.monotonic() - cand_t0
-                candidates.append(
-                    (wav, OMNIVOICE_SAMPLE_RATE, flagged, reason, last_transcript or "", last_match_score)
+                candidate_tuple = (
+                    wav, OMNIVOICE_SAMPLE_RATE, flagged, reason, last_transcript or "", last_match_score
                 )
+                candidates.append(candidate_tuple)
+                if on_candidate_complete is not None and callable(on_candidate_complete):
+                    on_candidate_complete(seg_idx, cand_idx, text, candidate_tuple)
 
                 completed = _progress["completed"] + 1
                 prev_avg = _progress["avg_seconds"]
@@ -424,8 +430,6 @@ def run_omnivoice_job(
                     f"({completed}/{total}, ~{remaining * avg:.0f}s remaining)",
                     flush=True,
                 )
-            if on_segment_complete is not None and callable(on_segment_complete):
-                on_segment_complete(seg_idx, text, candidates)
             results.append(candidates)
         elapsed = time.monotonic() - t0
         print(

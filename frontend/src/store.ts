@@ -318,7 +318,7 @@ export const useAppStore = create<StoreState>((set) => ({
   ovDurationInput: '',
   ovSpeedInput: '',
   ovGuidanceScaleInput: '',
-  ovDiverseCandidates: false,
+  ovDiverseCandidates: true,
   ovScriptText: '',
   ovSegmentRack: [],
   ovIsRackAuditioning: false,

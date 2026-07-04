@@ -919,39 +919,51 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
           if (typeof p.current_candidate_index === 'number')
             setJobCurrentCandidateIndex(p.current_candidate_index)
 
-          if (
-            p.segments_completed.length >
-            lastHandledCount
-          ) {
+          const totalCandidatesSoFar = (
+            p.segments_completed || []
+          ).reduce(
+            (acc, s) =>
+              acc +
+              (Array.isArray(s.candidates)
+                ? s.candidates.length
+                : 0),
+            0,
+          )
+
+          if (totalCandidatesSoFar > lastHandledCount) {
+            // Merge in-place: a segment's candidates list grows as each candidate
+            // finishes, so update existing rows instead of only appending new ones —
+            // this is what lets a take's waveform/player show up as soon as it's
+            // done, without waiting for the rest of the segment (or job) to finish.
             setSegmentRack((prev) => {
               const next = [...prev]
-              const existingIds = new Set(
-                next.map(
-                  (r) => r.segmentId,
-                ),
+              const indexBySegId = new Map(
+                next.map((r, i) => [r.segmentId, i]),
               )
               for (const s of p.segments_completed || []) {
                 const segId = `seg-${s.segment_index}`
-                if (!existingIds.has(segId)) {
-                  const candidates =
-                    Array.isArray(s.candidates)
-                      ? s.candidates
-                      : []
+                const candidates = Array.isArray(s.candidates)
+                  ? s.candidates
+                  : []
+                const existingIndex = indexBySegId.get(segId)
+                if (existingIndex == null) {
                   next.push({
                     segmentId: segId,
                     text: s.text || '',
                     candidates,
                     selectedTakeIndex:
-                      candidates.length > 0
-                        ? 0
-                        : -1,
+                      candidates.length > 0 ? 0 : -1,
                   })
+                } else {
+                  next[existingIndex] = {
+                    ...next[existingIndex],
+                    candidates,
+                  }
                 }
               }
               return next
             })
-            lastHandledCount =
-              p.segments_completed.length
+            lastHandledCount = totalCandidatesSoFar
           }
 
         if (p.status === 'completed') {
@@ -1113,24 +1125,29 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
           if (typeof p.current_candidate_index === 'number')
             setJobCurrentCandidateIndex(p.current_candidate_index)
 
+          const regenSeg = p.segments_completed[0]
+          if (regenSeg && Array.isArray(regenSeg.candidates)) {
+            // Merge candidates in as they stream in, so a take's waveform/player
+            // appears as soon as it's rendered rather than waiting for the whole
+            // regen batch to finish.
+            setSegmentRack((prev) =>
+              prev.map((r) =>
+                r.segmentId === segmentId
+                  ? {
+                      ...r,
+                      candidates: regenSeg.candidates,
+                      selectedTakeIndex:
+                        r.candidates.length === 0 &&
+                        regenSeg.candidates.length > 0
+                          ? 0
+                          : r.selectedTakeIndex,
+                    }
+                  : r,
+              ),
+            )
+          }
+
           if (p.status === 'completed') {
-            const seg = p.segments_completed[0]
-            if (seg) {
-              setSegmentRack((prev) =>
-                prev.map((r) =>
-                  r.segmentId ===
-                  segmentId
-                    ? {
-                        ...r,
-                        candidates:
-                          seg.candidates,
-                        selectedTakeIndex:
-                          0,
-                      }
-                    : r,
-                ),
-              )
-            }
             // Clean up for single-seg regen
             setIsRackAuditioning(false)
             setProgress(null)
