@@ -335,6 +335,7 @@ export interface StitchPlanPayload {
   clips: {
     segmentId?: string
     candidateId?: string
+    voiceId?: string
     trimStartMs: number
     trimEndMs: number
     fadeInMs: number
@@ -356,6 +357,7 @@ function serializeStitchPlan(plan: StitchPlanPayload) {
     clips: plan.clips.map((c) => ({
       segment_id: c.segmentId ?? undefined,
       candidate_id: c.candidateId ?? undefined,
+      voice_id: c.voiceId ?? undefined,
       trim_start_ms: c.trimStartMs,
       trim_end_ms: c.trimEndMs,
       fade_in_ms: c.fadeInMs,

@@ -11,7 +11,7 @@ import { applyTheme, loadStoredTheme, type Theme } from './lib/theme'
 import type { ChipSelections } from './lib/voiceDesignChips'
 import type { OmniVoiceSelections } from './lib/omnivoiceChips'
 
-export type Page = 'speak' | 'voice-design' | 'voice-library' | 'integrations' | 'runtime'
+export type Page = 'speak' | 'voice-design' | 'voice-library' | 'stitch-studio' | 'integrations' | 'runtime'
 export type DesignEngine = 'qwen' | 'omnivoice'
 
 export interface ActivityStatus {
@@ -46,6 +46,7 @@ export interface SegmentRackRow {
 export type ClipRef =
   | { segmentId: string }
   | { candidateId: string }
+  | { voiceId: string }
 
 export interface StitchPlanClip {
   clipId: string

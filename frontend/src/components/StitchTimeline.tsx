@@ -4,7 +4,7 @@ import { AnimatePresence, motion, Reorder } from 'framer-motion'
 import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play, Pause } from 'lucide-react'
 import { useAppStore, type StitchPlanClip } from '@/store'
 import { base64ToBlob, cn } from '@/lib/utils'
-import { renderStitchPlan, type StitchPlanPayload, type SegmentMeta } from '@/lib/api'
+import { renderStitchPlan, type StitchPlanPayload, type SegmentMeta, type VoiceMeta } from '@/lib/api'
 
 /* ---------- helpers ---------- */
 
@@ -277,6 +277,139 @@ function MsStepper({
   )
 }
 
+// Generic multi-select library picker: filter, per-item checkboxes, select-all toggle,
+// and a single bulk "Insert selected" action — used for both the segment library and the
+// voice library (each saved voice inserts as one whole clip, same shape as a segment clip).
+function LibraryPickerButton<T>({
+  label,
+  items,
+  getId,
+  getLabel,
+  onInsertMany,
+}: {
+  label: string
+  items: T[]
+  getId: (item: T) => string
+  getLabel: (item: T) => string
+  onInsertMany: (items: T[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [filter, setFilter] = useState('')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+
+  const filtered = useMemo(() => {
+    const q = filter.trim().toLowerCase()
+    if (!q) return items
+    return items.filter((it) => getLabel(it).toLowerCase().includes(q))
+  }, [items, filter, getLabel])
+
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every((it) => selected.has(getId(it)))
+
+  const toggleSelectAll = () => {
+    setSelected((prev) => {
+      if (allFilteredSelected) {
+        const next = new Set(prev)
+        for (const it of filtered) next.delete(getId(it))
+        return next
+      }
+      const next = new Set(prev)
+      for (const it of filtered) next.add(getId(it))
+      return next
+    })
+  }
+
+  const handleInsert = () => {
+    const chosen = items.filter((it) => selected.has(getId(it)))
+    if (chosen.length === 0) return
+    onInsertMany(chosen)
+    setSelected(new Set())
+    setOpen(false)
+    setFilter('')
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted"
+      >
+        {open ? `Hide ${label.toLowerCase()}` : `Add ${label.toLowerCase()}`}
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            className="absolute right-0 top-9 z-30 flex max-h-72 w-80 flex-col gap-1.5 overflow-hidden rounded-lg border border-border bg-background p-2 shadow-lg"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] uppercase text-muted-foreground">{label}</span>
+              <button
+                type="button"
+                onClick={toggleSelectAll}
+                disabled={filtered.length === 0}
+                className="shrink-0 text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground disabled:opacity-40"
+              >
+                {allFilteredSelected ? 'Deselect all' : 'Select all'}
+              </button>
+            </div>
+            <input
+              type="text"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter…"
+              className="rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-foreground outline-none focus:border-cyan-500/50"
+            />
+            <div className="flex flex-col gap-1 overflow-y-auto">
+              {filtered.length === 0 && (
+                <span className="px-2 py-1 text-xs text-muted-foreground/60">No matches</span>
+              )}
+              {filtered.map((it) => {
+                const id = getId(it)
+                const checked = selected.has(id)
+                return (
+                  <label
+                    key={id}
+                    className="flex items-center gap-2 rounded-md border border-transparent px-2 py-1 text-xs text-foreground hover:border-border hover:bg-muted"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggle(id)}
+                      className="size-3.5 shrink-0 accent-cyan-500"
+                    />
+                    <span className="truncate">{getLabel(it)}</span>
+                  </label>
+                )
+              })}
+            </div>
+            <button
+              type="button"
+              onClick={handleInsert}
+              disabled={selected.size === 0}
+              className="mt-1 rounded-md bg-cyan-500/90 px-2 py-1 text-xs font-medium text-background hover:bg-cyan-500 disabled:opacity-40"
+            >
+              Insert selected ({selected.size})
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
 /* ---------- main component ---------- */
 
 interface StitchTimelineProps {
@@ -284,6 +417,8 @@ interface StitchTimelineProps {
   isPreviewStale: boolean
   library: SegmentMeta[]
   onInsertFromLibrary: (seg: SegmentMeta) => void
+  voiceLibrary?: VoiceMeta[]
+  onInsertVoiceFromLibrary?: (voice: VoiceMeta) => void
 }
 
 export const StitchTimeline = memo(function StitchTimeline({
@@ -291,6 +426,8 @@ export const StitchTimeline = memo(function StitchTimeline({
   isPreviewStale: _isPreviewStale,
   library,
   onInsertFromLibrary,
+  voiceLibrary,
+  onInsertVoiceFromLibrary,
 }: StitchTimelineProps) {
   const clips = useAppStore((s) => s.ovStitchPlanClips)
   const paddingMs = useAppStore((s) => s.ovStitchPlanPaddingMs)
@@ -298,7 +435,7 @@ export const StitchTimeline = memo(function StitchTimeline({
   const removeClip = useAppStore((s) => s.removeOvStitchPlanClip)
   const updateClip = useAppStore((s) => s.updateOvStitchPlanClip)
   const setPadding = useAppStore((s) => s.setOvStitchPlanPaddingAt)
-  const [libraryPickerOpen, setLibraryPickerOpen] = useState(false)
+  const hasVoiceLibrary = (voiceLibrary?.length ?? 0) > 0 && !!onInsertVoiceFromLibrary
 
   const handleReorder = useCallback(
     (next: StitchPlanClip[]) => {
@@ -332,15 +469,26 @@ export const StitchTimeline = memo(function StitchTimeline({
     return (
       <div className="flex h-24 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
         <span>No clips in timeline</span>
-        {library.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setLibraryPickerOpen(true)}
-            className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted"
-          >
-            Add saved segment
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {library.length > 0 && (
+            <LibraryPickerButton
+              label="Saved segments"
+              items={library}
+              getId={(seg) => seg.segment_id}
+              getLabel={(seg) => seg.text}
+              onInsertMany={(segs) => segs.forEach(onInsertFromLibrary)}
+            />
+          )}
+          {hasVoiceLibrary && (
+            <LibraryPickerButton
+              label="Voice library"
+              items={voiceLibrary!}
+              getId={(v) => v.voice_id}
+              getLabel={(v) => v.description || v.voice_id}
+              onInsertMany={(vs) => vs.forEach(onInsertVoiceFromLibrary!)}
+            />
+          )}
+        </div>
       </div>
     )
   }
@@ -357,47 +505,30 @@ export const StitchTimeline = memo(function StitchTimeline({
   return (
     <div className="relative flex flex-col gap-2">
       {/* Library insert bar */}
-      {library.length > 0 && (
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">
-              Drag to reorder clips, trim edges, and adjust gaps to build your 10–15s reference voice.
-            </span>
-          </div>
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setLibraryPickerOpen((v) => !v)}
-              className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted"
-            >
-              {libraryPickerOpen ? 'Hide segments' : 'Add saved segment'}
-            </button>
-
-            <AnimatePresence>
-              {libraryPickerOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  className="absolute right-0 top-9 z-30 flex max-h-52 w-72 flex-col gap-1 overflow-y-auto rounded-lg border border-border bg-background p-2 shadow-lg"
-                >
-                  <span className="text-[10px] uppercase text-muted-foreground">Saved segments</span>
-                  {library.map((seg) => (
-                    <button
-                      key={seg.segment_id}
-                      type="button"
-                      onClick={() => {
-                        onInsertFromLibrary(seg)
-                        setLibraryPickerOpen(false)
-                      }}
-                      className="flex items-center justify-between gap-2 rounded-md border border-transparent px-2 py-1 text-xs text-foreground hover:border-border hover:bg-muted"
-                    >
-                      <span className="truncate">{seg.text}</span>
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
+      {(library.length > 0 || hasVoiceLibrary) && (
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-muted-foreground">
+            Drag to reorder clips, trim edges, and adjust gaps to build your 10–15s reference voice.
+          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            {library.length > 0 && (
+              <LibraryPickerButton
+                label="Saved segments"
+                items={library}
+                getId={(seg) => seg.segment_id}
+                getLabel={(seg) => seg.text}
+                onInsertMany={(segs) => segs.forEach(onInsertFromLibrary)}
+              />
+            )}
+            {hasVoiceLibrary && (
+              <LibraryPickerButton
+                label="Voice library"
+                items={voiceLibrary!}
+                getId={(v) => v.voice_id}
+                getLabel={(v) => v.description || v.voice_id}
+                onInsertMany={(vs) => vs.forEach(onInsertVoiceFromLibrary!)}
+              />
+            )}
           </div>
         </div>
       )}
@@ -545,12 +676,16 @@ export function StitchEditorPanel({
   onSave,
   library,
   onInsertFromLibrary,
+  voiceLibrary,
+  onInsertVoiceFromLibrary,
 }: {
   onClose: () => void
   onRender: (plan: StitchPlanPayload) => Promise<void>
   onSave: (plan: StitchPlanPayload) => Promise<void>
   library: SegmentMeta[]
   onInsertFromLibrary: (seg: SegmentMeta) => void
+  voiceLibrary?: VoiceMeta[]
+  onInsertVoiceFromLibrary?: (voice: VoiceMeta) => void
 }) {
   const clips = useAppStore((s) => s.ovStitchPlanClips)
   const paddingMs = useAppStore((s) => s.ovStitchPlanPaddingMs)
@@ -576,12 +711,10 @@ export function StitchEditorPanel({
     return {
       clips: clips.map((c) => {
         const anyRef = c.ref as Record<string, string>
-        const isSegment = 'segmentId' in anyRef
-        const segId = isSegment ? anyRef.segmentId : undefined
-        const candId = !isSegment ? anyRef.candidateId : undefined
         return {
-          segmentId: segId,
-          candidateId: candId,
+          segmentId: 'segmentId' in anyRef ? anyRef.segmentId : undefined,
+          candidateId: 'candidateId' in anyRef ? anyRef.candidateId : undefined,
+          voiceId: 'voiceId' in anyRef ? anyRef.voiceId : undefined,
           trimStartMs: c.trimStartMs,
           trimEndMs: c.trimEndMs,
           fadeInMs: c.fadeInMs,
@@ -708,7 +841,14 @@ export function StitchEditorPanel({
           </button>
         </div>
 
-        <StitchTimeline totalDurationMs={totalMs} isPreviewStale={staleFlags} library={library} onInsertFromLibrary={onInsertFromLibrary} />
+        <StitchTimeline
+          totalDurationMs={totalMs}
+          isPreviewStale={staleFlags}
+          library={library}
+          onInsertFromLibrary={onInsertFromLibrary}
+          voiceLibrary={voiceLibrary}
+          onInsertVoiceFromLibrary={onInsertVoiceFromLibrary}
+        />
         <StitchDspControls open={showDsp} onToggle={() => setShowDsp((v) => !v)} />
 
         {previewUrl && (

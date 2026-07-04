@@ -720,8 +720,8 @@ def _resolve_omnivoice_clips(data: dict[str, Any]) -> list[tuple[Any, int]] | No
 
 
 def _resolve_one_clip_ref(ref: dict[str, Any]) -> tuple[Any, int] | None:
-    """Resolve a single stitch-plan clip ref (``{segment_id}`` or ``{candidate_id}``) into a
-    (wav, sample_rate) tuple. Returns None on any unknown/malformed ref.
+    """Resolve a single stitch-plan clip ref (``{segment_id}``, ``{candidate_id}``, or
+    ``{voice_id}``) into a (wav, sample_rate) tuple. Returns None on any unknown/malformed ref.
     """
     segment_id = ref.get("segment_id")
     if isinstance(segment_id, str) and segment_id:
@@ -733,6 +733,15 @@ def _resolve_one_clip_ref(ref: dict[str, Any]) -> tuple[Any, int] | None:
     candidate_id = ref.get("candidate_id")
     if isinstance(candidate_id, str) and candidate_id:
         return _omnivoice_candidates.get(candidate_id)
+    # voice_id: lets the stitch editor pull in a saved Voice Library entry (a whole finished
+    # take, e.g. from Speak/Voice Design) as one clip, same as any segment/candidate.
+    voice_id = ref.get("voice_id")
+    if isinstance(voice_id, str) and voice_id:
+        wav_bytes = voice_library.get_voice_wav_bytes(voice_id)
+        if wav_bytes is None:
+            return None
+        wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+        return wav, sr
     return None
 
 

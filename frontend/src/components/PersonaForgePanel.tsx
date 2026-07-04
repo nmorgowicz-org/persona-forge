@@ -17,6 +17,7 @@ import {
   saveOmniVoice,
   type StitchPlanPayload,
   type SegmentMeta,
+  type VoiceMeta,
 } from '@/lib/api'
 import {
   ACCENT_BANK,
@@ -46,6 +47,7 @@ import { useAppStore, type StitchPlanClip } from '@/store'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import * as Tooltip from '@/components/ui/tooltip'
 import { StitchEditorPanel } from '@/components/StitchTimeline'
+import { insertSegmentIntoStitchTimeline, insertVoiceIntoStitchTimeline } from '@/lib/stitchClips'
 
 const DEFAULT_ACCENT = ACCENT_BANK[0] ?? null
 
@@ -740,6 +742,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   const setStitchPlanClips = useAppStore(
     (s) => s.setOvStitchPlanClips,
   )
+  const voices = useAppStore((s) => s.voices)
   const setStitchPlanPaddingAt = useAppStore(
     (s) => s.setOvStitchPlanPaddingAt,
   )
@@ -1705,74 +1708,16 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
 
   const insertFromLibraryToTimeline = useCallback(
     async (seg: SegmentMeta) => {
-      let audioBase64 = seg.audio_base64
-      if (!audioBase64) {
-        try {
-          audioBase64 = await getSegmentAudioBase64(seg.segment_id)
-        } catch {
-          setError('No audio available for this segment')
-          return
-        }
-      }
-
-      const ctx = (() => {
-        if (typeof window !== 'undefined' && window.AudioContext) {
-          return new (window.AudioContext)()
-        }
-        return null
-      })()
-
-      if (!ctx) {
-        setError('AudioContext not available')
-        return
-      }
-
-      const byteStr = atob(audioBase64)
-      const bytes = new Uint8Array(byteStr.length)
-      for (let i = 0; i < byteStr.length; i++) {
-        bytes[i] = byteStr.charCodeAt(i)
-      }
-
-      let durationMs = 0
-      try {
-        const arrayBuffer = bytes.buffer
-        const audioBuffer = await ctx.decodeAudioData(
-          arrayBuffer.slice(0) as ArrayBuffer,
-        )
-        durationMs = Math.round(audioBuffer.duration * 1000)
-      } catch {
-        durationMs = 0
-      }
-      await ctx.close()
-
-      const newClip: StitchPlanClip = {
-        clipId: seg.segment_id + '-insert-' + Date.now(),
-        ref: { segmentId: seg.segment_id },
-        text: seg.text,
-        sourceAudioBase64: audioBase64,
-        sampleRate: seg.sample_rate,
-        trimStartMs: 0,
-        trimEndMs: 0,
-        fadeInMs: 0,
-        fadeOutMs: 0,
-        durationMs,
-      }
-
-      setStitchPlanClips((prev: StitchPlanClip[]) => {
-        const next = [...prev, newClip]
-        // Update padding array length
-        const needed = Math.max(0, next.length - 1)
-        const current = useAppStore.getState().ovStitchPlanPaddingMs || []
-        for (let i = current.length; i < needed; i++) {
-          useAppStore.getState().setOvStitchPlanPaddingAt(i, 0)
-        }
-        return next
-      })
+      await insertSegmentIntoStitchTimeline(seg, setError)
     },
-    [
-      setError,
-      setStitchPlanClips,
-    ],
+    [setError],
+  )
+
+  const insertVoiceToTimeline = useCallback(
+    async (voice: VoiceMeta) => {
+      await insertVoiceIntoStitchTimeline(voice, setError)
+    },
+    [setError],
   )
 
   const toggleLibrarySelection = useCallback(
@@ -2885,6 +2830,8 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
             onClose={() => setStitchEditorOpen(false)}
             library={library}
             onInsertFromLibrary={insertFromLibraryToTimeline}
+            voiceLibrary={voices}
+            onInsertVoiceFromLibrary={insertVoiceToTimeline}
             onRender={async (plan: StitchPlanPayload) => {
               try {
                 setIsStitching(true)
