@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { AudioWaveform, Loader2, Mic2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { AudioWaveform, Layers, Loader2, Mic2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 import {
   deleteOmniVoiceSegment,
   deleteVoice,
@@ -14,7 +14,33 @@ import {
 import { hasChipSelections, type ChipSelections } from '@/lib/voiceDesignChips'
 import { AudioPlayer } from '@/components/AudioPlayer'
 import { Button } from '@/components/ui/button'
-import { useAppStore } from '@/store'
+import { useAppStore, type StitchPlanClip } from '@/store'
+
+// Shape persisted by /omnivoice/save into voice.selections -- see app.py's omnivoice_save
+// handler. stitch_plan is the raw (snake_case) editor payload, kept verbatim so a voice
+// assembled in Stitch Studio can later be reopened there instead of only existing as a
+// flattened audio blob (candidate_id-only clips are the exception: those reference the
+// ephemeral in-memory audition cache and can't be recovered once it's evicted/restarted).
+interface OmniVoiceSelections {
+  engine?: string
+  stitch_plan?: {
+    clips?: {
+      segment_id?: string
+      candidate_id?: string
+      voice_id?: string
+      trim_start_ms?: number
+      trim_end_ms?: number
+      fade_in_ms?: number
+      fade_out_ms?: number
+    }[]
+    padding_ms?: number[]
+    crossfade_ms?: number
+    segment_target_dbfs?: number
+    final_target_dbfs?: number
+    final_ceiling_db?: number
+    compress?: { threshold_db: number; ratio: number } | null
+  } | null
+}
 
 function toBase64FromUrl(url: string): Promise<string> {
   return fetch(url)
@@ -115,6 +141,7 @@ function VoiceCard({
   busy,
   onUse,
   onDesignFrom,
+  onReopenInStitchStudio,
   onDelete,
   onSaveSampleText,
 }: {
@@ -122,6 +149,7 @@ function VoiceCard({
   busy: boolean
   onUse: () => void
   onDesignFrom: (() => void) | null
+  onReopenInStitchStudio: (() => void) | null
   onDelete: () => void
   onSaveSampleText: (text: string) => Promise<void>
 }) {
@@ -218,6 +246,18 @@ function VoiceCard({
             <Sparkles className="size-4" />
           </Button>
         )}
+        {onReopenInStitchStudio && (
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label="Reopen in Stitch Studio"
+            title="Reopen the clips this voice was assembled from in Stitch Studio"
+            disabled={busy}
+            onClick={onReopenInStitchStudio}
+          >
+            <Layers className="size-4" />
+          </Button>
+        )}
         <Button
           size="sm"
           variant="outline"
@@ -261,6 +301,8 @@ export function VoiceLibraryPage() {
   const setDesignEngine = useAppStore((s) => s.setDesignEngine)
   const setOvStitchEditorOpen = useAppStore((s) => s.setOvStitchEditorOpen)
   const setOvStitchPlanClips = useAppStore((s) => s.setOvStitchPlanClips)
+  const setOvStitchPlanPaddingMs = useAppStore((s) => s.setOvStitchPlanPaddingMs)
+  const setOvStitchPlanDsp = useAppStore((s) => s.setOvStitchPlanDsp)
 
   function refresh() {
     return Promise.all([
@@ -347,6 +389,103 @@ export function VoiceLibraryPage() {
       })
       setDesignEngine('qwen')
       setPage('voice-design')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusyVoiceId(null)
+    }
+  }
+
+  // Rebuilds a Stitch Studio timeline from a voice's saved stitch_plan (its actual assembly
+  // origin -- segment/voice refs, trims, fades, padding, DSP) so it can be re-arranged and
+  // re-saved, instead of only ever existing as a flattened audio blob. Re-saving always forks
+  // a new voice (no in-place audio replace yet); clips that only carried an ephemeral
+  // candidate_id (never locked into the segment library) can't be recovered and are skipped.
+  async function reopenInStitchStudio(voice: VoiceMeta) {
+    setBusyVoiceId(voice.voice_id)
+    setError(null)
+    try {
+      const sel = (voice.selections as OmniVoiceSelections | null | undefined) ?? null
+      const plan = sel?.stitch_plan
+      const planClips = plan?.clips ?? []
+
+      const rebuilt: StitchPlanClip[] = []
+      let skipped = 0
+      for (const [i, c] of planClips.entries()) {
+        if (c.segment_id) {
+          const seg = segments.find((s) => s.segment_id === c.segment_id)
+          if (!seg) {
+            skipped++
+            continue
+          }
+          const b64 = await toBase64FromUrl(
+            `/omnivoice/segments/${encodeURIComponent(c.segment_id)}/audio`,
+          )
+          rebuilt.push({
+            clipId: `clip_reopen_${Date.now()}_${i}`,
+            ref: { segmentId: c.segment_id },
+            text: seg.text,
+            sourceAudioBase64: b64,
+            sampleRate: seg.sample_rate ?? 24000,
+            durationMs:
+              typeof seg.duration_sec === 'number' && seg.duration_sec > 0
+                ? Math.round(seg.duration_sec * 1000)
+                : 0,
+            trimStartMs: c.trim_start_ms ?? 0,
+            trimEndMs: c.trim_end_ms ?? 0,
+            fadeInMs: c.fade_in_ms ?? 0,
+            fadeOutMs: c.fade_out_ms ?? 0,
+          })
+        } else if (c.voice_id) {
+          const full = await getVoice(c.voice_id)
+          if (!full.audio_base64) {
+            skipped++
+            continue
+          }
+          rebuilt.push({
+            clipId: `clip_reopen_${Date.now()}_${i}`,
+            ref: { voiceId: c.voice_id },
+            text: full.sample_text,
+            sourceAudioBase64: full.audio_base64,
+            sampleRate: 24000,
+            durationMs: 0,
+            trimStartMs: c.trim_start_ms ?? 0,
+            trimEndMs: c.trim_end_ms ?? 0,
+            fadeInMs: c.fade_in_ms ?? 0,
+            fadeOutMs: c.fade_out_ms ?? 0,
+          })
+        } else {
+          skipped++
+        }
+      }
+
+      if (rebuilt.length === 0) {
+        setError(
+          "This voice's original clips are no longer available (only ephemeral audition candidates were used, not saved segments) — it can't be reopened for editing.",
+        )
+        return
+      }
+
+      setOvStitchPlanClips(rebuilt)
+      setOvStitchPlanPaddingMs(plan?.padding_ms ?? new Array(Math.max(0, rebuilt.length - 1)).fill(0))
+      setOvStitchPlanDsp({
+        crossfadeMs: plan?.crossfade_ms,
+        segmentTargetDbfs: plan?.segment_target_dbfs,
+        finalTargetDbfs: plan?.final_target_dbfs,
+        finalCeilingDb: plan?.final_ceiling_db,
+        compressEnabled: plan?.compress != null,
+        compressThresholdDb: plan?.compress?.threshold_db,
+        compressRatio: plan?.compress?.ratio,
+      })
+      setDesignEngine('omnivoice')
+      setPage('voice-design')
+      setOvStitchEditorOpen(true)
+
+      if (skipped > 0) {
+        setError(
+          `${skipped} clip(s) from the original assembly couldn't be recovered (ephemeral audition candidates) and were skipped.`,
+        )
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -447,6 +586,12 @@ export function VoiceLibraryPage() {
                     }}
                     onDesignFrom={
                       hasChipSelections(voice.selections) ? () => designFromVoice(voice.voice_id) : null
+                    }
+                    onReopenInStitchStudio={
+                      (voice.selections as OmniVoiceSelections | null | undefined)?.stitch_plan?.clips
+                        ?.length
+                        ? () => reopenInStitchStudio(voice)
+                        : null
                     }
                     onDelete={() => remove(voice.voice_id)}
                     onSaveSampleText={(text) => saveSampleText(voice.voice_id, text)}
