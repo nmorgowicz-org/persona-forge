@@ -480,6 +480,21 @@ export async function deleteOmniVoiceSegment(segmentId: string): Promise<void> {
   if (!res.ok) throw new Error(await readError(res))
 }
 
+// listOmniVoiceSegments() intentionally omits audio (the list endpoint drops wav bytes for
+// payload size), so anything that needs actual samples client-side — the stitch editor's
+// waveform/duration decode, "insert from library" — has to fetch it separately per segment.
+export async function getSegmentAudioBase64(segmentId: string): Promise<string> {
+  const res = await fetch(`/omnivoice/segments/${encodeURIComponent(segmentId)}/audio`)
+  if (!res.ok) throw new Error(await readError(res))
+  const buf = await res.arrayBuffer()
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i])
+  }
+  return btoa(binary)
+}
+
 export interface RuntimeConfigState {
   reconfig_in_progress: boolean
   live: {

@@ -10,6 +10,7 @@ import {
   auditionOmniVoiceStreaming,
   deleteOmniVoiceSegment,
   getOmniVoiceAuditionProgress,
+  getSegmentAudioBase64,
   listOmniVoiceSegments,
   lockInOmniVoiceSegment,
   renderStitchPlan,
@@ -1576,11 +1577,15 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
       const candidate = row.candidates[row.selectedTakeIndex]
       if (!candidate || !candidate.candidate_id) continue
 
-      const b64 = candidate.audio_base64
+      let b64 = candidate.audio_base64
       if (!b64) {
-        setError('Missing audio for a segment')
-        ctx.close()
-        return
+        try {
+          b64 = await getSegmentAudioBase64(row.segmentId)
+        } catch {
+          setError('Missing audio for a segment')
+          await ctx.close()
+          return
+        }
       }
 
       const byteStr = atob(b64)
@@ -1642,9 +1647,14 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
 
   const insertFromLibraryToTimeline = useCallback(
     async (seg: SegmentMeta) => {
-      if (!seg.audio_base64) {
-        setError('No audio available for this segment')
-        return
+      let audioBase64 = seg.audio_base64
+      if (!audioBase64) {
+        try {
+          audioBase64 = await getSegmentAudioBase64(seg.segment_id)
+        } catch {
+          setError('No audio available for this segment')
+          return
+        }
       }
 
       const ctx = (() => {
@@ -1659,7 +1669,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         return
       }
 
-      const byteStr = atob(seg.audio_base64)
+      const byteStr = atob(audioBase64)
       const bytes = new Uint8Array(byteStr.length)
       for (let i = 0; i < byteStr.length; i++) {
         bytes[i] = byteStr.charCodeAt(i)
@@ -1681,7 +1691,7 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
         clipId: seg.segment_id + '-insert-' + Date.now(),
         ref: { segmentId: seg.segment_id },
         text: seg.text,
-        sourceAudioBase64: seg.audio_base64,
+        sourceAudioBase64: audioBase64,
         sampleRate: seg.sample_rate,
         trimStartMs: 0,
         trimEndMs: 0,
