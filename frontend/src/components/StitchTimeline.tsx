@@ -240,7 +240,7 @@ function GapControl({
         type="button"
         onClick={() => onSetPadding(gapIndex, 200)}
         title="Add a gap between these clips"
-        className="mt-3 flex h-24 w-6 shrink-0 items-center justify-center rounded border border-dashed border-border/40 text-sm text-muted-foreground/50 hover:border-cyan-500/50 hover:text-cyan-400"
+        className="mt-3 flex h-24 w-8 shrink-0 items-center justify-center rounded border border-dashed border-border/40 text-sm text-muted-foreground/50 hover:border-cyan-500/50 hover:text-cyan-400"
       >
         +
       </button>
@@ -248,7 +248,7 @@ function GapControl({
   }
   return (
     <div
-      className="mx-1.5 mt-3 flex h-24 shrink-0 flex-col items-center justify-center gap-1.5 rounded border border-dashed border-cyan-500/40 bg-cyan-500/5 px-1.5"
+      className="mt-3 flex h-24 shrink-0 flex-col items-center justify-center gap-1.5 rounded border border-dashed border-cyan-500/40 bg-cyan-500/5 px-1.5"
       style={{ flex: `${Math.max(1, paddingMs)} 0 auto`, minWidth: 56 }}
       title={`${paddingMs}ms gap`}
     >
@@ -607,7 +607,7 @@ export const StitchTimeline = memo(function StitchTimeline({
   }
 
   return (
-    <div className="relative flex flex-col gap-2">
+    <div className="relative flex min-w-0 flex-col gap-2">
       {/* Library insert bar */}
       {(library.length > 0 || hasVoiceLibrary) && (
         <div className="flex items-center justify-between gap-2">
@@ -664,13 +664,13 @@ export const StitchTimeline = memo(function StitchTimeline({
           className="mt-3 flex flex-1 items-start gap-0"
         >
           {clips.map((clip, i) => (
-            <div key={clip.clipId} className="flex items-start">
+            <div key={clip.clipId} className="flex items-start gap-3">
               {i > 0 && (
                 <GapControl gapIndex={i - 1} paddingMs={paddingMs[i - 1] || 0} onSetPadding={setPadding} />
               )}
               <Reorder.Item
                 value={clip}
-                className={cn('group relative flex flex-col', i > 0 && 'ml-3')}
+                className="group relative flex flex-col"
                 style={{ flex: `${Math.max(300, clipEffectiveDurationMs(clip))} 0 auto`, minWidth: 170 }}
               >
                 {/* Keyboard-accessible reorder buttons */}
@@ -1023,7 +1023,7 @@ export function StitchEditorPanel(props: StitchEditorBodyProps & { onClose: () =
 // page, which is the editor's home rather than something popping over another workflow.
 export function StitchEditorInline(props: Omit<StitchEditorBodyProps, 'onClose'>) {
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-border bg-background/50 px-6 py-5">
+    <div className="flex min-w-0 flex-col gap-4 rounded-2xl border border-border bg-background/50 px-6 py-5">
       <StitchEditorBody {...props} />
     </div>
   )

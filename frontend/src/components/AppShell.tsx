@@ -264,8 +264,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
         <SwapBanner />
-        <div className="min-w-0 flex-1 overflow-y-auto">
-          <div className="w-full px-6 py-8">{children}</div>
+        <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+          <div className="w-full min-w-0 px-6 py-8">{children}</div>
         </div>
       </SidebarInset>
       <ActivityStatusBar />

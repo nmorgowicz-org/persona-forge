@@ -93,7 +93,7 @@ export function StitchStudioPage() {
   )
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <div>
         <h1 className="text-lg font-semibold text-foreground">Stitch Studio</h1>
         <p className="text-sm text-muted-foreground">
