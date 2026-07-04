@@ -464,7 +464,10 @@ function LibraryPickerButton<T>({
                           )}
                         </button>
                       )}
-                      <span className="min-w-0 flex-1">
+                      <span
+                        className="min-w-0 flex-1"
+                        title={meta ? `${getLabel(it)}\n${meta}` : getLabel(it)}
+                      >
                         <span className="block truncate">{getLabel(it)}</span>
                         {meta && (
                           <span className="block truncate text-[10px] text-muted-foreground">{meta}</span>
