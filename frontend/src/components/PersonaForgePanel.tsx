@@ -2501,11 +2501,11 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                       onSegmentDurationChange
                     }
                     onSaveToLibrary={(meta) => {
-                      setLibrary((prev) => {
-                        if (prev.some((m) => m.segment_id === meta.segment_id))
-                          return prev
-                        return [meta, ...prev]
-                      })
+                      setLibrary(
+                        library.some((m) => m.segment_id === meta.segment_id)
+                          ? library
+                          : [meta, ...library]
+                      )
                     }}
                     isMissingTake={isMissing}
                     instruct={instruct}

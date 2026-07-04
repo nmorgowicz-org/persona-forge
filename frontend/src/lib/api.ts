@@ -400,6 +400,19 @@ export interface SegmentMeta {
   sample_rate: number
   created_at: number
   audio_base64?: string
+  duration_sec?: number
+  language?: string | null
+  seed?: number | null
+  num_step?: number | null
+  speed?: number | null
+  guidance_scale?: number | null
+  diverse_candidates?: boolean | null
+  postprocess_output?: string | null
+  duration_target?: number | null
+  candidate_id?: string | null
+  job_id?: string | null
+  whisper_transcript?: string | null
+  match_score?: number | null
 }
 
 export async function lockInOmniVoiceSegment(params: {
