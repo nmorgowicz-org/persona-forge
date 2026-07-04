@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion, Reorder } from 'framer-motion'
-import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play } from 'lucide-react'
+import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play, Pause } from 'lucide-react'
 import { useAppStore, type StitchPlanClip } from '@/store'
 import { base64ToBlob, cn } from '@/lib/utils'
 import { renderStitchPlan, type StitchPlanPayload, type SegmentMeta } from '@/lib/api'
@@ -25,21 +25,45 @@ function barColor(peak: number) {
 
 function StitchTimelineClip({
   clip,
-  gapIndex,
   onRemove,
   onUpdate,
-  onSetPadding,
   isReordering,
 }: {
   clip: StitchPlanClip
-  gapIndex: number | null
   onRemove: (clipId: string) => void
   onUpdate: (clipId: string, patch: Partial<StitchPlanClip>) => void
-  onSetPadding: (gapIndex: number, ms: number) => void
   isReordering?: boolean
 }) {
   const [peaks, setPeaks] = useState<number[] | null>(null)
   const [durMs, setDurMs] = useState<number | null>(null)
+  const [clipPlaying, setClipPlaying] = useState(false)
+  const clipAudioRef = useRef<HTMLAudioElement | null>(null)
+  const clipAudioUrlRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    return () => {
+      clipAudioRef.current?.pause()
+      if (clipAudioUrlRef.current) URL.revokeObjectURL(clipAudioUrlRef.current)
+    }
+  }, [])
+
+  const toggleClipPlay = () => {
+    if (!clip.sourceAudioBase64) return
+    if (!clipAudioRef.current) {
+      const url = URL.createObjectURL(base64ToBlob(clip.sourceAudioBase64))
+      clipAudioUrlRef.current = url
+      const audio = new Audio(url)
+      audio.addEventListener('ended', () => setClipPlaying(false))
+      clipAudioRef.current = audio
+    }
+    if (clipPlaying) {
+      clipAudioRef.current.pause()
+      setClipPlaying(false)
+    } else {
+      void clipAudioRef.current.play()
+      setClipPlaying(true)
+    }
+  }
 
   useEffect(() => {
     let dead = false
@@ -135,6 +159,15 @@ function StitchTimelineClip({
           )}
           <button
             type="button"
+            className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+            onClick={toggleClipPlay}
+            disabled={!clip.sourceAudioBase64}
+            title="Listen to just this segment"
+          >
+            {clipPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+          </button>
+          <button
+            type="button"
             className="rounded p-0.5 text-muted-foreground hover:text-destructive"
             onClick={() => onRemove(clip.clipId)}
             title="Remove clip"
@@ -177,27 +210,42 @@ function StitchTimelineClip({
         <MsStepper label="Fade in" value={clip.fadeInMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeInMs: clampFade(v) })} />
         <MsStepper label="Fade out" value={clip.fadeOutMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeOutMs: clampFade(v) })} />
       </div>
-
-      {gapIndex != null && (
-        <GapControl gapIndex={gapIndex} onSetPadding={onSetPadding} />
-      )}
     </div>
   )
 }
 
+// Independent, always-visible control for the gap between two adjacent clips —
+// rendered between clips in the timeline (not nested inside either clip's card),
+// so it reads as belonging to "the space between" rather than to one clip.
 function GapControl({
   gapIndex,
+  paddingMs,
   onSetPadding,
 }: {
   gapIndex: number
+  paddingMs: number
   onSetPadding: (gapIndex: number, ms: number) => void
 }) {
-  const padding = useAppStore((s) => s.ovStitchPlanPaddingMs)
-  const value = padding[gapIndex] ?? 0
+  if (paddingMs <= 0) {
+    return (
+      <button
+        type="button"
+        onClick={() => onSetPadding(gapIndex, 200)}
+        title="Add a gap between these clips"
+        className="mt-3 flex h-24 w-6 shrink-0 items-center justify-center rounded border border-dashed border-border/40 text-sm text-muted-foreground/50 hover:border-cyan-500/50 hover:text-cyan-400"
+      >
+        +
+      </button>
+    )
+  }
   return (
-    <div className="mx-1.5 flex items-center gap-1.5 rounded border border-dashed border-border/60 px-1.5 py-1 bg-black/10">
+    <div
+      className="mx-1.5 mt-3 flex h-24 shrink-0 flex-col items-center justify-center gap-1.5 rounded border border-dashed border-cyan-500/40 bg-cyan-500/5 px-1.5"
+      style={{ flex: `${Math.max(1, paddingMs)} 0 auto`, minWidth: 56 }}
+      title={`${paddingMs}ms gap`}
+    >
       <span className="text-[10px] uppercase text-muted-foreground">gap</span>
-      <MsStepper label="gap" value={value} min={0} max={3000} step={10} onChange={(v) => onSetPadding(gapIndex, v)} compact />
+      <MsStepper label="gap" value={paddingMs} min={0} max={3000} step={10} onChange={(v) => onSetPadding(gapIndex, v)} compact />
     </div>
   )
 }
@@ -382,14 +430,8 @@ export const StitchTimeline = memo(function StitchTimeline({
         >
           {clips.map((clip, i) => (
             <div key={clip.clipId} className="flex items-start">
-              {i > 0 && (paddingMs[i - 1] || 0) > 0 && (
-                <div
-                  className="mx-1.5 mt-3 flex h-24 shrink-0 items-center justify-center rounded border border-dashed border-border/50 text-[10px] text-muted-foreground/70"
-                  style={{ flex: `${Math.max(1, paddingMs[i - 1])} 0 auto`, minWidth: 28 }}
-                  title={`${paddingMs[i - 1]}ms gap`}
-                >
-                  {paddingMs[i - 1]}ms
-                </div>
+              {i > 0 && (
+                <GapControl gapIndex={i - 1} paddingMs={paddingMs[i - 1] || 0} onSetPadding={setPadding} />
               )}
               <Reorder.Item
                 value={clip}
@@ -407,10 +449,8 @@ export const StitchTimeline = memo(function StitchTimeline({
                 </div>
                 <StitchTimelineClip
                   clip={clip}
-                  gapIndex={i < clips.length - 1 ? i : null}
                   onRemove={removeClip}
                   onUpdate={updateClip}
-                  onSetPadding={setPadding}
                   isReordering
                 />
               </Reorder.Item>
@@ -526,6 +566,11 @@ export function StitchEditorPanel({
   const [staleFlags, setStaleFlags] = useState(true)
   const debounceRef = useRef<number | null>(null)
   const lastHashRef = useRef('')
+  // Guards against out-of-order network responses: an older in-flight render
+  // (e.g. from before a clip was removed) can resolve after a newer one and
+  // silently overwrite the correct preview with stale audio. Bumped on every
+  // new render attempt; a response is only applied if it's still current.
+  const renderSeqRef = useRef(0)
 
   const planPayload = useMemo<StitchPlanPayload>(() => {
     return {
@@ -578,9 +623,11 @@ export function StitchEditorPanel({
     if (debounceRef.current != null) clearTimeout(debounceRef.current)
     debounceRef.current = window.setTimeout(async () => {
       debounceRef.current = null
+      const seq = ++renderSeqRef.current
       try {
         setIsRendering(true)
         const blob = await renderStitchPlan(planPayload)
+        if (seq !== renderSeqRef.current) return // superseded by a newer edit
         if (previewUrl) URL.revokeObjectURL(previewUrl)
         const url = URL.createObjectURL(blob)
         setPreviewUrl(url)
@@ -589,7 +636,7 @@ export function StitchEditorPanel({
       } catch {
         /* keep last-good preview */
       } finally {
-        setIsRendering(false)
+        if (seq === renderSeqRef.current) setIsRendering(false)
       }
     }, 500)
 
@@ -602,11 +649,21 @@ export function StitchEditorPanel({
   }, [hash, planPayload, clips.length, setPreviewUrl, setPreviewBlob, setIsRendering, previewUrl])
 
   const handleRender = useCallback(async () => {
+    renderSeqRef.current++ // invalidate any in-flight auto-preview response
+    if (debounceRef.current != null) {
+      clearTimeout(debounceRef.current)
+      debounceRef.current = null
+    }
     setStaleFlags(false)
     await onRender(planPayload)
   }, [planPayload, onRender])
 
   const handleSave = useCallback(async () => {
+    renderSeqRef.current++
+    if (debounceRef.current != null) {
+      clearTimeout(debounceRef.current)
+      debounceRef.current = null
+    }
     setStaleFlags(false)
     await onSave(planPayload)
   }, [planPayload, onSave])

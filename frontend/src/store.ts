@@ -515,11 +515,19 @@ export const useAppStore = create<StoreState>((set) => ({
       ),
     })),
   removeOvStitchPlanClip: (clipId) =>
-    set((s) => ({
-      ovStitchPlanClips: s.ovStitchPlanClips.filter(
-        (c) => c.clipId !== clipId,
-      ),
-    })),
+    set((s) => {
+      const idx = s.ovStitchPlanClips.findIndex((c) => c.clipId === clipId)
+      if (idx === -1) return {}
+      const clips = s.ovStitchPlanClips.filter((c) => c.clipId !== clipId)
+      // Removing a clip merges its two adjacent gaps into one — drop the gap that
+      // followed it (or, if it was last, the one that preceded it) so the padding
+      // array stays aligned to clips.length - 1; otherwise every later gap index
+      // silently points at the wrong boundary.
+      const pad = [...s.ovStitchPlanPaddingMs]
+      if (idx < pad.length) pad.splice(idx, 1)
+      else if (idx - 1 >= 0) pad.splice(idx - 1, 1)
+      return { ovStitchPlanClips: clips, ovStitchPlanPaddingMs: pad }
+    }),
   setOvStitchPlanPaddingAt: (gapIndex, ms) =>
     set((s) => {
       const pad = [...s.ovStitchPlanPaddingMs]
