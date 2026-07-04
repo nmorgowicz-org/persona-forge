@@ -48,6 +48,34 @@ export interface SegmentRackRow {
   selectedTakeIndex: number
 }
 
+// Stitch editor (PLAN_stitch_editor.md §5)
+export type ClipRef =
+  | { segmentId: string }
+  | { candidateId: string }
+
+export interface StitchPlanClip {
+  clipId: string
+  ref: ClipRef
+  text: string
+  sourceAudioBase64: string
+  sampleRate: number
+  durationMs?: number
+  trimStartMs: number
+  trimEndMs: number
+  fadeInMs: number
+  fadeOutMs: number
+}
+
+export interface StitchPlanDsp {
+  segmentTargetDbfs: number
+  finalTargetDbfs: number
+  finalCeilingDb: number
+  crossfadeMs: number
+  compressEnabled: boolean
+  compressThresholdDb: number
+  compressRatio: number
+}
+
 interface StoreState {
   // ---- Core ----
   page: Page
@@ -214,9 +242,33 @@ interface StoreState {
    setOvIsLibraryOpen: (
      v: boolean | ((p: boolean) => boolean),
    ) => void
-   setOvLibrarySelection: (
-     updater: Set<string> | ((prev: Set<string>) => Set<string>),
-   ) => void
+  setOvLibrarySelection: (
+      updater: Set<string> | ((prev: Set<string>) => Set<string>),
+    ) => void
+
+  // ---- Stitch editor (PLAN_stitch_editor.md) ----
+  ovStitchPlanClips: StitchPlanClip[]
+  ovStitchPlanPaddingMs: number[]
+  ovStitchPlanDsp: StitchPlanDsp
+  ovStitchEditorOpen: boolean
+  ovStitchPreviewUrl: string | null
+  ovStitchPreviewBlob: Blob | null
+  ovIsRenderingPreview: boolean
+
+  setOvStitchPlanClips: (
+    updater:
+      | StitchPlanClip[]
+      | ((prev: StitchPlanClip[]) => StitchPlanClip[]),
+  ) => void
+  reorderOvStitchPlanClip: (fromIndex: number, toIndex: number) => void
+  updateOvStitchPlanClip: (clipId: string, patch: Partial<StitchPlanClip>) => void
+  removeOvStitchPlanClip: (clipId: string) => void
+  setOvStitchPlanPaddingAt: (gapIndex: number, ms: number) => void
+  setOvStitchPlanDsp: (patch: Partial<StitchPlanDsp>) => void
+  setOvStitchEditorOpen: (v: boolean) => void
+  setOvStitchPreviewUrl: (v: string | null) => void
+  setOvStitchPreviewBlob: (v: Blob | null) => void
+  setOvIsRenderingPreview: (v: boolean) => void
 }
 
 const initialTheme = loadStoredTheme()
@@ -351,8 +403,25 @@ export const useAppStore = create<StoreState>((set) => ({
    ovAutoplayTakes: true,
    ovLibrary: [],
   ovLibraryFilter: '',
-  ovIsLibraryOpen: false,
-  ovLibrarySelection: new Set(),
+    ovIsLibraryOpen: false,
+    ovLibrarySelection: new Set(),
+
+    // Stitch editor
+    ovStitchPlanClips: [],
+    ovStitchPlanPaddingMs: [],
+    ovStitchPlanDsp: {
+      segmentTargetDbfs: -20,
+      finalTargetDbfs: -18,
+      finalCeilingDb: -1,
+      crossfadeMs: 100,
+      compressEnabled: true,
+      compressThresholdDb: -24,
+      compressRatio: 2.5,
+    },
+    ovStitchEditorOpen: false,
+    ovStitchPreviewUrl: null,
+    ovStitchPreviewBlob: null,
+    ovIsRenderingPreview: false,
 
   setOvSelections: (updater) =>
     set((s) => ({
@@ -432,13 +501,55 @@ export const useAppStore = create<StoreState>((set) => ({
       ovIsLibraryOpen:
         typeof v === 'function' ? v(s.ovIsLibraryOpen) : v,
     })),
-  setOvLibrarySelection: (updater) =>
+    setOvLibrarySelection: (updater) =>
+      set((s) => {
+        const prev = s.ovLibrarySelection
+        const next =
+          typeof updater === 'function' ? updater(prev) : updater
+        return { ovLibrarySelection: next }
+      }),
+
+  // Stitch editor actions
+  setOvStitchPlanClips: (updater) =>
+    set((s) => ({
+      ovStitchPlanClips:
+        typeof updater === 'function'
+          ? updater(s.ovStitchPlanClips)
+          : updater,
+    })),
+  reorderOvStitchPlanClip: (fromIndex, toIndex) =>
     set((s) => {
-      const prev = s.ovLibrarySelection
-      const next =
-        typeof updater === 'function' ? updater(prev) : updater
-      return { ovLibrarySelection: next }
+      const clips = [...s.ovStitchPlanClips]
+      const [moved] = clips.splice(fromIndex, 1)
+      clips.splice(toIndex, 0, moved)
+      return { ovStitchPlanClips: clips }
     }),
+  updateOvStitchPlanClip: (clipId, patch) =>
+    set((s) => ({
+      ovStitchPlanClips: s.ovStitchPlanClips.map((c) =>
+        c.clipId === clipId ? { ...c, ...patch } : c,
+      ),
+    })),
+  removeOvStitchPlanClip: (clipId) =>
+    set((s) => ({
+      ovStitchPlanClips: s.ovStitchPlanClips.filter(
+        (c) => c.clipId !== clipId,
+      ),
+    })),
+  setOvStitchPlanPaddingAt: (gapIndex, ms) =>
+    set((s) => {
+      const pad = [...s.ovStitchPlanPaddingMs]
+      pad[gapIndex] = ms
+      return { ovStitchPlanPaddingMs: pad }
+    }),
+  setOvStitchPlanDsp: (patch) =>
+    set((s) => ({
+      ovStitchPlanDsp: { ...s.ovStitchPlanDsp, ...patch },
+    })),
+  setOvStitchEditorOpen: (v) => set({ ovStitchEditorOpen: v }),
+  setOvStitchPreviewUrl: (v) => set({ ovStitchPreviewUrl: v }),
+  setOvStitchPreviewBlob: (v) => set({ ovStitchPreviewBlob: v }),
+  setOvIsRenderingPreview: (v) => set({ ovIsRenderingPreview: v }),
 }))
 
 // ---- Store-level polling: survives unmounts ----

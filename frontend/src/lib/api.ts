@@ -328,6 +328,33 @@ export async function stitchOmniVoice(params: OmniVoiceStitchParams | string[]):
   return res.blob()
 }
 
+export interface StitchPlanPayload {
+  clips: {
+    segmentId?: string
+    candidateId?: string
+    trimStartMs: number
+    trimEndMs: number
+    fadeInMs: number
+    fadeOutMs: number
+  }[]
+  paddingMs: number[]
+  crossfadeMs: number
+  segmentTargetDbfs: number
+  finalTargetDbfs: number
+  finalCeilingDb: number
+  compress: { thresholdDb: number; ratio: number; attackMs: number; releaseMs: number } | null
+}
+
+export async function renderStitchPlan(plan: StitchPlanPayload): Promise<Blob> {
+  const res = await fetch('/omnivoice/stitch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stitch_plan: plan }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.blob()
+}
+
 export interface OmniVoiceSaveParams {
   selections?: string[]
   segmentIds?: string[]
@@ -335,6 +362,8 @@ export interface OmniVoiceSaveParams {
   segments: string[]
   language?: string
   accentId?: string | null
+  /** Optional stitch_plan for full control (PLAN_stitch_editor.md). */
+  stitchPlan?: StitchPlanPayload | null
 }
 
 export interface OmniVoiceSaveResult {
@@ -354,6 +383,7 @@ export async function saveOmniVoice(params: OmniVoiceSaveParams): Promise<OmniVo
       segments: params.segments,
       language: params.language ?? 'english',
       accent_id: params.accentId ?? undefined,
+      stitch_plan: params.stitchPlan ?? undefined,
     }),
   })
   if (!res.ok) throw new Error(await readError(res))

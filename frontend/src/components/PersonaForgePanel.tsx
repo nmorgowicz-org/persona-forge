@@ -5,14 +5,16 @@ import {
   useState,
 } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { FlaskConical } from 'lucide-react'
+import { FlaskConical, Scissors } from 'lucide-react'
 import {
   auditionOmniVoiceStreaming,
   deleteOmniVoiceSegment,
   getOmniVoiceAuditionProgress,
   listOmniVoiceSegments,
+  renderStitchPlan,
   saveOmniVoice,
   stitchOmniVoice,
+  type StitchPlanPayload,
 } from '@/lib/api'
 import {
   ACCENT_BANK,
@@ -32,9 +34,10 @@ import { ChipButton } from './Chip'
 import { AudioPlayer } from './AudioPlayer'
 import { Button } from '@/components/ui/button'
 import { base64ToBlob, cn } from '@/lib/utils'
-import { useAppStore } from '@/store'
+import { useAppStore, type StitchPlanClip } from '@/store'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import * as Tooltip from '@/components/ui/tooltip'
+import { StitchEditorPanel } from '@/components/StitchTimeline'
 
 const DEFAULT_ACCENT = ACCENT_BANK[0] ?? null
 
@@ -623,6 +626,18 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
   )
   const setLibrarySelection = useAppStore(
     (s) => s.setOvLibrarySelection,
+  )
+  const stitchEditorOpen = useAppStore(
+    (s) => s.ovStitchEditorOpen,
+  )
+  const setStitchPlanClips = useAppStore(
+    (s) => s.setOvStitchPlanClips,
+  )
+  const setStitchPlanPaddingAt = useAppStore(
+    (s) => s.setOvStitchPlanPaddingAt,
+  )
+  const setStitchEditorOpen = useAppStore(
+    (s) => s.setOvStitchEditorOpen,
   )
 
   // -- Init --
@@ -1352,6 +1367,89 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
     setIsSaving,
     setError,
     setSavedVoiceId,
+  ])
+
+  const openStitchEditor = useCallback(async () => {
+    if (segmentRack.length === 0) return
+
+    const ctx = (() => {
+      if (typeof window !== 'undefined' && window.AudioContext) {
+        return new (window.AudioContext)()
+      }
+      return null
+    })()
+
+    if (!ctx) {
+      setError('AudioContext not available')
+      return
+    }
+
+    const clips: (StitchPlanClip & { durationMs?: number })[] = []
+
+    for (const row of segmentRack) {
+      const candidate = row.candidates[row.selectedTakeIndex]
+      if (!candidate || !candidate.candidate_id) {
+        setError('Select a take for each segment first.')
+        ctx.close()
+        return
+      }
+
+      const b64 = candidate.audio_base64
+      if (!b64) {
+        setError('Missing audio for a segment')
+        ctx.close()
+        return
+      }
+
+      const byteStr = atob(b64)
+      const bytes = new Uint8Array(byteStr.length)
+      for (let i = 0; i < byteStr.length; i++) {
+        bytes[i] = byteStr.charCodeAt(i)
+      }
+
+      let durationMs = 0
+
+      try {
+        const arrayBuffer = bytes.buffer
+        const audioBuffer = await ctx.decodeAudioData(
+          arrayBuffer.slice(0) as ArrayBuffer,
+        )
+        durationMs = Math.round(audioBuffer.duration * 1000)
+      } catch {
+        durationMs = 0
+      }
+
+      clips.push({
+        clipId: row.segmentId + '-clip',
+        ref: { candidateId: candidate.candidate_id },
+        text: row.text,
+        sourceAudioBase64: b64,
+        sampleRate: candidate.sample_rate,
+        trimStartMs: 0,
+        trimEndMs: 0,
+        fadeInMs: 0,
+        fadeOutMs: 0,
+        durationMs,
+      })
+    }
+
+    await ctx.close()
+
+    if (clips.length === 0) return
+
+    const paddingLen = Math.max(0, clips.length - 1)
+    for (let i = 0; i < paddingLen; i++) {
+      setStitchPlanPaddingAt(i, 0)
+    }
+
+    setStitchPlanClips(clips as StitchPlanClip[])
+    setStitchEditorOpen(true)
+  }, [
+    segmentRack,
+    setError,
+    setStitchPlanClips,
+    setStitchPlanPaddingAt,
+    setStitchEditorOpen,
   ])
 
   const removeLockedSegment = useCallback(
@@ -2290,7 +2388,18 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
                   ? 'Stitching…'
                   : 'Stitch all'}
               </Button>
-           </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={openStitchEditor}
+                disabled={segmentRack.length === 0}
+                className="shrink-0 inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px]"
+              >
+                <Scissors className="h-3 w-3" />
+                Edit in timeline
+              </Button>
+            </div>
          </div>
        )}
 
@@ -2335,6 +2444,53 @@ export function PersonaForgePanel({ onVoiceCreated }: PersonaForgePanelProps) {
               </Button>
             )}
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Stitch editor (timeline) */}
+      <AnimatePresence>
+        {stitchEditorOpen && (
+          <StitchEditorPanel
+            onClose={() => setStitchEditorOpen(false)}
+            onRender={async (plan: StitchPlanPayload) => {
+              try {
+                setIsStitching(true)
+                const blob = await renderStitchPlan(plan)
+                if (stitchedUrl) URL.revokeObjectURL(stitchedUrl)
+                const url = URL.createObjectURL(blob)
+                setStitchedUrl(url)
+                setStitchedBlob(blob)
+                setStitchEditorOpen(false)
+              } finally {
+                setIsStitching(false)
+              }
+            }}
+            onSave={async (plan: StitchPlanPayload) => {
+              try {
+                setIsSaving(true)
+                setError(null)
+                const segments = segmentRack.map((r) => r.text)
+                const result = await saveOmniVoice({
+                  instruct,
+                  segments,
+                  accentId:
+                    matchedAccentBankEntry?.id ?? null,
+                  stitchPlan: plan,
+                })
+                setSavedVoiceId(result.voice_id)
+                onVoiceCreated?.(result.voice_id)
+                setStitchEditorOpen(false)
+              } catch (err) {
+                setError(
+                  err instanceof Error
+                    ? err.message
+                    : String(err),
+                )
+              } finally {
+                setIsSaving(false)
+              }
+            }}
+          />
         )}
       </AnimatePresence>
 

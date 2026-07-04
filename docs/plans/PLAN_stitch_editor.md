@@ -3,7 +3,7 @@
 Status (2026-07-04): Part A ("Persona Forge polish" items, see bottom
 section) is **done and deployed to dockermisc1**. Part B (the stitch editor
 itself, backend + frontend, steps 1-7 below) is in progress:
-- **Steps 1-3 done** (backend only, not yet deployed):
+- **Steps 1-6 done** (backend + frontend v1-v3, not yet deployed):
   - Step 1: `audio_post.py` primitives (`trim`, `apply_fades`, `concat_with_padding`,
     extended `stitch_segments` kwargs) — unit-tested (34/34 in
     `tests/test_audio_post.py`, including an explicit
@@ -12,7 +12,15 @@ itself, backend + frontend, steps 1-7 below) is in progress:
     `_resolve_one_clip_ref`, widened `stitch_selected(plan=...)`.
   - Step 3: `/omnivoice/save` accepts `stitch_plan`, persists it into
     `voice_library` `selections["stitch_plan"]`.
-- Steps 4-7 (frontend timeline) not yet started.
+  - Step 4: Frontend v1 — store types, `StitchTimeline` component (proportional
+    layout, reorder buttons), "Edit in timeline" entry point in
+    `PersonaForgePanel`.
+  - Step 5: Frontend v2 — per-clip trim steppers, gap padding controls,
+    debounced live preview via `renderStitchPlan`.
+  - Step 6: Frontend v3 — fade-in/out per clip, DSP controls panel
+    (segment/final target, ceiling, crossfade, compression
+    threshold/ratio).
+- Step 7 (drag-and-drop reorder, insert from library) is a fast-follow, not yet started.
 Serves as both the implementation plan and the handoff doc for this feature.
 
 ## Context / motivation
