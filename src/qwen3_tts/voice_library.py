@@ -99,6 +99,24 @@ def get_voice_wav_bytes(voice_id: str) -> bytes | None:
     return wav_path.read_bytes()
 
 
+def update_voice(voice_id: str, *, sample_text: str) -> dict[str, Any] | None:
+    """Patch a saved voice's reference transcript in place (metadata only, no re-clone).
+
+    Reference text must match what's actually spoken in reference.wav for cloning quality
+    (see app.py's omnivoice_save), so users need to fix typos/spacing/accent-spelling here
+    without forking a whole new voice — unlike the chip-based "tune/tweak" flow below, which
+    always forks (PLAN_voice_design.md §8.3) because it re-generates the reference audio too.
+    """
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    meta.pop("wav_path", None)
+    meta["sample_text"] = sample_text
+    voice_dir = _voice_dir(voice_id)
+    (voice_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    return meta
+
+
 def delete_voice(voice_id: str) -> bool:
     """Remove a voice's directory. Returns False if it doesn't exist (not an error) — the
     tune/tweak workflow forks a new voice on every edit, so this exists to prune superseded

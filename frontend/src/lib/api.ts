@@ -112,6 +112,16 @@ export async function getVoice(voiceId: string): Promise<VoiceMeta> {
   return res.json()
 }
 
+export async function updateVoiceSampleText(voiceId: string, sampleText: string): Promise<VoiceMeta> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sample_text: sampleText }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 export async function deleteVoice(voiceId: string): Promise<void> {
   const res = await fetch(`/voices/${encodeURIComponent(voiceId)}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(await readError(res))

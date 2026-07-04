@@ -282,6 +282,18 @@ def voices_get(voice_id: str):
     return jsonify(response)
 
 
+@app.patch("/voices/<voice_id>")
+def voices_update(voice_id: str):
+    data = request.get_json(silent=True) or {}
+    sample_text = (data.get("sample_text") or "").strip()
+    if not sample_text:
+        return jsonify({"error": "sample_text is required"}), 400
+    meta = voice_library.update_voice(voice_id, sample_text=sample_text)
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    return jsonify(meta)
+
+
 @app.delete("/voices/<voice_id>")
 def voices_delete(voice_id: str):
     deleted = voice_library.delete_voice(voice_id)

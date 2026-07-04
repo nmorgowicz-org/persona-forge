@@ -13,6 +13,7 @@ import {
   TEXTURES,
   activeWarnings,
   composeDescription,
+  hasChipSelections as computeHasChipSelections,
   sampleTextForSelections,
   type PersonaChip,
 } from '../lib/voiceDesignChips'
@@ -87,16 +88,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
   // Voices saved outside the chip-based flow (e.g. Stitch Studio / PersonaForge) persist a
   // differently-shaped `selections` object (or none at all) -- truthy but missing
   // textures/personas arrays, which used to crash this check with a bare `.length` read.
-  const hasChipSelections = Boolean(
-    initial?.selections &&
-      Array.isArray(initial.selections.textures) &&
-      Array.isArray(initial.selections.personas) &&
-      (initial.selections.gender ||
-        initial.selections.age ||
-        initial.selections.register ||
-        initial.selections.textures.length > 0 ||
-        initial.selections.personas.length > 0),
-  )
+  const hasChipSelections = computeHasChipSelections(initial?.selections)
 
   if (initial && !initRef.done) {
     initRef.done = true

@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { AudioWaveform, Mic2, Pencil, Plus, Trash2 } from 'lucide-react'
+import { AudioWaveform, Loader2, Mic2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 import {
   deleteOmniVoiceSegment,
   deleteVoice,
   getVoice,
   listOmniVoiceSegments,
   listVoices,
+  updateVoiceSampleText,
   type SegmentMeta,
   type VoiceMeta,
 } from '@/lib/api'
-import type { ChipSelections } from '@/lib/voiceDesignChips'
+import { hasChipSelections, type ChipSelections } from '@/lib/voiceDesignChips'
 import { AudioPlayer } from '@/components/AudioPlayer'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/store'
@@ -61,11 +62,194 @@ function ClipPlayerUrl({ segmentId, className }: { segmentId: string; className?
   return <AudioPlayer src={src} blob={blob} className={className} autoPlay={false} />
 }
 
+// Auto-loads and plays a saved voice's reference audio without a "Load preview" click,
+// mirroring the saved-segment cards below (ClipPlayerUrl) which already do this.
+function VoiceAudioAutoPlayer({ voiceId }: { voiceId: string }) {
+  const [state, setState] = useState<{ url: string; blob: Blob } | 'loading' | 'error'>('loading')
+
+  useEffect(() => {
+    let cancelled = false
+    setState('loading')
+    getVoice(voiceId)
+      .then((full) => {
+        if (cancelled) return
+        if (!full.audio_base64) {
+          setState('error')
+          return
+        }
+        const bytes = Uint8Array.from(atob(full.audio_base64), (c) => c.charCodeAt(0))
+        const blob = new Blob([bytes], { type: 'audio/wav' })
+        setState({ url: URL.createObjectURL(blob), blob })
+      })
+      .catch(() => {
+        if (!cancelled) setState('error')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [voiceId])
+
+  useEffect(() => {
+    return () => {
+      if (state !== 'loading' && state !== 'error') URL.revokeObjectURL(state.url)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceId])
+
+  if (state === 'loading') {
+    return (
+      <div className="flex h-9 items-center gap-1.5 text-xs text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" />
+        Loading waveform…
+      </div>
+    )
+  }
+  if (state === 'error') {
+    return <p className="text-xs text-muted-foreground">Couldn't load audio.</p>
+  }
+  return <AudioPlayer src={state.url} blob={state.blob} />
+}
+
+function VoiceCard({
+  voice,
+  busy,
+  onUse,
+  onDesignFrom,
+  onDelete,
+  onSaveSampleText,
+}: {
+  voice: VoiceMeta
+  busy: boolean
+  onUse: () => void
+  onDesignFrom: (() => void) | null
+  onDelete: () => void
+  onSaveSampleText: (text: string) => Promise<void>
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(voice.sample_text)
+  const [saving, setSaving] = useState(false)
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus()
+  }, [editing])
+
+  const commit = async () => {
+    const trimmed = draft.trim()
+    setEditing(false)
+    if (!trimmed || trimmed === voice.sample_text) {
+      setDraft(voice.sample_text)
+      return
+    }
+    setSaving(true)
+    try {
+      await onSaveSampleText(trimmed)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <motion.div
+      data-testid="voice-card"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      whileHover={{ y: -2 }}
+      className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm transition-shadow duration-200 hover:border-border/80 hover:shadow-lg"
+    >
+      <div>
+        <p className="text-sm font-medium">{voice.voice_id}</p>
+        <p className="line-clamp-2 text-xs text-muted-foreground">{voice.description}</p>
+      </div>
+
+      <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Reference text
+        </p>
+        {editing ? (
+          <textarea
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                commit()
+              } else if (e.key === 'Escape') {
+                e.preventDefault()
+                setDraft(voice.sample_text)
+                setEditing(false)
+              }
+            }}
+            rows={2}
+            className="w-full resize-none rounded border border-cyan-500/40 bg-background px-2 py-1 text-xs text-foreground outline-none"
+          />
+        ) : (
+          <p
+            className="cursor-text text-xs text-foreground hover:text-cyan-400"
+            title="Click to edit — this is the cloning transcript, so it must match the audio"
+            onClick={() => {
+              setDraft(voice.sample_text)
+              setEditing(true)
+            }}
+          >
+            {voice.sample_text || '(no reference text — click to add)'}
+            {saving && ' (saving…)'}
+          </p>
+        )}
+      </div>
+
+      <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
+
+      <div className="flex gap-2">
+        <Button size="sm" className="flex-1" onClick={onUse}>
+          Use in Speak
+        </Button>
+        {onDesignFrom && (
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label="Design a new voice from this one"
+            title="Design a new voice from this one's chip settings"
+            disabled={busy}
+            onClick={onDesignFrom}
+          >
+            <Sparkles className="size-4" />
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          aria-label="Edit reference text"
+          title="Edit reference text"
+          disabled={busy}
+          onClick={() => {
+            setDraft(voice.sample_text)
+            setEditing(true)
+          }}
+        >
+          <Pencil className="size-4" />
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          aria-label="Delete this voice"
+          title="Delete this voice"
+          disabled={busy}
+          onClick={onDelete}
+        >
+          <Trash2 className="size-4" />
+        </Button>
+      </div>
+    </motion.div>
+  )
+}
+
 export function VoiceLibraryPage() {
   const [voices, setVoices] = useState<VoiceMeta[]>([])
   const [segments, setSegments] = useState<SegmentMeta[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [playing, setPlaying] = useState<Record<string, { url: string; blob: Blob }>>({})
   const [busyVoiceId, setBusyVoiceId] = useState<string | null>(null)
   const [busySegmentId, setBusySegmentId] = useState<string | null>(null)
 
@@ -142,20 +326,13 @@ export function VoiceLibraryPage() {
     }
   }
 
-  async function preview(voiceId: string) {
-    if (playing[voiceId]) return
-    try {
-      const full = await getVoice(voiceId)
-      if (!full.audio_base64) return
-      const bytes = Uint8Array.from(atob(full.audio_base64), (c) => c.charCodeAt(0))
-      const blob = new Blob([bytes], { type: 'audio/wav' })
-      setPlaying((prev) => ({ ...prev, [voiceId]: { url: URL.createObjectURL(blob), blob } }))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  async function edit(voiceId: string) {
+  // Only meaningful for chip-based voices: re-opens VoiceDesignPanel pre-filled with this
+  // voice's chip selections so the user can tweak and save as a NEW voice (always forks --
+  // re-generates the reference audio, unlike editing reference text below). Voices built via
+  // Stitch Studio/OmniVoice don't have chip selections, so this action isn't offered for them
+  // (setDesignEngine('qwen') here is what was missing before, which used to route stitch-plan
+  // voices into the wrong panel and crash).
+  async function designFromVoice(voiceId: string) {
     setBusyVoiceId(voiceId)
     setError(null)
     try {
@@ -168,11 +345,22 @@ export function VoiceLibraryPage() {
         seed: full.seed ?? null,
         selections: (full.selections as ChipSelections | null | undefined) ?? null,
       })
+      setDesignEngine('qwen')
       setPage('voice-design')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusyVoiceId(null)
+    }
+  }
+
+  async function saveSampleText(voiceId: string, text: string) {
+    setError(null)
+    try {
+      await updateVoiceSampleText(voiceId, text)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -248,67 +436,21 @@ export function VoiceLibraryPage() {
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {voices.map((voice, i) => (
-                  <motion.div
+                {voices.map((voice) => (
+                  <VoiceCard
                     key={voice.voice_id}
-                    data-testid="voice-card"
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.03 }}
-                    whileHover={{ y: -2 }}
-                    className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm transition-shadow duration-200 hover:border-border/80 hover:shadow-lg"
-                  >
-                    <div>
-                      <p className="text-sm font-medium">{voice.voice_id}</p>
-                      <p className="line-clamp-2 text-xs text-muted-foreground">
-                        {voice.description}
-                      </p>
-                    </div>
-
-                    {playing[voice.voice_id] ? (
-                      <AudioPlayer
-                        src={playing[voice.voice_id].url}
-                        blob={playing[voice.voice_id].blob}
-                      />
-                    ) : (
-                      <Button size="sm" variant="outline" onClick={() => preview(voice.voice_id)}>
-                        Load preview
-                      </Button>
-                    )}
-
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        className="flex-1"
-                        onClick={() => {
-                          setVoiceId(voice.voice_id)
-                          setPage('speak')
-                        }}
-                      >
-                        Use in Speak
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        aria-label="Tune this voice"
-                        title="Tune this voice"
-                        disabled={busyVoiceId === voice.voice_id}
-                        onClick={() => edit(voice.voice_id)}
-                      >
-                        <Pencil className="size-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        aria-label="Delete this voice"
-                        title="Delete this voice"
-                        disabled={busyVoiceId === voice.voice_id}
-                        onClick={() => remove(voice.voice_id)}
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
-                  </motion.div>
+                    voice={voice}
+                    busy={busyVoiceId === voice.voice_id}
+                    onUse={() => {
+                      setVoiceId(voice.voice_id)
+                      setPage('speak')
+                    }}
+                    onDesignFrom={
+                      hasChipSelections(voice.selections) ? () => designFromVoice(voice.voice_id) : null
+                    }
+                    onDelete={() => remove(voice.voice_id)}
+                    onSaveSampleText={(text) => saveSampleText(voice.voice_id, text)}
+                  />
                 ))}
               </div>
             </section>

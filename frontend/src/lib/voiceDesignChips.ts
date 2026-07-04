@@ -119,6 +119,19 @@ export const EMPTY_SELECTIONS: ChipSelections = {
   personas: [],
 }
 
+// Voices saved outside the chip-based flow (e.g. Stitch Studio / Persona Forge OmniVoice)
+// persist a differently-shaped `selections` object (or none at all) -- truthy but missing
+// textures/personas arrays. Any truthy-but-non-chip-shaped `selections` must fail this check,
+// not just an empty one, otherwise consumers crash reading `.textures.length` off undefined.
+export function hasChipSelections(selections: unknown): selections is ChipSelections {
+  if (!selections || typeof selections !== 'object') return false
+  const sel = selections as Partial<ChipSelections>
+  if (!Array.isArray(sel.textures) || !Array.isArray(sel.personas)) return false
+  return Boolean(
+    sel.gender || sel.age || sel.register || sel.textures.length > 0 || sel.personas.length > 0,
+  )
+}
+
 function findLabel(chips: Chip[], id: string | null): string | undefined {
   if (!id) return undefined
   return chips.find((c) => c.id === id)?.text ?? chips.find((c) => c.id === id)?.label
