@@ -536,7 +536,7 @@ function SegmentRackRow({
                         : undefined
                     }
                     className="min-w-0 flex-1"
-                    autoPlay={selected && autoplayTakes}
+                    autoPlay={selected && autoplayTakes && Boolean(c.audio_base64)}
                   />
 
                   <TakeDebugButton lines={debugLines} matchScore={c.match_score} />
