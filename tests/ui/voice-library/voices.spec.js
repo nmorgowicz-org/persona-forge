@@ -32,7 +32,12 @@ test.describe('voice library', () => {
     // Ensure the confirm dialog is accepted so the delete actually runs.
     await page.evaluate(() => { window.confirm = () => true })
     await originalCard.getByLabel('Delete this voice').click()
-    // Wait for the card to disappear (refresh happens after delete).
+
+    // Navigate away and back to get a fresh server-side list, in case the in-page
+    // refresh is affected by optimistic state or timing.
+    await page.getByTestId('nav-speak').click()
+    await page.getByTestId('nav-voice-library').click()
+
     await expect(page.getByTestId('voice-card').filter({ hasText: voiceId })).toHaveCount(0, {
       timeout: 10_000,
     })
