@@ -340,8 +340,8 @@ def load_model(profile: ModelProfile | None = None):
     rotary_report = repair_rotary_buffers(wrapped.model, torch)
     print(f"[app_worker] Repaired and validated RoPE buffers: {rotary_report}", flush=True)
 
-    # T5-generation fixes for both backends: stale inputs_embeds + input_ids clip.
-    patch_talker_prepare_inputs(wrapped.model.talker)
+    # T5-generation fixes for both backends: stale inputs_embeds + input_ids clip + attention_mask.
+    patch_talker_prepare_inputs()
 
     # Fix attention_mask Q/K broadcast bug in eager_attention_forward (PyTorch backend).
     patch_eager_attention_mask_broadcast()

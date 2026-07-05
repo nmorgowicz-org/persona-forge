@@ -49,7 +49,7 @@ def repair_rotary_buffers(root, torch) -> list[dict[str, object]]:
     return repaired
 
 
-def patch_talker_prepare_inputs(talker) -> None:
+def patch_talker_prepare_inputs() -> None:
     """Fix two transformers 5.x issues in the talker's prepare_inputs_for_generation.
 
     1) Stale inputs_embeds leak:
@@ -72,14 +72,17 @@ def patch_talker_prepare_inputs(talker) -> None:
        not first iteration).
     """
     from qwen_tts.core.models.modeling_qwen3_tts import (
+        Qwen3TTSTalkerCodePredictorModelForConditionalGeneration,
         Qwen3TTSTalkerForConditionalGeneration,
     )
 
-    _base_pigf = Qwen3TTSTalkerForConditionalGeneration.prepare_inputs_for_generation
+    _base_talker_pigf = Qwen3TTSTalkerForConditionalGeneration.prepare_inputs_for_generation
+    _base_predictor_pigf = Qwen3TTSTalkerCodePredictorModelForConditionalGeneration.prepare_inputs_for_generation
 
     call_count = 0
 
-    def _fixed_pigf(self_inner, input_ids, past_key_values=None, inputs_embeds=None,
+    def _fixed_pigf(cls_label, base_fn, self_inner, input_ids,
+                    past_key_values=None, inputs_embeds=None,
                     is_first_iteration=None, **kwargs):
         nonlocal call_count
         call_count += 1
@@ -88,16 +91,16 @@ def patch_talker_prepare_inputs(talker) -> None:
         if is_first_iteration:
             if call_count == 1:
                 print(
-                    f"[diag] prepare_inputs step={call_count} mode=prefill "
+                    f"[diag] {cls_label} prepare_inputs step={call_count} mode=prefill "
                     f"input_ids={tuple(input_ids.shape) if input_ids is not None else None} "
                     f"inputs_embeds={tuple(inputs_embeds.shape) if inputs_embeds is not None else None}",
                     flush=True,
                 )
-            return _base_pigf(self_inner, input_ids=input_ids,
-                              past_key_values=past_key_values,
-                              inputs_embeds=inputs_embeds,
-                              is_first_iteration=is_first_iteration,
-                              **kwargs)
+            return base_fn(self_inner, input_ids=input_ids,
+                           past_key_values=past_key_values,
+                           inputs_embeds=inputs_embeds,
+                           is_first_iteration=is_first_iteration,
+                           **kwargs)
 
         # Decode step: clip input_ids to last token (required under T5).
         if (
@@ -109,17 +112,17 @@ def patch_talker_prepare_inputs(talker) -> None:
 
         # Call the base, then remove stale inputs_embeds so forward() does not
         # mistake this decode step for a prefill.
-        model_inputs = _base_pigf(self_inner, input_ids=input_ids,
-                                   past_key_values=past_key_values,
-                                   inputs_embeds=inputs_embeds,
-                                   is_first_iteration=is_first_iteration,
-                                   **kwargs)
+        model_inputs = base_fn(self_inner, input_ids=input_ids,
+                               past_key_values=past_key_values,
+                               inputs_embeds=inputs_embeds,
+                               is_first_iteration=is_first_iteration,
+                               **kwargs)
 
         # Log first few decode steps
         if call_count <= 5:
             has_embeds_before = "inputs_embeds" in model_inputs
             print(
-                f"[diag] prepare_inputs step={call_count} mode=decode "
+                f"[diag] {cls_label} prepare_inputs step={call_count} mode=decode "
                 f"input_ids={tuple(input_ids.shape) if input_ids is not None else None} "
                 f"inputs_embeds_before_pop={tuple(model_inputs.get('inputs_embeds').shape) if has_embeds_before else None} "
                 f"has_embeds_before={has_embeds_before}",
@@ -138,10 +141,25 @@ def patch_talker_prepare_inputs(talker) -> None:
 
         return model_inputs
 
-    Qwen3TTSTalkerForConditionalGeneration.prepare_inputs_for_generation = _fixed_pigf
+    @functools.wraps(_base_talker_pigf)
+    def _talker_fixed_pigf(self, input_ids, past_key_values=None,
+                           inputs_embeds=None, is_first_iteration=None, **kwargs):
+        return _fixed_pigf("talker", _base_talker_pigf, self, input_ids,
+                           past_key_values, inputs_embeds,
+                           is_first_iteration, **kwargs)
+
+    @functools.wraps(_base_predictor_pigf)
+    def _predictor_fixed_pigf(self, input_ids, past_key_values=None,
+                              inputs_embeds=None, is_first_iteration=None, **kwargs):
+        return _fixed_pigf("predictor", _base_predictor_pigf, self, input_ids,
+                           past_key_values, inputs_embeds,
+                           is_first_iteration, **kwargs)
+
+    Qwen3TTSTalkerForConditionalGeneration.prepare_inputs_for_generation = _talker_fixed_pigf
+    Qwen3TTSTalkerCodePredictorModelForConditionalGeneration.prepare_inputs_for_generation = _predictor_fixed_pigf
     print(
-        "[transformers_compat] patched talker prepare_inputs_for_generation "
-        "(T5 stale-embeds + input_ids clip)",
+        "[transformers_compat] patched talker and code predictor "
+        "prepare_inputs_for_generation (T5 stale-embeds + input_ids clip + attention_mask fix)",
         flush=True,
     )
 
