@@ -440,7 +440,7 @@ def load_model(profile: ModelProfile | None = None):
     OPENVINO_PREDICTOR_STATEFUL_MODEL = profile.predictor_stateful_model
     active_profile = profile
 
-    global _service_started
+    global _service_started, _model_loaded
     _service_started = True
     _model_loaded = True
     print(f"[app_worker] Model loaded and ready (profile={profile.name!r}).")

@@ -44,7 +44,10 @@ interface OmniVoiceSelections {
 
 function toBase64FromUrl(url: string): Promise<string> {
   return fetch(url)
-    .then((r) => r.arrayBuffer())
+    .then((r) => {
+      if (!r.ok) throw new Error(`Failed to fetch audio (${r.status}): ${url}`)
+      return r.arrayBuffer()
+    })
     .then((buf) => {
       const bytes = new Uint8Array(buf)
       let binary = ''
@@ -61,7 +64,10 @@ function ClipPlayerUrl({ segmentId, className }: { segmentId: string; className?
   useEffect(() => {
     let cancelled = false
     fetch(url)
-      .then((r) => r.blob())
+      .then((r) => {
+        if (!r.ok) throw new Error(`Failed to fetch audio (${r.status}): ${url}`)
+        return r.blob()
+      })
       .then((b) => {
         if (!cancelled) {
           setBlob(b)

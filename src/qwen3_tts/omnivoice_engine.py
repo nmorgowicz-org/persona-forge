@@ -94,6 +94,35 @@ def swap_in_progress() -> bool:
     return _swap_in_progress
 
 
+def mark_swap_pending() -> None:
+    """Set swap_in_progress immediately once a job is accepted (running or queued).
+
+    run_omnivoice_job only flips this flag once it actually starts executing on
+    model.executor, leaving a window between a job being accepted by the
+    /omnivoice/audition endpoint and it actually starting where a second,
+    conflicting swap request (e.g. /voice_design or /runtime/config) could slip
+    past the swap_in_progress() 503 guard. Callers that accept a job — whether
+    it runs immediately or is queued to wait for model startup — must call this
+    before returning success so the guard is accurate for the whole window.
+    """
+    global _swap_in_progress
+    _swap_in_progress = True
+
+
+def clear_swap_pending() -> None:
+    """Idempotently clear swap_in_progress.
+
+    run_omnivoice_job also clears this in its own finally block once it actually
+    runs, but callers that call mark_swap_pending() before dispatch must clear it
+    themselves too (in their own finally), in case the job is never actually
+    invoked — e.g. executor.submit()/future.result() itself raises before
+    run_omnivoice_job's body starts. Otherwise the flag is stuck True forever and
+    every future swap-sensitive request 503s until the process restarts.
+    """
+    global _swap_in_progress
+    _swap_in_progress = False
+
+
 def omnivoice_loaded() -> bool:
     return _omnivoice_model is not None
 

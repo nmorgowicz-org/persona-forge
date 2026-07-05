@@ -834,11 +834,10 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
                   ? {
                       ...r,
                       candidates: regenSeg.candidates,
+                      // Regen always replaces candidates with fresh, unheard takes, so
+                      // any previously selected index must not carry over onto them.
                       selectedTakeIndex:
-                        r.candidates.length === 0 &&
-                        regenSeg.candidates.length > 0
-                          ? 0
-                          : r.selectedTakeIndex,
+                        regenSeg.candidates.length > 0 ? 0 : r.selectedTakeIndex,
                     }
                   : r,
               ),

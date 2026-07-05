@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import functools
+import logging
+
+logger = logging.getLogger(__name__)
 
 _patch_talker_prepare_inputs_applied = False
 _patch_eager_attention_mask_broadcast_applied = False
@@ -139,9 +142,11 @@ def patch_talker_prepare_inputs() -> None:
 def patch_eager_attention_mask_broadcast() -> None:
     """Defensive patches for attention_mask issues in PyTorch backend.
 
-    1) Slice stale 4D masks in sdpa_attention_forward.
+    1) Slice stale 4D masks in sdpa_attention_forward and eager_attention_forward.
     2) Return None from create_causal_mask in decode mode to avoid
-       stale-mask-based causal masks.
+       stale-mask-based causal masks (create_sliding_window_causal_mask is
+       always computed for real, since a sliding-window layer cannot safely
+       skip masking once the cache outgrows the window).
     """
     global _patch_eager_attention_mask_broadcast_applied
     if _patch_eager_attention_mask_broadcast_applied:
@@ -172,7 +177,7 @@ def patch_eager_attention_mask_broadcast() -> None:
             and attention_mask.dim() == 4
             and query.dim() == 4
         ):
-            q_len, k_len = query.shape[2], key.shape[3]
+            q_len, k_len = query.shape[2], key.shape[2]
             if (
                 attention_mask.shape[2] != q_len
                 or attention_mask.shape[3] != k_len
@@ -192,10 +197,55 @@ def patch_eager_attention_mask_broadcast() -> None:
 
     sdpa_attention.sdpa_attention_forward = patched_sdpa_attention_forward
 
+    # 1b) Patch eager_attention_forward for the same stale-mask slicing. qwen_tts
+    # defines its own eager_attention_forward (not routed through
+    # transformers.integrations), and its own mask slicing only trims the key
+    # dimension (`attention_mask[:, :, :, :key_states.shape[-2]]`), leaving a
+    # stale query dimension that silently broadcasts to the wrong shape instead
+    # of raising, corrupting attention output whenever config._attn_implementation
+    # == "eager".
+    orig_eager = M.eager_attention_forward
+
+    @functools.wraps(orig_eager)
+    def patched_eager_attention_forward(
+        module,
+        query,
+        key,
+        value,
+        attention_mask,
+        scaling,
+        dropout=0.0,
+        **kwargs,
+    ):
+        if (
+            attention_mask is not None
+            and attention_mask.dim() == 4
+            and query.dim() == 4
+        ):
+            q_len, k_len = query.shape[2], key.shape[2]
+            if (
+                attention_mask.shape[2] != q_len
+                or attention_mask.shape[3] != k_len
+            ):
+                attention_mask = attention_mask[:, :, :q_len, :k_len]
+
+        return orig_eager(
+            module,
+            query,
+            key,
+            value,
+            attention_mask,
+            scaling,
+            dropout,
+            **kwargs,
+        )
+
+    M.eager_attention_forward = patched_eager_attention_forward
+
     # 2) Patch create_causal_mask and create_sliding_window_causal_mask
     from transformers import masking_utils
 
-    def _make_decode_mask_patch(orig_fn):
+    def _make_decode_mask_patch(orig_fn, skip_on_decode):
         @functools.wraps(orig_fn)
         def patched_fn(**kwargs):
             # Handle both "inputs_embeds" (correct) and "input_embeds" (qwen_tts tokenizer bug).
@@ -205,8 +255,13 @@ def patch_eager_attention_mask_broadcast() -> None:
             past_key_values = kwargs.get("past_key_values")
 
             # In decode mode (single-token input with existing cache), skip mask creation.
+            # Only safe for full causal attention: with no mask, SDPA attends over the
+            # whole cache, which is correct for causal layers but wrong for
+            # sliding-window layers once the cache exceeds the window — those still
+            # need a real mask computed below.
             if (
-                inputs_embeds is not None
+                skip_on_decode
+                and inputs_embeds is not None
                 and inputs_embeds.shape[1] == 1
                 and past_key_values is not None
             ):
@@ -215,14 +270,11 @@ def patch_eager_attention_mask_broadcast() -> None:
             # Normalize for the original transformers create_causal_mask:
             # - qwen_tts tokenizer uses "input_embeds" instead of "inputs_embeds"
             # - also passes "cache_position" which the original doesn't accept
-            # Avoid boolean-evaluation of tensors: use explicit None checks.
-            embeds = inputs_embeds if inputs_embeds is not None else kwargs.get("inputs_embeds")
-            cache = past_key_values if past_key_values is not None else kwargs.get("past_key_values")
             call_kwargs = {
                 "config": kwargs.get("config"),
-                "inputs_embeds": embeds,
+                "inputs_embeds": inputs_embeds,
                 "attention_mask": kwargs.get("attention_mask"),
-                "past_key_values": cache,
+                "past_key_values": past_key_values,
                 "position_ids": kwargs.get("position_ids"),
             }
             return orig_fn(**call_kwargs)
@@ -230,10 +282,10 @@ def patch_eager_attention_mask_broadcast() -> None:
         return patched_fn
 
     masking_utils.create_causal_mask = _make_decode_mask_patch(
-        masking_utils.create_causal_mask
+        masking_utils.create_causal_mask, skip_on_decode=True
     )
     masking_utils.create_sliding_window_causal_mask = _make_decode_mask_patch(
-        masking_utils.create_sliding_window_causal_mask
+        masking_utils.create_sliding_window_causal_mask, skip_on_decode=False
     )
     M.create_causal_mask = masking_utils.create_causal_mask
     M.create_sliding_window_causal_mask = masking_utils.create_sliding_window_causal_mask
@@ -243,5 +295,10 @@ def patch_eager_attention_mask_broadcast() -> None:
         from qwen_tts.core.tokenizer_12hz import modeling_qwen3_tts_tokenizer_v2 as T
         T.create_causal_mask = masking_utils.create_causal_mask
         T.create_sliding_window_causal_mask = masking_utils.create_sliding_window_causal_mask
+        T.eager_attention_forward = patched_eager_attention_forward
     except Exception:
-        pass
+        logger.exception(
+            "Failed to apply attention-mask compat patches to qwen_tts "
+            "tokenizer_12hz module; if its internals changed, the stale-mask "
+            "broadcast/shape bug this patch guards against may resurface."
+        )

@@ -307,6 +307,10 @@ def _ensure_service_started(timeout_seconds: int = 900):
     # Used by the queue dispatcher when a job is queued because model wasn't ready.
     deadline = time.monotonic() + timeout_seconds
     while not model._service_started:
+        if model._startup_failed:
+            # Background load already failed for good — no point waiting out the
+            # full timeout for a result that will never arrive.
+            return False
         if time.monotonic() >= deadline:
             return False
         time.sleep(0.5)
@@ -410,6 +414,8 @@ def _dispatch_audition_jobs():
                             job["status"] = "failed"
                             job["current_segment_index"] = None
                             job["message"] = f"OmniVoice error: {exc}"
+                finally:
+                    omnivoice_engine.clear_swap_pending()
 
             threading.Thread(target=_run_job, args=(next_job_id,), daemon=True).start()
     finally:
@@ -572,6 +578,17 @@ def omnivoice_audition():
 
     job_id = uuid.uuid4().hex
 
+    # Candidates are only ever addressable up until the next audition job starts (see
+    # module docstring above _omnivoice_candidates); clearing here both enforces that
+    # and bounds memory, since each entry holds a decoded float32 waveform.
+    _omnivoice_candidates.clear()
+
+    # Mark the swap as pending now, before this job actually starts executing, so a
+    # second conflicting swap request can't slip past the swap_in_progress() 503
+    # guard during the window between acceptance and execution (including any time
+    # spent queued waiting for model startup).
+    omnivoice_engine.mark_swap_pending()
+
     # Decide whether we can run immediately or must queue.
     if model._service_started:
         initial_status = "running"
@@ -636,6 +653,8 @@ def omnivoice_audition():
                         job["status"] = "failed"
                         job["current_segment_index"] = None
                         job["message"] = f"OmniVoice error: {exc}"
+            finally:
+                omnivoice_engine.clear_swap_pending()
 
         threading.Thread(target=_run_job, daemon=True).start()
     else:
@@ -1071,7 +1090,11 @@ def runtime_config_post():
     # security note): the whole service already runs unauthenticated on a trusted-network-only
     # posture (SECURITY.md), and this stays consistent with that rather than special-casing
     # one route.
-    if model.reconfig_in_progress() or voice_design.swap_in_progress():
+    if (
+        model.reconfig_in_progress()
+        or voice_design.swap_in_progress()
+        or omnivoice_engine.swap_in_progress()
+    ):
         return jsonify({"error": "Another runtime reconfiguration or swap is already in progress"}), 503
     data = _json_body()
     if not data:
@@ -1087,6 +1110,10 @@ def runtime_config_post():
 
 @app.post("/generate")
 def generate():
+    # Bridge the same startup race /omnivoice/audition already queues through, instead
+    # of hard-failing any request that lands before the background model load finishes.
+    if not model._service_started and not _ensure_service_started(timeout_seconds=240):
+        return jsonify({"error": "Model not loaded"}), 503
     if not _generation_ready():
         return jsonify({"error": "Model not loaded"}), 503
     data = _json_body()
@@ -1127,6 +1154,10 @@ def generate():
 
 @app.post("/v1/audio/speech")
 def openai_audio_speech():
+    # Bridge the same startup race /omnivoice/audition already queues through, instead
+    # of hard-failing any request that lands before the background model load finishes.
+    if not model._service_started and not _ensure_service_started(timeout_seconds=240):
+        return _openai_error("Model not loaded", 503, "api_error")
     if not _generation_ready():
         return _openai_error("Model not loaded", 503, "api_error")
     data = _json_body()

@@ -865,6 +865,7 @@ function StitchEditorBody({
   const setIsRendering = useAppStore((s) => s.setOvIsRenderingPreview)
   const [showDsp, setShowDsp] = useState(false)
   const [staleFlags, setStaleFlags] = useState(true)
+  const [previewError, setPreviewError] = useState<string | null>(null)
   const debounceRef = useRef<number | null>(null)
   const lastHashRef = useRef('')
   // Guards against out-of-order network responses: an older in-flight render
@@ -918,6 +919,7 @@ function StitchEditorBody({
     }
     lastHashRef.current = hash
     setStaleFlags(true)
+    setPreviewError(null)
 
     if (debounceRef.current != null) clearTimeout(debounceRef.current)
     debounceRef.current = window.setTimeout(async () => {
@@ -932,8 +934,13 @@ function StitchEditorBody({
         setPreviewUrl(url)
         setPreviewBlob(blob)
         setStaleFlags(false)
-      } catch {
-        /* keep last-good preview */
+        setPreviewError(null)
+      } catch (err) {
+        // Keep the last-good preview showing, but surface the failure — otherwise
+        // the UI looks stuck on "changes pending" forever with no explanation.
+        if (seq === renderSeqRef.current) {
+          setPreviewError(err instanceof Error ? err.message : 'Preview render failed.')
+        }
       } finally {
         if (seq === renderSeqRef.current) setIsRendering(false)
       }
@@ -973,9 +980,17 @@ function StitchEditorBody({
         <div className="flex items-center gap-2.5">
           <span className="text-sm font-semibold uppercase tracking-wider text-foreground">Arrange your reference clip</span>
           <span className="text-xs text-muted-foreground/70">{clips.length} clip{clips.length !== 1 ? 's' : ''}</span>
-          {staleFlags && (
+          {staleFlags && !previewError && (
             <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-400">
               changes pending
+            </span>
+          )}
+          {previewError && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-400"
+              title={previewError}
+            >
+              preview failed — showing last good render
             </span>
           )}
         </div>
