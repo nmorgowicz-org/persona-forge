@@ -138,25 +138,26 @@ def patch_talker_prepare_inputs(talker) -> None:
 
 
 def patch_eager_attention_mask_broadcast() -> None:
-    """Fix attention_mask broadcasting bug in qwen_tts eager_attention_forward.
+    """Fix attention_mask broadcasting bug in qwen_tts eager_attention_forward and
+    transformers sdpa_attention_forward.
 
-    During auto-regressive decode, the original code only sliced the key dimension:
+    During auto-regressive decode, the original attention_mask is still the full
+    prefill mask (e.g. (B,1,170,170)). When broadcast against decode attn_weights
+    (B,8,1,171), this produces (B,8,170,171) instead of (B,8,1,171), leading to
+    reshape → (1,1,350208) and a matmul crash at o_proj.
 
-        causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
-
-    but the query dimension can differ (e.g. prefill mask (B,1,170,170) vs
-    decode attn_weights (B,8,1,171)). This broadcasts to (B,8,170,171) instead
-    of (B,8,1,171), causing reshape → (1,1,350208) and a matmul crash at o_proj.
-
-    Fix: slice both query and key dims to match attn_weights shape.
+    Fix: for both the local eager_attention_forward and the transformers
+    sdpa_attention_forward, ensure the 4D attention_mask is sliced to match the
+    current query/key lengths before use.
     """
     from qwen_tts.core.models import modeling_qwen3_tts as M
     import torch
     import torch.nn.functional as F
 
-    orig = M.eager_attention_forward
+    # 1) Patch local eager_attention_forward
+    orig_eager = M.eager_attention_forward
 
-    @functools.wraps(orig)
+    @functools.wraps(orig_eager)
     def patched_eager_attention_forward(
         module,
         query,
@@ -189,8 +190,53 @@ def patch_eager_attention_mask_broadcast() -> None:
         return attn_output, attn_weights
 
     M.eager_attention_forward = patched_eager_attention_forward
+
+    # 2) Patch transformers sdpa_attention_forward to fix the broadcast there too
+    # The qwen_tts attention.forward selects this when _attn_implementation is "sdpa"
+    # (the default when flash-attn is not installed).
+    from transformers.integrations import sdpa_attention
+
+    orig_sdpa = sdpa_attention.sdpa_attention_forward
+
+    @functools.wraps(orig_sdpa)
+    def patched_sdpa_attention_forward(
+        module,
+        query,
+        key,
+        value,
+        attention_mask,
+        scaling,
+        dropout=0.0,
+        **kwargs,
+    ):
+        # If attention_mask is a 4D tensor whose query dimension does not match
+        # the query length, it's a stale prefill mask; slice to current lengths.
+        if (
+            attention_mask is not None
+            and attention_mask.dim() == 4
+            and query.dim() == 4
+        ):
+            b, h, q_len, k_len = query.shape[0], query.shape[1], query.shape[2], key.shape[3]
+            if (
+                attention_mask.shape[2] != q_len
+                or attention_mask.shape[3] != k_len
+            ):
+                attention_mask = attention_mask[:, :, :q_len, :k_len]
+
+        return orig_sdpa(
+            module,
+            query,
+            key,
+            value,
+            attention_mask,
+            scaling,
+            dropout,
+            **kwargs,
+        )
+
+    sdpa_attention.sdpa_attention_forward = patched_sdpa_attention_forward
     print(
-        "[transformers_compat] patched eager_attention_forward "
-        "(attention_mask Q/K broadcast fix for decode)",
+        "[transformers_compat] patched eager_attention_forward and "
+        "sdpa_attention_forward (attention_mask Q/K broadcast fix for decode)",
         flush=True,
     )
