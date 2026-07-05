@@ -339,6 +339,87 @@ should copy this template rather than inventing a new visual language.
 
 ---
 
+## 9. Repo/image/container rebrand (`qwen3-tts` → Persona Forge) — scoped, not scheduled
+
+**Status: flagged by nick, not decided.** During the OmniVoice/Persona Forge source-naming
+cleanup (frontend components, comments), we confirmed the app's actual product brand is
+"Persona Forge" (see `AppShell.tsx`'s sidebar title) while OmniVoice is one engine inside it.
+Source-level naming is now consistent. What's *not* consistent is everything one level up: the
+git repo, Python package, Docker image, container, and every doc/script that references them are
+still named after the original `qwen3-tts` framing. This section scopes what a rebrand would
+touch and what it would cost, so the decision can be made deliberately rather than by drift.
+
+### What's actually named `qwen3-tts` today
+
+- **Git repo**: `qwen3-tts-openvino` (GitHub: `nmorgowicz-org/qwen3-tts-openvino`).
+- **Python package**: `src/qwen3_tts/` — imported as `qwen3_tts` in ~45 places across
+  `src/` and referenced in `pyproject.toml`/entrypoints.
+- **Docker image**: built from `Dockerfile`, tagged `qwen3-tts-openvino:<branch-or-version>`,
+  pushed to GHCR as `ghcr.io/nmorgowicz-org/qwen3-tts-openvino` (`.github/workflows/image.yml`,
+  `IMAGE_NAME` env var, release tag pattern `qwen3-tts-openvino-v*`).
+- **Container name**: `qwen3-tts` (`compose.yml` service name `qwen3-tts`, `container_name`,
+  and every runtime reference — `docker exec qwen3-tts kill -HUP 1`, `docker restart qwen3-tts`).
+- **Env var prefixes**: `QWEN3_TTS_IMAGE`, `QWEN3_TTS_PORT` in `compose.yml`.
+- **Docs**: `CLAUDE.md`, `AGENTS.md`, `docs/HOW_TO_RUN.md`, `docs/DEV_TEST_LOOP.md`,
+  `docs/agent-reference/TRANSFORMERS_COMPAT.md` all instruct against these exact names
+  (image tags, container name, exec/restart commands).
+- **Claude memory files** (this machine, not the repo): several memory entries name the
+  container/image directly (e.g. `dockermisc1-ops.md`, `simplify-v2-refactor.md`) — a rename
+  would make those entries stale until manually updated.
+
+### Cost/risk if fully renamed end-to-end
+
+- **High blast radius, low reversibility on the ops side**: the container name and image tag are
+  load-bearing in the documented dev-test loop (CLAUDE.md's `docker exec qwen3-tts kill -HUP 1`,
+  the dockermisc1 deployment, and any external scripts/cron on that host that assume the current
+  name). Renaming requires touching the live dockermisc1 container (stop old, rename/recreate,
+  verify port/volumes/env all carried over correctly) — that's a real-service action, not a pure
+  source change.
+- **Python package rename** (`src/qwen3_tts` → e.g. `src/persona_forge`) touches ~45 import
+  sites, `pyproject.toml`, Dockerfile `COPY`/`WORKDIR` references if any hardcode the path, and
+  any external tooling (export scripts, benchmark scripts) that imports the package by name.
+  Mechanical but wide — the kind of change that's easy to get 95% right and leave a handful of
+  broken imports.
+- **GHCR image rename** changes the pull path for anyone/anything already referencing
+  `ghcr.io/nmorgowicz-org/qwen3-tts-openvino` — old tags don't silently redirect, so a rename is
+  effectively "publish a new image location," not a rename in the strict sense. The GitHub Actions
+  workflow's tag-push trigger pattern (`qwen3-tts-openvino-v*`) would also need updating, and any
+  existing tags stay under the old name unless retagged.
+- **Git repo rename** (via GitHub's rename) is the cheapest part in isolation — GitHub
+  transparently redirects the old URL — but every hardcoded `git remote`/clone URL in scripts,
+  CI, and dockermisc1's existing checkout would still work via redirect, so this alone is
+  low-risk. The risk is doing it *in isolation* while image/container names diverge further from
+  the repo name than they already do.
+
+### Recommendation
+
+Don't do this as part of the current roadmap/polish work — it's an infra/ops decision with
+real-service risk, not a code-quality one, and nothing above is blocking any of §1-§8. If/when
+nick wants to proceed, split it into independently-reversible steps and confirm before each one
+that touches the live container:
+
+1. **Cosmetic-only first pass (near-zero risk)**: rename just the GitHub repo (redirect-safe) and
+   update CLAUDE.md/AGENTS.md/docs prose to call the product "Persona Forge" in narrative text,
+   while leaving every command, env var, image tag, and container name exactly as-is. This gets
+   the repo's public-facing name aligned without touching anything that runs.
+2. **Env var / image tag rename** (`QWEN3_TTS_IMAGE` → e.g. `PERSONA_FORGE_IMAGE`,
+   `qwen3-tts-openvino:<tag>` → `persona-forge:<tag>`) — requires a coordinated compose.yml +
+   CI workflow + dockermisc1 update in one sitting, since half-migrated env vars would silently
+   fall back to defaults and mask breakage. Do this only after step 1 has been live a while with
+   no issues.
+3. **Container rename on dockermisc1** — the actual live-service risk step: stop the old
+   container, recreate under the new name with identical port/volume/env mappings, verify `/health`
+   and a real `/generate` call before considering it done, then update CLAUDE.md's dev-test-loop
+   commands and all Claude memory entries that reference the old container name.
+4. **Python package rename** (`qwen3_tts` → e.g. `persona_forge`) — purely mechanical, do this
+   whenever convenient since it has no runtime/ops risk once the import sites are all updated and
+   verified with `python3 -m py_compile`/existing test tiers; not coupled to steps 1-3.
+
+None of these steps should be bundled — each is independently shippable and independently
+revertible, matching the "small, focused changes" convention already in place for this repo.
+
+---
+
 ## Suggested delivery order
 
 1. §1 (voice hygiene) + the bulk-select component + voice search bar — cheapest, closes the most
@@ -357,3 +438,7 @@ should copy this template rather than inventing a new visual language.
 Each numbered item above should be its own PR/commit series, following the existing dev-test loop
 (commit+push, pull+rebuild on dockermisc1, `docker restart qwen3-tts` for any backend change) —
 don't bundle multiple roadmap items into one deploy cycle.
+
+§9 (repo/image/container rebrand) is deliberately **not** in this ordered list — it's an
+infra/ops decision nick hasn't greenlit yet, scoped in this doc so it's ready to schedule
+whenever he decides, not because it's next.
