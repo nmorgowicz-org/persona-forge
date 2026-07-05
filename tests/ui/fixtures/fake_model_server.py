@@ -44,7 +44,12 @@ def _install_fake_model_module() -> None:
         vocoder_runtime=types.SimpleNamespace(enabled=True, sample_rate=_SAMPLE_RATE)
     )
     fake_model.executor = ThreadPoolExecutor(max_workers=1)
-    fake_model.health_state = lambda: {"status": "ok", "backend": "fake-e2e"}
+    fake_model.health_state = lambda: {
+        "status": "ok",
+        "backend": "fake-e2e",
+        "model_loaded": True,
+        "service_started": True,
+    }
     fake_model._apply_optional_seed = lambda seed: None
     fake_model.register_foreign_engine = lambda is_loaded, unload: None
     fake_model.resolve_seed = lambda seed_value: (
