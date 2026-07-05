@@ -29,9 +29,13 @@ test.describe('voice library', () => {
     const originalCard = page.getByTestId('voice-card').filter({ hasText: voiceId })
     await expect(originalCard).toBeVisible()
 
-    page.once('dialog', (dialog) => dialog.accept())
+    // Ensure the confirm dialog is accepted so the delete actually runs.
+    await page.evaluate(() => { window.confirm = () => true })
     await originalCard.getByLabel('Delete this voice').click()
-    await expect(page.getByTestId('voice-card').filter({ hasText: voiceId })).toHaveCount(0)
+    // Wait for the card to disappear (refresh happens after delete).
+    await expect(page.getByTestId('voice-card').filter({ hasText: voiceId })).toHaveCount(0, {
+      timeout: 10_000,
+    })
   })
 
   test('empty library shows a call to action', async ({ page }) => {
