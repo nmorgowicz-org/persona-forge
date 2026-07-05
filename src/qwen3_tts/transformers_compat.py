@@ -230,51 +230,55 @@ def patch_eager_attention_mask_broadcast() -> None:
 
     sdpa_attention.sdpa_attention_forward = patched_sdpa_attention_forward
 
-    # 2) Patch create_causal_mask to ensure correct decode-time masks
-    orig_create_causal_mask = M.create_causal_mask
-
-    @functools.wraps(orig_create_causal_mask)
-    def patched_create_causal_mask(
-        config,
-        inputs_embeds,
-        attention_mask,
-        past_key_values=None,
-        position_ids=None,
-        **kwargs,
-    ):
-        # If we're in decode mode (single-token input with cache present)
-        # and attention_mask is None, the upstream implementation may produce
-        # an incorrect mask shape for T5-style generation. Force a clean
-        # causal mask: (B, 1, q_len, kv_len) where q_len = 1.
-        is_decode = (
-            inputs_embeds.shape[1] == 1
-            and past_key_values is not None
-        )
-        if is_decode:
-            if not hasattr(patched_create_causal_mask, "_diag"):
-                patched_create_causal_mask._diag = True
-                print(
-                    f"[decode_mask_fix] decode-mode detected: "
-                    f"inputs={tuple(inputs_embeds.shape)} past_len={past_key_values.get_seq_length()}",
-                    flush=True,
-                )
-            # Full attention on all keys (past + current): upper-triangular is
-            # handled by SDPA's is_causal=True when mask is None. Return None
-            # to let the attention kernel use its native causal behavior.
-            return None
-
-        return orig_create_causal_mask(
+    # 2) Patch create_causal_mask and create_sliding_window_causal_mask
+    # to ensure correct decode-time masks.
+    # When the main talker uses sliding_window != None, it calls
+    # create_sliding_window_causal_mask instead of create_causal_mask;
+    # both must be patched for the fix to apply in all configurations.
+    def _make_decode_mask_patch(orig_fn, name):
+        @functools.wraps(orig_fn)
+        def patched_fn(
             config,
             inputs_embeds,
             attention_mask,
-            past_key_values=past_key_values,
-            position_ids=position_ids,
+            past_key_values=None,
+            position_ids=None,
             **kwargs,
-        )
+        ):
+            is_decode = (
+                inputs_embeds.shape[1] == 1
+                and past_key_values is not None
+            )
+            if is_decode:
+                if not hasattr(patched_fn, "_diag"):
+                    patched_fn._diag = True
+                    print(
+                        f"[decode_mask_fix] {name}: decode-mode detected: "
+                        f"inputs={tuple(inputs_embeds.shape)} past_len={past_key_values.get_seq_length()}",
+                        flush=True,
+                    )
+                return None
 
-    M.create_causal_mask = patched_create_causal_mask
+            return orig_fn(
+                config,
+                inputs_embeds,
+                attention_mask,
+                past_key_values=past_key_values,
+                position_ids=position_ids,
+                **kwargs,
+            )
+
+        return patched_fn
+
+    M.create_causal_mask = _make_decode_mask_patch(
+        M.create_causal_mask, "create_causal_mask"
+    )
+    M.create_sliding_window_causal_mask = _make_decode_mask_patch(
+        M.create_sliding_window_causal_mask, "create_sliding_window_causal_mask"
+    )
     print(
-        "[transformers_compat] patched sdpa_attention_forward and "
-        "create_causal_mask (PyTorch decode mask fix)",
+        "[transformers_compat] patched sdpa_attention_forward, "
+        "create_causal_mask, create_sliding_window_causal_mask "
+        "(PyTorch decode mask fix)",
         flush=True,
     )
