@@ -94,8 +94,8 @@ function ClipPlayerUrl({ segmentId, className }: { segmentId: string; className?
   return <AudioPlayer src={src} blob={blob} className={className} autoPlay={false} />
 }
 
-// Auto-loads and plays a saved voice's reference audio without a "Load preview" click,
-// mirroring the saved-segment cards below (ClipPlayerUrl) which already do this.
+// Auto-loads (but does not auto-play) a saved voice's reference audio without a
+// "Load preview" click, mirroring the saved-segment cards below (ClipPlayerUrl).
 function VoiceAudioAutoPlayer({ voiceId }: { voiceId: string }) {
   const [state, setState] = useState<{ url: string; blob: Blob } | 'loading' | 'error'>('loading')
 
@@ -139,7 +139,7 @@ function VoiceAudioAutoPlayer({ voiceId }: { voiceId: string }) {
   if (state === 'error') {
     return <p className="text-xs text-muted-foreground">Couldn't load audio.</p>
   }
-  return <AudioPlayer src={state.url} blob={state.blob} />
+  return <AudioPlayer src={state.url} blob={state.blob} autoPlay={false} />
 }
 
 function VoiceCard({
