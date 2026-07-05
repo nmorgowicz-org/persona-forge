@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react'
+import { useMemo, useRef, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { createVoiceDesign, saveVoiceDesign } from '../lib/api'
 import type { EditingVoice } from '../store'
@@ -113,6 +113,8 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
     : sampleText || sampleTextForSelections(selections)
 
   // -- Handlers --
+  const abortRef = useRef<AbortController | null>(null)
+
   const toggleSingle = useCallback(
     (key: 'gender' | 'age' | 'register', id: string) => {
       setSelections((prev) => ({ ...prev, [key]: prev[key] === id ? null : id }))
@@ -159,6 +161,14 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
     [setManualDescription],
   )
 
+  const handleStop = useCallback(() => {
+    if (!isGenerating) return
+    abortRef.current?.abort()
+    setIsGenerating(false)
+    setProgress(null)
+    setError('Cancelled by you.')
+  }, [isGenerating, setIsGenerating, setError, setProgress])
+
   const handleGenerate = useCallback(async () => {
     if (
       !description.trim() ||
@@ -170,16 +180,21 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
     setError(null)
     setProgress(null)
     try {
+      const controller = new AbortController()
+      abortRef.current = controller
       const seed = seedInput.trim()
         ? Number(seedInput)
         : undefined
-      const result = await createVoiceDesign({
-        description,
-        sampleText: effectiveSampleText,
-        language,
-        seed,
-        selections,
-      })
+      const result = await createVoiceDesign(
+        {
+          description,
+          sampleText: effectiveSampleText,
+          language,
+          seed,
+          selections,
+        },
+        controller.signal,
+      )
       // data URL so it survives unmount without needing revoke.
       const dataUrl = `data:audio/wav;base64,${result.audio_base64}`
       const blob = new Blob(
@@ -497,21 +512,22 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
           <Button
             type="button"
             data-testid="voice-design-generate-button"
-            onClick={handleGenerate}
+            onClick={isGenerating ? handleStop : handleGenerate}
             disabled={
-              !description.trim() ||
+              !isGenerating &&
+              (!description.trim() ||
               !effectiveSampleText.trim() ||
-              isGenerating ||
-              !modelLoaded
+              !modelLoaded)
             }
             title={
               modelLoaded
                 ? undefined
                 : 'Model is still loading'
             }
+            variant={isGenerating ? 'secondary' : 'default'}
           >
             {isGenerating
-              ? 'Designing voice…'
+              ? 'Stop'
               : initial
                 ? 'Generate new voice'
                 : 'Generate voice'}

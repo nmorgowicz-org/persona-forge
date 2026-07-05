@@ -137,3 +137,82 @@ def compute_transcript_match_score(
         hyp_idx += 1
 
     return matched / len(ref_words)
+
+
+def validate_reference_text(
+    wav_path: str,
+    expected_text: str,
+    *,
+    warn_threshold: float = 0.70,
+    fail_threshold: float = 0.50,
+) -> dict:
+    """Transcribe reference audio with Whisper and compare to expected_text.
+
+    Returns:
+        {
+            "ok": bool,
+            "severity": "ok" | "warn" | "fail" | "no_speech" | "error",
+            "match_score": float|None,
+            "whisper_transcript": str,
+            "suggestion": str|None
+        }
+    """
+    import soundfile as sf
+
+    try:
+        audio, sr = sf.read(wav_path)
+    except Exception as e:
+        return {
+            "ok": False,
+            "severity": "error",
+            "match_score": None,
+            "whisper_transcript": "",
+            "suggestion": f"Failed to read reference audio: {e}",
+        }
+
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+
+    has_speech_result, transcript, _logprob = has_speech(audio, sr)
+
+    if not has_speech_result or not transcript.strip():
+        return {
+            "ok": False,
+            "severity": "no_speech",
+            "match_score": 0.0,
+            "whisper_transcript": transcript,
+            "suggestion": "Reference audio contains no detectable speech.",
+        }
+
+    score = compute_transcript_match_score(expected_text, transcript)
+
+    if score >= warn_threshold:
+        return {
+            "ok": True,
+            "severity": "ok",
+            "match_score": score,
+            "whisper_transcript": transcript,
+            "suggestion": None,
+        }
+    if score >= fail_threshold:
+        return {
+            "ok": False,
+            "severity": "warn",
+            "match_score": score,
+            "whisper_transcript": transcript,
+            "suggestion": (
+                "The transcript is partially mismatched. Verify REF_TEXT (or this voice's reference text) "
+                "exactly matches what's spoken."
+            ),
+        }
+    return {
+        "ok": False,
+        "severity": "fail",
+        "match_score": score,
+        "whisper_transcript": transcript,
+        "suggestion": (
+            "Severe mismatch: the reference text does not match the audio. "
+            "Speech quality will likely be degraded. "
+            "Fix REF_TEXT in your .env or Compose file, or update this voice's sample_text."
+        ),
+    }

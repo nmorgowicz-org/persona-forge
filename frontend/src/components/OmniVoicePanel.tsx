@@ -8,6 +8,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Scissors } from 'lucide-react'
 import {
   auditionOmniVoiceStreaming,
+  cancelOmniVoiceAudition,
   deleteOmniVoiceSegment,
   getOmniVoiceAuditionProgress,
   getSegmentAudioBase64,
@@ -665,10 +666,21 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
           break
         }
         if (p.status === 'failed') {
-          setError(
-            p.message ||
-              'OmniVoice job failed.',
-          )
+          if (
+            (p.message || '').toLowerCase().includes('cancel')
+          ) {
+            setJobMessage('Cancelled.')
+            setIsRackAuditioning(false)
+            setProgress(null)
+            setCurrentJobId(null)
+            setJobCurrentSegmentIndex(null)
+            setJobEtaSeconds(null)
+          } else {
+            setError(
+              p.message ||
+                'OmniVoice job failed.',
+            )
+          }
           break
         }
         await new Promise(
@@ -861,10 +873,28 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
             break
           }
           if (p.status === 'failed') {
-            setError(
-              p.message ||
-                'OmniVoice job failed.',
-            )
+            if (
+              (p.message || '').toLowerCase().includes('cancel')
+            ) {
+              setJobMessage('Cancelled.')
+              setIsRackAuditioning(false)
+              setProgress(null)
+              setCurrentJobId(null)
+              setJobStatus(null)
+              setJobTotalSegments(0)
+              setJobSegmentsCompleted([])
+              setJobCurrentSegmentIndex(null)
+              setJobMessage('Cancelled.')
+              setJobEtaSeconds(null)
+              setJobCandidatesTotal(0)
+              setJobCandidatesCompleted(0)
+              setJobCurrentCandidateIndex(null)
+            } else {
+              setError(
+                p.message ||
+                  'OmniVoice job failed.',
+              )
+            }
             break
           }
           await new Promise(
@@ -1557,6 +1587,31 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
               ? 'Generating…'
               : 'Generate candidates'}
           </Button>
+
+          {isRackAuditioning &&
+            useAppStore.getState().ovCurrentJobId && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    const jobId = useAppStore
+                      .getState()
+                      .ovCurrentJobId
+                    if (jobId)
+                      await cancelOmniVoiceAudition(jobId)
+                  } catch {
+                    // Best effort
+                  }
+                  // Let the poll loop pick up the new status
+                }}
+                className="h-8 gap-1.5"
+              >
+                Stop
+              </Button>
+            )}
+
           <button
             type="button"
             onClick={() =>

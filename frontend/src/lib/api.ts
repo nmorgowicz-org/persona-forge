@@ -2,6 +2,85 @@
 // as the rest of the service (see SECURITY.md); this UI is meant to run on the same
 // trusted network as the container.
 
+export function classifyGenerateError(
+  message: string | null,
+  status: number | null,
+): {
+  type:
+    | 'TOO_LONG'
+    | 'TIMEOUT'
+    | 'NOT_READY'
+    | 'BUSY_SWAP'
+    | 'SERVER_BUSY'
+    | 'SERVER_ERROR'
+    | 'UNKNOWN'
+  headline: string
+  detail: string
+} {
+  const m = (message || '').toLowerCase()
+
+  if (
+    status === 422 ||
+    m.includes('capacity exceeded') ||
+    m.includes('exceeded its allowed')
+  ) {
+    return {
+      type: 'TOO_LONG',
+      headline: 'Generation was cut off: it ran longer than allowed.',
+      detail:
+        'This often means the reference text does not match the audio, or your text is too long.',
+    }
+  }
+
+  if (m.includes('timed out') || m.includes('timeout') || status === 504) {
+    return {
+      type: 'TIMEOUT',
+      headline: 'Generation timed out.',
+      detail: 'Try shorter text or try again in a moment.',
+    }
+  }
+
+  if (m.includes('not loaded') || m.includes('not ready')) {
+    return {
+      type: 'NOT_READY',
+      headline: 'Model is not ready yet.',
+      detail: "It's starting up or reloading — try again shortly.",
+    }
+  }
+
+  if (m.includes('in progress') || m.includes('already')) {
+    return {
+      type: 'BUSY_SWAP',
+      headline: 'Another task is in progress.',
+      detail:
+        'The model is switching tasks — generation is temporarily unavailable.',
+    }
+  }
+
+  if (status === 503) {
+    return {
+      type: 'SERVER_BUSY',
+      headline: 'Server is busy.',
+      detail: 'Try again in a moment.',
+    }
+  }
+
+  if (status && status >= 500) {
+    return {
+      type: 'SERVER_ERROR',
+      headline: 'Something went wrong.',
+      detail:
+        'The server encountered an error. Try again; if it persists, contact your admin.',
+    }
+  }
+
+  return {
+    type: 'UNKNOWN',
+    headline: 'Generation failed.',
+    detail: 'An unexpected error occurred. Try again or shorten your text.',
+  }
+}
+
 export interface GenerateParams {
   text: string
   language?: string
@@ -25,6 +104,22 @@ export interface VoiceMeta {
 export interface GenerateResult {
   blob: Blob
   seed: number | null
+}
+
+export interface AsyncJobIdResult {
+  job_id: string
+}
+
+export interface GenerateJobProgress {
+  job_id: string
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
+  frames_generated: number
+  expected_total_frames: number
+  progress_pct: number
+  elapsed_seconds: number
+  eta_seconds: number | null
+  message: string | null
+  audio_available?: boolean
 }
 
 async function readError(res: Response): Promise<string> {
@@ -69,7 +164,10 @@ export interface VoiceDesignPreviewResult {
   audio_base64: string
 }
 
-export async function createVoiceDesign(params: VoiceDesignParams): Promise<VoiceDesignPreviewResult> {
+export async function createVoiceDesign(
+  params: VoiceDesignParams,
+  signal?: AbortSignal,
+): Promise<VoiceDesignPreviewResult> {
   const res = await fetch('/voice_design', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -80,6 +178,7 @@ export async function createVoiceDesign(params: VoiceDesignParams): Promise<Voic
       seed: params.seed ?? undefined,
       selections: params.selections ?? undefined,
     }),
+    signal,
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
@@ -551,4 +650,61 @@ export async function updateRuntimeConfig(
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
+}
+
+// ── Async generation (progress + cancel) ──────────────────────────────────────────────────
+
+export async function generateAsync(
+  params: GenerateParams,
+): Promise<AsyncJobIdResult> {
+  const res = await fetch('/generate/async', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text: params.text,
+      language: params.language ?? 'English',
+      voice_id: params.voiceId ?? undefined,
+      seed: params.seed ?? undefined,
+      instruct: params.instruct ?? undefined,
+      response_format: params.responseFormat ?? 'mp3',
+    }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function getGenerateJobProgress(
+  jobId: string,
+): Promise<GenerateJobProgress> {
+  const res = await fetch(`/generate/progress?job_id=${encodeURIComponent(jobId)}`)
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function cancelGenerate(jobId: string): Promise<void> {
+  const res = await fetch(`/generate/cancel?job_id=${encodeURIComponent(jobId)}`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error(await readError(res))
+}
+
+export async function getGenerateJobAudio(
+  jobId: string,
+  responseFormat: 'mp3' | 'wav' = 'mp3',
+): Promise<Blob> {
+  const res = await fetch(
+    `/generate/job/${encodeURIComponent(jobId)}/audio?response_format=${responseFormat}`,
+  )
+  if (!res.ok) throw new Error(await readError(res))
+  return res.blob()
+}
+
+// ── OmniVoice audition cancel ─────────────────────────────────────────────────────────────
+
+export async function cancelOmniVoiceAudition(jobId: string): Promise<void> {
+  const res = await fetch(
+    `/omnivoice/audition/cancel?job_id=${encodeURIComponent(jobId)}`,
+    { method: 'POST' },
+  )
+  if (!res.ok) throw new Error(await readError(res))
 }

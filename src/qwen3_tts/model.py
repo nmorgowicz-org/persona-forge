@@ -3,12 +3,14 @@ import json
 import os
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
 # Apply thread and runtime envs before heavy imports
+from qwen3_tts.asr_check import validate_reference_text
 from qwen3_tts.config import REF_AUDIO_PATH, apply_preset_env
 from qwen3_tts.openvino.runtime_config import apply_thread_env
 from qwen3_tts.presets import get_voice_design_preset, seconds_for_capacity
@@ -139,6 +141,7 @@ _startup_failed: bool = False
 _startup_error: str | None = None
 _last_request_time: float = time.time()
 _unload_pending: bool = False
+_ref_text_validation_result: dict | None = None
 
 
 def _process_rss_mib() -> float | None:
@@ -382,6 +385,46 @@ def load_model(profile: ModelProfile | None = None):
     else:
         print("[app_worker] Model loaded. (profile skips voice clone prompt)", flush=True)
 
+    # Validate REF_TEXT against REF_AUDIO at startup.
+    global _ref_text_validation_result
+    if profile.build_voice_clone_prompt and profile.ref_audio and profile.ref_text:
+        _ref_text_validation_result = validate_reference_text(
+            profile.ref_audio, profile.ref_text
+        )
+        sev = _ref_text_validation_result["severity"]
+        if sev in ("fail", "no_speech"):
+            print(
+                f"[REF-TEXT-VALID] STATUS=fail  score={_ref_text_validation_result.get('match_score')}",
+                flush=True,
+                file=sys.stderr,
+            )
+            print(f"  REF_AUDIO: {profile.ref_audio}", flush=True, file=sys.stderr)
+            print(f"  REF_TEXT:  {profile.ref_text!r}", flush=True, file=sys.stderr)
+            print(f"  Whisper:   {_ref_text_validation_result.get('whisper_transcript')!r}", flush=True, file=sys.stderr)
+            print(f"  SUGGESTION: {_ref_text_validation_result.get('suggestion')}", flush=True, file=sys.stderr)
+            print(
+                "  ACTION: Fix REF_TEXT in your .env or Compose file to match what's spoken in the audio, then restart.",
+                flush=True,
+                file=sys.stderr,
+            )
+            if os.getenv("REF_TEXT_FAIL_ON_MISMATCH", "").strip() == "1":
+                raise RuntimeError(
+                    "REF_TEXT/REF_AUDIO mismatch (REF_TEXT_FAIL_ON_MISMATCH=1): "
+                    f"{_ref_text_validation_result.get('suggestion')}"
+                )
+        elif sev == "warn":
+            print(
+                f"[REF-TEXT-VALID] STATUS=warn  score={_ref_text_validation_result.get('match_score')}",
+                flush=True,
+                file=sys.stderr,
+            )
+            print(f"  REF_AUDIO: {profile.ref_audio}", flush=True, file=sys.stderr)
+            print(f"  REF_TEXT:  {profile.ref_text!r}", flush=True, file=sys.stderr)
+            print(f"  Whisper:   {_ref_text_validation_result.get('whisper_transcript')!r}", flush=True, file=sys.stderr)
+            print(f"  SUGGESTION: {_ref_text_validation_result.get('suggestion')}", flush=True, file=sys.stderr)
+    else:
+        _ref_text_validation_result = None
+
     if TTS_BACKEND == "openvino":
         # Milestone 4: install the OpenVINO talker runtime by swapping the two inner
         # transformer core forwards. All other generation glue stays in PyTorch.
@@ -519,6 +562,7 @@ def health_state() -> dict[str, Any]:
         "torch_dtype": TORCH_DTYPE_NAME,
         "low_cpu_mem_usage": OPENVINO_LOW_CPU_MEM_USAGE,
         "ref_audio": REF_AUDIO,
+        "ref_text_validation": _ref_text_validation_result,
         "timestamp": time.time(),
     }
 
@@ -718,6 +762,190 @@ def _trim_silence(wav, sr):
     return arr[start:end]
 
 
+# ── Async job system (cooperative cancel + live progress/ETA) ─────────────────────────────────
+#
+# Each generation (Speak, VoiceDesign, OmniVoice) gets a job_id. The job state holds:
+#   - cancel_event: set to signal cooperative cancel
+#   - progress: frames_generated, elapsed, status, ETA
+#   - completed: (wav, sr) or error once done
+#
+# A _ProgressLogitsProcessor is injected into the generation loop:
+#   - Increments frames_generated each decode step
+#   - On cancel, forces EOS → loop terminates cleanly with partial audio
+#
+# The single-worker executor ensures only one job runs at a time, so cancel is safe.
+
+
+@dataclass
+class _JobState:
+    job_id: str
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+    status: str = "running"  # running | completed | failed | cancelled
+    frames_generated: int = 0
+    reference_frames: int = 0
+    started_at: float = field(default_factory=time.monotonic)
+    text_length: int = 0
+    message: str | None = None
+    wav: Any = None
+    sr: int = 0
+    seed: int | None = None
+    error: str | None = None
+    expected_total_frames: int = 0
+    _watchdog_limit: float = 120.0
+
+
+_active_jobs: dict[str, _JobState] = {}
+_active_jobs_lock = threading.Lock()
+
+
+def _create_job(text: str, seed: int | None = None) -> _JobState:
+    job_id = uuid.uuid4().hex
+    chars_per_sec_speech = 9.3
+    expected_audio_seconds = max(1.5, len(text) / chars_per_sec_speech if len(text) > 0 else 3.0)
+    expected_total_frames = max(40, int(expected_audio_seconds * 12))
+    watchdog_limit = float(os.getenv("TTS_WATCHDOG_SECONDS", "120"))
+
+    job = _JobState(
+        job_id=job_id,
+        text_length=len(text),
+        seed=seed,
+        expected_total_frames=expected_total_frames,
+        _watchdog_limit=watchdog_limit,
+    )
+    with _active_jobs_lock:
+        _active_jobs[job_id] = job
+    return job
+
+
+def _cleanup_job(job_id: str):
+    # Evict completed jobs to bound memory.
+    with _active_jobs_lock:
+        _active_jobs.pop(job_id, None)
+
+
+def cancel_job(job_id: str) -> bool:
+    """Signal cooperative cancel for a running job.
+
+    Returns True if the job was found and its cancel_event was set; False otherwise.
+    The generation loop checks cancel_event via a logits_processor and forces EOS on next step.
+    """
+    with _active_jobs_lock:
+        job = _active_jobs.get(job_id)
+    if job is None:
+        return False
+    if job.status not in ("running",):
+        return False
+    job.cancel_event.set()
+    job.status = "cancelled"
+    job.message = "Cancelled by user."
+    print(f"[generate] cancel_job: {job_id}", flush=True)
+    return True
+
+
+def get_job_progress(job_id: str) -> dict[str, Any] | None:
+    """Return a JSON-serializable snapshot of the job, or None if not found."""
+    with _active_jobs_lock:
+        job = _active_jobs.get(job_id)
+    if job is None:
+        return None
+
+    elapsed = time.monotonic() - job.started_at
+    frames = job.frames_generated
+
+    # ETA: use a live moving average of speed (frames/sec).
+    # We know 1 frame = 1/12s of audio. Estimate expected total frames from text length.
+    # Typical speech rate ≈ 2.33 words/sec, with ~4 chars per word → ~9.3 chars/sec.
+    # So expected_audio_seconds ≈ text_length / 9.3, expected_total_frames ≈ audio_seconds × 12.
+    chars_per_sec_speech = 9.3
+    text_len = job.text_length if job.text_length > 0 else 0
+    expected_audio_seconds = max(1.5, text_len / chars_per_sec_speech if text_len > 0 else 3.0)
+    expected_total_frames = max(40, int(expected_audio_seconds * 12))
+
+    speed = frames / elapsed if elapsed > 0.5 and frames > 5 else None
+    eta_seconds = None
+    progress_pct = 0.0
+
+    if speed is not None and speed > 0 and frames > 0:
+        remaining_frames = max(0, expected_total_frames - frames)
+        eta_seconds = remaining_frames / speed
+        progress_pct = min(100.0, (frames / max(expected_total_frames, 1)) * 100.0)
+
+    return {
+        "job_id": job.job_id,
+        "status": job.status,
+        "frames_generated": frames,
+        "expected_total_frames": expected_total_frames,
+        "progress_pct": round(progress_pct, 1),
+        "elapsed_seconds": round(elapsed, 1),
+        "eta_seconds": round(eta_seconds, 1) if eta_seconds is not None else None,
+        "message": job.message,
+    }
+
+
+class _ProgressLogitsProcessor:
+    """Tracks decode steps and implements cooperative cancel.
+
+    Each call corresponds to one decode step (one frame for codebook 1).
+    On cancel, forces EOS so generation ends cleanly.
+    """
+
+    def __init__(self, job: _JobState, eos_token_id: int):
+        self._job = job
+        self._eos = eos_token_id
+        self._step = 0
+
+    def __call__(self, input_ids, scores):
+        import torch
+
+        self._step += 1
+        self._job.frames_generated = self._step
+
+        if self._job.cancel_event.is_set():
+            # Force EOS: make EOS the only non -inf logit.
+            new_scores = torch.full_like(scores, float("-inf"))
+            new_scores[:, self._eos] = scores[:, self._eos]
+            return new_scores
+
+        # Stuck detection: exceeded 3x expected frames; likely REF_TEXT/REF_AUDIO mismatch.
+        if (
+            self._job.status == "running"
+            and self._step > self._job.expected_total_frames * 3
+        ):
+            new_scores = torch.full_like(scores, float("-inf"))
+            new_scores[:, self._eos] = scores[:, self._eos]
+            self._job.status = "failed"
+            self._job.message = (
+                "Generation stuck: exceeded 3x expected frames; "
+                "possible REF_TEXT/REF_AUDIO mismatch."
+            )
+            return new_scores
+
+        # Time watchdog: overall wall-time limit; likely REF_TEXT/REF_AUDIO mismatch.
+        if (
+            self._job.status == "running"
+            and (time.monotonic() - self._job.started_at) > self._job._watchdog_limit
+        ):
+            new_scores = torch.full_like(scores, float("-inf"))
+            new_scores[:, self._eos] = scores[:, self._eos]
+            self._job.status = "failed"
+            self._job.message = (
+                "Generation timed out (watchdog); "
+                "possible REF_TEXT/REF_AUDIO mismatch."
+            )
+            return new_scores
+
+        return scores
+
+
+def _get_eos_token_id(model_instance):
+    """Resolve the EOS token ID for the talker's codec."""
+    try:
+        config = model_instance.model.config.talker_config
+        return getattr(config, "codec_eos_token_id", 2150)
+    except Exception:
+        return 2150
+
+
 class _DiagLogitsProcessor:
     """Diagnostic: logs top tokens and EOS probability at early decode steps.
 
@@ -809,6 +1037,7 @@ def _run_generate(
     voice_id: str | None = None,
     seed_value=None,
     instruct: str | None = None,
+    job_id: str | None = None,
     **gen_kwargs,
 ):
     _touch_last_request()
@@ -826,17 +1055,34 @@ def _run_generate(
         print(f"[generate] instruct field ignored on Base checkpoint: {instruct!r}", flush=True)
     import traceback as _tb
     t0 = time.monotonic()
-    print(f"[generate] batch  lang={language!r}  chars={len(text)}", flush=True)
+    print(f"[generate] batch  lang={language!r}  chars={len(text)}  job={job_id or '-'}", flush=True)
+
+    # Create or use provided job state for progress tracking + cancel.
+    job: _JobState | None = None
+    if job_id:
+        with _active_jobs_lock:
+            job = _active_jobs.get(job_id)
+        if job is None:
+            job = _create_job(text, seed=seed_value)
+            job_id = job.job_id
+    else:
+        # Always create a lightweight job for cancel + progress (even for blocking /generate).
+        job = _create_job(text, seed=seed_value)
+        job_id = job.job_id
+
+    # Inject progress logits processor for cancel + live ETA.
+    eos_id = _get_eos_token_id(model)
+    progress_processor = _ProgressLogitsProcessor(job, eos_id)
+    gen_kwargs.setdefault("logits_processor", [])
+    gen_kwargs["logits_processor"] = list(gen_kwargs["logits_processor"]) + [progress_processor]
 
     if (os.getenv("TTS_DIAG", "0").strip() == "1" or os.path.exists("/tmp/tts_diag")) and TTS_BACKEND == "openvino":
-        eos_id = getattr(
-            getattr(getattr(model, "model", None), "config", None), "talker_config", None
-        )
-        eos_id = getattr(eos_id, "codec_eos_token_id", 2150) if eos_id is not None else 2150
-        gen_kwargs.setdefault("logits_processor", [])
-        gen_kwargs["logits_processor"] = list(gen_kwargs["logits_processor"]) + [
+        diag_kwargs = gen_kwargs.copy()
+        diag_kwargs.setdefault("logits_processor", [])
+        diag_kwargs["logits_processor"] = list(diag_kwargs["logits_processor"]) + [
             _DiagLogitsProcessor(eos_id)
         ]
+        gen_kwargs = diag_kwargs
         print(f"[diag] TTS_DIAG active  eos_token_id={eos_id}", flush=True)
 
     # Diagnostic/safety override: cap generation length so a non-terminating
@@ -853,6 +1099,22 @@ def _run_generate(
         gen_kwargs.setdefault("max_new_tokens", int(_max_new))
         print(f"[diag] TTS_MAX_NEW_TOKENS override -> {_max_new}", flush=True)
 
+    # Safety cap: ensure max_new_tokens is within sane bounds based on speech duration.
+    system_limit = int(os.getenv("TTS_SYSTEM_MAX_NEW_TOKENS", "800"))
+    max_speech_secs_str = os.getenv("TTS_MAX_SPEECH_SECONDS", "64")
+    max_speech_secs = float(max_speech_secs_str) if max_speech_secs_str else 64.0
+    from qwen3_tts.presets import capacity_for_seconds
+    safe_capacity = capacity_for_seconds(max_speech_secs)
+    hard_cap_frames = int(safe_capacity * 0.8)
+    expected_frames = job.expected_total_frames if job else 40
+    safety_max = max(expected_frames * 2, hard_cap_frames)
+    chosen = min(system_limit, safety_max)
+    if "max_new_tokens" not in gen_kwargs:
+        gen_kwargs["max_new_tokens"] = chosen
+    else:
+        gen_kwargs["max_new_tokens"] = min(gen_kwargs["max_new_tokens"], chosen)
+    print(f"[generate] effective max_new_tokens={gen_kwargs['max_new_tokens']}", flush=True)
+
     # Batch/complete-file consumers (hermes) don't need the streaming internal
     # text-delivery path. non_streaming_mode=True bakes the whole target text into
     # the prefill instead of feeding it incrementally via trailing_text_hidden.
@@ -868,13 +1130,34 @@ def _run_generate(
             **gen_kwargs,
         )
     except Exception:
+        if job:
+            job.status = "failed"
+            try:
+                job.error = "Generation failed; see server logs."
+            except Exception:
+                pass
         _tb.print_exc()
         raise
+    if job and job.status == "failed":
+        print(
+            f"[GEN-ABORT] {job.message} job_id={job.job_id} text_len={job.text_length}",
+            flush=True,
+        )
     wav, sr = _trim_silence(wavs[0], sr), sr
     duration = len(wav) / sr
     elapsed = time.monotonic() - t0
-    print(f"[generate] done   elapsed={elapsed:.1f}s  audio={duration:.1f}s  RTF={elapsed/duration:.2f}x", flush=True)
-    return wav, sr
+    print(f"[generate] done   elapsed={elapsed:.1f}s  audio={duration:.1f}s  RTF={elapsed/duration:.2f}x  frames={job.frames_generated if job else '-'}", flush=True)
+
+    # If cancelled, we got partial audio but treat as cancelled.
+    if job and job.cancel_event.is_set():
+        job.status = "cancelled"
+        job.message = "Cancelled by user."
+    elif job:
+        job.status = "completed"
+        job.wav = wav
+        job.sr = sr
+
+    return wav, sr, job_id
 
 
 def _apply_optional_seed(seed_value):
@@ -979,6 +1262,23 @@ def _run_generate_with_streaming(
         return [session.full_waveform], vr.sample_rate
 
     started = time.monotonic()
+
+    # Safety cap for streaming: same logic as _run_generate.
+    system_limit_stream = int(os.getenv("TTS_SYSTEM_MAX_NEW_TOKENS", "800"))
+    max_speech_secs_str_stream = os.getenv("TTS_MAX_SPEECH_SECONDS", "64")
+    max_speech_secs_stream = float(max_speech_secs_str_stream) if max_speech_secs_str_stream else 64.0
+    from qwen3_tts.presets import capacity_for_seconds as capacity_for_seconds_stream
+    safe_capacity_stream = capacity_for_seconds_stream(max_speech_secs_stream)
+    hard_cap_frames_stream = int(safe_capacity_stream * 0.8)
+    expected_frames_stream = max(40, int(len(text) / 9.3 * 12))
+    safety_max_stream = max(expected_frames_stream * 2, hard_cap_frames_stream)
+    chosen_stream = min(system_limit_stream, safety_max_stream)
+    if "max_new_tokens" not in gen_kwargs:
+        gen_kwargs["max_new_tokens"] = chosen_stream
+    else:
+        gen_kwargs["max_new_tokens"] = min(gen_kwargs["max_new_tokens"], chosen_stream)
+    print(f"[generate] stream effective max_new_tokens={gen_kwargs['max_new_tokens']}", flush=True)
+
     with session:
         if reuse_streamed_decode:
             speech_tokenizer.decode = reuse_decode

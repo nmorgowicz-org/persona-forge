@@ -87,6 +87,14 @@ interface StoreState {
   editingVoice: EditingVoice | null
   designEngine: DesignEngine
   activityStatus: ActivityStatus | null
+  refTextValidation:
+    | {
+        severity: string | null
+        matchScore: number | null
+        whisperTranscript: string | null
+      }
+    | null
+  setRefTextValidation: (v: StoreState['refTextValidation']) => void
 
   setPage: (page: Page) => void
   setTheme: (theme: Theme) => void
@@ -281,9 +289,10 @@ export const useAppStore = create<StoreState>((set) => ({
   error: null,
   editingVoice: null,
   designEngine: 'qwen',
-  activityStatus: null,
+   activityStatus: null,
+   refTextValidation: null,
 
-  setPage: (page) => set({ page }),
+   setPage: (page) => set({ page }),
   setTheme: (theme) => {
     applyTheme(theme)
     set({ theme })
@@ -300,6 +309,7 @@ export const useAppStore = create<StoreState>((set) => ({
   setEditingVoice: (editingVoice) => set({ editingVoice }),
   setDesignEngine: (engine) => set({ designEngine: engine }),
   setActivityStatus: (activityStatus) => set({ activityStatus }),
+  setRefTextValidation: (refTextValidation) => set({ refTextValidation }),
 
   // -- VoiceDesign --
   vdSelections: {
@@ -571,6 +581,20 @@ const PROGRESS_POLL_MS = 700
       }
       if (data.loading_message !== store.loadingMessage) {
         store.setLoadingMessage(data.loading_message || null)
+      }
+      const rvt = data.ref_text_validation as
+        | {
+            severity?: string
+            match_score?: number
+            whisper_transcript?: string
+          }
+        | null
+      if (rvt) {
+        store.setRefTextValidation({
+          severity: rvt.severity || null,
+          matchScore: rvt.match_score ?? null,
+          whisperTranscript: rvt.whisper_transcript || null,
+        })
       }
     } catch {
       // Transient; will retry

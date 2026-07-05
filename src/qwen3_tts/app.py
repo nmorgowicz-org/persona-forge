@@ -6,6 +6,7 @@ import base64
 import io
 import os
 import queue
+import sys
 import time
 import threading
 import uuid
@@ -16,6 +17,7 @@ import soundfile as sf
 from flask import Flask, Response, jsonify, request, send_from_directory
 
 from qwen3_tts import model, omnivoice_engine, segment_library, voice_design, voice_library
+from qwen3_tts.asr_check import validate_reference_text
 
 # candidate_id -> (wav, sample_rate). In-memory only, single-user local tool (locked decision,
 # docs/dev/features/persona_forge_studio.md §5): cleared at the start of every /omnivoice/audition call, so
@@ -175,6 +177,53 @@ def health():
     return jsonify(state)
 
 
+@app.post("/health/validate-ref-text")
+def health_validate_ref_text():
+    if not model._service_started:
+        return jsonify({"error": "Model not loaded"}), 503
+    from qwen3_tts.config import REF_AUDIO_PATH
+    ref_audio = (os.getenv("REF_AUDIO") or REF_AUDIO_PATH or "").strip() or None
+    ref_text = (os.getenv("REF_TEXT") or "").strip() or None
+    if not ref_audio or not ref_text:
+        return jsonify({"error": "REF_AUDIO or REF_TEXT not configured"}), 400
+
+    def _run():
+        return validate_reference_text(ref_audio, ref_text)
+
+    try:
+        result = model.executor.submit(_run).result(timeout=15)
+    except Exception as exc:
+        return jsonify({"error": f"Validation failed: {exc}"}), 500
+
+    sev = result["severity"]
+    if sev in ("fail", "no_speech"):
+        print(
+            f"[REF-TEXT-VALID] STATUS=fail  score={result.get('match_score')}",
+            flush=True,
+            file=sys.stderr,
+        )
+        print(f"  REF_AUDIO: {ref_audio}", flush=True, file=sys.stderr)
+        print(f"  REF_TEXT:  {ref_text!r}", flush=True, file=sys.stderr)
+        print(f"  Whisper:   {result.get('whisper_transcript')!r}", flush=True, file=sys.stderr)
+        print(f"  SUGGESTION: {result.get('suggestion')}", flush=True, file=sys.stderr)
+    elif sev == "warn":
+        print(
+            f"[REF-TEXT-VALID] STATUS=warn  score={result.get('match_score')}",
+            flush=True,
+            file=sys.stderr,
+        )
+        print(f"  REF_AUDIO: {ref_audio}", flush=True, file=sys.stderr)
+        print(f"  REF_TEXT:  {ref_text!r}", flush=True, file=sys.stderr)
+        print(f"  Whisper:   {result.get('whisper_transcript')!r}", flush=True, file=sys.stderr)
+        print(f"  SUGGESTION: {result.get('suggestion')}", flush=True, file=sys.stderr)
+    else:
+        print(
+            f"[REF-TEXT-VALID] STATUS=ok  score={result.get('match_score')}",
+            flush=True,
+        )
+    return jsonify(result)
+
+
 @app.post("/voice_design")
 def voice_design_create():
     # Checked separately from the generic _ready() 503 below: while a swap is already in
@@ -301,6 +350,55 @@ def voices_delete(voice_id: str):
     if not deleted:
         return jsonify({"error": "voice_id not found"}), 404
     return jsonify({"deleted": voice_id})
+
+
+@app.post("/voices/<voice_id>/validate")
+def voices_validate(voice_id: str):
+    if not model._service_started:
+        return jsonify({"error": "Model not loaded"}), 503
+    meta = voice_library.get_voice(voice_id)
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    wav_path = meta.get("wav_path")
+    sample_text = (meta.get("sample_text") or "").strip()
+    if not wav_path or not sample_text:
+        return jsonify({"error": "Voice missing wav_path or sample_text"}), 400
+
+    def _run():
+        return validate_reference_text(wav_path, sample_text)
+
+    try:
+        result = model.executor.submit(_run).result(timeout=15)
+    except Exception as exc:
+        return jsonify({"error": f"Validation failed: {exc}"}), 500
+
+    sev = result["severity"]
+    if sev in ("fail", "no_speech"):
+        print(
+            f"[REF-TEXT-VALID] voice_id={voice_id} STATUS=fail  score={result.get('match_score')}",
+            flush=True,
+            file=sys.stderr,
+        )
+        print(f"  WAV_PATH: {wav_path}", flush=True, file=sys.stderr)
+        print(f"  SAMPLE_TEXT: {sample_text!r}", flush=True, file=sys.stderr)
+        print(f"  Whisper:   {result.get('whisper_transcript')!r}", flush=True, file=sys.stderr)
+        print(f"  SUGGESTION: {result.get('suggestion')}", flush=True, file=sys.stderr)
+    elif sev == "warn":
+        print(
+            f"[REF-TEXT-VALID] voice_id={voice_id} STATUS=warn  score={result.get('match_score')}",
+            flush=True,
+            file=sys.stderr,
+        )
+        print(f"  WAV_PATH: {wav_path}", flush=True, file=sys.stderr)
+        print(f"  SAMPLE_TEXT: {sample_text!r}", flush=True, file=sys.stderr)
+        print(f"  Whisper:   {result.get('whisper_transcript')!r}", flush=True, file=sys.stderr)
+        print(f"  SUGGESTION: {result.get('suggestion')}", flush=True, file=sys.stderr)
+    else:
+        print(
+            f"[REF-TEXT-VALID] voice_id={voice_id} STATUS=ok  score={result.get('match_score')}",
+            flush=True,
+        )
+    return jsonify(result)
 
 
 def _ensure_service_started(timeout_seconds: int = 900):
@@ -708,6 +806,35 @@ def omnivoice_audition_progress():
             "current_candidate_index": prog.get("current_candidate_index"),
         }
     )
+
+
+@app.post("/omnivoice/audition/cancel")
+def omnivoice_audition_cancel():
+    """Cancel a running OmniVoice audition job.
+
+    Sets the job status to failed and clears any swap pending flag so it doesn't block
+    further work. Uses the same cooperative pattern: the OmniVoice engine will stop at
+    the next segment/candidate boundary.
+    """
+    job_id = (request.args.get("job_id") or "").strip()
+    if not job_id:
+        return jsonify({"error": "job_id is required"}), 400
+
+    with _OV_AUDITION_JOBS_LOCK:
+        job = _OV_AUDITION_JOBS.get(job_id)
+        if job is None:
+            return jsonify({"error": "Unknown or expired job_id"}), 404
+        if job["status"] != "running":
+            return jsonify({"error": "Job is not currently running"}), 400
+
+        job["status"] = "failed"
+        job["message"] = "Cancelled by user."
+        job["current_segment_index"] = None
+
+    # Clear swap pending so other operations aren't blocked.
+    omnivoice_engine.clear_swap_pending()
+
+    return jsonify({"cancelled": True, "job_id": job_id})
 
 
 def _resolve_omnivoice_selections(selections: Any) -> list[tuple[Any, int]] | None:
@@ -1134,10 +1261,7 @@ def generate():
         return jsonify({"error": "seed must be an integer"}), 400
     resolved_seed = model.resolve_seed(seed)
     try:
-        # Longer than the other routes' 300s: this can now queue behind an in-flight
-        # VoiceDesign swap (unload + load + generate + unload + reload, observed ~90-120s,
-        # longer on a cold OpenVINO kernel cache) before its own generation even starts.
-        wav, sr = model.executor.submit(
+        wav, sr, job_id = model.executor.submit(
             model._run_generate,
             text,
             language,
@@ -1147,9 +1271,25 @@ def generate():
         ).result(timeout=480)
         audio, media_type = _encode(wav, sr, fmt)
     except Exception as exc:
+        if isinstance(exc, RuntimeError) and "cache capacity exceeded" in str(exc):
+            print(
+                f"[OV-CAPACITY] capacity exceeded; text_len={len(text)}; "
+                f"likely no EOS or REF_TEXT mismatch.",
+                flush=True,
+            )
+            return jsonify({
+                "error": (
+                    "Generation aborted: model exceeded its allowed audio length. "
+                    "This often indicates a mismatch between REF_TEXT and REF_AUDIO, "
+                    "or text that is too long for this deployment's TTS_MAX_SPEECH_SECONDS. "
+                    f"Current request text length: {len(text)}"
+                )
+            }), 422
         return jsonify({"error": f"Inference error: {exc}"}), 500
     response = Response(audio, content_type=media_type)
     response.headers["X-Seed"] = str(resolved_seed)
+    if job_id:
+        response.headers["X-Job-Id"] = job_id
     return response
 
 
@@ -1182,9 +1322,7 @@ def openai_audio_speech():
         return _openai_error("seed must be an integer", 400)
     resolved_seed = model.resolve_seed(seed)
     try:
-        # See /generate's matching comment: this can queue behind an in-flight VoiceDesign
-        # swap, so it gets the same longer timeout.
-        wav, sr = model.executor.submit(
+        wav, sr, job_id = model.executor.submit(
             model._run_generate,
             text,
             language,
@@ -1194,11 +1332,164 @@ def openai_audio_speech():
         ).result(timeout=480)
         audio, media_type = _encode(wav, sr, fmt)
     except Exception as exc:
+        if isinstance(exc, RuntimeError) and "cache capacity exceeded" in str(exc):
+            print(
+                f"[OV-CAPACITY] capacity exceeded; text_len={len(text)}; "
+                f"likely no EOS or REF_TEXT mismatch.",
+                flush=True,
+            )
+            return _openai_error(
+                "Generation aborted: model exceeded its allowed audio length. "
+                "This often indicates a mismatch between REF_TEXT and REF_AUDIO, "
+                "or text that is too long for this deployment's TTS_MAX_SPEECH_SECONDS.",
+                422,
+                "invalid_request_error",
+            )
         return _openai_error(f"Inference error: {exc}", 500, "api_error")
     response = Response(audio, content_type=media_type)
     response.headers["X-Seed"] = str(resolved_seed)
+    if job_id:
+        response.headers["X-Job-Id"] = job_id
     return response
 
+
+# ── Async generation endpoints (progress + cancel) ──────────────────────────────────────────
+
+@app.post("/generate/async")
+def generate_async():
+    """Start a generation job and return immediately with job_id.
+
+    Caller then polls /generate/progress?job_id=... for live progress/ETA and cancel.
+    """
+    if not model._service_started and not _ensure_service_started(timeout_seconds=240):
+        return jsonify({"error": "Model not loaded"}), 503
+    if not _generation_ready():
+        return jsonify({"error": "Model not loaded"}), 503
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    text, language = _generation_fields(data)
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    fmt = _canonical_format(data.get("response_format"))
+    if fmt not in _SUPPORTED_FORMATS:
+        return jsonify({"error": f"unsupported response_format {fmt!r}; supported: "
+                        f"{', '.join(sorted(_SUPPORTED_FORMATS))}"}), 400
+    voice_id = (data.get("voice_id") or "").strip() or None
+    instruct = (data.get("instruct") or "").strip() or None
+    seed = data.get("seed")
+    if seed is not None and not isinstance(seed, int):
+        return jsonify({"error": "seed must be an integer"}), 400
+    resolved_seed = model.resolve_seed(seed)
+
+    # Pre-create the job so the frontend knows the job_id immediately.
+    job = model._create_job(text, seed=resolved_seed)
+    job_id = job.job_id
+
+    def _run():
+        try:
+            model.executor.submit(
+                model._run_generate,
+                text,
+                language,
+                voice_id=voice_id,
+                seed_value=resolved_seed,
+                instruct=instruct,
+                job_id=job_id,
+            ).result(timeout=480)
+        except Exception as exc:
+            with model._active_jobs_lock:
+                j = model._active_jobs.get(job_id)
+            if j:
+                j.status = "failed"
+                j.error = str(exc)
+        finally:
+            # Clean up after some time; caller has downloaded audio.
+            import time as _t
+            _t.sleep(120)
+            model._cleanup_job(job_id)
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    return jsonify({"job_id": job_id})
+
+
+@app.get("/generate/progress")
+def generate_progress():
+    """Return live progress for an async generation job."""
+    job_id = request.args.get("job_id")
+    if not job_id:
+        return jsonify({"error": "job_id query parameter is required"}), 400
+
+    with model._active_jobs_lock:
+        job = model._active_jobs.get(job_id)
+    if job is None:
+        return jsonify({"error": "Unknown or expired job_id"}), 404
+
+    # Build a rich progress response from the job state.
+    prog = model.get_job_progress(job_id)
+    if prog is None:
+        return jsonify({"error": "Unknown or expired job_id"}), 404
+
+    # Add status-specific data.
+    if job.status == "completed":
+        prog["audio_available"] = True
+    elif job.status in ("cancelled", "failed"):
+        # If cancelled, there may be partial audio; still expose it.
+        prog["audio_available"] = job.wav is not None and job.sr > 0
+
+    return jsonify(prog)
+
+
+@app.post("/generate/cancel")
+def generate_cancel():
+    """Cancel an async generation job cooperatively."""
+    job_id = (request.args.get("job_id") or "").strip()
+    if not job_id:
+        # Also check JSON body.
+        data = _json_body()
+        if data:
+            job_id = (data.get("job_id") or "").strip()
+    if not job_id:
+        return jsonify({"error": "job_id is required"}), 400
+
+    cancelled = model.cancel_job(job_id)
+    if not cancelled:
+        return jsonify({"error": "Unknown or not-running job_id"}), 404
+
+    return jsonify({"cancelled": True, "job_id": job_id})
+
+
+@app.get("/generate/job/<job_id>/audio")
+def generate_job_audio(job_id: str):
+    """Return the audio for a completed or cancelled (partial) generation job."""
+    with model._active_jobs_lock:
+        job = model._active_jobs.get(job_id)
+    if job is None:
+        return jsonify({"error": "Unknown or expired job_id"}), 404
+
+    if job.status not in ("completed", "cancelled"):
+        return jsonify({"error": "Job not completed yet"}), 400
+
+    wav = job.wav
+    sr = job.sr
+    if wav is None or sr <= 0:
+        return jsonify({"error": "No audio available"}), 404
+
+    fmt = (request.args.get("response_format") or "mp3").strip().lower()
+    try:
+        audio_bytes, media_type = _encode(wav, sr, fmt)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    response = Response(audio_bytes, content_type=media_type)
+    if job.seed is not None:
+        response.headers["X-Seed"] = str(job.seed)
+    response.headers["X-Job-Id"] = job_id
+    return response
+
+
+# ── Streaming endpoint ─────────────────────────────────────────────────────────────────────
 
 @app.post("/generate/stream")
 def generate_stream():
