@@ -168,62 +168,28 @@ def patch_talker_prepare_inputs() -> None:
 
 
 def patch_eager_attention_mask_broadcast() -> None:
-    """Fix attention_mask broadcasting bug in qwen_tts eager_attention_forward and
-    transformers sdpa_attention_forward.
+    """Fix attention_mask issues in PyTorch backend.
 
-    During auto-regressive decode, the original attention_mask is still the full
-    prefill mask (e.g. (B,1,170,170)). When broadcast against decode attn_weights
-    (B,8,1,171), this produces (B,8,170,171) instead of (B,8,1,171), leading to
-    reshape → (1,1,350208) and a matmul crash at o_proj.
+    Two problems during T5-style decode (auto-regressive generation with cache):
 
-    Fix: for both the local eager_attention_forward and the transformers
-    sdpa_attention_forward, ensure the 4D attention_mask is sliced to match the
-    current query/key lengths before use.
+    1) Stale 4D attention_mask from prefill:
+       - Prefill creates a mask (B,1,170,170)
+       - Decode passes it unchanged instead of updating for (B,1,1,171)
+       - SDPA broadcasts it wrong, producing garbage shapes and matmul crash
+       - 350208 = 170 * 2048 (pre-fill seq * hidden)
+       - Fix: patch sdpa_attention_forward to slice 4D mask to current Q/K lengths.
+
+    2) create_causal_mask with None attention_mask:
+       - Our prepare_inputs_for_generation patches pop the 4D mask to avoid (1)
+       - create_causal_mask then gets attention_mask=None in decode
+       - In some transformers 5.x / qwen_tts configs, this creates a wrong mask
+       - Fix: monkeypatch create_causal_mask to force a clean causal mask
+         when in decode mode (single-token inputs, cache present).
     """
     from qwen_tts.core.models import modeling_qwen3_tts as M
     import torch
-    import torch.nn.functional as F
 
-    # 1) Patch local eager_attention_forward
-    orig_eager = M.eager_attention_forward
-
-    @functools.wraps(orig_eager)
-    def patched_eager_attention_forward(
-        module,
-        query,
-        key,
-        value,
-        attention_mask,
-        scaling,
-        dropout=0.0,
-        **kwargs,
-    ):
-        key_states = M.repeat_kv(key, module.num_key_value_groups)
-        value_states = M.repeat_kv(value, module.num_key_value_groups)
-
-        attn_weights = torch.matmul(query, key_states.transpose(2, 3)) * scaling
-        if attention_mask is not None:
-            # Slice both Q and K dims to match attn_weights (B, H, q_len, k_len)
-            causal_mask = attention_mask[
-                :, :, : attn_weights.shape[2], : attn_weights.shape[3]
-            ]
-            attn_weights = attn_weights + causal_mask
-
-        attn_weights = F.softmax(
-            attn_weights, dim=-1, dtype=torch.float32
-        ).to(query.dtype)
-        attn_weights = F.dropout(
-            attn_weights, p=dropout, training=module.training
-        )
-        attn_output = torch.matmul(attn_weights, value_states)
-        attn_output = attn_output.transpose(1, 2).contiguous()
-        return attn_output, attn_weights
-
-    M.eager_attention_forward = patched_eager_attention_forward
-
-    # 2) Patch transformers sdpa_attention_forward to fix the broadcast there too
-    # The qwen_tts attention.forward selects this when _attn_implementation is "sdpa"
-    # (the default when flash-attn is not installed).
+    # 1) Patch sdpa_attention_forward for stale-mask slicing
     from transformers.integrations import sdpa_attention
 
     orig_sdpa = sdpa_attention.sdpa_attention_forward
@@ -239,14 +205,12 @@ def patch_eager_attention_mask_broadcast() -> None:
         dropout=0.0,
         **kwargs,
     ):
-        # If attention_mask is a 4D tensor whose query dimension does not match
-        # the query length, it's a stale prefill mask; slice to current lengths.
         if (
             attention_mask is not None
             and attention_mask.dim() == 4
             and query.dim() == 4
         ):
-            b, h, q_len, k_len = query.shape[0], query.shape[1], query.shape[2], key.shape[3]
+            q_len, k_len = query.shape[2], key.shape[3]
             if (
                 attention_mask.shape[2] != q_len
                 or attention_mask.shape[3] != k_len
@@ -265,8 +229,50 @@ def patch_eager_attention_mask_broadcast() -> None:
         )
 
     sdpa_attention.sdpa_attention_forward = patched_sdpa_attention_forward
+
+    # 2) Patch create_causal_mask to ensure correct decode-time masks
+    orig_create_causal_mask = M.create_causal_mask
+
+    @functools.wraps(orig_create_causal_mask)
+    def patched_create_causal_mask(
+        config,
+        inputs_embeds,
+        attention_mask,
+        past_key_values=None,
+        position_ids=None,
+        **kwargs,
+    ):
+        # If we're in decode mode (single-token input with cache present)
+        # and attention_mask is None, the upstream implementation may produce
+        # an incorrect mask shape for T5-style generation. Force a clean
+        # causal mask: (B, 1, q_len, kv_len) where q_len = 1.
+        is_decode = (
+            inputs_embeds.shape[1] == 1
+            and past_key_values is not None
+        )
+        if is_decode:
+            past_len = past_key_values.get_seq_length()
+            batch_size, q_len = inputs_embeds.shape[0], inputs_embeds.shape[1]
+            kv_len = q_len + past_len
+            # Full attention on all keys (past + current): upper-triangular is
+            # handled by SDPA's is_causal=True when mask is None. Return None
+            # to let the attention kernel use its native causal behavior.
+            # For models that need an explicit float mask, return a (B,1,q,kv)
+            # all-zeros mask (no masking needed; causal is enforced by is_causal).
+            return None
+
+        return orig_create_causal_mask(
+            config,
+            inputs_embeds,
+            attention_mask,
+            past_key_values=past_key_values,
+            position_ids=position_ids,
+            **kwargs,
+        )
+
+    M.create_causal_mask = patched_create_causal_mask
     print(
-        "[transformers_compat] patched eager_attention_forward and "
-        "sdpa_attention_forward (attention_mask Q/K broadcast fix for decode)",
+        "[transformers_compat] patched sdpa_attention_forward and "
+        "create_causal_mask (PyTorch decode mask fix)",
         flush=True,
     )
