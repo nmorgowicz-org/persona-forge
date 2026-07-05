@@ -110,10 +110,10 @@ def patch_talker_prepare_inputs(talker) -> None:
         # Call the base, then remove stale inputs_embeds so forward() does not
         # mistake this decode step for a prefill.
         model_inputs = _base_pigf(self_inner, input_ids=input_ids,
-                                  past_key_values=past_key_values,
-                                  inputs_embeds=inputs_embeds,
-                                  is_first_iteration=is_first_iteration,
-                                  **kwargs)
+                                   past_key_values=past_key_values,
+                                   inputs_embeds=inputs_embeds,
+                                   is_first_iteration=is_first_iteration,
+                                   **kwargs)
 
         # Log first few decode steps
         if call_count <= 5:
@@ -127,6 +127,15 @@ def patch_talker_prepare_inputs(talker) -> None:
             )
 
         model_inputs.pop("inputs_embeds", None)
+
+        # During decode, the prefill attention_mask (4D, e.g. B,1,170,170) leaks into
+        # SDPA which broadcasts it wrongly, producing garbage shapes. For single-token
+        # decode steps we rely on SDPA's causal masking instead.
+        if "attention_mask" in model_inputs:
+            mask = model_inputs["attention_mask"]
+            if mask.dim() == 4 and mask.shape[2] > 1:
+                model_inputs.pop("attention_mask")
+
         return model_inputs
 
     Qwen3TTSTalkerForConditionalGeneration.prepare_inputs_for_generation = _fixed_pigf
