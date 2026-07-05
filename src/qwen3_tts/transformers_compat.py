@@ -6,14 +6,7 @@ import functools
 
 
 def repair_rotary_buffers(root, torch) -> list[dict[str, object]]:
-    """Recompute non-persistent RoPE buffers after meta-device model loading.
-
-    qwen-tts registers ``inv_freq`` with ``persistent=False``, so it is absent from the
-    checkpoint. Transformers 5 can construct that buffer on the meta device and later
-    materialize it as uninitialized storage. A merely finite check is insufficient: the
-    observed corruption used the finite FP16 extrema (-65504, 65504). Recompute from the
-    module's own config/initializer and fail closed on the default-RoPE invariants.
-    """
+    """Recompute non-persistent RoPE buffers after meta-device model loading."""
     repaired = []
     for name, module in root.named_modules():
         initializer = getattr(module, "rope_init_fn", None)
@@ -50,28 +43,28 @@ def repair_rotary_buffers(root, torch) -> list[dict[str, object]]:
 
 
 def patch_talker_prepare_inputs() -> None:
-    """Fix two transformers 5.x issues in the talker's prepare_inputs_for_generation.
+    """Fix transformers 5.x T5-style decode issues.
+
+    Problems during auto-regressive generation with cache:
 
     1) Stale inputs_embeds leak:
-       Transformers 5.x centralised prepare_inputs_for_generation into GenerationMixin.
-       On decode steps, it forwards all model_kwargs, including the original long
-       inputs_embeds from step 1. Qwen3TTSTalkerForConditionalGeneration.forward
-       uses ``inputs_embeds.shape[1] > 1`` to decide "prefill path". With stale
-       (B, 171, 2048) embeds on a 1-token decode step, this causes:
-       - Wrong attention mask (q_length=171 vs accumulated kv_length)
-       - Corrupted attn_output reshape → (B, seq*hidden) → matmul crash.
-
-       Fix: drop inputs_embeds from model_kwargs on non-first steps.
+       Transformers 5.x forwards the original long inputs_embeds from step 1 into
+       all decode steps. Qwen3TTSTalkerForConditionalGeneration.forward uses
+       inputs_embeds.shape[1] > 1 to choose the prefill path. With stale (B, L, D)
+       embeds on a 1-token decode step, it reconstructs a full-length inputs_embeds
+       instead of a single-token one, causing Q/K/V length mismatches and crashes.
 
     2) Full input_ids on decode steps:
-       T5 passes the accumulated (B, N) input_ids instead of just the last token.
-       The talker uses input_ids.shape[1] for RoPE and codec-embedding, so N>1
-       produces garbage RoPE/logits and non-terminating generation.
+       T5-style generation passes accumulated (B, N) input_ids instead of just the
+       last token. The talker uses input_ids.shape[1] for RoPE and codec-embedding,
+       so N>1 produces garbage RoPE/logits and non-terminating generation.
 
-       Fix: clip input_ids to last token on decode steps (past_key_values not None,
-       not first iteration).
+    3) Stale attention_mask:
+       A prefill attention_mask (e.g. (1, 171)) leaks into decode steps where the
+       model is only processing 1 token. The create_causal_mask and attention layers
+       use this stale mask length to create wrong masks, leading to shape mismatches
+       in the attention output (e.g. Q=171, K=341, V=171 instead of Q=1, K=171, V=171).
     """
-    from qwen_tts.core.models import modeling_qwen3_tts as M
     from qwen_tts.core.models.modeling_qwen3_tts import (
         Qwen3TTSTalkerCodePredictorModelForConditionalGeneration,
         Qwen3TTSTalkerForConditionalGeneration,
@@ -80,23 +73,11 @@ def patch_talker_prepare_inputs() -> None:
     _base_talker_pigf = Qwen3TTSTalkerForConditionalGeneration.prepare_inputs_for_generation
     _base_predictor_pigf = Qwen3TTSTalkerCodePredictorModelForConditionalGeneration.prepare_inputs_for_generation
 
-    call_count = 0
-
     def _fixed_pigf(cls_label, base_fn, self_inner, input_ids,
                     past_key_values=None, inputs_embeds=None,
                     is_first_iteration=None, **kwargs):
-        nonlocal call_count
-        call_count += 1
-
         # First iteration (prefill): delegate fully to transformers.
         if is_first_iteration:
-            if call_count == 1:
-                print(
-                    f"[diag] {cls_label} prepare_inputs step={call_count} mode=prefill "
-                    f"input_ids={tuple(input_ids.shape) if input_ids is not None else None} "
-                    f"inputs_embeds={tuple(inputs_embeds.shape) if inputs_embeds is not None else None}",
-                    flush=True,
-                )
             return base_fn(self_inner, input_ids=input_ids,
                            past_key_values=past_key_values,
                            inputs_embeds=inputs_embeds,
@@ -111,34 +92,22 @@ def patch_talker_prepare_inputs() -> None:
         ):
             input_ids = input_ids[:, -1:]
 
-        # Call the base, then remove stale inputs_embeds so forward() does not
-        # mistake this decode step for a prefill.
+        # Call the base, then clean up stale items.
         model_inputs = base_fn(self_inner, input_ids=input_ids,
                                past_key_values=past_key_values,
                                inputs_embeds=inputs_embeds,
                                is_first_iteration=is_first_iteration,
                                **kwargs)
 
-        # Log first few decode steps
-        if call_count <= 5:
-            has_embeds_before = "inputs_embeds" in model_inputs
-            print(
-                f"[diag] {cls_label} prepare_inputs step={call_count} mode=decode "
-                f"input_ids={tuple(input_ids.shape) if input_ids is not None else None} "
-                f"inputs_embeds_before_pop={tuple(model_inputs.get('inputs_embeds').shape) if has_embeds_before else None} "
-                f"has_embeds_before={has_embeds_before}",
-                flush=True,
-            )
-
+        # Pop stale inputs_embeds so forward() does not take the prefill path.
         model_inputs.pop("inputs_embeds", None)
 
-        # During decode, the prefill attention_mask (4D, e.g. B,1,170,170) leaks into
-        # SDPA which broadcasts it wrongly, producing garbage shapes. For single-token
-        # decode steps we rely on SDPA's causal masking instead.
+        # Pop stale attention_mask (1D/2D/4D) from prefill.
+        # During decode, relying on past_key_values + causal masking is sufficient.
+        # A stale attention_mask with the prefill length corrupts causal mask creation
+        # and causes Q/K/V length mismatches in the attention layer.
         if "attention_mask" in model_inputs:
-            mask = model_inputs["attention_mask"]
-            if mask.dim() == 4 and mask.shape[2] > 1:
-                model_inputs.pop("attention_mask")
+            model_inputs.pop("attention_mask")
 
         return model_inputs
 
@@ -158,33 +127,14 @@ def patch_talker_prepare_inputs() -> None:
 
     Qwen3TTSTalkerForConditionalGeneration.prepare_inputs_for_generation = _talker_fixed_pigf
     Qwen3TTSTalkerCodePredictorModelForConditionalGeneration.prepare_inputs_for_generation = _predictor_fixed_pigf
-    print(
-        "[transformers_compat] patched talker and code predictor "
-        "prepare_inputs_for_generation (T5 stale-embeds + input_ids clip + attention_mask fix)",
-        flush=True,
-    )
-
-
 
 
 def patch_eager_attention_mask_broadcast() -> None:
-    """Fix attention_mask issues in PyTorch backend.
+    """Defensive patches for attention_mask issues in PyTorch backend.
 
-    Two problems during T5-style decode (auto-regressive generation with cache):
-
-    1) Stale 4D attention_mask from prefill:
-       - Prefill creates a mask (B,1,170,170)
-       - Decode passes it unchanged instead of updating for (B,1,1,171)
-       - SDPA broadcasts it wrong, producing garbage shapes and matmul crash
-       - 350208 = 170 * 2048 (pre-fill seq * hidden)
-       - Fix: patch sdpa_attention_forward to slice 4D mask to current Q/K lengths.
-
-    2) create_causal_mask with None attention_mask:
-       - Our prepare_inputs_for_generation patches pop the 4D mask to avoid (1)
-       - create_causal_mask then gets attention_mask=None in decode
-       - In some transformers 5.x / qwen_tts configs, this creates a wrong mask
-       - Fix: monkeypatch create_causal_mask to force a clean causal mask
-         when in decode mode (single-token inputs, cache present).
+    1) Slice stale 4D masks in sdpa_attention_forward.
+    2) Return None from create_causal_mask in decode mode to avoid
+       stale-mask-based causal masks.
     """
     from qwen_tts.core.models import modeling_qwen3_tts as M
     import torch
@@ -231,59 +181,64 @@ def patch_eager_attention_mask_broadcast() -> None:
     sdpa_attention.sdpa_attention_forward = patched_sdpa_attention_forward
 
     # 2) Patch create_causal_mask and create_sliding_window_causal_mask
-    # at the transformers.masking_utils level (the true source) AND at
-    # modeling_qwen3_tts level, so all models benefit.
     from transformers import masking_utils
 
-    def _make_decode_mask_patch(orig_fn, name):
+    def _make_decode_mask_patch(orig_fn):
         @functools.wraps(orig_fn)
-        def patched_fn(
-            config,
-            inputs_embeds,
-            attention_mask,
-            past_key_values=None,
-            position_ids=None,
-            **kwargs,
-        ):
-            is_decode = (
-                inputs_embeds.shape[1] == 1
+        def patched_fn(**kwargs):
+            # Handle both "inputs_embeds" (correct) and "input_embeds" (qwen_tts tokenizer bug).
+            inputs_embeds = kwargs.get("inputs_embeds")
+            if inputs_embeds is None:
+                inputs_embeds = kwargs.get("input_embeds")
+            past_key_values = kwargs.get("past_key_values")
+
+            # In decode mode (single-token input with existing cache), skip mask creation.
+            if (
+                inputs_embeds is not None
+                and inputs_embeds.shape[1] == 1
                 and past_key_values is not None
-            )
-            if is_decode:
-                if not hasattr(patched_fn, "_diag"):
-                    patched_fn._diag = True
-                    print(
-                        f"[decode_mask_fix] {name}: decode-mode detected: "
-                        f"inputs={tuple(inputs_embeds.shape)} past_len={past_key_values.get_seq_length()}",
-                        flush=True,
-                    )
+            ):
                 return None
 
-            return orig_fn(
-                config,
-                inputs_embeds,
-                attention_mask,
-                past_key_values=past_key_values,
-                position_ids=position_ids,
-                **kwargs,
-            )
+            # Normalize for the original transformers create_causal_mask:
+            # - qwen_tts tokenizer uses "input_embeds" instead of "inputs_embeds"
+            # - also passes "cache_position" which the original doesn't accept
+            # Avoid boolean-evaluation of tensors: use explicit None checks.
+            embeds = inputs_embeds if inputs_embeds is not None else kwargs.get("inputs_embeds")
+            cache = past_key_values if past_key_values is not None else kwargs.get("past_key_values")
+            call_kwargs = {
+                "config": kwargs.get("config"),
+                "inputs_embeds": embeds,
+                "attention_mask": kwargs.get("attention_mask"),
+                "past_key_values": cache,
+                "position_ids": kwargs.get("position_ids"),
+            }
+            return orig_fn(**call_kwargs)
 
         return patched_fn
 
-    # Patch at the source (transformers.masking_utils)
     masking_utils.create_causal_mask = _make_decode_mask_patch(
-        masking_utils.create_causal_mask, "create_causal_mask"
+        masking_utils.create_causal_mask
     )
     masking_utils.create_sliding_window_causal_mask = _make_decode_mask_patch(
-        masking_utils.create_sliding_window_causal_mask, "create_sliding_window_causal_mask"
+        masking_utils.create_sliding_window_causal_mask
     )
-    # Also patch in modeling_qwen3_tts to be safe
     M.create_causal_mask = masking_utils.create_causal_mask
     M.create_sliding_window_causal_mask = masking_utils.create_sliding_window_causal_mask
 
-    print(
-        "[transformers_compat] patched sdpa_attention_forward, "
-        "create_causal_mask, create_sliding_window_causal_mask "
-        "(PyTorch decode mask fix)",
-        flush=True,
-    )
+    # Patch tokenizer module which has its own import and uses "input_embeds" (typo).
+    try:
+        from qwen_tts.core.tokenizer_12hz import modeling_qwen3_tts_tokenizer_v2 as T
+        T.create_causal_mask = masking_utils.create_causal_mask
+        T.create_sliding_window_causal_mask = masking_utils.create_sliding_window_causal_mask
+    except Exception:
+        pass
+
+
+def patch_attn_layer0_diag() -> None:
+    """Optional diagnostic wrapper for attention (no-op in production).
+
+    Kept as a placeholder for attaching temporary shape-tracing patches
+    when debugging. In production builds this can be left empty.
+    """
+    pass

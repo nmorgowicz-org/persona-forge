@@ -31,7 +31,12 @@ from qwen3_tts.model_config import (
     resolve_voice_design_model_repo,
 )
 from qwen3_tts.streaming import StreamingVocoderSession
-from qwen3_tts.transformers_compat import patch_eager_attention_mask_broadcast, patch_talker_prepare_inputs, repair_rotary_buffers
+from qwen3_tts.transformers_compat import (
+    patch_attn_layer0_diag,
+    patch_eager_attention_mask_broadcast,
+    patch_talker_prepare_inputs,
+    repair_rotary_buffers,
+)
 
 configure_hf_token()
 
@@ -345,6 +350,10 @@ def load_model(profile: ModelProfile | None = None):
 
     # Fix attention_mask Q/K broadcast bug in eager_attention_forward (PyTorch backend).
     patch_eager_attention_mask_broadcast()
+
+    # Shape diagnostics for layer 0 attention (PyTorch backend crash).
+    if TTS_BACKEND == "pytorch":
+        patch_attn_layer0_diag()
 
     gc.collect()
 

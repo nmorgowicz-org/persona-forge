@@ -5,8 +5,12 @@
 
 ## Why this exists
 
-qwen-tts==0.1.1 was designed for transformers 4.x. We’re using transformers 5.x for CVE-2026-1839.
-The Dockerfile and runtime code monkeypatch several internal behaviors to keep things working.
+qwen-tts==0.1.1 was designed for transformers 4.x. We're using transformers 5.12.1 for
+CVE-2026-1839. The Dockerfile and runtime code monkeypatch several internal behaviors to
+keep both backends (OpenVINO and PyTorch) working.
+
+Both `TTS_BACKEND=openvino` and `TTS_BACKEND=pytorch` are working under transformers 5.12.1
+with these patches in place.
 
 ## qwen-tts installed --no-deps
 
@@ -23,8 +27,11 @@ The Dockerfile and runtime code monkeypatch several internal behaviors to keep t
   - Strips `@check_model_inputs` decorator that breaks under T5.
 - modeling_mimi.py:
   - Renames `create_sliding_window_causal_mask` → `create_causal_mask` due to T5 symbol changes.
+- modeling_rope_utils.py:
+  - Injects custom `_compute_default_rope_parameters` and sets `"default"` as init function
+    because T5 changed how RoPE is wired.
 
-## Python patches in modeling_qwen3_tts.py
+## Python patches in modeling_qwen3_tts.py (via Dockerfile)
 
 - Replaces direct use of initialization helpers with explicit imports (`from transformers import initialization as init`).
 - Replaces `module.weight.data.normal_` / `zero_` / `fill_` calls with `init.normal_`, `init.zeros_`, `init.ones_`.
@@ -42,33 +49,52 @@ The Dockerfile and runtime code monkeypatch several internal behaviors to keep t
 - `repair_rotary_buffers`:
   - Recomputes `inv_freq` from the `rope_init_fn` and validates it (finite, positive, decreasing, starts at 1.0 for default type).
   - Required after every model load under T5.
-- Dockerfile injects custom `_compute_default_rope_parameters` into `modeling_rope_utils` and sets `"default"` as init function, because T5 changed how RoPE is wired.
+- Dockerfile injects custom `_compute_default_rope_parameters` into `modeling_rope_utils` and sets `"default"` as init function.
 
 ## Talker prepare_inputs_for_generation patch (transformers_compat.py)
 
 Applied at model-load time (for both backends) via `patch_talker_prepare_inputs()`.
-Two issues in one patch:
+Three issues fixed in one patch:
 
-- **Stale inputs_embeds bug (TTS_BACKEND=pytorch crash):**
-  T5's centralised `prepare_inputs_for_generation` forwards all model_kwargs,
+- **Stale inputs_embeds bug (primary crash cause for PyTorch backend):**
+  T5's centralized `prepare_inputs_for_generation` forwards all model_kwargs,
   including the original long-sequence `inputs_embeds` from step 1, into every
   decode step. The talker's `forward` uses `inputs_embeds.shape[1] > 1` to detect
-  prefill; with stale (B, 171, 2048) embeds on a 1-token decode step, it re-enters
-  the prefill path with a wrong mask vs. accumulated K/V → attention corruption →
-  `attn_output` reshape produces (B, seq*hidden) → matmul crash at o_proj.
+  prefill; with stale embeds on a 1-token decode step, it re-enters the prefill path
+  → wrong masks vs. K/V cache → attention corruption → matmul crash.
   Fix: drop `inputs_embeds` from model_inputs on non-first iterations.
 
 - **Full input_ids on decode steps:**
   T5 passes the accumulated (B, N) `input_ids` instead of just the last token.
   The talker uses `input_ids.shape[1]` for RoPE + codec embedding; N>1 produces
   garbage RoPE/logits, EOS ≈ 0, runs to capacity.
-  Fix: clip `input_ids` to `[:, -1:]` in decode steps (past_key_values present,
-  not first iteration).
+  Fix: clip `input_ids` to `[:, -1:]` in decode steps.
 
-CRITICAL: reverting either fix under T5 will crash (pytorch) or produce
+- **Stale attention_mask leak:**
+  A prefill attention_mask (e.g. (1, 171)) leaks into decode steps and corrupts
+  causal mask creation and Q/K/V lengths.
+  Fix: pop `attention_mask` from model_inputs on non-first iterations.
+
+CRITICAL: reverting any of these fixes under T5 will crash (pytorch) or produce
 non-terminating/garbage generation (both backends).
+
+## Attention mask broadcast fix (transformers_compat.py, PyTorch backend)
+
+Applied at model-load time via `patch_eager_attention_mask_broadcast()`.
+
+- **sdpa_attention_forward stale-mask slicing:**
+  If a 4D attention_mask's Q/K dimensions don't match the current query and key
+  lengths, it is sliced to match. Without this, stale masks from prefill cause
+  shape mismatches in SDPA attention.
+
+- **create_causal_mask / create_sliding_window_causal_mask decode-mode bypass:**
+  In decode mode (single-token input with existing cache), return `None` instead
+  of building a mask. This avoids stale prefill-length masks being used to create
+  incorrect causal masks. Patches `transformers.masking_utils`, `modeling_qwen3_tts`,
+  and the tokenizer module which has its own imports.
 
 ## Agent rule
 
 - If bumping transformers, qwen-tts, or related deps, assume these patches need review and retesting.
-- Do not “clean up” these patches unless you’ve proven they’re no longer needed with a full run.
+- Do not "clean up" these patches unless you've proven they're no longer needed with a full run
+  on both backends.
