@@ -1,7 +1,7 @@
 # Plan: Feature roadmap (6 items) + UI/UX polish pass
 
 > Audience: a fresh AI coding agent with **zero prior context** on this repo. Read
-> `docs/plans/PLAN_persona_forge_studio.md` and `docs/plans/PLAN_voice_design.md` first — this doc
+> `docs/dev/features/persona_forge_studio.md` and `docs/dev/architecture/voice_design.md` first — this doc
 > assumes OmniVoice/Stitch Studio, the segment library, and the chip-based VoiceDesign flow already
 > exist and work as described there. This doc scopes six forward-looking features nick asked for
 > after using the shipped stitch editor + reference-text-edit + reopen-in-stitch-studio work, plus
@@ -27,11 +27,11 @@ what's worth doing, not treat it as a required redesign.
   accent-capable path. Any new UI (multi-speaker mode, presets) must not reintroduce an accent
   control on the chip flow. See `voiceDesignChips.ts` composeDescription() docstring.
 - `candidate_id`-only refs (ephemeral in-memory audition cache) can **never** be recovered after
-  server restart/eviction — already a known risk surfaced in `PLAN_stitch_editor.md` and the
+   server restart/eviction — already a known risk surfaced in `docs/dev/features/stitch_editor.md` and the
   reopen-in-stitch-studio feature. Any new feature touching stitch plans or segment refs must keep
   treating `segment_id`/`voice_id` as the only durable refs.
 - Swap-in-progress state must stay honestly surfaced, never hidden behind a bare spinner
-  (`PLAN_voice_design.md` §3). Any new long-running batch feature (multi-speaker render) must reuse
+   (`docs/dev/architecture/voice_design.md` §3). Any new long-running batch feature (multi-speaker render) must reuse
   the existing swap-banner/progress pattern, not invent a silent wait.
 
 ---
@@ -163,7 +163,7 @@ generation step itself), finally concatenating the resulting clips with the exis
 
 **Verification:** backend route curl-testable with a small 2-3 line script before any frontend
 exists (mirrors the delivery-order discipline already used for stitch_plan in
-`PLAN_stitch_editor.md`); frontend `tsc --noEmit && npm run build`, then manual test with a real
+`docs/dev/features/stitch_editor.md`); frontend `tsc --noEmit && npm run build`, then manual test with a real
 multi-speaker script end to end.
 
 ---

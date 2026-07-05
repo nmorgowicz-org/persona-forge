@@ -13,7 +13,7 @@
 - For export system behavior and fragility, see:
   - `docs/agent-reference/EXPORT_SYSTEM.md`
 - For VoiceDesign and frontend work, follow:
-  - `docs/plans/PLAN_voice_design.md`
+  - `docs/dev/architecture/voice_design.md`
 
 If a change conflicts with any of these, stop and propose alternatives explicitly.
 
