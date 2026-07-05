@@ -46,6 +46,7 @@ def _install_fake_model_module() -> None:
     fake_model.executor = ThreadPoolExecutor(max_workers=1)
     fake_model.health_state = lambda: {"status": "ok", "backend": "fake-e2e"}
     fake_model._apply_optional_seed = lambda seed: None
+    fake_model.register_foreign_engine = lambda is_loaded, unload: None
     fake_model.resolve_seed = lambda seed_value: (
         seed_value if seed_value is not None else secrets.randbelow(_MAX_SEED)
     )
