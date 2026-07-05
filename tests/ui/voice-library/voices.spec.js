@@ -6,6 +6,7 @@ async function designAVoice(page) {
   await page.getByTestId('voice-design-sample-text').fill('This is a short sample line.')
   await page.getByTestId('voice-design-generate-button').click()
   await expect(page.getByTestId('voice-design-result')).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: 'Save to library' }).click()
 }
 
 test.describe('voice library', () => {

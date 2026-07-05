@@ -11,6 +11,8 @@ test.describe('voice design', () => {
 
     await expect(page.getByTestId('voice-design-result')).toBeVisible({ timeout: 15_000 })
 
+    await page.getByRole('button', { name: 'Save to library' }).click()
+
     await page.getByTestId('nav-voice-library').click()
     await expect(page.getByTestId('voice-card').first()).toBeVisible()
   })
