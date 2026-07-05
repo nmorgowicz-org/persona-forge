@@ -71,6 +71,7 @@ def patch_talker_prepare_inputs() -> None:
        Fix: clip input_ids to last token on decode steps (past_key_values not None,
        not first iteration).
     """
+    from qwen_tts.core.models import modeling_qwen3_tts as M
     from qwen_tts.core.models.modeling_qwen3_tts import (
         Qwen3TTSTalkerCodePredictorModelForConditionalGeneration,
         Qwen3TTSTalkerForConditionalGeneration,
@@ -162,6 +163,38 @@ def patch_talker_prepare_inputs() -> None:
         "prepare_inputs_for_generation (T5 stale-embeds + input_ids clip + attention_mask fix)",
         flush=True,
     )
+
+    # Add lightweight shape diagnostics to both attention classes
+    # to help debug decode-phase attention_mask issues.
+    for cls in [
+        M.Qwen3TTSAttention,
+        M.Qwen3TTSTalkerAttention,
+    ]:
+        orig_fwd = cls.forward
+
+        @functools.wraps(orig_fwd)
+        def diag_fwd(self, hidden_states, position_embeddings, attention_mask,
+                     past_key_values=None, cache_position=None, **kw):
+            if not hasattr(self, "_diag_printed"):
+                self._diag_printed = True
+            if past_key_values is not None:  # decode phase
+                if attention_mask is not None:
+                    print(
+                        f"[attn_mask_diag] {cls.__name__} layer={self.layer_idx} "
+                        f"hidden={tuple(hidden_states.shape)} "
+                        f"mask={tuple(attention_mask.shape)}",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"[attn_mask_diag] {cls.__name__} layer={self.layer_idx} "
+                        f"hidden={tuple(hidden_states.shape)} mask=NONE",
+                        flush=True,
+                    )
+            return orig_fwd(self, hidden_states, position_embeddings,
+                            attention_mask, past_key_values, cache_position, **kw)
+
+        cls.forward = diag_fwd
 
 
 def patch_eager_attention_mask_broadcast() -> None:
