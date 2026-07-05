@@ -25,6 +25,7 @@ import os
 import secrets
 import sys
 import tempfile
+import threading
 import time
 import types
 from concurrent.futures import ThreadPoolExecutor
@@ -99,7 +100,8 @@ def _install_fake_model_module() -> None:
     fake_model.apply_runtime_config = _apply_runtime_config
 
     def _run_generate(text, language, **kwargs):
-        return np.zeros(int(_SAMPLE_RATE * 0.5), dtype=np.float32), _SAMPLE_RATE
+        # Now returns (wav, sr, job_id) for consistency with real model.py.
+        return np.zeros(int(_SAMPLE_RATE * 0.5), dtype=np.float32), _SAMPLE_RATE, "fake-job-" + str(int(time.time() * 1000))
 
     def _run_generate_with_streaming(text, language, on_chunk, **kwargs):
         chunk = np.zeros(_SAMPLE_RATE // 4, dtype=np.float32)
@@ -112,6 +114,62 @@ def _install_fake_model_module() -> None:
 
     fake_model._run_generate = _run_generate
     fake_model._run_generate_with_streaming = _run_generate_with_streaming
+
+    # Async job helpers (used by /generate/async, /generate/progress, /generate/cancel)
+    fake_model._active_jobs = {}
+    fake_model._active_jobs_lock = threading.Lock()
+
+    def _fake_create_job(text, seed=None):
+        job_id = "fake-job-" + str(int(time.time() * 1000))
+        class _FakeJob:
+            job_id = job_id
+            status = "running"
+            frames_generated = 0
+            reference_frames = 0
+            text_length = len(text)
+            message = None
+            wav = np.zeros(int(_SAMPLE_RATE * 0.5), dtype=np.float32)
+            sr = _SAMPLE_RATE
+            seed = seed
+            error = None
+            started_at = time.monotonic()
+            cancel_event = threading.Event()
+        fake_model._active_jobs[job_id] = _FakeJob()
+        return fake_model._active_jobs[job_id]
+
+    def _fake_get_job_progress(job_id):
+        job = fake_model._active_jobs.get(job_id)
+        if job is None:
+            return None
+        elapsed = time.monotonic() - job.started_at
+        return {
+            "job_id": job_id,
+            "status": job.status,
+            "frames_generated": job.frames_generated,
+            "expected_total_frames": 60,
+            "progress_pct": min(100.0, (job.frames_generated / 60) * 100),
+            "elapsed_seconds": round(elapsed, 1),
+            "eta_seconds": None,
+            "message": job.message,
+        }
+
+    def _fake_cancel_job(job_id):
+        job = fake_model._active_jobs.get(job_id)
+        if job is None or job.status != "running":
+            return False
+        job.status = "cancelled"
+        job.message = "Cancelled by user."
+        job.cancel_event.set()
+        return True
+
+    def _fake_cleanup_job(job_id):
+        fake_model._active_jobs.pop(job_id, None)
+
+    fake_model._create_job = _fake_create_job
+    fake_model.get_job_progress = _fake_get_job_progress
+    fake_model.cancel_job = _fake_cancel_job
+    fake_model._cleanup_job = _fake_cleanup_job
+
     sys.modules["qwen3_tts.model"] = fake_model
 
 
