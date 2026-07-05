@@ -100,8 +100,44 @@ def _install_fake_model_module() -> None:
     fake_model.apply_runtime_config = _apply_runtime_config
 
     def _run_generate(text, language, **kwargs):
-        # Now returns (wav, sr, job_id) for consistency with real model.py.
-        return np.zeros(int(_SAMPLE_RATE * 0.5), dtype=np.float32), _SAMPLE_RATE, "fake-job-" + str(int(time.time() * 1000))
+        # For consistency with real model.py, this:
+        # - Uses job_id from kwargs if provided (async job flow)
+        # - Marks job as completed and stores wav/sr so /generate/progress returns "completed"
+        # - Falls back to a plain tuple if no job_id
+        import random
+        job_id = kwargs.get("job_id")
+        wav = np.zeros(int(_SAMPLE_RATE * 0.5), dtype=np.float32)
+        sr = _SAMPLE_RATE
+        resolved_seed = kwargs.get("seed_value")
+
+        if job_id:
+            with fake_model._active_jobs_lock:
+                job = fake_model._active_jobs.get(job_id)
+            if job is None:
+                # Race guard: job already cleaned up.
+                return wav, sr, job_id
+
+            # Simulate short generation delay (fast for tests)
+            time.sleep(0.05)
+            job.frames_generated = 60  # matches expected_total_frames in _fake_get_job_progress
+
+            # Store result in job so /generate/job/{id}/audio can return it.
+            job.wav = wav
+            job.sr = sr
+            job.status = "completed"
+            job.message = None
+            job.error = None
+
+            # Store seed for test consistency (mirrors real model).
+            if resolved_seed is not None:
+                job.seed = resolved_seed
+            else:
+                job.seed = random.randint(0, _MAX_SEED - 1)
+
+            return wav, sr, job_id
+        else:
+            # Legacy: no job_id (used by some internal callers)
+            return wav, sr, "fake-job-" + str(int(time.time() * 1000))
 
     def _run_generate_with_streaming(text, language, on_chunk, **kwargs):
         chunk = np.zeros(_SAMPLE_RATE // 4, dtype=np.float32)
