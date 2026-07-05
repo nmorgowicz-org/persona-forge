@@ -4,6 +4,8 @@ import io
 import shutil
 import sys
 import tempfile
+import threading
+import time
 import types
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -26,13 +28,85 @@ fake_model.health_state = lambda: {"status": "ok", "backend": "openvino"}
 fake_model.reconfig_in_progress = lambda: False
 fake_model.runtime_config_state = lambda: {"reconfig_in_progress": False, "live": {}}
 fake_model.apply_runtime_config = lambda updates: {"reconfig_in_progress": False, "live": updates}
-fake_model._run_generate = lambda text, language, **kwargs: (np.zeros(240, dtype=np.float32), 24000)
+
+# _run_generate now returns (wav, sr, job_id)
+_fake_job_counter = 0
+
+def _fake_run_generate(text, language, **kwargs):
+    global _fake_job_counter
+    _fake_job_counter += 1
+    job_id = f"fake-job-{_fake_job_counter}"
+    return np.zeros(240, dtype=np.float32), 24000, job_id
+
+fake_model._run_generate = _fake_run_generate
+
 fake_model._apply_optional_seed = lambda seed: None
 fake_model.resolve_seed = lambda seed_value: seed_value if seed_value is not None else 12345
 fake_model._touch_last_request = lambda: None
 fake_model.force_unload = lambda: None
 fake_model.unload_foreign_models = lambda: None
 fake_model.register_foreign_engine = lambda is_loaded, unload: None
+
+# Async job helpers (for /generate/async, /generate/progress, /generate/cancel)
+fake_model._active_jobs = {}
+fake_model._active_jobs_lock = threading.Lock()
+
+def _fake_create_job(text, seed=None):
+    global _fake_job_counter
+    _fake_job_counter += 1
+    job_id = f"fake-job-{_fake_job_counter}"
+    class _FakeJob:
+        job_id = job_id
+        status = "running"
+        frames_generated = 0
+        reference_frames = 0
+        text_length = len(text)
+        message = None
+        wav = np.zeros(240, dtype=np.float32)
+        sr = 24000
+        seed = seed
+        error = None
+        started_at = time.monotonic()
+        cancel_event = threading.Event()
+    fake_model._active_jobs[job_id] = _FakeJob()
+    return fake_model._active_jobs[job_id]
+
+fake_model._create_job = _fake_create_job
+
+def _fake_get_job_progress(job_id):
+    job = fake_model._active_jobs.get(job_id)
+    if job is None:
+        return None
+    elapsed = time.monotonic() - job.started_at
+    frames = job.frames_generated
+    return {
+        "job_id": job_id,
+        "status": job.status,
+        "frames_generated": frames,
+        "expected_total_frames": 60,
+        "progress_pct": min(100.0, (frames / 60) * 100),
+        "elapsed_seconds": round(elapsed, 1),
+        "eta_seconds": None,
+        "message": job.message,
+    }
+
+fake_model.get_job_progress = _fake_get_job_progress
+
+def _fake_cancel_job(job_id):
+    job = fake_model._active_jobs.get(job_id)
+    if job is None or job.status != "running":
+        return False
+    job.status = "cancelled"
+    job.message = "Cancelled by user."
+    job.cancel_event.set()
+    return True
+
+fake_model.cancel_job = _fake_cancel_job
+
+def _fake_cleanup_job(job_id):
+    fake_model._active_jobs.pop(job_id, None)
+
+fake_model._cleanup_job = _fake_cleanup_job
 
 
 def _stream(text, language, on_chunk, **kwargs):
@@ -118,7 +192,7 @@ class AppTests(unittest.TestCase):
 
         def fake_run_generate(text, language, **kwargs):
             seen.update(kwargs)
-            return np.zeros(240, dtype=np.float32), 24000
+            return np.zeros(240, dtype=np.float32), 24000, "fake-job-1"
 
         with patch.object(app_module.model, "_run_generate", fake_run_generate), patch.object(
             app_module, "_encode", return_value=(b"audio", "audio/mpeg")
@@ -133,7 +207,7 @@ class AppTests(unittest.TestCase):
 
         def fake_run_generate(text, language, **kwargs):
             seen.update(kwargs)
-            return np.zeros(240, dtype=np.float32), 24000
+            return np.zeros(240, dtype=np.float32), 24000, "fake-job-1"
 
         with patch.object(app_module.model, "_run_generate", fake_run_generate), patch.object(
             app_module, "_encode", return_value=(b"audio", "audio/mpeg")
