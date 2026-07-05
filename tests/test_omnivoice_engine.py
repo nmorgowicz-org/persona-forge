@@ -109,9 +109,12 @@ class RunOmnivoiceJobTests(unittest.TestCase):
         "speech found" so it never interferes with the analyze_take-driven assertions."""
         from qwen3_tts import omnivoice_engine
 
-        patcher = patch.object(omnivoice_engine, "has_speech", lambda wav, sr: (True, "stub"))
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        patcher1 = patch.object(omnivoice_engine, "has_speech", lambda wav, sr: (True, "stub", -1.0))
+        patcher2 = patch.object(omnivoice_engine, "compute_transcript_match_score", lambda ref, hyp: 1.0)
+        patcher1.start()
+        patcher2.start()
+        self.addCleanup(patcher1.stop)
+        self.addCleanup(patcher2.stop)
         return omnivoice_engine
 
     def test_flagged_first_draw_is_retried_once_then_succeeds(self):
@@ -130,7 +133,7 @@ class RunOmnivoiceJobTests(unittest.TestCase):
 
         self.assertEqual(len(results), 1)
         self.assertEqual(len(results[0]), 1)
-        wav, out_sr, flagged, reason = results[0][0]
+        wav, out_sr, flagged, reason, transcript, match_score = results[0][0]
         self.assertEqual(out_sr, sr)
         self.assertFalse(flagged)
         self.assertEqual(reason, "ok")
@@ -141,7 +144,12 @@ class RunOmnivoiceJobTests(unittest.TestCase):
 
         sr = omnivoice_engine.OMNIVOICE_SAMPLE_RATE
         self.fake_model_holder["model"] = FakeOmniVoiceModel(
-            draws=[_sine(220.0, 1.0, sr), _sine(220.0, 1.0, sr)], sr=sr
+            draws=[
+                _sine(220.0, 1.0, sr),
+                _sine(220.0, 1.0, sr),
+                _sine(220.0, 1.0, sr),
+            ],
+            sr=sr,
         )
 
         results = omnivoice_engine.run_omnivoice_job(
@@ -150,10 +158,10 @@ class RunOmnivoiceJobTests(unittest.TestCase):
             candidates_per_segment=1,
         )
 
-        _, _, flagged, reason = results[0][0]
+        _, _, flagged, reason, transcript, match_score = results[0][0]
         self.assertTrue(flagged)
         self.assertEqual(reason, "tonal/drone-like")
-        self.assertEqual(len(self.fake_model_holder["model"].calls), 2)
+        self.assertEqual(len(self.fake_model_holder["model"].calls), 3)
 
     def test_num_step_duration_speed_are_forwarded_and_clamped(self):
         omnivoice_engine = self._import_engine()
@@ -166,7 +174,7 @@ class RunOmnivoiceJobTests(unittest.TestCase):
             instruct="female, young adult, moderate pitch",
             candidates_per_segment=1,
             num_step=999,  # above MAX_NUM_STEP, must clamp
-            duration=3.5,
+            durations=[3.5],
             speed=0.1,  # below MIN_SPEED, must clamp
         )
 

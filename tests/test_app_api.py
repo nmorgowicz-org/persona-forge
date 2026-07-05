@@ -143,17 +143,13 @@ class AppTests(unittest.TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertIsNone(seen.get("voice_id"))
 
-    def test_voice_design_returns_voice_id_and_audio(self) -> None:
+    def test_voice_design_returns_preview_id_and_audio(self) -> None:
         def fake_run_voice_design_request(description, sample_text, language, seed):
             return np.zeros(240, dtype=np.float32), 24000, seed or 999
 
         with patch.object(
             app_module.voice_design, "run_voice_design_request", fake_run_voice_design_request
-        ), patch.object(
-            app_module.voice_library,
-            "save_voice",
-            lambda wav_bytes, **kw: {"voice_id": "vd_new123456"},
-        ):
+        ), patch.object(app_module, "_encode", return_value=(b"audio", "audio/wav")):
             result = self.client.post(
                 "/voice_design",
                 json={"description": "a calm narrator", "sample_text": "hello there"},
@@ -161,7 +157,8 @@ class AppTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, 200)
         body = result.get_json()
-        self.assertEqual(body["voice_id"], "vd_new123456")
+        self.assertIn("preview_id", body)
+        self.assertTrue(len(body["preview_id"]) > 8)
         self.assertEqual(body["sample_rate"], 24000)
         self.assertEqual(body["seed"], 999)
         self.assertIn("audio_base64", body)
@@ -175,11 +172,7 @@ class AppTests(unittest.TestCase):
 
         with patch.object(
             app_module.voice_design, "run_voice_design_request", fake_run_voice_design_request
-        ), patch.object(
-            app_module.voice_library,
-            "save_voice",
-            lambda wav_bytes, **kw: {"voice_id": "vd_new123456"},
-        ):
+        ), patch.object(app_module, "_encode", return_value=(b"audio", "audio/wav")):
             result = self.client.post(
                 "/voice_design",
                 json={
@@ -248,11 +241,16 @@ class AppTests(unittest.TestCase):
         self.assertEqual(generate_result.status_code, 200)
 
     def test_omnivoice_audition_returns_candidates_with_ids(self) -> None:
-        def fake_run_omnivoice_job(segments, instruct, language, candidates_per_segment, seed, num_step=None, duration=None, speed=None):
-            return [
-                [(np.zeros(240, dtype=np.float32), 24000, False, 'ok') for _ in range(candidates_per_segment)]
-                for _ in segments
-            ]
+        def fake_run_omnivoice_job(segments, instruct, language, candidates_per_segment, seed,
+                                   num_step=None, durations=None, speed=None, guidance_scale=None,
+                                   diverse_candidates=False, postprocess_output=None,
+                                   min_match_score=None, on_candidate_complete=None):
+            for seg_idx, text in enumerate(segments):
+                for cand_idx in range(candidates_per_segment):
+                    wav = np.zeros(240, dtype=np.float32)
+                    candidate = (wav, 24000, False, "ok", "", None)
+                    if on_candidate_complete is not None:
+                        on_candidate_complete(seg_idx, cand_idx, text, candidate)
 
         with patch.object(
             app_module.omnivoice_engine, "run_omnivoice_job", fake_run_omnivoice_job
@@ -268,11 +266,26 @@ class AppTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, 200)
         body = result.get_json()
-        self.assertEqual(len(body["segments"]), 2)
-        self.assertEqual(len(body["segments"][0]["candidates"]), 2)
-        candidate_ids = [c["candidate_id"] for seg in body["segments"] for c in seg["candidates"]]
+        self.assertIn("job_id", body)
+        self.assertEqual(body["total_segments"], 2)
+
+        # Poll until job is completed
+        job_id = body["job_id"]
+        import time
+        for _ in range(100):
+            time.sleep(0.01)
+            prog = self.client.get(f"/omnivoice/audition/progress?job_id={job_id}")
+            if prog.status_code == 200 and prog.get_json().get("status") == "completed":
+                break
+
+        prog_body = prog.get_json()
+        self.assertEqual(prog_body["status"], "completed")
+        segments = prog_body["segments_completed"]
+        self.assertEqual(len(segments), 2)
+        self.assertEqual(len(segments[0]["candidates"]), 2)
+        candidate_ids = [c["candidate_id"] for seg in segments for c in seg["candidates"]]
         self.assertEqual(len(candidate_ids), len(set(candidate_ids)))
-        self.assertIn("audio_base64", body["segments"][0]["candidates"][0])
+        self.assertIn("audio_base64", segments[0]["candidates"][0])
 
     def test_omnivoice_audition_rejects_missing_segments(self) -> None:
         result = self.client.post(
@@ -299,8 +312,17 @@ class AppTests(unittest.TestCase):
         self.assertEqual(result.status_code, 503)
 
     def test_omnivoice_stitch_combines_selected_candidates(self) -> None:
-        def fake_run_omnivoice_job(segments, instruct, language, candidates_per_segment, seed, num_step=None, duration=None, speed=None):
-            return [[(np.zeros(240, dtype=np.float32), 24000, False, 'ok')] for _ in segments]
+        import time
+        def fake_run_omnivoice_job(segments, instruct, language, candidates_per_segment, seed,
+                                   num_step=None, durations=None, speed=None, guidance_scale=None,
+                                   diverse_candidates=False, postprocess_output=None,
+                                   min_match_score=None, on_candidate_complete=None):
+            for seg_idx, text in enumerate(segments):
+                for cand_idx in range(candidates_per_segment):
+                    wav = np.zeros(240, dtype=np.float32)
+                    candidate = (wav, 24000, False, "ok", "", None)
+                    if on_candidate_complete is not None:
+                        on_candidate_complete(seg_idx, cand_idx, text, candidate)
 
         with patch.object(
             app_module.omnivoice_engine, "run_omnivoice_job", fake_run_omnivoice_job
@@ -309,16 +331,24 @@ class AppTests(unittest.TestCase):
                 "/omnivoice/audition",
                 json={"segments": ["hello", "world"], "instruct": "female, young adult"},
             )
+
+        job_id = audition.get_json()["job_id"]
+        for _ in range(100):
+            time.sleep(0.01)
+            prog = self.client.get(f"/omnivoice/audition/progress?job_id={job_id}")
+            if prog.status_code == 200 and prog.get_json().get("status") == "completed":
+                break
+        segments_completed = prog.get_json()["segments_completed"]
         candidate_ids = [
             c["candidate_id"]
-            for seg in audition.get_json()["segments"]
+            for seg in segments_completed
             for c in seg["candidates"]
         ]
 
         with patch.object(
             app_module.omnivoice_engine,
             "stitch_selected",
-            lambda selected: (np.zeros(480, dtype=np.float32), 24000),
+            lambda selected, **kw: (np.zeros(480, dtype=np.float32), 24000),
         ), patch.object(app_module, "_encode", return_value=(b"stitched", "audio/wav")):
             result = self.client.post("/omnivoice/stitch", json={"selections": candidate_ids})
 
@@ -336,8 +366,17 @@ class AppTests(unittest.TestCase):
         self.assertEqual(result.status_code, 400)
 
     def _seed_omnivoice_candidate(self) -> str:
-        def fake_run_omnivoice_job(segments, instruct, language, candidates_per_segment, seed, num_step=None, duration=None, speed=None):
-            return [[(np.zeros(240, dtype=np.float32), 24000, False, 'ok')] for _ in segments]
+        import time
+        def fake_run_omnivoice_job(segments, instruct, language, candidates_per_segment, seed,
+                                   num_step=None, durations=None, speed=None, guidance_scale=None,
+                                   diverse_candidates=False, postprocess_output=None,
+                                   min_match_score=None, on_candidate_complete=None):
+            for seg_idx, text in enumerate(segments):
+                for cand_idx in range(candidates_per_segment):
+                    wav = np.zeros(240, dtype=np.float32)
+                    candidate = (wav, 24000, False, "ok", "", None)
+                    if on_candidate_complete is not None:
+                        on_candidate_complete(seg_idx, cand_idx, text, candidate)
 
         with patch.object(
             app_module.omnivoice_engine, "run_omnivoice_job", fake_run_omnivoice_job
@@ -346,7 +385,15 @@ class AppTests(unittest.TestCase):
                 "/omnivoice/audition",
                 json={"segments": ["G'day"], "instruct": "female, young adult, high pitch"},
             )
-        return audition.get_json()["segments"][0]["candidates"][0]["candidate_id"]
+
+        job_id = audition.get_json()["job_id"]
+        for _ in range(100):
+            time.sleep(0.01)
+            prog = self.client.get(f"/omnivoice/audition/progress?job_id={job_id}")
+            if prog.status_code == 200 and prog.get_json().get("status") == "completed":
+                break
+        segments_completed = prog.get_json()["segments_completed"]
+        return segments_completed[0]["candidates"][0]["candidate_id"]
 
     def test_omnivoice_save_persists_to_voice_library(self) -> None:
         candidate_id = self._seed_omnivoice_candidate()
@@ -359,7 +406,7 @@ class AppTests(unittest.TestCase):
         with patch.object(
             app_module.omnivoice_engine,
             "stitch_selected",
-            lambda selected: (np.zeros(480, dtype=np.float32), 24000),
+            lambda selected, **kw: (np.zeros(480, dtype=np.float32), 24000),
         ), patch.object(app_module, "_encode", return_value=(b"stitched", "audio/wav")), patch.object(
             app_module.voice_library, "save_voice", fake_save_voice
         ):
@@ -463,7 +510,7 @@ class AppTests(unittest.TestCase):
                 with patch.object(
                     app_module.omnivoice_engine,
                     "stitch_selected",
-                    lambda selected: (np.zeros(480, dtype=np.float32), 24000),
+                    lambda selected, **kw: (np.zeros(480, dtype=np.float32), 24000),
                 ), patch.object(app_module, "_encode", return_value=(b"stitched", "audio/wav")):
                     result = self.client.post(
                         "/omnivoice/stitch", json={"segment_ids": [meta["segment_id"]]}
