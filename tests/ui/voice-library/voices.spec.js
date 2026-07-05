@@ -19,12 +19,13 @@ test.describe('voice library', () => {
     await expect(card).toBeVisible()
     const voiceId = await card.locator('p').first().innerText()
 
-    // Edit re-opens the design panel pre-filled and never mutates the original in place.
-    await card.getByLabel('Tune this voice').click()
-    await expect(page.getByTestId('nav-voice-design')).toHaveAttribute('data-active', 'true')
-    await expect(page.getByTestId('voice-design-description')).not.toBeEmpty()
+    // Edit: inline-edit the reference text (always available; Sparkles/fork button only appears
+    // for OmniVoice voices with chip selections, not for plain VoiceDesign voices).
+    const refTextP = card.locator('p.cursor-text').first()
+    await expect(refTextP).toBeVisible()
+    await refTextP.click()
+    await expect(card.locator('textarea').first()).toBeVisible()
 
-    await page.getByTestId('nav-voice-library').click()
     const originalCard = page.getByTestId('voice-card').filter({ hasText: voiceId })
     await expect(originalCard).toBeVisible()
 
