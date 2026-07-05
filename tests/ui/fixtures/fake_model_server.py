@@ -122,20 +122,22 @@ def _install_fake_model_module() -> None:
     def _fake_create_job(text, seed=None):
         job_id = "fake-job-" + str(int(time.time() * 1000))
         class _FakeJob:
-            job_id = job_id
-            status = "running"
-            frames_generated = 0
-            reference_frames = 0
-            text_length = len(text)
-            message = None
-            wav = np.zeros(int(_SAMPLE_RATE * 0.5), dtype=np.float32)
-            sr = _SAMPLE_RATE
-            seed = seed
-            error = None
-            started_at = time.monotonic()
-            cancel_event = threading.Event()
-        fake_model._active_jobs[job_id] = _FakeJob()
-        return fake_model._active_jobs[job_id]
+            def __init__(self):
+                self.job_id = job_id
+                self.status = "running"
+                self.frames_generated = 0
+                self.reference_frames = 0
+                self.text_length = len(text)
+                self.message = None
+                self.wav = np.zeros(int(_SAMPLE_RATE * 0.5), dtype=np.float32)
+                self.sr = _SAMPLE_RATE
+                self.seed = seed
+                self.error = None
+                self.started_at = time.monotonic()
+                self.cancel_event = threading.Event()
+        job = _FakeJob()
+        fake_model._active_jobs[job_id] = job
+        return job
 
     def _fake_get_job_progress(job_id):
         job = fake_model._active_jobs.get(job_id)
