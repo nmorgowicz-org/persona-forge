@@ -231,10 +231,10 @@ def patch_eager_attention_mask_broadcast() -> None:
     sdpa_attention.sdpa_attention_forward = patched_sdpa_attention_forward
 
     # 2) Patch create_causal_mask and create_sliding_window_causal_mask
-    # to ensure correct decode-time masks.
-    # When the main talker uses sliding_window != None, it calls
-    # create_sliding_window_causal_mask instead of create_causal_mask;
-    # both must be patched for the fix to apply in all configurations.
+    # at the transformers.masking_utils level (the true source) AND at
+    # modeling_qwen3_tts level, so all models benefit.
+    from transformers import masking_utils
+
     def _make_decode_mask_patch(orig_fn, name):
         @functools.wraps(orig_fn)
         def patched_fn(
@@ -270,12 +270,17 @@ def patch_eager_attention_mask_broadcast() -> None:
 
         return patched_fn
 
-    M.create_causal_mask = _make_decode_mask_patch(
-        M.create_causal_mask, "create_causal_mask"
+    # Patch at the source (transformers.masking_utils)
+    masking_utils.create_causal_mask = _make_decode_mask_patch(
+        masking_utils.create_causal_mask, "create_causal_mask"
     )
-    M.create_sliding_window_causal_mask = _make_decode_mask_patch(
-        M.create_sliding_window_causal_mask, "create_sliding_window_causal_mask"
+    masking_utils.create_sliding_window_causal_mask = _make_decode_mask_patch(
+        masking_utils.create_sliding_window_causal_mask, "create_sliding_window_causal_mask"
     )
+    # Also patch in modeling_qwen3_tts to be safe
+    M.create_causal_mask = masking_utils.create_causal_mask
+    M.create_sliding_window_causal_mask = masking_utils.create_sliding_window_causal_mask
+
     print(
         "[transformers_compat] patched sdpa_attention_forward, "
         "create_causal_mask, create_sliding_window_causal_mask "
