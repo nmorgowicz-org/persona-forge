@@ -31,7 +31,7 @@ from qwen3_tts.model_config import (
     resolve_voice_design_model_repo,
 )
 from qwen3_tts.streaming import StreamingVocoderSession
-from qwen3_tts.transformers_compat import repair_rotary_buffers
+from qwen3_tts.transformers_compat import patch_eager_attention_mask_broadcast, patch_talker_prepare_inputs, repair_rotary_buffers
 
 configure_hf_token()
 
@@ -66,7 +66,7 @@ class ModelProfile:
 
     ``load_model()`` used to read MODEL_ID/OV_MODEL_DIR/etc. as module-level
     constants computed once at import time. Swapping in a second checkpoint (e.g.
-    VoiceDesign, see docs/plans/PLAN_voice_design.md) needs those to vary per call,
+    VoiceDesign, see docs/dev/architecture/voice_design.md) needs those to vary per call,
     so they now travel as a profile instead. OVTalkerRuntime still reads its IR
     paths from the environment (OV_MODEL_DIR / OPENVINO_*_STATEFUL_MODEL), so
     ``load_model`` writes the profile's values into ``os.environ`` before
@@ -105,7 +105,7 @@ _voice_design_preset = get_voice_design_preset(
 )
 
 # VoiceDesign is never the model loaded at startup — it is only ever installed via the
-# lazy model-swap path in qwen3_tts.voice_design (docs/plans/PLAN_voice_design.md §3/§4.2).
+# lazy model-swap path in qwen3_tts.voice_design (docs/dev/architecture/voice_design.md §3/§4.2).
 # generate_voice_design() synthesizes the sample_text directly from the description; there
 # is no reference audio/transcript to build a voice_clone_prompt from.
 VOICE_DESIGN_PROFILE = ModelProfile(
@@ -340,6 +340,12 @@ def load_model(profile: ModelProfile | None = None):
     rotary_report = repair_rotary_buffers(wrapped.model, torch)
     print(f"[app_worker] Repaired and validated RoPE buffers: {rotary_report}", flush=True)
 
+    # T5-generation fixes for both backends: stale inputs_embeds + input_ids clip.
+    patch_talker_prepare_inputs(wrapped.model.talker)
+
+    # Fix attention_mask Q/K broadcast bug in eager_attention_forward (PyTorch backend).
+    patch_eager_attention_mask_broadcast()
+
     gc.collect()
 
     model = wrapped
@@ -554,7 +560,7 @@ def health_state() -> dict[str, Any]:
     return _json_safe(base)
 
 
-# ── Runtime control panel (PLAN_voice_design.md §8.8) ──────────────────────────────────
+# ── Runtime control panel (docs/dev/architecture/voice_design.md §8.8) ──────────────────────────────────
 #
 # Category 1 (live-adjustable): applied via apply_runtime_config(), always inside
 # model.executor so it never races inference. Two flavors:

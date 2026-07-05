@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+
 
 def repair_rotary_buffers(root, torch) -> list[dict[str, object]]:
     """Recompute non-persistent RoPE buffers after meta-device model loading.
@@ -45,3 +47,150 @@ def repair_rotary_buffers(root, torch) -> list[dict[str, object]]:
     if not repaired:
         raise RuntimeError("no rotary embedding buffers found to repair")
     return repaired
+
+
+def patch_talker_prepare_inputs(talker) -> None:
+    """Fix two transformers 5.x issues in the talker's prepare_inputs_for_generation.
+
+    1) Stale inputs_embeds leak:
+       Transformers 5.x centralised prepare_inputs_for_generation into GenerationMixin.
+       On decode steps, it forwards all model_kwargs, including the original long
+       inputs_embeds from step 1. Qwen3TTSTalkerForConditionalGeneration.forward
+       uses ``inputs_embeds.shape[1] > 1`` to decide "prefill path". With stale
+       (B, 171, 2048) embeds on a 1-token decode step, this causes:
+       - Wrong attention mask (q_length=171 vs accumulated kv_length)
+       - Corrupted attn_output reshape → (B, seq*hidden) → matmul crash.
+
+       Fix: drop inputs_embeds from model_kwargs on non-first steps.
+
+    2) Full input_ids on decode steps:
+       T5 passes the accumulated (B, N) input_ids instead of just the last token.
+       The talker uses input_ids.shape[1] for RoPE and codec-embedding, so N>1
+       produces garbage RoPE/logits and non-terminating generation.
+
+       Fix: clip input_ids to last token on decode steps (past_key_values not None,
+       not first iteration).
+    """
+    from qwen_tts.core.models.modeling_qwen3_tts import (
+        Qwen3TTSTalkerForConditionalGeneration,
+    )
+
+    _base_pigf = Qwen3TTSTalkerForConditionalGeneration.prepare_inputs_for_generation
+
+    call_count = 0
+
+    def _fixed_pigf(self_inner, input_ids, past_key_values=None, inputs_embeds=None,
+                    is_first_iteration=None, **kwargs):
+        nonlocal call_count
+        call_count += 1
+
+        # First iteration (prefill): delegate fully to transformers.
+        if is_first_iteration:
+            if call_count == 1:
+                print(
+                    f"[diag] prepare_inputs step={call_count} mode=prefill "
+                    f"input_ids={tuple(input_ids.shape) if input_ids is not None else None} "
+                    f"inputs_embeds={tuple(inputs_embeds.shape) if inputs_embeds is not None else None}",
+                    flush=True,
+                )
+            return _base_pigf(self_inner, input_ids=input_ids,
+                              past_key_values=past_key_values,
+                              inputs_embeds=inputs_embeds,
+                              is_first_iteration=is_first_iteration,
+                              **kwargs)
+
+        # Decode step: clip input_ids to last token (required under T5).
+        if (
+            past_key_values is not None
+            and input_ids is not None
+            and input_ids.shape[1] > 1
+        ):
+            input_ids = input_ids[:, -1:]
+
+        # Call the base, then remove stale inputs_embeds so forward() does not
+        # mistake this decode step for a prefill.
+        model_inputs = _base_pigf(self_inner, input_ids=input_ids,
+                                  past_key_values=past_key_values,
+                                  inputs_embeds=inputs_embeds,
+                                  is_first_iteration=is_first_iteration,
+                                  **kwargs)
+
+        # Log first few decode steps
+        if call_count <= 5:
+            has_embeds_before = "inputs_embeds" in model_inputs
+            print(
+                f"[diag] prepare_inputs step={call_count} mode=decode "
+                f"input_ids={tuple(input_ids.shape) if input_ids is not None else None} "
+                f"inputs_embeds_before_pop={tuple(model_inputs.get('inputs_embeds').shape) if has_embeds_before else None} "
+                f"has_embeds_before={has_embeds_before}",
+                flush=True,
+            )
+
+        model_inputs.pop("inputs_embeds", None)
+        return model_inputs
+
+    Qwen3TTSTalkerForConditionalGeneration.prepare_inputs_for_generation = _fixed_pigf
+    print(
+        "[transformers_compat] patched talker prepare_inputs_for_generation "
+        "(T5 stale-embeds + input_ids clip)",
+        flush=True,
+    )
+
+
+def patch_eager_attention_mask_broadcast() -> None:
+    """Fix attention_mask broadcasting bug in qwen_tts eager_attention_forward.
+
+    During auto-regressive decode, the original code only sliced the key dimension:
+
+        causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
+
+    but the query dimension can differ (e.g. prefill mask (B,1,170,170) vs
+    decode attn_weights (B,8,1,171)). This broadcasts to (B,8,170,171) instead
+    of (B,8,1,171), causing reshape → (1,1,350208) and a matmul crash at o_proj.
+
+    Fix: slice both query and key dims to match attn_weights shape.
+    """
+    from qwen_tts.core.models import modeling_qwen3_tts as M
+    import torch
+    import torch.nn.functional as F
+
+    orig = M.eager_attention_forward
+
+    @functools.wraps(orig)
+    def patched_eager_attention_forward(
+        module,
+        query,
+        key,
+        value,
+        attention_mask,
+        scaling,
+        dropout=0.0,
+        **kwargs,
+    ):
+        key_states = M.repeat_kv(key, module.num_key_value_groups)
+        value_states = M.repeat_kv(value, module.num_key_value_groups)
+
+        attn_weights = torch.matmul(query, key_states.transpose(2, 3)) * scaling
+        if attention_mask is not None:
+            # Slice both Q and K dims to match attn_weights (B, H, q_len, k_len)
+            causal_mask = attention_mask[
+                :, :, : attn_weights.shape[2], : attn_weights.shape[3]
+            ]
+            attn_weights = attn_weights + causal_mask
+
+        attn_weights = F.softmax(
+            attn_weights, dim=-1, dtype=torch.float32
+        ).to(query.dtype)
+        attn_weights = F.dropout(
+            attn_weights, p=dropout, training=module.training
+        )
+        attn_output = torch.matmul(attn_weights, value_states)
+        attn_output = attn_output.transpose(1, 2).contiguous()
+        return attn_output, attn_weights
+
+    M.eager_attention_forward = patched_eager_attention_forward
+    print(
+        "[transformers_compat] patched eager_attention_forward "
+        "(attention_mask Q/K broadcast fix for decode)",
+        flush=True,
+    )
