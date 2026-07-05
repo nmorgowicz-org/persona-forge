@@ -18,7 +18,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 from qwen3_tts import model, omnivoice_engine, segment_library, voice_design, voice_library
 
 # candidate_id -> (wav, sample_rate). In-memory only, single-user local tool (locked decision,
-# PLAN_persona_forge_studio.md §5): cleared at the start of every /omnivoice/audition call, so
+# docs/dev/features/persona_forge_studio.md §5): cleared at the start of every /omnivoice/audition call, so
 # a candidate is only ever addressable up until the next audition job is kicked off.
 _omnivoice_candidates: dict[str, tuple[Any, int]] = {}
 
@@ -69,7 +69,7 @@ def _evict_old_audition_jobs() -> None:
 
 app = Flask(__name__)
 
-# Static frontend export (frontend/, built by `npm run build`; see docs/plans/PLAN_voice_design.md
+# Static frontend export (frontend/, built by `npm run build`; see docs/dev/architecture/voice_design.md
 # §8.1). The Dockerfile copies the build output to /app/frontend/dist; app.py lives at
 # /app/src/qwen3_tts/app.py, so parent.parent.parent is /app in the container by construction.
 # Auto-disables (falls back to a bare API service) if the dist directory isn't present, e.g. a
@@ -161,7 +161,7 @@ def health():
     state = model.health_state()
     # Swap-in-progress is tracked in voice_design.py, not model.py, to avoid a circular
     # import; merged here so the frontend can poll one endpoint for a prominent
-    # swap-in-progress banner (PLAN_voice_design.md §3, §11 frontend checklist).
+    # swap-in-progress banner (docs/dev/architecture/voice_design.md §3, §11 frontend checklist).
     state["swap_in_progress"] = voice_design.swap_in_progress() or omnivoice_engine.swap_in_progress()
     state["reconfig_in_progress"] = model.reconfig_in_progress()
     # model_loaded only reflects Base/VoiceDesign (model.model) — OmniVoice bypasses that
@@ -1063,7 +1063,7 @@ def runtime_config_get():
 
 @app.post("/runtime/config")
 def runtime_config_post():
-    # No auth gate on this mutating route — deliberate decision (PLAN_voice_design.md §8.8
+    # No auth gate on this mutating route — deliberate decision (docs/dev/architecture/voice_design.md §8.8
     # security note): the whole service already runs unauthenticated on a trusted-network-only
     # posture (SECURITY.md), and this stays consistent with that rather than special-casing
     # one route.

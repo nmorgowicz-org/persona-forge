@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { getHealth } from '@/lib/api'
 
 // Polls /health so any page can show a prominent, honest "VoiceDesign swap in progress"
-// banner (PLAN_voice_design.md §3: "do not hide behind a spinner with no explanation") —
+// banner (docs/dev/architecture/voice_design.md §3: "do not hide behind a spinner with no explanation") —
 // a swap unloads the Base model for tens of seconds to minutes, so every generation
 // endpoint 503s for that whole window, not just the /voice_design call that triggered it.
 const POLL_MS = 2500

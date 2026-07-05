@@ -42,7 +42,7 @@ export interface SegmentRackRow {
   selectedTakeIndex: number
 }
 
-// Stitch editor (PLAN_stitch_editor.md §5)
+// Stitch editor (docs/dev/features/stitch_editor.md §5)
 export type ClipRef =
   | { segmentId: string }
   | { candidateId: string }
@@ -237,7 +237,7 @@ interface StoreState {
       updater: Set<string> | ((prev: Set<string>) => Set<string>),
     ) => void
 
-  // ---- Stitch editor (PLAN_stitch_editor.md) ----
+  // ---- Stitch editor (docs/dev/features/stitch_editor.md) ----
   ovStitchPlanClips: StitchPlanClip[]
   ovStitchPlanPaddingMs: number[]
   ovStitchPlanDsp: StitchPlanDsp

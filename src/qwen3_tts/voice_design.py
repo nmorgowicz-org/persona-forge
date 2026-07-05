@@ -1,6 +1,6 @@
 """VoiceDesign checkpoint model-swap manager.
 
-See docs/plans/PLAN_voice_design.md §3/§4.2. VoiceDesign is a separate HF checkpoint from
+See docs/dev/architecture/voice_design.md §3/§4.2. VoiceDesign is a separate HF checkpoint from
 Base — this service holds exactly one checkpoint in memory at a time (model.py's
 module-level globals assume it), so using VoiceDesign means: unload Base, load VoiceDesign,
 run generate_voice_design(). All of that must run serialized inside model.executor (the
@@ -44,7 +44,7 @@ def get_progress() -> dict[str, Any]:
         snapshot["estimated_remaining_seconds"] = max(0.0, snapshot["avg_seconds"] - elapsed)
     return snapshot
 
-# ~130-150 words/min speech rate heuristic (PLAN_voice_design.md §8.4). VoiceDesign's IR
+# ~130-150 words/min speech rate heuristic (docs/dev/architecture/voice_design.md §8.4). VoiceDesign's IR
 # capacity (§4.1) is larger to leave headroom for testing; this is the API-level cap on the
 # *stored* reference sample, kept intentionally short because shorter, clearer reference
 # samples clone better.
@@ -85,7 +85,7 @@ def run_voice_design_request(
     A concrete seed is always resolved and applied (random when the caller doesn't supply
     one) and returned to the caller, so every saved voice has a reproducible, inspectable
     seed rather than depending on whatever ambient RNG state happened to exist — required
-    for the tune/tweak workflow (PLAN_voice_design.md §8.3) to mean anything: re-rolling a
+    for the tune/tweak workflow (docs/dev/architecture/voice_design.md §8.3) to mean anything: re-rolling a
     voice needs a real new random draw, and locking onto a good take needs its exact seed.
     """
     global _swap_in_progress, _phase_started_at, _completed_requests

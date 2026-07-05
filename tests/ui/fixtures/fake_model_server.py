@@ -1,6 +1,6 @@
 """Runs the real qwen3_tts Flask app with the model layer faked out.
 
-For local UI/UX review and E2E/screenshot testing (see docs/plans/20260702-e2e_and_screenshotting.md
+For local UI/UX review and E2E/screenshot testing (see docs/dev/resolved/E2E_AND_SCREENSHOTTING.md
 §3.1). No model weights are loaded, no OpenVINO, no Docker required — this is a plain Python
 process that works the same on any machine/architecture.
 

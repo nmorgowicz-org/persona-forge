@@ -44,13 +44,29 @@ The Dockerfile and runtime code monkeypatch several internal behaviors to keep t
   - Required after every model load under T5.
 - Dockerfile injects custom `_compute_default_rope_parameters` into `modeling_rope_utils` and sets `"default"` as init function, because T5 changed how RoPE is wired.
 
-## OVTalkerRuntime patch (talker.py _patch_talker_prepare_inputs)
+## Talker prepare_inputs_for_generation patch (transformers_compat.py)
 
-- T5 now passes full accumulated `input_ids` instead of last token during decode.
-- qwen3_tts's talker uses `input_ids.shape[1]` as seq_length for RoPE + codec embedding.
-- Without clipping, all past tokens are treated as current → garbage RoPE/logits, EOS ≈ 0, runs to capacity.
-- Fix: monkeypatch `prepare_inputs_for_generation` to clip `input_ids` to `[:, -1:]` in decode steps.
-- CRITICAL: reverting this under T5 will cause non-terminating generation.
+Applied at model-load time (for both backends) via `patch_talker_prepare_inputs()`.
+Two issues in one patch:
+
+- **Stale inputs_embeds bug (TTS_BACKEND=pytorch crash):**
+  T5's centralised `prepare_inputs_for_generation` forwards all model_kwargs,
+  including the original long-sequence `inputs_embeds` from step 1, into every
+  decode step. The talker's `forward` uses `inputs_embeds.shape[1] > 1` to detect
+  prefill; with stale (B, 171, 2048) embeds on a 1-token decode step, it re-enters
+  the prefill path with a wrong mask vs. accumulated K/V → attention corruption →
+  `attn_output` reshape produces (B, seq*hidden) → matmul crash at o_proj.
+  Fix: drop `inputs_embeds` from model_inputs on non-first iterations.
+
+- **Full input_ids on decode steps:**
+  T5 passes the accumulated (B, N) `input_ids` instead of just the last token.
+  The talker uses `input_ids.shape[1]` for RoPE + codec embedding; N>1 produces
+  garbage RoPE/logits, EOS ≈ 0, runs to capacity.
+  Fix: clip `input_ids` to `[:, -1:]` in decode steps (past_key_values present,
+  not first iteration).
+
+CRITICAL: reverting either fix under T5 will crash (pytorch) or produce
+non-terminating/garbage generation (both backends).
 
 ## Agent rule
 

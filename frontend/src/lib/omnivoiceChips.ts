@@ -2,10 +2,10 @@
 //
 // OmniVoice's `instruct` field is NOT free text — the model repo's `generate()` splits it on
 // commas and validates each tag against a fixed attribute grammar (see
-// docs/plans/PLAN_omnivoice_integration.md §1a and [[voicedesign-accent-investigation]]).
+// docs/dev/integration/omnivoice_integration.md §1a and [[voicedesign-accent-investigation]]).
 // Anything outside this list is silently ignored or destabilizes generation, so the UI must
 // only ever compose from these exact tags — no free-text tone/texture chips like VoiceDesign
-// has. Order matters: docs/plans/PLAN_omnivoice_integration.md confirms hands-on that the
+// has. Order matters: docs/dev/integration/omnivoice_integration.md confirms hands-on that the
 // documented order (gender, age, pitch, style, accent last) is the one that reliably works;
 // deviating from it was the root cause of an earlier "load-bearing noise/drone" failure mode.
 

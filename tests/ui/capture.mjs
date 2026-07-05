@@ -1,5 +1,5 @@
 // Puppeteer-based screenshot/GIF capture harness. Local-only tool — never run in CI (§6 of
-// docs/plans/20260702-e2e_and_screenshotting.md). By default spawns the same fake-model server
+// docs/dev/resolved/E2E_AND_SCREENSHOTTING.md). By default spawns the same fake-model server
 // used by Playwright (via run-server.mjs) on a distinct port so it can run alongside a real
 // service (8318) and the Playwright test server (8319) without colliding. Pass --target <url>
 // to point at an already-running instance instead (e.g. the dockermisc1 real-model tunnel, §7).

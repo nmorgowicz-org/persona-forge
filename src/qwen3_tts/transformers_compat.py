@@ -251,14 +251,16 @@ def patch_eager_attention_mask_broadcast() -> None:
             and past_key_values is not None
         )
         if is_decode:
-            past_len = past_key_values.get_seq_length()
-            batch_size, q_len = inputs_embeds.shape[0], inputs_embeds.shape[1]
-            kv_len = q_len + past_len
+            if not hasattr(patched_create_causal_mask, "_diag"):
+                patched_create_causal_mask._diag = True
+                print(
+                    f"[decode_mask_fix] decode-mode detected: "
+                    f"inputs={tuple(inputs_embeds.shape)} past_len={past_key_values.get_seq_length()}",
+                    flush=True,
+                )
             # Full attention on all keys (past + current): upper-triangular is
             # handled by SDPA's is_causal=True when mask is None. Return None
             # to let the attention kernel use its native causal behavior.
-            # For models that need an explicit float mask, return a (B,1,q,kv)
-            # all-zeros mask (no masking needed; causal is enforced by is_causal).
             return None
 
         return orig_create_causal_mask(

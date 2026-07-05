@@ -406,7 +406,7 @@ export interface OmniVoiceSaveParams {
   segments: string[]
   language?: string
   accentId?: string | null
-  /** Optional stitch_plan for full control (PLAN_stitch_editor.md). */
+  /** Optional stitch_plan for full control (docs/dev/features/stitch_editor.md). */
   stitchPlan?: StitchPlanPayload | null
 }
 

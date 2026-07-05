@@ -1,5 +1,5 @@
 // Guided VoiceDesign chip taxonomy and composition rules.
-// Source of truth: docs/plans/PLAN_voice_design.md §8.3/§8.4. Do not expose the full lexicon
+// Source of truth: docs/dev/architecture/voice_design.md §8.3/§8.4. Do not expose the full lexicon
 // as raw text in the UI — chips only, "Advanced" mode is the escape hatch for free text.
 
 export interface Chip {

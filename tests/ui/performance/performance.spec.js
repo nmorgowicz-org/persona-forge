@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 
 // Coarse sanity checks, not real benchmarks — the fake-model server returns instantly, so this
 // only catches gross regressions (e.g. render-blocking work added to the initial load), not
-// backend latency. See docs/plans/20260702-e2e_and_screenshotting.md §4.4.
+// backend latency. See docs/dev/resolved/E2E_AND_SCREENSHOTTING.md §4.4.
 test.describe('performance', () => {
   test('home page becomes interactive quickly', async ({ page }) => {
     const start = Date.now()

@@ -4,7 +4,7 @@
 EXPORT_TARGET=base (default) exports the MODEL_SIZE Base checkpoint into /ov/<size>/...
 EXPORT_TARGET=voice_design exports the VoiceDesign checkpoint (VOICE_DESIGN_MODEL_SIZE,
 default 1.7B) into the separate /ov/<size>-voicedesign/... tree so it can never collide
-with a Base export for the same size. See docs/plans/PLAN_voice_design.md §4.1 — this
+with a Base export for the same size. See docs/dev/architecture/voice_design.md §4.1 — this
 reuses the same exporter/transform tooling, only the source repo and output dir differ.
 """
 

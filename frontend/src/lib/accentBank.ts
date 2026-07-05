@@ -1,9 +1,9 @@
 // Curated per-accent sentence bank for the OmniVoice engine.
 //
 // NOT YET CURATED beyond AU/GB: entries below are structural placeholders pointing at
-// OmniVoice instruct vocabulary validated in docs/plans/PLAN_omnivoice_integration.md, not a
+// OmniVoice instruct vocabulary validated in docs/dev/integration/omnivoice_integration.md, not a
 // finished, human-listened-through sentence bank. `previewAudioUrl` intentionally stays null
-// until a curation pass (PLAN_persona_forge_studio.md §5 decision 3: repo-committed,
+// until a curation pass (docs/dev/features/persona_forge_studio.md §5 decision 3: repo-committed,
 // human-picked audio, not build-time generated) promotes real files from
 // audio/omnivoice_*_*.wav.
 //
@@ -99,7 +99,7 @@ export interface AccentBankEntry {
 export const ESTIMATED_WORDS_PER_SECOND = 3.2
 
 // A "hero" take should be long enough to give the clone real range to work with, short enough
-// to stay auditionable in one pass (PLAN_persona_forge_studio.md hero-reference goal, nick
+// to stay auditionable in one pass (docs/dev/features/persona_forge_studio.md hero-reference goal, nick
 // 2026-07-04: "we need 10-15 seconds for a proper hero set of sentences").
 export const HERO_TARGET_MIN_SEC = 10
 export const HERO_TARGET_MAX_SEC = 15

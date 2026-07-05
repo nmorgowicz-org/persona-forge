@@ -1,6 +1,6 @@
 """OmniVoice checkpoint model-swap manager (Persona Forge accent-design engine).
 
-See docs/plans/PLAN_persona_forge_studio.md §1. OmniVoice reuses the same one-model-at-a-time
+See docs/dev/features/persona_forge_studio.md §1. OmniVoice reuses the same one-model-at-a-time
 swap discipline VoiceDesign already established (qwen3_tts.voice_design): unload Base, load
 OmniVoice, run a whole *job* (every reference segment, every candidate take) in one swap
 window. All of that must run serialized inside model.executor (the service's single
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 # Real bounds from the installed `omnivoice` package's OmniVoiceGenerationConfig
 # (num_step default 32, guidance_scale/duration/speed unset by default) — see
-# docs/plans/PLAN_omnivoice_integration.md and the 2026-07-03 upstream-docs review. Clamped
+# docs/dev/integration/omnivoice_integration.md and the 2026-07-03 upstream-docs review. Clamped
 # here rather than trusting the frontend, since these reach a third-party model call.
 MIN_NUM_STEP = 16
 MAX_NUM_STEP = 32

@@ -1,13 +1,13 @@
 """Audio post-processing for stitched multi-segment OmniVoice reference clips.
 
-See docs/plans/PLAN_persona_forge_studio.md §2. Each segment is an independent model draw
+See docs/dev/features/persona_forge_studio.md §2. Each segment is an independent model draw
 with its own internal dynamics; naively concatenating them leaves the result "all over the
 place" (nick, 2026-07-03). Order matters: per-segment compression, then per-segment loudness
 normalization, THEN crossfade concatenation, THEN a final limiter/normalization pass on the
 whole clip. Normalizing only the final concatenated clip does nothing to fix uneven *internal*
 dynamics of individual segments, which is the actual complaint this pipeline addresses.
 
-Hand-rolled numpy, no new audio-DSP dependency (locked decision, PLAN_persona_forge_studio.md
+Hand-rolled numpy, no new audio-DSP dependency (locked decision, docs/dev/features/persona_forge_studio.md
 §5) — quality is good enough for short speech clips; revisit only if it isn't.
 """
 
@@ -181,7 +181,7 @@ def crossfade_concat(
     """Concatenate segments with an equal-power crossfade at each join.
 
     Replaces the flat-silence-gap approach from the original stitching prototype
-    (PLAN_persona_forge_studio.md §2) — a crossfade masks the seam better than a hard cut
+    (docs/dev/features/persona_forge_studio.md §2) — a crossfade masks the seam better than a hard cut
     or a silent gap between independently-drawn segments.
     """
     if not segments:
@@ -271,7 +271,7 @@ def stitch_segments(
 ) -> np.ndarray:
     """Full pipeline: trim, compress+normalize, fade each segment, then join and final limit+normalize.
 
-    New optional kwargs (stitch-editor support, PLAN_stitch_editor.md §3) all default to
+    New optional kwargs (stitch-editor support, docs/dev/features/stitch_editor.md §3) all default to
     None, which reproduces the original behavior exactly:
       - trims: per-segment (start_ms, end_ms) applied before compress/normalize.
       - compress_params: kwargs forwarded to compress(); None uses its own defaults, same

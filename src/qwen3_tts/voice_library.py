@@ -1,4 +1,4 @@
-"""Filesystem-backed voice library (docs/plans/PLAN_voice_design.md §7).
+"""Filesystem-backed voice library (docs/dev/architecture/voice_design.md §7).
 
 Maps voice_id -> {wav_path, description, sample_text, language, created_at}. No database —
 consistent with the project's existing "no database, bind-mounted host directories" pattern
@@ -54,7 +54,7 @@ def save_voice(
     always a concrete resolved value, never None, so every voice is reproducible).
     ``selections`` is the chip state that composed ``description``, stored so the voice can
     later be reopened and tweaked in the VoiceDesign panel instead of only re-typed from
-    scratch (PLAN_voice_design.md §8.3 tune/tweak workflow).
+    scratch (docs/dev/architecture/voice_design.md §8.3 tune/tweak workflow).
     """
     voice_id = new_voice_id()
     voice_dir = _voice_dir(voice_id)
@@ -105,7 +105,7 @@ def update_voice(voice_id: str, *, sample_text: str) -> dict[str, Any] | None:
     Reference text must match what's actually spoken in reference.wav for cloning quality
     (see app.py's omnivoice_save), so users need to fix typos/spacing/accent-spelling here
     without forking a whole new voice — unlike the chip-based "tune/tweak" flow below, which
-    always forks (PLAN_voice_design.md §8.3) because it re-generates the reference audio too.
+    always forks (docs/dev/architecture/voice_design.md §8.3) because it re-generates the reference audio too.
     """
     meta = get_voice(voice_id)
     if meta is None:
@@ -120,7 +120,7 @@ def update_voice(voice_id: str, *, sample_text: str) -> dict[str, Any] | None:
 def delete_voice(voice_id: str) -> bool:
     """Remove a voice's directory. Returns False if it doesn't exist (not an error) — the
     tune/tweak workflow forks a new voice on every edit, so this exists to prune superseded
-    forks (PLAN_voice_design.md §8.3).
+    forks (docs/dev/architecture/voice_design.md §8.3).
     """
     if not _is_valid_voice_id(voice_id):
         return False

@@ -67,7 +67,7 @@ services:
   export-voice-design:
     # Same image/command as `export`; EXPORT_TARGET selects the VoiceDesign checkpoint and
     # its separate /ov/<size>-voicedesign/... output tree (see scripts/export.py, VOICE_DESIGN
-    # section of docs/plans/PLAN_voice_design.md). Independent from the `export` service so a
+    # section of docs/dev/architecture/voice_design.md). Independent from the `export` service so a
     # VoiceDesign export never overwrites a Base export for the same size.
     image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:local}
     build:
