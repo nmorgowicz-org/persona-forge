@@ -233,12 +233,3 @@ def patch_eager_attention_mask_broadcast() -> None:
         T.create_sliding_window_causal_mask = masking_utils.create_sliding_window_causal_mask
     except Exception:
         pass
-
-
-def patch_attn_layer0_diag() -> None:
-    """Optional diagnostic wrapper for attention (no-op in production).
-
-    Kept as a placeholder for attaching temporary shape-tracing patches
-    when debugging. In production builds this can be left empty.
-    """
-    pass
