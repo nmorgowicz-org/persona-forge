@@ -291,6 +291,7 @@ def voices_update(voice_id: str):
     meta = voice_library.update_voice(voice_id, sample_text=sample_text)
     if meta is None:
         return jsonify({"error": "voice_id not found"}), 404
+    model.invalidate_voice_clone_prompt(voice_id)
     return jsonify(meta)
 
 

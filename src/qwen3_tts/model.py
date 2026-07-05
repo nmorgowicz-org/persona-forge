@@ -792,6 +792,16 @@ def get_voice_clone_prompt(voice_id: str | None = None):
     return prompt
 
 
+def invalidate_voice_clone_prompt(voice_id: str) -> None:
+    """Drop a cached voice_clone_prompt so the next request rebuilds it from meta.json.
+
+    Must be called whenever a voice's reference audio or sample_text changes on disk
+    (see voice_library.update_voice) — the cache in get_voice_clone_prompt is keyed by
+    voice_id only and never re-reads meta.json once built.
+    """
+    _voice_clone_prompt_cache.pop(voice_id, None)
+
+
 def _run_generate(
     text: str,
     language: str,
