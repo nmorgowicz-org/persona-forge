@@ -380,7 +380,7 @@ def _dispatch_audition_jobs():
                 min_match_score,
             ) = params
 
-            def _run_job(job_id, job):
+            def _run_job(job_id):
                 try:
                     model.executor.submit(
                         omnivoice_engine.run_omnivoice_job,
@@ -399,15 +399,19 @@ def _dispatch_audition_jobs():
                         on_candidate_complete=_candidate_callback_factory(job_id),
                     ).result(timeout=1800)
                     with _OV_AUDITION_JOBS_LOCK:
-                        _OV_AUDITION_JOBS[job_id]["status"] = "completed"
-                        _OV_AUDITION_JOBS[job_id]["current_segment_index"] = None
+                        job = _OV_AUDITION_JOBS.get(job_id)
+                        if job is not None:
+                            job["status"] = "completed"
+                            job["current_segment_index"] = None
                 except Exception as exc:
                     with _OV_AUDITION_JOBS_LOCK:
-                        _OV_AUDITION_JOBS[job_id]["status"] = "failed"
-                        _OV_AUDITION_JOBS[job_id]["current_segment_index"] = None
-                        _OV_AUDITION_JOBS[job_id]["message"] = f"OmniVoice error: {exc}"
+                        job = _OV_AUDITION_JOBS.get(job_id)
+                        if job is not None:
+                            job["status"] = "failed"
+                            job["current_segment_index"] = None
+                            job["message"] = f"OmniVoice error: {exc}"
 
-            threading.Thread(target=_run_job, args=(next_job_id, job), daemon=True).start()
+            threading.Thread(target=_run_job, args=(next_job_id,), daemon=True).start()
     finally:
         with _OV_AUDITION_QUEUE_LOCK:
             _OV_AUDITION_DISPATCH_IN_PROGRESS = False

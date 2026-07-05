@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import functools
 
+_patch_talker_prepare_inputs_applied = False
+_patch_eager_attention_mask_broadcast_applied = False
 
 def repair_rotary_buffers(root, torch) -> list[dict[str, object]]:
     """Recompute non-persistent RoPE buffers after meta-device model loading."""
@@ -65,6 +67,11 @@ def patch_talker_prepare_inputs() -> None:
        use this stale mask length to create wrong masks, leading to shape mismatches
        in the attention output (e.g. Q=171, K=341, V=171 instead of Q=1, K=171, V=171).
     """
+    global _patch_talker_prepare_inputs_applied
+    if _patch_talker_prepare_inputs_applied:
+        return
+    _patch_talker_prepare_inputs_applied = True
+
     from qwen_tts.core.models.modeling_qwen3_tts import (
         Qwen3TTSTalkerCodePredictorModelForConditionalGeneration,
         Qwen3TTSTalkerForConditionalGeneration,
@@ -136,6 +143,11 @@ def patch_eager_attention_mask_broadcast() -> None:
     2) Return None from create_causal_mask in decode mode to avoid
        stale-mask-based causal masks.
     """
+    global _patch_eager_attention_mask_broadcast_applied
+    if _patch_eager_attention_mask_broadcast_applied:
+        return
+    _patch_eager_attention_mask_broadcast_applied = True
+
     from qwen_tts.core.models import modeling_qwen3_tts as M
     import torch
 

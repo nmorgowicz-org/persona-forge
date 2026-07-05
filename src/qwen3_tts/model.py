@@ -135,6 +135,8 @@ executor = ThreadPoolExecutor(max_workers=1)
 
 _service_started: bool = False
 _model_loaded: bool = False
+_startup_failed: bool = False
+_startup_error: str | None = None
 _last_request_time: float = time.time()
 _unload_pending: bool = False
 
@@ -449,10 +451,17 @@ def model_loaded() -> bool:
 
 
 def _load_model_background():
+    global _service_started, _startup_failed, _startup_error
     try:
         load_model(BASE_PROFILE)
     except Exception as exc:
-        print(f"[app_worker] FATAL: model load failed: {exc}", flush=True, file=sys.stderr)
+        _startup_failed = True
+        _startup_error = str(exc)
+        print(
+            f"[app_worker] FATAL: model load failed: {exc}",
+            flush=True,
+            file=sys.stderr,
+        )
         raise
 
 
@@ -484,6 +493,14 @@ if IDLE_UNLOAD_SECONDS > 0:
 
 def health_state() -> dict[str, Any]:
     """Return JSON-serializable model and backend readiness state."""
+    if _startup_failed:
+        return {
+            "status": "error",
+            "service_started": False,
+            "model_loaded": False,
+            "error": _startup_error,
+        }
+
     idle_unload_seconds = IDLE_UNLOAD_SECONDS if IDLE_UNLOAD_SECONDS > 0 else None
     base = {
         "status": "ok",
