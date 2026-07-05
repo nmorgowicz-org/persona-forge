@@ -85,7 +85,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
   // -- One-time init from EditingVoice --
   const initRef = useMemo(() => ({ done: false }), [])
 
-  // Voices saved outside the chip-based flow (e.g. Stitch Studio / PersonaForge) persist a
+  // Voices saved outside the chip-based flow (e.g. Stitch Studio / OmniVoice) persist a
   // differently-shaped `selections` object (or none at all) -- truthy but missing
   // textures/personas arrays, which used to crash this check with a bare `.length` read.
   const hasChipSelections = computeHasChipSelections(initial?.selections)

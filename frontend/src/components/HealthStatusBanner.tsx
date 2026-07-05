@@ -11,9 +11,9 @@ export function HealthStatusBanner() {
   // cycles reload lazily/transparently on the next request, so there's nothing to "wait" for
   // and no banner should show. Only a true cold boot (never started) blocks anything.
   if (serviceStarted) return null
-  // model_loaded/service_started only track the Base/VoiceDesign slot — OmniVoice (Persona
-  // Forge) loads independently and never touches it, so this banner would otherwise show
-  // "Initializing TTS model" on Persona Forge even when nothing is loading there.
+  // model_loaded/service_started only track the Base/VoiceDesign slot — OmniVoice loads
+  // independently and never touches it, so this banner would otherwise show "Initializing
+  // TTS model" on the OmniVoice panel even when nothing is loading there.
   const needsBase = page === 'speak' || (page === 'voice-design' && designEngine === 'qwen')
   if (!needsBase) return null
 

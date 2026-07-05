@@ -11,10 +11,10 @@ import {
 } from '@/lib/api'
 import { insertSegmentIntoStitchTimeline, insertVoiceIntoStitchTimeline } from '@/lib/stitchClips'
 
-// A second, more direct entry point into the same stitch editor used inside Persona Forge's
-// OmniVoice flow — lets a user jump straight to arranging saved segments/voices into a
+// A second, more direct entry point into the same stitch editor used inside the OmniVoice
+// flow — lets a user jump straight to arranging saved segments/voices into a
 // reference voice without first running an audition. Shares the same store-backed stitch
-// plan, so switching between this page and Persona Forge's editor doesn't lose the timeline.
+// plan, so switching between this page and OmniVoice's editor doesn't lose the timeline.
 export function StitchStudioPage() {
   const voices = useAppStore((s) => s.voices)
   const setVoices = useAppStore((s) => s.setVoices)

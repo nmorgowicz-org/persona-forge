@@ -19,7 +19,7 @@ interface AccentChipPanelProps {
   onToggleWhisper: () => void
 }
 
-// The chip-based OmniVoice instruct composer — left column of Persona Forge. Fully
+// The chip-based OmniVoice instruct composer — left column of OmniVoicePanel. Fully
 // self-contained given the current selections + a handful of toggle callbacks, so it's
 // split out of OmniVoicePanel.tsx to keep that file from growing further.
 export function AccentChipPanel({

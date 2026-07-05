@@ -1,4 +1,4 @@
-// Curated per-accent sentence bank for the Persona Forge OmniVoice engine.
+// Curated per-accent sentence bank for the OmniVoice engine.
 //
 // NOT YET CURATED beyond AU/GB: entries below are structural placeholders pointing at
 // OmniVoice instruct vocabulary validated in docs/plans/PLAN_omnivoice_integration.md, not a

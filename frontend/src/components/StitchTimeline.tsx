@@ -612,7 +612,7 @@ export const StitchTimeline = memo(function StitchTimeline({
   // for the empty-timeline case, which threw "rendered more hooks than previous render" (React
   // error #310) the instant a first clip was inserted (0 clips -> hook skipped, 1+ clips -> hook
   // ran), crashing the page. Stitch Studio hits the empty state on first load, so it surfaced
-  // this immediately; Persona Forge's editor rarely opened with zero clips, so it went unnoticed.
+  // this immediately; OmniVoice's editor rarely opened with zero clips, so it went unnoticed.
   const effectiveTotalMs = useMemo(() => {
     let sum = 0
     for (const c of clips) {
@@ -843,7 +843,7 @@ interface StitchEditorBodyProps {
 
 // Shared editor internals (timeline + DSP controls + live preview + render/save footer), with
 // no opinion on how it's framed — StitchEditorPanel wraps it in a full-screen modal (used from
-// Persona Forge's OmniVoice flow, popping over an existing workflow); StitchEditorInline renders
+// the OmniVoice flow, popping over an existing workflow); StitchEditorInline renders
 // it as plain page content (used by the standalone Stitch Studio page).
 function StitchEditorBody({
   onClose,

@@ -119,7 +119,7 @@ export const EMPTY_SELECTIONS: ChipSelections = {
   personas: [],
 }
 
-// Voices saved outside the chip-based flow (e.g. Stitch Studio / Persona Forge OmniVoice)
+// Voices saved outside the chip-based flow (e.g. Stitch Studio / OmniVoice)
 // persist a differently-shaped `selections` object (or none at all) -- truthy but missing
 // textures/personas arrays. Any truthy-but-non-chip-shaped `selections` must fail this check,
 // not just an empty one, otherwise consumers crash reading `.textures.length` off undefined.
@@ -146,8 +146,8 @@ function findLabel(chips: Chip[], id: string | null): string | undefined {
  * No accent field: this checkpoint's regional/non-US English accent control doesn't work
  * reliably (nick's feedback, 2026-07-03, confirmed via testing) — the engine only produces
  * plain English regardless of accent instruction, so the chip was actively misleading users
- * into thinking accent control was available here. OmniVoice (Persona Forge) is the engine
- * that's actually accent-capable — see [[voicedesign-accent-investigation]].
+ * into thinking accent control was available here. OmniVoice is the engine
+ * that's actually accent-capable.
  */
 export function composeDescription(sel: ChipSelections): string {
   const age = findLabel(AGES, sel.age)

@@ -140,7 +140,7 @@ interface StoreState {
   setVdSavedVoiceId: (v: string | null) => void
   setVdIsSaving: (v: boolean) => void
 
-  // ---- OmniVoice (PersonaForge) ----
+  // ---- OmniVoice ----
   ovSelections: OmniVoiceSelections
   ovCandidatesPerSegment: number
   ovShowAdvanced: boolean
