@@ -166,12 +166,7 @@ def patch_talker_prepare_inputs() -> None:
 
     # Add lightweight shape diagnostics to both attention classes
     # to help debug decode-phase attention_mask issues.
-    for cls in [
-        M.Qwen3TTSAttention,
-        M.Qwen3TTSTalkerAttention,
-    ]:
-        orig_fwd = cls.forward
-
+    def _make_diag_forward(cls, orig_fwd):
         @functools.wraps(orig_fwd)
         def diag_fwd(self, hidden_states, position_embeddings, attention_mask,
                      past_key_values=None, cache_position=None, **kw):
@@ -194,7 +189,13 @@ def patch_talker_prepare_inputs() -> None:
             return orig_fwd(self, hidden_states, position_embeddings,
                             attention_mask, past_key_values, cache_position, **kw)
 
-        cls.forward = diag_fwd
+        return diag_fwd
+
+    for cls in [
+        M.Qwen3TTSAttention,
+        M.Qwen3TTSTalkerAttention,
+    ]:
+        cls.forward = _make_diag_forward(cls, cls.forward)
 
 
 def patch_eager_attention_mask_broadcast() -> None:
