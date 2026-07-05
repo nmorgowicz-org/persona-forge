@@ -43,9 +43,11 @@ The "0.6B ≈ 1.7B memory" surprise is explained and the reduction work is done.
   (~0.3 GiB) variable IR/embedding delta. So **0.6B is not meaningfully smaller than 1.7B** → ship 1.7B.
 - Normal single-utterance traffic peaks at **~5.4–5.8 GiB**, safe under the 10G limit. (The old
   "9.84 GiB" was a long-prompt/cold worst case that scales with KV occupancy toward cap768.)
-- **Codec release SHIPPED** (`OPENVINO_RELEASE_CODEC`, default on): frees the ~0.32 GiB PyTorch
-  `speech_tokenizer` after startup → **−381 MiB load, −466 MiB gen peak** on 1.7B. Fail-closed (no
-  PyTorch decode fallback once freed); set `0` to keep the encoder for future per-request cloning.
+- **Codec release SHIPPED** (`OPENVINO_KEEP_CODEC_ENCODER`, renamed from `OPENVINO_RELEASE_CODEC`
+  once per-request cloning became a real feature; now defaults to `1`/keep-resident): setting it
+  to `0` frees the ~0.32 GiB PyTorch `speech_tokenizer` after startup → **−381 MiB load, −466 MiB
+  gen peak** on 1.7B. Fail-closed (no PyTorch decode fallback once freed); leave at the `1` default
+  to keep the encoder for per-request/voice-library cloning.
 - **INT8 vocoder: rejected with data** (net RSS *loss* — OpenVINO dequantizes to FP32 at inference).
   Do not re-attempt. The only untried memory levers left are small + parity-gated:
   `KV_CACHE_PRECISION=u8` and capacity 768→512.
@@ -71,8 +73,8 @@ The "0.6B ≈ 1.7B memory" surprise is explained and the reduction work is done.
    - Re-measure codec release on **0.6B** (the A/B above was 1.7B-only) for symmetry.
    - Try the two remaining memory levers (`KV_CACHE_PRECISION=u8`, cap512) if long-paragraph traffic
      ever needs a lower peak — parity-gate each.
-   - Alexandria features (per-request VoiceDesign/cloning) will need `OPENVINO_RELEASE_CODEC=0`
-     because they revive the codec encoder. See `docs/plans/alexandria_ideas.md`.
+   - Alexandria features (per-request VoiceDesign/cloning) need `OPENVINO_KEEP_CODEC_ENCODER=1`
+     (the current default) because they revive the codec encoder. See `docs/plans/alexandria_ideas.md`.
 
 ## 5. dockermisc1 quick reference
 

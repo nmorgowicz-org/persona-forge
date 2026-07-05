@@ -48,7 +48,7 @@ Legend:
 | `OPENVINO_VOCODER_DEVICE` | `CPU` | `runtime_config.py:44` | Device for vocoder (CPU is only meaningful option today). |
 | `OPENVINO_VOCODER_COMPRESSION` | `fp32` | `runtime_config.py:46` | Vocoder compression metadata; runtime only supports FP32. |
 | `OPENVINO_RELEASE_TORCH` | `1` (for openvino backend) | `config.py:69`, `model.py:57` | `1`: releases PyTorch core weights after OpenVINO compilation to save RAM. |
-| `OPENVINO_RELEASE_CODEC` | `1` (implicit; default is release) | `openvino/talker.py:655` | `1`: frees ~0.3 GiB speech_tokenizer codec after startup. Set `0` to keep it resident for per-request voice cloning of new voice_ids. |
+| `OPENVINO_KEEP_CODEC_ENCODER` | `1` | `openvino/talker.py:658` | `1` (default): keeps the ~0.3 GiB speech_tokenizer codec encoder resident for per-request voice cloning of new voice_ids. Set `0` to free it after startup (only for deployments that never clone a non-default voice_id). |
 | `OPENVINO_LOW_CPU_MEM_USAGE` | `1` | `config.py:70`, `model_config.py:95` | Enables `low_cpu_mem_usage=True` at model load for reduced peak memory. |
 | `OPENVINO_TORCH_DTYPE` | Preset-specific (`bfloat16` for OpenVINO, `float32` for PyTorch) | `config.py:68`, `model_config.py:78` | Dtype for loading the Qwen3TTSModel in Torch. |
 | `OPENVINO_BUFFER_KV` | `0` | `openvino/talker.py:152` | `1` enables K/V buffering behavior in OVTalkerRuntime. Advanced tuning. |

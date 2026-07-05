@@ -64,9 +64,10 @@ These constraints explain why the implementation looks the way it does:
    `REF_TEXT`. VoiceDesign's "feed into the base model for cloning" requirement meant we had to
    relax this (see §4.4: per-request / named-voice cloning).
 
-4. **`OPENVINO_RELEASE_CODEC=0` is required for VoiceDesign's "capture → clone" handoff.**
-   The PyTorch codec encoder must remain resident so `create_voice_clone_prompt()` can run at
-   runtime. Any deployment wanting `voice_id` requests must set `OPENVINO_RELEASE_CODEC=0`.
+4. **`OPENVINO_KEEP_CODEC_ENCODER=1` (the default) is required for VoiceDesign's "capture → clone"
+   handoff.** The PyTorch codec encoder must remain resident so `create_voice_clone_prompt()` can
+   run at runtime. Only a deployment that never needs `voice_id` requests (e.g. a single fixed
+   voice) should set `OPENVINO_KEEP_CODEC_ENCODER=0`.
 
 5. **`qwen_tts` package (v0.1.1) exposes three separate top-level generation methods**, gated by
    checkpoint type (`self.model.tts_model_type`), not by a runtime flag:
@@ -234,7 +235,7 @@ How it works:
    For VoiceDesign-captured samples, `ref_text = sample_text` (VoiceDesign directly synthesizes
    `sample_text` in the described voice). No ASR step needed.
 2. Call `model.create_voice_clone_prompt(ref_audio=<captured wav>, ref_text=<sample_text>)` to
-   build a fresh `voice_clone_prompt` for this request. Requires `OPENVINO_RELEASE_CODEC=0`.
+   build a fresh `voice_clone_prompt` for this request. Requires `OPENVINO_KEEP_CODEC_ENCODER=1`.
 3. **We cache the built `voice_clone_prompt` per `voice_id`** (in-process dict, invalidated on
    model reload/idle-unload) so repeated requests don't rebuild it.
 4. If `voice_id` is omitted, behavior is unchanged (uses the startup default). The Hermes

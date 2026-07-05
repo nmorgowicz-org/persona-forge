@@ -398,7 +398,8 @@ def load_model(profile: ModelProfile | None = None):
 
         # The codec encoder has done its one job (voice_clone_prompt was built above) and
         # the OV vocoder now owns decode, so free the ~0.3 GiB PyTorch speech_tokenizer.
-        # Self-gates on OPENVINO_RELEASE_CODEC; no-op when disabled for per-request cloning.
+        # Self-gates on OPENVINO_KEEP_CODEC_ENCODER; no-op when set (the default) so
+        # per-request/voice_id cloning keeps working.
         ov_runtime.release_codec()
 
         # Startup policy logs
@@ -778,9 +779,9 @@ def get_voice_clone_prompt(voice_id: str | None = None):
     if getattr(ov_runtime, "codec_released", False):
         raise RuntimeError(
             "Cannot build a voice_clone_prompt for a new voice_id: the PyTorch codec was "
-            "released at startup (OPENVINO_RELEASE_CODEC=1, the default) and encoding new "
+            "released at startup (OPENVINO_KEEP_CODEC_ENCODER=0) and encoding new "
             "reference audio requires it. Restart the container with "
-            "OPENVINO_RELEASE_CODEC=0 to use per-request/voice_id cloning."
+            "OPENVINO_KEEP_CODEC_ENCODER=1 (the default) to use per-request/voice_id cloning."
         )
     prompt = model.create_voice_clone_prompt(
         ref_audio=meta["wav_path"],

@@ -1163,10 +1163,11 @@ built the server-side `voice_clone_prompt` and the codec decoder is fully replac
 so `OVTalkerRuntime.release_codec()` frees the ~0.32 GiB PyTorch `speech_tokenizer` and `malloc_trim`s.
 This time the allocator returned it well: **−381 MiB at load, −466 MiB at gen peak.** It is one-way and
 **fail-closed** — the PyTorch decode fallback is gone, so an OV vocoder failure now errors the request
-instead of silently switching to PyTorch. Gated by `OPENVINO_RELEASE_CODEC` (default on wherever
-`OPENVINO_RELEASE_TORCH` is on); set it `0` to keep the encoder live for future per-request voice
-cloning / VoiceDesign (alexandria). Decode output is byte-identical (the decode path is unchanged), so
-there is no quality question.
+instead of silently switching to PyTorch. Measured here as `OPENVINO_RELEASE_CODEC=1`; that flag was
+later renamed `OPENVINO_KEEP_CODEC_ENCODER` and its polarity flipped once per-request voice cloning /
+VoiceDesign (alexandria) became a real, regularly-used feature — the numbers above correspond to
+today's `OPENVINO_KEEP_CODEC_ENCODER=0`, and the current default (`=1`) keeps the encoder live instead.
+Decode output is byte-identical (the decode path is unchanged), so there is no quality question.
 
 **INT8 vocoder REJECTED with data — do not re-try.** NNCF `compress_weights` INT8_ASYM on the vocoder
 IR halves it on *disk* (231 MB → 114 MB) but is a **net RSS loss** (+144 MiB load, +120 MiB peak vs
