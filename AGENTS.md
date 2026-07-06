@@ -228,12 +228,18 @@ Use Conventional Commits (`feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `bu
 - `(docs)` — documentation, README, HOW_TO_RUN, AGENTS, etc.
 - `(test)` — unit and integration tests
 
-Every implementation PR body must include a Release Please override block:
+Every implementation PR body must include a Release Please override block using this exact format:
+
+- Each line is one Conventional Commit entry.
+- Format: `- type(scope): description`
+- The leading `- ` is required.
+
+Example:
 
 ```text
 BEGIN_COMMIT_OVERRIDE
-fix(model): correct seed max from 2^63-1 to 2^32-1
-docs: restore advanced env var detail in .env.example and HOW_TO_RUN.md
+- fix(model): correct seed max from 2^63-1 to 2^32-1
+- docs: restore advanced env var detail in .env.example and HOW_TO_RUN.md
 END_COMMIT_OVERRIDE
 ```
 

@@ -9,7 +9,7 @@ test.describe('voice design', () => {
     await page.getByTestId('voice-design-sample-text').fill('This is a short sample line for the voice.')
     await page.getByTestId('voice-design-generate-button').click()
 
-    await expect(page.getByTestId('voice-design-result')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('voice-design-result')).toBeVisible({ timeout: 15000 })
 
     await page.getByRole('button', { name: 'Save to library' }).click()
 

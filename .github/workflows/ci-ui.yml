@@ -22,6 +22,8 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: arc-general
     timeout-minutes: 20
+    env:
+      PYTHONPATH: src:src/export
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
@@ -60,8 +62,40 @@ jobs:
         working-directory: tests/ui
         run: npx playwright install --with-deps chromium
 
+      - name: Start fake_model_server
+        run: |
+          nohup python tests/ui/fixtures/fake_model_server.py > fake_model_server.log 2>&1 &
+          echo "fake_model_server PID=$!"
+          sleep 2
+
+          # Show initial logs
+          echo "--- fake_model_server initial logs ---"
+          cat fake_model_server.log || true
+          echo "--- end initial logs ---"
+
+          # Try to curl /health once and show response
+          set +e
+          response=$(curl -s -w "\n%{http_code}" http://127.0.0.1:8319/health 2>&1 || true)
+          code=$(echo "$response" | tail -1)
+          echo "health HTTP code=$code"
+          echo "health response:"
+          echo "$response"
+
+          if [ "$code" = "200" ]; then
+            echo "fake_model_server is healthy"
+            exit 0
+          fi
+
+          # If not healthy, dump more logs
+          echo "fake_model_server not healthy; logs:"
+          tail -100 fake_model_server.log || true
+          exit 1
+
       - name: Run Playwright E2E tests
         working-directory: tests/ui
+        env:
+          PYTHONPATH: src:src/export
+          QWEN3_TTS_UI_URL: http://127.0.0.1:8319
         run: npm run test:ci
 
       - name: Upload Playwright report
@@ -70,4 +104,12 @@ jobs:
         with:
           name: playwright-report
           path: tests/ui/playwright-report
+          retention-days: 1
+
+      - name: Upload fake_model_server log
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fake_model_server-log
+          path: fake_model_server.log
           retention-days: 1

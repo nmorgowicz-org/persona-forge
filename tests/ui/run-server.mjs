@@ -10,26 +10,48 @@ import { fileURLToPath } from 'node:url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(__dirname, '..', '..')
 
-// Prefer the repo's own .venv (has flask/numpy/soundfile installed) over a bare `python3`,
-// which on a fresh dev machine won't have these deps.
+// Prefer: repo's .venv python, then pythonLocation (GitHub Actions), then python/python3.
 function resolvePython() {
   const venvPython = join(REPO_ROOT, '.venv', 'bin', 'python')
-  return existsSync(venvPython) ? venvPython : 'python3'
+  if (existsSync(venvPython)) return venvPython
+
+  // GitHub Actions sets pythonLocation to the tool path; derive python executable from it.
+  const pythonLocation = process.env.pythonLocation
+  if (pythonLocation) {
+    const candidate = join(pythonLocation, 'bin', 'python')
+    if (existsSync(candidate)) return candidate
+  }
+
+  return 'python'
 }
 
 export function startFakeServer({ port = 8319 } = {}) {
   const voiceLibraryDir = mkdtempSync(join(tmpdir(), 'qwen3-tts-e2e-voices-'))
   const env = {
     ...process.env,
-    PYTHONPATH: join(REPO_ROOT, 'src'),
+    PYTHONPATH: [REPO_ROOT, join(REPO_ROOT, 'src'), join(REPO_ROOT, 'src', 'export')].join(
+      process.platform === 'win32' ? ';' : ':'
+    ),
     VOICE_LIBRARY_DIR: voiceLibraryDir,
     FRONTEND_DIST_DIR: join(REPO_ROOT, 'frontend', 'dist'),
     QWEN3_TTS_TEST_PORT: String(port),
   }
 
-  const child = spawn(resolvePython(), [join(__dirname, 'fixtures', 'fake_model_server.py')], {
+  const python = resolvePython()
+  const child = spawn(python, [join(__dirname, 'fixtures', 'fake_model_server.py')], {
     env,
     stdio: 'inherit',
+  })
+
+  child.on('error', (err) => {
+    console.error(`[run-server] spawn failed for python=${python}: ${err.message}`)
+    process.exit(1)
+  })
+  child.on('close', (code) => {
+    if (code !== 0 && code !== null) {
+      console.error(`[run-server] fake_model_server exited with code ${code}`)
+      process.exit(code || 1)
+    }
   })
 
   const url = `http://127.0.0.1:${port}`
