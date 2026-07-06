@@ -67,14 +67,20 @@ jobs:
           nohup python tests/ui/fixtures/fake_model_server.py > fake_model_server.log 2>&1 &
           echo "fake_model_server PID=$!"
           set +e
+          last_response=""
           for i in $(seq 1 40); do
-            if curl -sf http://127.0.0.1:8319/health; then
+            response=$(curl -s -w "\n%{http_code}" http://127.0.0.1:8319/health 2>/dev/null || true)
+            code=$(echo "$response" | tail -1)
+            if [ "$code" = "200" ]; then
               echo "fake_model_server is healthy"
               exit 0
             fi
+            last_response="$response"
             sleep 0.5
           done
-          echo "fake_model_server failed to start. Last 100 lines:"
+          echo "fake_model_server failed to start. Last curl response:"
+          echo "$last_response"
+          echo "Last 100 lines of fake_model_server.log:"
           tail -100 fake_model_server.log
           exit 1
 
