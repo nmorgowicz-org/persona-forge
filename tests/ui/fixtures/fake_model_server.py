@@ -176,26 +176,9 @@ def main() -> None:
     print(f"[fake_model_server] TEST_PROFILE={_read_test_profile()}", flush=True)
     print(f"[fake_model_server] voice library: {os.environ['VOICE_LIBRARY_DIR']}", flush=True)
 
-    import urllib.request
-
-    deadline = time.monotonic() + 15
-    last_error = None
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1) as resp:
-                if resp.status == 200:
-                    break
-                # Non-200: capture once for diagnostics
-                if last_error is None:
-                    last_error = f"/health returned {resp.status}: {resp.read().decode(errors='replace')[:300]}"
-        except Exception as e:
-            if last_error is None:
-                last_error = str(e)
-            time.sleep(0.15)
-    else:
-        raise RuntimeError(
-            f"fake_model_server did not become reachable; last_error={last_error}"
-        )
+    # Block main thread; external health check is handled by CI / test harness.
+    while not shutdown_event.is_set():
+        shutdown_event.wait(timeout=1)
 
 
 def start_server(port: int = 18318, frontend_enabled: bool = False):

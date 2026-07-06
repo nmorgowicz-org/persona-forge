@@ -66,22 +66,29 @@ jobs:
         run: |
           nohup python tests/ui/fixtures/fake_model_server.py > fake_model_server.log 2>&1 &
           echo "fake_model_server PID=$!"
+          sleep 2
+
+          # Show initial logs
+          echo "--- fake_model_server initial logs ---"
+          cat fake_model_server.log || true
+          echo "--- end initial logs ---"
+
+          # Try to curl /health once and show response
           set +e
-          last_response=""
-          for i in $(seq 1 40); do
-            response=$(curl -s -w "\n%{http_code}" http://127.0.0.1:8319/health 2>/dev/null || true)
-            code=$(echo "$response" | tail -1)
-            if [ "$code" = "200" ]; then
-              echo "fake_model_server is healthy"
-              exit 0
-            fi
-            last_response="$response"
-            sleep 0.5
-          done
-          echo "fake_model_server failed to start. Last curl response:"
-          echo "$last_response"
-          echo "Last 100 lines of fake_model_server.log:"
-          tail -100 fake_model_server.log
+          response=$(curl -s -w "\n%{http_code}" http://127.0.0.1:8319/health 2>&1 || true)
+          code=$(echo "$response" | tail -1)
+          echo "health HTTP code=$code"
+          echo "health response:"
+          echo "$response"
+
+          if [ "$code" = "200" ]; then
+            echo "fake_model_server is healthy"
+            exit 0
+          fi
+
+          # If not healthy, dump more logs
+          echo "fake_model_server not healthy; logs:"
+          tail -100 fake_model_server.log || true
           exit 1
 
       - name: Run Playwright E2E tests
