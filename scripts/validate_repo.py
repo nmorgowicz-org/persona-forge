@@ -27,7 +27,7 @@ CONVENTIONAL_TYPES = (
     "revert",
 )
 OVERRIDE_ENTRY_RE = re.compile(
-    rf"^({'|'.join(CONVENTIONAL_TYPES)})(?:\([a-z0-9][a-z0-9._/-]*\))?!?: .+$"
+    rf"^-? ?({'|'.join(CONVENTIONAL_TYPES)})(?:\([a-z0-9][a-z0-9._/-]*\))?!?: .+$"
 )
 
 
