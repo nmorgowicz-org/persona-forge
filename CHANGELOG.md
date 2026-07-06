@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.22.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.21.1...qwen3-tts-openvino-v0.22.0) (2026-07-06)
+
+
+### Features
+
+* **audio_post:** add numpy-based compressor, loudness normalizer, crossfade concat, and drone-detect heuristic ([5e60279](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5e60279eb61fa1ce5aaa7a439ddb16781525fc4a))
+* **frontend:** add AccentBank with regional accent examples and guidance ([5e60279](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5e60279eb61fa1ce5aaa7a439ddb16781525fc4a))
+* **frontend:** add Persona Forge OmniVoice panel with accent chips, segment audition, and streaming results ([5e60279](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5e60279eb61fa1ce5aaa7a439ddb16781525fc4a))
+* **frontend:** add standalone Stitch Studio page and Saved Segments browser to Voice Library ([5e60279](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5e60279eb61fa1ce5aaa7a439ddb16781525fc4a))
+* **frontend:** add VST-style Stitch Timeline editor for per-clip trim/fade/gap controls and drag-and-drop reorder ([5e60279](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5e60279eb61fa1ce5aaa7a439ddb16781525fc4a))
+* **openvino:** add OmniVoice accent-design engine with multi-candidate audition, segment library, and streaming progress API ([5e60279](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5e60279eb61fa1ce5aaa7a439ddb16781525fc4a))
+* **runtime:** async OmniVoice job queueing when model is not yet loaded ([5e60279](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5e60279eb61fa1ce5aaa7a439ddb16781525fc4a))
+* **runtime:** load Base model in background; allow /generate to queue through swaps instead of 503ing ([5e60279](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5e60279eb61fa1ce5aaa7a439ddb16781525fc4a))
+
+
+### Bug Fixes
+
+* **frontend:** bound /health swap-status polling with timeout and exponential backoff ([5e60279](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5e60279eb61fa1ce5aaa7a439ddb16781525fc4a))
+* **pytorch:** patch T5-generation prepare_inputs_for_generation, create_causal_mask, and sdpa_attention_forward for transformers 5.x ([5e60279](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5e60279eb61fa1ce5aaa7a439ddb16781525fc4a))
+
+
+### Documentation
+
+* reorganize docs/plans into docs/dev with completed-feature rewrites; update all internal cross-references ([5e60279](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5e60279eb61fa1ce5aaa7a439ddb16781525fc4a))
+
+
+### Miscellaneous Chores
+
+* **deps:** install OmniVoice from git (398b6113), faster-whisper, pydub; add ffmpeg; add segment library volume ([5e60279](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5e60279eb61fa1ce5aaa7a439ddb16781525fc4a))
+* **model:** remove unused debug hooks from transformers 5.x patches ([5e60279](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5e60279eb61fa1ce5aaa7a439ddb16781525fc4a))
+
 ## [0.21.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.21.0...qwen3-tts-openvino-v0.21.1) (2026-07-03)
 
 
