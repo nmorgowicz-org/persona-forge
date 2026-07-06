@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.22.0...qwen3-tts-openvino-v0.22.1) (2026-07-06)
+
+
+### Miscellaneous Chores
+
+* **deps:** update dependency shadcn to v4.13.0 ([#103](https://github.com/nmorgowicz-org/qwen3-tts-openvino/issues/103)) ([b9126c8](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/b9126c854bb9ceeb4bdd7fd271dbd4bcac98fc43))
+
 ## [0.22.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.21.1...qwen3-tts-openvino-v0.22.0) (2026-07-06)
 
 
