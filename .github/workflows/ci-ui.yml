@@ -62,10 +62,27 @@ jobs:
         working-directory: tests/ui
         run: npx playwright install --with-deps chromium
 
+      - name: Start fake_model_server
+        run: |
+          nohup python tests/ui/fixtures/fake_model_server.py > fake_model_server.log 2>&1 &
+          echo "fake_model_server PID=$!"
+          set +e
+          for i in $(seq 1 40); do
+            if curl -sf http://127.0.0.1:8319/health; then
+              echo "fake_model_server is healthy"
+              exit 0
+            fi
+            sleep 0.5
+          done
+          echo "fake_model_server failed to start. Last 100 lines:"
+          tail -100 fake_model_server.log
+          exit 1
+
       - name: Run Playwright E2E tests
         working-directory: tests/ui
         env:
           PYTHONPATH: src:src/export
+          QWEN3_TTS_UI_URL: http://127.0.0.1:8319
         run: npm run test:ci
 
       - name: Upload Playwright report
@@ -74,4 +91,12 @@ jobs:
         with:
           name: playwright-report
           path: tests/ui/playwright-report
+          retention-days: 1
+
+      - name: Upload fake_model_server log
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fake_model_server-log
+          path: fake_model_server.log
           retention-days: 1
