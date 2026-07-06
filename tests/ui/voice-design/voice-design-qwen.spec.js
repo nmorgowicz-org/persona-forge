@@ -36,9 +36,7 @@ test.describe('voice design (Qwen engine)', () => {
 
     // Navigate to Voice Library and confirm voice card is present
     await page.getByTestId('nav-voice-library').click()
-    await expect(page.locator('[data-testid="voice-card"]')).toHaveCount(
-      { greaterThanOrEqual: 1 },
-      { timeout: 10000 }
-    )
+    const cards = page.locator('[data-testid="voice-card"]')
+    await expect(cards).toHaveCount(1, { timeout: 10000 })
   })
 })

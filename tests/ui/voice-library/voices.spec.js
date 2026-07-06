@@ -23,10 +23,7 @@ test.describe('voice library', () => {
       if (await saveBtn.isVisible()) await saveBtn.click()
 
       await page.getByTestId('nav-voice-library').click()
-      await expect(page.locator('[data-testid="voice-card"]')).toHaveCount(
-        { greaterThanOrEqual: 1 },
-        { timeout: 10000 }
-      )
+      await expect(page.locator('[data-testid="voice-card"]')).toHaveCount(1, { timeout: 10000 })
     }
 
     // Inline-edit reference text: click pencil icon on first card
