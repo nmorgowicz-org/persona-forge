@@ -10,11 +10,12 @@ import { fileURLToPath } from 'node:url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(__dirname, '..', '..')
 
-// Prefer the repo's own .venv (has flask/numpy/soundfile installed) over a bare `python3`,
-// which on a fresh dev machine won't have these deps.
+// Prefer: repo's .venv python, then `python`, then `python3`.
 function resolvePython() {
   const venvPython = join(REPO_ROOT, '.venv', 'bin', 'python')
-  return existsSync(venvPython) ? venvPython : 'python3'
+  if (existsSync(venvPython)) return venvPython
+  // In CI (actions/setup-python), `python` is present; `python3` may not be.
+  return process.platform === 'win32' ? 'python' : 'python'
 }
 
 export function startFakeServer({ port = 8319 } = {}) {
