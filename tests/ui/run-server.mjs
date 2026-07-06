@@ -21,7 +21,9 @@ export function startFakeServer({ port = 8319 } = {}) {
   const voiceLibraryDir = mkdtempSync(join(tmpdir(), 'qwen3-tts-e2e-voices-'))
   const env = {
     ...process.env,
-    PYTHONPATH: join(REPO_ROOT, 'src'),
+    PYTHONPATH: [REPO_ROOT, join(REPO_ROOT, 'src'), join(REPO_ROOT, 'src', 'export')].join(
+      process.platform === 'win32' ? ';' : ':'
+    ),
     VOICE_LIBRARY_DIR: voiceLibraryDir,
     FRONTEND_DIST_DIR: join(REPO_ROOT, 'frontend', 'dist'),
     QWEN3_TTS_TEST_PORT: String(port),
