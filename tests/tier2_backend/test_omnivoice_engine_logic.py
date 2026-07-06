@@ -46,6 +46,7 @@ def _prepare_engine(model_draws, sr=24000):
     return eng, fake_model_holder, (patcher1, patcher2)
 
 
+@pytest.mark.slow
 @pytest.mark.integration
 class TestOmniVoiceRetry:
 
@@ -105,6 +106,7 @@ class TestOmniVoiceRetry:
             p2.stop()
 
 
+@pytest.mark.slow
 @pytest.mark.integration
 class TestOmniVoiceParams:
 
