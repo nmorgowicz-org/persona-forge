@@ -22,6 +22,8 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: arc-general
     timeout-minutes: 20
+    env:
+      PYTHONPATH: src:src/export
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
@@ -62,6 +64,8 @@ jobs:
 
       - name: Run Playwright E2E tests
         working-directory: tests/ui
+        env:
+          PYTHONPATH: src:src/export
         run: npm run test:ci
 
       - name: Upload Playwright report

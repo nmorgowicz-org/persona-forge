@@ -1,6 +1,12 @@
-import unittest
+"""Test export utility helpers without loading models or OpenVINO runtime."""
+
+from __future__ import annotations
+
+import sys
 from types import SimpleNamespace
 from unittest import mock
+
+import pytest
 
 from export_openvino import (
     _compress,
@@ -12,39 +18,38 @@ from export_openvino import (
 )
 
 
-class ExportOpenVINOTests(unittest.TestCase):
-    def test_resolves_decoder_from_tokenizer_model(self):
+class TestResolveVocoderDecoder:
+    def test_resolves_from_tokenizer_model(self):
         decoder = object()
         tokenizer = SimpleNamespace(model=SimpleNamespace(decoder=decoder))
-
-        self.assertIs(_resolve_vocoder_decoder(tokenizer), decoder)
+        assert _resolve_vocoder_decoder(tokenizer) is decoder
 
     def test_rejects_unexpected_tokenizer_contract(self):
-        with self.assertRaisesRegex(RuntimeError, "speech_tokenizer.model.decoder"):
+        with pytest.raises(RuntimeError, match="speech_tokenizer.model.decoder"):
             _resolve_vocoder_decoder(SimpleNamespace())
 
-    def test_vocoder_only_cli_mode(self):
+
+class TestCLIParse:
+    def test_vocoder_only_mode(self):
         with mock.patch(
             "sys.argv",
             ["export_openvino.py", "--output-dir", "/tmp/ov", "--vocoder-only"],
         ):
             args = parse_args()
+        assert args.vocoder_only is True
+        assert args.skip_vocoder is False
 
-        self.assertTrue(args.vocoder_only)
-        self.assertFalse(args.skip_vocoder)
-
-    def test_main_only_cli_mode(self):
+    def test_main_only_mode(self):
         with mock.patch(
             "sys.argv",
             ["export_openvino.py", "--output-dir", "/tmp/ov", "--main-only"],
         ):
             args = parse_args()
+        assert args.main_only is True
+        assert args.vocoder_only is False
+        assert args.skip_vocoder is False
 
-        self.assertTrue(args.main_only)
-        self.assertFalse(args.vocoder_only)
-        self.assertFalse(args.skip_vocoder)
-
-    def test_rejects_unsupported_mix8_mode(self):
+    def test_rejects_unsupported_int8_mode(self):
         with mock.patch(
             "sys.argv",
             [
@@ -54,10 +59,10 @@ class ExportOpenVINOTests(unittest.TestCase):
                 "--int8-mode",
                 "mix8",
             ],
-        ), self.assertRaises(SystemExit):
+        ), pytest.raises(SystemExit):
             parse_args()
 
-    def test_rejects_unsupported_int8_calibration_before_export(self):
+    def test_rejects_unsupported_calibration(self):
         with mock.patch(
             "sys.argv",
             [
@@ -69,9 +74,11 @@ class ExportOpenVINOTests(unittest.TestCase):
                 "--calibration",
                 "/tmp/calib",
             ],
-        ), self.assertRaises(SystemExit):
+        ), pytest.raises(SystemExit):
             parse_args()
 
+
+class TestSetEagerAttention:
     def test_sets_each_nested_attention_config_once(self):
         eager = SimpleNamespace(_attn_implementation="sdpa")
         untouched = SimpleNamespace()
@@ -82,45 +89,42 @@ class ExportOpenVINOTests(unittest.TestCase):
         ]
         module = SimpleNamespace(modules=lambda: iter(children))
 
-        self.assertEqual(_set_eager_attention(module), 1)
-        self.assertEqual(eager._attn_implementation, "eager")
-        self.assertFalse(hasattr(untouched, "_attn_implementation"))
+        assert _set_eager_attention(module) == 1
+        assert eager._attn_implementation == "eager"
+        assert not hasattr(untouched, "_attn_implementation")
 
-    def test_export_provenance_uses_explicit_env_values(self):
+
+class TestExportProvenance:
+    def test_uses_explicit_env_values(self):
         commit = "a" * 40
         digest = f"sha256:{'b' * 64}"
-
-        self.assertEqual(
-            _export_provenance(
-                {"SOURCE_COMMIT": commit, "EXPORTER_IMAGE_DIGEST": digest}
-            ),
-            (commit, digest),
+        result = _export_provenance(
+            {"SOURCE_COMMIT": commit, "EXPORTER_IMAGE_DIGEST": digest}
         )
+        assert result == (commit, digest)
 
-    def test_export_provenance_defaults_when_missing(self):
-        # Missing provenance must NOT abort an export. Digest falls back to "unknown";
-        # the commit is best-effort (auto-detected git SHA or "unknown").
+    def test_defaults_when_missing(self):
         commit, digest = _export_provenance({})
+        assert digest == "unknown"
+        assert isinstance(commit, str) and commit
 
-        self.assertEqual(digest, "unknown")
-        self.assertIsInstance(commit, str)
-        self.assertTrue(commit)
 
+class TestResolvedModelRevision:
     def test_resolves_immutable_model_revision_from_loaded_config(self):
         resolved = "a" * 40
         wrapped = SimpleNamespace(
             model=SimpleNamespace(config=SimpleNamespace(_commit_hash=resolved))
         )
+        assert _resolved_model_revision(wrapped, "main") == resolved
 
-        self.assertEqual(_resolved_model_revision(wrapped, "main"), resolved)
-
-    def test_falls_back_to_requested_revision_when_no_commit_hash(self):
+    def test_falls_back_to_requested_revision(self):
         wrapped = SimpleNamespace(model=SimpleNamespace(config=SimpleNamespace()))
+        assert _resolved_model_revision(wrapped, "v1.2") == "v1.2"
+        assert _resolved_model_revision(wrapped, None) == "main"
 
-        self.assertEqual(_resolved_model_revision(wrapped, "v1.2"), "v1.2")
-        self.assertEqual(_resolved_model_revision(wrapped, None), "main")
 
-    def test_int8_compression_does_not_pass_int4_tuning_arguments(self):
+class TestCompress:
+    def test_int8_asym_does_not_pass_int4_args(self):
         modes = SimpleNamespace(INT8_SYM="int8_sym", INT8_ASYM="int8_asym", INT4_ASYM="int4")
         nncf = SimpleNamespace(CompressWeightsMode=modes, compress_weights=mock.Mock())
 
@@ -128,21 +132,14 @@ class ExportOpenVINOTests(unittest.TestCase):
 
         nncf.compress_weights.assert_called_once_with("model", mode="int8_asym")
 
-    def test_int8_sym_and_asym_modes_are_not_confused(self):
+    def test_int8_sym_and_asym_modes_not_confused(self):
         modes = SimpleNamespace(INT8_SYM="symmetric", INT8_ASYM="asymmetric", INT4_ASYM="int4")
         nncf = SimpleNamespace(CompressWeightsMode=modes, compress_weights=mock.Mock())
 
         _compress("model", nncf, mode="int8_sym")
         _compress("model", nncf, mode="int8_asym")
 
-        self.assertEqual(
-            nncf.compress_weights.call_args_list,
-            [
-                mock.call("model", mode="symmetric"),
-                mock.call("model", mode="asymmetric"),
-            ],
-        )
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert nncf.compress_weights.call_args_list == [
+            mock.call("model", mode="symmetric"),
+            mock.call("model", mode="asymmetric"),
+        ]

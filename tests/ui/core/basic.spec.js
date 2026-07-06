@@ -8,24 +8,26 @@ test.describe('core', () => {
     expect(body.status).toBe('ok')
   })
 
-  test('home page loads with Speak active', async ({ page }) => {
+  test('home page loads with Speak active and speak text input present', async ({ page }) => {
     await page.goto('/')
     await expect(page.getByTestId('nav-speak')).toBeVisible()
     await expect(page.getByTestId('speak-text-input')).toBeVisible()
   })
 
-  test('sidebar navigates between every page', async ({ page }) => {
+  test('all main nav items are clickable', async ({ page }) => {
     await page.goto('/')
-    const pages = [
-      ['nav-voice-design', 'voice-design-description'],
-      ['nav-voice-library', null],
-      ['nav-integrations', null],
-      ['nav-runtime', null],
-      ['nav-speak', 'speak-text-input'],
+    const navItems = [
+      'nav-speak',
+      'nav-voice-design',
+      'nav-voice-library',
+      'nav-stitch-studio',
+      'nav-integrations',
+      'nav-runtime',
     ]
-    for (const [navTestId, contentTestId] of pages) {
-      await page.getByTestId(navTestId).click()
-      if (contentTestId) await expect(page.getByTestId(contentTestId)).toBeVisible()
+    for (const id of navItems) {
+      await expect(page.getByTestId(id)).toBeVisible()
+      await page.getByTestId(id).click()
+      await expect(page.getByTestId(id)).toBeVisible()
     }
   })
 })

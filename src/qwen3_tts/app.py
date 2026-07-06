@@ -71,6 +71,17 @@ def _evict_old_audition_jobs() -> None:
 
 app = Flask(__name__)
 
+_shutdown_hook = None
+
+
+@app.route("/_shutdown", methods=["GET"])
+def _test_shutdown():
+    """Test-only hook used by fake_model_server to shut down a test instance."""
+    if _shutdown_hook is not None:
+        _shutdown_hook()
+    return "ok"
+
+
 # Static frontend export (frontend/, built by `npm run build`; see docs/dev/architecture/voice_design.md
 # §8.1). The Dockerfile copies the build output to /app/frontend/dist; app.py lives at
 # /app/src/qwen3_tts/app.py, so parent.parent.parent is /app in the container by construction.
