@@ -1,5 +1,17 @@
 import type { ReactNode } from 'react'
-import { AudioLines, Mic2, Plug, Settings2, Sparkles } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import {
+  AudioLines,
+  ChevronLeft,
+  ChevronRight,
+  Layers,
+  Mic2,
+  Palette,
+  Plug,
+  Settings2,
+  Sparkles,
+} from 'lucide-react'
 import {
   Sidebar,
   SidebarContent,
@@ -14,19 +26,168 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
+  useSidebar,
 } from '@/components/ui/sidebar'
+import { ActivityStatusBar } from '@/components/ui/ActivityStatusBar'
 import { Separator } from '@/components/ui/separator'
-import { ThemeSwitcher } from '@/components/ThemeSwitcher'
 import { SwapBanner } from '@/components/SwapBanner'
 import { type Page, useAppStore } from '@/store'
+import { THEMES, type Theme } from '@/lib/theme'
+import { cn } from '@/lib/utils'
+
+const SWATCH_COLOR: Record<Theme, string> = {
+  violet: 'oklch(0.62 0.19 280)',
+  teal: 'oklch(0.6 0.13 175)',
+  amber: 'oklch(0.78 0.16 70)',
+  rose: 'oklch(0.64 0.2 10)',
+}
+
+const SWATCH_LABEL: Record<Theme, string> = {
+  violet: 'Violet',
+  teal: 'Teal',
+  amber: 'Amber',
+  rose: 'Rose',
+}
 
 const NAV_ITEMS: { page: Page; label: string; icon: typeof Mic2; description: string }[] = [
   { page: 'speak', label: 'Speak', icon: AudioLines, description: 'Text to speech' },
   { page: 'voice-design', label: 'Voice Design', icon: Sparkles, description: 'Craft a new voice' },
   { page: 'voice-library', label: 'Voice Library', icon: Mic2, description: 'Saved voices' },
+  { page: 'stitch-studio', label: 'Stitch Studio', icon: Layers, description: 'Arrange clips into a voice' },
   { page: 'integrations', label: 'Integrations', icon: Plug, description: 'API & apps' },
   { page: 'runtime', label: 'Runtime', icon: Settings2, description: 'Live server config' },
 ]
+
+function ThemePaletteBar() {
+  const theme = useAppStore((s) => s.theme)
+  const setTheme = useAppStore((s) => s.setTheme)
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {THEMES.map((t) => {
+        const active = theme === t
+        return (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTheme(t)}
+            className={cn(
+              'h-2 w-6 shrink-0 overflow-hidden rounded-full border border-transparent transition-all hover:scale-110',
+              active && 'border-white/80 ring-2 ring-white/80',
+            )}
+            style={{ background: SWATCH_COLOR[t] }}
+            title={SWATCH_LABEL[t]}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+function ThemePaletteButton() {
+  const theme = useAppStore((s) => s.theme)
+  const setTheme = useAppStore((s) => s.setTheme)
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
+
+  useEffect(() => {
+    if (!open) return
+    const update = () => {
+      if (!btnRef.current) return
+      const r = btnRef.current.getBoundingClientRect()
+      setPos({ x: r.right + 6, y: r.top + r.height / 2 - 10 })
+    }
+    update()
+    window.addEventListener('resize', update)
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node
+      const btn = btnRef.current
+      const panel = panelRef.current
+      const insideBtn = btn?.contains(target)
+      const insidePanel = panel?.contains(target)
+      if (!insideBtn && !insidePanel) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => {
+      window.removeEventListener('resize', update)
+      document.removeEventListener('mousedown', onDown)
+    }
+  }, [open])
+
+  const panel =
+    open &&
+    createPortal(
+      <div
+        ref={panelRef}
+        style={{
+          position: 'fixed',
+          left: pos.x,
+          top: pos.y,
+          zIndex: 9999,
+        }}
+        className="flex gap-1.5 rounded-lg border border-border bg-popover px-2.5 py-1.5 shadow-lg"
+      >
+        {THEMES.map((t) => {
+          const active = theme === t
+          return (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTheme(t)}
+              className={cn(
+                'h-2 w-6 shrink-0 rounded-full border border-transparent transition-all hover:scale-110',
+                active && 'border-white/80 ring-2 ring-white/80',
+              )}
+              style={{ background: SWATCH_COLOR[t] }}
+              title={SWATCH_LABEL[t]}
+            />
+          )
+        })}
+      </div>,
+      document.body,
+    )
+
+  return (
+    <>
+      <SidebarMenuButton
+        ref={btnRef}
+        onClick={() => setOpen((v) => !v)}
+        tooltip="Theme"
+      >
+        <Palette className="size-4" />
+      </SidebarMenuButton>
+      {panel}
+    </>
+  )
+}
+
+function SidebarCollapseButton() {
+  const { open, toggleSidebar } = useSidebar()
+
+  if (!open) {
+    return (
+      <SidebarMenuButton onClick={toggleSidebar} tooltip="Expand sidebar">
+        <ChevronLeft className="size-4" />
+      </SidebarMenuButton>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={toggleSidebar}
+      className="group/collapse flex w-full items-center justify-between gap-2 rounded-xl border border-border/90 px-3 py-2 text-xs font-medium text-foreground/90 shadow-sm transition-all hover:border-border hover:bg-accent hover:text-foreground hover:shadow"
+      title="Collapse sidebar"
+    >
+      <span>Collapse sidebar</span>
+      <ChevronRight className="size-4 shrink-0 text-foreground/90 transition-transform group-hover/collapse:translate-x-0.5 group-hover/collapse:text-foreground" />
+    </button>
+  )
+}
 
 export function AppShell({ children }: { children: ReactNode }) {
   const page = useAppStore((s) => s.page)
@@ -37,12 +198,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     <SidebarProvider>
       <Sidebar collapsible="icon">
         <SidebarHeader className="px-3 py-4">
-          <div className="flex items-center gap-2 px-1">
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <div className="flex items-center gap-2.5 px-1">
+            <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm ring-1 ring-primary/20">
               <AudioLines className="size-4" />
             </div>
             <div className="flex flex-col group-data-[collapsible=icon]:hidden">
-              <span className="text-sm font-semibold leading-none">Qwen3-TTS</span>
+              <span className="text-sm font-semibold leading-none tracking-tight">Persona Forge</span>
               <span className="text-[11px] text-muted-foreground">Voice Studio</span>
             </div>
           </div>
@@ -52,33 +213,49 @@ export function AppShell({ children }: { children: ReactNode }) {
             <SidebarGroupLabel>Studio</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {NAV_ITEMS.map((item) => (
-                  <SidebarMenuItem key={item.page}>
-                    <SidebarMenuButton
-                      data-testid={`nav-${item.page}`}
-                      isActive={page === item.page}
-                      tooltip={item.label}
-                      onClick={() => setPage(item.page)}
-                    >
-                      <item.icon />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                {NAV_ITEMS.map((item) => {
+                  const isActive = page === item.page
+                  return (
+                    <SidebarMenuItem key={item.page}>
+                      <SidebarMenuButton
+                        data-testid={`nav-${item.page}`}
+                        isActive={isActive}
+                        tooltip={item.label}
+                        onClick={() => setPage(item.page)}
+                        className={cn(
+                          'relative transition-all',
+                          isActive &&
+                            'before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-primary group-data-[collapsible=icon]:before:hidden',
+                        )}
+                      >
+                        <item.icon />
+                        <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  )
+                })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
-        <SidebarFooter className="gap-3 px-3 py-3 group-data-[collapsible=icon]:hidden">
-          <ThemeSwitcher />
-          <p className="text-[11px] leading-snug text-muted-foreground">
-            Voices designed here are served over the OpenAI-compatible endpoint for Hermes and
-            other apps.
-          </p>
+        <SidebarFooter className="flex flex-col gap-2 px-3 py-3">
+          {/* Expanded: inline color palette bar + short note */}
+          <div className="group-data-[collapsible=icon]:hidden flex flex-col gap-1.5">
+            <ThemePaletteBar />
+            <p className="text-[10px] leading-tight text-muted-foreground">
+              Voices designed here are served over the OpenAI-compatible endpoint for Hermes and
+              other apps.
+            </p>
+          </div>
+          {/* Collapsed: theme button (same size as expand button) */}
+          <div className="hidden group-data-[collapsible=icon]:flex justify-center">
+            <ThemePaletteButton />
+          </div>
+          <SidebarCollapseButton />
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/80 bg-background/80 px-4 backdrop-blur-sm">
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-5" />
           <div className="flex flex-col">
@@ -87,10 +264,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
         <SwapBanner />
-        <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-5xl px-6 py-8">{children}</div>
+        <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+          <div className="w-full min-w-0 px-6 py-8">{children}</div>
         </div>
       </SidebarInset>
+      <ActivityStatusBar />
     </SidebarProvider>
   )
 }

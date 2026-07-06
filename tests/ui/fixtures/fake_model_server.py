@@ -1,6 +1,6 @@
 """Runs the real qwen3_tts Flask app with the model layer faked out.
 
-For local UI/UX review and E2E/screenshot testing (see docs/plans/20260702-e2e_and_screenshotting.md
+For local UI/UX review and E2E/screenshot testing (see docs/dev/resolved/E2E_AND_SCREENSHOTTING.md
 §3.1). No model weights are loaded, no OpenVINO, no Docker required — this is a plain Python
 process that works the same on any machine/architecture.
 
@@ -25,6 +25,7 @@ import os
 import secrets
 import sys
 import tempfile
+import threading
 import time
 import types
 from concurrent.futures import ThreadPoolExecutor
@@ -44,8 +45,14 @@ def _install_fake_model_module() -> None:
         vocoder_runtime=types.SimpleNamespace(enabled=True, sample_rate=_SAMPLE_RATE)
     )
     fake_model.executor = ThreadPoolExecutor(max_workers=1)
-    fake_model.health_state = lambda: {"status": "ok", "backend": "fake-e2e"}
+    fake_model.health_state = lambda: {
+        "status": "ok",
+        "backend": "fake-e2e",
+        "model_loaded": True,
+        "service_started": True,
+    }
     fake_model._apply_optional_seed = lambda seed: None
+    fake_model.register_foreign_engine = lambda is_loaded, unload: None
     fake_model.resolve_seed = lambda seed_value: (
         seed_value if seed_value is not None else secrets.randbelow(_MAX_SEED)
     )
@@ -93,7 +100,44 @@ def _install_fake_model_module() -> None:
     fake_model.apply_runtime_config = _apply_runtime_config
 
     def _run_generate(text, language, **kwargs):
-        return np.zeros(int(_SAMPLE_RATE * 0.5), dtype=np.float32), _SAMPLE_RATE
+        # For consistency with real model.py, this:
+        # - Uses job_id from kwargs if provided (async job flow)
+        # - Marks job as completed and stores wav/sr so /generate/progress returns "completed"
+        # - Falls back to a plain tuple if no job_id
+        import random
+        job_id = kwargs.get("job_id")
+        wav = np.zeros(int(_SAMPLE_RATE * 0.5), dtype=np.float32)
+        sr = _SAMPLE_RATE
+        resolved_seed = kwargs.get("seed_value")
+
+        if job_id:
+            with fake_model._active_jobs_lock:
+                job = fake_model._active_jobs.get(job_id)
+            if job is None:
+                # Race guard: job already cleaned up.
+                return wav, sr, job_id
+
+            # Simulate short generation delay (fast for tests)
+            time.sleep(0.05)
+            job.frames_generated = 60  # matches expected_total_frames in _fake_get_job_progress
+
+            # Store result in job so /generate/job/{id}/audio can return it.
+            job.wav = wav
+            job.sr = sr
+            job.status = "completed"
+            job.message = None
+            job.error = None
+
+            # Store seed for test consistency (mirrors real model).
+            if resolved_seed is not None:
+                job.seed = resolved_seed
+            else:
+                job.seed = random.randint(0, _MAX_SEED - 1)
+
+            return wav, sr, job_id
+        else:
+            # Legacy: no job_id (used by some internal callers)
+            return wav, sr, "fake-job-" + str(int(time.time() * 1000))
 
     def _run_generate_with_streaming(text, language, on_chunk, **kwargs):
         chunk = np.zeros(_SAMPLE_RATE // 4, dtype=np.float32)
@@ -106,6 +150,64 @@ def _install_fake_model_module() -> None:
 
     fake_model._run_generate = _run_generate
     fake_model._run_generate_with_streaming = _run_generate_with_streaming
+
+    # Async job helpers (used by /generate/async, /generate/progress, /generate/cancel)
+    fake_model._active_jobs = {}
+    fake_model._active_jobs_lock = threading.Lock()
+
+    def _fake_create_job(text, seed=None):
+        job_id = "fake-job-" + str(int(time.time() * 1000))
+        class _FakeJob:
+            def __init__(self):
+                self.job_id = job_id
+                self.status = "running"
+                self.frames_generated = 0
+                self.reference_frames = 0
+                self.text_length = len(text)
+                self.message = None
+                self.wav = np.zeros(int(_SAMPLE_RATE * 0.5), dtype=np.float32)
+                self.sr = _SAMPLE_RATE
+                self.seed = seed
+                self.error = None
+                self.started_at = time.monotonic()
+                self.cancel_event = threading.Event()
+        job = _FakeJob()
+        fake_model._active_jobs[job_id] = job
+        return job
+
+    def _fake_get_job_progress(job_id):
+        job = fake_model._active_jobs.get(job_id)
+        if job is None:
+            return None
+        elapsed = time.monotonic() - job.started_at
+        return {
+            "job_id": job_id,
+            "status": job.status,
+            "frames_generated": job.frames_generated,
+            "expected_total_frames": 60,
+            "progress_pct": min(100.0, (job.frames_generated / 60) * 100),
+            "elapsed_seconds": round(elapsed, 1),
+            "eta_seconds": None,
+            "message": job.message,
+        }
+
+    def _fake_cancel_job(job_id):
+        job = fake_model._active_jobs.get(job_id)
+        if job is None or job.status != "running":
+            return False
+        job.status = "cancelled"
+        job.message = "Cancelled by user."
+        job.cancel_event.set()
+        return True
+
+    def _fake_cleanup_job(job_id):
+        fake_model._active_jobs.pop(job_id, None)
+
+    fake_model._create_job = _fake_create_job
+    fake_model.get_job_progress = _fake_get_job_progress
+    fake_model.cancel_job = _fake_cancel_job
+    fake_model._cleanup_job = _fake_cleanup_job
+
     sys.modules["qwen3_tts.model"] = fake_model
 
 

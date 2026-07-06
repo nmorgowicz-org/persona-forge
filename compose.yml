@@ -42,6 +42,7 @@ services:
       - ${OV_DATA_PATH:-./data/ov}:/ov:rw
       - ${REF_AUDIO_PATH:?Set REF_AUDIO_PATH to the reference WAV file}:/voice/reference.wav:ro
       - ${VOICE_LIBRARY_PATH:-./data/voices}:/voices:rw
+      - ${SEGMENT_LIBRARY_PATH:-./data/segments}:/segments:rw
     mem_limit: ${TTS_MEMORY_LIMIT:-10G}
     memswap_limit: ${TTS_MEMORY_SWAP_LIMIT:-11G}
     stop_grace_period: 45s
@@ -66,7 +67,7 @@ services:
   export-voice-design:
     # Same image/command as `export`; EXPORT_TARGET selects the VoiceDesign checkpoint and
     # its separate /ov/<size>-voicedesign/... output tree (see scripts/export.py, VOICE_DESIGN
-    # section of docs/plans/PLAN_voice_design.md). Independent from the `export` service so a
+    # section of docs/dev/architecture/voice_design.md). Independent from the `export` service so a
     # VoiceDesign export never overwrites a Base export for the same size.
     image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:local}
     build:

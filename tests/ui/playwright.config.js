@@ -1,4 +1,4 @@
-// See docs/plans/20260702-e2e_and_screenshotting.md §4.2. Chromium-only, sequential, pointed at
+// See docs/dev/resolved/E2E_AND_SCREENSHOTTING.md §4.2. Chromium-only, sequential, pointed at
 // the fake-model server by default so it runs anywhere (CI, any dev machine/architecture) with
 // no Docker and no real model weights.
 import { defineConfig, devices } from '@playwright/test'

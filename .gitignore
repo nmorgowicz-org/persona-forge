@@ -243,3 +243,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local agent notes (not tracked; reference only)
+CLAUDE.md

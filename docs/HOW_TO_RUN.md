@@ -76,9 +76,10 @@ If you want to generate new voices and use them as clone targets:
    This writes a separate VoiceDesign IR under `/ov/1.7B-voicedesign/...` and is required before
    VoiceDesign will work.
 
-2. Ensure `OPENVINO_RELEASE_CODEC=0` (set in `.env` or via the Runtime panel). With the codec
-   released (`1`), a new `voice_id` cannot be cloned on first use. Setting it to `0` uses
-   ~0.3 GiB more but enables full voice library functionality.
+2. Ensure `OPENVINO_KEEP_CODEC_ENCODER=1` (the default; set in `.env` or via the Runtime panel
+   if it was overridden). With the codec encoder released (`0`), a new `voice_id` cannot be
+   cloned on first use. Keeping it at `1` uses ~0.3 GiB more but enables full voice library
+   functionality.
 
 3. Create a new voice:
    - In the UI: open Voice Design, choose chips or write a description, generate, and save.
@@ -186,11 +187,11 @@ Use these only if you have a reason. All other internals are preset-derived and 
   JIT recompilation on every restart or idle-unload reload.
 - Set to empty string (`""`) to disable (useful only for controlled testing).
 
-**`OPENVINO_RELEASE_CODEC`** (default `1`)
-- Controls whether the ~0.3 GiB PyTorch codec is freed after startup:
-  - `1` (default): codec is released; saves ~0.3 GiB. Uncached `voice_id` fails with a clear error instead of silently cloning.
-  - `0`: codec stays loaded; any `voice_id` can be cloned immediately. Use this if you plan to use VoiceDesign or the voice library frequently.
-- Recommended: set `0` in new deployments that want full voice library functionality.
+**`OPENVINO_KEEP_CODEC_ENCODER`** (default `1`)
+- Controls whether the ~0.3 GiB PyTorch codec encoder stays loaded after startup:
+  - `1` (default): codec stays loaded; any `voice_id` can be cloned immediately. Needed for VoiceDesign and the voice library.
+  - `0`: codec is released after startup; saves ~0.3 GiB. Uncached `voice_id` fails with a clear error instead of silently cloning.
+- Set `0` only for single-voice deployments (e.g. Hermes) that never need voice-library/VoiceDesign cloning.
 
 **`IDLE_UNLOAD_SECONDS`** (default `0` or `1800` with `LOW_RAM_MODE=1`)
 - Unload the model after this many seconds of idle. Reload is automatic and transparent

@@ -10,3 +10,15 @@ librosa
 onnxruntime
 sox
 transformers==5.12.1
+
+# OmniVoice (Persona Forge accent-design engine, docs/dev/features/persona_forge_studio.md).
+# Installed --no-deps in the Dockerfile since its declared deps (torch/torchaudio/
+# transformers/accelerate/librosa/soundfile/numpy) already match the pins above exactly, and
+# its unpinned extras (gradio/tensorboardx/webdataset) are unused by the inference path this
+# service actually calls. pydub is the one genuinely new runtime dependency.
+pydub
+
+# qwen3_tts/asr_check.py: fast no-speech gate layered on top of audio_post.analyze_take for
+# OmniVoice candidate takes (nick's feedback, 2026-07-03). CTranslate2-based (not torch-based
+# openai-whisper) since this is a CPU-only box and its int8 CPU path is materially faster.
+faster-whisper

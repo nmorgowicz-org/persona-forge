@@ -1,6 +1,6 @@
 // Spawns the fake-model test server (fixtures/fake_model_server.py) and waits for it to become
 // healthy. Used by playwright.config.js's webServer block and by capture.mjs's default mode.
-// See docs/plans/20260702-e2e_and_screenshotting.md §3.1/§4.3.
+// See docs/dev/resolved/E2E_AND_SCREENSHOTTING.md §3.1/§4.3.
 import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'

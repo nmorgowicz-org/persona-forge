@@ -1,8 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { generateSpeech, listVoices } from '@/lib/api'
+import {
+  AlertCircle,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Square,
+} from 'lucide-react'
+import {
+  classifyGenerateError,
+  generateAsync,
+  getGenerateJobProgress,
+  cancelGenerate,
+  listVoices,
+} from '@/lib/api'
+import type { GenerateJobProgress } from '@/lib/api'
 import { TONE_OPTIONS } from '@/lib/voiceDesignChips'
 import { useAppStore } from '@/store'
+import { cn } from '@/lib/utils'
 import { VoiceSelector } from '@/components/VoiceSelector'
 import { AudioPlayer } from '@/components/AudioPlayer'
 import { Button } from '@/components/ui/button'
@@ -15,6 +31,72 @@ import {
 } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Info, Dices } from 'lucide-react'
+
+function formatEta(seconds: number | null): string {
+  if (seconds == null) return 'estimating remaining time…'
+  if (seconds < 1) return 'almost done'
+  if (seconds < 60) return `~${Math.round(seconds)}s remaining`
+  const m = Math.floor(seconds / 60)
+  const s = Math.round(seconds % 60)
+  return `~${m}m ${s > 0 ? s + 's' : ''} remaining`
+}
+
+function estimateInitialEta(text: string): string {
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0
+  if (words === 0) return ''
+  if (words <= 5) return 'About 15–25 seconds'
+  if (words <= 15) return 'About 25–40 seconds'
+  if (words <= 30) return 'About 40–90 seconds'
+  if (words <= 60) return 'About 1–3 minutes'
+  if (words <= 100) return 'About 3–6 minutes'
+  return 'Very long — expect 6+ minutes'
+}
+
+function StructuredError({ error }: { error: string }) {
+  const info = classifyGenerateError(error, null)
+  const [expanded, setExpanded] = useState(false)
+  const isStrong = info.type === 'TOO_LONG' || info.type === 'TIMEOUT'
+
+  return (
+    <div
+      data-testid="speak-error"
+      className={
+        'flex flex-col gap-1 rounded-lg border px-3 py-2 text-xs ' +
+        (isStrong
+          ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+          : 'border-destructive/40 bg-destructive/10 text-destructive')
+      }
+    >
+      <div className="flex items-start gap-2">
+        {isStrong ? (
+          <AlertTriangle className="mt-[2px] size-3.5 shrink-0" />
+        ) : (
+          <AlertCircle className="mt-[2px] size-3.5 shrink-0" />
+        )}
+        <div className="flex flex-col">
+          <span className="text-[11px] font-medium">{info.headline}</span>
+          <span className="text-[10px] opacity-90">{info.detail}</span>
+        </div>
+      </div>
+
+      {/* Expandable raw error */}
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1 self-start text-[10px] underline decoration-dotted underline-offset-2 opacity-70 hover:opacity-100"
+      >
+        {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+        Details
+      </button>
+
+      {expanded && (
+        <pre className="max-h-32 overflow-auto whitespace-pre-wrap text-[10px] opacity-80">
+          {error}
+        </pre>
+      )}
+    </div>
+  )
+}
 
 export function SpeakPage() {
   const {
@@ -30,6 +112,7 @@ export function SpeakPage() {
     setGenerating,
     error,
     setError,
+    modelLoaded,
   } = useAppStore()
   const [language, setLanguage] = useState('English')
   const [tone, setTone] = useState('neutral')
@@ -37,11 +120,16 @@ export function SpeakPage() {
   const [lastSeed, setLastSeed] = useState<number | null>(null)
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
 
+  // Async job state
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null)
+  const [progress, setProgress] = useState<GenerateJobProgress | null>(null)
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   async function refreshVoices() {
     try {
       setVoices(await listVoices())
     } catch {
-      // Non-fatal — voice library may be empty or briefly unavailable during a swap.
+      // Non-fatal
     }
   }
 
@@ -50,25 +138,110 @@ export function SpeakPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Cleanup poll timer on unmount
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current)
+    }
+  }, [])
+
+  function startPoll(jobId: string) {
+    // Clear any existing timer
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current)
+
+    const poll = async () => {
+      try {
+        const p = await getGenerateJobProgress(jobId)
+        setProgress(p)
+
+        if (p.status === 'completed') {
+          // Download audio and capture seed if present
+          try {
+            const audioRes = await fetch(
+              `/generate/job/${encodeURIComponent(jobId)}/audio?response_format=mp3`,
+            )
+            if (!audioRes.ok) throw new Error('Failed to fetch audio')
+            const blob = await audioRes.blob()
+            if (audioUrl) URL.revokeObjectURL(audioUrl)
+            setAudioBlob(blob)
+            setAudioUrl(URL.createObjectURL(blob))
+            const seedHeader = audioRes.headers.get('X-Seed')
+            if (seedHeader) setLastSeed(Number(seedHeader))
+          } catch {
+            setError('Failed to download generated audio')
+          }
+          setGenerating(false)
+          setCurrentJobId(null)
+          setProgress(null)
+          return
+        }
+
+        if (p.status === 'failed') {
+          const msg = p.message || 'Generation failed'
+          const info = classifyGenerateError(msg, null)
+          setError(info.headline + (info.detail ? '\n' + info.detail : ''))
+          setGenerating(false)
+          setCurrentJobId(null)
+          setProgress(null)
+          return
+        }
+
+        if (p.status === 'cancelled') {
+          setError('Generation was cancelled')
+          setGenerating(false)
+          setCurrentJobId(null)
+          setProgress(null)
+          return
+        }
+
+        // Still running: schedule next poll
+        pollTimerRef.current = setTimeout(poll, 400)
+      } catch {
+        // On transient error, keep polling
+        pollTimerRef.current = setTimeout(poll, 600)
+      }
+    }
+
+    poll()
+  }
+
   async function handleGenerate() {
     if (!text.trim() || isGenerating) return
     setGenerating(true)
     setError(null)
+    setProgress(null)
     try {
       const toneLabel = TONE_OPTIONS.find((t) => t.id === tone)?.label
       const instruct = tone !== 'neutral' && toneLabel ? toneLabel : undefined
       const seed = seedInput.trim() ? Number(seedInput) : undefined
-      const result = await generateSpeech({ text, language, voiceId, instruct, seed, responseFormat: 'mp3' })
-      if (audioUrl) URL.revokeObjectURL(audioUrl)
-      setAudioBlob(result.blob)
-      setAudioUrl(URL.createObjectURL(result.blob))
-      setLastSeed(result.seed)
+      const { job_id } = await generateAsync({
+        text,
+        language,
+        voiceId,
+        instruct,
+        seed,
+        responseFormat: 'mp3',
+      })
+      setCurrentJobId(job_id)
+      startPoll(job_id)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
-    } finally {
       setGenerating(false)
     }
   }
+
+  async function handleStop() {
+    if (!currentJobId) return
+    try {
+      await cancelGenerate(currentJobId)
+    } catch {
+      // Best-effort; server may already be stopping it.
+    }
+    // Let the poller detect cancelled status
+  }
+
+  const hasText = text.trim().length > 0
+  const initialEta = hasText && !isGenerating ? estimateInitialEta(text) : ''
 
   return (
     <div className="flex flex-col gap-6">
@@ -87,11 +260,32 @@ export function SpeakPage() {
       >
         <textarea
           data-testid="speak-text-input"
-          className="min-h-48 resize-y rounded-lg border border-input bg-transparent p-4 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="min-h-48 resize-y rounded-lg border border-input bg-transparent p-4 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           placeholder="Say something..."
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
+
+        {/* Character count + length hint */}
+        {text.length > 0 && (
+          <div className="flex flex-col gap-0.5">
+            <p className="text-[10px] text-muted-foreground tabular-nums">
+              {text.length} / 2000
+            </p>
+            {text.length > 1500 && (
+              <p className="text-[10px] text-amber-500">
+                Very long texts may fail or time out. Consider breaking into shorter pieces.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Initial ETA hint (before generation starts) */}
+        {initialEta && (
+          <p className="text-[11px] text-muted-foreground">
+            Estimated time to generate: {initialEta}. This is approximate — actual time depends on text complexity and system load.
+          </p>
+        )}
 
         <div className="flex flex-wrap items-center gap-3">
           <VoiceSelector voices={voices} voiceId={voiceId} onChange={setVoiceId} />
@@ -156,21 +350,92 @@ export function SpeakPage() {
             </Tooltip>
           </div>
 
+          {isGenerating && currentJobId ? (
+            // Stop button (secondary)
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleStop}
+              className="h-9 gap-1.5"
+            >
+              <Square className="size-3" />
+              Stop
+            </Button>
+          ) : null}
+
           <Button
             type="button"
             data-testid="speak-generate-button"
             onClick={handleGenerate}
-            disabled={!text.trim() || isGenerating}
+            disabled={!text.trim() || isGenerating || !modelLoaded}
+            title={modelLoaded ? undefined : 'Model is still loading'}
+            className={cn(
+              'transition-all duration-200',
+              !isGenerating &&
+                text.trim() &&
+                modelLoaded &&
+                'shadow-[0_4px_20px_-6px_color-mix(in_oklch,var(--primary),transparent_35%)] hover:shadow-[0_6px_24px_-6px_color-mix(in_oklch,var(--primary),transparent_20%)]',
+            )}
           >
-            {isGenerating ? 'Generating…' : 'Generate'}
+            {isGenerating ? (
+              <span className="flex items-center gap-1.5">
+                <Loader2 className="size-4 animate-spin" />
+                Generating…
+              </span>
+            ) : (
+              'Generate'
+            )}
           </Button>
         </div>
 
-        {error && (
-          <p data-testid="speak-error" className="text-sm text-destructive">
-            {error}
-          </p>
+        {/* Progress + ETA while generating */}
+        {isGenerating && progress && (
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <motion.div
+                  className="h-full bg-primary"
+                  animate={{
+                    width: `${Math.min(100, Math.max(3, progress.progress_pct))}%`,
+                  }}
+                  transition={{ ease: 'easeOut', duration: 0.3 }}
+                />
+              </div>
+              {typeof progress.progress_pct === 'number' && (
+                <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+                  {Math.round(progress.progress_pct)}%
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {progress.status === 'cancelled'
+                ? 'Cancelling…'
+                : formatEta(progress.eta_seconds)}
+              {progress.elapsed_seconds > 0 && (
+                <span className="ml-2 text-[10px] text-muted-foreground/70">
+                  · {Math.round(progress.elapsed_seconds)}s elapsed
+                </span>
+              )}
+              {progress.elapsed_seconds >= 30 &&
+                progress.elapsed_seconds < 60 &&
+                progress.status !== 'cancelled' && (
+                  <span className="ml-2 text-[10px] text-amber-500">
+                    This is taking longer than usual.
+                  </span>
+                )}
+              {progress.elapsed_seconds >= 60 &&
+                progress.status !== 'cancelled' && (
+                  <span className="ml-2 text-[10px] text-amber-500">
+                    Generation is in progress; this may take several minutes for longer texts.
+                  </span>
+                )}
+            </p>
+          </div>
         )}
+
+        {/* Structured error display */}
+        {error && <StructuredError error={error} />}
 
         {audioUrl && (
           <div data-testid="speak-result" className="flex flex-col gap-2">

@@ -1,3 +1,5 @@
+Superseded by voice_design.md and persona_forge_studio.md. Kept for historical reference.
+
 # Alexandria Integration Plan — Hermes-Focused
 
 > What this doc is:
@@ -110,7 +112,7 @@ Design rules:
 ## 4. Instruct / Tone Control
 
 Goal:
-- Expose instruct fields now, even if Hermes doesn’t use them yet.
+- Expose instruct fields now, even if Hermes doesn't use them yet.
 - Enable future instruct-aware tools without re-architecting.
 
 Implementation:
@@ -193,14 +195,14 @@ Implementation note:
 Current risk:
 - Unbounded Queue:
   - If Hermes or another client stalls, queue grows.
-  - On a constrained KVM, that’s unnecessary pressure.
+  - On a constrained KVM, that's unnecessary pressure.
 
 Fix:
 - Use a bounded Queue with:
-  - maxsize tuned to a safe memory ceiling (e.g., 20–40 chunks).
+  - maxsize tuned to a safe memory ceiling (e.g., 20-40 chunks).
 - On overflow:
   - Producer blocks briefly (soft throttle).
-  - If block time exceeds a small timeout (e.g., 1–2s), abort:
+  - If block time exceeds a small timeout (e.g., 1-2s), abort:
     - Close stream.
     - Optionally mark as dropped or partial via SSE "error" event.
 
@@ -275,7 +277,7 @@ Internal/development endpoints:
 
 LoRA is:
 - Interesting if:
-  - Zero-shot cloning isn’t good enough for a specific voice.
+  - Zero-shot cloning isn't good enough for a specific voice.
 - Not needed now because:
   - We already support:
     - Strong zero-shot cloning.
@@ -389,7 +391,7 @@ Design:
       - An SSE stream and handles events client-side.
   - Behavior:
     - Waveform begins drawing immediately.
-    - Subtle status line: “Generating…”, then “Streaming segment 1/1”.
+    - Subtle status line: "Generating…", then "Streaming segment 1/1".
     - User hears audio before the full utterance is done.
 - No loading spinners; show flow, not waiting.
 - For longer text:
@@ -403,8 +405,8 @@ Make designing voices feel magical.
 
 Flow:
 - User:
-  - Types: “Warm baritone, calm, slight gravel.”
-  - Types: “Hello, this is my voice.”
+  - Types: "Warm baritone, calm, slight gravel."
+  - Types: "Hello, this is my voice."
   - Clicks "Design voice".
 - UI:
   - Shows a quick state indicator.
@@ -496,7 +498,7 @@ To avoid vague design talk, this stack should deliver:
 
 10) VoiceDesign: Prompt Engineering and Guardrails
 
-Based on Alexandria’s VOICE_REFERENCE.md and empirical tests with VoiceDesign, we should not treat “voice description” as a free-form text field. Unstructured prompts create unstable or unusable voices.
+Based on Alexandria's VOICE_REFERENCE.md and empirical tests with VoiceDesign, we should not treat "voice description" as a free-form text field. Unstructured prompts create unstable or unusable voices.
 
 We should expose structured, safe patterns and make it hard to do it wrong.
 
@@ -528,19 +530,19 @@ In the UI (Left panel: VoiceDesign), provide:
 - 2-3 texture/timbre chips (safe, tested terms):
   - Examples:
     - [Silky] [Even] [Warm] [Rich] [Dark] [Authoritative] [Slight gravel] [Soft rounded]
-- A small “character” chip set (tonal adjectives only, no delivery):
+- A small "character" chip set (tonal adjectives only, no delivery):
   - [Calm] [Gentle] [Firm] [Cool] [Mysterious]
 
 Behavior:
 - UI composes a single description string from selections.
 - User can:
   - Use the composed description, or
-  - Switch to “Advanced” and edit it as text.
+  - Switch to "Advanced" and edit it as text.
 - Disallow/flag known unstable combos:
-  - Example: if user includes both "bright" + energy terms → show a warning: “This combination tends to destabilize the voice. Consider removing energy-related words from the description and using them in instruct instead.”
+  - Example: if user includes both "bright" + energy terms → show a warning: "This combination tends to destabilize the voice. Consider removing energy-related words from the description and using them in instruct instead."
 
 This is a killer feature:
-- Users get great, stable voices without knowing the model’s quirks.
+- Users get great, stable voices without knowing the model's quirks.
 - Feels like a premium AI product, not a raw model interface.
 
 10.2) Instruct/Tone UX (Separation of Concerns)
@@ -548,15 +550,15 @@ This is a killer feature:
 Use instruct for emotional and delivery control, not identity.
 
 UI:
-- Provide a “Tone” control under the main editor:
+- Provide a "Tone" control under the main editor:
   - Chips or dropdown with proven patterns:
     - [Neutral] [Calm, thoughtful] [Warm and amused] [Tense, whispered] [Softly excited] [Frustrated, clipped]
 - Internally map these to instruct strings.
 - Explain briefly:
-  - “Voice: defines what it sounds like.
-     Tone: defines how it delivers this line.”
+  - "Voice: defines what it sounds like.
+     Tone: defines how it delivers this line."
 
-This directly reflects Alexandria’s findings:
+This directly reflects Alexandria's findings:
 - Description = instrument.
 - Instruct = performance.
 
@@ -573,4 +575,4 @@ For API clients (like Hermes), we should:
   - Provide 6-10 canonical examples that are tested and safe.
 
 Goal:
-- A developer doesn’t need to read 3 pages of lexicon to get a decent voice.
+- A developer doesn't need to read 3 pages of lexicon to get a decent voice.

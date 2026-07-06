@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-command local launch of the VoiceDesign frontend against the fake-model test server —
 # no Docker, no real model weights, works on any dev machine/architecture (including an arm64
-# Mac). See docs/plans/20260702-e2e_and_screenshotting.md §3.1.
+# Mac). See docs/dev/resolved/E2E_AND_SCREENSHOTTING.md §3.1.
 #
 # Usage: scripts/dev_ui.sh [--rebuild] [port]
 set -euo pipefail

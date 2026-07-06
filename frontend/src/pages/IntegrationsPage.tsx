@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { Check, Copy, Plug } from 'lucide-react'
 import { getHealth } from '@/lib/api'
 import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { cn } from '@/lib/utils'
 
 const CURL_SNIPPET = (voiceId: string) => `curl -X POST "$QWEN3_TTS_BASE_URL/v1/audio/speech" \\
   -H "Content-Type: application/json" \\
@@ -29,19 +30,46 @@ response.stream_to_file("speech.mp3")`
 function CodeBlock({ code }: { code: string }) {
   const [copied, setCopied] = useState(false)
   return (
-    <div className="relative rounded-lg border border-border bg-muted/30">
+    <div className="group relative rounded-lg border border-border bg-muted/30 transition-colors hover:border-border/80">
       <Button
         type="button"
         size="icon-sm"
         variant="ghost"
-        className="absolute top-2 right-2"
+        className={cn(
+          'absolute top-2 right-2 transition-all',
+          copied ? 'text-primary' : 'opacity-60 group-hover:opacity-100',
+        )}
         onClick={() => {
           navigator.clipboard.writeText(code)
           setCopied(true)
           setTimeout(() => setCopied(false), 1200)
         }}
       >
-        {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        <AnimatePresence mode="wait" initial={false}>
+          {copied ? (
+            <motion.span
+              key="check"
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.5, opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="flex"
+            >
+              <Check className="size-3.5" />
+            </motion.span>
+          ) : (
+            <motion.span
+              key="copy"
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.5, opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="flex"
+            >
+              <Copy className="size-3.5" />
+            </motion.span>
+          )}
+        </AnimatePresence>
       </Button>
       <pre className="overflow-x-auto p-4 text-xs leading-relaxed">
         <code>{code}</code>
@@ -79,8 +107,14 @@ export function IntegrationsPage() {
         animate={{ opacity: 1, y: 0 }}
         className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm"
       >
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <div className="relative flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Plug className="size-4" />
+          {modelLoaded && (
+            <span className="absolute -top-0.5 -right-0.5 flex size-2.5">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary/60" />
+              <span className="relative inline-flex size-full rounded-full bg-primary ring-2 ring-card" />
+            </span>
+          )}
         </div>
         <div className="flex-1">
           <p className="text-sm font-medium">Base model status</p>

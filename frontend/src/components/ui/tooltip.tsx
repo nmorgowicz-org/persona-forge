@@ -1,55 +1,77 @@
-import * as React from "react"
-import { Tooltip as TooltipPrimitive } from "radix-ui"
+import * as React from 'react'
+import * as Radix from 'radix-ui'
+import { cn } from '@/lib/utils'
 
-import { cn } from "@/lib/utils"
+const T = Radix.Tooltip
 
-function TooltipProvider({
-  delayDuration = 0,
-  ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
+export function TooltipProvider({
+  delayDuration = 150,
+  skipDelayDuration = 0,
+  children,
+}: {
+  delayDuration?: number
+  skipDelayDuration?: number
+  children: React.ReactNode
+}) {
   return (
-    <TooltipPrimitive.Provider
-      data-slot="tooltip-provider"
-      delayDuration={delayDuration}
-      {...props}
-    />
+    <T.Provider delayDuration={delayDuration} skipDelayDuration={skipDelayDuration}>
+      {children}
+    </T.Provider>
   )
 }
 
-function Tooltip({
-  ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Root>) {
-  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
+export function Root({ children }: { children: React.ReactNode }) {
+  return <T.Root>{children}</T.Root>
 }
 
-function TooltipTrigger({
-  ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Trigger>) {
-  return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
-}
-
-function TooltipContent({
-  className,
-  sideOffset = 0,
+export function Trigger({
   children,
+  asChild,
+  className,
   ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+}: React.ComponentProps<typeof T.Trigger> & { className?: string }) {
   return (
-    <TooltipPrimitive.Portal>
-      <TooltipPrimitive.Content
-        data-slot="tooltip-content"
-        sideOffset={sideOffset}
+    <T.Trigger asChild={asChild} className={cn('relative inline-flex', className)} {...props}>
+      {children}
+    </T.Trigger>
+  )
+}
+
+export function Content({
+  children,
+  side = 'top',
+  align = 'center',
+  hidden,
+  className,
+}: {
+  children: React.ReactNode
+  side?: 'top' | 'bottom' | 'left' | 'right'
+  align?: 'center' | 'start' | 'end'
+  hidden?: boolean
+  className?: string
+}) {
+  if (hidden) return null
+
+  return (
+    <T.Portal>
+      <T.Content
+        side={side}
+        align={align}
+        sideOffset={6}
         className={cn(
-          "z-50 inline-flex w-fit max-w-xs origin-(--radix-tooltip-content-transform-origin) items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs text-background has-data-[slot=kbd]:pr-1.5 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 **:data-[slot=kbd]:relative **:data-[slot=kbd]:isolate **:data-[slot=kbd]:z-50 **:data-[slot=kbd]:rounded-sm data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
-          className
+          'z-50 max-w-[240px] rounded-lg border border-border/90 bg-popover px-2.5 py-1.5',
+          'text-[11px] leading-snug text-popover-foreground shadow-lg',
+          'animate-in fade-in-0 zoom-in-95 duration-150',
+          className,
         )}
-        {...props}
       >
         {children}
-        <TooltipPrimitive.Arrow className="z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px] bg-foreground fill-foreground" />
-      </TooltipPrimitive.Content>
-    </TooltipPrimitive.Portal>
+      </T.Content>
+    </T.Portal>
   )
 }
 
-export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger }
+// Backwards-compatible names
+export const Tooltip = Root
+export const TooltipTrigger = Trigger
+export const TooltipContent = Content

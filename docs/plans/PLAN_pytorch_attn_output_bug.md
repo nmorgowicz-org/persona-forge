@@ -1,16 +1,27 @@
 # Investigation: PyTorch-backend (`TTS_BACKEND=pytorch`) main-talker attention shape bug
 
-**Status:** open, unscoped, not yet fixed. Found as a side effect of validating a separate,
-now-fixed OpenVINO bug (see `docs/dev/resolved/EXPORT_PIPELINE_INT4_NAN_FIX.md`) — nobody has
-actually debugged this one yet, only reproduced the crash.
+**Status:** open, root cause identified but not fixed in upstream qwen_tts package. Crash
+confirmed during decode in Qwen3TTSTalkerAttention (layer 0). Not blocking: OpenVINO is the
+production backend.
 
-**Written:** 2026-07-02. Assume fresh context — this doc should be self-sufficient.
+**Written:** 2026-07-02, updated 2026-07-05.
 
 **Does this block anything?** No. The OpenVINO serving path (`TTS_BACKEND=openvino`, the
 production/default backend — see `compose.yml`'s `TTS_BACKEND: ${TTS_BACKEND:-openvino}`) never
-executes the eager PyTorch attention code this bug lives in. This only matters if something needs
-the PyTorch backend to actually work (a "rollback gate" / fallback path, or a box without
-OpenVINO). Do not treat this as blocking VoiceDesign UI work.
+executes this code. This only matters if something needs the PyTorch backend to actually work
+(a "rollback gate" / fallback path, or a box without OpenVINO). Do not treat this as blocking
+VoiceDesign UI work.
+
+**Summary (updated 2026-07-05):**
+The bug is in qwen_tts's `generate_voice_clone` decode path, not in attention_mask broadcasting
+(we confirmed attention_mask is correctly None during decode). The crash occurs at
+Qwen3TTSTalkerAttention layer=0 with hidden_states=(1,1,2048), but the attention output
+reshapes to (1,1,350208) instead of (1,1,2048). Since 350208 = 170 × 2048 (prefill length ×
+hidden), the attention mechanism somehow processes 170 tokens when it should process 1. This is
+likely related to how `generate_voice_clone` streams text during decode (trailing_text_hidden)
+or how it concatenates hidden states. Fix requires patching the qwen_tts package internals.
+Patches applied in `transformers_compat.py` fix the stale inputs_embeds and input_ids issues,
+but cannot fix this deeper bug without modifying qwen_tts's generation code.
 
 ## Symptom
 

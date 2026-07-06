@@ -1,4 +1,4 @@
-# Plan: E2E and Screenshotting for qwen3-tts-openvino
+# COMPLETED (infrastructure implemented; CI integration pending): E2E and Screenshotting for qwen3-tts-openvino
 
 > Audience: a fresh AI agent with zero prior context. This doc fully specifies how to set up
 > E2E tests, visual captures, and artifact workflows for this project. Do not silently relax
@@ -27,7 +27,7 @@ We already have:
   - Playwright for E2E.
   - Puppeteer + capture.mjs for screenshots/GIFs.
 
-We will adopt a comparable, but adapted, approach here. This doc:
+We have adopted a comparable, but adapted, approach here. This doc:
 - Reuses proven patterns from llama-monitor.
 - Adapts them to:
   - A containerized Python/Flask service.
@@ -35,7 +35,7 @@ We will adopt a comparable, but adapted, approach here. This doc:
   - Our existing CI constraints (no heavy Docker-in-Docker; limited RAM).
   - The fact that local dev is on macOS Apple Silicon, but the container is Linux AMD64 only.
 
-If anything conflicts with AGENTS.md or PLAN_voice_design.md, treat this as additive unless explicitly contradicted.
+If anything conflicts with AGENTS.md or docs/dev/architecture/voice_design.md, treat this as additive unless explicitly contradicted.
 
 ## 1. Goals
 
@@ -97,7 +97,7 @@ underneath it is fake. This means:
   process anywhere, including natively on an arm64 Mac (no Docker, no `linux/amd64` constraint).
 - Fast and deterministic: fake responses return instantly.
 
-Create `tests/ui/fixtures/fake_model_server.py`:
+`tests/ui/fixtures/fake_model_server.py`:
 
 - Registers a fake module at `sys.modules["qwen3_tts.model"]` exposing `model`,
   `voice_clone_prompt`, a real `ThreadPoolExecutor(max_workers=1)` (so swap/generate calls still
@@ -129,7 +129,7 @@ needs it.
 
 ### 4.1 Scope
 
-Implement:
+Implemented:
 - Basic health and startup:
   - /health endpoint returns 200.
   - Frontend page loads; essential UI elements present.
@@ -151,7 +151,7 @@ Implement:
 
 ### 4.2 Playwright configuration
 
-Create: tests/ui/playwright.config.js
+tests/ui/playwright.config.js:
 
 Requirements:
 - Browser: chromium only.
@@ -174,7 +174,7 @@ Requirements:
 
 ### 4.3 How to run the service for E2E
 
-Create `tests/ui/run-server.mjs`:
+tests/ui/run-server.mjs:
 - Responsibilities:
   - Spawn `fixtures/fake_model_server.py` (§3.1) as a child process, with `PYTHONPATH=src` set.
   - Wait until `/health` returns 200.
@@ -210,7 +210,7 @@ Under tests/ui/:
 
 Rules:
 - Prefer stable selectors (data-testid where possible; semantic structure where not).
-- Do not deeply introspect internal JS modules like llama-monitor’s tests sometimes do.
+- Do not deeply introspect internal JS modules like llama-monitor's tests sometimes do.
 - Tests should be understandable and resilient to internal refactors.
 
 ## 5. Visual capture and screenshots (Puppeteer)
@@ -230,7 +230,7 @@ Provide a scenario-driven harness to capture:
 
 ### 5.2 Core design (capture.mjs)
 
-Create: tests/ui/capture.mjs
+tests/ui/capture.mjs:
 
 Patterns (from llama-monitor, adapted):
 - Uses Puppeteer to:
@@ -300,14 +300,17 @@ Artifacts flow:
   relevant PR the same way `ci.yml`'s existing `validate` job does.
 - Keep it deterministic and fast; no real model in CI, ever.
 
-### 6.2 Workflow shape
+### 6.2 Workflow shape (not yet implemented)
+
+The CI workflow for E2E has NOT been created yet. The intended design is documented here for
+reference; a later change will implement it.
 
 GitHub Actions path filters are per-workflow-file (the `on.pull_request.paths:` key), not
-per-job — so this can't just be a new job bolted onto `ci.yml` without either affecting
+per-job — so this cannot just be a new job bolted onto `ci.yml` without either affecting
 `validate`'s trigger (which currently runs on every PR, unfiltered) or duplicating the filter
-per-job with a manual diffing step. Follow the same pattern `image.yml` already uses for exactly
-this reason: **a separate workflow file**, e.g. `.github/workflows/ci-ui.yml`, with its own path
-filter:
+per-job with a manual diffing step. It should follow the same pattern `image.yml` already uses
+for exactly this reason: **a separate workflow file**, e.g. `.github/workflows/ci-ui.yml`, with
+its own path filter:
 
 ```yaml
 on:
@@ -364,62 +367,68 @@ service down longer than the task needs.
 
 ## 8. Git, artifacts, and .gitignore
 
-Ensure:
-- In .gitignore:
-  - docs/screenshots/artifacts/
-  - tests/ui/playwright-report/
-  - Any large logs or generated data.
-- In repo:
-  - docs/screenshots/ contains only approved, curated images.
+Status: partially implemented; needs a final .gitignore pass.
+
+Intended entries (confirm or add as needed):
+- docs/screenshots/artifacts/
+- tests/ui/playwright-report/
+- Any large logs or generated data.
+
+In repo:
+- docs/screenshots/ contains only approved, curated images.
+
+Note: ensure these exclusions are present; treat this as pending if not yet verified in the
+current .gitignore.
 
 This aligns with the existing project philosophy:
 - Keep Git lightweight.
-- Keep docs/screenshots/ as the canonical “showcase” set.
+- Keep docs/screenshots/ as the canonical "showcase" set.
 - Use artifacts/ as the raw staging area.
 
 ## 9. Implementation checklist (for agents)
 
-Use this as a pass/fail checklist when implementing E2E and screenshotting. If incomplete, the change is not ready.
+Use this as a pass/fail checklist when validating E2E and screenshotting. Completed items are
+checked; incomplete items are flagged.
 
-- [ ] Fake-model test server (§3.1), no production code changes:
-  - [ ] `tests/ui/fixtures/fake_model_server.py` substitutes `sys.modules["qwen3_tts.model"]`
+- [x] Fake-model test server (§3.1), no production code changes:
+  - [x] `tests/ui/fixtures/fake_model_server.py` substitutes `sys.modules["qwen3_tts.model"]`
         before importing `qwen3_tts.app` (same pattern as `tests/test_app_api.py`).
-  - [ ] Serves the built frontend (`FRONTEND_DIST_DIR` pointed at `frontend/dist`).
-  - [ ] /health returns 200.
-  - [ ] /generate, /voice_design, /voices return deterministic fake responses instantly.
-  - [ ] No real model loaded; runs as a plain Python process, no Docker required.
+  - [x] Serves the built frontend (`FRONTEND_DIST_DIR` pointed at `frontend/dist`).
+  - [x] /health returns 200.
+  - [x] /generate, /voice_design, /voices return deterministic fake responses instantly.
+  - [x] No real model loaded; runs as a plain Python process, no Docker required.
 
-- [ ] tests/ui/ created:
-  - [ ] package.json with Playwright and Puppeteer.
-  - [ ] playwright.config.js with chromium-only, sequential workers, timeouts, reports.
-  - [ ] run-server.mjs to start/stop the fake-model server for tests.
-  - [ ] Organized tests:
-    - [ ] core/basic.spec.js (health, load).
-    - [ ] generate/generate.spec.js (generation flow, basic errors).
-    - [ ] voice-design/voice-design.spec.js (panel + generate).
-    - [ ] voice-library/voices.spec.js (list/select).
-    - [ ] performance/performance.spec.js (optional, basic checks).
+- [x] tests/ui/ created:
+  - [x] package.json with Playwright and Puppeteer.
+  - [x] playwright.config.js with chromium-only, sequential workers, timeouts, reports.
+  - [x] run-server.mjs to start/stop the fake-model server for tests.
+  - [x] Organized tests:
+    - [x] core/basic.spec.js (health, load).
+    - [x] generate/generate.spec.js (generation flow, basic errors).
+    - [x] voice-design/voice-design.spec.js (panel + generate).
+    - [x] voice-library/voices.spec.js (list/select).
+    - [x] performance/performance.spec.js (optional, basic checks).
 
-- [ ] Screenshot harness:
-  - [ ] tests/ui/capture.mjs with scenario-driven design.
-  - [ ] Deterministic scenarios (health, home, generate, VoiceDesign, voices).
-  - [ ] Outputs into docs/screenshots/artifacts/; gitignored.
+- [x] Screenshot harness:
+  - [x] tests/ui/capture.mjs with scenario-driven design.
+  - [x] Deterministic scenarios (health, home, generate, VoiceDesign, voices).
+  - [ ] docs/screenshots/artifacts/ is populated and reliably gitignored (pending confirmation).
 
-- [ ] CI integration:
-  - [ ] New `.github/workflows/ci-ui.yml` (separate file, own path filter — no
+- [ ] CI integration (INCOMPLETE — not yet wired into GitHub Actions):
+  - [ ] `.github/workflows/ci-ui.yml` (separate file, own path filter — no
         `dorny/paths-filter`), `runs-on: arc-general`, no Docker.
     - [ ] Path filter: frontend/**, tests/ui/**, src/qwen3_tts/**.
     - [ ] Builds frontend, starts the fake-model server via Playwright's `webServer`, runs
           Playwright.
     - [ ] On failure: uploads playwright-report as artifact (short retention).
-  - [ ] Screenshots (capture.mjs) remain local-only (not in CI).
+  - [x] Screenshots (capture.mjs) remain local-only (by design, not in CI).
 
-- [ ] Manual dockermisc1 procedure (§7) documented:
-  - [ ] SSH tunnel command.
-  - [ ] Running Playwright/capture.mjs against the real instance via `--target`/`QWEN3_TTS_UI_URL`.
-  - [ ] Teardown (stop container, close tunnel).
+- [x] Manual dockermisc1 procedure (§7) documented:
+  - [x] SSH tunnel command.
+  - [x] Running Playwright/capture.mjs against the real instance via `--target`/`QWEN3_TTS_UI_URL`.
+  - [x] Teardown (stop container, close tunnel).
 
-- [ ] General:
-  - [ ] No backend or Docker image changes beyond what’s needed for tests.
-  - [ ] No new auth/multi-tenancy introduced.
-  - [ ] All scripts are documented and self-contained for future agents.
+- [x] General:
+  - [x] No backend or Docker image changes beyond what's needed for tests.
+  - [x] No new auth/multi-tenancy introduced.
+  - [x] All scripts are documented and self-contained for future agents.

@@ -4,7 +4,7 @@
 EXPORT_TARGET=base (default) exports the MODEL_SIZE Base checkpoint into /ov/<size>/...
 EXPORT_TARGET=voice_design exports the VoiceDesign checkpoint (VOICE_DESIGN_MODEL_SIZE,
 default 1.7B) into the separate /ov/<size>-voicedesign/... tree so it can never collide
-with a Base export for the same size. See docs/plans/PLAN_voice_design.md §4.1 — this
+with a Base export for the same size. See docs/dev/architecture/voice_design.md §4.1 — this
 reuses the same exporter/transform tooling, only the source repo and output dir differ.
 """
 
@@ -66,6 +66,7 @@ def main() -> int:
         preset = get_voice_design_preset(
             os.environ.get("VOICE_DESIGN_MODEL_SIZE"),
             float(max_speech_seconds_env) if max_speech_seconds_env else None,
+            os.environ.get("VOICE_DESIGN_MAIN_COMPRESSION") or None,
         )
         # export_openvino.py resolves its checkpoint via qwen3_tts.model_config.resolve_model_repo(),
         # which honors an explicit MODEL_REPO override — set it so the subprocess below (which

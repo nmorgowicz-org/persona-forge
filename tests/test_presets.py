@@ -101,6 +101,20 @@ class PresetTests(unittest.TestCase):
         self.assertNotEqual(base["main_stateful_model"], voice_design["main_stateful_model"])
         self.assertNotEqual(base["ov_model_dir"], voice_design["ov_model_dir"])
 
+    def test_voice_design_preset_defaults_to_int4_main_compression(self) -> None:
+        preset = get_voice_design_preset("1.7B")
+
+        self.assertEqual(preset["main_compression"], "int4")
+
+    def test_voice_design_preset_main_compression_override_wins(self) -> None:
+        preset = get_voice_design_preset("1.7B", main_compression="int8")
+
+        self.assertEqual(preset["main_compression"], "int8")
+
+    def test_voice_design_preset_rejects_unsupported_main_compression(self) -> None:
+        with self.assertRaises(ValueError):
+            get_voice_design_preset("1.7B", main_compression="fp32")
+
 
 if __name__ == "__main__":
     unittest.main()

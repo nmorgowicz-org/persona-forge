@@ -71,7 +71,7 @@ PRESETS: dict[str, dict[str, object]] = {
 }
 
 
-# VoiceDesign (docs/plans/PLAN_voice_design.md) only ever generates a short sample
+# VoiceDesign (docs/dev/architecture/voice_design.md) only ever generates a short sample
 # utterance for reference capture, never long-form speech, so its IR capacity can stay
 # much smaller than the Base preset's default.
 VOICE_DESIGN_DEFAULT_MAX_SPEECH_SECONDS = 30.0
@@ -114,15 +114,31 @@ def normalize_voice_design_size(model_size: str | None) -> str:
 
 
 def get_voice_design_preset(
-    model_size: str | None = None, max_speech_seconds: float | None = None
+    model_size: str | None = None,
+    max_speech_seconds: float | None = None,
+    main_compression: str | None = None,
 ) -> dict[str, object]:
-    """Return a copy of the VoiceDesign preset settings, mirroring :func:`get_preset`."""
+    """Return a copy of the VoiceDesign preset settings, mirroring :func:`get_preset`.
+
+    ``main_compression`` overrides the preset default main-core compression (e.g. from
+    ``VOICE_DESIGN_MAIN_COMPRESSION``) for export-time experiments — e.g. comparing an
+    INT8 main core against the default INT4 for accent fidelity. It only affects which IR
+    variant scripts/export.py promotes; it does not change the IR output path, so re-running
+    export with a different override overwrites the previous VoiceDesign IR in place.
+    """
     key = normalize_voice_design_size(model_size)
     preset = dict(VOICE_DESIGN_PRESETS[key])
     seconds = max_speech_seconds if max_speech_seconds is not None else preset["max_speech_seconds"]
     capacity = capacity_for_seconds(seconds)
     preset["max_speech_seconds"] = seconds
     preset["stateful_capacity"] = capacity
+    if main_compression is not None:
+        if main_compression not in ("int4", "int8"):
+            raise ValueError(
+                f"Unsupported VOICE_DESIGN_MAIN_COMPRESSION={main_compression!r}; "
+                "choose int4 or int8"
+            )
+        preset["main_compression"] = main_compression
     preset.update(_voice_design_ir_paths(key, capacity))
     return preset
 
