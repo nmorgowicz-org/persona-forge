@@ -1,8 +1,9 @@
-# CI Rewrite — Scorch-Earth Plan
+# CI Rewrite — Scorch-Earth Plan (IMPLEMENTED)
 
-Date: 2026-07-05
+Date: 2026-07-05 → 2026-07-06
 Branch: ci-rewrite-scorch-earth
-Status: planning → implementation (use this doc as the single source of truth)
+Status: implemented; this doc moved to docs/dev/ci/ as reference.
+PR: #104
 
 This is a self-contained specification for completely rewriting the repository's
 test suite and CI configuration. A future AI agent must be able to execute this
@@ -1322,5 +1323,60 @@ If any of these criteria cannot be met, the agent should:
   - Each phase in its own branch/PR.
   - Include Release Please override:
     - test: describe changes.
+
+## FINAL STATUS (2026-07-06)
+
+What was completed:
+
+- Migrated all tests from unittest to pytest; removed 18 legacy tests/test_*.py.
+- Implemented canonical FakeModelRuntime as the single fake for all tests.
+- Created fixtures: FakeOpenVINO, FakeOmniVoice, FakeWhisper.
+- Built three test tiers (fake, no models, no Docker):
+  - tier1_unit: 148 tests.
+  - tier2_backend: 66 tests (Flask + backend logic).
+  - tier3_api_integration: 25 tests (black-box HTTP).
+- Wired CI:
+  - ci.yml uses pytest -m "not slow" -n auto on three tier directories.
+  - ci-ui.yml runs Playwright E2E against fake_model_server started in its own step.
+- E2E (stable subset):
+  - core/basic.spec.js
+  - generate/generate.spec.js
+  - voice-design/voice-design-qwen.spec.js
+  - voice-library/voices.spec.js
+  - runtime/runtime-config.spec.js
+  - performance/performance.spec.js
+
+Runtime notes:
+
+- OmniVoice engine tests (test_omnivoice_engine_logic.py) marked slow (require torch).
+- Rope repair tests (test_export_rope_repair.py) marked slow.
+
+Open items (intentional, to be implemented in follow-up work):
+
+- Re-add async_cancel E2E:
+  - Start async generation, confirm progress bar, click Stop, confirm cancelled.
+  - Requires: stable data-testid on SpeakPage progress bar and Stop button.
+
+- Re-add stitch-studio E2E:
+  - Load Stitch Studio, enter name, insert segments, trigger stitch.
+  - Requires: data-testid on Stitch Studio page header and controls.
+
+- Re-add voice-design-omnivoice E2E:
+  - Switch engine to OmniVoice, fill segments/instruct, audition, select takes, stitch, save.
+  - Requires: specific selectors for "Segment rack" and take buttons to be unique and stable.
+
+- Add data-testid hooks (frontend):
+  - speak-progress-bar
+  - speak-stop-button
+  - stitch-studio-title or similar unique heading
+  - stitch-studio-insert-button, stitch-studio-save-button
+  - segment-rack-area, segment-take-button
+  - (Any others needed for stable E2E selectors.)
+
+- Harden test_app_api / backend tests:
+  - Mark as "stable"; no further changes unless app.py/voice_design.py/omnivoice_engine.py change.
+
+If you cannot execute a step because of ambiguity, propose a minimal alternative
+in this document before changing behavior.
 
 End of plan.
