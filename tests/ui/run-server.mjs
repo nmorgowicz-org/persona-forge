@@ -10,12 +10,19 @@ import { fileURLToPath } from 'node:url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(__dirname, '..', '..')
 
-// Prefer: repo's .venv python, then `python`, then `python3`.
+// Prefer: repo's .venv python, then pythonLocation (GitHub Actions), then python/python3.
 function resolvePython() {
   const venvPython = join(REPO_ROOT, '.venv', 'bin', 'python')
   if (existsSync(venvPython)) return venvPython
-  // In CI (actions/setup-python), `python` is present; `python3` may not be.
-  return process.platform === 'win32' ? 'python' : 'python'
+
+  // GitHub Actions sets pythonLocation to the tool path; derive python executable from it.
+  const pythonLocation = process.env.pythonLocation
+  if (pythonLocation) {
+    const candidate = join(pythonLocation, 'bin', 'python')
+    if (existsSync(candidate)) return candidate
+  }
+
+  return 'python'
 }
 
 export function startFakeServer({ port = 8319 } = {}) {
@@ -30,9 +37,21 @@ export function startFakeServer({ port = 8319 } = {}) {
     QWEN3_TTS_TEST_PORT: String(port),
   }
 
-  const child = spawn(resolvePython(), [join(__dirname, 'fixtures', 'fake_model_server.py')], {
+  const python = resolvePython()
+  const child = spawn(python, [join(__dirname, 'fixtures', 'fake_model_server.py')], {
     env,
     stdio: 'inherit',
+  })
+
+  child.on('error', (err) => {
+    console.error(`[run-server] spawn failed for python=${python}: ${err.message}`)
+    process.exit(1)
+  })
+  child.on('close', (code) => {
+    if (code !== 0 && code !== null) {
+      console.error(`[run-server] fake_model_server exited with code ${code}`)
+      process.exit(code || 1)
+    }
   })
 
   const url = `http://127.0.0.1:${port}`
