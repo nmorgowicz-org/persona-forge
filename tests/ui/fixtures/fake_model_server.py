@@ -150,7 +150,9 @@ def main() -> None:
     port = int(os.getenv("QWEN3_TTS_TEST_PORT", "8319"))
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
+    # Ensure library dirs before importing app (uses segment_library which defaults to /segments).
     os.environ.setdefault("VOICE_LIBRARY_DIR", tempfile.mkdtemp(prefix="qwen3-tts-e2e-voices-"))
+    os.environ.setdefault("SEGMENT_LIBRARY_DIR", tempfile.mkdtemp(prefix="qwen3-tts-e2e-segments-"))
 
     rt = _install_fake_runtime()
     _patch_generate_for_slow_async(rt)
@@ -177,15 +179,23 @@ def main() -> None:
     import urllib.request
 
     deadline = time.monotonic() + 15
+    last_error = None
     while time.monotonic() < deadline:
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1) as resp:
                 if resp.status == 200:
                     break
-        except Exception:
+                # Non-200: capture once for diagnostics
+                if last_error is None:
+                    last_error = f"/health returned {resp.status}: {resp.read().decode(errors='replace')[:300]}"
+        except Exception as e:
+            if last_error is None:
+                last_error = str(e)
             time.sleep(0.15)
     else:
-        raise RuntimeError("fake_model_server did not become reachable")
+        raise RuntimeError(
+            f"fake_model_server did not become reachable; last_error={last_error}"
+        )
 
 
 def start_server(port: int = 18318, frontend_enabled: bool = False):
@@ -242,4 +252,10 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
 
 
 if __name__ == "__main__":
-    main()
+    import traceback, sys as _sys
+
+    try:
+        main()
+    except Exception:
+        traceback.print_exc(file=_sys.stderr)
+        _sys.exit(1)
