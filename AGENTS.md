@@ -213,7 +213,16 @@ Every handoff must state:
 
 ## Commit and PR conventions
 
-Use Conventional Commits (`feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `build`, `ci`, `chore`, `revert`). Use squash merge. The PR title drives Release Please, so user-facing changes need a `feat:` or `fix:` title.
+Use Conventional Commits (`feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `build`, `ci`, `chore`, `revert`). Use squash merge.
+
+**PR titles are the squash-merge commit messages consumed by Release Please.** They must be valid Conventional Commits or Release Please will fail to parse the release.
+
+Requirements:
+- Must start with `type:` or `type(scope):` — no leading spaces, no emoji unless requested, no markdown in the title.
+- Must not contain prefixes, extra characters, or malformed type tokens.
+- Release Please uses a standard Conventional Commits parser (release-type: node); ensure the title parses cleanly.
+
+So user-facing changes need a `feat:` or `fix:` title.
 
 **Scopes** (choose the one that matches your change; omit only if obvious):
 
