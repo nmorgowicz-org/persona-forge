@@ -618,6 +618,11 @@ export interface RuntimeConfigState {
     SILENCE_TRIM_THRESH: number
     SILENCE_TRIM_PAD_MS: number
     OV_DYNAMIC_QUANT_GROUP_SIZE: number
+    POCKET_TTS_TEMP: number | undefined
+    POCKET_TTS_LSD_DECODE_STEPS: number | undefined
+    POCKET_TTS_EOS_THRESHOLD: number | undefined
+    POCKET_TTS_NOISE_CLAMP: number | null | undefined
+    POCKET_TTS_FRAMES_AFTER_EOS: number | null | undefined
   }
   read_only: {
     mounts: Record<string, 'ro' | 'rw' | null>

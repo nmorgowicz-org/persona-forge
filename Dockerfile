@@ -81,6 +81,9 @@ p.write_text(t)"
 RUN python -m pip install -r requirements/requirements-openvino.txt && \
     python -m pip install -r requirements/requirements-export.txt
 
+# Pocket TTS: lightweight CPU TTS backend
+RUN python -m pip install -r requirements/requirements-pocket-tts.txt
+
 COPY src/ src/
 COPY scripts/ scripts/
 COPY --from=frontend-build /frontend/dist frontend/dist
