@@ -24,12 +24,9 @@ jobs:
         with:
           client-id: ${{ vars.GH_APP_CLIENT_ID }}
           private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
-          permissions: >
-            {
-              "contents": "write",
-              "pull-requests": "write",
-              "metadata": "read"
-            }
+          permission-contents: write
+          permission-pull-requests: write
+          permission-metadata: read
 
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         with:
