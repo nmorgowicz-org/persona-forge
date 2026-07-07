@@ -27,7 +27,7 @@ CONVENTIONAL_TYPES = (
     "revert",
 )
 OVERRIDE_ENTRY_RE = re.compile(
-    rf"^-? ?({'|'.join(CONVENTIONAL_TYPES)})(?:\([a-z0-9][a-z0-9._/-]*\))?!?: .+$"
+    rf"^({'|'.join(CONVENTIONAL_TYPES)})(?:\([a-z0-9][a-z0-9._/-]*\))?!?: .+$"
 )
 
 
@@ -47,7 +47,7 @@ def validate_pr_override_body(body: str) -> None:
     if invalid:
         raise RuntimeError(
             "Release Please override entries must each be a single Conventional Commit line "
-            "with one supported type and an optional simple scope; "
+            "without a Markdown list marker, with one supported type and an optional simple scope; "
             f"invalid entries: {invalid}"
         )
 
