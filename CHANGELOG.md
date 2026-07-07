@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.22.3](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.22.2...qwen3-tts-openvino-v0.22.3) (2026-07-07)
+
+
+### Bug Fixes
+
+* **ci:** correct release-please-action v4.4.1 SHA ([e6fc11f](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/e6fc11f2d0eb37ab196dd28670db863a6161175b))
+* **ci:** pin release-please to v4.4.1 (no parser bug), use rust release-type ([43e2d1b](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/43e2d1bb3bc7b7c193c73ce10612044f3cbe9691))
+* **ci:** restore original release-please workflow (remove permission overrides, v5.0.0) ([760acda](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/760acda24978dddb85c8be9ccf14bd0f4dc6d440))
+* **ci:** restore release-please parsing and latest action ([de12867](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/de128675154a3240735cb45651f6af5e63fe89f1))
+* **ci:** specify explicit permissions for release-please GitHub App token ([92a6745](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/92a674560e609355df3266d7059bd50e9a0fab2d))
+* **ci:** specify explicit permissions for release-please GitHub App token ([#112](https://github.com/nmorgowicz-org/qwen3-tts-openvino/issues/112)) ([627fb11](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/627fb11fe8835c39c880f09daa32e45e91868464))
+* **ci:** use correct permission- prefix for release-please App token ([c08a6e6](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/c08a6e62c041167198d588c8f70d7525b29b6eb8))
+* **ci:** use correct permission- prefix for release-please App token ([d9b6f07](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/d9b6f07acdf2612504ace26bc4043e23c2153d50))
+* **ci:** use rust release-type like llama-monitor to avoid release creation error ([6cef070](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/6cef070450dcaed60209494eedb270519c7065ee))
+* **ci:** use simple release-type (not rust) for Python project ([cf6a219](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/cf6a219d23ce3302b70fb2752b09dafa1369a8f8))
+* **openvino:** auto-size OV_INFERENCE_THREADS from host core count ([de12867](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/de128675154a3240735cb45651f6af5e63fe89f1))
+
+
+### Documentation
+
+* correct Release Please commit override syntax ([de12867](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/de128675154a3240735cb45651f6af5e63fe89f1))
+
+
+### Miscellaneous Chores
+
+* **ci:** remove release-type from workflow ([c0c22af](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/c0c22af22310c4abf9b316a816aadccc42841f5c))
+
 ## [0.22.2](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.22.1...qwen3-tts-openvino-v0.22.2) (2026-07-07)
 
 
