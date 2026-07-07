@@ -25,7 +25,7 @@ jobs:
           client-id: ${{ vars.GH_APP_CLIENT_ID }}
           private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
 
-      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+      - uses: googleapis/release-please-action@29baac3596e4355d640c88843a7b3985ed874850 # v4.4.1
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: .github/release-please/config.json5
