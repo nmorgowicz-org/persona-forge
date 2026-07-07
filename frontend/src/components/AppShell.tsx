@@ -31,6 +31,7 @@ import {
 import { ActivityStatusBar } from '@/components/ui/ActivityStatusBar'
 import { Separator } from '@/components/ui/separator'
 import { SwapBanner } from '@/components/SwapBanner'
+import { HealthStatusBanner } from '@/components/HealthStatusBanner'
 import { type Page, useAppStore } from '@/store'
 import { THEMES, type Theme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
@@ -263,6 +264,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="text-[11px] text-muted-foreground">{active?.description}</span>
           </div>
         </header>
+        <HealthStatusBanner />
         <SwapBanner />
         <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
           <div className="w-full min-w-0 px-6 py-8">{children}</div>

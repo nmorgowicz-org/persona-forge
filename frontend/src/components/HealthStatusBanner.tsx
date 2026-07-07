@@ -24,25 +24,25 @@ export function HealthStatusBanner() {
       return (
         <div
           className={
-            'flex items-start gap-2 border-b px-4 py-1.5 text-xs ' +
+            'flex items-center gap-2 border-b px-4 py-1.5 text-xs ' +
             (isFail
               ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
               : 'border-amber-500/30 bg-amber-500/10 text-amber-300')
           }
         >
-          <AlertTriangle className="size-3 shrink-0 mt-[3px]" />
-          <div className="flex flex-col gap-0.5">
-            <span>
+          <AlertTriangle className="size-3 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <span className="inline-block truncate">
               {isFail
                 ? 'The reference text does not match the reference audio. This will degrade speech quality.'
                 : 'Reference text partially mismatched; speech quality may be affected.'}
             </span>
-            {isFail && (
-              <span className="text-[10px] opacity-70">
-                Fix REF_TEXT in your .env or Compose file to match what's spoken.
-              </span>
-            )}
           </div>
+          {isFail && (
+            <span className="shrink-0 text-[10px] opacity-70">
+              Fix REF_TEXT in your .env or Compose file.
+            </span>
+          )}
         </div>
       )
     }
@@ -59,11 +59,11 @@ export function HealthStatusBanner() {
 
   return (
     <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground">
-      <div className="flex items-center gap-2">
-        <Loader2 className="size-3 animate-spin text-muted-foreground" />
-        <span>{loadingMessage || 'Initializing TTS model…'}</span>
+      <div className="min-w-0 flex items-center gap-2">
+        <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
+        <span className="truncate">{loadingMessage || 'Initializing TTS model…'}</span>
       </div>
-      <span className="shrink-0 opacity-70">
+      <span className="shrink-0 opacity-70 hidden sm:inline">
         Speak and Voice Design will be available shortly.
       </span>
     </div>

@@ -296,6 +296,7 @@ def _validate_ov_metadata(model_dir: str, model_repo: str, revision: str | None)
 def load_model(profile: ModelProfile | None = None):
     global model, voice_clone_prompt, ov_runtime, active_profile
     global MODEL_ID, OV_MODEL_DIR, OPENVINO_MAIN_STATEFUL_MODEL, OPENVINO_PREDICTOR_STATEFUL_MODEL
+    global _service_started, _model_loaded, _ref_text_validation_result
 
     profile = profile or BASE_PROFILE
 
@@ -359,7 +360,6 @@ def load_model(profile: ModelProfile | None = None):
 
         active_profile = profile
 
-        global _service_started, _model_loaded, _ref_text_validation_result
         _service_started = True
         _model_loaded = True
 
@@ -433,7 +433,6 @@ def load_model(profile: ModelProfile | None = None):
             print("[app_worker] Model loaded. (profile skips voice clone prompt)", flush=True)
 
         # Validate REF_TEXT against REF_AUDIO at startup.
-        global _ref_text_validation_result
         if profile.build_voice_clone_prompt and profile.ref_audio and profile.ref_text:
             _ref_text_validation_result = validate_reference_text(
                 profile.ref_audio, profile.ref_text
@@ -531,7 +530,6 @@ def load_model(profile: ModelProfile | None = None):
         OPENVINO_PREDICTOR_STATEFUL_MODEL = profile.predictor_stateful_model
         active_profile = profile
 
-        global _service_started, _model_loaded
         _service_started = True
         _model_loaded = True
         print(f"[app_worker] Model loaded and ready (profile={profile.name!r}).")
