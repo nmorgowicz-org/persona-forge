@@ -50,9 +50,14 @@ jobs:
 
           echo "=== Import smoke test ==="
           python -c "
-          import sys, json, time
+          import sys
           sys.path.insert(0, 'src')
           sys.path.insert(0, 'src/export')
+
+          # Install fake model before importing app (no torch on runner)
+          from tests.fixtures.fake_runtime import FakeModelRuntime
+          rt = FakeModelRuntime()
+          rt.install()
 
           errors = []
           def try_import(name):
