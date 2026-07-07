@@ -40,6 +40,46 @@ jobs:
       - name: Install Python test dependencies
         run: python -m pip install -r requirements-dev.txt
 
+      - name: Environment and import smoke test
+        run: |
+          echo "=== Environment ==="
+          python --version
+          pip list --format=columns | head -30
+          echo "PYTHONPATH=$PYTHONPATH"
+          echo "PWD=$(pwd)"
+
+          echo "=== Import smoke test ==="
+          python -c "
+          import sys
+          sys.path.insert(0, 'src')
+          sys.path.insert(0, 'src/export')
+
+          # Install fake model before importing app (no torch on runner)
+          from tests.fixtures.fake_runtime import FakeModelRuntime
+          rt = FakeModelRuntime()
+          rt.install()
+
+          errors = []
+          def try_import(name):
+              try:
+                  __import__(name)
+              except Exception as e:
+                  errors.append(f'{name}: {e}')
+          try_import('flask')
+          try_import('soundfile')
+          try_import('numpy')
+          try_import('qwen3_tts')
+          try_import('qwen3_tts.app')
+
+          if errors:
+              print('IMPORT ERRORS:')
+              for e in errors:
+                  print(' ', e)
+              sys.exit(1)
+          else:
+              print('All critical imports OK')
+          "
+
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
@@ -64,31 +104,43 @@ jobs:
 
       - name: Start fake_model_server
         run: |
-          nohup python tests/ui/fixtures/fake_model_server.py > fake_model_server.log 2>&1 &
-          echo "fake_model_server PID=$!"
-          sleep 2
+          # Start in background; use a wrapper to ensure we get the PID and logs
+          python tests/ui/fixtures/fake_model_server.py > fake_model_server.log 2>&1 &
+          SERVER_PID=$!
+          echo "fake_model_server PID=$SERVER_PID"
 
-          # Show initial logs
-          echo "--- fake_model_server initial logs ---"
-          cat fake_model_server.log || true
-          echo "--- end initial logs ---"
+          # Give it time to start (up to 10s, polling every 1s)
+          echo "=== Waiting for fake_model_server to become healthy ==="
+          deadline=$((SECONDS + 10))
+          while [ $SECONDS -lt $deadline ]; do
+            sleep 1
+            set +e
+            response=$(curl -s -w "\n%{http_code}" http://127.0.0.1:8319/health 2>&1 || true)
+            code=$(echo "$response" | tail -1)
+            set -e
 
-          # Try to curl /health once and show response
-          set +e
-          response=$(curl -s -w "\n%{http_code}" http://127.0.0.1:8319/health 2>&1 || true)
-          code=$(echo "$response" | tail -1)
-          echo "health HTTP code=$code"
-          echo "health response:"
-          echo "$response"
+            if [ "$code" = "200" ]; then
+              echo "fake_model_server is healthy after $((SECONDS))s"
+              echo "health response:"
+              echo "$response"
+              exit 0
+            fi
+          done
 
-          if [ "$code" = "200" ]; then
-            echo "fake_model_server is healthy"
-            exit 0
-          fi
+          # If we get here, it did not become healthy; dump diagnostics
+          echo "=== fake_model_server did not become healthy ==="
+          echo "Server PID alive?"
+          kill -0 "$SERVER_PID" 2>/dev/null && echo "YES" || echo "NO"
 
-          # If not healthy, dump more logs
-          echo "fake_model_server not healthy; logs:"
-          tail -100 fake_model_server.log || true
+          echo "--- fake_model_server logs (full) ---"
+          cat fake_model_server.log || echo "(empty or unreadable)"
+          echo "--- end logs ---"
+
+          # Try running it directly for 5s to capture any crash output
+          echo "=== Direct run attempt (5s timeout) ==="
+          timeout 5 python tests/ui/fixtures/fake_model_server.py || true
+          echo "=== end direct run ==="
+
           exit 1
 
       - name: Run Playwright E2E tests

@@ -12,17 +12,12 @@ from typing import Any, Callable
 # Apply thread and runtime envs before heavy imports
 from qwen3_tts.asr_check import validate_reference_text
 from qwen3_tts.config import REF_AUDIO_PATH, apply_preset_env
-from qwen3_tts.openvino.runtime_config import apply_thread_env
+from qwen3_tts.openvino.runtime_config import apply_thread_env, resolve_inference_threads
 from qwen3_tts.presets import get_voice_design_preset, seconds_for_capacity
 
 apply_preset_env()
 
 apply_thread_env()
-os.environ.setdefault("ORT_INTRA_OP_NUM_THREADS", "6")
-os.environ.setdefault("ORT_INTER_OP_NUM_THREADS", "2")
-os.environ.setdefault("OMP_NUM_THREADS", "6")
-os.environ.setdefault("MKL_NUM_THREADS", "6")
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 import torch
 
@@ -63,7 +58,7 @@ OPENVINO_PREDICTOR_STATEFUL_MODEL = (
 )
 TORCH_DTYPE, TORCH_DTYPE_NAME, OPENVINO_LOW_CPU_MEM_USAGE = resolve_torch_load_config(torch)
 
-torch.set_num_threads(int(os.environ.get("OV_INFERENCE_THREADS", "6")))
+torch.set_num_threads(resolve_inference_threads())
 
 
 @dataclass(frozen=True)
@@ -246,7 +241,7 @@ def _validate_ov_metadata(model_dir: str, model_repo: str, revision: str | None)
         raise RuntimeError(f"OV_MODEL_DIR missing metadata.json: {meta_path}")
 
     ov_metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-    from qwen3_tts.openvino.runtime_config import get_ov_config
+    from qwen3_tts.openvino.runtime_config import get_ov_config, resolve_inference_threads
     ov_config = get_ov_config()
 
     # Validate metadata matches loaded model
