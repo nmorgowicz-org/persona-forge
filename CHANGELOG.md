@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.22.2](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.22.1...qwen3-tts-openvino-v0.22.2) (2026-07-07)
+
+
+### Miscellaneous Chores
+
+* **deps:** update dependency pytest to v8.4.2 ([#106](https://github.com/nmorgowicz-org/qwen3-tts-openvino/issues/106)) ([f09009e](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/f09009e2414b2b20ee907c63957595fcb6a6b01a))
+* **deps:** update dependency pytest to v9 ([#107](https://github.com/nmorgowicz-org/qwen3-tts-openvino/issues/107)) ([cc9c593](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/cc9c593d8c978429a2a16bd265bba2e8b21f03f8))
+
 ## [0.22.1](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.22.0...qwen3-tts-openvino-v0.22.1) (2026-07-06)
 
 
