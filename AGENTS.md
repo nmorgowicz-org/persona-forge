@@ -240,16 +240,20 @@ So user-facing changes need a `feat:` or `fix:` title.
 Every implementation PR body must include a Release Please override block using this exact format:
 
 - Each line is one Conventional Commit entry.
-- Format: `- type(scope): description`
-- The leading `- ` is required.
+- Format: `type(scope): description`
+- Do not prefix entries with Markdown bullets. Release Please parses the block as a
+  commit message, so a leading `- ` makes the entry invalid.
 
 Example:
 
 ```text
 BEGIN_COMMIT_OVERRIDE
-- fix(model): correct seed max from 2^63-1 to 2^32-1
-- docs: restore advanced env var detail in .env.example and HOW_TO_RUN.md
+fix(model): correct seed max from 2^63-1 to 2^32-1
+
+docs: restore advanced env var detail in .env.example and HOW_TO_RUN.md
 END_COMMIT_OVERRIDE
 ```
 
-One Conventional Commit line per entry; one supported type per entry; no composite headers. Release Please version PRs are exempt. Keep model artifacts and benchmark audio out of PRs.
+One Conventional Commit line per entry; separate multiple entries with a blank line; one
+supported type per entry; no composite headers. Release Please version PRs are exempt.
+Keep model artifacts and benchmark audio out of PRs.

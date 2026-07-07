@@ -41,5 +41,14 @@ END_COMMIT_OVERRIDE
 """
         )
 
+    def test_rejects_markdown_list_markers(self):
+        with pytest.raises(RuntimeError, match="without a Markdown list marker"):
+            validate_pr_override_body(
+                """BEGIN_COMMIT_OVERRIDE
+- fix(runtime): do not pass a list item to the commit parser
+END_COMMIT_OVERRIDE
+"""
+            )
+
     def test_ignores_bodies_without_an_override(self):
         validate_pr_override_body("Renovate dependency update")
