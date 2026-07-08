@@ -26,12 +26,20 @@ _whisper_model = None
 def _get_model():
     global _whisper_model
     if _whisper_model is None:
-        from faster_whisper import WhisperModel
+        try:
+            from faster_whisper import WhisperModel
 
-        # tiny.en: this only needs to answer "is there speech at all", not produce an accurate
-        # transcript, so the smallest English-only model is plenty and keeps load/decode cost
-        # low. int8 is the fastest CPU compute type CTranslate2 offers.
-        _whisper_model = WhisperModel("tiny.en", device="cpu", compute_type="int8")
+            # tiny.en: this only needs to answer "is there speech at all", not produce an accurate
+            # transcript, so the smallest English-only model is plenty and keeps load/decode cost
+            # low. int8 is the fastest CPU compute type CTranslate2 offers.
+            _whisper_model = WhisperModel("tiny.en", device="cpu", compute_type="int8")
+        except ImportError:
+            print(
+                "[asr_check] faster_whisper not installed; ASR validation disabled. "
+                "Install faster_whisper to re-enable REF_TEXT validation.",
+                flush=True,
+            )
+            _whisper_model = None
     return _whisper_model
 
 

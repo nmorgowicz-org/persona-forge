@@ -1239,7 +1239,7 @@ def runtime_config_post():
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
     try:
-        state = model.executor.submit(model.apply_runtime_config, data).result(timeout=300)
+        state = model.executor.submit(model.apply_runtime_config, data).result(timeout=900)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
