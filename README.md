@@ -20,31 +20,21 @@ contains the export tooling.
 No authentication or TLS. Keep port 8318 on a trusted network or behind an authenticated reverse
 proxy (see SECURITY.md).
 
-## Quick start
+## Getting started
 
-Requirements: Linux AMD64, Docker Compose, Intel CPU, at least 10 GiB RAM for the service, a
-reference WAV, and its exact transcript.
+Prerequisites:
 
-```bash
-cp .env.example .env
-# Edit .env: set REF_AUDIO_PATH and REF_TEXT. MODEL_SIZE=1.7B is recommended.
+- Docker and Docker Compose
+- A reference WAV file and its exact transcript
 
-docker compose run --rm export
-docker compose up -d qwen3-tts
-curl -fsS http://localhost:8318/health
-```
+Steps:
 
-Generate:
+1. Copy `.env.example` to `.env`; set `REF_AUDIO_PATH`, `REF_TEXT`, and `HF_TOKEN` (if using gated models).
+2. `docker compose up --build qwen3-tts`
+3. Run once to generate model artifacts: `docker compose run --rm --profile export export`
+4. Open `http://localhost:8318`
 
-```bash
-curl -sS http://localhost:8318/v1/audio/speech \
-  -H 'Content-Type: application/json' \
-  -d '{"input":"Hello from Qwen three TTS.","response_format":"mp3"}' \
-  -o output.mp3
-```
-
-For full deployment details, environment variables, VoiceDesign setup, streaming, and memory
-tuning, see [HOW_TO_RUN.md](docs/HOW_TO_RUN.md).
+For advanced configuration, environment variables, and tuning, see [docs/ENV_REFERENCE.md](docs/ENV_REFERENCE.md).
 
 ## Model profiles
 
