@@ -98,7 +98,20 @@ def resolve_torch_load_config(
         canonical = "bfloat16"
     else:
         # For pytorch and pocket_tts: allow MODEL_DTYPE override; default fp32.
-        requested = (environ.get("MODEL_DTYPE") or "float32").strip().lower()
+        # Backward-compat shim: if no explicit backend was given and only
+        # OPENVINO_TORCH_DTYPE is set, treat it as MODEL_DTYPE.
+        # When backend is explicitly "pytorch" / "pocket_tts", ignore it and
+        # default to fp32 to respect the caller's intent.
+        model_dtype = environ.get("MODEL_DTYPE")
+        if model_dtype:
+            requested = model_dtype.strip().lower()
+        elif b:
+            # explicit backend (pytorch, pocket_tts) → ignore OPENVINO_TORCH_DTYPE
+            requested = "float32"
+        else:
+            # no explicit backend → honor legacy OPENVINO_TORCH_DTYPE
+            legacy = environ.get("OPENVINO_TORCH_DTYPE")
+            requested = (legacy or "float32").strip().lower()
         aliases = {
             "float32": "float32",
             "fp32": "float32",
