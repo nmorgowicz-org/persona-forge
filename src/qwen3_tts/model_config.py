@@ -38,21 +38,26 @@ def resolve_voice_design_model_repo(environ: MutableMapping[str, str] = os.envir
 
 
 def configure_hf_token(environ: MutableMapping[str, str] = os.environ) -> None:
-    """Populate HF_TOKEN from a Docker secret without logging the credential."""
+    """Populate HF_TOKEN from environment, a Docker secret file, or a persisted runtime token.
+
+    Precedence:
+      1) HF_TOKEN env var (set by user, Compose, or runtime config)
+      2) HF_TOKEN_FILE (explicit Docker secret)
+      3) /app/.hf_token (persisted via runtime config panel, if it exists)
+    """
 
     if environ.get("HF_TOKEN"):
         return
 
-    token_file = environ.get("HF_TOKEN_FILE")
-    if not token_file:
-        return
+    token_file = environ.get("HF_TOKEN_FILE") or "/app/.hf_token"
 
     try:
         token = Path(token_file).read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        raise RuntimeError(f"Unable to read HF_TOKEN_FILE: {token_file}") from exc
+    except OSError:
+        return  # no file or unreadable: continue with no token
+
     if not token:
-        raise RuntimeError(f"HF_TOKEN_FILE is empty: {token_file}")
+        return  # empty file: continue with no token
 
     environ["HF_TOKEN"] = token
 
@@ -72,25 +77,43 @@ def resolve_model_repo(environ: MutableMapping[str, str] = os.environ) -> str:
         raise RuntimeError(f"Unsupported MODEL_SIZE={model_size!r}; choose {choices}") from exc
 
 
-def resolve_torch_load_config(torch_module, environ: MutableMapping[str, str] = os.environ):
+def resolve_torch_load_config(
+    torch_module,
+    environ: MutableMapping[str, str] = os.environ,
+    *,
+    backend: str | None = None,
+):
     """Resolve runtime/benchmark Torch dtype and low-memory loading."""
 
-    requested = (environ.get("OPENVINO_TORCH_DTYPE") or "float32").strip().lower()
-    aliases = {
-        "float32": "float32",
-        "fp32": "float32",
-        "bfloat16": "bfloat16",
-        "bf16": "bfloat16",
-        "float16": "float16",
-        "fp16": "float16",
-    }
-    try:
-        canonical = aliases[requested]
-    except KeyError as exc:
-        choices = ", ".join(sorted(aliases))
-        raise ValueError(
-            f"unsupported OPENVINO_TORCH_DTYPE={requested!r}; choose {choices}"
-        ) from exc
+    # Runtime priority:
+    #  - openvino: must be bf16 (enforced).
+    #  - pytorch: MODEL_DTYPE (default fp32).
+    #  - pocket_tts: treated as pytorch for this resolver.
+    #
+    # Re-resolve this policy for every model load instead of retaining the dtype
+    # selected when the worker first imported this module.
+    b = (backend or "").strip().lower()
+
+    if b == "openvino":
+        canonical = "bfloat16"
+    else:
+        # For pytorch and pocket_tts: allow MODEL_DTYPE override; default fp32.
+        requested = (environ.get("MODEL_DTYPE") or "float32").strip().lower()
+        aliases = {
+            "float32": "float32",
+            "fp32": "float32",
+            "bfloat16": "bfloat16",
+            "bf16": "bfloat16",
+            "float16": "float16",
+            "fp16": "float16",
+        }
+        try:
+            canonical = aliases[requested]
+        except KeyError as exc:
+            choices = ", ".join(sorted(aliases))
+            raise ValueError(
+                f"unsupported MODEL_DTYPE={requested!r}; choose {choices}"
+            ) from exc
 
     low_cpu_mem_usage = (
         (environ.get("OPENVINO_LOW_CPU_MEM_USAGE") or "1").strip() != "0"

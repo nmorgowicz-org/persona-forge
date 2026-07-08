@@ -59,6 +59,21 @@ class TestResolveTorchLoadConfig:
         assert name == "bfloat16"
         assert low_memory is True
 
+    def test_pytorch_backend_forces_fp32_after_openvino_swap(self):
+        torch_module = type(
+            "FakeTorch",
+            (),
+            {"float32": object(), "bfloat16": object(), "float16": object()},
+        )
+        dtype, name, low_memory = resolve_torch_load_config(
+            torch_module,
+            {"OPENVINO_TORCH_DTYPE": "bf16", "OPENVINO_LOW_CPU_MEM_USAGE": "1"},
+            backend="pytorch",
+        )
+        assert dtype is torch_module.float32
+        assert name == "float32"
+        assert low_memory is True
+
     def test_rejects_unknown_dtype(self):
         torch_module = type(
             "FakeTorch",
