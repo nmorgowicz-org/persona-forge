@@ -384,13 +384,13 @@ def load_model(profile: ModelProfile | None = None):
         from qwen3_tts import pocket_tts_runtime
 
         language = (os.getenv("POCKET_TTS_LANGUAGE") or "english").strip() or "english"
-        temp = float(os.getenv("POCKET_TTS_TEMP", "0.7"))
-        lsd_steps = int(os.getenv("POCKET_TTS_LSD_DECODE_STEPS", "1"))
+        temp = float(os.getenv("POCKET_TTS_TEMP", "1.2"))
+        lsd_steps = int(os.getenv("POCKET_TTS_LSD_DECODE_STEPS", "5"))
         eos_threshold = float(os.getenv("POCKET_TTS_EOS_THRESHOLD", "-4.0"))
         noise_clamp_raw = os.getenv("POCKET_TTS_NOISE_CLAMP", "").strip()
         noise_clamp = float(noise_clamp_raw) if noise_clamp_raw else None
-        frames_after_eos_raw = os.getenv("POCKET_TTS_FRAMES_AFTER_EOS", "").strip()
-        frames_after_eos = int(frames_after_eos_raw) if frames_after_eos_raw else None
+        frames_after_eos_raw = os.getenv("POCKET_TTS_FRAMES_AFTER_EOS", "4").strip()
+        frames_after_eos = int(frames_after_eos_raw) if frames_after_eos_raw else 4
         quantize = int(os.getenv("POCKET_TTS_QUANTIZE", "0"))
 
         pocket_tts_runtime.load_pocket_tts_model(
@@ -591,6 +591,19 @@ def load_model(profile: ModelProfile | None = None):
         _service_started = True
         _model_loaded = True
         print(f"[app_worker] Model loaded and ready (profile={profile.name!r}).")
+
+    # ── Backend-agnostic: register mounted REF_AUDIO as a first-class voice ────
+    if profile.ref_audio:
+        from qwen3_tts import voice_library
+        try:
+            vid = voice_library.ensure_mounted_ref_voice(
+                profile.ref_audio,
+                sample_text=REF_TEXT,
+            )
+            if vid:
+                print(f"[app_worker] Registered mounted reference as voice {vid}", flush=True)
+        except Exception as exc:
+            print(f"[app_worker] Mounted reference registration failed (non-fatal): {exc}", flush=True)
 
 
 def model_loaded() -> bool:
@@ -849,12 +862,12 @@ def runtime_config_state() -> dict[str, Any]:
         from qwen3_tts import pocket_tts_runtime
 
         _ptts_noise = os.getenv("POCKET_TTS_NOISE_CLAMP", "").strip()
-        _ptts_frames = os.getenv("POCKET_TTS_FRAMES_AFTER_EOS", "").strip()
-        live["POCKET_TTS_TEMP"] = float(os.getenv("POCKET_TTS_TEMP", "0.7"))
-        live["POCKET_TTS_LSD_DECODE_STEPS"] = int(os.getenv("POCKET_TTS_LSD_DECODE_STEPS", "1"))
+        _ptts_frames = os.getenv("POCKET_TTS_FRAMES_AFTER_EOS", "4").strip()
+        live["POCKET_TTS_TEMP"] = float(os.getenv("POCKET_TTS_TEMP", "1.2"))
+        live["POCKET_TTS_LSD_DECODE_STEPS"] = int(os.getenv("POCKET_TTS_LSD_DECODE_STEPS", "5"))
         live["POCKET_TTS_EOS_THRESHOLD"] = float(os.getenv("POCKET_TTS_EOS_THRESHOLD", "-4.0"))
         live["POCKET_TTS_NOISE_CLAMP"] = float(_ptts_noise) if _ptts_noise else None
-        live["POCKET_TTS_FRAMES_AFTER_EOS"] = int(_ptts_frames) if _ptts_frames else None
+        live["POCKET_TTS_FRAMES_AFTER_EOS"] = int(_ptts_frames) if _ptts_frames else 4
 
         cloning_ok = pocket_tts_runtime.pocket_tts_cloning_available
         cloning_msg = (pocket_tts_runtime.pocket_tts_cloning_status_message or "").strip()

@@ -36,6 +36,11 @@ pocket_tts_voice_state_cache: dict[str, Any] = {}
 pocket_tts_cloning_available: bool = False
 pocket_tts_cloning_status_message: str = ""
 
+# Extra audio frames to keep after the last speech frame (post-EOS tail control).
+# 1 frame ≈ 1/12 s of audio at 24 kHz (~2000 samples).
+# Controlled by POCKET_TTS_FRAMES_AFTER_EOS env var (default 4).
+pocket_tts_frames_after_eos: int = 4
+
 
 # ---------------------------------------------------------------------------
 # Model loading
@@ -91,14 +96,16 @@ def load_pocket_tts_model(
         pocket_tts_model = None
         raise RuntimeError(f"[pocket_tts] Failed to load TTSModel: {exc}") from exc
 
-    # Optional: forward advanced knobs via environment on the model if supported.
-    # (These are primarily for documentation and future wiring; load_model
-    # already consumes the core four; additional knobs can be applied later
-    # via generate_pocket_tts if the API supports per-call overrides.)
+    # Store advanced knobs for use during generation.
+    global pocket_tts_frames_after_eos
     if noise_clamp is not None:
         print(f"[pocket_tts] noise_clamp set to {noise_clamp} (noted; runtime wiring TBD)")
     if frames_after_eos is not None:
-        print(f"[pocket_tts] frames_after_eos set to {frames_after_eos} (noted; runtime wiring TBD)")
+        pocket_tts_frames_after_eos = max(0, frames_after_eos)
+        print(f"[pocket_tts] frames_after_eos set to {pocket_tts_frames_after_eos}")
+    else:
+        pocket_tts_frames_after_eos = 4
+        print(f"[pocket_tts] frames_after_eos defaulted to {pocket_tts_frames_after_eos}")
 
     print("[pocket_tts] Model loaded and ready.")
     return pocket_tts_model
@@ -243,6 +250,54 @@ def get_pocket_tts_voice_state(
 # Audio generation
 # ---------------------------------------------------------------------------
 
+def _trim_post_eos_tail(audio: torch.Tensor, sr: int, frames_after_eos: int) -> torch.Tensor:
+    """Trim trailing dead air after the last speech frame, respecting frames_after_eos.
+
+    Uses a per-frame energy heuristic:
+    - 1 frame ≈ 2000 samples at 24 kHz (12 fps codec).
+    - Finds the last frame where energy exceeds a fraction of the peak frame energy.
+    - Keeps up to frames_after_eos extra frames after that point.
+    - On any error, returns the original audio unchanged.
+    """
+    try:
+        import torch.nn.functional as F
+
+        if frames_after_eos < 0 or audio.numel() == 0:
+            return audio
+
+        # Work on CPU float
+        x = audio.float().cpu().flatten()
+        frame_samples = max(1, sr // 12)
+        if len(x) <= frame_samples:
+            return audio
+
+        # Per-frame energy (L2 norm) via unfold
+        frames = x.unfold(0, frame_samples, frame_samples)
+        energies = (frames * frames).sum(dim=1).sqrt()
+        peak = energies.max().item()
+        if peak <= 1e-9:
+            return audio
+
+        # Speech threshold: 3% of peak frame energy
+        thresh = peak * 0.03
+        # Last speech frame index (energy above threshold)
+        speech_mask = (energies >= thresh).nonzero(as_tuple=True)[0]
+        if speech_mask.numel() == 0:
+            return audio
+        last_speech_frame = int(speech_mask[-1])
+
+        # Effective endpoint: allow extra frames_after_eos beyond last speech frame
+        limit_frame = last_speech_frame + frames_after_eos
+        limit_sample = min(len(x), (limit_frame + 1) * frame_samples)
+
+        if limit_sample < len(x):
+            return x[:limit_sample]
+        return audio
+    except Exception:
+        # Defensive: never break generation on trimming issues
+        return audio
+
+
 def generate_pocket_tts(
     model: TTSModel,
     voice_state: dict[str, Any],
@@ -281,6 +336,10 @@ def generate_pocket_tts(
         audio = torch.tensor(audio, dtype=torch.float32)
 
     sample_rate = getattr(model, "sample_rate", 24000)
+
+    # Apply post-EOS tail trim if configured
+    audio = _trim_post_eos_tail(audio, int(sample_rate), pocket_tts_frames_after_eos)
+
     return audio, int(sample_rate)
 
 

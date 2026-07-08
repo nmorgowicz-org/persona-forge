@@ -151,3 +151,49 @@ def list_voices() -> list[dict[str, Any]]:
         voices.append(meta)
     voices.sort(key=lambda m: m.get("created_at", 0), reverse=True)
     return voices
+
+
+def ensure_mounted_ref_voice(
+    ref_audio_path: str,
+    sample_text: str | None = None,
+) -> str | None:
+    """Register the mounted REF_AUDIO as a first-class 'Mounted reference' voice.
+
+    Creates/updates voice vd_000000000001 backed by the same WAV.
+    Idempotent: skips if hash matches; updates WAV+meta if hash changed.
+    Returns voice_id if created/updated, else None on any error (non-fatal).
+    """
+    MOUNTED_VOICE_ID = "vd_000000000001"
+    if not ref_audio_path or not os.path.isfile(ref_audio_path):
+        return None
+    try:
+        import hashlib
+        data = Path(ref_audio_path).read_bytes()
+        if len(data) == 0:
+            return None
+        file_hash = hashlib.sha256(data).hexdigest()
+        voice_dir = _voice_dir(MOUNTED_VOICE_ID)
+        meta_path = voice_dir / "meta.json"
+        existing = None
+        if meta_path.is_file():
+            try:
+                existing = json.loads(meta_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                existing = None
+        if existing and existing.get("source") == "mounted_ref_audio" and existing.get("sha256") == file_hash:
+            return MOUNTED_VOICE_ID
+        voice_dir.mkdir(parents=True, exist_ok=True)
+        (voice_dir / "reference.wav").write_bytes(data)
+        meta = {
+            "voice_id": MOUNTED_VOICE_ID,
+            "description": "Mounted reference (Default)",
+            "sample_text": (sample_text or "").rstrip(),
+            "language": "en",
+            "source": "mounted_ref_audio",
+            "sha256": file_hash,
+            "created_at": time.time(),
+        }
+        (voice_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        return MOUNTED_VOICE_ID
+    except Exception:
+        return None

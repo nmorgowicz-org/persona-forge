@@ -13,6 +13,12 @@ import {
 } from '@/lib/api'
 import { hasChipSelections, type ChipSelections } from '@/lib/voiceDesignChips'
 import { AudioPlayer } from '@/components/AudioPlayer'
+
+const MOUNTED_REF_SOURCE = 'mounted_ref_audio' as const
+
+function isMountedRef(voice: VoiceMeta): boolean {
+  return (voice as VoiceMeta & { source?: string }).source === MOUNTED_REF_SOURCE
+}
 import { Button } from '@/components/ui/button'
 import { createStitchClipFromSegment } from '@/lib/stitchClips'
 import { useAppStore, type StitchPlanClip } from '@/store'
@@ -193,7 +199,14 @@ function VoiceCard({
       className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm transition-shadow duration-200 hover:border-border/80 hover:shadow-lg"
     >
       <div>
-        <p className="text-sm font-medium">{voice.voice_id}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium">{voice.voice_id}</p>
+          {isMountedRef(voice) && (
+            <span className="inline-flex items-center rounded-full border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-cyan-400">
+              Mounted reference
+            </span>
+          )}
+        </div>
         <p className="line-clamp-2 text-xs text-muted-foreground">{voice.description}</p>
       </div>
 
