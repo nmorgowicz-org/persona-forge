@@ -15,7 +15,6 @@ import {
   cancelGenerate,
   listVoices,
 } from '@/lib/api'
-import type { GenerateJobProgress } from '@/lib/api'
 import { TONE_OPTIONS } from '@/lib/voiceDesignChips'
 import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
@@ -106,23 +105,25 @@ export function SpeakPage() {
     setVoiceId,
     voices,
     setVoices,
-    audioUrl,
-    setAudioUrl,
-    isGenerating,
-    setGenerating,
-    error,
-    setError,
+    speakAudioUrl,
+    setSpeakAudioUrl,
+    speakIsGenerating,
+    setSpeakIsGenerating,
+    speakError,
+    setSpeakError,
+    speakJobId,
+    setSpeakJobId,
+    speakJobProgress,
+    setSpeakJobProgress,
+    speakLastSeed,
+    setSpeakLastSeed,
+    speakAudioBlob,
+    setSpeakAudioBlob,
     modelLoaded,
   } = useAppStore()
   const [language, setLanguage] = useState('English')
   const [tone, setTone] = useState('neutral')
   const [seedInput, setSeedInput] = useState('')
-  const [lastSeed, setLastSeed] = useState<number | null>(null)
-  const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
-
-  // Async job state
-  const [currentJobId, setCurrentJobId] = useState<string | null>(null)
-  const [progress, setProgress] = useState<GenerateJobProgress | null>(null)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   async function refreshVoices() {
@@ -152,7 +153,7 @@ export function SpeakPage() {
     const poll = async () => {
       try {
         const p = await getGenerateJobProgress(jobId)
-        setProgress(p)
+        setSpeakJobProgress(p)
 
         if (p.status === 'completed') {
           // Download audio and capture seed if present
@@ -162,35 +163,36 @@ export function SpeakPage() {
             )
             if (!audioRes.ok) throw new Error('Failed to fetch audio')
             const blob = await audioRes.blob()
-            if (audioUrl) URL.revokeObjectURL(audioUrl)
-            setAudioBlob(blob)
-            setAudioUrl(URL.createObjectURL(blob))
+            const existing = useAppStore.getState().speakAudioUrl
+            if (existing) URL.revokeObjectURL(existing)
+            setSpeakAudioBlob(blob)
+            setSpeakAudioUrl(URL.createObjectURL(blob))
             const seedHeader = audioRes.headers.get('X-Seed')
-            if (seedHeader) setLastSeed(Number(seedHeader))
+            if (seedHeader) setSpeakLastSeed(Number(seedHeader))
           } catch {
-            setError('Failed to download generated audio')
+            setSpeakError('Failed to download generated audio')
           }
-          setGenerating(false)
-          setCurrentJobId(null)
-          setProgress(null)
+          setSpeakIsGenerating(false)
+          setSpeakJobId(null)
+          setSpeakJobProgress(null)
           return
         }
 
         if (p.status === 'failed') {
           const msg = p.message || 'Generation failed'
           const info = classifyGenerateError(msg, null)
-          setError(info.headline + (info.detail ? '\n' + info.detail : ''))
-          setGenerating(false)
-          setCurrentJobId(null)
-          setProgress(null)
+          setSpeakError(info.headline + (info.detail ? '\n' + info.detail : ''))
+          setSpeakIsGenerating(false)
+          setSpeakJobId(null)
+          setSpeakJobProgress(null)
           return
         }
 
         if (p.status === 'cancelled') {
-          setError('Generation was cancelled')
-          setGenerating(false)
-          setCurrentJobId(null)
-          setProgress(null)
+          setSpeakError('Generation was cancelled')
+          setSpeakIsGenerating(false)
+          setSpeakJobId(null)
+          setSpeakJobProgress(null)
           return
         }
 
@@ -206,10 +208,10 @@ export function SpeakPage() {
   }
 
   async function handleGenerate() {
-    if (!text.trim() || isGenerating) return
-    setGenerating(true)
-    setError(null)
-    setProgress(null)
+    if (!text.trim() || speakIsGenerating) return
+    setSpeakIsGenerating(true)
+    setSpeakError(null)
+    setSpeakJobProgress(null)
     try {
       const toneLabel = TONE_OPTIONS.find((t) => t.id === tone)?.label
       const instruct = tone !== 'neutral' && toneLabel ? toneLabel : undefined
@@ -222,18 +224,18 @@ export function SpeakPage() {
         seed,
         responseFormat: 'mp3',
       })
-      setCurrentJobId(job_id)
+      setSpeakJobId(job_id)
       startPoll(job_id)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      setGenerating(false)
+      setSpeakError(err instanceof Error ? err.message : String(err))
+      setSpeakIsGenerating(false)
     }
   }
 
   async function handleStop() {
-    if (!currentJobId) return
+    if (!speakJobId) return
     try {
-      await cancelGenerate(currentJobId)
+      await cancelGenerate(speakJobId)
     } catch {
       // Best-effort; server may already be stopping it.
     }
@@ -241,7 +243,7 @@ export function SpeakPage() {
   }
 
   const hasText = text.trim().length > 0
-  const initialEta = hasText && !isGenerating ? estimateInitialEta(text) : ''
+  const initialEta = hasText && !speakIsGenerating ? estimateInitialEta(text) : ''
 
   return (
     <div className="flex flex-col gap-6">
@@ -350,7 +352,7 @@ export function SpeakPage() {
             </Tooltip>
           </div>
 
-          {isGenerating && currentJobId ? (
+          {speakIsGenerating && speakJobId ? (
             // Stop button (secondary)
             <Button
               type="button"
@@ -368,17 +370,17 @@ export function SpeakPage() {
             type="button"
             data-testid="speak-generate-button"
             onClick={handleGenerate}
-            disabled={!text.trim() || isGenerating || !modelLoaded}
+            disabled={!text.trim() || speakIsGenerating || !modelLoaded}
             title={modelLoaded ? undefined : 'Model is still loading'}
             className={cn(
               'transition-all duration-200',
-              !isGenerating &&
+              !speakIsGenerating &&
                 text.trim() &&
                 modelLoaded &&
                 'shadow-[0_4px_20px_-6px_color-mix(in_oklch,var(--primary),transparent_35%)] hover:shadow-[0_6px_24px_-6px_color-mix(in_oklch,var(--primary),transparent_20%)]',
             )}
           >
-            {isGenerating ? (
+            {speakIsGenerating ? (
               <span className="flex items-center gap-1.5">
                 <Loader2 className="size-4 animate-spin" />
                 Generating…
@@ -390,65 +392,65 @@ export function SpeakPage() {
         </div>
 
         {/* Progress + ETA while generating */}
-        {isGenerating && progress && (
+        {speakIsGenerating && speakJobProgress && (
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
               <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
                 <motion.div
                   className="h-full bg-primary"
                   animate={{
-                    width: `${Math.min(100, Math.max(3, progress.progress_pct))}%`,
+                     width: `${Math.min(100, Math.max(3, speakJobProgress.progress_pct))}%`,
                   }}
                   transition={{ ease: 'easeOut', duration: 0.3 }}
                 />
               </div>
-              {typeof progress.progress_pct === 'number' && (
-                <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
-                  {Math.round(progress.progress_pct)}%
+               {typeof speakJobProgress.progress_pct === 'number' && (
+                 <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
+                   {Math.round(speakJobProgress.progress_pct)}%
                 </span>
               )}
             </div>
             <p className="text-[11px] text-muted-foreground">
-              {progress.status === 'cancelled'
-                ? 'Cancelling…'
-                : formatEta(progress.eta_seconds)}
-              {progress.elapsed_seconds > 0 && (
-                <span className="ml-2 text-[10px] text-muted-foreground/70">
-                  · {Math.round(progress.elapsed_seconds)}s elapsed
+               {speakJobProgress.status === 'cancelled'
+                 ? 'Cancelling…'
+                 : formatEta(speakJobProgress.eta_seconds)}
+               {speakJobProgress.elapsed_seconds > 0 && (
+                 <span className="ml-2 text-[10px] text-muted-foreground/70">
+                   · {Math.round(speakJobProgress.elapsed_seconds)}s elapsed
                 </span>
               )}
-              {progress.elapsed_seconds >= 30 &&
-                progress.elapsed_seconds < 60 &&
-                progress.status !== 'cancelled' && (
-                  <span className="ml-2 text-[10px] text-amber-500">
-                    This is taking longer than usual.
-                  </span>
-                )}
-              {progress.elapsed_seconds >= 60 &&
-                progress.status !== 'cancelled' && (
-                  <span className="ml-2 text-[10px] text-amber-500">
-                    Generation is in progress; this may take several minutes for longer texts.
-                  </span>
-                )}
+               {speakJobProgress.elapsed_seconds >= 30 &&
+                 speakJobProgress.elapsed_seconds < 60 &&
+                 speakJobProgress.status !== 'cancelled' && (
+                   <span className="ml-2 text-[10px] text-amber-500">
+                     This is taking longer than usual.
+                   </span>
+                 )}
+               {speakJobProgress.elapsed_seconds >= 60 &&
+                 speakJobProgress.status !== 'cancelled' && (
+                   <span className="ml-2 text-[10px] text-amber-500">
+                     Generation is in progress; this may take several minutes for longer texts.
+                   </span>
+                 )}
             </p>
           </div>
         )}
 
         {/* Structured error display */}
-        {error && <StructuredError error={error} />}
+        {speakError && <StructuredError error={speakError} />}
 
-        {audioUrl && (
+        {speakAudioUrl && (
           <div data-testid="speak-result" className="flex flex-col gap-2">
-            <AudioPlayer src={audioUrl} blob={audioBlob} />
-            {lastSeed !== null && (
+            <AudioPlayer src={speakAudioUrl} blob={speakAudioBlob} />
+            {speakLastSeed !== null && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span>
-                  Seed: <span className="font-mono text-foreground">{lastSeed}</span>
+                  Seed: <span className="font-mono text-foreground">{speakLastSeed}</span>
                 </span>
-                {seedInput !== String(lastSeed) && (
+                {seedInput !== String(speakLastSeed) && (
                   <button
                     type="button"
-                    onClick={() => setSeedInput(String(lastSeed))}
+                    onClick={() => setSeedInput(String(speakLastSeed))}
                     className="underline decoration-dotted hover:text-foreground"
                   >
                     Lock this seed

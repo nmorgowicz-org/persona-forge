@@ -14,6 +14,7 @@ import {
 import { hasChipSelections, type ChipSelections } from '@/lib/voiceDesignChips'
 import { AudioPlayer } from '@/components/AudioPlayer'
 import { Button } from '@/components/ui/button'
+import { createStitchClipFromSegment } from '@/lib/stitchClips'
 import { useAppStore, type StitchPlanClip } from '@/store'
 
 // Shape persisted by /omnivoice/save into voice.selections -- see app.py's omnivoice_save
@@ -293,8 +294,11 @@ function VoiceCard({
 }
 
 export function VoiceLibraryPage() {
-  const [voices, setVoices] = useState<VoiceMeta[]>([])
-  const [segments, setSegments] = useState<SegmentMeta[]>([])
+  const voices = useAppStore((s) => s.voices)
+  const segments = useAppStore((s) => s.ovLibrary)
+  const storeSetVoices = useAppStore((s) => s.setVoices)
+  const storeSetSegments = useAppStore((s) => s.setOvLibrary)
+
   const [error, setError] = useState<string | null>(null)
   const [busyVoiceId, setBusyVoiceId] = useState<string | null>(null)
   const [busySegmentId, setBusySegmentId] = useState<string | null>(null)
@@ -310,17 +314,16 @@ export function VoiceLibraryPage() {
   const setOvStitchPlanPaddingMs = useAppStore((s) => s.setOvStitchPlanPaddingMs)
   const setOvStitchPlanDsp = useAppStore((s) => s.setOvStitchPlanDsp)
 
-  function refresh() {
-    return Promise.all([
+  async function refresh() {
+    const [v, segs] = await Promise.all([
       listVoices().catch((err) => {
         setError(err instanceof Error ? err.message : String(err))
         return [] as VoiceMeta[]
       }),
       listOmniVoiceSegments().catch(() => [] as SegmentMeta[]),
-    ]).then(([v, segs]) => {
-      setVoices(v)
-      setSegments(segs)
-    })
+    ])
+    storeSetVoices(v)
+    storeSetSegments(segs)
   }
 
   useEffect(() => {
@@ -340,34 +343,12 @@ export function VoiceLibraryPage() {
   async function insertSegmentIntoStitchEditor(seg: SegmentMeta) {
     setError(null)
     try {
-      const url = `/omnivoice/segments/${encodeURIComponent(seg.segment_id)}/audio`
-      const b64 = await toBase64FromUrl(url)
+      const clip = await createStitchClipFromSegment(seg)
 
       setPage('voice-design')
       setDesignEngine('omnivoice')
 
-      const clipId = `clip_seg_${Date.now()}`
-      const durationMs =
-        typeof seg.duration_sec === 'number' && seg.duration_sec > 0
-          ? Math.round(seg.duration_sec * 1000)
-          : 0
-
-      setOvStitchPlanClips((prev: any) => [
-        ...(prev ?? []),
-        {
-          clipId,
-          ref: { segmentId: seg.segment_id },
-          text: seg.text,
-          sourceAudioBase64: b64,
-          sampleRate: seg.sample_rate ?? 24000,
-          durationMs,
-          trimStartMs: 0,
-          trimEndMs: 0,
-          fadeInMs: 0,
-          fadeOutMs: 0,
-        },
-      ])
-
+      setOvStitchPlanClips((prev: any) => [...(prev ?? []), clip])
       setOvStitchEditorOpen(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

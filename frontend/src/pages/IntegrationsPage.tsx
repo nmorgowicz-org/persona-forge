@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Check, Copy, Plug } from 'lucide-react'
-import { getHealth } from '@/lib/api'
 import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -81,16 +80,9 @@ function CodeBlock({ code }: { code: string }) {
 export function IntegrationsPage() {
   const voiceId = useAppStore((s) => s.voiceId)
   const voices = useAppStore((s) => s.voices)
-  const [health, setHealth] = useState<Record<string, unknown> | null>(null)
+  const storeModelLoaded = useAppStore((s) => s.modelLoaded)
+  const storeServiceStarted = useAppStore((s) => s.serviceStarted)
   const exampleVoiceId = voiceId ?? voices[0]?.voice_id ?? 'my-voice'
-
-  useEffect(() => {
-    getHealth()
-      .then(setHealth)
-      .catch(() => setHealth(null))
-  }, [])
-
-  const modelLoaded = Boolean(health && (health.ready ?? health.model_loaded))
 
   return (
     <div className="flex flex-col gap-6">
@@ -109,7 +101,7 @@ export function IntegrationsPage() {
       >
         <div className="relative flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Plug className="size-4" />
-          {modelLoaded && (
+          {storeModelLoaded && (
             <span className="absolute -top-0.5 -right-0.5 flex size-2.5">
               <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary/60" />
               <span className="relative inline-flex size-full rounded-full bg-primary ring-2 ring-card" />
@@ -119,11 +111,15 @@ export function IntegrationsPage() {
         <div className="flex-1">
           <p className="text-sm font-medium">Base model status</p>
           <p className="text-xs text-muted-foreground">
-            {modelLoaded ? 'Loaded and serving' : health ? 'Reachable, not ready' : 'Unreachable'}
+            {storeModelLoaded
+              ? 'Loaded and serving'
+              : storeServiceStarted
+                ? 'Service running, model not loaded'
+                : 'Starting up'}
           </p>
         </div>
-        <Badge variant={modelLoaded ? 'default' : 'outline'}>
-          {modelLoaded ? 'online' : 'offline'}
+        <Badge variant={storeModelLoaded ? 'default' : 'outline'}>
+          {storeModelLoaded ? 'online' : 'offline'}
         </Badge>
       </motion.div>
 
