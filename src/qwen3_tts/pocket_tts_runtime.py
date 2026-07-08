@@ -123,7 +123,7 @@ def build_default_voice_state(
     Returns:
         voice_state dict, or None if no valid ref_audio_path.
     """
-    global pocket_tts_default_voice_state
+    global pocket_tts_default_voice_state, pocket_tts_cloning_available, pocket_tts_cloning_status_message
 
     if not ref_audio_path:
         print("[pocket_tts] No REF_AUDIO_PATH configured; default voice_state = None.")

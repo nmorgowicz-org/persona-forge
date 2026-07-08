@@ -42,11 +42,14 @@ MODEL_ID = resolve_model_repo()
 MODEL_REVISION = os.getenv("MODEL_REVISION") or None
 DEVICE = os.getenv("DEVICE", "cpu")
 REF_AUDIO = os.getenv("REF_AUDIO", REF_AUDIO_PATH)
-REF_TEXT = os.getenv(
-    "REF_TEXT",
-    "Welcome to Rosies. What can I get for you today? You know, Im a good girl. "
-    "You want me, dont you? I am on the menu too.",
-)
+ref_text_val = os.getenv("REF_TEXT")
+if not ref_text_val:
+    raise RuntimeError(
+        "REF_TEXT environment variable is not set. "
+        "It must be the exact transcript of the reference audio (REF_AUDIO_PATH). "
+        "Without a correct REF_TEXT, voice cloning quality will be severely degraded."
+    )
+REF_TEXT = ref_text_val
 
 TTS_BACKEND = (os.getenv("TTS_BACKEND", "pytorch") or "pytorch").strip().lower()
 IDLE_UNLOAD_SECONDS = int(os.environ.get("IDLE_UNLOAD_SECONDS", "0") or "0")
@@ -336,6 +339,46 @@ def load_model(profile: ModelProfile | None = None):
 
         _validate_ov_metadata(profile.ov_model_dir, profile.model_repo, profile.revision)
 
+    # ── Mount health checks ─────────────────────────────────────────────────────
+    _mount_warnings: list[str] = []
+
+    # Reference audio
+    if profile.ref_audio and not os.path.isfile(profile.ref_audio):
+        _mount_warnings.append(
+            f"Reference audio not found: {profile.ref_audio}. "
+            "Voice cloning will fail until this is mounted or corrected."
+        )
+
+    # Voice library (/voices)
+    voice_lib = os.getenv("VOICE_LIBRARY_DIR", "/voices")
+    if not os.path.isdir(voice_lib):
+        _mount_warnings.append(
+            "Voice library directory missing: "
+            f"{voice_lib}. Voice library and VoiceDesign saves will be lost on restart."
+        )
+    elif not os.access(voice_lib, os.W_OK):
+        _mount_warnings.append(
+            f"Voice library directory not writable: {voice_lib}. "
+            "Voice saves will fail."
+        )
+
+    # Segment library (/segments)
+    segment_lib = os.getenv("SEGMENT_LIBRARY_DIR", "/segments")
+    if not os.path.isdir(segment_lib):
+        _mount_warnings.append(
+            "Segment library directory missing: "
+            f"{segment_lib}. OmniVoice segments will be lost on restart."
+        )
+    elif not os.access(segment_lib, os.W_OK):
+        _mount_warnings.append(
+            f"Segment library directory not writable: {segment_lib}. "
+            "Segment saves will fail."
+        )
+
+    # Log mount warnings
+    for m in _mount_warnings:
+        print(f"[MOUNT] WARNING: {m}", flush=True, file=sys.stderr)
+
     # ── Pocket TTS backend branch ──────────────────────────────────────────────
     if TTS_BACKEND == "pocket_tts":
         from qwen3_tts import pocket_tts_runtime
@@ -441,10 +484,10 @@ def load_model(profile: ModelProfile | None = None):
         else:
             print("[app_worker] Model loaded. (profile skips voice clone prompt)", flush=True)
 
-        # Validate REF_TEXT against REF_AUDIO at startup for OpenVINO only.
-        # PyTorch and Pocket TTS backends skip this to avoid blocking runtime config reloads.
+        # Validate REF_TEXT against REF_AUDIO at startup for all backends except Pocket TTS
+        # (Pocket TTS ignores REF_TEXT; clones from audio only).
         if (
-            TTS_BACKEND == "openvino"
+            TTS_BACKEND != "pocket_tts"
             and profile.build_voice_clone_prompt
             and profile.ref_audio
             and profile.ref_text
@@ -595,6 +638,41 @@ if IDLE_UNLOAD_SECONDS > 0:
     print(f"[app_worker] Idle unload enabled: {IDLE_UNLOAD_SECONDS}s cooldown.", flush=True)
 
 
+def _health_mount_status() -> dict[str, Any]:
+    """Return mount and runtime config status for /health and Runtime page."""
+    # Reference audio
+    ref_audio_path = os.getenv("REF_AUDIO") or REF_AUDIO_PATH or "/voice/reference.wav"
+    ref_audio_ok = os.path.isfile(ref_audio_path)
+
+    # Voice library
+    voice_lib = os.getenv("VOICE_LIBRARY_DIR", "/voices")
+    voice_lib_ok = os.path.isdir(voice_lib) and os.access(voice_lib, os.W_OK)
+
+    # Segment library
+    segment_lib = os.getenv("SEGMENT_LIBRARY_DIR", "/segments")
+    segment_lib_ok = os.path.isdir(segment_lib) and os.access(segment_lib, os.W_OK)
+
+    # Model cache (HF hub)
+    hf_cache = os.getenv("MODEL_CACHE_PATH", "/root/.cache/huggingface/hub")
+    hf_cache_ok = os.path.isdir(hf_cache) and os.access(hf_cache, os.W_OK)
+
+    # OpenVINO directory
+    ov_dir = OV_MODEL_DIR or ""
+    ov_ok = os.path.isdir(ov_dir) and os.access(ov_dir, os.W_OK)
+
+    # Runtime config: is /app writable?
+    app_writable = os.access("/app", os.W_OK) if os.path.isdir("/app") else False
+
+    return {
+        "ref_audio": {"path": ref_audio_path, "ok": ref_audio_ok},
+        "voice_library": {"path": voice_lib, "ok": voice_lib_ok},
+        "segment_library": {"path": segment_lib, "ok": segment_lib_ok},
+        "hf_cache": {"path": hf_cache, "ok": hf_cache_ok},
+        "ov": {"path": ov_dir, "ok": ov_ok} if ov_dir else None,
+        "app_writable": app_writable,
+    }
+
+
 def health_state() -> dict[str, Any]:
     """Return JSON-serializable model and backend readiness state."""
     if _startup_failed:
@@ -623,6 +701,7 @@ def health_state() -> dict[str, Any]:
         "low_cpu_mem_usage": OPENVINO_LOW_CPU_MEM_USAGE,
         "ref_audio": REF_AUDIO,
         "ref_text_validation": _ref_text_validation_result,
+        "mount": _health_mount_status(),
         "timestamp": time.time(),
     }
 
