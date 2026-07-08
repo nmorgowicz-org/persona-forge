@@ -1,124 +1,148 @@
 # Environment Reference
 
-Authoritative list of every environment variable read by this service, grouped logically.
-Defaults are as implemented in code — not marketing.
+Authoritative list of environment variables for this service.
+Defaults are as implemented in code.
+
+For a minimal setup, see “Minimal required” below; everything else is optional.
 
 Legend:
-- Required: must be set for normal operation.
-- Recommended: strongly advised; omission changes behavior noticeably.
+- Required: must be set.
+- Recommended: omission changes behavior noticeably.
 - Advanced: leave alone unless you know what you're doing.
 
 ---
 
-## Required
+## Minimal required
 
-| Var | Default | Read (file:line) | Description |
-|-----|---------|------------------|-------------|
-| `MODEL_SIZE` | `0.6B` | `config.py:35`, `model_config.py:67` | Selects 0.6B or 1.7B Base checkpoint. Drives `MODEL_REPO`, `OV_MODEL_DIR`, compression, stateful model, and vocoder settings via `apply_preset_env()`. |
-| `REF_AUDIO` | `/voice/reference.wav` | `model.py:47` | Path to the reference WAV used to build the voice-clone prompt at startup. Override only if your mount differs from the compose default. |
-| `REF_TEXT` | `"Welcome to Rosies..."` (see code) | `model.py:48` | Transcript of REF_AUDIO. Must match what is spoken or cloning quality suffers. |
+These are the only variables a normal user must set. All others have safe defaults.
+
+| Var | Required? | Description |
+|-----|-----------|-------------|
+| `REF_AUDIO_PATH` | **Yes** | Host path to the reference WAV. Mounted as `/voice/reference.wav` in the container. |
+| `REF_TEXT` | **Yes** | Exact transcript of REF_AUDIO. Must match what is spoken; startup fails if unset. |
+| `HF_TOKEN` | Yes, if gated | Hugging Face access token for gated checkpoints. Never log or commit. |
+
+Recommended (simple knobs):
+
+| Var | Default | Description |
+|-----|---------|-------------|
+| `MODEL_SIZE` | `1.7B` | Base checkpoint size. Leave at 1.7B unless you specifically need 0.6B. |
+| `TTS_BACKEND` | `openvino` | Inference backend. Use `openvino` (default) or `pytorch` as rollback. |
+| `LOW_RAM_MODE` | `1` | Enables idle unload + malloc tuning; recommended on 10–15 GiB hosts. |
+| `FRONTEND_ENABLED` | `1` | Serves the web UI at `/`. Set `0` for API-only deployments. |
+
+---
 
 ## Runtime / backend
 
-| Var | Default | Read (file:line) | Description |
-|-----|---------|------------------|-------------|
-| `TTS_BACKEND` | `openvino` (via preset; `pytorch` in model.py fallback) | `config.py:44`, `model.py:54` | Which inference backend: `openvino` or `pytorch`. `pytorch` ignores OpenVINO IR and is slower; used as rollback. |
-| `DEVICE` | `cpu` | `model.py:46` | Torch/OpenVINO device. Always `cpu` for current deployment. |
-| `TTS_MAX_SPEECH_SECONDS` | Preset-specific (64 for 1.7B, 64 for 0.6B) | `config.py:40` | Max speech duration per request. Baked into the IR at export time; changing it requires re-exporting. |
-| `IDLE_UNLOAD_SECONDS` | `0` (disabled) | `model.py:55` | Seconds after last request to unload model and free RAM. Reload is transparent but adds latency. LOW_RAM_MODE=1 sets this. |
-| `TTS_DIAG` | `0` | `model.py:803` | `1` enables diagnostic logits processor during early decode steps (for debugging generation issues). |
-| `TTS_MAX_NEW_TOKENS` | unset | `model.py:817` | Diagnostic override: caps `max_new_tokens` to avoid non-terminating decode. Unset in normal operation. |
-| `TTS_NON_STREAMING` | unset | `model.py:831` | `1` forces `non_streaming_mode=True` (batch prefill text delivery instead of streaming internal text-delivery). |
-| `TTS_LOGITS_DIAG` | `0` | `openvino/talker.py:795` | `1` enables per-step logits diagnostics inside OVTalkerRuntime for debugging. |
-| `TTS_PROMPT_DUMP_DIR` | unset (falls back to `/tmp/tts-prompt-dump`) | `model.py:367` | If set, writes a JSON dump of the voice-clone prompt and talker parameter manifest for inspection. |
+| Var | Default | Description |
+|-----|---------|-------------|
+| `TTS_BACKEND` | `openvino` | `openvino` (default, accelerated) or `pytorch` (rollback, slower). |
+| `DEVICE` | `cpu` | Torch/OpenVINO device; always `cpu` in current deployments. |
+| `TTS_MAX_SPEECH_SECONDS` | Preset-specific (e.g. 64) | Max speech duration per request. Baked into IR at export time; changing it requires re-export. |
+| `IDLE_UNLOAD_SECONDS` | `0` | Seconds after last request to unload model and free RAM; reload is transparent but adds latency. Set by LOW_RAM_MODE. |
 
-## Memory / OpenVINO
+## Memory / OpenVINO (advanced)
 
-| Var | Default | Read (file:line) | Description |
-|-----|---------|------------------|-------------|
-| `OV_MODEL_DIR` | Preset-specific (from `apply_preset_env`) | `config.py:48`, `model.py:56`, `model.py:307` | Path to the exported OpenVINO IR directory for the active profile. |
-| `OV_INFERENCE_THREADS` | `6` | `model.py:64`, `runtime_config.py:15` | Number of inference threads for OpenVINO and Torch. Set close to physical core count for best latency. |
-| `OV_DYNAMIC_QUANT_GROUP_SIZE` | `32` | `runtime_config.py:19`, `model.py:612` | OpenVINO dynamic quantization group size. 0 = disabled; 32 = default; 64 = faster but slightly less accurate. |
-| `OV_KV_CACHE_PRECISION` | `f32` | `runtime_config.py:20` | Precision for K/V cache. |
-| `OV_CACHE_DIR` | `/ov/cache` | `runtime_config.py:25` | Compiled kernel cache directory. Eliminates 60–120s JIT recompilation on restart. Set to empty string to disable. |
-| `OPENVINO_MAIN_STATEFUL_MODEL` | Preset-specific | `config.py:49`, `model.py:58` | Filename of the stateful IR for the main (talker) transformer core. |
-| `OPENVINO_PREDICTOR_STATEFUL_MODEL` | Preset-specific | `config.py:50`, `model.py:59` | Filename of the stateful IR for the predictor (codebook 2–16). |
-| `OPENVINO_VOCODER_DIR` | Preset-specific | `config.py:55`, `model.py:99`, `runtime_config.py:43` | Path to the vocoder's IR directory. |
-| `OPENVINO_VOCODER_ENABLED` | `0` (but preset may set to `1`) | `config.py:56`, `runtime_config.py:42` | Whether to use OpenVINO-accelerated vocoder (FP32-only). |
-| `OPENVINO_VOCODER_DEVICE` | `CPU` | `runtime_config.py:44` | Device for vocoder (CPU is only meaningful option today). |
-| `OPENVINO_VOCODER_COMPRESSION` | `fp32` | `runtime_config.py:46` | Vocoder compression metadata; runtime only supports FP32. |
-| `OPENVINO_RELEASE_TORCH` | `1` (for openvino backend) | `config.py:69`, `model.py:57` | `1`: releases PyTorch core weights after OpenVINO compilation to save RAM. |
-| `OPENVINO_KEEP_CODEC_ENCODER` | `1` | `openvino/talker.py:658` | `1` (default): keeps the ~0.3 GiB speech_tokenizer codec encoder resident for per-request voice cloning of new voice_ids. Set `0` to free it after startup (only for deployments that never clone a non-default voice_id). |
-| `OPENVINO_LOW_CPU_MEM_USAGE` | `1` | `config.py:70`, `model_config.py:95` | Enables `low_cpu_mem_usage=True` at model load for reduced peak memory. |
-| `OPENVINO_TORCH_DTYPE` | Preset-specific (`bfloat16` for OpenVINO, `float32` for PyTorch) | `config.py:68`, `model_config.py:78` | Dtype for loading the Qwen3TTSModel in Torch. |
-| `OPENVINO_BUFFER_KV` | `0` | `openvino/talker.py:152` | `1` enables K/V buffering behavior in OVTalkerRuntime. Advanced tuning. |
-| `OV_MAIN_COMPRESSION` | Preset-specific | `config.py:59`, `openvino/talker.py:612` | Compression mode for main core; used in metadata/active_compression reporting. |
-| `OV_PREDICTOR_COMPRESSION` | Preset-specific | `config.py:60`, `openvino/talker.py:613` | Compression mode for predictor core; used in metadata/active_compression reporting. |
-| `OMP_NUM_THREADS` | `6` | `model.py:21`, `runtime_config.py:72` | OpenMP threads. Set to physical core count. |
-| `MKL_NUM_THREADS` | `6` | `model.py:22`, `runtime_config.py:73` | Intel MKL threads. Set to physical core count. |
-| `OPENBLAS_NUM_THREADS` | `1` | `model.py:23`, `runtime_config.py:74` | OpenBLAS threads. |
-| `OMP_WAIT_POLICY` | `PASSIVE` | `runtime_config.py:71` | OpenMP wait policy for thread pool behavior. |
-| `ORT_INTRA_OP_NUM_THREADS` | `6` | `model.py:19`, `runtime_config.py:77` | ONNX Runtime intra-op threads (used for vocoder ONNX session if in use). |
-| `ORT_INTER_OP_NUM_THREADS` | `2` | `model.py:20`, `runtime_config.py:78` | ONNX Runtime inter-op threads. |
+Unless you're tuning performance, leave these at defaults.
+
+| Var | Default | Description |
+|-----|---------|-------------|
+| `OV_MODEL_DIR` | Preset-specific | Path to exported OpenVINO IR. |
+| `OV_INFERENCE_THREADS` | Auto (cores-2) | Inference threads for OpenVINO and Torch. |
+| `OV_DYNAMIC_QUANT_GROUP_SIZE` | `32` | OpenVINO dynamic quant group size: 0 = off; 32 = default; 64 = faster, slightly less accurate. |
+| `OV_KV_CACHE_PRECISION` | `f32` | K/V cache precision. |
+| `OV_CACHE_DIR` | `/ov/cache` | Compiled kernel cache; set to empty to disable (slower restarts). |
+| `OPENVINO_MAIN_STATEFUL_MODEL` | Preset-specific | Stateful IR for the main transformer core. |
+| `OPENVINO_PREDICTOR_STATEFUL_MODEL` | Preset-specific | Stateful IR for the predictor (codebook 2–16). |
+| `OPENVINO_VOCODER_DIR` | Preset-specific | Vocoder IR path. |
+| `OPENVINO_VOCODER_ENABLED` | `1` (via preset) | Use OpenVINO-accelerated vocoder (FP32-only). |
+| `OPENVINO_VOCODER_DEVICE` | `CPU` | Device for vocoder. |
+| `OPENVINO_VOCODER_COMPRESSION` | `fp32` | Vocoder compression metadata (FP32 only). |
+| `OPENVINO_RELEASE_TORCH` | `1` | Release PyTorch weights after OpenVINO compilation to save RAM. |
+| `OPENVINO_KEEP_CODEC_ENCODER` | `1` | Keep ~0.3 GiB codec encoder for per-request voice cloning. Set `0` only if you never clone a non-default voice. |
+| `OPENVINO_LOW_CPU_MEM_USAGE` | `1` | Use low CPU memory mode at model load. |
+| `OPENVINO_TORCH_DTYPE` | Preset-specific | Torch load dtype (bfloat16 for OpenVINO). |
+| `OPENVINO_BUFFER_KV` | `0` | K/V buffering in OVTalkerRuntime (advanced tuning). |
+| `OV_MAIN_COMPRESSION` | Preset-specific | Compression mode for main core (metadata). |
+| `OV_PREDICTOR_COMPRESSION` | Preset-specific | Compression mode for predictor (metadata). |
+| `OMP_NUM_THREADS` | Auto | OpenMP threads. |
+| `MKL_NUM_THREADS` | Auto | MKL threads. |
+| `OPENBLAS_NUM_THREADS` | `1` | OpenBLAS threads. |
+| `OMP_WAIT_POLICY` | `PASSIVE` | OpenMP wait policy. |
+| `ORT_INTRA_OP_NUM_THREADS` | Auto | ONNX Runtime intra-op threads. |
+| `ORT_INTER_OP_NUM_THREADS` | `2` | ONNX Runtime inter-op threads. |
 
 ## Voice library
 
-| Var | Default | Read (file:line) | Description |
-|-----|---------|------------------|-------------|
-| `VOICE_LIBRARY_DIR` | `/voices` | `voice_library.py:23` | Container-side mount point for voice library (`vd_<id>/reference.wav` + `meta.json`). Bound from host via compose. |
-| `VOICE_LIBRARY_PATH_CONTAINER` | `/voices` | `model.py:595` | Alias used only in `runtime_config_state()` mount reporting. |
+| Var | Default | Description |
+|-----|---------|-------------|
+| `VOICE_LIBRARY_DIR` | `/voices` | Container-side path for voice library (`vd_<id>/reference.wav` + `meta.json`). Mounted via compose. |
 
 ## Segment library
 
-| Var | Default | Read (file:line) | Description |
-|-----|---------|------------------|-------------|
-| `SEGMENT_LIBRARY_DIR` | `/segments` | `segment_library.py:25` | Container-side mount for OmniVoice segment library (`seg_<id>/clip.wav` + `meta.json`). Bound from host via compose. |
+| Var | Default | Description |
+|-----|---------|-------------|
+| `SEGMENT_LIBRARY_DIR` | `/segments` | Container-side path for OmniVoice segment library. Mounted via compose. |
 
 ## Frontend
 
-| Var | Default | Read (file:line) | Description |
-|-----|---------|------------------|-------------|
-| `FRONTEND_ENABLED` | `1` | `app.py:80` | Serve web UI at `/`. Set `0` for API-only deployments. |
-| `FRONTEND_DIST_DIR` | `parent.parent.parent / "frontend" / "dist"` | `app.py:78` | Path to the compiled frontend static files. Normally auto-resolved. |
+| Var | Default | Description |
+|-----|---------|-------------|
+| `FRONTEND_ENABLED` | `1` | Serve web UI at `/`. Set `0` for API-only. |
+| `FRONTEND_DIST_DIR` | Auto-resolved | Path to compiled frontend static files; normally auto-resolved. |
 
-## VoiceDesign / model
+## VoiceDesign / model (advanced)
 
-| Var | Default | Read (file:line) | Description |
-|-----|---------|------------------|-------------|
-| `VOICE_DESIGN_MODEL_SIZE` | `1.7B` | `model.py:107`, `model_config.py:30` | Size of the VoiceDesign checkpoint. Must be `1.7B` unless an override is exported. |
-| `VOICE_DESIGN_MODEL_REPO` | Preset from `VOICE_DESIGN_MODEL_SIZE` | `model_config.py:26` | Expert override for the VoiceDesign model repo. |
-| `VOICE_DESIGN_MODEL_REVISION` | unset | `model.py:118` | Revision for the VoiceDesign checkpoint. |
-| `VOICE_DESIGN_MAX_SPEECH_SECONDS` | Preset-specific | `model.py:105` | Capacity baked into the VoiceDesign IR at export time. |
-| `MODEL_REPO` | Preset from `MODEL_SIZE` | `model_config.py:63` | Expert override for the Base model repo. |
-| `MODEL_REVISION` | unset (auto-resolved) | `model.py:45` | Pin a specific Hugging Face revision; must match exported IR metadata if set. |
-| `HF_TOKEN` | (from `HF_TOKEN_FILE` if set) | `model_config.py:43` | Hugging Face access token for gated checkpoints. Never log or commit. |
-| `HF_TOKEN_FILE` | unset | `model_config.py:46` | Path to a file containing `HF_TOKEN`, used when token is provided as a Docker secret. |
-| `MODEL_CACHE_CONTAINER_PATH` | `/root/.cache/huggingface/hub` | `model.py:593` | Internal: mount reporting path for HF model cache. |
+Leave at defaults unless you know what you're doing.
 
-## OmniVoice / ASR-specific
+| Var | Default | Description |
+|-----|---------|-------------|
+| `VOICE_DESIGN_MODEL_SIZE` | `1.7B` | VoiceDesign checkpoint size. |
+| `VOICE_DESIGN_MODEL_REPO` | Preset | Expert override for VoiceDesign model repo. |
+| `VOICE_DESIGN_MODEL_REVISION` | unset | Pin specific VoiceDesign revision. |
+| `VOICE_DESIGN_MAX_SPEECH_SECONDS` | Preset-specific | Capacity baked into VoiceDesign IR. |
+| `MODEL_REPO` | Preset from MODEL_SIZE | Expert override for Base model repo. |
+| `MODEL_REVISION` | unset | Pin specific Base revision; must match exported IR metadata. |
+| `HF_TOKEN` | (from HF_TOKEN_FILE if set) | Hugging Face token for gated checkpoints. |
+| `HF_TOKEN_FILE` | unset | Path to a file containing HF_TOKEN (Docker secret pattern). |
+| `MODEL_CACHE_CONTAINER_PATH` | `/root/.cache/huggingface/hub` | Internal: mount reporting path for HF cache. |
 
-| Var | Default | Read (file:line) | Description |
-|-----|---------|------------------|-------------|
-| `ASR_MIN_MATCH_SHORT` | `0.70` | `asr_check.py:88` | Minimum fuzzy transcript match score for short segments (up to ASR_SHORT_SEGMENT_WORDS words). |
-| `ASR_MIN_MATCH_LONG` | `0.80` | `asr_check.py:89` | Minimum fuzzy transcript match score for longer segments. |
-| `ASR_SHORT_SEGMENT_WORDS` | `5` | `asr_check.py:90` | Word count boundary: segment with <= this many words is "short." |
-| `ASR_SOFT_MAX_SCORE` | `0.75` | `asr_check.py:91` | Soft-reject threshold: candidates below ASR_MIN_MATCH but above this may still be accepted if logprob is high. |
-| `ASR_SOFT_LOGPROB` | `-1.5` | `asr_check.py:92` | If Whisper average logprob is below this, borderline match candidates are rejected instead of accepted. |
+## OmniVoice / ASR (advanced)
+
+| Var | Default | Description |
+|-----|---------|-------------|
+| `ASR_MIN_MATCH_SHORT` | `0.70` | Min fuzzy transcript match for short segments. |
+| `ASR_MIN_MATCH_LONG` | `0.80` | Min fuzzy transcript match for longer segments. |
+| `ASR_SHORT_SEGMENT_WORDS` | `5` | Word count boundary for “short” vs “long.” |
+| `ASR_SOFT_MAX_SCORE` | `0.75` | Soft-reject fuzzy score threshold. |
+| `ASR_SOFT_LOGPROB` | `-1.5` | Whisper logprob threshold for soft-reject. |
 
 ## Silence trim
 
-| Var | Default | Read (file:line) | Description |
-|-----|---------|------------------|-------------|
-| `SILENCE_TRIM` | `1` (enabled) | `model.py:609,685` | Trim leading/trailing silence from generated audio. Set `0` to disable. |
-| `SILENCE_TRIM_THRESH` | `0.01` | `model.py:610,693` | Silence threshold as a fraction of the clip's peak amplitude. |
-| `SILENCE_TRIM_PAD_MS` | `30` | `model.py:611,697` | Padding (ms) kept after detected silence boundary to avoid clipping consonants. |
+| Var | Default | Description |
+|-----|---------|-------------|
+| `SILENCE_TRIM` | `1` | Trim leading/trailing silence from generated audio. Set `0` to disable. |
+| `SILENCE_TRIM_THRESH` | `0.01` | Silence threshold as fraction of peak amplitude. |
+| `SILENCE_TRIM_PAD_MS` | `30` | Padding (ms) after detected silence to avoid clipping consonants. |
 
 ## Debug / dev (do not use in production)
 
-| Var | Default | Read (file:line) | Description |
-|-----|---------|------------------|-------------|
-| `TTS_DIAG` | `0` | `model.py:803` | Enables diagnostic logits logging in early decode steps (OpenVINO only). Also triggered by `/tmp/tts_diag` file. |
-| `TTS_MAX_NEW_TOKENS` | unset | `model.py:817` | Caps max_new_tokens; used for catching non-terminating decode. Also from `/tmp/tts_max_new` file. |
-| `TTS_NON_STREAMING` | unset | `model.py:831` | Forces non_streaming_mode=True. Also from `/tmp/tts_non_streaming` file. |
-| `TTS_LOGITS_DIAG` | `0` | `openvino/talker.py:795` | Per-step logits diagnostics inside OVTalkerRuntime. |
-| `TTS_PROMPT_DUMP_DIR` | unset | `model.py:367` | Write reference prompt and talker parameter manifests. Fallback `/tmp/tts-prompt-dump` if file `/tmp/tts_prompt_dump` exists. |
+| Var | Default | Description |
+|-----|---------|-------------|
+| `TTS_DIAG` | `0` | Diagnostic logits logging in early decode steps. Also via `/tmp/tts_diag`. |
+| `TTS_MAX_NEW_TOKENS` | unset | Caps max_new_tokens to catch non-terminating decode. Also via `/tmp/tts_max_new`. |
+| `TTS_NON_STREAMING` | unset | Forces non_streaming_mode=True. Also via `/tmp/tts_non_streaming`. |
+| `TTS_LOGITS_DIAG` | `0` | Per-step logits diagnostics inside OVTalkerRuntime. |
+| `TTS_PROMPT_DUMP_DIR` | unset | Write reference prompt and talker parameter manifests. |
+
+## Export
+
+For the `export` service (compose profile `export`):
+
+| Var | Default | Description |
+|-----|---------|-------------|
+| `EXPORT_TARGET` | `base` | `base` (Base only), `voice_design` (VoiceDesign only), or `both` (unified export for all targets). |
+| `OV_OUTPUT_ROOT` | `/ov` | Root directory for exported IR. |
+
+Normal users should run the export via Docker Compose; `EXPORT_TARGET` is already set to `both` in compose.yml.
