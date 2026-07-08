@@ -33,6 +33,9 @@ pocket_tts_model: TTSModel | None = None
 pocket_tts_default_voice_state: dict[str, Any] | None = None
 pocket_tts_voice_state_cache: dict[str, Any] = {}
 
+pocket_tts_cloning_available: bool = False
+pocket_tts_cloning_status_message: str = ""
+
 
 # ---------------------------------------------------------------------------
 # Model loading
@@ -138,16 +141,30 @@ def build_default_voice_state(
     print(f"[pocket_tts] Building default voice_state from {ref_audio_path!r}")
     try:
         pocket_tts_default_voice_state = model.get_state_for_audio_prompt(ref_audio_path)
+        pocket_tts_cloning_available = True
+        pocket_tts_cloning_status_message = ""
+        print("[pocket_tts] Default voice_state built successfully.")
+        return pocket_tts_default_voice_state
     except Exception as exc:
         pocket_tts_default_voice_state = None
+        msg = str(exc)
+
+        if "We could not download the weights for the model with voice cloning" in msg:
+            pocket_tts_cloning_available = False
+            pocket_tts_cloning_status_message = (
+                "Voice cloning model unavailable. "
+                "Accept the terms at https://huggingface.co/kyutai/pocket-tts with the account "
+                "used for HF_TOKEN, then restart the container."
+            )
+        else:
+            pocket_tts_cloning_available = False
+            pocket_tts_cloning_status_message = f"Voice cloning unavailable: {msg}"
+
         print(
             f"[pocket_tts] Failed to build default voice_state: {exc}. "
             "Continuing without a default voice_state."
         )
         return None
-
-    print("[pocket_tts] Default voice_state built successfully.")
-    return pocket_tts_default_voice_state
 
 
 # ---------------------------------------------------------------------------
@@ -191,8 +208,9 @@ def get_pocket_tts_voice_state(
             )
             return model.get_state_for_audio_prompt(ref_audio_path)
         raise RuntimeError(
-            "[pocket_tts] No voice_id and no default_voice_state or valid REF_AUDIO "
-            "configured. Cannot resolve a voice_state."
+            "[pocket_tts] Voice cloning model not available (likely missing or gated HF token). "
+            "Set an HF_TOKEN with access to kyutai/pocket-tts via Runtime → HF_TOKEN "
+            "or in your startup config."
         )
 
     # 2) Cached voice_state.

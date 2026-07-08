@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Settings2 } from 'lucide-react'
 import { getRuntimeConfig, updateRuntimeConfig, type RuntimeConfigState } from '@/lib/api'
+import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -21,6 +22,7 @@ export function RuntimeConfigPage() {
   const [draft, setDraft] = useState<LiveDraft | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [applying, setApplying] = useState(false)
+  const setRuntimeConfig = useAppStore((s) => s.setRuntimeConfig)
 
   function refresh() {
     getRuntimeConfig()
@@ -28,6 +30,10 @@ export function RuntimeConfigPage() {
         setState(s)
         setDraft(s.live)
         setError(null)
+        setRuntimeConfig({
+          runtimeTtsBackend: s.live.TTS_BACKEND,
+          pocketTtsVoiceCloningAvailable: s.live.pocket_tts_voice_cloning_available,
+        })
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
   }
@@ -54,6 +60,10 @@ export function RuntimeConfigPage() {
       const next = await updateRuntimeConfig(changed)
       setState(next)
       setDraft(next.live)
+      setRuntimeConfig({
+        runtimeTtsBackend: next.live.TTS_BACKEND,
+        pocketTtsVoiceCloningAvailable: next.live.pocket_tts_voice_cloning_available,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -105,7 +115,18 @@ export function RuntimeConfigPage() {
               </label>
               <Select
                 value={draft.TTS_BACKEND}
-                onValueChange={(v) => setDraft({ ...draft, TTS_BACKEND: v })}
+                onValueChange={(v) => {
+                  const nextBackend = v as string
+                  const prevBackend = draft.TTS_BACKEND
+                  let dtype = draft.MODEL_DTYPE
+
+                  // If switching away from openvino and currently bf16, default to float32.
+                  if (prevBackend === 'openvino' && nextBackend !== 'openvino' && dtype === 'bfloat16') {
+                    dtype = 'float32'
+                  }
+
+                  setDraft({ ...draft, TTS_BACKEND: nextBackend, MODEL_DTYPE: dtype })
+                }}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue />
@@ -146,6 +167,37 @@ export function RuntimeConfigPage() {
                   setDraft({ ...draft, OV_DYNAMIC_QUANT_GROUP_SIZE: Number(e.target.value) })
                 }
               />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                Model dtype (reloads model)
+              </label>
+              {draft.TTS_BACKEND === 'openvino' ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>bf16</span>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                    required
+                  </Badge>
+                </div>
+              ) : (
+                <Select
+                  value={draft.MODEL_DTYPE}
+                  onValueChange={(v) => setDraft({ ...draft, MODEL_DTYPE: v })}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="float32">
+                      fp32 (safer, usually required on many CPUs)
+                    </SelectItem>
+                    <SelectItem value="bfloat16">
+                      bf16 (faster if supported, may fail)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -199,6 +251,7 @@ export function RuntimeConfigPage() {
               className="flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-4"
             >
               <p className="text-sm font-semibold">Pocket TTS generation tuning</p>
+
               <p className="text-xs text-muted-foreground">
                 These settings affect how Pocket TTS generates audio. Changing them will
                 briefly reload the model. Use the Speak tab to compare quality after each
