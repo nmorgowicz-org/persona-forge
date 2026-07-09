@@ -26,12 +26,20 @@ _whisper_model = None
 def _get_model():
     global _whisper_model
     if _whisper_model is None:
-        from faster_whisper import WhisperModel
+        try:
+            from faster_whisper import WhisperModel
 
-        # tiny.en: this only needs to answer "is there speech at all", not produce an accurate
-        # transcript, so the smallest English-only model is plenty and keeps load/decode cost
-        # low. int8 is the fastest CPU compute type CTranslate2 offers.
-        _whisper_model = WhisperModel("tiny.en", device="cpu", compute_type="int8")
+            # tiny.en: this only needs to answer "is there speech at all", not produce an accurate
+            # transcript, so the smallest English-only model is plenty and keeps load/decode cost
+            # low. int8 is the fastest CPU compute type CTranslate2 offers.
+            _whisper_model = WhisperModel("tiny.en", device="cpu", compute_type="int8")
+        except ImportError:
+            print(
+                "[asr_check] faster_whisper not installed; ASR validation disabled. "
+                "Install faster_whisper to re-enable REF_TEXT validation.",
+                flush=True,
+            )
+            _whisper_model = None
     return _whisper_model
 
 
@@ -137,6 +145,57 @@ def compute_transcript_match_score(
         hyp_idx += 1
 
     return matched / len(ref_words)
+
+
+def transcribe_reference_audio(wav_path: str) -> dict:
+    """Transcribe reference audio for default/user-friendly ref_text bootstrap.
+
+    Returns the same shape subset used by validation so callers can persist
+    ASR status in voice metadata even when there is no expected text yet.
+    """
+    import soundfile as sf
+
+    try:
+        audio, sr = sf.read(wav_path)
+    except Exception as e:
+        return {
+            "ok": False,
+            "severity": "error",
+            "match_score": None,
+            "whisper_transcript": "",
+            "avg_logprob": None,
+            "suggestion": f"Failed read reference audio: {e}",
+        }
+
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+
+    has_speech_result, transcript, logprob = has_speech(audio, sr)
+    transcript = transcript.strip()
+    if not has_speech_result or not transcript:
+        return {
+            "ok": False,
+            "severity": "no_speech",
+            "match_score": 0.0,
+            "whisper_transcript": transcript,
+            "avg_logprob": logprob,
+            "suggestion": "Reference audio contains no detectable speech.",
+        }
+
+    severity = "ok"
+    suggestion = None
+    if logprob is not None and logprob < _SOFT_REJECT_IF_LOGPROB_BELOW:
+        severity = "warn"
+        suggestion = "Whisper transcript confidence is low; review the reference text."
+
+    return {
+        "ok": severity == "ok",
+        "severity": severity,
+        "match_score": 1.0,
+        "whisper_transcript": transcript,
+        "avg_logprob": logprob,
+        "suggestion": suggestion,
+    }
 
 
 def validate_reference_text(

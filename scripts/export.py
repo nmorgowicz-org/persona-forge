@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Export the selected MODEL_SIZE (or VoiceDesign checkpoint) into stable runtime paths under /ov.
+"""Export IR into stable runtime paths under /ov.
 
-EXPORT_TARGET=base (default) exports the MODEL_SIZE Base checkpoint into /ov/<size>/...
-EXPORT_TARGET=voice_design exports the VoiceDesign checkpoint (VOICE_DESIGN_MODEL_SIZE,
-default 1.7B) into the separate /ov/<size>-voicedesign/... tree so it can never collide
-with a Base export for the same size. See docs/dev/architecture/voice_design.md §4.1 — this
-reuses the same exporter/transform tooling, only the source repo and output dir differ.
+Supported EXPORT_TARGET values:
+- base (default): exports the Base checkpoint.
+- voice_design: exports the VoiceDesign checkpoint.
+- both: exports both Base and VoiceDesign in one run (intended for compose export service).
+
+For details on IR layout and VoiceDesign wiring, see docs/dev/architecture/voice_design.md.
 """
 
 from __future__ import annotations
@@ -56,27 +57,8 @@ def _move_pair(source_xml: Path, destination_xml: Path) -> None:
     shutil.move(source_xml.with_suffix(".bin"), destination_xml.with_suffix(".bin"))
 
 
-def main() -> int:
-    target = (os.environ.get("EXPORT_TARGET") or "base").strip().lower()
-    if target not in ("base", "voice_design"):
-        raise RuntimeError(f"Unsupported EXPORT_TARGET={target!r}; choose base or voice_design")
-
-    if target == "voice_design":
-        max_speech_seconds_env = os.environ.get("VOICE_DESIGN_MAX_SPEECH_SECONDS")
-        preset = get_voice_design_preset(
-            os.environ.get("VOICE_DESIGN_MODEL_SIZE"),
-            float(max_speech_seconds_env) if max_speech_seconds_env else None,
-            os.environ.get("VOICE_DESIGN_MAIN_COMPRESSION") or None,
-        )
-        # export_openvino.py resolves its checkpoint via qwen3_tts.model_config.resolve_model_repo(),
-        # which honors an explicit MODEL_REPO override — set it so the subprocess below (which
-        # inherits this environment) loads the VoiceDesign checkpoint instead of a Base one.
-        os.environ["MODEL_REPO"] = resolve_voice_design_model_repo()
-    else:
-        size = normalize_size(os.environ.get("MODEL_SIZE"))
-        max_speech_seconds_env = os.environ.get("TTS_MAX_SPEECH_SECONDS")
-        preset = get_preset(size, float(max_speech_seconds_env) if max_speech_seconds_env else None)
-
+def _export_for_preset(preset: dict[str, object]) -> None:
+    """Run the full export pipeline for a given preset (Base or VoiceDesign)."""
     capacity = int(preset["stateful_capacity"])
     # Derived from the preset's own IR paths (not size directly) so Base and VoiceDesign
     # never need duplicated directory-naming logic here.
@@ -160,6 +142,41 @@ def main() -> int:
         )
     shutil.rmtree(staging)
     print(f"export complete: {output}")
+
+
+def main() -> int:
+    target = (os.environ.get("EXPORT_TARGET") or "base").strip().lower()
+    if target not in ("base", "voice_design", "both"):
+        raise RuntimeError(
+            f"Unsupported EXPORT_TARGET={target!r}; choose base, voice_design, or both"
+        )
+
+    # Base export (if requested)
+    if target in ("base", "both"):
+        print("=== Exporting Base checkpoint ===")
+        size = normalize_size(os.environ.get("MODEL_SIZE"))
+        max_speech_seconds_env = os.environ.get("TTS_MAX_SPEECH_SECONDS")
+        base_preset = get_preset(
+            size,
+            float(max_speech_seconds_env) if max_speech_seconds_env else None,
+        )
+        _export_for_preset(base_preset)
+
+    # VoiceDesign export (if requested)
+    if target in ("voice_design", "both"):
+        print("=== Exporting VoiceDesign checkpoint ===")
+        max_speech_seconds_env = os.environ.get("VOICE_DESIGN_MAX_SPEECH_SECONDS")
+        vd_preset = get_voice_design_preset(
+            os.environ.get("VOICE_DESIGN_MODEL_SIZE"),
+            float(max_speech_seconds_env) if max_speech_seconds_env else None,
+            os.environ.get("VOICE_DESIGN_MAIN_COMPRESSION") or None,
+        )
+        # export_openvino.py resolves its checkpoint via qwen3_tts.model_config.resolve_model_repo(),
+        # which honors an explicit MODEL_REPO override — set it so the subprocess below (which
+        # inherits this environment) loads the VoiceDesign checkpoint instead of a Base one.
+        os.environ["MODEL_REPO"] = resolve_voice_design_model_repo()
+        _export_for_preset(vd_preset)
+
     return 0
 
 

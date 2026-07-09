@@ -59,16 +59,31 @@ class TestResolveTorchLoadConfig:
         assert name == "bfloat16"
         assert low_memory is True
 
+    def test_pytorch_backend_forces_fp32_after_openvino_swap(self):
+        torch_module = type(
+            "FakeTorch",
+            (),
+            {"float32": object(), "bfloat16": object(), "float16": object()},
+        )
+        dtype, name, low_memory = resolve_torch_load_config(
+            torch_module,
+            {"OPENVINO_TORCH_DTYPE": "bf16", "OPENVINO_LOW_CPU_MEM_USAGE": "1"},
+            backend="pytorch",
+        )
+        assert dtype is torch_module.float32
+        assert name == "float32"
+        assert low_memory is True
+
     def test_rejects_unknown_dtype(self):
         torch_module = type(
             "FakeTorch",
             (),
             {"float32": object(), "bfloat16": object(), "float16": object()},
         )
-        with pytest.raises(ValueError, match="OPENVINO_TORCH_DTYPE"):
+        with pytest.raises(ValueError, match="MODEL_DTYPE"):
             resolve_torch_load_config(
                 torch_module,
-                {"OPENVINO_TORCH_DTYPE": "int8"},
+                {"MODEL_DTYPE": "int8"},
             )
 
 
@@ -85,14 +100,16 @@ class TestConfigureHfToken:
         configure_hf_token(environ)
         assert environ["HF_TOKEN"] == "direct"
 
-    def test_missing_file_raises(self):
+    def test_missing_file_no_raise(self):
+        """Missing HF_TOKEN_FILE is silently ignored; HF_TOKEN stays unset."""
         environ = {"HF_TOKEN_FILE": "/does-not-exist-hf-token-file"}
-        with pytest.raises(RuntimeError, match="Unable to read HF_TOKEN_FILE"):
-            configure_hf_token(environ)
+        configure_hf_token(environ)
+        assert "HF_TOKEN" not in environ
 
-    def test_empty_file_raises(self, tmp_path: Path):
+    def test_empty_file_no_raise(self, tmp_path: Path):
+        """Empty HF_TOKEN_FILE is silently ignored; HF_TOKEN stays unset."""
         token_file = tmp_path / "empty_token"
         token_file.write_text("   \n", encoding="utf-8")
         environ = {"HF_TOKEN_FILE": str(token_file)}
-        with pytest.raises(RuntimeError, match="HF_TOKEN_FILE is empty"):
-            configure_hf_token(environ)
+        configure_hf_token(environ)
+        assert "HF_TOKEN" not in environ

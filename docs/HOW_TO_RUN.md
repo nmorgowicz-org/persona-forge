@@ -12,7 +12,7 @@ reference WAV, and its exact transcript.
 
    ```bash
    cp .env.example .env
-   # Set REF_AUDIO_PATH and REF_TEXT.
+   # Optional: set REF_AUDIO_PATH for a default voice. REF_TEXT is optional; Whisper drafts it by default.
    # MODEL_SIZE=1.7B is recommended and is the default.
    ```
 
@@ -102,15 +102,15 @@ Note: `POST /voice_design` briefly swaps the resident model and causes 503 for a
 
 This section is for day-to-day operators: what to change and what to leave alone.
 
-### Essential settings (set these)
+### Essential settings
 
-In `.env` (or your Compose environment):
+The service can start without a default reference voice. In `.env` (or your Compose environment):
 
-- `REF_AUDIO_PATH` — absolute host path to your reference WAV (REQUIRED).
-- `REF_TEXT` — exact transcript of the reference WAV (REQUIRED).
 - `MODEL_SIZE` — `1.7B` (recommended) or `0.6B`.
+- `REF_AUDIO_PATH` — optional absolute host path to a default reference WAV. When present, it is mounted, promoted into the Voice Library, and analyzed with Whisper.
+- `REF_TEXT` — optional power-user override for the mounted reference transcript. If omitted, `REF_TEXT_AUTO=whisper` drafts it automatically for Qwen backends. Pocket TTS ignores transcript text.
 
-These three are all you strictly need beyond the defaults.
+Normal users only need to choose a model size and optionally add or generate a voice in the app.
 
 ### Recommended settings (for most real deployments)
 
@@ -149,12 +149,12 @@ No jemalloc / tcmalloc: allocator replacement caused SIGABRT/SIGSEGV under trans
 `GET/POST /runtime/config` (and the Runtime panel in the UI) let you adjust settings live:
 
 - Live-adjustable:
-  - `TTS_BACKEND` (openvino | pytorch)
+  - `TTS_BACKEND` (openvino | pytorch | pocket_tts)
   - `IDLE_UNLOAD_SECONDS`
   - `SILENCE_TRIM`, `SILENCE_TRIM_THRESH`, `SILENCE_TRIM_PAD_MS`
   - `OV_DYNAMIC_QUANT_GROUP_SIZE`
 - Read-only:
-  - Mount modes, `REF_AUDIO_PATH` set?, `HF_TOKEN` set?, device, dtype.
+  - Mount modes, optional `REF_AUDIO_PATH` status, `HF_TOKEN` set?, device, dtype, reference-text/Whisper review state.
 - Requires re-export:
   - `TTS_MAX_SPEECH_SECONDS`, quantization.
 

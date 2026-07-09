@@ -99,6 +99,18 @@ export interface VoiceMeta {
   selections?: unknown
   created_at: number
   audio_base64?: string
+  source?: string
+  sha256?: string
+  sample_text_source?: 'env' | 'whisper' | 'user' | 'none' | 'unset' | string
+  needs_review?: boolean
+  asr?: {
+    ok?: boolean
+    severity?: 'ok' | 'warn' | 'fail' | 'no_speech' | 'error' | string
+    match_score?: number | null
+    whisper_transcript?: string | null
+    avg_logprob?: number | null
+    suggestion?: string | null
+  }
 }
 
 export interface GenerateResult {
@@ -618,11 +630,20 @@ export interface RuntimeConfigState {
     SILENCE_TRIM_THRESH: number
     SILENCE_TRIM_PAD_MS: number
     OV_DYNAMIC_QUANT_GROUP_SIZE: number
+    MODEL_DTYPE: string
+    POCKET_TTS_TEMP: number | undefined
+    POCKET_TTS_LSD_DECODE_STEPS: number | undefined
+    POCKET_TTS_EOS_THRESHOLD: number | undefined
+    POCKET_TTS_NOISE_CLAMP: number | null | undefined
+    POCKET_TTS_FRAMES_AFTER_EOS: number | null | undefined
+    pocket_tts_voice_cloning_available: boolean | undefined
+    pocket_tts_voice_cloning_message: string | undefined
   }
   read_only: {
     mounts: Record<string, 'ro' | 'rw' | null>
     ref_audio_path_set: boolean
     hf_token_set: boolean
+    hf_token_status: 'set' | 'not_set'
     device: string
     torch_dtype: string
   }

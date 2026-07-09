@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 # Apply thread and runtime envs before heavy imports
-from qwen3_tts.asr_check import validate_reference_text
+from qwen3_tts.asr_check import transcribe_reference_audio, validate_reference_text
 from qwen3_tts.config import REF_AUDIO_PATH, apply_preset_env
 from qwen3_tts.openvino.runtime_config import apply_thread_env, resolve_inference_threads
 from qwen3_tts.presets import get_voice_design_preset, seconds_for_capacity
@@ -41,14 +41,11 @@ from qwen_tts import Qwen3TTSModel
 MODEL_ID = resolve_model_repo()
 MODEL_REVISION = os.getenv("MODEL_REVISION") or None
 DEVICE = os.getenv("DEVICE", "cpu")
-REF_AUDIO = os.getenv("REF_AUDIO", REF_AUDIO_PATH)
-REF_TEXT = os.getenv(
-    "REF_TEXT",
-    "Welcome to Rosies. What can I get for you today? You know, Im a good girl. "
-    "You want me, dont you? I am on the menu too.",
-)
-
 TTS_BACKEND = (os.getenv("TTS_BACKEND", "pytorch") or "pytorch").strip().lower()
+REF_AUDIO = (os.getenv("REF_AUDIO") or REF_AUDIO_PATH).strip() or None
+REF_TEXT = (os.getenv("REF_TEXT") or "").strip()
+REF_TEXT_SOURCE = "env" if REF_TEXT else "unset"
+REF_TEXT_AUTO = (os.getenv("REF_TEXT_AUTO", "whisper") or "whisper").strip().lower()
 IDLE_UNLOAD_SECONDS = int(os.environ.get("IDLE_UNLOAD_SECONDS", "0") or "0")
 OV_MODEL_DIR = os.getenv("OV_MODEL_DIR")
 OPENVINO_RELEASE_TORCH = os.getenv("OPENVINO_RELEASE_TORCH", "0").strip() == "1"
@@ -56,7 +53,9 @@ OPENVINO_MAIN_STATEFUL_MODEL = (os.getenv("OPENVINO_MAIN_STATEFUL_MODEL") or "")
 OPENVINO_PREDICTOR_STATEFUL_MODEL = (
     (os.getenv("OPENVINO_PREDICTOR_STATEFUL_MODEL") or "").strip() or None
 )
-TORCH_DTYPE, TORCH_DTYPE_NAME, OPENVINO_LOW_CPU_MEM_USAGE = resolve_torch_load_config(torch)
+TORCH_DTYPE, TORCH_DTYPE_NAME, OPENVINO_LOW_CPU_MEM_USAGE = resolve_torch_load_config(
+    torch, backend=TTS_BACKEND
+)
 
 torch.set_num_threads(resolve_inference_threads())
 
@@ -170,6 +169,12 @@ def force_unload():
     model = None
     voice_clone_prompt = None
     ov_runtime = None
+    # Unload Pocket TTS model/runtime if loaded (safe no-op if not).
+    try:
+        from qwen3_tts import pocket_tts_runtime
+        pocket_tts_runtime.unload_pocket_tts()
+    except Exception:
+        pass
     gc.collect()
     gc.collect()
     # Ask glibc to return freed heap to the OS. No-op with jemalloc (which handles
@@ -287,13 +292,54 @@ def _validate_ov_metadata(model_dir: str, model_repo: str, revision: str | None)
     )
 
 
+def _resolve_reference_text(profile: ModelProfile) -> tuple[str | None, str, dict | None]:
+    """Return effective reference text, source, and ASR metadata for startup.
+
+    Qwen backends need a transcript when a default reference audio is used.
+    Normal deployments can omit REF_TEXT and let Whisper provide a draft. Pocket
+    TTS ignores transcript text, so its loader skips this helper.
+    """
+    if profile.ref_text:
+        if profile.ref_audio and os.path.isfile(profile.ref_audio):
+            return profile.ref_text, "env", validate_reference_text(profile.ref_audio, profile.ref_text)
+        return profile.ref_text, "env", None
+
+    if not profile.ref_audio or not os.path.isfile(profile.ref_audio):
+        return None, "none", None
+
+    if REF_TEXT_AUTO not in ("1", "true", "yes", "whisper", "auto"):
+        return None, "none", {
+            "ok": False,
+            "severity": "warn",
+            "match_score": None,
+            "whisper_transcript": "",
+            "suggestion": "Reference audio is mounted but REF_TEXT_AUTO is disabled.",
+        }
+
+    result = transcribe_reference_audio(profile.ref_audio)
+    transcript = (result.get("whisper_transcript") or "").strip()
+    if transcript:
+        print("[REF-TEXT-AUTO] Using Whisper transcript for mounted reference audio.", flush=True)
+        return transcript, "whisper", result
+    return None, "none", result
+
+
 def load_model(profile: ModelProfile | None = None):
     global model, voice_clone_prompt, ov_runtime, active_profile
     global MODEL_ID, OV_MODEL_DIR, OPENVINO_MAIN_STATEFUL_MODEL, OPENVINO_PREDICTOR_STATEFUL_MODEL
+    global _service_started, _model_loaded, _ref_text_validation_result
+    global REF_TEXT, REF_TEXT_SOURCE
+    global TORCH_DTYPE, TORCH_DTYPE_NAME, OPENVINO_LOW_CPU_MEM_USAGE
 
     profile = profile or BASE_PROFILE
 
-    if TTS_BACKEND not in ("pytorch", "openvino"):
+    # Backend can change without restarting the worker.  Do not retain the BF16
+    # load policy selected for OpenVINO when loading the pure-PyTorch CPU path.
+    TORCH_DTYPE, TORCH_DTYPE_NAME, OPENVINO_LOW_CPU_MEM_USAGE = resolve_torch_load_config(
+        torch, backend=TTS_BACKEND
+    )
+
+    if TTS_BACKEND not in ("pytorch", "openvino", "pocket_tts"):
         raise RuntimeError(f"Invalid TTS_BACKEND: {TTS_BACKEND!r}")
 
     if TTS_BACKEND == "openvino":
@@ -319,170 +365,275 @@ def load_model(profile: ModelProfile | None = None):
             os.environ.pop("OPENVINO_VOCODER_DIR", None)
 
         _validate_ov_metadata(profile.ov_model_dir, profile.model_repo, profile.revision)
-    else:
-        # PyTorch-only backend
-        if profile.ov_model_dir:
+
+    # ── Mount health checks ─────────────────────────────────────────────────────
+    _mount_warnings: list[str] = []
+
+    # Reference audio
+    if profile.ref_audio and not os.path.isfile(profile.ref_audio):
+        _mount_warnings.append(
+            f"Reference audio not found: {profile.ref_audio}. "
+            "Voice cloning will fail until this is mounted or corrected."
+        )
+
+    # Voice library (/voices)
+    voice_lib = os.getenv("VOICE_LIBRARY_DIR", "/voices")
+    if not os.path.isdir(voice_lib):
+        _mount_warnings.append(
+            "Voice library directory missing: "
+            f"{voice_lib}. Voice library and VoiceDesign saves will be lost on restart."
+        )
+    elif not os.access(voice_lib, os.W_OK):
+        _mount_warnings.append(
+            f"Voice library directory not writable: {voice_lib}. "
+            "Voice saves will fail."
+        )
+
+    # Segment library (/segments)
+    segment_lib = os.getenv("SEGMENT_LIBRARY_DIR", "/segments")
+    if not os.path.isdir(segment_lib):
+        _mount_warnings.append(
+            "Segment library directory missing: "
+            f"{segment_lib}. OmniVoice segments will be lost on restart."
+        )
+    elif not os.access(segment_lib, os.W_OK):
+        _mount_warnings.append(
+            f"Segment library directory not writable: {segment_lib}. "
+            "Segment saves will fail."
+        )
+
+    # Log mount warnings
+    for m in _mount_warnings:
+        print(f"[MOUNT] WARNING: {m}", flush=True, file=sys.stderr)
+
+    # ── Pocket TTS backend branch ──────────────────────────────────────────────
+    if TTS_BACKEND == "pocket_tts":
+        from qwen3_tts import pocket_tts_runtime
+
+        language = (os.getenv("POCKET_TTS_LANGUAGE") or "english").strip() or "english"
+        temp = float(os.getenv("POCKET_TTS_TEMP", "1.2"))
+        lsd_steps = int(os.getenv("POCKET_TTS_LSD_DECODE_STEPS", "5"))
+        eos_threshold = float(os.getenv("POCKET_TTS_EOS_THRESHOLD", "-4.0"))
+        noise_clamp_raw = os.getenv("POCKET_TTS_NOISE_CLAMP", "").strip()
+        noise_clamp = float(noise_clamp_raw) if noise_clamp_raw else None
+        frames_after_eos_raw = os.getenv("POCKET_TTS_FRAMES_AFTER_EOS", "4").strip()
+        frames_after_eos = int(frames_after_eos_raw) if frames_after_eos_raw else 4
+        quantize = int(os.getenv("POCKET_TTS_QUANTIZE", "0"))
+
+        pocket_tts_runtime.load_pocket_tts_model(
+            language=language,
+            temp=temp,
+            lsd_decode_steps=lsd_steps,
+            eos_threshold=eos_threshold,
+            noise_clamp=noise_clamp,
+            frames_after_eos=frames_after_eos,
+            quantize=bool(quantize),
+        )
+
+        model = pocket_tts_runtime.pocket_tts_model
+
+        voice_clone_prompt = pocket_tts_runtime.build_default_voice_state(
+            model,
+            profile.ref_audio,
+        )
+
+        active_profile = profile
+
+        _service_started = True
+        _model_loaded = True
+
+        REF_TEXT_SOURCE = "unused"
+        _ref_text_validation_result = {
+            "severity": "info",
+            "suggestion": "Pocket TTS ignores REF_TEXT; clones from REF_AUDIO only.",
+        }
+
+        print("[app_worker] Pocket TTS loaded and ready", flush=True)
+
+    # ── PyTorch / OpenVINO backends (unchanged) ────────────────────────────────
+    elif TTS_BACKEND in ("pytorch", "openvino"):
+        # PyTorch-only backend log
+        if TTS_BACKEND == "pytorch" and profile.ov_model_dir:
             print(
                 "[app_worker] OV_MODEL_DIR set but TTS_BACKEND=pytorch; "
                 "ignoring OpenVINO directory.",
                 flush=True,
             )
 
-    print(
-        f"[app_worker] Backend={TTS_BACKEND}, loading profile={profile.name!r} "
-        f"({profile.model_repo}) at {TORCH_DTYPE_NAME} "
-        f"(low_cpu_mem_usage={OPENVINO_LOW_CPU_MEM_USAGE})...",
-        flush=True,
-    )
-    wrapped = Qwen3TTSModel.from_pretrained(
-        profile.model_repo,
-        revision=profile.revision,
-        device_map=DEVICE,
-        dtype=TORCH_DTYPE,
-        low_cpu_mem_usage=OPENVINO_LOW_CPU_MEM_USAGE,
-    )
-    rotary_report = repair_rotary_buffers(wrapped.model, torch)
-    print(f"[app_worker] Repaired and validated RoPE buffers: {rotary_report}", flush=True)
-
-    # T5-generation fixes for both backends: stale inputs_embeds + input_ids clip + attention_mask.
-    patch_talker_prepare_inputs()
-
-    # Fix attention_mask Q/K broadcast bug in eager_attention_forward (PyTorch backend).
-    patch_eager_attention_mask_broadcast()
-
-    gc.collect()
-
-    model = wrapped
-    voice_clone_prompt = None
-    if profile.build_voice_clone_prompt:
-        print("[app_worker] Model loaded. Creating voice clone prompt...", flush=True)
-        voice_clone_prompt = model.create_voice_clone_prompt(
-            ref_audio=profile.ref_audio,
-            ref_text=profile.ref_text,
-            x_vector_only_mode=False,
-        )
-
-        # Opt-in, deterministic artifact for controlled Transformers 4/5 comparisons.
-        # The dump contains codec token IDs and package versions, never reference audio/text.
-        _prompt_dump_dir = os.getenv("TTS_PROMPT_DUMP_DIR", "").strip()
-        if not _prompt_dump_dir and os.path.exists("/tmp/tts_prompt_dump"):
-            _prompt_dump_dir = "/tmp/tts-prompt-dump"
-        if _prompt_dump_dir:
-            from qwen3_tts.prompt_diagnostics import (
-                dump_reference_prompt,
-                dump_talker_parameter_manifest,
-            )
-
-            manifest_path = dump_reference_prompt(voice_clone_prompt, _prompt_dump_dir)
-            print(f"[prompt_diag] reference prompt saved: {manifest_path}", flush=True)
-            parameter_path = dump_talker_parameter_manifest(model.model.talker, _prompt_dump_dir)
-            print(f"[prompt_diag] talker parameters saved: {parameter_path}", flush=True)
-    else:
-        print("[app_worker] Model loaded. (profile skips voice clone prompt)", flush=True)
-
-    # Validate REF_TEXT against REF_AUDIO at startup.
-    global _ref_text_validation_result
-    if profile.build_voice_clone_prompt and profile.ref_audio and profile.ref_text:
-        _ref_text_validation_result = validate_reference_text(
-            profile.ref_audio, profile.ref_text
-        )
-        sev = _ref_text_validation_result["severity"]
-        if sev in ("fail", "no_speech"):
-            print(
-                f"[REF-TEXT-VALID] STATUS=fail  score={_ref_text_validation_result.get('match_score')}",
-                flush=True,
-                file=sys.stderr,
-            )
-            print(f"  REF_AUDIO: {profile.ref_audio}", flush=True, file=sys.stderr)
-            print(f"  REF_TEXT:  {profile.ref_text!r}", flush=True, file=sys.stderr)
-            print(f"  Whisper:   {_ref_text_validation_result.get('whisper_transcript')!r}", flush=True, file=sys.stderr)
-            print(f"  SUGGESTION: {_ref_text_validation_result.get('suggestion')}", flush=True, file=sys.stderr)
-            print(
-                "  ACTION: Fix REF_TEXT in your .env or Compose file to match what's spoken in the audio, then restart.",
-                flush=True,
-                file=sys.stderr,
-            )
-            if os.getenv("REF_TEXT_FAIL_ON_MISMATCH", "").strip() == "1":
-                raise RuntimeError(
-                    "REF_TEXT/REF_AUDIO mismatch (REF_TEXT_FAIL_ON_MISMATCH=1): "
-                    f"{_ref_text_validation_result.get('suggestion')}"
-                )
-        elif sev == "warn":
-            print(
-                f"[REF-TEXT-VALID] STATUS=warn  score={_ref_text_validation_result.get('match_score')}",
-                flush=True,
-                file=sys.stderr,
-            )
-            print(f"  REF_AUDIO: {profile.ref_audio}", flush=True, file=sys.stderr)
-            print(f"  REF_TEXT:  {profile.ref_text!r}", flush=True, file=sys.stderr)
-            print(f"  Whisper:   {_ref_text_validation_result.get('whisper_transcript')!r}", flush=True, file=sys.stderr)
-            print(f"  SUGGESTION: {_ref_text_validation_result.get('suggestion')}", flush=True, file=sys.stderr)
-    else:
-        _ref_text_validation_result = None
-
-    if TTS_BACKEND == "openvino":
-        # Milestone 4: install the OpenVINO talker runtime by swapping the two inner
-        # transformer core forwards. All other generation glue stays in PyTorch.
-        from qwen3_tts.openvino.talker import OVTalkerRuntime
-
-        talker = model.model.talker
-        # speech_tokenizer is a sibling of talker on the parent model, not a child of it;
-        # pass it explicitly so the OV vocoder patch can find it.
-        ov_runtime = OVTalkerRuntime(
-            profile.ov_model_dir, talker, ov_config=ov_config,
-            speech_tokenizer=model.model.speech_tokenizer,
-        )
-        ov_runtime.install()
-
-        # The codec encoder has done its one job (voice_clone_prompt was built above) and
-        # the OV vocoder now owns decode, so free the ~0.3 GiB PyTorch speech_tokenizer.
-        # Self-gates on OPENVINO_KEEP_CODEC_ENCODER; no-op when set (the default) so
-        # per-request/voice_id cloning keeps working.
-        ov_runtime.release_codec()
-
-        # Startup policy logs
-        if OPENVINO_RELEASE_TORCH:
-            print(
-                "[app_worker] OPENVINO_RELEASE_TORCH active: "
-                "PyTorch core weights may be released during OpenVINO compilation.",
-                flush=True,
-            )
-        if profile.main_stateful_model:
-            print(
-                f"[app_worker] OPENVINO_MAIN_STATEFUL_MODEL active: "
-                f"{profile.main_stateful_model}",
-                flush=True,
-            )
-        if profile.predictor_stateful_model:
-            print(
-                f"[app_worker] OPENVINO_PREDICTOR_STATEFUL_MODEL active: "
-                f"{profile.predictor_stateful_model}",
-                flush=True,
-            )
-
-        vocoder_status = (
-            f"vocoder={'OV' if (ov_runtime.vocoder_runtime and ov_runtime.vocoder_runtime.enabled) else 'PyTorch'}"
-        )
         print(
-            f"[app_worker] OpenVINO talker runtime installed "
-            f"(compression={ov_runtime.compression}, {vocoder_status}); "
-            f"cores run on OpenVINO.",
+            f"[app_worker] Backend={TTS_BACKEND}, loading profile={profile.name!r} "
+            f"({profile.model_repo}) at {TORCH_DTYPE_NAME} "
+            f"(low_cpu_mem_usage={OPENVINO_LOW_CPU_MEM_USAGE})...",
             flush=True,
         )
+        wrapped = Qwen3TTSModel.from_pretrained(
+            profile.model_repo,
+            revision=profile.revision,
+            device_map=DEVICE,
+            dtype=TORCH_DTYPE,
+            low_cpu_mem_usage=OPENVINO_LOW_CPU_MEM_USAGE,
+        )
+        rotary_report = repair_rotary_buffers(wrapped.model, torch)
+        print(f"[app_worker] Repaired and validated RoPE buffers: {rotary_report}", flush=True)
 
-    # Mirror the active profile into the module-level constants that health_state()
-    # and callers still read directly, so behavior is unchanged when profile is None
-    # (BASE_PROFILE) and correct when a non-base profile is swapped in.
-    MODEL_ID = profile.model_repo
-    OV_MODEL_DIR = profile.ov_model_dir
-    OPENVINO_MAIN_STATEFUL_MODEL = profile.main_stateful_model
-    OPENVINO_PREDICTOR_STATEFUL_MODEL = profile.predictor_stateful_model
-    active_profile = profile
+        # T5-generation and transformers 5 compatibility fixes (required for both backends).
+        patch_talker_prepare_inputs()
 
-    global _service_started, _model_loaded
-    _service_started = True
-    _model_loaded = True
-    print(f"[app_worker] Model loaded and ready (profile={profile.name!r}).")
+        # Fix attention_mask Q/K broadcast bug in eager_attention_forward (PyTorch backend).
+        patch_eager_attention_mask_broadcast()
+
+        gc.collect()
+
+        model = wrapped
+        voice_clone_prompt = None
+        if profile.build_voice_clone_prompt:
+            effective_ref_text, ref_text_source, ref_text_result = _resolve_reference_text(profile)
+            profile.ref_text = effective_ref_text
+            REF_TEXT = effective_ref_text or ""
+            REF_TEXT_SOURCE = ref_text_source
+            _ref_text_validation_result = ref_text_result
+
+            if profile.ref_audio and effective_ref_text:
+                print(
+                    f"[app_worker] Model loaded. building voice clone prompt "
+                    f"(ref_text_source={ref_text_source})...",
+                    flush=True,
+                )
+                voice_clone_prompt = model.create_voice_clone_prompt(
+                    ref_audio=profile.ref_audio,
+                    ref_text=effective_ref_text,
+                    x_vector_only_mode=False,
+                )
+
+                # Opt-in, deterministic artifact for controlled Transformers 4/5 comparisons.
+                # The dump contains codec token IDs and package versions, never reference audio/text.
+                _prompt_dump_dir = os.getenv("TTS_PROMPT_DUMP_DIR", "").strip()
+                if not _prompt_dump_dir and os.path.exists("/tmp/tts_prompt_dump"):
+                    _prompt_dump_dir = "/tmp/tts-prompt-dump"
+                if _prompt_dump_dir:
+                    from qwen3_tts.prompt_diagnostics import (
+                        dump_reference_prompt,
+                        dump_talker_parameter_manifest,
+                    )
+
+                    manifest_path = dump_reference_prompt(voice_clone_prompt, _prompt_dump_dir)
+                    print(f"[prompt_diag] reference prompt saved: {manifest_path}", flush=True)
+                    parameter_path = dump_talker_parameter_manifest(model.model.talker, _prompt_dump_dir)
+                    print(f"[prompt_diag] talker parameters saved: {parameter_path}", flush=True)
+            else:
+                print(
+                    "[app_worker] Model loaded without default reference voice. "
+                    "Add/generate a voice or mount REF_AUDIO before generation.",
+                    flush=True,
+                )
+
+            if _ref_text_validation_result:
+                sev = _ref_text_validation_result["severity"]
+                if sev in ("fail", "no_speech", "error"):
+                    print(
+                        f"[REF-TEXT-VALID] STATUS=fail score={_ref_text_validation_result.get('match_score')}",
+                        flush=True,
+                        file=sys.stderr,
+                    )
+                    print(f"  REF_AUDIO: {profile.ref_audio}", flush=True, file=sys.stderr)
+                    print(f"  REF_TEXT: {effective_ref_text!r}", flush=True, file=sys.stderr)
+                    print(f"  Whisper: {_ref_text_validation_result.get('whisper_transcript')!r}", flush=True, file=sys.stderr)
+                    print(f"  SUGGESTION: {_ref_text_validation_result.get('suggestion')}", flush=True, file=sys.stderr)
+                    if os.getenv("REF_TEXT_FAIL_ON_MISMATCH", "").strip() == "1" and ref_text_source == "env":
+                        raise RuntimeError(
+                            "REF_TEXT/REF_AUDIO mismatch (REF_TEXT_FAIL_ON_MISMATCH=1): "
+                            f"{_ref_text_validation_result.get('suggestion')}"
+                        )
+                elif sev == "warn":
+                    print(
+                        f"[REF-TEXT-VALID] STATUS=warn score={_ref_text_validation_result.get('match_score')}",
+                        flush=True,
+                        file=sys.stderr,
+                    )
+                    print(f"  REF_AUDIO: {profile.ref_audio}", flush=True, file=sys.stderr)
+                    print(f"  REF_TEXT: {effective_ref_text!r}", flush=True, file=sys.stderr)
+                    print(f"  Whisper: {_ref_text_validation_result.get('whisper_transcript')!r}", flush=True, file=sys.stderr)
+                    print(f"  SUGGESTION: {_ref_text_validation_result.get('suggestion')}", flush=True, file=sys.stderr)
+        else:
+            print("[app_worker] Model loaded. (profile skips voice clone prompt)", flush=True)
+
+        if TTS_BACKEND == "openvino":
+            # Milestone 4: install the OpenVINO talker runtime by swapping the two inner
+            # transformer core forwards. All other generation glue stays in PyTorch.
+            from qwen3_tts.openvino.talker import OVTalkerRuntime
+
+            talker = model.model.talker
+            # speech_tokenizer is a sibling of talker on the parent model, not a child of it;
+            # pass it explicitly so the OV vocoder patch can find it.
+            ov_runtime = OVTalkerRuntime(
+                profile.ov_model_dir, talker, ov_config=ov_config,
+                speech_tokenizer=model.model.speech_tokenizer,
+            )
+            ov_runtime.install()
+
+            # The codec encoder has done its one job (voice_clone_prompt was built above) and
+            # the OV vocoder now owns decode, so free the ~0.3 GiB PyTorch speech_tokenizer.
+            # Self-gates on OPENVINO_KEEP_CODEC_ENCODER; no-op when set (the default) so
+            # per-request/voice_id cloning keeps working.
+            ov_runtime.release_codec()
+
+            # Startup policy logs
+            if OPENVINO_RELEASE_TORCH:
+                print(
+                    "[app_worker] OPENVINO_RELEASE_TORCH active: "
+                    "PyTorch core weights may be released during OpenVINO compilation.",
+                    flush=True,
+                )
+            if profile.main_stateful_model:
+                print(
+                    f"[app_worker] OPENVINO_MAIN_STATEFUL_MODEL active: "
+                    f"{profile.main_stateful_model}",
+                    flush=True,
+                )
+            if profile.predictor_stateful_model:
+                print(
+                    f"[app_worker] OPENVINO_PREDICTOR_STATEFUL_MODEL active: "
+                    f"{profile.predictor_stateful_model}",
+                    flush=True,
+                )
+
+            vocoder_status = (
+                f"vocoder={'OV' if (ov_runtime.vocoder_runtime and ov_runtime.vocoder_runtime.enabled) else 'PyTorch'}"
+            )
+            print(
+                f"[app_worker] OpenVINO talker runtime installed "
+                f"(compression={ov_runtime.compression}, {vocoder_status}); "
+                f"cores run on OpenVINO.",
+                flush=True,
+            )
+
+        # Mirror the active profile into the module-level constants that health_state()
+        # and callers still read directly, so behavior is unchanged when profile is None
+        # (BASE_PROFILE) and correct when a non-base profile is swapped in.
+        MODEL_ID = profile.model_repo
+        OV_MODEL_DIR = profile.ov_model_dir
+        OPENVINO_MAIN_STATEFUL_MODEL = profile.main_stateful_model
+        OPENVINO_PREDICTOR_STATEFUL_MODEL = profile.predictor_stateful_model
+        active_profile = profile
+
+        _service_started = True
+        _model_loaded = True
+        print(f"[app_worker] Model loaded and ready (profile={profile.name!r}).")
+
+    # ── Backend-agnostic: register mounted REF_AUDIO as a first-class voice ────
+    if profile.ref_audio:
+        from qwen3_tts import voice_library
+        try:
+            vid = voice_library.ensure_mounted_ref_voice(
+                profile.ref_audio,
+                sample_text=REF_TEXT,
+                sample_text_source=REF_TEXT_SOURCE,
+                asr=_ref_text_validation_result,
+            )
+            if vid:
+                print(f"[app_worker] Registered mounted reference as voice {vid}", flush=True)
+        except Exception as exc:
+            print(f"[app_worker] Mounted reference registration failed (non-fatal): {exc}", flush=True)
 
 
 def model_loaded() -> bool:
@@ -530,6 +681,41 @@ if IDLE_UNLOAD_SECONDS > 0:
     print(f"[app_worker] Idle unload enabled: {IDLE_UNLOAD_SECONDS}s cooldown.", flush=True)
 
 
+def _health_mount_status() -> dict[str, Any]:
+    """Return mount and runtime config status for /health and Runtime page."""
+    # Reference audio
+    ref_audio_path = os.getenv("REF_AUDIO") or REF_AUDIO_PATH or "/voice/reference.wav"
+    ref_audio_ok = os.path.isfile(ref_audio_path)
+
+    # Voice library
+    voice_lib = os.getenv("VOICE_LIBRARY_DIR", "/voices")
+    voice_lib_ok = os.path.isdir(voice_lib) and os.access(voice_lib, os.W_OK)
+
+    # Segment library
+    segment_lib = os.getenv("SEGMENT_LIBRARY_DIR", "/segments")
+    segment_lib_ok = os.path.isdir(segment_lib) and os.access(segment_lib, os.W_OK)
+
+    # Model cache (HF hub)
+    hf_cache = os.getenv("MODEL_CACHE_PATH", "/root/.cache/huggingface/hub")
+    hf_cache_ok = os.path.isdir(hf_cache) and os.access(hf_cache, os.W_OK)
+
+    # OpenVINO directory
+    ov_dir = OV_MODEL_DIR or ""
+    ov_ok = os.path.isdir(ov_dir) and os.access(ov_dir, os.W_OK)
+
+    # Runtime config: is /app writable?
+    app_writable = os.access("/app", os.W_OK) if os.path.isdir("/app") else False
+
+    return {
+        "ref_audio": {"path": ref_audio_path, "ok": ref_audio_ok},
+        "voice_library": {"path": voice_lib, "ok": voice_lib_ok},
+        "segment_library": {"path": segment_lib, "ok": segment_lib_ok},
+        "hf_cache": {"path": hf_cache, "ok": hf_cache_ok},
+        "ov": {"path": ov_dir, "ok": ov_ok} if ov_dir else None,
+        "app_writable": app_writable,
+    }
+
+
 def health_state() -> dict[str, Any]:
     """Return JSON-serializable model and backend readiness state."""
     if _startup_failed:
@@ -557,7 +743,9 @@ def health_state() -> dict[str, Any]:
         "torch_dtype": TORCH_DTYPE_NAME,
         "low_cpu_mem_usage": OPENVINO_LOW_CPU_MEM_USAGE,
         "ref_audio": REF_AUDIO,
+        "ref_text_source": REF_TEXT_SOURCE,
         "ref_text_validation": _ref_text_validation_result,
+        "mount": _health_mount_status(),
         "timestamp": time.time(),
     }
 
@@ -609,6 +797,23 @@ def health_state() -> dict[str, Any]:
             }
         )
 
+    # Pocket TTS health metadata
+    if TTS_BACKEND == "pocket_tts":
+        from qwen3_tts import pocket_tts_runtime
+        voice_cloning_available = pocket_tts_runtime.pocket_tts_default_voice_state is not None
+        base["pocket_tts"] = {
+            "backend": "pocket_tts",
+            "runtime_wired": True,
+            "language": os.getenv("POCKET_TTS_LANGUAGE", "english"),
+            "voice_cloning_available": voice_cloning_available,
+        }
+        if not voice_cloning_available:
+            base["pocket_tts"]["message"] = (
+                "Pocket TTS voice cloning model not available. "
+                "Set an HF_TOKEN with access to kyutai/pocket-tts via HF_TOKEN_FILE "
+                "or your startup config."
+            )
+
     def _json_safe(obj):
         if isinstance(obj, Path):
             return obj.as_posix()
@@ -633,9 +838,21 @@ def health_state() -> dict[str, Any]:
 #     watcher loop each tick (IDLE_UNLOAD_SECONDS, effectively "hot" too but listed here
 #     since it's a plain global rather than an os.environ lookup).
 _HOT_ENV_KEYS = {"SILENCE_TRIM", "SILENCE_TRIM_THRESH", "SILENCE_TRIM_PAD_MS"}
-_RELOAD_ENV_KEYS = {"OV_DYNAMIC_QUANT_GROUP_SIZE"}
+_RELOAD_ENV_KEYS = {"OV_DYNAMIC_QUANT_GROUP_SIZE", "MODEL_DTYPE"}
 _GLOBAL_KEYS = {"TTS_BACKEND", "IDLE_UNLOAD_SECONDS"}
-LIVE_RUNTIME_KEYS = _HOT_ENV_KEYS | _RELOAD_ENV_KEYS | _GLOBAL_KEYS
+_POCKET_TTS_RUNTIME_KEYS = {
+    "POCKET_TTS_TEMP",
+    "POCKET_TTS_LSD_DECODE_STEPS",
+    "POCKET_TTS_EOS_THRESHOLD",
+    "POCKET_TTS_NOISE_CLAMP",
+    "POCKET_TTS_FRAMES_AFTER_EOS",
+}
+LIVE_RUNTIME_KEYS = (
+    _HOT_ENV_KEYS
+    | _RELOAD_ENV_KEYS
+    | _GLOBAL_KEYS
+    | _POCKET_TTS_RUNTIME_KEYS
+)
 
 _reconfig_in_progress = False
 
@@ -658,20 +875,52 @@ def runtime_config_state() -> dict[str, Any]:
             continue
         mount_access[name] = "rw" if os.access(path, os.W_OK) else "ro"
 
+    model_dtype_raw = (os.getenv("MODEL_DTYPE") or "").strip().lower()
+    live: dict[str, Any] = {
+        "TTS_BACKEND": TTS_BACKEND,
+        "IDLE_UNLOAD_SECONDS": IDLE_UNLOAD_SECONDS,
+        "SILENCE_TRIM": os.getenv("SILENCE_TRIM", "1").strip() != "0",
+        "SILENCE_TRIM_THRESH": float(os.getenv("SILENCE_TRIM_THRESH", "0.01")),
+        "SILENCE_TRIM_PAD_MS": float(os.getenv("SILENCE_TRIM_PAD_MS", "30")),
+        "OV_DYNAMIC_QUANT_GROUP_SIZE": int(os.getenv("OV_DYNAMIC_QUANT_GROUP_SIZE", "32")),
+        "MODEL_DTYPE": model_dtype_raw or ("bfloat16" if TTS_BACKEND == "openvino" else "float32"),
+    }
+
+    # Pocket TTS knobs only shown/active when TTS_BACKEND == "pocket_tts"
+    if TTS_BACKEND == "pocket_tts":
+        from qwen3_tts import pocket_tts_runtime
+
+        _ptts_noise = os.getenv("POCKET_TTS_NOISE_CLAMP", "").strip()
+        _ptts_frames = os.getenv("POCKET_TTS_FRAMES_AFTER_EOS", "4").strip()
+        live["POCKET_TTS_TEMP"] = float(os.getenv("POCKET_TTS_TEMP", "1.2"))
+        live["POCKET_TTS_LSD_DECODE_STEPS"] = int(os.getenv("POCKET_TTS_LSD_DECODE_STEPS", "5"))
+        live["POCKET_TTS_EOS_THRESHOLD"] = float(os.getenv("POCKET_TTS_EOS_THRESHOLD", "-4.0"))
+        live["POCKET_TTS_NOISE_CLAMP"] = float(_ptts_noise) if _ptts_noise else None
+        live["POCKET_TTS_FRAMES_AFTER_EOS"] = int(_ptts_frames) if _ptts_frames else 4
+
+        cloning_ok = pocket_tts_runtime.pocket_tts_cloning_available
+        cloning_msg = (pocket_tts_runtime.pocket_tts_cloning_status_message or "").strip()
+
+        if not cloning_ok and not cloning_msg:
+            cloning_msg = (
+                "Voice cloning model unavailable. "
+                "Accept the terms at https://huggingface.co/kyutai/pocket-tts "
+                "with the HF account used by this container, then restart."
+            )
+
+        live["pocket_tts_voice_cloning_available"] = cloning_ok
+        live["pocket_tts_voice_cloning_message"] = cloning_msg
+
+    hf_token_set = bool(os.getenv("HF_TOKEN"))
+
     return {
         "reconfig_in_progress": _reconfig_in_progress,
-        "live": {
-            "TTS_BACKEND": TTS_BACKEND,
-            "IDLE_UNLOAD_SECONDS": IDLE_UNLOAD_SECONDS,
-            "SILENCE_TRIM": os.getenv("SILENCE_TRIM", "1").strip() != "0",
-            "SILENCE_TRIM_THRESH": float(os.getenv("SILENCE_TRIM_THRESH", "0.01")),
-            "SILENCE_TRIM_PAD_MS": float(os.getenv("SILENCE_TRIM_PAD_MS", "30")),
-            "OV_DYNAMIC_QUANT_GROUP_SIZE": int(os.getenv("OV_DYNAMIC_QUANT_GROUP_SIZE", "32")),
-        },
+        "live": live,
         "read_only": {
             "mounts": mount_access,
             "ref_audio_path_set": bool(REF_AUDIO),
-            "hf_token_set": bool(os.getenv("HF_TOKEN")),
+            "hf_token_set": hf_token_set,
+            "hf_token_status": "set" if hf_token_set else "not_set",
             "device": DEVICE,
             "torch_dtype": TORCH_DTYPE_NAME,
         },
@@ -698,13 +947,18 @@ def apply_runtime_config(updates: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"Not a live-adjustable key: {sorted(unknown)}")
 
     global TTS_BACKEND, IDLE_UNLOAD_SECONDS, _reconfig_in_progress
+
+    # Pocket TTS knobs are always writable (they are live keys).
+    # They only trigger a reload when the active backend is pocket_tts.
+    ptts_changed = bool(set(updates) & _POCKET_TTS_RUNTIME_KEYS)
+
     needs_reload = bool(set(updates) & _RELOAD_ENV_KEYS) or "TTS_BACKEND" in updates
 
     _reconfig_in_progress = True
     try:
         if "TTS_BACKEND" in updates:
             backend = str(updates["TTS_BACKEND"]).strip().lower()
-            if backend not in ("pytorch", "openvino"):
+            if backend not in ("pytorch", "openvino", "pocket_tts"):
                 raise ValueError(f"Invalid TTS_BACKEND: {backend!r}")
             TTS_BACKEND = backend
 
@@ -714,6 +968,29 @@ def apply_runtime_config(updates: dict[str, Any]) -> dict[str, Any]:
         for key in _HOT_ENV_KEYS | _RELOAD_ENV_KEYS:
             if key in updates:
                 os.environ[key] = str(updates[key])
+
+        # Normalize MODEL_DTYPE:
+        # - openvino: pinned to bf16 (user cannot break it).
+        # - pytorch/pocket_tts: allow change; will trigger reload via _RELOAD_ENV_KEYS.
+        if "MODEL_DTYPE" in updates:
+            if TTS_BACKEND == "openvino":
+                os.environ["MODEL_DTYPE"] = "bfloat16"
+            else:
+                # keep as-is; resolve_torch_load_config will validate.
+                pass
+
+        # Write Pocket TTS knobs to os.environ.
+        for key in _POCKET_TTS_RUNTIME_KEYS:
+            if key in updates:
+                value = updates[key]
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = str(value)
+
+        # Pocket TTS knobs: reload only if current backend is pocket_tts.
+        if ptts_changed and TTS_BACKEND == "pocket_tts":
+            needs_reload = True
 
         if needs_reload:
             print(
@@ -989,6 +1266,11 @@ def get_voice_clone_prompt(voice_id: str | None = None):
     with Base loaded).
     """
     if voice_id is None:
+        if voice_clone_prompt is None:
+            raise RuntimeError(
+                "No default reference voice is configured. "
+                "Add or generate a voice, select a saved voice_id, or mount REF_AUDIO."
+            )
         return voice_clone_prompt
     if voice_id in _voice_clone_prompt_cache:
         return _voice_clone_prompt_cache[voice_id]
@@ -1040,6 +1322,76 @@ def _run_generate(
     _ensure_base_loaded()
     if model is None:
         raise RuntimeError("Model not loaded")
+
+    # ── Pocket TTS backend branch ──────────────────────────────────────────────
+    if TTS_BACKEND == "pocket_tts":
+        from qwen3_tts import pocket_tts_runtime
+
+        if instruct:
+            print(f"[generate] instruct field ignored on Base checkpoint: {instruct!r}", flush=True)
+        import traceback as _tb
+        t0 = time.monotonic()
+        print(f"[generate] batch  lang={language!r}  chars={len(text)}  job={job_id or '-'}", flush=True)
+
+        # Create or use provided job state for progress tracking + cancel.
+        job: _JobState | None = None
+        if job_id:
+            with _active_jobs_lock:
+                job = _active_jobs.get(job_id)
+            if job is None:
+                job = _create_job(text, seed=seed_value)
+                job_id = job.job_id
+        else:
+            job = _create_job(text, seed=seed_value)
+            job_id = job.job_id
+
+        # Pre-generate cancel check
+        if job.cancel_event.is_set():
+            job.status = "cancelled"
+            job.message = "Cancelled by user."
+            raise RuntimeError("Job cancelled before generation started.")
+
+        # Use Pocket TTS voice_state resolution instead of Qwen3TTS voice_clone_prompt.
+        voice_state = pocket_tts_runtime.get_pocket_tts_voice_state(
+            model,
+            voice_id=voice_id,
+            default_voice_state=voice_clone_prompt,
+            ref_audio_path=REF_AUDIO,
+        )
+
+        # Give progress a non-zero start so async/progress endpoints behave.
+        if job:
+            job.frames_generated = job.expected_total_frames
+
+        try:
+            audio_tensor, sr = pocket_tts_runtime.generate_pocket_tts(model, voice_state, text)
+        except Exception:
+            if job:
+                job.status = "failed"
+                try:
+                    job.error = "Generation failed; see server logs."
+                except Exception:
+                    pass
+            _tb.print_exc()
+            raise
+
+        wav = _trim_silence(audio_tensor.cpu().numpy().ravel(), sr)
+        duration = len(wav) / sr
+        elapsed = time.monotonic() - t0
+        print(f"[generate] done   elapsed={elapsed:.1f}s  audio={duration:.1f}s  RTF={elapsed/duration:.2f}x", flush=True)
+
+        # If cancelled after generation (unlikely but consistent)
+        if job and job.cancel_event.is_set():
+            job.status = "cancelled"
+            job.message = "Cancelled by user."
+        elif job:
+            job.status = "completed"
+            job.wav = wav
+            job.sr = sr
+
+        return wav, sr, job_id
+
+    # ── PyTorch / OpenVINO backends (unchanged) ────────────────────────────────
     voice_prompt = get_voice_clone_prompt(voice_id)
     if voice_prompt is None:
         raise RuntimeError("Model not loaded")
@@ -1071,14 +1423,24 @@ def _run_generate(
     gen_kwargs.setdefault("logits_processor", [])
     gen_kwargs["logits_processor"] = list(gen_kwargs["logits_processor"]) + [progress_processor]
 
-    if (os.getenv("TTS_DIAG", "0").strip() == "1" or os.path.exists("/tmp/tts_diag")) and TTS_BACKEND == "openvino":
+    # Unified diagnostic mode (for any backend) controlled by TTS_DIAG.
+    _tts_diag = os.getenv("TTS_DIAG", "0").strip() == "1" or os.path.exists("/tmp/tts_diag")
+
+    if _tts_diag:
+        print(
+            f"[diag] TTS_DIAG active  backend={TTS_BACKEND!r} "
+            f"eos_token_id={eos_id} logits_processors={len(gen_kwargs['logits_processor'])}",
+            flush=True,
+        )
+
+    # _DiagLogitsProcessor: enable for any backend when TTS_DIAG is set
+    if _tts_diag:
         diag_kwargs = gen_kwargs.copy()
         diag_kwargs.setdefault("logits_processor", [])
         diag_kwargs["logits_processor"] = list(diag_kwargs["logits_processor"]) + [
             _DiagLogitsProcessor(eos_id)
         ]
         gen_kwargs = diag_kwargs
-        print(f"[diag] TTS_DIAG active  eos_token_id={eos_id}", flush=True)
 
     # Diagnostic/safety override: cap generation length so a non-terminating
     # decode returns partial audio for inspection instead of crashing at the
@@ -1104,6 +1466,25 @@ def _run_generate(
     expected_frames = job.expected_total_frames if job else 40
     safety_max = max(expected_frames * 2, hard_cap_frames)
     chosen = min(system_limit, safety_max)
+
+    # Use a tighter cap for non-OpenVINO backends to avoid apparent hangs:
+    # PyTorch 1.7B on CPU is extremely slow; 300 tokens is enough for most utterances.
+    if TTS_BACKEND != "openvino":
+        ptts_cap = int(os.getenv("TTS_SYSTEM_MAX_NEW_TOKENS_PURE_TORCH", "300"))
+        chosen = min(chosen, ptts_cap)
+
+    # Extra guard for pytorch + bfloat16 (known to hang or diverge on many CPUs):
+    # keep generation short so a broken dtype fails fast instead of stalling the service.
+    if TTS_BACKEND == "pytorch" and TORCH_DTYPE_NAME == "bfloat16":
+        bf16_cap = int(os.getenv("TTS_SYSTEM_MAX_NEW_TOKENS_PYTORCH_BF16", "160"))
+        if chosen > bf16_cap:
+            print(
+                f"[generate] pytorch+bfloat16: enforcing tighter max_new_tokens cap {bf16_cap} "
+                f"(original={chosen}) to avoid hung decode",
+                flush=True,
+            )
+            chosen = min(chosen, bf16_cap)
+
     if "max_new_tokens" not in gen_kwargs:
         gen_kwargs["max_new_tokens"] = chosen
     else:
@@ -1117,22 +1498,161 @@ def _run_generate(
         gen_kwargs.setdefault("non_streaming_mode", True)
         print("[diag] non_streaming_mode=True (batch prefill text delivery)", flush=True)
 
-    try:
-        wavs, sr = model.generate_voice_clone(
-            text=text,
-            language=language,
-            voice_clone_prompt=voice_prompt,
-            **gen_kwargs,
+    t1 = time.monotonic()
+    if _tts_diag:
+        print(
+            f"[diag] calling generate_voice_clone backend={TTS_BACKEND!r} "
+            f"dtype={TORCH_DTYPE_NAME} "
+            f"max_new_tokens={gen_kwargs.get('max_new_tokens')} "
+            f"chars={len(text)}",
+            flush=True,
         )
-    except Exception:
-        if job:
-            job.status = "failed"
+
+    # Hard timeout + watchdog for stuck generation when TTS_DIAG is enabled.
+    # This is critical for pytorch+bfloat16 on many CPUs: decode can run forever
+    # without producing EOS due to numerical drift. We prefer a clean failure
+    # over pinning a worker at 100% indefinitely.
+    _diag_timeout = int(os.getenv("TTS_DIAG_GEN_TIMEOUT", "180"))  # seconds
+
+    # Use a shorter timeout for pytorch+bfloat16 since it is known to hang.
+    if TTS_BACKEND == "pytorch" and TORCH_DTYPE_NAME == "bfloat16":
+        _diag_timeout = min(_diag_timeout, int(os.getenv("TTS_DIAG_GEN_TIMEOUT_BF16", "120")))
+    _use_timeout = _tts_diag
+    _watchdog_stop = None
+    _watchdog = None
+
+    if _use_timeout:
+        _watchdog_stop = threading.Event()
+        _result_container: list = []  # holds (wavs, sr) or None
+        _error_container: list = []
+
+        def _diag_watchdog():
+            interval = 30.0
+            while not _watchdog_stop.is_set():
+                _watchdog_stop.wait(interval)
+                if _watchdog_stop.is_set():
+                    break
+                elapsed = time.monotonic() - t1
+                print(
+                    f"[diag-watchdog] generate_voice_clone still running; "
+                    f"elapsed={elapsed:.0f}s backend={TTS_BACKEND} dtype={TORCH_DTYPE_NAME}",
+                    flush=True,
+                )
+
+        def _run_generate_in_thread():
             try:
-                job.error = "Generation failed; see server logs."
-            except Exception:
-                pass
-        _tb.print_exc()
-        raise
+                result = model.generate_voice_clone(
+                    text=text,
+                    language=language,
+                    voice_clone_prompt=voice_prompt,
+                    **gen_kwargs,
+                )
+                _result_container.append(result)
+            except Exception as ex:
+                _error_container.append(ex)
+
+        _watchdog = threading.Thread(target=_diag_watchdog, daemon=True)
+        _worker = threading.Thread(target=_run_generate_in_thread, daemon=True)
+
+        _watchdog.start()
+        _worker.start()
+
+        # Wait up to timeout
+        _worker.join(timeout=_diag_timeout)
+        if _worker.is_alive():
+            elapsed = time.monotonic() - t1
+            print(
+                f"[diag] TIMEOUT: generate_voice_clone exceeded {_diag_timeout}s "
+                f"(elapsed={elapsed:.0f}s) backend={TTS_BACKEND} dtype={TORCH_DTYPE_NAME} "
+                f"max_new_tokens={gen_kwargs.get('max_new_tokens')} chars={len(text)}; "
+                f"killing to avoid hung worker",
+                flush=True,
+            )
+            _watchdog_stop.set()
+
+            # Auto-fallback: if pytorch+bfloat16 is timing out and
+            # TTS_DIAG_BF16_AUTO_FALLBACK=1, switch to float32 to avoid repeated hangs.
+            # This is intentionally opt-in: it mutates global state and reloads the model
+            # from inside a generation request, which is fragile and can interfere with
+            # other runtimes (e.g. pocket_tts) if loaded.
+            _bf16_auto_fallback = os.environ.get("TTS_DIAG_BF16_AUTO_FALLBACK", "").lower() in ("1", "true")
+            if _bf16_auto_fallback and TTS_BACKEND == "pytorch" and TORCH_DTYPE_NAME == "bfloat16":
+                print(
+                    f"[diag] pytorch+bfloat16 timed out; TTS_DIAG_BF16_AUTO_FALLBACK is set, "
+                    f"switching to float32 to avoid future hangs",
+                    flush=True,
+                )
+                try:
+                    os.environ["MODEL_DTYPE"] = "float32"
+                    force_unload()
+                    load_model(active_profile)
+                    _voice_clone_prompt_cache.clear()
+                except Exception as ex:
+                    print(f"[diag] Failed to switch to float32 on timeout: {ex}", flush=True)
+            elif not _bf16_auto_fallback and TTS_BACKEND == "pytorch" and TORCH_DTYPE_NAME == "bfloat16":
+                print(
+                    f"[diag] pytorch+bfloat16 timed out; auto-fallback to float32 is disabled "
+                    f"(set TTS_DIAG_BF16_AUTO_FALLBACK=1 to enable).",
+                    flush=True,
+                )
+
+            if job:
+                job.status = "failed"
+                try:
+                    job.error = (
+                        f"Generation timed out after {elapsed:.0f}s (TTS_DIAG_GEN_TIMEOUT={_diag_timeout}). "
+                        f"Likely stuck decode (dtype={TORCH_DTYPE_NAME})."
+                    )
+                except Exception:
+                    pass
+            raise RuntimeError(
+                f"generate_voice_clone timed out after {elapsed:.0f}s with TTS_DIAG enabled; "
+                f"possible stuck decode"
+            ) from None
+
+        _watchdog_stop.set()
+        _watchdog.join(timeout=3)
+
+        # Propagate any exception from the worker
+        if _error_container:
+            ex = _error_container[0]
+            if job:
+                job.status = "failed"
+                try:
+                    job.error = "Generation failed; see server logs."
+                except Exception:
+                    pass
+            raise ex from None
+
+        if not _result_container:
+            raise RuntimeError("generate_voice_clone returned no result (diag path).")
+        wavs, sr = _result_container[0]
+    else:
+        # Normal path (no diag timeout)
+        try:
+            wavs, sr = model.generate_voice_clone(
+                text=text,
+                language=language,
+                voice_clone_prompt=voice_prompt,
+                **gen_kwargs,
+            )
+        except Exception:
+            if job:
+                job.status = "failed"
+                try:
+                    job.error = "Generation failed; see server logs."
+                except Exception:
+                    pass
+            _tb.print_exc()
+            raise
+    if _watchdog_stop is not None:
+        _watchdog_stop.set()
+    if _watchdog:
+        _watchdog.join(timeout=3)
+    t2 = time.monotonic()
+    if _tts_diag:
+        print(f"[diag] generate_voice_clone returned dt={t2-t1:.1f}s", flush=True)
+
     if job and job.status == "failed":
         print(
             f"[GEN-ABORT] {job.message} job_id={job.job_id} text_len={job.text_length}",

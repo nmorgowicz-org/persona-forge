@@ -32,21 +32,21 @@ function appendStitchPlanClip(clip: StitchPlanClip) {
   })
 }
 
-export async function insertSegmentIntoStitchTimeline(
-  seg: SegmentMeta,
-  onError: (msg: string) => void,
-): Promise<void> {
+// Public shared helpers — used by:
+// - OmniVoicePanel (via insertSegmentIntoStitchTimeline / insertVoiceIntoStitchTimeline)
+// - VoiceLibraryPage (directly, plus page nav and editor open)
+export async function createStitchClipFromSegment(seg: SegmentMeta): Promise<StitchPlanClip> {
   let audioBase64 = seg.audio_base64
   if (!audioBase64) {
     try {
       audioBase64 = await getSegmentAudioBase64(seg.segment_id)
     } catch {
-      onError('No audio available for this segment')
-      return
+      throw new Error('No audio available for this segment')
     }
   }
   const durationMs = await decodeAudioDurationMs(audioBase64)
-  appendStitchPlanClip({
+
+  return {
     clipId: seg.segment_id + '-insert-' + Date.now(),
     ref: { segmentId: seg.segment_id },
     text: seg.text,
@@ -57,29 +57,26 @@ export async function insertSegmentIntoStitchTimeline(
     fadeInMs: 0,
     fadeOutMs: 0,
     durationMs,
-  })
+  }
 }
 
-export async function insertVoiceIntoStitchTimeline(
-  voice: VoiceMeta,
-  onError: (msg: string) => void,
-): Promise<void> {
+export async function createStitchClipFromVoice(voice: VoiceMeta): Promise<StitchPlanClip> {
   let audioBase64 = voice.audio_base64
   if (!audioBase64) {
     try {
       const full = await getVoice(voice.voice_id)
       audioBase64 = full.audio_base64
     } catch {
-      onError('No audio available for this voice')
-      return
+      throw new Error('No audio available for this voice')
     }
   }
   if (!audioBase64) {
-    onError('No audio available for this voice')
-    return
+    throw new Error('No audio available for this voice')
   }
+
   const durationMs = await decodeAudioDurationMs(audioBase64)
-  appendStitchPlanClip({
+
+  return {
     clipId: voice.voice_id + '-insert-' + Date.now(),
     ref: { voiceId: voice.voice_id },
     text: voice.description || voice.sample_text || voice.voice_id,
@@ -92,5 +89,29 @@ export async function insertVoiceIntoStitchTimeline(
     fadeInMs: 0,
     fadeOutMs: 0,
     durationMs,
-  })
+  }
+}
+
+export async function insertSegmentIntoStitchTimeline(
+  seg: SegmentMeta,
+  onError: (msg: string) => void,
+): Promise<void> {
+  try {
+    const clip = await createStitchClipFromSegment(seg)
+    appendStitchPlanClip(clip)
+  } catch (err) {
+    onError(err instanceof Error ? err.message : String(err))
+  }
+}
+
+export async function insertVoiceIntoStitchTimeline(
+  voice: VoiceMeta,
+  onError: (msg: string) => void,
+): Promise<void> {
+  try {
+    const clip = await createStitchClipFromVoice(voice)
+    appendStitchPlanClip(clip)
+  } catch (err) {
+    onError(err instanceof Error ? err.message : String(err))
+  }
 }

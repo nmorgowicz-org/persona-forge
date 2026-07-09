@@ -248,16 +248,16 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     }
   }
 
-  // Load library on mount
+  // Load library on mount only if the store is empty.
   useEffect(() => {
-    const load = async () => {
+    if (library.length > 0) return
+    ;(async () => {
       try {
         setLibrary(await listOmniVoiceSegments())
       } catch {
         // Non-fatal
       }
-    }
-    load()
+    })()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // -- Derived --

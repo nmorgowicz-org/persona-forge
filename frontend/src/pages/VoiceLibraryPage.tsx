@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { AudioWaveform, Layers, Loader2, Mic2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
+import {
+  AlertTriangle,
+  AudioWaveform,
+  CheckCircle2,
+  Layers,
+  Loader2,
+  Mic2,
+  Pencil,
+  Plus,
+  Sparkles,
+  Trash2,
+} from 'lucide-react'
 import {
   deleteOmniVoiceSegment,
   deleteVoice,
@@ -14,7 +25,33 @@ import {
 import { hasChipSelections, type ChipSelections } from '@/lib/voiceDesignChips'
 import { AudioPlayer } from '@/components/AudioPlayer'
 import { Button } from '@/components/ui/button'
+import { createStitchClipFromSegment } from '@/lib/stitchClips'
 import { useAppStore, type StitchPlanClip } from '@/store'
+
+const MOUNTED_REF_SOURCE = 'mounted_ref_audio' as const
+
+function isMountedRef(voice: VoiceMeta): boolean {
+  return (voice as VoiceMeta & { source?: string }).source === MOUNTED_REF_SOURCE
+}
+
+function voiceNeedsReview(voice: VoiceMeta): boolean {
+  if (voice.sample_text_source === 'user' && !voice.needs_review) return false
+  const severity = voice.asr?.severity
+  return Boolean(
+    voice.needs_review ||
+      severity === 'warn' ||
+      severity === 'fail' ||
+      severity === 'no_speech' ||
+      severity === 'error',
+  )
+}
+
+function voiceTranscriptSource(voice: VoiceMeta): string {
+  if (voice.sample_text_source === 'whisper') return 'Whisper draft'
+  if (voice.sample_text_source === 'env') return 'Startup override'
+  if (voice.sample_text_source === 'user') return 'User edited'
+  return 'Transcript'
+}
 
 // Shape persisted by /omnivoice/save into voice.selections -- see app.py's omnivoice_save
 // handler. stitch_plan is the raw (snake_case) editor payload, kept verbatim so a voice
@@ -163,6 +200,14 @@ function VoiceCard({
   const [draft, setDraft] = useState(voice.sample_text)
   const [saving, setSaving] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const needsReview = voiceNeedsReview(voice)
+  const transcriptSource = voiceTranscriptSource(voice)
+  const whisperTranscript = (voice.asr?.whisper_transcript || '').trim()
+  const reviewMessage =
+    voice.asr?.suggestion ||
+    (needsReview
+      ? 'Review the transcript before using Qwen backends.'
+      : 'Transcript is ready for Qwen backends.')
 
   useEffect(() => {
     if (editing) inputRef.current?.focus()
@@ -192,14 +237,42 @@ function VoiceCard({
       className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm transition-shadow duration-200 hover:border-border/80 hover:shadow-lg"
     >
       <div>
-        <p className="text-sm font-medium">{voice.voice_id}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium">{voice.voice_id}</p>
+          {isMountedRef(voice) && (
+            <span className="inline-flex items-center rounded-full border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-cyan-400">
+              Mounted reference
+            </span>
+          )}
+          <span
+            className={
+              'inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[9px] font-medium uppercase tracking-wide ' +
+              (needsReview
+                ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300')
+            }
+            title={reviewMessage}
+          >
+            {needsReview ? <AlertTriangle className="size-3" /> : <CheckCircle2 className="size-3" />}
+            {needsReview ? 'Review text' : transcriptSource}
+          </span>
+        </div>
         <p className="line-clamp-2 text-xs text-muted-foreground">{voice.description}</p>
       </div>
 
+      {needsReview && (
+        <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          {reviewMessage}
+        </div>
+      )}
+
       <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Reference text
-        </p>
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Reference text
+          </p>
+          <span className="shrink-0 text-[10px] text-muted-foreground">{transcriptSource}</span>
+        </div>
         {editing ? (
           <textarea
             ref={inputRef}
@@ -230,6 +303,11 @@ function VoiceCard({
           >
             {voice.sample_text || '(no reference text — click to add)'}
             {saving && ' (saving…)'}
+          </p>
+        )}
+        {whisperTranscript && whisperTranscript !== voice.sample_text && (
+          <p className="mt-2 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+            Whisper heard: "{whisperTranscript}"
           </p>
         )}
       </div>
@@ -293,8 +371,11 @@ function VoiceCard({
 }
 
 export function VoiceLibraryPage() {
-  const [voices, setVoices] = useState<VoiceMeta[]>([])
-  const [segments, setSegments] = useState<SegmentMeta[]>([])
+  const voices = useAppStore((s) => s.voices)
+  const segments = useAppStore((s) => s.ovLibrary)
+  const storeSetVoices = useAppStore((s) => s.setVoices)
+  const storeSetSegments = useAppStore((s) => s.setOvLibrary)
+
   const [error, setError] = useState<string | null>(null)
   const [busyVoiceId, setBusyVoiceId] = useState<string | null>(null)
   const [busySegmentId, setBusySegmentId] = useState<string | null>(null)
@@ -310,17 +391,16 @@ export function VoiceLibraryPage() {
   const setOvStitchPlanPaddingMs = useAppStore((s) => s.setOvStitchPlanPaddingMs)
   const setOvStitchPlanDsp = useAppStore((s) => s.setOvStitchPlanDsp)
 
-  function refresh() {
-    return Promise.all([
+  async function refresh() {
+    const [v, segs] = await Promise.all([
       listVoices().catch((err) => {
         setError(err instanceof Error ? err.message : String(err))
         return [] as VoiceMeta[]
       }),
       listOmniVoiceSegments().catch(() => [] as SegmentMeta[]),
-    ]).then(([v, segs]) => {
-      setVoices(v)
-      setSegments(segs)
-    })
+    ])
+    storeSetVoices(v)
+    storeSetSegments(segs)
   }
 
   useEffect(() => {
@@ -340,34 +420,12 @@ export function VoiceLibraryPage() {
   async function insertSegmentIntoStitchEditor(seg: SegmentMeta) {
     setError(null)
     try {
-      const url = `/omnivoice/segments/${encodeURIComponent(seg.segment_id)}/audio`
-      const b64 = await toBase64FromUrl(url)
+      const clip = await createStitchClipFromSegment(seg)
 
       setPage('voice-design')
       setDesignEngine('omnivoice')
 
-      const clipId = `clip_seg_${Date.now()}`
-      const durationMs =
-        typeof seg.duration_sec === 'number' && seg.duration_sec > 0
-          ? Math.round(seg.duration_sec * 1000)
-          : 0
-
-      setOvStitchPlanClips((prev: any) => [
-        ...(prev ?? []),
-        {
-          clipId,
-          ref: { segmentId: seg.segment_id },
-          text: seg.text,
-          sourceAudioBase64: b64,
-          sampleRate: seg.sample_rate ?? 24000,
-          durationMs,
-          trimStartMs: 0,
-          trimEndMs: 0,
-          fadeInMs: 0,
-          fadeOutMs: 0,
-        },
-      ])
-
+      setOvStitchPlanClips((prev: any) => [...(prev ?? []), clip])
       setOvStitchEditorOpen(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

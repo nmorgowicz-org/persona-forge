@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Settings2 } from 'lucide-react'
 import { getRuntimeConfig, updateRuntimeConfig, type RuntimeConfigState } from '@/lib/api'
+import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -21,6 +22,7 @@ export function RuntimeConfigPage() {
   const [draft, setDraft] = useState<LiveDraft | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [applying, setApplying] = useState(false)
+  const setRuntimeConfig = useAppStore((s) => s.setRuntimeConfig)
 
   function refresh() {
     getRuntimeConfig()
@@ -28,6 +30,10 @@ export function RuntimeConfigPage() {
         setState(s)
         setDraft(s.live)
         setError(null)
+        setRuntimeConfig({
+          runtimeTtsBackend: s.live.TTS_BACKEND,
+          pocketTtsVoiceCloningAvailable: s.live.pocket_tts_voice_cloning_available,
+        })
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
   }
@@ -54,6 +60,10 @@ export function RuntimeConfigPage() {
       const next = await updateRuntimeConfig(changed)
       setState(next)
       setDraft(next.live)
+      setRuntimeConfig({
+        runtimeTtsBackend: next.live.TTS_BACKEND,
+        pocketTtsVoiceCloningAvailable: next.live.pocket_tts_voice_cloning_available,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -105,7 +115,18 @@ export function RuntimeConfigPage() {
               </label>
               <Select
                 value={draft.TTS_BACKEND}
-                onValueChange={(v) => setDraft({ ...draft, TTS_BACKEND: v })}
+                onValueChange={(v) => {
+                  const nextBackend = v as string
+                  const prevBackend = draft.TTS_BACKEND
+                  let dtype = draft.MODEL_DTYPE
+
+                  // If switching away from openvino and currently bf16, default to float32.
+                  if (prevBackend === 'openvino' && nextBackend !== 'openvino' && dtype === 'bfloat16') {
+                    dtype = 'float32'
+                  }
+
+                  setDraft({ ...draft, TTS_BACKEND: nextBackend, MODEL_DTYPE: dtype })
+                }}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue />
@@ -113,6 +134,9 @@ export function RuntimeConfigPage() {
                 <SelectContent>
                   <SelectItem value="openvino">openvino</SelectItem>
                   <SelectItem value="pytorch">pytorch</SelectItem>
+                  <SelectItem value="pocket_tts">
+                    pocket_tts (small, fast, experimental)
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -143,6 +167,37 @@ export function RuntimeConfigPage() {
                   setDraft({ ...draft, OV_DYNAMIC_QUANT_GROUP_SIZE: Number(e.target.value) })
                 }
               />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                Model dtype (reloads model)
+              </label>
+              {draft.TTS_BACKEND === 'openvino' ? (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>bf16</span>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                    required
+                  </Badge>
+                </div>
+              ) : (
+                <Select
+                  value={draft.MODEL_DTYPE}
+                  onValueChange={(v) => setDraft({ ...draft, MODEL_DTYPE: v })}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="float32">
+                      fp32 (safer, usually required on many CPUs)
+                    </SelectItem>
+                    <SelectItem value="bfloat16">
+                      bf16 (faster if supported, may fail)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -187,6 +242,160 @@ export function RuntimeConfigPage() {
               />
             </div>
           </div>
+
+          {draft.TTS_BACKEND === 'pocket_tts' && (
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-4"
+            >
+              <p className="text-sm font-semibold">Pocket TTS generation tuning</p>
+
+              <p className="text-xs text-muted-foreground">
+                These settings affect how Pocket TTS generates audio. Changing them will
+                briefly reload the model. Use the Speak tab to compare quality after each
+                change.
+              </p>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Temperature
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min={0.1}
+                    max={2}
+                    value={draft.POCKET_TTS_TEMP ?? 1.2}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        POCKET_TTS_TEMP: Number(e.target.value),
+                      })
+                    }
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Controls expressiveness vs stability. Lower (0.3–0.5) = more consistent,
+                    safer but monotone. Higher (0.9–1.2) = more natural variation but risk of
+                    artifacts. Test: generate the same sentence with 0.4 vs 1.0 and compare.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    LSD decode steps
+                  </label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={draft.POCKET_TTS_LSD_DECODE_STEPS ?? 5}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        POCKET_TTS_LSD_DECODE_STEPS: Number(e.target.value),
+                      })
+                    }
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Number of refinement steps per audio frame. More steps = higher quality,
+                    slower. Pocket TTS is fast, so 2–5 is reasonable. Test: compare 1 vs 3 vs
+                    5 on a longer sentence for clarity and smoothness.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    EOS threshold
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min={-10}
+                    max={0}
+                    value={draft.POCKET_TTS_EOS_THRESHOLD ?? -4.0}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        POCKET_TTS_EOS_THRESHOLD: Number(e.target.value),
+                      })
+                    }
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Controls when generation decides it is done. Smaller (more negative) =
+                    longer audio, but may include tail noise. Less negative (e.g. -2.5) =
+                    earlier stop, risk of cutting off last word. Test: use -3.0 and -5.0;
+                    check for early cutoff vs trailing noise.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Noise clamp <span className="text-muted-foreground/60">(optional)</span>
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min={0.1}
+                    max={10}
+                    value={
+                      draft.POCKET_TTS_NOISE_CLAMP == null
+                        ? ''
+                        : draft.POCKET_TTS_NOISE_CLAMP
+                    }
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        POCKET_TTS_NOISE_CLAMP:
+                          e.target.value === ''
+                            ? null
+                            : Number(e.target.value),
+                      })
+                    }
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Caps the magnitude of injected noise. Leaving it empty is recommended.
+                    Lower values can reduce harsh artifacts but may make speech flatter. Use
+                    only if you hear obvious noise issues. Test: if default sounds noisy, try
+                    1.0–2.0 and compare.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Frames after EOS{' '}
+                    <span className="text-muted-foreground/60">(optional)</span>
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={
+                      draft.POCKET_TTS_FRAMES_AFTER_EOS == null
+                        ? ''
+                        : draft.POCKET_TTS_FRAMES_AFTER_EOS
+                    }
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        POCKET_TTS_FRAMES_AFTER_EOS:
+                          e.target.value === ''
+                            ? null
+                            : Number(e.target.value),
+                      })
+                    }
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Number of 80ms frames to keep after end-of-speech. Useful to reduce
+                    abrupt cut off. Leave empty to auto-calculate based on text length.
+                    Increase only if speech sounds cut too early. Test: if the last word is
+                    clipped, try 2–4.
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          )}
 
           <div className="flex justify-end">
             <Button onClick={apply} disabled={!dirty || applying}>

@@ -1,12 +1,24 @@
 name: qwen3-tts-openvino
 
+# Minimal setup:
+# - Create .env if you need to override defaults:
+#   HF_TOKEN="your token repo is gated"  # if needed
+#   REF_AUDIO_PATH=/path/to/reference.wav  # optional default voice
+#   REF_TEXT="exact transcript reference audio"  # optional override; Whisper drafts by default
+# - Then:
+#     docker compose up --build qwen3-tts
+#     docker compose run --rm --profile export export   (once, to generate IR)
+
+# All other knobs are optional and should be left at defaults.
+
+# Common model/volume settings (used by both qwen3-tts and export)
 x-model-environment: &model-environment
   MODEL_SIZE: ${MODEL_SIZE:-1.7B}
-  REF_TEXT: ${REF_TEXT:?Set REF_TEXT to the exact reference-audio transcript}
+  REF_TEXT: ${REF_TEXT:-}
+  REF_TEXT_AUTO: ${REF_TEXT_AUTO:-whisper}
   HF_TOKEN: ${HF_TOKEN:-}
   MODEL_REVISION: ${MODEL_REVISION:-}
-  # Must match between `export` and `qwen3-tts` — it selects which capacity-keyed IR file
-  # gets built and which one gets loaded. Unset uses the 64s default (unchanged behavior).
+  # Capacity baked into the IR at export time; changing it requires re-export.
   TTS_MAX_SPEECH_SECONDS: ${TTS_MAX_SPEECH_SECONDS:-}
 
 x-model-volumes: &model-volumes
@@ -15,7 +27,7 @@ x-model-volumes: &model-volumes
 
 services:
   qwen3-tts:
-    # Local builds: `docker compose up --build` creates the :local tag automatically.
+    # Local builds: docker compose up --build creates :local.
     # Production: set QWEN3_TTS_IMAGE to a pinned GHCR SHA or version tag.
     image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:local}
     build:
@@ -26,29 +38,41 @@ services:
       - "${QWEN3_TTS_PORT:-8318}:8318"
     environment:
       <<: *model-environment
+      # Core behavior
       TTS_BACKEND: ${TTS_BACKEND:-openvino}
       TZ: ${TZ:-America/Detroit}
-      LOW_RAM_MODE: ${LOW_RAM_MODE:-0}
-      # Serves the built frontend/ static export at / (see src/qwen3_tts/app.py). Set to 0 to
-      # run this container as an API-only service with no web UI.
-      FRONTEND_ENABLED: ${FRONTEND_ENABLED:-1}
-      # Must match the export-voice-design service below — selects which VoiceDesign IR tree
-      # this container swaps into for POST /voice_design (see src/qwen3_tts/voice_design.py).
+
+      # LOW_RAM_MODE=1 is recommended on typical 10-15 GiB hosts:
+      # enables idle unload + malloc tuning so the container can coexist
+      # with other services without hogging memory.
+      LOW_RAM_MODE: 1
+
+      # Serve the built web UI at /. Set to 0 to run API-only.
+      FRONTEND_ENABLED: 1
+
+      # VoiceDesign (used for POST /voice_design).
+      # These must match whatever was used during export.
       VOICE_DESIGN_MODEL_SIZE: ${VOICE_DESIGN_MODEL_SIZE:-1.7B}
       VOICE_DESIGN_MODEL_REPO: ${VOICE_DESIGN_MODEL_REPO:-}
       VOICE_DESIGN_MAX_SPEECH_SECONDS: ${VOICE_DESIGN_MAX_SPEECH_SECONDS:-}
     volumes:
       - ${MODEL_CACHE_PATH:-./data/model}:/root/.cache/huggingface/hub:rw
       - ${OV_DATA_PATH:-./data/ov}:/ov:rw
-      - ${REF_AUDIO_PATH:?Set REF_AUDIO_PATH to the reference WAV file}:/voice/reference.wav:ro
+      - ${REF_AUDIO_PATH:-./data/reference.wav}:/voice/reference.wav:ro
       - ${VOICE_LIBRARY_PATH:-./data/voices}:/voices:rw
       - ${SEGMENT_LIBRARY_PATH:-./data/segments}:/segments:rw
     mem_limit: ${TTS_MEMORY_LIMIT:-10G}
     memswap_limit: ${TTS_MEMORY_SWAP_LIMIT:-11G}
     stop_grace_period: 45s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8318/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
 
+  # Unified export service: exports both Base and VoiceDesign IR in one run.
   export:
-    # Same single image as the service above; only the command differs.
     image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:local}
     build:
       context: .
@@ -56,31 +80,15 @@ services:
     profiles: [export]
     environment:
       <<: *model-environment
+      # Tell export.py to run both targets (Base + VoiceDesign) in one shot.
+      EXPORT_TARGET: both
       OV_OUTPUT_ROOT: /ov
-    volumes: *model-volumes
-    # The FP32 export + INT4/INT8 quantization needs more headroom than serving; the 1.7B
-    # INT4 export can OOM at the 10G serving limit. Stop the serving container before exporting
-    # on the 15 GiB box — never run a 13G export and a 10G serve concurrently (OOM).
-    mem_limit: ${EXPORT_MEMORY_LIMIT:-13G}
-    memswap_limit: ${EXPORT_MEMORY_SWAP_LIMIT:-14G}
-
-  export-voice-design:
-    # Same image/command as `export`; EXPORT_TARGET selects the VoiceDesign checkpoint and
-    # its separate /ov/<size>-voicedesign/... output tree (see scripts/export.py, VOICE_DESIGN
-    # section of docs/dev/architecture/voice_design.md). Independent from the `export` service so a
-    # VoiceDesign export never overwrites a Base export for the same size.
-    image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:local}
-    build:
-      context: .
-    command: ["python", "scripts/export.py"]
-    profiles: [export]
-    environment:
-      HF_TOKEN: ${HF_TOKEN:-}
-      EXPORT_TARGET: voice_design
+      # VoiceDesign settings (must match qwen3-tts service)
       VOICE_DESIGN_MODEL_SIZE: ${VOICE_DESIGN_MODEL_SIZE:-1.7B}
       VOICE_DESIGN_MODEL_REPO: ${VOICE_DESIGN_MODEL_REPO:-}
       VOICE_DESIGN_MAX_SPEECH_SECONDS: ${VOICE_DESIGN_MAX_SPEECH_SECONDS:-}
-      OV_OUTPUT_ROOT: /ov
     volumes: *model-volumes
+    # FP32 export + INT4/INT8 quantization is memory-intensive.
+    # On a 15 GiB box, stop qwen3-tts before running this to avoid OOM.
     mem_limit: ${EXPORT_MEMORY_LIMIT:-13G}
     memswap_limit: ${EXPORT_MEMORY_SWAP_LIMIT:-14G}

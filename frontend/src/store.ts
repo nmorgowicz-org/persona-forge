@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type {
+  GenerateJobProgress,
   OmniVoiceAuditionProgressResult,
   OmniVoiceCandidate,
   OmniVoiceProgress,
@@ -81,12 +82,28 @@ interface StoreState {
   text: string
   voiceId: string | null
   voices: VoiceMeta[]
-  audioUrl: string | null
-  isGenerating: boolean
-  error: string | null
-  editingVoice: EditingVoice | null
+   speakAudioUrl: string | null
+   speakIsGenerating: boolean
+   speakError: string | null
+   speakJobId: string | null
+   speakJobProgress: GenerateJobProgress | null
+   speakLastSeed: number | null
+   speakAudioBlob: Blob | null
+   editingVoice: EditingVoice | null
   designEngine: DesignEngine
   activityStatus: ActivityStatus | null
+  runtimeTtsBackend: string | null
+  pocketTtsVoiceCloningAvailable: boolean | null
+  swapInProgress: boolean
+  healthBackend: string | null
+  reconfigInProgress: boolean
+  pocketTtsVoiceCloningMessage: string | null
+  setRuntimeConfig: (patch: {
+    runtimeTtsBackend?: string | null
+    pocketTtsVoiceCloningAvailable?: boolean | null
+    reconfigInProgress?: boolean
+    pocketTtsVoiceCloningMessage?: string | null
+  }) => void
   refTextValidation:
     | {
         severity: string | null
@@ -104,9 +121,13 @@ interface StoreState {
   setText: (text: string) => void
   setVoiceId: (voiceId: string | null) => void
   setVoices: (voices: VoiceMeta[]) => void
-  setAudioUrl: (url: string | null) => void
-  setGenerating: (isGenerating: boolean) => void
-  setError: (error: string | null) => void
+  setSpeakAudioUrl: (url: string | null) => void
+  setSpeakIsGenerating: (v: boolean) => void
+  setSpeakError: (v: string | null) => void
+  setSpeakJobId: (v: string | null) => void
+  setSpeakJobProgress: (v: GenerateJobProgress | null) => void
+  setSpeakLastSeed: (v: number | null) => void
+  setSpeakAudioBlob: (v: Blob | null) => void
   setEditingVoice: (voice: EditingVoice | null) => void
   setDesignEngine: (engine: DesignEngine) => void
   setActivityStatus: (v: ActivityStatus | null) => void
@@ -283,16 +304,26 @@ export const useAppStore = create<StoreState>((set) => ({
   loadingMessage: null,
   text: '',
   voiceId: null,
-  voices: [],
-  audioUrl: null,
-  isGenerating: false,
-  error: null,
-  editingVoice: null,
-  designEngine: 'qwen',
-   activityStatus: null,
-   refTextValidation: null,
+   voices: [],
+   speakAudioUrl: null,
+   speakIsGenerating: false,
+   speakError: null,
+   speakJobId: null,
+   speakJobProgress: null,
+   speakLastSeed: null,
+   speakAudioBlob: null,
+   editingVoice: null,
+    designEngine: 'qwen',
+    activityStatus: null,
+    runtimeTtsBackend: null,
+    pocketTtsVoiceCloningAvailable: null,
+    swapInProgress: false,
+    healthBackend: null,
+    reconfigInProgress: false,
+    pocketTtsVoiceCloningMessage: null,
+    refTextValidation: null,
 
-   setPage: (page) => set({ page }),
+    setPage: (page) => set({ page }),
   setTheme: (theme) => {
     applyTheme(theme)
     set({ theme })
@@ -303,13 +334,18 @@ export const useAppStore = create<StoreState>((set) => ({
   setText: (text) => set({ text }),
   setVoiceId: (voiceId) => set({ voiceId }),
   setVoices: (voices) => set({ voices }),
-  setAudioUrl: (audioUrl) => set({ audioUrl }),
-  setGenerating: (isGenerating) => set({ isGenerating }),
-  setError: (error) => set({ error }),
+  setSpeakAudioUrl: (url) => set({ speakAudioUrl: url }),
+  setSpeakIsGenerating: (v) => set({ speakIsGenerating: v }),
+  setSpeakError: (v) => set({ speakError: v }),
+  setSpeakJobId: (v) => set({ speakJobId: v }),
+  setSpeakJobProgress: (v) => set({ speakJobProgress: v }),
+  setSpeakLastSeed: (v) => set({ speakLastSeed: v }),
+  setSpeakAudioBlob: (v) => set({ speakAudioBlob: v }),
   setEditingVoice: (editingVoice) => set({ editingVoice }),
   setDesignEngine: (engine) => set({ designEngine: engine }),
-  setActivityStatus: (activityStatus) => set({ activityStatus }),
-  setRefTextValidation: (refTextValidation) => set({ refTextValidation }),
+   setActivityStatus: (activityStatus) => set({ activityStatus }),
+   setRuntimeConfig: (patch) => set(patch),
+   setRefTextValidation: (refTextValidation) => set({ refTextValidation }),
 
   // -- VoiceDesign --
   vdSelections: {
@@ -581,6 +617,33 @@ const PROGRESS_POLL_MS = 700
       }
       if (data.loading_message !== store.loadingMessage) {
         store.setLoadingMessage(data.loading_message || null)
+      }
+      if (data.swap_in_progress !== store.swapInProgress) {
+        useAppStore.setState({ swapInProgress: Boolean(data.swap_in_progress) })
+      }
+      if (data.backend !== store.healthBackend) {
+        useAppStore.setState({
+          healthBackend: data.backend || null,
+          runtimeTtsBackend: data.backend || null,
+        })
+      }
+      // Sync Pocket TTS voice-cloning status into the store whenever /health
+      // indicates the backend is pocket_tts — this is the single source of truth
+      // for PocketTTSWarningBanner and survives page navigations / refreshes.
+      if (data.backend === 'pocket_tts') {
+        const pt = (data as any).pocket_tts as
+          | { voice_cloning_available?: boolean; message?: string }
+          | null
+        if (pt) {
+          const available = Boolean(pt.voice_cloning_available)
+          const message = (pt.message || '').trim() || null
+          if (available !== store.pocketTtsVoiceCloningAvailable || message !== store.pocketTtsVoiceCloningMessage) {
+            useAppStore.setState({
+              pocketTtsVoiceCloningAvailable: available,
+              pocketTtsVoiceCloningMessage: message,
+            })
+          }
+        }
       }
       const rvt = data.ref_text_validation as
         | {

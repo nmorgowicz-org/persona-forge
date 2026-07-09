@@ -31,6 +31,8 @@ import {
 import { ActivityStatusBar } from '@/components/ui/ActivityStatusBar'
 import { Separator } from '@/components/ui/separator'
 import { SwapBanner } from '@/components/SwapBanner'
+import { HealthStatusBanner } from '@/components/HealthStatusBanner'
+import { getRuntimeConfig } from '@/lib/api'
 import { type Page, useAppStore } from '@/store'
 import { THEMES, type Theme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
@@ -57,6 +59,37 @@ const NAV_ITEMS: { page: Page; label: string; icon: typeof Mic2; description: st
   { page: 'integrations', label: 'Integrations', icon: Plug, description: 'API & apps' },
   { page: 'runtime', label: 'Runtime', icon: Settings2, description: 'Live server config' },
 ]
+
+function PocketTTSWarningBanner() {
+  const backend = useAppStore((s) => s.runtimeTtsBackend)
+  const cloningAvailable = useAppStore((s) => s.pocketTtsVoiceCloningAvailable)
+
+  const isPocketTTS = backend === 'pocket_tts'
+  const cloningOk = cloningAvailable === true
+  if (!isPocketTTS || cloningOk) return null
+
+  return (
+    <div className="flex flex-col border-b border-amber-400/50 bg-amber-500/10 px-4 py-2 text-amber-600">
+      <div className="flex items-center gap-2 text-[11px]">
+        <span className="inline-flex size-2 shrink-0 items-center justify-center rounded-full bg-amber-400 animate-pulse" />
+        <span className="flex-1">
+          Pocket TTS is active, but voice cloning is unavailable until you accept the license on Hugging Face:{' '}
+          <a
+            href="https://huggingface.co/kyutai/pocket-tts"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            huggingface.co/kyutai/pocket-tts
+          </a>
+        </span>
+      </div>
+      <div className="mt-1 text-[10px] opacity-70">
+        Use the account that matches your HF_TOKEN, then restart the container after accepting.
+      </div>
+    </div>
+  )
+}
 
 function ThemePaletteBar() {
   const theme = useAppStore((s) => s.theme)
@@ -192,7 +225,22 @@ function SidebarCollapseButton() {
 export function AppShell({ children }: { children: ReactNode }) {
   const page = useAppStore((s) => s.page)
   const setPage = useAppStore((s) => s.setPage)
+  const setRuntimeConfig = useAppStore((s) => s.setRuntimeConfig)
   const active = NAV_ITEMS.find((item) => item.page === page)
+
+  // One-time fetch to initialize Pocket TTS banner state at startup
+  useEffect(() => {
+    getRuntimeConfig()
+      .then((cfg) => {
+        setRuntimeConfig({
+          runtimeTtsBackend: cfg.live.TTS_BACKEND,
+          pocketTtsVoiceCloningAvailable: cfg.live.pocket_tts_voice_cloning_available,
+        })
+      })
+      .catch(() => {
+        // Non-critical; banner will stay hidden until RuntimeConfigPage updates the store
+      })
+  }, [setRuntimeConfig])
 
   return (
     <SidebarProvider>
@@ -263,6 +311,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="text-[11px] text-muted-foreground">{active?.description}</span>
           </div>
         </header>
+        <HealthStatusBanner />
+        <PocketTTSWarningBanner />
         <SwapBanner />
         <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
           <div className="w-full min-w-0 px-6 py-8">{children}</div>

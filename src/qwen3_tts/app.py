@@ -360,6 +360,12 @@ def voices_delete(voice_id: str):
     deleted = voice_library.delete_voice(voice_id)
     if not deleted:
         return jsonify({"error": "voice_id not found"}), 404
+    model.invalidate_voice_clone_prompt(voice_id)
+    try:
+        from qwen3_tts import pocket_tts_runtime
+        pocket_tts_runtime.invalidate_voice_state(voice_id)
+    except ImportError:
+        pass  # pocket-tts package not installed (non-pocket_tts deployment); nothing to invalidate.
     return jsonify({"deleted": voice_id})
 
 
