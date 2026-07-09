@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.23.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.22.3...qwen3-tts-openvino-v0.23.0) (2026-07-09)
+
+
+### Features
+
+* **docker:** unified export service with EXPORT_TARGET=both for Base + VoiceDesign; simplified compose.yml and .env.example ([30ac7be](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/30ac7befa4e849bc573a9e2b31eccb5cb6d4c4e3))
+* **frontend:** add Pocket TTS options and tuning controls to RuntimeConfigPage; PocketTTSWarningBanner for cloning unavailability ([30ac7be](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/30ac7befa4e849bc573a9e2b31eccb5cb6d4c4e3))
+* **runtime:** add MODEL_DTYPE control with backend-aware safety and bf16→float32 auto-correction on swap ([30ac7be](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/30ac7befa4e849bc573a9e2b31eccb5cb6d4c4e3))
+* **runtime:** add mount health checks (REF_AUDIO, /voices, /segments, HF cache, OV dir) and /health mount/pocket_tts reporting ([30ac7be](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/30ac7befa4e849bc573a9e2b31eccb5cb6d4c4e3))
+* **runtime:** integrate Pocket TTS as hotswappable backend with generation, voice states, and live knobs ([30ac7be](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/30ac7befa4e849bc573a9e2b31eccb5cb6d4c4e3))
+* **runtime:** register mounted REF_AUDIO as first-class "Mounted reference" voice; show "Mounted" badge in VoiceSelector ([30ac7be](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/30ac7befa4e849bc573a9e2b31eccb5cb6d4c4e3))
+* **runtime:** unify TTS_DIAG across backends and add watchdog with hard timeout; tighter pytorch+bf16 token cap; opt-in bf16→float32 auto-fallback ([30ac7be](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/30ac7befa4e849bc573a9e2b31eccb5cb6d4c4e3))
+
+
+### Bug Fixes
+
+* **runtime:** gate bf16→float32 auto-fallback and cache fallback voice_state ([30ac7be](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/30ac7befa4e849bc573a9e2b31eccb5cb6d4c4e3))
+* **runtime:** gracefully handle missing faster_whisper instead of crashing at import ([30ac7be](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/30ac7befa4e849bc573a9e2b31eccb5cb6d4c4e3))
+
+
+### Code Refactoring
+
+* **frontend:** centralize health, swap, runtime config, and speak-page state in Zustand store; refactor SpeakPage and useSwapStatus ([30ac7be](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/30ac7befa4e849bc573a9e2b31eccb5cb6d4c4e3))
+
+
+### Tests
+
+* add test_pocket_tts_runtime and test_run_generate for watchdog/watchdog-regression and Pocket TTS behaviors ([30ac7be](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/30ac7befa4e849bc573a9e2b31eccb5cb6d4c4e3))
+
+
+### Documentation
+
+* simplify ENV_REFERENCE and .env.example for new users; add pocket_tts_integration architecture doc ([30ac7be](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/30ac7befa4e849bc573a9e2b31eccb5cb6d4c4e3))
+
+
+### Miscellaneous Chores
+
+* **deps:** update node.js to cb4e8f7 ([#115](https://github.com/nmorgowicz-org/qwen3-tts-openvino/issues/115)) ([06fd976](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/06fd976002d7707a4716fb060d83981455cbed7c))
+
 ## [0.22.3](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.22.2...qwen3-tts-openvino-v0.22.3) (2026-07-07)
 
 
