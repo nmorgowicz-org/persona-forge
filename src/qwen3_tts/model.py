@@ -1529,12 +1529,16 @@ def _run_generate(
             )
             _watchdog_stop.set()
 
-            # Auto-fallback: if pytorch+bfloat16 is timing out, switch to float32
-            # to avoid repeatedly hanging the service with an unusable dtype.
-            if TTS_BACKEND == "pytorch" and TORCH_DTYPE_NAME == "bfloat16":
+            # Auto-fallback: if pytorch+bfloat16 is timing out and
+            # TTS_DIAG_BF16_AUTO_FALLBACK=1, switch to float32 to avoid repeated hangs.
+            # This is intentionally opt-in: it mutates global state and reloads the model
+            # from inside a generation request, which is fragile and can interfere with
+            # other runtimes (e.g. pocket_tts) if loaded.
+            _bf16_auto_fallback = os.environ.get("TTS_DIAG_BF16_AUTO_FALLBACK", "").lower() in ("1", "true")
+            if _bf16_auto_fallback and TTS_BACKEND == "pytorch" and TORCH_DTYPE_NAME == "bfloat16":
                 print(
-                    f"[diag] pytorch+bfloat16 timed out; switching to float32 "
-                    f"to avoid future hangs",
+                    f"[diag] pytorch+bfloat16 timed out; TTS_DIAG_BF16_AUTO_FALLBACK is set, "
+                    f"switching to float32 to avoid future hangs",
                     flush=True,
                 )
                 try:
@@ -1544,6 +1548,12 @@ def _run_generate(
                     _voice_clone_prompt_cache.clear()
                 except Exception as ex:
                     print(f"[diag] Failed to switch to float32 on timeout: {ex}", flush=True)
+            elif not _bf16_auto_fallback and TTS_BACKEND == "pytorch" and TORCH_DTYPE_NAME == "bfloat16":
+                print(
+                    f"[diag] pytorch+bfloat16 timed out; auto-fallback to float32 is disabled "
+                    f"(set TTS_DIAG_BF16_AUTO_FALLBACK=1 to enable).",
+                    flush=True,
+                )
 
             if job:
                 job.status = "failed"

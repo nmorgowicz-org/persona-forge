@@ -214,11 +214,16 @@ def get_pocket_tts_voice_state(
         if default_voice_state is not None:
             return default_voice_state
         # Last-ditch: try to rebuild from ref_audio_path.
+        # Cache result so we don't re-encode on every call.
         if ref_audio_path and os.path.isfile(ref_audio_path):
             print(
                 f"[pocket_tts] No default_voice_state; falling back to ref_audio_path={ref_audio_path!r}"
             )
-            return model.get_state_for_audio_prompt(ref_audio_path)
+            state = model.get_state_for_audio_prompt(ref_audio_path)
+            # Store as default for future requests to avoid redundant work.
+            global pocket_tts_default_voice_state
+            pocket_tts_default_voice_state = state
+            return state
         raise RuntimeError(
             "[pocket_tts] Voice cloning model not available (likely missing or gated HF token). "
             "Set an HF_TOKEN with access to kyutai/pocket-tts via Runtime → HF_TOKEN "
