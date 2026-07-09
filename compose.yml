@@ -1,10 +1,10 @@
 name: qwen3-tts-openvino
 
 # Minimal setup:
-# - Create .env with:
-#     REF_AUDIO_PATH=/path/to/reference.wav
-#     REF_TEXT="exact transcript of reference audio"
-#     HF_TOKEN="your token if repo is gated"
+# - Create .env if you need to override defaults:
+#   HF_TOKEN="your token repo is gated"  # if needed
+#   REF_AUDIO_PATH=/path/to/reference.wav  # optional default voice
+#   REF_TEXT="exact transcript reference audio"  # optional override; Whisper drafts by default
 # - Then:
 #     docker compose up --build qwen3-tts
 #     docker compose run --rm --profile export export   (once, to generate IR)
@@ -14,7 +14,8 @@ name: qwen3-tts-openvino
 # Common model/volume settings (used by both qwen3-tts and export)
 x-model-environment: &model-environment
   MODEL_SIZE: ${MODEL_SIZE:-1.7B}
-  REF_TEXT: ${REF_TEXT:?Set REF_TEXT to the exact reference-audio transcript}
+  REF_TEXT: ${REF_TEXT:-}
+  REF_TEXT_AUTO: ${REF_TEXT_AUTO:-whisper}
   HF_TOKEN: ${HF_TOKEN:-}
   MODEL_REVISION: ${MODEL_REVISION:-}
   # Capacity baked into the IR at export time; changing it requires re-export.
@@ -57,7 +58,7 @@ services:
     volumes:
       - ${MODEL_CACHE_PATH:-./data/model}:/root/.cache/huggingface/hub:rw
       - ${OV_DATA_PATH:-./data/ov}:/ov:rw
-      - ${REF_AUDIO_PATH:?Set REF_AUDIO_PATH to the reference WAV file}:/voice/reference.wav:ro
+      - ${REF_AUDIO_PATH:-./data/reference.wav}:/voice/reference.wav:ro
       - ${VOICE_LIBRARY_PATH:-./data/voices}:/voices:rw
       - ${SEGMENT_LIBRARY_PATH:-./data/segments}:/segments:rw
     mem_limit: ${TTS_MEMORY_LIMIT:-10G}

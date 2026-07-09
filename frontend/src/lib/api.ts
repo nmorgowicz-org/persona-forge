@@ -99,6 +99,18 @@ export interface VoiceMeta {
   selections?: unknown
   created_at: number
   audio_base64?: string
+  source?: string
+  sha256?: string
+  sample_text_source?: 'env' | 'whisper' | 'user' | 'none' | 'unset' | string
+  needs_review?: boolean
+  asr?: {
+    ok?: boolean
+    severity?: 'ok' | 'warn' | 'fail' | 'no_speech' | 'error' | string
+    match_score?: number | null
+    whisper_transcript?: string | null
+    avg_logprob?: number | null
+    suggestion?: string | null
+  }
 }
 
 export interface GenerateResult {

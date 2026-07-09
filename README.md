@@ -25,11 +25,11 @@ proxy (see SECURITY.md).
 Prerequisites:
 
 - Docker and Docker Compose
-- A reference WAV file and its exact transcript
+- Optional: a reference WAV file for a default cloned voice
 
 Steps:
 
-1. Copy `.env.example` to `.env`; set `REF_AUDIO_PATH`, `REF_TEXT`, and `HF_TOKEN` (if using gated models).
+1. Copy `.env.example` to `.env`; set `HF_TOKEN` only if your selected models are gated. Optional: set `REF_AUDIO_PATH` for a default voice; Whisper drafts its transcript automatically.
 2. `docker compose up --build qwen3-tts`
 3. Run once to generate model artifacts: `docker compose run --rm --profile export export`
 4. Open `http://localhost:8318`

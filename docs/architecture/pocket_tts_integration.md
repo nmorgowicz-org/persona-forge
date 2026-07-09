@@ -318,8 +318,8 @@ On a CPU host with enough RAM (dockermisc1 or equivalent):
 
 - Build the image with the pocket-tts dependency and confirm `python -c "from pocket_tts import
   TTSModel"` succeeds, and that torch remains CPU-only (no CUDA wheel pulled in).
-- With REF_AUDIO/REF_TEXT set, start with `TTS_BACKEND=pocket_tts`:
-  - Health reports `backend=pocket_tts`, `model_loaded=true`.
+- Optional REF_AUDIO set, no REF_TEXT, `TTS_BACKEND=pocket_tts`:
+  - Health reports `backend=pocket_tts`, `model_loaded=true`; REF_TEXT validation is absent or ignored.
   - `POST /generate` with small text produces reasonable, fast, 24 kHz audio.
 - Switch backends via the UI or `/runtime/config` in both directions (openvino <-> pocket_tts
   <-> pytorch) and confirm each unload/reload completes and generation works afterward.

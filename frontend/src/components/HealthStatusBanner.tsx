@@ -35,12 +35,12 @@ export function HealthStatusBanner() {
             <span className="inline-block truncate">
               {isFail
                 ? 'The reference text does not match the reference audio. This will degrade speech quality.'
-                : 'Reference text partially mismatched; speech quality may be affected.'}
+                : 'Reference text may need review; speech quality can be affected.'}
             </span>
           </div>
           {isFail && (
             <span className="shrink-0 text-[10px] opacity-70">
-              Fix REF_TEXT in your .env or Compose file.
+              Review it in Voice Library.
             </span>
           )}
         </div>

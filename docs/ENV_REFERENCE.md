@@ -14,12 +14,13 @@ Legend:
 
 ## Minimal required
 
-These are the only variables a normal user must set. All others have safe defaults.
+The app starts without a default reference voice. Normal users can add or generate voices in the UI.
 
 | Var | Required? | Description |
 |-----|-----------|-------------|
-| `REF_AUDIO_PATH` | **Yes** | Host path to the reference WAV. Mounted as `/voice/reference.wav` in the container. |
-| `REF_TEXT` | **Yes** | Exact transcript of REF_AUDIO. Must match what is spoken; startup fails if unset. |
+| `REF_AUDIO_PATH` | No | Optional host path to a default reference WAV. When present, it is mounted as `/voice/reference.wav`, promoted into the Voice Library, and analyzed with Whisper. |
+| `REF_TEXT` | No | Optional power-user transcript override for `REF_AUDIO_PATH`. Qwen backends use it if supplied; Pocket TTS ignores it. |
+| `REF_TEXT_AUTO` | No (`whisper`) | Transcript bootstrap when `REF_AUDIO_PATH` is set and `REF_TEXT` is omitted. Default `whisper` transcribes the audio and stores review metadata. Set `0` to disable. |
 | `HF_TOKEN` | Yes, if gated | Hugging Face access token for gated checkpoints. Never log or commit. |
 
 Recommended (simple knobs):
@@ -37,7 +38,7 @@ Recommended (simple knobs):
 
 | Var | Default | Description |
 |-----|---------|-------------|
-| `TTS_BACKEND` | `openvino` | `openvino` (default, accelerated) or `pytorch` (rollback, slower). |
+| `TTS_BACKEND` | `openvino` | `openvino` (default, accelerated), `pytorch` (rollback, slower), or `pocket_tts` (audio-only Pocket TTS backend). |
 | `DEVICE` | `cpu` | Torch/OpenVINO device; always `cpu` in current deployments. |
 | `TTS_MAX_SPEECH_SECONDS` | Preset-specific (e.g. 64) | Max speech duration per request. Baked into IR at export time; changing it requires re-export. |
 | `IDLE_UNLOAD_SECONDS` | `0` | Seconds after last request to unload model and free RAM; reload is transparent but adds latency. Set by LOW_RAM_MODE. |
@@ -128,7 +129,7 @@ Leave at defaults unless you know what you're doing.
 
 ## Pocket TTS backend
 
-Only used when TTS_BACKEND=pocket_tts.
+Only used when TTS_BACKEND=pocket_tts. Pocket TTS does not use or require REF_TEXT; it builds voice state from reference audio only.
 
 | Var | Default | Description |
 |-----|---------|-------------|

@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { AudioWaveform, Layers, Loader2, Mic2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
+import {
+  AlertTriangle,
+  AudioWaveform,
+  CheckCircle2,
+  Layers,
+  Loader2,
+  Mic2,
+  Pencil,
+  Plus,
+  Sparkles,
+  Trash2,
+} from 'lucide-react'
 import {
   deleteOmniVoiceSegment,
   deleteVoice,
@@ -21,6 +32,25 @@ const MOUNTED_REF_SOURCE = 'mounted_ref_audio' as const
 
 function isMountedRef(voice: VoiceMeta): boolean {
   return (voice as VoiceMeta & { source?: string }).source === MOUNTED_REF_SOURCE
+}
+
+function voiceNeedsReview(voice: VoiceMeta): boolean {
+  if (voice.sample_text_source === 'user' && !voice.needs_review) return false
+  const severity = voice.asr?.severity
+  return Boolean(
+    voice.needs_review ||
+      severity === 'warn' ||
+      severity === 'fail' ||
+      severity === 'no_speech' ||
+      severity === 'error',
+  )
+}
+
+function voiceTranscriptSource(voice: VoiceMeta): string {
+  if (voice.sample_text_source === 'whisper') return 'Whisper draft'
+  if (voice.sample_text_source === 'env') return 'Startup override'
+  if (voice.sample_text_source === 'user') return 'User edited'
+  return 'Transcript'
 }
 
 // Shape persisted by /omnivoice/save into voice.selections -- see app.py's omnivoice_save
@@ -170,6 +200,14 @@ function VoiceCard({
   const [draft, setDraft] = useState(voice.sample_text)
   const [saving, setSaving] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const needsReview = voiceNeedsReview(voice)
+  const transcriptSource = voiceTranscriptSource(voice)
+  const whisperTranscript = (voice.asr?.whisper_transcript || '').trim()
+  const reviewMessage =
+    voice.asr?.suggestion ||
+    (needsReview
+      ? 'Review the transcript before using Qwen backends.'
+      : 'Transcript is ready for Qwen backends.')
 
   useEffect(() => {
     if (editing) inputRef.current?.focus()
@@ -206,14 +244,35 @@ function VoiceCard({
               Mounted reference
             </span>
           )}
+          <span
+            className={
+              'inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[9px] font-medium uppercase tracking-wide ' +
+              (needsReview
+                ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300')
+            }
+            title={reviewMessage}
+          >
+            {needsReview ? <AlertTriangle className="size-3" /> : <CheckCircle2 className="size-3" />}
+            {needsReview ? 'Review text' : transcriptSource}
+          </span>
         </div>
         <p className="line-clamp-2 text-xs text-muted-foreground">{voice.description}</p>
       </div>
 
+      {needsReview && (
+        <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          {reviewMessage}
+        </div>
+      )}
+
       <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Reference text
-        </p>
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Reference text
+          </p>
+          <span className="shrink-0 text-[10px] text-muted-foreground">{transcriptSource}</span>
+        </div>
         {editing ? (
           <textarea
             ref={inputRef}
@@ -244,6 +303,11 @@ function VoiceCard({
           >
             {voice.sample_text || '(no reference text — click to add)'}
             {saving && ' (saving…)'}
+          </p>
+        )}
+        {whisperTranscript && whisperTranscript !== voice.sample_text && (
+          <p className="mt-2 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+            Whisper heard: "{whisperTranscript}"
           </p>
         )}
       </div>

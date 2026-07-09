@@ -136,7 +136,7 @@ Primary purpose: live-tweak certain container settings without a restart.
 Key behaviors:
 - GET /runtime/config to load RuntimeConfigState.
 - Live-adjustable:
-  - TTS_BACKEND (openvino / pytorch) — triggers model reload.
+  - TTS_BACKEND (openvino / pytorch / pocket_tts) — triggers model reload.
   - IDLE_UNLOAD_SECONDS
   - OV_DYNAMIC_QUANT_GROUP_SIZE — triggers model reload.
   - SILENCE_TRIM toggle

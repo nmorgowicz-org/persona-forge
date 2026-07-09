@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 # Apply thread and runtime envs before heavy imports
-from qwen3_tts.asr_check import validate_reference_text
+from qwen3_tts.asr_check import transcribe_reference_audio, validate_reference_text
 from qwen3_tts.config import REF_AUDIO_PATH, apply_preset_env
 from qwen3_tts.openvino.runtime_config import apply_thread_env, resolve_inference_threads
 from qwen3_tts.presets import get_voice_design_preset, seconds_for_capacity
@@ -41,17 +41,11 @@ from qwen_tts import Qwen3TTSModel
 MODEL_ID = resolve_model_repo()
 MODEL_REVISION = os.getenv("MODEL_REVISION") or None
 DEVICE = os.getenv("DEVICE", "cpu")
-REF_AUDIO = os.getenv("REF_AUDIO", REF_AUDIO_PATH)
-ref_text_val = os.getenv("REF_TEXT")
-if not ref_text_val:
-    raise RuntimeError(
-        "REF_TEXT environment variable is not set. "
-        "It must be the exact transcript of the reference audio (REF_AUDIO_PATH). "
-        "Without a correct REF_TEXT, voice cloning quality will be severely degraded."
-    )
-REF_TEXT = ref_text_val
-
 TTS_BACKEND = (os.getenv("TTS_BACKEND", "pytorch") or "pytorch").strip().lower()
+REF_AUDIO = (os.getenv("REF_AUDIO") or REF_AUDIO_PATH).strip() or None
+REF_TEXT = (os.getenv("REF_TEXT") or "").strip()
+REF_TEXT_SOURCE = "env" if REF_TEXT else "unset"
+REF_TEXT_AUTO = (os.getenv("REF_TEXT_AUTO", "whisper") or "whisper").strip().lower()
 IDLE_UNLOAD_SECONDS = int(os.environ.get("IDLE_UNLOAD_SECONDS", "0") or "0")
 OV_MODEL_DIR = os.getenv("OV_MODEL_DIR")
 OPENVINO_RELEASE_TORCH = os.getenv("OPENVINO_RELEASE_TORCH", "0").strip() == "1"
@@ -298,10 +292,43 @@ def _validate_ov_metadata(model_dir: str, model_repo: str, revision: str | None)
     )
 
 
+def _resolve_reference_text(profile: ModelProfile) -> tuple[str | None, str, dict | None]:
+    """Return effective reference text, source, and ASR metadata for startup.
+
+    Qwen backends need a transcript when a default reference audio is used.
+    Normal deployments can omit REF_TEXT and let Whisper provide a draft. Pocket
+    TTS ignores transcript text, so its loader skips this helper.
+    """
+    if profile.ref_text:
+        if profile.ref_audio and os.path.isfile(profile.ref_audio):
+            return profile.ref_text, "env", validate_reference_text(profile.ref_audio, profile.ref_text)
+        return profile.ref_text, "env", None
+
+    if not profile.ref_audio or not os.path.isfile(profile.ref_audio):
+        return None, "none", None
+
+    if REF_TEXT_AUTO not in ("1", "true", "yes", "whisper", "auto"):
+        return None, "none", {
+            "ok": False,
+            "severity": "warn",
+            "match_score": None,
+            "whisper_transcript": "",
+            "suggestion": "Reference audio is mounted but REF_TEXT_AUTO is disabled.",
+        }
+
+    result = transcribe_reference_audio(profile.ref_audio)
+    transcript = (result.get("whisper_transcript") or "").strip()
+    if transcript:
+        print("[REF-TEXT-AUTO] Using Whisper transcript for mounted reference audio.", flush=True)
+        return transcript, "whisper", result
+    return None, "none", result
+
+
 def load_model(profile: ModelProfile | None = None):
     global model, voice_clone_prompt, ov_runtime, active_profile
     global MODEL_ID, OV_MODEL_DIR, OPENVINO_MAIN_STATEFUL_MODEL, OPENVINO_PREDICTOR_STATEFUL_MODEL
     global _service_started, _model_loaded, _ref_text_validation_result
+    global REF_TEXT, REF_TEXT_SOURCE
     global TORCH_DTYPE, TORCH_DTYPE_NAME, OPENVINO_LOW_CPU_MEM_USAGE
 
     profile = profile or BASE_PROFILE
@@ -415,6 +442,7 @@ def load_model(profile: ModelProfile | None = None):
         _service_started = True
         _model_loaded = True
 
+        REF_TEXT_SOURCE = "unused"
         _ref_text_validation_result = {
             "severity": "info",
             "suggestion": "Pocket TTS ignores REF_TEXT; clones from REF_AUDIO only.",
@@ -459,70 +487,75 @@ def load_model(profile: ModelProfile | None = None):
         model = wrapped
         voice_clone_prompt = None
         if profile.build_voice_clone_prompt:
-            print("[app_worker] Model loaded. Creating voice clone prompt...", flush=True)
-            voice_clone_prompt = model.create_voice_clone_prompt(
-                ref_audio=profile.ref_audio,
-                ref_text=profile.ref_text,
-                x_vector_only_mode=False,
-            )
+            effective_ref_text, ref_text_source, ref_text_result = _resolve_reference_text(profile)
+            profile.ref_text = effective_ref_text
+            REF_TEXT = effective_ref_text or ""
+            REF_TEXT_SOURCE = ref_text_source
+            _ref_text_validation_result = ref_text_result
 
-            # Opt-in, deterministic artifact for controlled Transformers 4/5 comparisons.
-            # The dump contains codec token IDs and package versions, never reference audio/text.
-            _prompt_dump_dir = os.getenv("TTS_PROMPT_DUMP_DIR", "").strip()
-            if not _prompt_dump_dir and os.path.exists("/tmp/tts_prompt_dump"):
-                _prompt_dump_dir = "/tmp/tts-prompt-dump"
-            if _prompt_dump_dir:
-                from qwen3_tts.prompt_diagnostics import (
-                    dump_reference_prompt,
-                    dump_talker_parameter_manifest,
+            if profile.ref_audio and effective_ref_text:
+                print(
+                    f"[app_worker] Model loaded. building voice clone prompt "
+                    f"(ref_text_source={ref_text_source})...",
+                    flush=True,
+                )
+                voice_clone_prompt = model.create_voice_clone_prompt(
+                    ref_audio=profile.ref_audio,
+                    ref_text=effective_ref_text,
+                    x_vector_only_mode=False,
                 )
 
-                manifest_path = dump_reference_prompt(voice_clone_prompt, _prompt_dump_dir)
-                print(f"[prompt_diag] reference prompt saved: {manifest_path}", flush=True)
-                parameter_path = dump_talker_parameter_manifest(model.model.talker, _prompt_dump_dir)
-                print(f"[prompt_diag] talker parameters saved: {parameter_path}", flush=True)
+                # Opt-in, deterministic artifact for controlled Transformers 4/5 comparisons.
+                # The dump contains codec token IDs and package versions, never reference audio/text.
+                _prompt_dump_dir = os.getenv("TTS_PROMPT_DUMP_DIR", "").strip()
+                if not _prompt_dump_dir and os.path.exists("/tmp/tts_prompt_dump"):
+                    _prompt_dump_dir = "/tmp/tts-prompt-dump"
+                if _prompt_dump_dir:
+                    from qwen3_tts.prompt_diagnostics import (
+                        dump_reference_prompt,
+                        dump_talker_parameter_manifest,
+                    )
+
+                    manifest_path = dump_reference_prompt(voice_clone_prompt, _prompt_dump_dir)
+                    print(f"[prompt_diag] reference prompt saved: {manifest_path}", flush=True)
+                    parameter_path = dump_talker_parameter_manifest(model.model.talker, _prompt_dump_dir)
+                    print(f"[prompt_diag] talker parameters saved: {parameter_path}", flush=True)
+            else:
+                print(
+                    "[app_worker] Model loaded without default reference voice. "
+                    "Add/generate a voice or mount REF_AUDIO before generation.",
+                    flush=True,
+                )
+
+            if _ref_text_validation_result:
+                sev = _ref_text_validation_result["severity"]
+                if sev in ("fail", "no_speech", "error"):
+                    print(
+                        f"[REF-TEXT-VALID] STATUS=fail score={_ref_text_validation_result.get('match_score')}",
+                        flush=True,
+                        file=sys.stderr,
+                    )
+                    print(f"  REF_AUDIO: {profile.ref_audio}", flush=True, file=sys.stderr)
+                    print(f"  REF_TEXT: {effective_ref_text!r}", flush=True, file=sys.stderr)
+                    print(f"  Whisper: {_ref_text_validation_result.get('whisper_transcript')!r}", flush=True, file=sys.stderr)
+                    print(f"  SUGGESTION: {_ref_text_validation_result.get('suggestion')}", flush=True, file=sys.stderr)
+                    if os.getenv("REF_TEXT_FAIL_ON_MISMATCH", "").strip() == "1" and ref_text_source == "env":
+                        raise RuntimeError(
+                            "REF_TEXT/REF_AUDIO mismatch (REF_TEXT_FAIL_ON_MISMATCH=1): "
+                            f"{_ref_text_validation_result.get('suggestion')}"
+                        )
+                elif sev == "warn":
+                    print(
+                        f"[REF-TEXT-VALID] STATUS=warn score={_ref_text_validation_result.get('match_score')}",
+                        flush=True,
+                        file=sys.stderr,
+                    )
+                    print(f"  REF_AUDIO: {profile.ref_audio}", flush=True, file=sys.stderr)
+                    print(f"  REF_TEXT: {effective_ref_text!r}", flush=True, file=sys.stderr)
+                    print(f"  Whisper: {_ref_text_validation_result.get('whisper_transcript')!r}", flush=True, file=sys.stderr)
+                    print(f"  SUGGESTION: {_ref_text_validation_result.get('suggestion')}", flush=True, file=sys.stderr)
         else:
             print("[app_worker] Model loaded. (profile skips voice clone prompt)", flush=True)
-
-        # Validate REF_TEXT against REF_AUDIO at startup. Pocket TTS skips this entirely (see
-        # the pocket_tts branch above) since it ignores REF_TEXT and clones from audio only.
-        if profile.build_voice_clone_prompt and profile.ref_audio and profile.ref_text:
-            _ref_text_validation_result = validate_reference_text(
-                profile.ref_audio, profile.ref_text
-            )
-            sev = _ref_text_validation_result["severity"]
-            if sev in ("fail", "no_speech"):
-                print(
-                    f"[REF-TEXT-VALID] STATUS=fail  score={_ref_text_validation_result.get('match_score')}",
-                    flush=True,
-                    file=sys.stderr,
-                )
-                print(f"  REF_AUDIO: {profile.ref_audio}", flush=True, file=sys.stderr)
-                print(f"  REF_TEXT:  {profile.ref_text!r}", flush=True, file=sys.stderr)
-                print(f"  Whisper:   {_ref_text_validation_result.get('whisper_transcript')!r}", flush=True, file=sys.stderr)
-                print(f"  SUGGESTION: {_ref_text_validation_result.get('suggestion')}", flush=True, file=sys.stderr)
-                print(
-                    "  ACTION: Fix REF_TEXT in your .env or Compose file to match what's spoken in the audio, then restart.",
-                    flush=True,
-                    file=sys.stderr,
-                )
-                if os.getenv("REF_TEXT_FAIL_ON_MISMATCH", "").strip() == "1":
-                    raise RuntimeError(
-                        "REF_TEXT/REF_AUDIO mismatch (REF_TEXT_FAIL_ON_MISMATCH=1): "
-                        f"{_ref_text_validation_result.get('suggestion')}"
-                    )
-            elif sev == "warn":
-                print(
-                    f"[REF-TEXT-VALID] STATUS=warn  score={_ref_text_validation_result.get('match_score')}",
-                    flush=True,
-                    file=sys.stderr,
-                )
-                print(f"  REF_AUDIO: {profile.ref_audio}", flush=True, file=sys.stderr)
-                print(f"  REF_TEXT:  {profile.ref_text!r}", flush=True, file=sys.stderr)
-                print(f"  Whisper:   {_ref_text_validation_result.get('whisper_transcript')!r}", flush=True, file=sys.stderr)
-                print(f"  SUGGESTION: {_ref_text_validation_result.get('suggestion')}", flush=True, file=sys.stderr)
-        else:
-            _ref_text_validation_result = None
 
         if TTS_BACKEND == "openvino":
             # Milestone 4: install the OpenVINO talker runtime by swapping the two inner
@@ -594,6 +627,8 @@ def load_model(profile: ModelProfile | None = None):
             vid = voice_library.ensure_mounted_ref_voice(
                 profile.ref_audio,
                 sample_text=REF_TEXT,
+                sample_text_source=REF_TEXT_SOURCE,
+                asr=_ref_text_validation_result,
             )
             if vid:
                 print(f"[app_worker] Registered mounted reference as voice {vid}", flush=True)
@@ -708,6 +743,7 @@ def health_state() -> dict[str, Any]:
         "torch_dtype": TORCH_DTYPE_NAME,
         "low_cpu_mem_usage": OPENVINO_LOW_CPU_MEM_USAGE,
         "ref_audio": REF_AUDIO,
+        "ref_text_source": REF_TEXT_SOURCE,
         "ref_text_validation": _ref_text_validation_result,
         "mount": _health_mount_status(),
         "timestamp": time.time(),
@@ -1230,6 +1266,11 @@ def get_voice_clone_prompt(voice_id: str | None = None):
     with Base loaded).
     """
     if voice_id is None:
+        if voice_clone_prompt is None:
+            raise RuntimeError(
+                "No default reference voice is configured. "
+                "Add or generate a voice, select a saved voice_id, or mount REF_AUDIO."
+            )
         return voice_clone_prompt
     if voice_id in _voice_clone_prompt_cache:
         return _voice_clone_prompt_cache[voice_id]

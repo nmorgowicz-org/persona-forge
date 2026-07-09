@@ -112,6 +112,8 @@ def update_voice(voice_id: str, *, sample_text: str) -> dict[str, Any] | None:
         return None
     meta.pop("wav_path", None)
     meta["sample_text"] = sample_text
+    meta["sample_text_source"] = "user"
+    meta["needs_review"] = False
     voice_dir = _voice_dir(voice_id)
     (voice_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta
@@ -156,6 +158,8 @@ def list_voices() -> list[dict[str, Any]]:
 def ensure_mounted_ref_voice(
     ref_audio_path: str,
     sample_text: str | None = None,
+    sample_text_source: str = "env",
+    asr: dict[str, Any] | None = None,
 ) -> str | None:
     """Register the mounted REF_AUDIO as a first-class 'Mounted reference' voice.
 
@@ -181,6 +185,13 @@ def ensure_mounted_ref_voice(
             except (OSError, json.JSONDecodeError):
                 existing = None
         if existing and existing.get("source") == "mounted_ref_audio" and existing.get("sha256") == file_hash:
+            updated = dict(existing)
+            updated["sample_text"] = (sample_text or "").rstrip()
+            updated["sample_text_source"] = sample_text_source
+            if asr is not None:
+                updated["asr"] = asr
+                updated["needs_review"] = asr.get("severity") not in (None, "ok")
+            meta_path.write_text(json.dumps(updated, indent=2), encoding="utf-8")
             return MOUNTED_VOICE_ID
         voice_dir.mkdir(parents=True, exist_ok=True)
         (voice_dir / "reference.wav").write_bytes(data)
@@ -188,11 +199,15 @@ def ensure_mounted_ref_voice(
             "voice_id": MOUNTED_VOICE_ID,
             "description": "Mounted reference (Default)",
             "sample_text": (sample_text or "").rstrip(),
+            "sample_text_source": sample_text_source,
             "language": "en",
             "source": "mounted_ref_audio",
             "sha256": file_hash,
             "created_at": time.time(),
         }
+        if asr is not None:
+            meta["asr"] = asr
+            meta["needs_review"] = asr.get("severity") not in (None, "ok")
         (voice_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
         return MOUNTED_VOICE_ID
     except Exception:
