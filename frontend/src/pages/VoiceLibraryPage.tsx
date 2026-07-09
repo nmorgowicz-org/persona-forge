@@ -13,15 +13,15 @@ import {
 } from '@/lib/api'
 import { hasChipSelections, type ChipSelections } from '@/lib/voiceDesignChips'
 import { AudioPlayer } from '@/components/AudioPlayer'
+import { Button } from '@/components/ui/button'
+import { createStitchClipFromSegment } from '@/lib/stitchClips'
+import { useAppStore, type StitchPlanClip } from '@/store'
 
 const MOUNTED_REF_SOURCE = 'mounted_ref_audio' as const
 
 function isMountedRef(voice: VoiceMeta): boolean {
   return (voice as VoiceMeta & { source?: string }).source === MOUNTED_REF_SOURCE
 }
-import { Button } from '@/components/ui/button'
-import { createStitchClipFromSegment } from '@/lib/stitchClips'
-import { useAppStore, type StitchPlanClip } from '@/store'
 
 // Shape persisted by /omnivoice/save into voice.selections -- see app.py's omnivoice_save
 // handler. stitch_plan is the raw (snake_case) editor payload, kept verbatim so a voice

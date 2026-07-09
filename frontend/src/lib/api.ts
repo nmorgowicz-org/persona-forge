@@ -624,7 +624,6 @@ export interface RuntimeConfigState {
     POCKET_TTS_EOS_THRESHOLD: number | undefined
     POCKET_TTS_NOISE_CLAMP: number | null | undefined
     POCKET_TTS_FRAMES_AFTER_EOS: number | null | undefined
-    HF_TOKEN: string | undefined
     pocket_tts_voice_cloning_available: boolean | undefined
     pocket_tts_voice_cloning_message: string | undefined
   }

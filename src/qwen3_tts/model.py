@@ -774,8 +774,8 @@ def health_state() -> dict[str, Any]:
         if not voice_cloning_available:
             base["pocket_tts"]["message"] = (
                 "Pocket TTS voice cloning model not available. "
-                "Set an HF_TOKEN with access to kyutai/pocket-tts via Runtime → HF_TOKEN "
-                "or in your startup config."
+                "Set an HF_TOKEN with access to kyutai/pocket-tts via HF_TOKEN_FILE "
+                "or your startup config."
             )
 
     def _json_safe(obj):
@@ -811,13 +811,11 @@ _POCKET_TTS_RUNTIME_KEYS = {
     "POCKET_TTS_NOISE_CLAMP",
     "POCKET_TTS_FRAMES_AFTER_EOS",
 }
-_HF_TOKEN_KEY = {"HF_TOKEN"}
 LIVE_RUNTIME_KEYS = (
     _HOT_ENV_KEYS
     | _RELOAD_ENV_KEYS
     | _GLOBAL_KEYS
     | _POCKET_TTS_RUNTIME_KEYS
-    | _HF_TOKEN_KEY
 )
 
 _reconfig_in_progress = False
@@ -957,35 +955,6 @@ def apply_runtime_config(updates: dict[str, Any]) -> dict[str, Any]:
         # Pocket TTS knobs: reload only if current backend is pocket_tts.
         if ptts_changed and TTS_BACKEND == "pocket_tts":
             needs_reload = True
-
-        # HF_TOKEN: persist, set env, login, reload Pocket TTS if active.
-        if "HF_TOKEN" in updates:
-            token = str(updates["HF_TOKEN"]).strip() or None
-            token_file = "/app/.hf_token"
-            if token:
-                os.environ["HF_TOKEN"] = token
-                try:
-                    Path(token_file).write_text(token, encoding="utf-8")
-                except Exception:
-                    pass  # best-effort persistence
-                try:
-                    from huggingface_hub import login
-                    login(token=token, add_to_git_credential=False)
-                    print("[app_worker] HF_TOKEN updated and logged in to Hugging Face Hub.", flush=True)
-                except Exception as exc:
-                    print(f"[app_worker] HF_TOKEN updated but login failed: {exc}", flush=True)
-            else:
-                os.environ.pop("HF_TOKEN", None)
-                try:
-                    if os.path.exists(token_file):
-                        os.remove(token_file)
-                except Exception:
-                    pass
-                print("[app_worker] HF_TOKEN cleared.", flush=True)
-
-            # If Pocket TTS is active, reloading may help re-download cloning weights.
-            if TTS_BACKEND == "pocket_tts":
-                needs_reload = True
 
         if needs_reload:
             print(
@@ -1508,6 +1477,8 @@ def _run_generate(
     if TTS_BACKEND == "pytorch" and TORCH_DTYPE_NAME == "bfloat16":
         _diag_timeout = min(_diag_timeout, int(os.getenv("TTS_DIAG_GEN_TIMEOUT_BF16", "120")))
     _use_timeout = _tts_diag
+    _watchdog_stop = None
+    _watchdog = None
 
     if _use_timeout:
         _watchdog_stop = threading.Event()
@@ -1623,7 +1594,8 @@ def _run_generate(
                     pass
             _tb.print_exc()
             raise
-    _watchdog_stop.set()
+    if _watchdog_stop is not None:
+        _watchdog_stop.set()
     if _watchdog:
         _watchdog.join(timeout=3)
     t2 = time.monotonic()
