@@ -288,3 +288,47 @@ Future considerations:
   - Speak page presets.
   - OpenAI-style endpoint demo voices.
 - That work is out of scope for now; this doc exists to keep prosody and integration behavior consistent.
+
+7. Design Constraints (from the original integration plan)
+
+These are the invariants the Pocket TTS integration was built to preserve. They are not
+Pocket TTS-specific — they're the repo's existing hotswap/serving architecture — but the
+integration must not violate them:
+
+- One image, one process, one model resident at a time. No co-loading Pocket TTS alongside
+  Qwen3TTSModel/OpenVINO.
+- Gunicorn stays `-w 1 -k gthread --threads 4`, never `--preload`, never more than one worker.
+- All inference stays serialized through the single-worker `ThreadPoolExecutor(max_workers=1)`.
+- `/generate`, `/v1/audio/speech`, `/generate/async`, `/health` keep their existing request/response
+  contracts — Pocket TTS is a backend selection behind those interfaces, not a new API shape.
+- `TTS_BACKEND=pytorch` and `TTS_BACKEND=openvino` rollback paths remain fully functional.
+- No CUDA; torch stays CPU-only. Verified empirically: installing `pocket-tts==2.1.0` on top of
+  the pinned CPU torch wheel (`torch==2.12.1`, `--index-url https://download.pytorch.org/whl/cpu`)
+  does not upgrade or replace torch, since pocket-tts only declares `torch>=2.5.0` and pip's
+  resolver leaves an already-satisfied floor constraint alone.
+- Voice-state caching (`pocket_tts_voice_state_cache` in pocket_tts_runtime.py) must be
+  invalidated when a cached voice is deleted from the voice library — `app.py`'s
+  `DELETE /voices/<voice_id>` calls `pocket_tts_runtime.invalidate_voice_state(voice_id)`
+  (alongside the equivalent `model.invalidate_voice_clone_prompt` for the Qwen3 cache) so a
+  deleted voice can't keep generating from a stale cached state.
+
+8. Manual Validation Checklist
+
+On a CPU host with enough RAM (dockermisc1 or equivalent):
+
+- Build the image with the pocket-tts dependency and confirm `python -c "from pocket_tts import
+  TTSModel"` succeeds, and that torch remains CPU-only (no CUDA wheel pulled in).
+- With REF_AUDIO/REF_TEXT set, start with `TTS_BACKEND=pocket_tts`:
+  - Health reports `backend=pocket_tts`, `model_loaded=true`.
+  - `POST /generate` with small text produces reasonable, fast, 24 kHz audio.
+- Switch backends via the UI or `/runtime/config` in both directions (openvino <-> pocket_tts
+  <-> pytorch) and confirm each unload/reload completes and generation works afterward.
+- Generate with a specific `voice_id` and confirm it clones that voice library entry, not the
+  default/mounted reference.
+- Delete a voice that was just used for generation, then confirm a follow-up request for that
+  same `voice_id` fails cleanly (no stale cached voice_state) instead of silently succeeding.
+- Confirm Pocket TTS RSS is materially lower than the 1.7B OpenVINO/PyTorch backends.
+- Confirm `/generate/stream` returns 503 under `TTS_BACKEND=pocket_tts` (streaming is explicitly
+  out of scope for this integration — see "What it is NOT" above).
+- Confirm no regressions in the openvino/pytorch backends, and that VoiceDesign/OmniVoice
+  (which manage their own model swap) still work.

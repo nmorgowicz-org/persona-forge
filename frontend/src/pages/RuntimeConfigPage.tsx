@@ -268,7 +268,7 @@ export function RuntimeConfigPage() {
                     step="0.1"
                     min={0.1}
                     max={2}
-                    value={draft.POCKET_TTS_TEMP ?? 0.7}
+                    value={draft.POCKET_TTS_TEMP ?? 1.2}
                     onChange={(e) =>
                       setDraft({
                         ...draft,
@@ -291,7 +291,7 @@ export function RuntimeConfigPage() {
                     type="number"
                     min={1}
                     max={10}
-                    value={draft.POCKET_TTS_LSD_DECODE_STEPS ?? 1}
+                    value={draft.POCKET_TTS_LSD_DECODE_STEPS ?? 5}
                     onChange={(e) =>
                       setDraft({
                         ...draft,

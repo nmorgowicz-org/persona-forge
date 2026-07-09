@@ -10,6 +10,7 @@ Public API:
     - build_default_voice_state(...)
     - get_pocket_tts_voice_state(...)
     - generate_pocket_tts(...)
+    - invalidate_voice_state(...)
     - unload_pocket_tts()
 """
 
@@ -81,25 +82,29 @@ def load_pocket_tts_model(
     print(
         f"[pocket_tts] Loading model — language={language!r}, "
         f"temp={temp}, lsd_decode_steps={lsd_decode_steps}, "
-        f"eos_threshold={eos_threshold}, quantize={quantize}"
+        f"eos_threshold={eos_threshold}, quantize={quantize}, noise_clamp={noise_clamp}"
     )
 
+    load_kwargs: dict[str, Any] = dict(
+        language=language,
+        temp=temp,
+        lsd_decode_steps=lsd_decode_steps,
+        eos_threshold=eos_threshold,
+        quantize=quantize,
+    )
+    # noise_clamp defaults to TTSModel's own DEFAULT_NOISE_CLAMP when omitted; only override
+    # it when the caller explicitly set one.
+    if noise_clamp is not None:
+        load_kwargs["noise_clamp"] = noise_clamp
+
     try:
-        pocket_tts_model = TTSModel.load_model(
-            language=language,
-            temp=temp,
-            lsd_decode_steps=lsd_decode_steps,
-            eos_threshold=eos_threshold,
-            quantize=quantize,
-        )
+        pocket_tts_model = TTSModel.load_model(**load_kwargs)
     except Exception as exc:
         pocket_tts_model = None
         raise RuntimeError(f"[pocket_tts] Failed to load TTSModel: {exc}") from exc
 
     # Store advanced knobs for use during generation.
     global pocket_tts_frames_after_eos
-    if noise_clamp is not None:
-        print(f"[pocket_tts] noise_clamp set to {noise_clamp} (noted; runtime wiring TBD)")
     if frames_after_eos is not None:
         pocket_tts_frames_after_eos = max(0, frames_after_eos)
         print(f"[pocket_tts] frames_after_eos set to {pocket_tts_frames_after_eos}")
@@ -244,6 +249,17 @@ def get_pocket_tts_voice_state(
     state = model.get_state_for_audio_prompt(wav_path)
     pocket_tts_voice_state_cache[voice_id] = state
     return state
+
+
+def invalidate_voice_state(voice_id: str) -> None:
+    """Drop a cached voice_state so the next request rebuilds it from the voice library.
+
+    Must be called whenever a voice's reference audio changes or is deleted on disk (see
+    voice_library.delete_voice) — the cache in get_pocket_tts_voice_state is keyed by
+    voice_id only and never re-checks the library once built, so a deleted voice would
+    otherwise stay generatable from the stale cached state.
+    """
+    pocket_tts_voice_state_cache.pop(voice_id, None)
 
 
 # ---------------------------------------------------------------------------

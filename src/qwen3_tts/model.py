@@ -484,14 +484,9 @@ def load_model(profile: ModelProfile | None = None):
         else:
             print("[app_worker] Model loaded. (profile skips voice clone prompt)", flush=True)
 
-        # Validate REF_TEXT against REF_AUDIO at startup for all backends except Pocket TTS
-        # (Pocket TTS ignores REF_TEXT; clones from audio only).
-        if (
-            TTS_BACKEND != "pocket_tts"
-            and profile.build_voice_clone_prompt
-            and profile.ref_audio
-            and profile.ref_text
-        ):
+        # Validate REF_TEXT against REF_AUDIO at startup. Pocket TTS skips this entirely (see
+        # the pocket_tts branch above) since it ignores REF_TEXT and clones from audio only.
+        if profile.build_voice_clone_prompt and profile.ref_audio and profile.ref_text:
             _ref_text_validation_result = validate_reference_text(
                 profile.ref_audio, profile.ref_text
             )
