@@ -10,6 +10,7 @@ Layout: <VOICE_LIBRARY_DIR>/<voice_id>/reference.wav + <VOICE_LIBRARY_DIR>/<voic
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -19,8 +20,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-from src.qwen3_tts.audio_style import analyze_reference
-from src.qwen3_tts.reference_analysis import calculate_quality_score
+import numpy as np
+import soundfile as sf
+
+from qwen3_tts.audio_style import analyze_reference, apply_style_preset, detect_pause_intervals
+from qwen3_tts.reference_analysis import calculate_quality_score
 
 
 # Fixed container-side mount point, same pattern as qwen3_tts.config.REF_AUDIO_PATH.
@@ -45,6 +49,9 @@ def _voice_dir(voice_id: str) -> Path:
 
 
 def _has_clipping_failure(quality_warnings: list[str], metrics: dict[str, Any]) -> bool:
+    true_peak_dbtp = metrics.get("true_peak_dbtp")
+    if isinstance(true_peak_dbtp, (int, float)) and true_peak_dbtp > -0.5:
+        return True
     peak_dbfs = metrics.get("peak_dbfs")
     if isinstance(peak_dbfs, (int, float)) and peak_dbfs > -0.5:
         return True
@@ -109,6 +116,7 @@ def save_voice(
         "metrics": metrics,
         "quality_score": quality_score,
         "quality_warnings": quality_warnings,
+        "needs_review": bool(quality_warnings),
     }
     (voice_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta
@@ -298,6 +306,7 @@ def ensure_mounted_ref_voice(
             "metrics": metrics,
             "quality_score": quality_score,
             "quality_warnings": quality_warnings,
+            "needs_review": bool(quality_warnings),
         }
         if asr is not None:
             meta["asr"] = asr
@@ -306,3 +315,101 @@ def ensure_mounted_ref_voice(
         return MOUNTED_VOICE_ID
     except Exception:
         return None
+
+
+def _rewrite_reference_wav(voice_id: str, wav: np.ndarray, sr: int) -> dict[str, Any] | None:
+    """Overwrite reference.wav in place and refresh derived metrics/quality gate.
+
+    Shared by any operation that edits the stored reference audio itself (normalize, trim),
+    as opposed to update_voice(), which only patches metadata.
+    """
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    voice_dir = _voice_dir(voice_id)
+    wav_path = voice_dir / "reference.wav"
+    sf.write(wav_path, wav, sr, format="WAV", subtype="PCM_16")
+    quality_score, quality_warnings, metrics = calculate_quality_score(wav_path, transcript=meta.get("sample_text"))
+    meta.pop("wav_path", None)
+    meta["metrics"] = metrics
+    meta["quality_score"] = quality_score
+    meta["quality_warnings"] = quality_warnings
+    meta["needs_review"] = bool(quality_warnings)
+    (voice_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    return meta
+
+
+def normalize_reference(voice_id: str) -> dict[str, Any] | None:
+    """Re-normalize a saved reference clip's loudness/peak in place (-20 LUFS, -1dBTP ceiling).
+
+    Reuses the "Neutral" style preset pipeline so a voice's stored reference — not just its
+    generated output — gets the same normalization other clips get at generation time.
+    """
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    wav_bytes = get_voice_wav_bytes(voice_id)
+    if wav_bytes is None:
+        return None
+    wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+    wav = np.asarray(wav, dtype=np.float32).ravel()
+    normalized, sr, _ = apply_style_preset(wav, sr, "Neutral")
+    return _rewrite_reference_wav(voice_id, normalized, sr)
+
+
+def trim_reference_silence(voice_id: str, padding_ms: float = 80.0) -> dict[str, Any] | None:
+    """Trim leading/trailing silence from a saved reference clip, keeping a small padding.
+
+    Uses the same top_db threshold as detect_pause_intervals() elsewhere in the pipeline, so
+    what gets trimmed here matches what the UI already marks as a pause.
+    """
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    wav_bytes = get_voice_wav_bytes(voice_id)
+    if wav_bytes is None:
+        return None
+    wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+    wav = np.asarray(wav, dtype=np.float32).ravel()
+    gaps = detect_pause_intervals(wav, sr)
+    if not gaps:
+        return meta
+    
+    speech_start_sec = gaps[0][1]
+    speech_end_sec = gaps[-1][0]
+    
+    if speech_start_sec >= speech_end_sec:
+        return meta
+        
+    pad = int(sr * padding_ms / 1000.0)
+    start = max(0, int(speech_start_sec * sr) - pad)
+    end = min(wav.size, int(speech_end_sec * sr) + pad)
+    if start <= 0 and end >= wav.size:
+        return meta
+    return _rewrite_reference_wav(voice_id, wav[start:end], sr)
+
+
+def set_default_variant(voice_id: str) -> dict[str, Any] | None:
+    """Mark voice_id as the default variant within its family, unmarking any siblings.
+
+    Voices without a family_id are treated as a single-member family of themselves.
+    """
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    family_id = meta.get("family_id")
+    siblings = get_voices_by_family(family_id) if family_id else [meta]
+    for sibling in siblings:
+        sibling_id = sibling["voice_id"]
+        is_default = sibling_id == voice_id
+        if sibling.get("is_default", False) == is_default:
+            continue
+        sibling_meta = get_voice(sibling_id)
+        if sibling_meta is None:
+            continue
+        sibling_meta.pop("wav_path", None)
+        sibling_meta["is_default"] = is_default
+        (_voice_dir(sibling_id) / "meta.json").write_text(
+            json.dumps(sibling_meta, indent=2), encoding="utf-8"
+        )
+    return get_voice(voice_id)
