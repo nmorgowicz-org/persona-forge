@@ -350,7 +350,7 @@ export const useAppStore = create<StoreState>((set) => ({
   setDesignEngine: (engine) => set({ designEngine: engine }),
   setTargetFamilyId: (targetFamilyId) => set({ targetFamilyId }),
   setActivityStatus: (activityStatus) => set({ activityStatus }),
-  setGlossaryOpen: (v) => set({ glossaryOpen: v }),
+  setGlossaryOpen: (v: boolean) => set({ glossaryOpen: v }),
   glossaryOpen: false,
   setRuntimeConfig: (patch) => set(patch),
 

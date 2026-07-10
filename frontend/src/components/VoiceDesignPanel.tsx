@@ -605,9 +605,10 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
         )}
 
         <AnimatePresence>
-          {previewAudioUrl && previewId && (
-            <motion.div
-              data-testid="voice-design-result"
+           {previewAudioUrl && previewId && (
+             console.log('[VoiceDesignPanel] Result Block:', { savedVoiceId, isSaving, previewId, previewAudioUrl }),
+             <motion.div
+               data-testid="voice-design-result"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 8 }}
@@ -675,7 +676,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
                   >
                     {isSaving
                       ? 'Saving…'
-                      : `Save ${deliveryVariant.name} variant`}
+                      : 'Save to library'}
                   </Button>
                 </div>
               )}

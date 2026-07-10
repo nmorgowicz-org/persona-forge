@@ -2217,10 +2217,11 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
        )}
 
       {/* Stitched preview */}
-      <AnimatePresence>
-        {stitchedUrl && (
-          <motion.div
-            data-testid="omnivoice-result"
+       <AnimatePresence>
+         {stitchedUrl && (
+           console.log('[OmniVoicePanel] Result Block:', { savedVoiceId, isSaving, stitchedUrl, stitchedBlob }),
+           <motion.div
+             data-testid="omnivoice-result"
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}
@@ -2256,9 +2257,9 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
                   disabled={isSaving}
                   className="self-start rounded-full px-3 py-1 text-[11px]"
                 >
-                  {isSaving
-                    ? 'Saving…'
-                    : `Save ${deliveryVariant.name} variant`}
+                    {isSaving
+                      ? 'Saving…'
+                      : 'Save to library'}
                 </Button>
               </div>
             )}
