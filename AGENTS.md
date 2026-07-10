@@ -110,7 +110,18 @@ Persistent host paths on `dockermisc1`:
 
 GHCR pulls on `dockermisc1` need a `read:packages` token. Pass via `docker login --password-stdin` only; never echo or embed in Compose.
 
+## Development Iteration (dockermisc1)
+
+To iterate on code and see changes live on the development VM:
+1. Commit and push changes to the working branch.
+2. Sync the codebase: `ssh dockermisc1 "cd ~/projects/qwen3-tts-openvino && git pull origin <branch>"`
+3. Build frontend (if applicable): `ssh dockermisc1 "cd ~/projects/qwen3-tts-openvino/frontend && npm run build"`
+4. Restart the container: `ssh dockermisc1 "docker compose -f ~/docker/docker-compose.yml -f ~/docker/docker-compose.qwen3-tts-dev.yml restart qwen3-tts"`
+
+The dev compose file (`~/docker/docker-compose.qwen3-tts-dev.yml`) enables bind-mounts for source code synchronization.
+
 ## Required validation
+
 
 Repository-only changes:
 ```bash
