@@ -113,6 +113,13 @@ GHCR pulls on `dockermisc1` need a `read:packages` token. Pass via `docker login
 ## Development Iteration (dockermisc1)
 
 To iterate on code and see changes live on the development VM:
+
+### Rapid Debugging (Preferred for UI/small fixes)
+1. Sync specific files: `scp frontend/src/components/AppShell.tsx nick@dockermisc1:~/projects/qwen3-tts-openvino/frontend/src/components/AppShell.tsx`
+2. Build frontend: `ssh dockermisc1 "cd ~/projects/qwen3-tts-openvino/frontend && npm run build"`
+3. Restart the container: `ssh dockermisc1 "docker compose -f ~/docker/docker-compose.yml -f ~/docker/docker-compose.qwen3-tts-dev.yml restart qwen3-tts"`
+
+### Permanent Changes
 1. Commit and push changes to the working branch.
 2. Sync the codebase: `ssh dockermisc1 "cd ~/projects/qwen3-tts-openvino && git pull origin <branch>"`
 3. Build frontend (if applicable): `ssh dockermisc1 "cd ~/projects/qwen3-tts-openvino/frontend && npm run build"`
