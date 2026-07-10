@@ -200,14 +200,19 @@ function ThemePaletteButton() {
 
 function SidebarVersionDisplay() {
   const [version, setVersion] = useState<string | null>(null)
+  const [error, setError] = useState<boolean>(false)
 
   useEffect(() => {
     getHealth()
       .then((state) => setVersion(state.version as string | null))
-      .catch((err) => console.error('Failed to fetch version:', err))
+      .catch((err) => {
+        console.error('Failed to fetch version:', err)
+        setError(true)
+      })
   }, [])
 
-  if (!version) return null
+  if (error) return <div className="text-center text-[11px] text-red-500">vError</div>
+  if (!version) return <div className="text-center text-[11px] text-muted-foreground">vLoading...</div>
 
   return (
     <div className="text-center text-[11px] font-bold text-primary">
