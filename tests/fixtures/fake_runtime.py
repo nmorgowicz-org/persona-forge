@@ -370,6 +370,10 @@ class FakeModelRuntime:
                 "expected_total_frames": 60,
                 "progress_pct": 100.0 if job.status == "completed" else 25.0,
                 "elapsed_seconds": round(elapsed, 1),
+                "audio_seconds_generated": round(job.frames_generated / 12, 2),
+                "live_rtf_estimate": round(elapsed / max(1, job.frames_generated / 12), 2)
+                if job.frames_generated > 0
+                else None,
                 "eta_seconds": None,
                 "message": job.message,
             }

@@ -392,19 +392,19 @@ export function SpeakPage() {
               )}
             </div>
             <p className="text-[11px] text-muted-foreground">
-               {speakJobProgress.status === 'cancelled'
-                 ? 'Cancelling…'
-                 : formatEta(speakJobProgress.eta_seconds)}
-               {speakJobProgress.audio_seconds_generated > 0 && (
-                 <span className="ml-2 text-[10px] text-muted-foreground/70">
-                   · {speakJobProgress.audio_seconds_generated.toFixed(1)}s generated
-                 </span>
-               )}
-               {speakJobProgress.live_rtf_estimate !== null && speakJobProgress.live_rtf_estimate !== undefined && (
-                 <span className="ml-2 text-[10px] text-primary/80 font-mono">
-                   · RTF: {speakJobProgress.live_rtf_estimate.toFixed(2)}x
-                 </span>
-               )}
+              {speakJobProgress.status === 'cancelled'
+                ? 'Cancelling…'
+                : formatEta(speakJobProgress.eta_seconds)}
+              {typeof speakJobProgress.audio_seconds_generated === 'number' && speakJobProgress.audio_seconds_generated > 0 && (
+                <span className="ml-2 text-[10px] text-muted-foreground/70">
+                  · {speakJobProgress.audio_seconds_generated.toFixed(1)}s generated
+                </span>
+              )}
+              {typeof speakJobProgress.live_rtf_estimate === 'number' && (
+                <span className="ml-2 text-[10px] text-primary/80 font-mono">
+                  · RTF: {speakJobProgress.live_rtf_estimate.toFixed(2)}x
+                </span>
+              )}
                {speakJobProgress.elapsed_seconds > 0 && (
                  <span className="ml-2 text-[10px] text-muted-foreground/70">
                    · {Math.round(speakJobProgress.elapsed_seconds)}s elapsed

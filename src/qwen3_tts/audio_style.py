@@ -16,6 +16,34 @@ from . import audio_post
 
 logger = logging.getLogger(__name__)
 
+
+def _finite_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if np.isfinite(numeric) else None
+
+
+def _normalize_lufs(wav: np.ndarray, sr: int, target_lufs: float = -20.0) -> np.ndarray:
+    """Scale audio toward integrated LUFS. No-op when loudness cannot be measured."""
+    x = np.asarray(wav, dtype=np.float32).ravel()
+    if x.size == 0:
+        return x
+    try:
+        meter = pyln.Meter(sr)
+        current_lufs = _finite_float(meter.integrated_loudness(x))
+    except Exception as e:
+        logger.warning(f"LUFS normalization failed: {e}")
+        return x
+    if current_lufs is None:
+        return x
+    gain_db = float(target_lufs) - current_lufs
+    return (x * (10.0 ** (gain_db / 20.0))).astype(np.float32)
+
+
 def analyze_reference(wav: np.ndarray, sr: int, transcript: str | None = None) -> dict[str, Any]:
     """
     Perform reference analysis on a voice sample.
@@ -41,7 +69,7 @@ def analyze_reference(wav: np.ndarray, sr: int, transcript: str | None = None) -
     # 2. Loudness (LUFS)
     try:
         meter = pyln.Meter(sr)
-        lufs_integrated = meter.integrated_loudness(wav)
+        lufs_integrated = _finite_float(meter.integrated_loudness(wav))
     except Exception as e:
         logger.warning(f"Loudness analysis failed: {e}")
         lufs_integrated = None
@@ -102,7 +130,7 @@ def analyze_reference(wav: np.ndarray, sr: int, transcript: str | None = None) -
     return {
         "duration_seconds": float(duration),
         "sample_rate": int(sr),
-        "lufs_integrated": float(lufs_integrated) if lufs_integrated is not None else None,
+        "lufs_integrated": lufs_integrated,
         "peak_dbfs": float(peak_dbfs),
         "speech_rate_proxy": float(speech_rate),
         "pause_count": int(pause_count),
@@ -241,17 +269,17 @@ def apply_style_preset(wav: np.ndarray, sr: int, preset: str, options: dict | No
     # Each entry is (name, function, kwargs)
     pipelines = {
         "Neutral": [
-            ("normalize_rms", audio_post.normalize_rms, {"target_dbfs": -20.0}),
+            ("normalize_lufs", _normalize_lufs, {"target_lufs": -20.0}),
             ("limit_peak", audio_post.limit_peak, {"ceiling_db": -1.0}),
         ],
         "Clean": [
             ("compress", audio_post.compress, {"threshold_db": -24.0, "ratio": 2.5}),
-            ("normalize_rms", audio_post.normalize_rms, {"target_dbfs": -18.0}),
+            ("normalize_lufs", _normalize_lufs, {"target_lufs": -20.0}),
             ("limit_peak", audio_post.limit_peak, {"ceiling_db": -1.0}),
         ],
         "Broadcast": [
             ("compress", audio_post.compress, {"threshold_db": -20.0, "ratio": 3.0}),
-            ("normalize_rms", audio_post.normalize_rms, {"target_dbfs": -16.0}),
+            ("normalize_lufs", _normalize_lufs, {"target_lufs": -20.0}),
             ("presence_boost", _apply_presence_boost, {}),
             ("limit_peak", audio_post.limit_peak, {"ceiling_db": -1.0}),
         ],
@@ -259,21 +287,21 @@ def apply_style_preset(wav: np.ndarray, sr: int, preset: str, options: dict | No
             ("time_stretch", _apply_time_stretch, {"factor": 1.05}),
             ("shape_pauses", _shape_pauses, {"factor": 1.10}),
             ("warm_eq", _apply_warm_eq, {}),
-            ("normalize_rms", audio_post.normalize_rms, {"target_dbfs": -20.0}),
+            ("normalize_lufs", _normalize_lufs, {"target_lufs": -23.0}),
             ("limit_peak", audio_post.limit_peak, {"ceiling_db": -1.0}),
         ],
         "Energetic": [
             ("time_stretch", _apply_time_stretch, {"factor": 0.95}),
             ("shape_pauses", _shape_pauses, {"factor": 0.90}),
             ("compress", audio_post.compress, {"threshold_db": -20.0, "ratio": 2.0}),
-            ("normalize_rms", audio_post.normalize_rms, {"target_dbfs": -18.0}),
+            ("normalize_lufs", _normalize_lufs, {"target_lufs": -20.0}),
             ("limit_peak", audio_post.limit_peak, {"ceiling_db": -1.0}),
         ],
         "Storyteller": [
             ("warm_eq", _apply_warm_eq, {}),
             ("compress", audio_post.compress, {"threshold_db": -24.0, "ratio": 2.0}),
             ("shape_pauses", _shape_pauses, {"factor": 1.10}),
-            ("normalize_rms", audio_post.normalize_rms, {"target_dbfs": -18.0}),
+            ("normalize_lufs", _normalize_lufs, {"target_lufs": -23.0}),
             ("limit_peak", audio_post.limit_peak, {"ceiling_db": -1.0}),
         ],
     }

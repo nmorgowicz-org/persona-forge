@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { cn } from '@/lib/utils'
-import { InfoIcon } from '../OmniVoice/InfoIcon'
+import { InfoIcon } from '@/components/InfoIcon'
 
 interface AudioStatsStripProps {
   metrics: {

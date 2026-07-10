@@ -24,7 +24,7 @@ import {
   type VoiceMeta,
 } from '@/lib/api'
 import { hasChipSelections, type ChipSelections } from '@/lib/voiceDesignChips'
-import { AudioPlayer } from '@/components/AudioPlayer'
+import { MiniAudioDeck } from '@/components/audio/MiniAudioDeck'
 import { Button } from '@/components/ui/button'
 import { createStitchClipFromSegment } from '@/lib/stitchClips'
 import { useAppStore, type StitchPlanClip } from '@/store'
@@ -144,7 +144,7 @@ function ClipPlayerUrl({ segmentId, className }: { segmentId: string; className?
 
   if (!src) return null
 
-  return <AudioPlayer src={src} blob={blob} className={className} autoPlay={false} />
+  return <MiniAudioDeck src={src} blob={blob} className={className} autoPlay={false} />
 }
 
 // Auto-loads (but does not auto-play) a saved voice's reference audio without a
@@ -192,7 +192,7 @@ function VoiceAudioAutoPlayer({ voiceId }: { voiceId: string }) {
   if (state === 'error') {
     return <p className="text-xs text-muted-foreground">Couldn't load audio.</p>
   }
-  return <AudioPlayer src={state.url} blob={state.blob} autoPlay={false} />
+  return <MiniAudioDeck src={state.url} blob={state.blob} autoPlay={false} />
 }
 
 function VoiceCard({
