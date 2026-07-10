@@ -133,6 +133,8 @@ interface StoreState {
   targetFamilyId: string | null
   setTargetFamilyId: (familyId: string | null) => void
   setActivityStatus: (v: ActivityStatus | null) => void
+  glossaryOpen: boolean
+  setGlossaryOpen: (v: boolean) => void
 
   // ---- VoiceDesign (Qwen) ----
   vdSelections: ChipSelections

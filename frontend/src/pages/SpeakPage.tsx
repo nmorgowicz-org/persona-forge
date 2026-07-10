@@ -23,6 +23,7 @@ import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
 import { VoiceSelector } from '@/components/VoiceSelector'
 import { AudioPlayer } from '@/components/AudioPlayer'
+import { InfoIcon } from '@/components/InfoIcon'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -34,7 +35,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { AdvancedDrawer } from '@/components/audio/AdvancedDrawer'
 
-import { Info } from 'lucide-react'
+
 
 
 // Helper for reduced motion
@@ -536,16 +537,7 @@ export function SpeakPage() {
                   )}
                 </div>
 
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 gap-1 px-2 text-[10px]"
-                  onClick={() => setShowAdvanced(!showAdvanced)}
-                >
-                  <Settings2 className="size-3" />
-                  {showAdvanced ? 'Hide Advanced' : 'Advanced'}
-                </Button>
+
               </div>
             )}
 
@@ -572,7 +564,7 @@ export function SpeakPage() {
                 </div>
                 <div className="flex justify-between items-center gap-2">
                   <span className="opacity-60">Backend:</span>
-                  <span className="capitalize">{runtimeTtsBackend.replace('_', ' ')}</span>
+                   <span className="capitalize">{runtimeTtsBackend?.replace('_', ' ') ?? 'unknown'}</span>
                   <InfoIcon text="Accelerated by Intel OpenVINO for faster CPU inference." className="size-3 shrink-0 text-muted-foreground" />
                 </div>
                 <div className="flex justify-between items-center gap-2">
