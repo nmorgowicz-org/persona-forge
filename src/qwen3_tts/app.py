@@ -311,6 +311,8 @@ def voice_design_save(preview_id: str):
             variant_name=data.get("variant_name"),
             variant_kind=data.get("variant_kind"),
         )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"error": f"VoiceDesign save error: {exc}"}), 500
     return jsonify(

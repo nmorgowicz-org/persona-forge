@@ -1418,7 +1418,7 @@ def _run_generate(
         wav = _trim_silence(audio_tensor.cpu().numpy().ravel(), sr)
         if job and job.style_preset:
             wav, sr, metadata = apply_style_preset(wav, sr, job.style_preset)
-            job.metadata.setdefault('applied_steps', []).append(metadata.get('applied_steps', 'style_preset'))
+            job.metadata.setdefault('applied_steps', []).extend(metadata.get('applied_steps', 'style_preset'))
         duration = len(wav) / sr
         elapsed = time.monotonic() - t0
         print(f"[generate] done   elapsed={elapsed:.1f}s  audio={duration:.1f}s  RTF={elapsed/duration:.2f}x", flush=True)
@@ -1439,9 +1439,6 @@ def _run_generate(
     if voice_prompt is None:
         raise RuntimeError("Model not loaded")
 
-    voice_prompt = get_voice_clone_prompt(effective_voice_id)
-    if voice_prompt is None:
-        raise RuntimeError("Model not loaded")
 
     import traceback as _tb
     t0 = time.monotonic()
@@ -1461,6 +1458,12 @@ def _run_generate(
         job_id = job.job_id
 
     # Store metadata in job for response headers/progress
+    # Base's generate_voice_clone has no tone/instruct parameter — VoiceDesign is the only
+    # checkpoint that consumes free-text instruct. No-op here rather than erroring, so a
+    # frontend that always sends `instruct` doesn't need to special-case Base.
+    if instruct:
+        print(f"[generate] instruct field ignored on Base checkpoint: {instruct!r}", flush=True)
+
     if job:
         from qwen3_tts import voice_library
         meta = voice_library.get_voice(effective_voice_id)
@@ -1469,10 +1472,6 @@ def _run_generate(
             job.variant_kind = meta.get("variant_kind")
             job.style_preset = style_preset
             job.postprocess_applied = (postprocess is not None)
-        # Base's generate_voice_clone has no tone/instruct parameter — VoiceDesign is the only
-        # checkpoint that consumes free-text instruct. No-op here rather than erroring, so a
-        # frontend that always sends `instruct` doesn't need to special-case Base.
-        print(f"[generate] instruct field ignored on Base checkpoint: {instruct!r}", flush=True)
 
     # Inject progress logits processor for cancel + live ETA.
     eos_id = _get_eos_token_id(model)
