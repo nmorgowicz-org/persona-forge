@@ -204,7 +204,10 @@ function SidebarVersionDisplay() {
 
   useEffect(() => {
     getHealth()
-      .then((state) => setVersion(state.version as string | null))
+      .then((state) => {
+        console.log('Health check response:', state)
+        setVersion(state.version as string | null)
+      })
       .catch((err) => {
         console.error('Failed to fetch version:', err)
         setError(true)
