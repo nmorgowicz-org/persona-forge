@@ -206,7 +206,9 @@ function SidebarVersionDisplay() {
     getHealth()
       .then((state) => {
         console.log('Health check response:', state)
-        setVersion(state.version as string | null)
+        const s = state as any
+        const v = s.version || s.openvino?.version
+        setVersion(v as string | null)
       })
       .catch((err) => {
         console.error('Failed to fetch version:', err)
@@ -325,10 +327,10 @@ export function AppShell({ children }: { children: ReactNode }) {
            <div className="hidden group-data-[collapsible=icon]:flex justify-center">
              <ThemePaletteButton />
            </div>
-            <SidebarCollapseButton />
-            <div className="text-center text-xs text-white">DEBUG: VERSION COMPONENT HERE</div>
-            <SidebarVersionDisplay />
-          </SidebarFooter>
+             <SidebarCollapseButton />
+             <SidebarVersionDisplay />
+           </SidebarFooter>
+
 
 
       </Sidebar>

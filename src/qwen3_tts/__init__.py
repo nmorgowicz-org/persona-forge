@@ -1,5 +1,7 @@
 """qwen3-tts OpenVINO CPU TTS service package."""
 
+__version__ = "0.23.0"
+
 import logging
 import warnings
 

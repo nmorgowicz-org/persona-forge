@@ -1,6 +1,7 @@
 import gc
 import json
 import os
+import subprocess
 import threading
 import time
 import uuid
@@ -8,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+from qwen3_tts import __version__
 
 # Apply thread and runtime envs before heavy imports
 from qwen3_tts.asr_check import transcribe_reference_audio, validate_reference_text
@@ -61,7 +63,7 @@ TORCH_DTYPE, TORCH_DTYPE_NAME, OPENVINO_LOW_CPU_MEM_USAGE = resolve_torch_load_c
 torch.set_num_threads(resolve_inference_threads())
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class ModelProfile:
     """A checkpoint + IR pairing that ``load_model`` can install.
 
@@ -716,6 +718,24 @@ def _health_mount_status() -> dict[str, Any]:
     }
 
 
+def get_app_version() -> str:
+    """Return the current app version. 
+    Prefers APP_VERSION env var (release), then git SHA (dev), then __version__.
+    """
+    release_version = os.getenv("APP_VERSION")
+    if release_version:
+        return release_version
+    try:
+        sha = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            encoding="utf-8",
+        ).strip()
+        return f"{__version__}+dev.{sha}"
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return __version__
+
+
 def health_state() -> dict[str, Any]:
     """Return JSON-serializable model and backend readiness state."""
     if _startup_failed:
@@ -729,6 +749,7 @@ def health_state() -> dict[str, Any]:
     idle_unload_seconds = IDLE_UNLOAD_SECONDS if IDLE_UNLOAD_SECONDS > 0 else None
     base = {
         "status": "ok",
+        "version": get_app_version(),
         "model_loaded": model is not None,
         # Distinct from model_loaded: stays true forever after the first successful load,
         # even through later idle-unload cycles. Lets callers tell "never loaded yet, please

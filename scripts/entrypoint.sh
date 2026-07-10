@@ -22,4 +22,8 @@ if [ "${LOW_RAM_MODE:-0}" = "1" ]; then
     echo "[entrypoint] LOW_RAM_MODE: idle unload after ${IDLE_UNLOAD_SECONDS}s"
 fi
 
+if [ -d "/app/.git" ]; then
+    git config --global --add safe.directory /app || true
+fi
+
 exec "$@"
