@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 
 interface WaveformProps {
   peaks: number[]
-  progress?: number // 0..1, how much of the waveform is \"played\"
+  progress?: number // 0..1, how much of the waveform is "played"
   isActive?: boolean // pulses idle bars gently while audio is loading/generating
   duration?: number | null // total audio duration in seconds, drives time axis
   className?: string
@@ -51,6 +51,7 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
     const pct = x / rect.width
     onClick(Math.min(1, Math.max(0, pct)))
   }
+
 
   // Compute time ticks: simple, evenly spaced, 3-7 labels.
   // For short clips (< 5s) use small step (0.2–1s) and decimal labels.
@@ -106,7 +107,6 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
         className,
       )}
       onClick={handleWaveformClick}
-    .
     >
       {/* center track line, like a DAW lane */}
       <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-border/60" />

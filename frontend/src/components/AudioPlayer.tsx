@@ -124,7 +124,7 @@ export function AudioPlayer({ src, blob, className, autoPlay = true }: AudioPlay
           peaks={peaks ?? Array(64).fill(0.15)}
           progress={progress}
           duration={duration}
-          className=\"flex-1\"
+           className="flex-1"
           onClick={handleSeek}
         />
 

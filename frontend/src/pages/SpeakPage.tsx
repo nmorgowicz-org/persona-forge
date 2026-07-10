@@ -474,20 +474,46 @@ export function SpeakPage() {
                       <TooltipTrigger asChild>
                         <Info className="size-3 shrink-0 text-muted-foreground" />
                       </TooltipTrigger>
-                      <TooltipContent side=\"top\">\n                        Unique backend identifier for this generation job.\n                      </TooltipContent>
+                      <TooltipContent side="top">
+                        Unique backend identifier for this generation job.
+                      </TooltipContent>
                     </Tooltip>
                   </div>
                   <div className="flex justify-between items-center gap-2">
-                    <span className=\"opacity-60\">Backend:</span>
+                    <span className="opacity-60">Backend:</span>
                     <span>OpenVINO</span>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Info className=\"size-3 shrink-0 text-muted-foreground\" />
+                        <Info className="size-3 shrink-0 text-muted-foreground" />
                       </TooltipTrigger>
-                      <TooltipContent side=\"top\">\n                        Accelerated by Intel OpenVINO for faster CPU inference.\n                      </TooltipContent>
+                      <TooltipContent side="top">
+                        Accelerated by Intel OpenVINO for faster CPU inference.
+                      </TooltipContent>
                     </Tooltip>
                   </div>
-                  <div className=\"flex justify-between items-center gap-2\">\n                    <span className=\"opacity-60\">Seed:</span>\n                    <span>{speakLastSeed}</span>\n                    <Tooltip>\n                      <TooltipTrigger asChild>\n                        <Info className=\"size-3 shrink-0 text-muted-foreground\" />\n                      </TooltipTrigger>\n                      <TooltipContent side=\"top\">\n                        Symmetric seed used to control randomness.\n                      </TooltipContent>\n                    </Tooltip>\n                  </div>\n                  <div className=\"flex justify-between items-center gap-2\">\n                    <span className=\"opacity-60\">Status:</span>\n                    <span className=\"text-green-500\">Completed</span>\n                    <Tooltip>\n                      <TooltipTrigger asChild>\n                        <Info className=\"size-3 shrink-0 text-muted-foreground\" />\n                      </TooltipTrigger>\n                      <TooltipContent side=\"top\">\n                        Audio successfully generated and downloaded.\n                      </TooltipContent>\n                    </Tooltip>\n                  </div>\n                </div>
+                                      <div className="flex justify-between items-center gap-2">
+                      <span className="opacity-60">Seed:</span>
+                      <span>{speakLastSeed}</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="size-3 shrink-0 text-muted-foreground" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          Symmetric seed used to control randomness.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>\n                                      <div className="flex justify-between items-center gap-2">
+                      <span className="opacity-60">Status:</span>
+                      <span className="text-green-500">Completed</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="size-3 shrink-0 text-muted-foreground" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          Audio successfully generated and downloaded.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>\n                </div>
               </div>
             )}
           </div>
