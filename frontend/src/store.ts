@@ -318,7 +318,7 @@ export const useAppStore = create<StoreState>((set) => ({
   designEngine: 'qwen',
   targetFamilyId: null,
     activityStatus: null,
-    runtimeTtsBackend: null,
+    runtimeTtsBackend: 'pocket_tts',
     pocketTtsVoiceCloningAvailable: null,
     swapInProgress: false,
     healthBackend: null,
@@ -348,7 +348,10 @@ export const useAppStore = create<StoreState>((set) => ({
   setDesignEngine: (engine) => set({ designEngine: engine }),
   setTargetFamilyId: (targetFamilyId) => set({ targetFamilyId }),
   setActivityStatus: (activityStatus) => set({ activityStatus }),
-   setRuntimeConfig: (patch) => set(patch),
+  setGlossaryOpen: (v) => set({ glossaryOpen: v }),
+  glossaryOpen: false,
+  setRuntimeConfig: (patch) => set(patch),
+
    setRefTextValidation: (refTextValidation) => set({ refTextValidation }),
 
   // -- VoiceDesign --
