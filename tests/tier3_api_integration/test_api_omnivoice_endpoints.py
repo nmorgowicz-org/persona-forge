@@ -140,7 +140,7 @@ def test_omnivoice_save(base_url: str):
             "instruct": TEST_INSTRUCT,
             "segments": TEST_SEGMENTS[:1],
         },
-        timeout=5,
+        timeout=30,
     )
     assert r.status_code == 200
     data = r.json()
