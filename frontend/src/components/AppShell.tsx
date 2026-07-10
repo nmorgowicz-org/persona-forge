@@ -204,13 +204,13 @@ function SidebarVersionDisplay() {
   useEffect(() => {
     getHealth()
       .then((state) => setVersion(state.version as string | null))
-      .catch(() => {})
+      .catch((err) => console.error('Failed to fetch version:', err))
   }, [])
 
   if (!version) return null
 
   return (
-    <div className="text-center text-[10px] font-mono text-muted-foreground/60">
+    <div className="text-center text-[11px] font-bold text-primary">
       v{version}
     </div>
   )
