@@ -1384,6 +1384,7 @@ def _run_generate(
         else:
             job = _create_job(text, seed=seed_value)
             job_id = job.job_id
+        job.style_preset = style_preset
 
         # Pre-generate cancel check
         if job.cancel_event.is_set():
@@ -1418,7 +1419,11 @@ def _run_generate(
         wav = _trim_silence(audio_tensor.cpu().numpy().ravel(), sr)
         if job and job.style_preset:
             wav, sr, metadata = apply_style_preset(wav, sr, job.style_preset)
-            job.metadata.setdefault('applied_steps', []).extend(metadata.get('applied_steps', 'style_preset'))
+            steps = metadata.get("applied_steps", ["style_preset"])
+            job.metadata.setdefault("applied_steps", []).extend(
+                steps if isinstance(steps, list) else [steps]
+            )
+            job.postprocess_applied = True
         duration = len(wav) / sr
         elapsed = time.monotonic() - t0
         print(f"[generate] done   elapsed={elapsed:.1f}s  audio={duration:.1f}s  RTF={elapsed/duration:.2f}x", flush=True)
@@ -1471,7 +1476,7 @@ def _run_generate(
             job.voice_family_id = meta.get("family_id")
             job.variant_kind = meta.get("variant_kind")
             job.style_preset = style_preset
-            job.postprocess_applied = (postprocess is not None)
+            job.postprocess_applied = False
 
     # Inject progress logits processor for cancel + live ETA.
     eos_id = _get_eos_token_id(model)
@@ -1717,7 +1722,11 @@ def _run_generate(
     wav, sr = _trim_silence(wavs[0], sr), sr
     if job and job.style_preset:
         wav, sr, metadata = apply_style_preset(wav, sr, job.style_preset)
-        job.metadata.setdefault('applied_steps', []).append(metadata.get('applied_steps', 'style_preset'))
+        steps = metadata.get("applied_steps", ["style_preset"])
+        job.metadata.setdefault("applied_steps", []).extend(
+            steps if isinstance(steps, list) else [steps]
+        )
+        job.postprocess_applied = True
     duration = len(wav) / sr
     elapsed = time.monotonic() - t0
     print(f"[generate] done   elapsed={elapsed:.1f}s  audio={duration:.1f}s  RTF={elapsed/duration:.2f}x  frames={job.frames_generated if job else '-'}", flush=True)

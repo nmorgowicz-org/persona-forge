@@ -16,7 +16,7 @@ from typing import Any
 import soundfile as sf
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from qwen3_tts import model, omnivoice_engine, segment_library, voice_design, voice_library
+from qwen3_tts import audio_style, model, omnivoice_engine, segment_library, voice_design, voice_library
 from qwen3_tts.asr_check import validate_reference_text
 
 # candidate_id -> (wav, sample_rate). In-memory only, single-user local tool (locked decision,
@@ -310,6 +310,7 @@ def voice_design_save(preview_id: str):
             family_id=data.get("family_id"),
             variant_name=data.get("variant_name"),
             variant_kind=data.get("variant_kind"),
+            source="VoiceDesign",
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -333,32 +334,36 @@ def voice_design_progress():
 # ── Built-in Pocket Voices ────────────────────────────────────────────────────────────────────
 
 POCKET_BUILTIN_VOICES = {
-    "vera": {"display_name": "Vera", "license": "CC BY 4.0", "note": "Female, natural Aussie"},
-    "jane": {"display_name": "Jane", "license": "CC0", "note": "Female conversation"},
-    "anna": {"display_name": "Anna", "license": "CC0", "note": "Female conversation"},
-    "fantine": {"display_name": "Fantine", "license": "CC BY 4.0", "note": "Female reading"},
-    "alba": {"display_name": "Alba", "license": "CC BY 4.0", "note": "Reading / character"},
-    "marius": {"display_name": "Marius", "license": "CC BY 4.0", "note": "Male reading"},
-    "jean": {"display_name": "Jean", "license": "CC0", "note": "Male reading"},
-    "azelma": {"display_name": "Azelma", "license": "CC0", "note": "Female"},
-    "bill_boerst": {"display_name": "Bill Boerst", "license": "CC0", "note": "Male"},
-    "caro_davy": {"display_name": "Caro Davy", "license": "CC0", "note": "Female"},
-    "charles": {"display_name": "Charles", "license": "CC0", "note": "Male"},
-    "cosette": {"display_name": "Cosette", "license": "CC BY 4.0", "note": "Female"},
-    "eponine": {"display_name": "Eponine", "license": "CC BY 4.0", "note": "Female"},
-    "eve": {"display_name": "Eve", "license": "CC0", "note": "Female"},
-    "george": {"display_name": "George", "license": "CC0", "note": "Male"},
-    "javert": {"display_name": "Javert", "license": "CC BY 4.0", "note": "Male"},
-    "mary": {"display_name": "Mary", "license": "CC0", "note": "Female"},
-    "michael": {"display_name": "Michael", "license": "CC0", "note": "Male"},
-    "paul": {"display_name": "Paul", "license": "CC0", "note": "Male"},
-    "peter_yearsley": {"display_name": "Peter Yearsley", "license": "CC0", "note": "Male"},
-    "stuart_bell": {"display_name": "Stuart Bell", "license": "CC0", "note": "Male"},
-    "estelle": {"display_name": "Estelle", "license": "CC BY 4.0", "note": "French"},
-    "giovanni": {"display_name": "Giovanni", "license": "CC BY 4.0", "note": "Italian"},
-    "juergen": {"display_name": "Juergen", "license": "CC BY 4.0", "note": "German"},
-    "lola": {"display_name": "Lola", "license": "CC BY 4.0", "note": "Spanish"},
-    "rafael": {"display_name": "Rafael", "license": "CC BY 4.0", "note": "Portuguese"},
+    "vera": {"display_name": "Vera", "license": "CC BY 4.0", "language": "English", "language_code": "en", "category": "conversation", "note": "Female, natural Aussie"},
+    "jane": {"display_name": "Jane", "license": "CC0", "language": "English", "language_code": "en", "category": "conversation", "note": "Female conversation"},
+    "anna": {"display_name": "Anna", "license": "CC0", "language": "English", "language_code": "en", "category": "conversation", "note": "Female conversation"},
+    "fantine": {"display_name": "Fantine", "license": "CC BY 4.0", "language": "English", "language_code": "en", "category": "reading", "note": "Female reading"},
+    "alba": {"display_name": "Alba", "license": "CC BY 4.0", "language": "English", "language_code": "en", "category": "reading", "note": "Reading / character"},
+    "marius": {"display_name": "Marius", "license": "CC BY 4.0", "language": "English", "language_code": "en", "category": "reading", "note": "Male reading"},
+    "jean": {"display_name": "Jean", "license": "CC0", "language": "English", "language_code": "en", "category": "reading", "note": "Male reading"},
+    "azelma": {"display_name": "Azelma", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Female"},
+    "bill_boerst": {"display_name": "Bill Boerst", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
+    "caro_davy": {"display_name": "Caro Davy", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Female"},
+    "charles": {"display_name": "Charles", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
+    "cosette": {"display_name": "Cosette", "license": "CC BY 4.0", "language": "English", "language_code": "en", "category": "other", "note": "Female"},
+    "eponine": {"display_name": "Eponine", "license": "CC BY 4.0", "language": "English", "language_code": "en", "category": "other", "note": "Female"},
+    "eve": {"display_name": "Eve", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Female"},
+    "george": {"display_name": "George", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
+    "javert": {"display_name": "Javert", "license": "CC BY 4.0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
+    "mary": {"display_name": "Mary", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Female"},
+    "michael": {"display_name": "Michael", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
+    "paul": {"display_name": "Paul", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
+    "peter_yearsley": {"display_name": "Peter Yearsley", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
+    "stuart_bell": {"display_name": "Stuart Bell", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
+    "estelle": {"display_name": "Estelle", "license": "CC BY 4.0", "language": "French", "language_code": "fr", "category": "multilingual", "note": "French"},
+    "giovanni": {"display_name": "Giovanni", "license": "CC BY 4.0", "language": "Italian", "language_code": "it", "category": "multilingual", "note": "Italian"},
+    "juergen": {"display_name": "Juergen", "license": "CC BY 4.0", "language": "German", "language_code": "de", "category": "multilingual", "note": "German"},
+    "lola": {"display_name": "Lola", "license": "CC BY 4.0", "language": "Spanish", "language_code": "es", "category": "multilingual", "note": "Spanish"},
+    "rafael": {"display_name": "Rafael", "license": "CC BY 4.0", "language": "Portuguese", "language_code": "pt", "category": "multilingual", "note": "Portuguese"},
+    "hf_expresso_happy": {"display_name": "Expresso Happy", "license": "CC BY-NC 4.0", "language": "English", "language_code": "en", "category": "other", "note": "Happy delivery", "path": "hf://kyutai/tts-voices/expresso/ex03-ex01_happy_001_channel1_334s.wav"},
+    "hf_voice_zero_bill": {"display_name": "Bill (Zero)", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male", "path": "hf://kyutai/tts-voices/voice-zero/bill_boerst.wav"},
+    "hf_voice_donations_0a67": {"display_name": "Donation 0a67", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Female", "path": "hf://kyutai/tts-voices/voice-donations/0a67_enhanced.wav"},
+    "hf_cml_fr_10087": {"display_name": "French 10087", "license": "CC BY 4.0", "language": "French", "language_code": "fr", "category": "multilingual", "note": "Female", "path": "hf://kyutai/tts-voices/cml-tts/fr/10087_11650_000028-0002_enhanced.wav"},
 }
 
 @app.get("/voices")
@@ -373,13 +378,32 @@ def voices_builtin():
     for vid, meta in POCKET_BUILTIN_VOICES.items():
         voices.append({
             "voice_id": f"pocket:{vid}",
+            "builtin_voice": vid,
             "backend": "pocket_tts",
             "display_name": meta["display_name"],
             "source": "kyutai/tts-voices",
             "license": meta["license"],
+            "language": meta["language"],
+            "language_code": meta["language_code"],
+            "category": meta["category"],
+            "note": meta["note"],
+            "prompt": vid,
             "requires_backend": "pocket_tts",
         })
-    return jsonify(voices)
+    return jsonify({"voices": voices})
+
+
+def _resolve_builtin_voice(data: dict, voice_id: str | None) -> tuple[str | None, str | None]:
+    builtin_voice = (data.get("builtin_voice") or "").strip()
+    if not builtin_voice:
+        return voice_id, None
+    active_backend = getattr(model, "TTS_BACKEND", getattr(model, "tts_backend", None))
+    if active_backend != "pocket_tts":
+        return voice_id, "builtin_voice is only supported when TTS_BACKEND=pocket_tts"
+    return (
+        builtin_voice if builtin_voice.startswith("pocket:") else f"pocket:{builtin_voice}",
+        None,
+    )
 
 
 @app.get("/voices/<voice_id>")
@@ -420,6 +444,50 @@ def voices_delete(voice_id: str):
     except ImportError:
         pass  # pocket-tts package not installed (non-pocket_tts deployment); nothing to invalidate.
     return jsonify({"deleted": voice_id})
+
+
+def _invalidate_voice_clone_state(voice_id: str) -> None:
+    model.invalidate_voice_clone_prompt(voice_id)
+    try:
+        from qwen3_tts import pocket_tts_runtime
+        pocket_tts_runtime.invalidate_voice_state(voice_id)
+    except ImportError:
+        pass  # pocket-tts package not installed (non-pocket_tts deployment); nothing to invalidate.
+
+
+@app.post("/voices/<voice_id>/normalize")
+def voices_normalize(voice_id: str):
+    """Re-normalize a saved reference clip's loudness/peak in place (-20 LUFS, -1dBTP)."""
+    try:
+        meta = voice_library.normalize_reference(voice_id)
+    except Exception as exc:
+        return jsonify({"error": f"Normalize failed: {exc}"}), 500
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    _invalidate_voice_clone_state(voice_id)
+    return jsonify(meta)
+
+
+@app.post("/voices/<voice_id>/trim-silence")
+def voices_trim_silence(voice_id: str):
+    """Trim leading/trailing silence from a saved reference clip in place."""
+    try:
+        meta = voice_library.trim_reference_silence(voice_id)
+    except Exception as exc:
+        return jsonify({"error": f"Trim failed: {exc}"}), 500
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    _invalidate_voice_clone_state(voice_id)
+    return jsonify(meta)
+
+
+@app.post("/voices/<voice_id>/set-default")
+def voices_set_default(voice_id: str):
+    """Mark voice_id as the default variant within its family."""
+    meta = voice_library.set_default_variant(voice_id)
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    return jsonify(meta)
 
 
 @app.post("/voices/<voice_id>/validate")
@@ -978,6 +1046,47 @@ def _resolve_one_clip_ref(ref: dict[str, Any]) -> tuple[Any, int] | None:
     return None
 
 
+_REGION_EDIT_FIELDS: dict[str, tuple[set[str], set[str]]] = {
+    # edit type -> (required numeric fields, optional numeric fields defaulted to 0.0)
+    "gain": ({"start_ms", "end_ms"}, {"gain_db", "fade_in_ms", "fade_out_ms"}),
+    "mute": ({"start_ms", "end_ms"}, {"fade_in_ms", "fade_out_ms"}),
+    "fade": ({"start_ms", "end_ms"}, {"fade_in_ms", "fade_out_ms"}),
+    "delete": ({"start_ms", "end_ms"}, set()),
+    "insert_silence": ({"at_ms", "duration_ms"}, set()),
+}
+
+
+def _validate_region_edits(edits_raw: Any) -> list[dict[str, Any]] | None:
+    """Validate/coerce one clip's RegionEdit list (StitchTimeline.tsx's client-side model).
+
+    Returns a list of plain dicts with float fields ready for audio_post.apply_region_edits,
+    or None on any structural/type failure (caller responds 400).
+    """
+    if edits_raw is None:
+        return []
+    if not isinstance(edits_raw, list):
+        return None
+    edits: list[dict[str, Any]] = []
+    for raw in edits_raw:
+        if not isinstance(raw, dict):
+            return None
+        edit_type = raw.get("type")
+        fields = _REGION_EDIT_FIELDS.get(edit_type)
+        if fields is None:
+            return None
+        required, optional = fields
+        edit: dict[str, Any] = {"type": edit_type}
+        try:
+            for key in required:
+                edit[key] = float(raw.get(key))
+            for key in optional:
+                edit[key] = float(raw.get(key) or 0.0)
+        except (TypeError, ValueError):
+            return None
+        edits.append(edit)
+    return edits
+
+
 def _resolve_stitch_plan(
     stitch_plan: Any,
 ) -> tuple[list[tuple[Any, int]], dict[str, Any]] | None:
@@ -987,7 +1096,9 @@ def _resolve_stitch_plan(
       {
         "clips": [{"segment_id"|"candidate_id": str,
                    "trim_start_ms": float, "trim_end_ms": float,
-                   "fade_in_ms": float, "fade_out_ms": float}, ...],
+                   "fade_in_ms": float, "fade_out_ms": float,
+                   "edits": [{"type": "gain"|"mute"|"delete"|"fade"|"insert_silence", ...}, ...]},
+                  ...],
         "padding_ms": [float, ...],       # len(clips) - 1
         "crossfade_ms": float,
         "segment_target_dbfs": float,
@@ -1010,6 +1121,7 @@ def _resolve_stitch_plan(
     selected: list[tuple[Any, int]] = []
     trims: list[tuple[float, float]] = []
     fades: list[tuple[float, float]] = []
+    edits: list[list[dict[str, Any]]] = []
     for clip in clips:
         if not isinstance(clip, dict):
             return None
@@ -1026,12 +1138,18 @@ def _resolve_stitch_plan(
             )
         except (TypeError, ValueError):
             return None
+        clip_edits = _validate_region_edits(clip.get("edits"))
+        if clip_edits is None:
+            return None
+        edits.append(clip_edits)
 
     kwargs: dict[str, Any] = {}
     if any(t != (0.0, 0.0) for t in trims):
         kwargs["trims"] = trims
     if any(f != (0.0, 0.0) for f in fades):
         kwargs["fades"] = fades
+    if any(edits):
+        kwargs["edits"] = edits
 
     padding_ms = stitch_plan.get("padding_ms")
     if padding_ms is not None:
@@ -1266,6 +1384,7 @@ def omnivoice_save():
             family_id=data.get("family_id"),
             variant_name=data.get("variant_name"),
             variant_kind=data.get("variant_kind"),
+            source="OmniVoice",
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -1328,26 +1447,14 @@ def generate():
         return jsonify({"error": f"unsupported response_format {fmt!r}; supported: "
                         f"{', '.join(sorted(_SUPPORTED_FORMATS))}"}), 400
     voice_id = (data.get("voice_id") or "").strip() or None
-    # ── Handle builtin_voice overrides (Pocket TTS only) ────────────────────────────
-    builtin_voice = data.get("builtin_voice")
-    if builtin_voice:
-        if model.TTS_BACKEND == "pocket_tts":
-            voice_id = f"pocket:{builtin_voice}" if not builtin_voice.startswith("pocket:") else builtin_voice
-        else:
-            print(f"[app] WARNING: builtin_voice={builtin_voice!r} provided but TTS_BACKEND is {model.TTS_BACKEND!r}; ignoring.", flush=True)
+    voice_id, builtin_error = _resolve_builtin_voice(data, voice_id)
+    if builtin_error:
+        return jsonify({"error": builtin_error}), 400
     instruct = (data.get("instruct") or "").strip() or None
     seed = data.get("seed")
     if seed is not None and not isinstance(seed, int):
         return jsonify({"error": "seed must be an integer"}), 400
     resolved_seed = model.resolve_seed(seed)
-
-    # ── Handle builtin_voice overrides (Pocket TTS only) ────────────────────────────
-    builtin_voice = data.get("builtin_voice")
-    if builtin_voice:
-        if model.TTS_BACKEND == "pocket_tts":
-            voice_id = f"pocket:{builtin_voice}" if not builtin_voice.startswith("pocket:") else builtin_voice
-        else:
-            print(f"[app] WARNING: builtin_voice={builtin_voice!r} provided but TTS_BACKEND is {model.TTS_BACKEND!r}; ignoring.", flush=True)
 
     try:
         wav, sr, job_id = model.executor.submit(
@@ -1355,6 +1462,9 @@ def generate():
             text,
             language,
             voice_id=voice_id,
+            voice_variant_id=data.get("voice_variant_id"),
+            style_preset=data.get("style_preset"),
+            postprocess=data.get("postprocess"),
             seed_value=resolved_seed,
             instruct=instruct,
         ).result(timeout=480)
@@ -1386,6 +1496,72 @@ def generate():
     return response
 
 
+@app.post("/generate/with_metrics")
+def generate_with_metrics():
+    # VariantCompare (frontend/src/components/VariantCompare.tsx) needs LUFS/pause/speech-rate
+    # for freshly generated audio, not just the saved reference — /generate can't grow a JSON
+    # response shape without breaking every existing raw-bytes caller, so this is a small
+    # companion endpoint instead: same generation path as /generate, plus analyze_reference()
+    # (the same metrics function used for saved voice references) run on the result.
+    if not model._service_started and not _ensure_service_started(timeout_seconds=240):
+        return jsonify({"error": "Model not loaded"}), 503
+    if not _generation_ready():
+        return jsonify({"error": "Model not loaded"}), 503
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    text, language = _generation_fields(data)
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    voice_id = (data.get("voice_id") or "").strip() or None
+    voice_id, builtin_error = _resolve_builtin_voice(data, voice_id)
+    if builtin_error:
+        return jsonify({"error": builtin_error}), 400
+    instruct = (data.get("instruct") or "").strip() or None
+    seed = data.get("seed")
+    if seed is not None and not isinstance(seed, int):
+        return jsonify({"error": "seed must be an integer"}), 400
+    resolved_seed = model.resolve_seed(seed)
+
+    try:
+        wav, sr, job_id = model.executor.submit(
+            model._run_generate,
+            text,
+            language,
+            voice_id=voice_id,
+            voice_variant_id=data.get("voice_variant_id"),
+            style_preset=data.get("style_preset"),
+            postprocess=data.get("postprocess"),
+            seed_value=resolved_seed,
+            instruct=instruct,
+        ).result(timeout=480)
+        audio, media_type = _encode(wav, sr, "wav")
+    except Exception as exc:
+        if isinstance(exc, RuntimeError) and "cache capacity exceeded" in str(exc):
+            return jsonify({
+                "error": (
+                    "Generation aborted: model exceeded its allowed audio length. "
+                    f"Current request text length: {len(text)}"
+                )
+            }), 422
+        return jsonify({"error": f"Inference error: {exc}"}), 500
+
+    try:
+        metrics = audio_style.analyze_reference(wav, sr, transcript=text)
+    except Exception as exc:
+        metrics = {"error": f"analysis failed: {exc}"}
+
+    response_payload = {
+        "audio_base64": base64.b64encode(audio).decode("ascii"),
+        "media_type": media_type,
+        "seed": resolved_seed,
+        "metrics": metrics,
+    }
+    if job_id:
+        response_payload["job_id"] = job_id
+    return jsonify(response_payload)
+
+
 @app.post("/v1/audio/speech")
 def openai_audio_speech():
     # Bridge the same startup race /omnivoice/audition already queues through, instead
@@ -1409,13 +1585,9 @@ def openai_audio_speech():
         )
     language = (data.get("language") or "English").strip()
     voice_id = (data.get("voice_id") or "").strip() or None
-    # ── Handle builtin_voice overrides (Pocket TTS only) ────────────────────────────
-    builtin_voice = data.get("builtin_voice")
-    if builtin_voice:
-        if model.TTS_BACKEND == "pocket_tts":
-            voice_id = f"pocket:{builtin_voice}" if not builtin_voice.startswith("pocket:") else builtin_voice
-        else:
-            print(f"[app] WARNING: builtin_voice={builtin_voice!r} provided but TTS_BACKEND is {model.TTS_BACKEND!r}; ignoring.", flush=True)
+    voice_id, builtin_error = _resolve_builtin_voice(data, voice_id)
+    if builtin_error:
+        return _openai_error(builtin_error, 400)
     instruct = (data.get("instruct") or "").strip() or None
     seed = data.get("seed")
     if seed is not None and not isinstance(seed, int):
@@ -1493,13 +1665,9 @@ def generate_async():
         return jsonify({"error": f"unsupported response_format {fmt!r}; supported: "
                         f"{', '.join(sorted(_SUPPORTED_FORMATS))}"}), 400
     voice_id = (data.get("voice_id") or "").strip() or None
-    # ── Handle builtin_voice overrides (Pocket TTS only) ────────────────────────────
-    builtin_voice = data.get("builtin_voice")
-    if builtin_voice:
-        if model.TTS_BACKEND == "pocket_tts":
-            voice_id = f"pocket:{builtin_voice}" if not builtin_voice.startswith("pocket:") else builtin_voice
-        else:
-            print(f"[app] WARNING: builtin_voice={builtin_voice!r} provided but TTS_BACKEND is {model.TTS_BACKEND!r}; ignoring.", flush=True)
+    voice_id, builtin_error = _resolve_builtin_voice(data, voice_id)
+    if builtin_error:
+        return jsonify({"error": builtin_error}), 400
     instruct = (data.get("instruct") or "").strip() or None
     seed = data.get("seed")
     if seed is not None and not isinstance(seed, int):
@@ -1615,9 +1783,18 @@ def generate_job_audio(job_id: str):
         response.headers["X-Seed"] = str(job.seed)
     response.headers["X-Job-Id"] = job_id
     prog = model.get_job_progress(job_id)
-    if prog and prog.get("applied_steps"):
-        steps = prog["applied_steps"]
-        response.headers["X-Applied-Steps"] = ", ".join(steps) if isinstance(steps, list) else str(steps)
+    if prog:
+        if prog.get("style_preset"):
+            response.headers["X-Style-Preset"] = prog["style_preset"]
+        if prog.get("postprocess_applied"):
+            response.headers["X-Postprocess-Applied"] = "true"
+        if prog.get("audio_seconds"):
+            response.headers["X-Audio-Seconds"] = str(prog["audio_seconds"])
+        if prog.get("rtf"):
+            response.headers["X-RTF"] = str(prog["rtf"])
+        if prog.get("applied_steps"):
+            steps = prog["applied_steps"]
+            response.headers["X-Applied-Steps"] = ", ".join(steps) if isinstance(steps, list) else str(steps)
     return response
 
 

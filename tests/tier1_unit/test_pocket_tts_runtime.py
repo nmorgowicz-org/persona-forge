@@ -9,6 +9,7 @@ the real dependency.
 
 from __future__ import annotations
 
+import os
 import sys
 import types
 from typing import Any
@@ -45,7 +46,12 @@ class FakeTTSModel:
         return torch.ones(2000)  # ~1 frame at 24kHz/12fps
 
     def export_model_state(self, state: dict[str, Any], path: str) -> None:
-        pass
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(str(state.get("ref_path", "")))
+
+    def import_model_state(self, path: str) -> dict[str, Any]:
+        with open(path, encoding="utf-8") as f:
+            return {"imported_ref_path": f.read()}
 
 
 @pytest.fixture
@@ -239,6 +245,36 @@ class TestInvalidateVoiceState:
 
         with pytest.raises(ValueError, match=r"voice_id .* not found in voice_library"):
             rt.get_pocket_tts_voice_state(model, "vd_abc123", None, None)
+
+    def test_updated_voice_rebuilds_stale_disk_cache(self, pocket_tts_runtime, tmp_path, monkeypatch):
+        rt = pocket_tts_runtime
+        model = FakeTTSModel()
+        voice_dir = tmp_path / "vd_abc123"
+        voice_dir.mkdir()
+        wav = voice_dir / "reference.wav"
+        wav.write_bytes(b"RIFF....")
+        meta_path = voice_dir / "meta.json"
+        meta_path.write_text("{}", encoding="utf-8")
+
+        from qwen3_tts import voice_library
+
+        monkeypatch.setattr(voice_library, "VOICE_LIBRARY_DIR", tmp_path)
+        monkeypatch.setattr(rt, "VOICE_LIBRARY_DIR", tmp_path)
+        monkeypatch.setattr(rt, "STATE_CACHE_DIR", tmp_path / ".state_cache")
+        rt.STATE_CACHE_DIR.mkdir()
+        monkeypatch.setattr(
+            voice_library, "get_voice", lambda vid: {"voice_id": vid, "wav_path": str(wav)}
+        )
+
+        cache_path = rt._state_cache_path("vd_abc123")
+        cache_path.write_text("old-reference.wav", encoding="utf-8")
+        old_time = wav.stat().st_mtime - 10
+        os.utime(cache_path, (old_time, old_time))
+
+        result = rt.get_pocket_tts_voice_state(model, "vd_abc123", None, None)
+
+        assert result == {"ref_path": str(wav)}
+        assert rt.pocket_tts_voice_state_cache["vd_abc123"] == result
 
 
 class TestGeneratePocketTts:

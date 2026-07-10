@@ -21,7 +21,7 @@ import os
 import re
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
-from src.qwen3_tts.voice_library import VOICE_LIBRARY_DIR
+from qwen3_tts.voice_library import VOICE_LIBRARY_DIR
 
 # Cache directory for persisted voice states (.safetensors)
 STATE_CACHE_DIR = VOICE_LIBRARY_DIR / ".state_cache"
@@ -252,6 +252,17 @@ def get_pocket_tts_voice_state(
     if voice_id.startswith("pocket:"):
         resolved_id = voice_id[7:]
 
+    is_library_voice = resolved_id.startswith("vd_")
+    library_meta = None
+    if is_library_voice:
+        from qwen3_tts import voice_library
+
+        library_meta = voice_library.get_voice(resolved_id)
+        if library_meta is None:
+            raise ValueError(
+                f"[pocket_tts] voice_id {resolved_id!r} not found in voice_library"
+            )
+
     # 2) In-memory cache.
     cached = pocket_tts_voice_state_cache.get(resolved_id)
     if cached is not None:
@@ -259,7 +270,19 @@ def get_pocket_tts_voice_state(
 
     # 3) Disk cache (.safetensors).
     cache_path = _state_cache_path(resolved_id)
-    if cache_path.is_file():
+    cache_is_current = True
+    if cache_path.is_file() and library_meta is not None:
+        dependency_mtimes = []
+        wav_path = library_meta.get("wav_path")
+        if wav_path and os.path.isfile(wav_path):
+            dependency_mtimes.append(os.path.getmtime(wav_path))
+        meta_path = VOICE_LIBRARY_DIR / resolved_id / "meta.json"
+        if meta_path.is_file():
+            dependency_mtimes.append(meta_path.stat().st_mtime)
+        if dependency_mtimes and cache_path.stat().st_mtime < max(dependency_mtimes):
+            cache_is_current = False
+
+    if cache_path.is_file() and cache_is_current:
         try:
             print(f"[pocket_tts] Loading cached voice state from disk: {cache_path.name}")
             state = model.import_model_state(str(cache_path))
@@ -282,15 +305,16 @@ def get_pocket_tts_voice_state(
             print(f"[pocket_tts] {resolved_id!r} is not a built-in preset: {exc}")
 
     # 4) Look up in voice_library.
-    from qwen3_tts import voice_library
+    if library_meta is None:
+        from qwen3_tts import voice_library
 
-    meta = voice_library.get_voice(resolved_id)
-    if meta is None:
+        library_meta = voice_library.get_voice(resolved_id)
+    if library_meta is None:
         raise ValueError(
             f"[pocket_tts] voice_id {resolved_id!r} not found in voice_library"
         )
 
-    wav_path = meta.get("wav_path")
+    wav_path = library_meta.get("wav_path")
     if not wav_path or not os.path.isfile(wav_path):
         raise RuntimeError(
             f"[pocket_tts] voice_id={resolved_id!r} exists but wav_path is invalid: "

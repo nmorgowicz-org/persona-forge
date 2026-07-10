@@ -8,11 +8,16 @@ import pytest
 from qwen3_tts.audio_post import (
     analyze_take,
     apply_fades,
+    apply_region_edits,
+    apply_region_envelope,
+    apply_region_fade,
     compress,
     concat_with_padding,
     crossfade_concat,
+    insert_silence,
     limit_peak,
     normalize_rms,
+    remove_range,
     stitch_segments,
     trim,
 )
@@ -213,6 +218,27 @@ class TestStitchSegmentsExtended:
         trimmed = stitch_segments(segs, sr, trims=[(100.0, 0.0), (0.0, 100.0)])
         assert trimmed.size < stitch_segments(segs, sr).size
 
+    def test_edits_none_matches_no_edits(self):
+        sr = 24000
+        segs = [_sine(220.0, 0.3, sr), _sine(330.0, 0.3, sr)]
+        no_edits_kwarg = stitch_segments(segs, sr)
+        empty_edits = stitch_segments(segs, sr, edits=[[], []])
+        np.testing.assert_array_equal(no_edits_kwarg, empty_edits)
+
+    def test_delete_edit_shrinks_a_segment(self):
+        sr = 24000
+        segs = [_sine(220.0, 0.5, sr), _sine(330.0, 0.5, sr)]
+        edits = [[{"type": "delete", "start_ms": 0.0, "end_ms": 200.0}], []]
+        result = stitch_segments(segs, sr, edits=edits)
+        assert result.size < stitch_segments(segs, sr).size
+
+    def test_insert_silence_edit_extends_a_segment(self):
+        sr = 24000
+        segs = [_sine(220.0, 0.3, sr), _sine(330.0, 0.3, sr)]
+        edits = [[{"type": "insert_silence", "at_ms": 100.0, "duration_ms": 200.0}], []]
+        result = stitch_segments(segs, sr, edits=edits)
+        assert result.size > stitch_segments(segs, sr).size
+
 
 class TestAnalyzeTake:
     def test_empty_flagged(self):
@@ -237,3 +263,121 @@ class TestAnalyzeTake:
         flagged, reason = analyze_take(noise, 24000)
         assert not flagged
         assert reason == "ok"
+
+
+class TestRegionEnvelope:
+    def test_gain_blends_at_edges_and_flat_in_middle(self):
+        sr = 1000
+        x = np.ones(1000, dtype=np.float32)
+        y = apply_region_envelope(x, sr, 200, 400, target_gain=0.5, fade_in_ms=50, fade_out_ms=50)
+        assert y[199] == 1.0
+        assert abs(y[300] - 0.5) < 1e-6
+        assert abs(y[500] - 1.0) < 1e-6
+
+    def test_mute_zeroes_flat_region(self):
+        sr = 1000
+        x = np.ones(1000, dtype=np.float32)
+        y = apply_region_envelope(x, sr, 200, 400, target_gain=0.0)
+        assert np.allclose(y[200:400], 0.0)
+        assert np.allclose(y[:200], 1.0)
+        assert np.allclose(y[400:], 1.0)
+
+    def test_no_op_when_end_before_start(self):
+        sr = 1000
+        x = np.ones(1000, dtype=np.float32)
+        y = apply_region_envelope(x, sr, 400, 200, target_gain=0.0)
+        assert np.allclose(y, 1.0)
+
+
+class TestRegionFade:
+    def test_ramps_to_silence_at_region_edges(self):
+        sr = 1000
+        x = np.ones(1000, dtype=np.float32)
+        y = apply_region_fade(x, sr, 200, 400, fade_in_ms=50, fade_out_ms=50)
+        assert abs(y[200]) < 1e-6
+        assert abs(y[300] - 1.0) < 1e-6
+        assert abs(y[399]) < 0.05
+        assert np.allclose(y[:200], 1.0)
+        assert np.allclose(y[400:], 1.0)
+
+
+class TestRemoveRange:
+    def test_deletes_samples(self):
+        sr = 1000
+        x = np.arange(1000, dtype=np.float32)
+        y = remove_range(x, sr, 200, 300)
+        assert y.size == 900
+        assert y[199] == 199
+        assert y[200] == 300
+
+    def test_clamps_out_of_range(self):
+        sr = 1000
+        x = np.ones(1000, dtype=np.float32)
+        y = remove_range(x, sr, -100, 5000)
+        assert y.size == 0
+
+
+class TestInsertSilence:
+    def test_inserts_zeros_at_position(self):
+        sr = 1000
+        x = np.ones(1000, dtype=np.float32)
+        y = insert_silence(x, sr, 200, 100)
+        assert y.size == 1100
+        assert np.allclose(y[200:300], 0.0)
+        assert np.allclose(y[:200], 1.0)
+        assert np.allclose(y[300:], 1.0)
+
+    def test_zero_duration_is_no_op(self):
+        sr = 1000
+        x = np.ones(1000, dtype=np.float32)
+        y = insert_silence(x, sr, 200, 0)
+        assert y.size == 1000
+
+
+class TestApplyRegionEdits:
+    def test_no_edits_returns_unchanged(self):
+        sr = 1000
+        x = np.ones(1000, dtype=np.float32)
+        y = apply_region_edits(x, sr, [])
+        assert np.array_equal(y, x)
+
+    def test_composes_gain_delete_and_insert(self):
+        sr = 1000
+        x = np.ones(1000, dtype=np.float32)
+        edits = [
+            {"type": "gain", "start_ms": 0, "end_ms": 200, "gain_db": -6.0, "fade_in_ms": 0, "fade_out_ms": 0},
+            {"type": "delete", "start_ms": 800, "end_ms": 1000},
+            {"type": "insert_silence", "at_ms": 400, "duration_ms": 50},
+        ]
+        y = apply_region_edits(x, sr, edits)
+        # 1000 - 200 (deleted) + 50 (inserted) = 850
+        assert y.size == 850
+        expected_gain = 10.0 ** (-6.0 / 20.0)
+        assert abs(y[100] - expected_gain) < 1e-6
+
+    def test_multiple_deletes_apply_longest_offset_first(self):
+        sr = 1000
+        x = np.arange(1000, dtype=np.float32)
+        edits = [
+            {"type": "delete", "start_ms": 100, "end_ms": 200},
+            {"type": "delete", "start_ms": 500, "end_ms": 600},
+        ]
+        y = apply_region_edits(x, sr, edits)
+        assert y.size == 800
+        assert y[99] == 99
+        assert y[100] == 200
+
+    def test_multiple_inserts_apply_in_ascending_order_with_running_offset(self):
+        sr = 1000
+        x = np.ones(1000, dtype=np.float32)
+        edits = [
+            {"type": "insert_silence", "at_ms": 100, "duration_ms": 50},
+            {"type": "insert_silence", "at_ms": 200, "duration_ms": 50},
+        ]
+        y = apply_region_edits(x, sr, edits)
+        assert y.size == 1100
+        # second insert's at_ms=200 lands at sample 250 because the first insert
+        # (50 samples at position 100) shifts everything after it by a running offset
+        assert np.allclose(y[100:150], 0.0)
+        assert np.allclose(y[150:250], 1.0)
+        assert np.allclose(y[250:300], 0.0)

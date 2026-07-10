@@ -124,6 +124,168 @@ def apply_fades(
     return x
 
 
+def _region_bounds(sr: int, size: int, start_ms: float, end_ms: float) -> tuple[int, int]:
+    start = max(0, min(int(round(sr * start_ms / 1000.0)), size))
+    end = max(start, min(int(round(sr * end_ms / 1000.0)), size))
+    return start, end
+
+
+def apply_region_envelope(
+    audio: np.ndarray,
+    sr: int,
+    start_ms: float,
+    end_ms: float,
+    target_gain: float,
+    fade_in_ms: float = 0.0,
+    fade_out_ms: float = 0.0,
+) -> np.ndarray:
+    """Blend an interior region toward target_gain (0.0 for mute), ramping in/out at its edges.
+
+    Mirrors the frontend's `applyEnvelope` for the 'gain'/'mute' RegionEdit types
+    (StitchTimeline.tsx) exactly: outside any fade window the region sits flat at
+    target_gain; within a fade window it blends linearly from the original level (1.0)
+    toward target_gain. If a region edit's node applies during both a matching operation, the
+    fade-out computation applies last, matching the frontend's sequential (not exclusive) ifs.
+    """
+    x = np.asarray(audio, dtype=np.float32).ravel().copy()
+    start, end = _region_bounds(sr, x.size, start_ms, end_ms)
+    if end <= start:
+        return x
+    region_len = end - start
+    fade_in_len = int(round(sr * fade_in_ms / 1000.0))
+    fade_out_len = int(round(sr * fade_out_ms / 1000.0))
+    factor = np.full(region_len, target_gain, dtype=np.float32)
+    pos = np.arange(region_len)
+    if fade_in_len > 0:
+        mask = pos < fade_in_len
+        factor[mask] = 1.0 + (target_gain - 1.0) * (pos[mask] / fade_in_len)
+    if fade_out_len > 0:
+        mask = (region_len - pos) < fade_out_len
+        factor[mask] = 1.0 + (target_gain - 1.0) * ((region_len - pos[mask]) / fade_out_len)
+    x[start:end] *= factor
+    return x
+
+
+def apply_region_fade(
+    audio: np.ndarray,
+    sr: int,
+    start_ms: float,
+    end_ms: float,
+    fade_in_ms: float = 0.0,
+    fade_out_ms: float = 0.0,
+) -> np.ndarray:
+    """Ramp an interior region up from / down to silence at its own edges (the 'fade' RegionEdit type).
+
+    Unlike apply_region_envelope, this never targets a gain level — it is a pure fade-in/
+    fade-out shape confined to the region, matching the frontend's linear ramp exactly.
+    """
+    x = np.asarray(audio, dtype=np.float32).ravel().copy()
+    start, end = _region_bounds(sr, x.size, start_ms, end_ms)
+    if end <= start:
+        return x
+    region_len = end - start
+    fade_in_len = int(round(sr * fade_in_ms / 1000.0))
+    fade_out_len = int(round(sr * fade_out_ms / 1000.0))
+    factor = np.ones(region_len, dtype=np.float32)
+    pos = np.arange(region_len)
+    if fade_in_len > 0:
+        mask = pos < fade_in_len
+        factor[mask] = np.minimum(factor[mask], pos[mask] / fade_in_len)
+    if fade_out_len > 0:
+        mask = (region_len - pos) < fade_out_len
+        factor[mask] = np.minimum(factor[mask], (region_len - pos[mask]) / fade_out_len)
+    x[start:end] *= factor
+    return x
+
+
+def _remove_range_samples(x: np.ndarray, start: int, end: int) -> np.ndarray:
+    start = max(0, min(int(start), x.size))
+    end = max(start, min(int(end), x.size))
+    if end <= start:
+        return x
+    return np.concatenate([x[:start], x[end:]])
+
+
+def remove_range(audio: np.ndarray, sr: int, start_ms: float, end_ms: float) -> np.ndarray:
+    """Delete an interior region, matching the frontend's 'delete' RegionEdit type."""
+    x = np.asarray(audio, dtype=np.float32).ravel()
+    start = int(round(sr * start_ms / 1000.0))
+    end = int(round(sr * end_ms / 1000.0))
+    return _remove_range_samples(x, start, end)
+
+
+def _insert_silence_samples(x: np.ndarray, at: int, duration_samples: int) -> np.ndarray:
+    if duration_samples <= 0:
+        return x
+    at = max(0, min(int(at), x.size))
+    silence = np.zeros(duration_samples, dtype=np.float32)
+    return np.concatenate([x[:at], silence, x[at:]])
+
+
+def insert_silence(audio: np.ndarray, sr: int, at_ms: float, duration_ms: float) -> np.ndarray:
+    """Insert a block of silence at at_ms, matching the frontend's 'insert_silence' RegionEdit type."""
+    x = np.asarray(audio, dtype=np.float32).ravel()
+    at = int(round(sr * at_ms / 1000.0))
+    duration_samples = int(round(sr * duration_ms / 1000.0))
+    return _insert_silence_samples(x, at, duration_samples)
+
+
+def apply_region_edits(audio: np.ndarray, sr: int, edits: list[dict] | None) -> np.ndarray:
+    """Apply one clip's ordered RegionEdit list (docs/plans/20260709-voice_style_foundation.md).
+
+    Order mirrors the frontend's `processClipAudio` exactly so preview and final render
+    stay in sync: gain/mute/fade envelopes apply first, in their original list order
+    (they may overlap and compose); deletes apply next, longest-offset-first so earlier
+    indices stay valid; insert_silence applies last, in ascending position order, tracking
+    a running sample offset so multiple inserts land at their intended positions.
+    """
+    x = np.asarray(audio, dtype=np.float32).ravel()
+    if not edits:
+        return x
+    for edit in edits:
+        edit_type = edit.get("type")
+        if edit_type == "insert_silence" or edit_type == "delete":
+            continue
+        start_ms = float(edit.get("start_ms", 0.0))
+        end_ms = float(edit.get("end_ms", 0.0))
+        if end_ms <= start_ms:
+            continue
+        fade_in_ms = float(edit.get("fade_in_ms", 0.0))
+        fade_out_ms = float(edit.get("fade_out_ms", 0.0))
+        if edit_type == "gain":
+            gain = 10.0 ** (float(edit.get("gain_db", 0.0)) / 20.0)
+            x = apply_region_envelope(x, sr, start_ms, end_ms, gain, fade_in_ms, fade_out_ms)
+        elif edit_type == "mute":
+            x = apply_region_envelope(x, sr, start_ms, end_ms, 0.0, fade_in_ms, fade_out_ms)
+        elif edit_type == "fade":
+            x = apply_region_fade(x, sr, start_ms, end_ms, fade_in_ms, fade_out_ms)
+
+    deletes = sorted(
+        (e for e in edits if e.get("type") == "delete"),
+        key=lambda e: float(e.get("start_ms", 0.0)),
+        reverse=True,
+    )
+    for edit in deletes:
+        start_ms = float(edit.get("start_ms", 0.0))
+        end_ms = float(edit.get("end_ms", 0.0))
+        if end_ms > start_ms:
+            x = remove_range(x, sr, start_ms, end_ms)
+
+    inserts = sorted(
+        (e for e in edits if e.get("type") == "insert_silence"),
+        key=lambda e: float(e.get("at_ms", 0.0)),
+    )
+    inserted_samples = 0
+    for edit in inserts:
+        at_ms = float(edit.get("at_ms", 0.0))
+        duration_ms = float(edit.get("duration_ms", 0.0))
+        duration_samples = int(round(sr * duration_ms / 1000.0))
+        at = min(x.size, int(round(sr * at_ms / 1000.0)) + inserted_samples)
+        x = _insert_silence_samples(x, at, duration_samples)
+        inserted_samples += duration_samples
+    return x
+
+
 def concat_with_padding(
     segments: list[np.ndarray],
     sr: int,
@@ -268,6 +430,7 @@ def stitch_segments(
     trims: list[tuple[float, float]] | None = None,
     fades: list[tuple[float, float]] | None = None,
     compress_params: dict | None = None,
+    edits: list[list[dict]] | None = None,
 ) -> np.ndarray:
     """Full pipeline: trim, compress+normalize, fade each segment, then join and final limit+normalize.
 
@@ -279,15 +442,21 @@ def stitch_segments(
       - fades: per-segment (fade_in_ms, fade_out_ms) applied after normalize, before joining.
       - padding_ms: per-gap silence override; None reproduces crossfade_concat's all-crossfade
         default via concat_with_padding (which falls back to crossfade_concat per-gap).
+      - edits: per-segment RegionEdit lists (gain/mute/fade/delete/insert_silence), applied
+        right after trim and before compress/normalize — see apply_region_edits(). This is the
+        durable counterpart to StitchTimeline.tsx's client-side preview-only region edits.
     """
     n = len(segments)
     trims = trims or [(0.0, 0.0)] * n
     fades = fades or [(0.0, 0.0)] * n
+    edits = edits or [[] for _ in range(n)]
     compress_kwargs = compress_params or {}
 
     processed = []
-    for seg, (start_ms, end_ms), (fade_in_ms, fade_out_ms) in zip(segments, trims, fades):
+    for seg, (start_ms, end_ms), (fade_in_ms, fade_out_ms), seg_edits in zip(segments, trims, fades, edits):
         clip = trim(seg, sr, start_ms, end_ms) if (start_ms or end_ms) else seg
+        if seg_edits:
+            clip = apply_region_edits(clip, sr, seg_edits)
         clip = normalize_rms(compress(clip, sr, **compress_kwargs), segment_target_dbfs)
         if fade_in_ms or fade_out_ms:
             clip = apply_fades(clip, sr, fade_in_ms, fade_out_ms)
