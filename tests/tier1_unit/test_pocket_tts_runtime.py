@@ -44,6 +44,9 @@ class FakeTTSModel:
     def generate_audio(self, voice_state: dict[str, Any], text: str) -> torch.Tensor:
         return torch.ones(2000)  # ~1 frame at 24kHz/12fps
 
+    def export_model_state(self, state: dict[str, Any], path: str) -> None:
+        pass
+
 
 @pytest.fixture
 def pocket_tts_runtime(monkeypatch):
@@ -198,7 +201,7 @@ class TestGetPocketTtsVoiceState:
 
         monkeypatch.setattr(voice_library, "get_voice", lambda vid: None)
 
-        with pytest.raises(ValueError, match="voice_id not found"):
+        with pytest.raises(ValueError, match=r"voice_id .* not found in voice_library"):
             rt.get_pocket_tts_voice_state(model, "vd_missing", None, None)
 
 
@@ -234,7 +237,7 @@ class TestInvalidateVoiceState:
         monkeypatch.setattr(voice_library, "get_voice", lambda vid: None)
         rt.invalidate_voice_state("vd_abc123")
 
-        with pytest.raises(ValueError, match="voice_id not found"):
+        with pytest.raises(ValueError, match=r"voice_id .* not found in voice_library"):
             rt.get_pocket_tts_voice_state(model, "vd_abc123", None, None)
 
 

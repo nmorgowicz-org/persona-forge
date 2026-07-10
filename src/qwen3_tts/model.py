@@ -14,7 +14,7 @@ from qwen3_tts.asr_check import transcribe_reference_audio, validate_reference_t
 from qwen3_tts.config import REF_AUDIO_PATH, apply_preset_env
 from qwen3_tts.openvino.runtime_config import apply_thread_env, resolve_inference_threads
 from qwen3_tts.presets import get_voice_design_preset, seconds_for_capacity
-from .audio_style import apply_style_preset
+from qwen3_tts.audio_style import apply_style_preset
 
 apply_preset_env()
 
@@ -1419,19 +1419,10 @@ def _run_generate(
     if voice_prompt is None:
         raise RuntimeError("Model not loaded")
 
-    # Store metadata in job for response headers/progress
-    if job:
-        from qwen3_tts import voice_library
-        meta = voice_library.get_voice(effective_voice_id)
-        if meta:
-            job.voice_family_id = meta.get("family_id")
-            job.variant_kind = meta.get("variant_kind")
-            job.style_preset = style_preset
-            job.postprocess_applied = (postprocess is not None)
-        # Base's generate_voice_clone has no tone/instruct parameter — VoiceDesign is the only
-        # checkpoint that consumes free-text instruct. No-op here rather than erroring, so a
-        # frontend that always sends `instruct` doesn't need to special-case Base.
-        print(f"[generate] instruct field ignored on Base checkpoint: {instruct!r}", flush=True)
+    voice_prompt = get_voice_clone_prompt(effective_voice_id)
+    if voice_prompt is None:
+        raise RuntimeError("Model not loaded")
+
     import traceback as _tb
     t0 = time.monotonic()
     print(f"[generate] batch  lang={language!r}  chars={len(text)}  job={job_id or '-'}", flush=True)
@@ -1448,6 +1439,20 @@ def _run_generate(
         # Always create a lightweight job for cancel + progress (even for blocking /generate).
         job = _create_job(text, seed=seed_value)
         job_id = job.job_id
+
+    # Store metadata in job for response headers/progress
+    if job:
+        from qwen3_tts import voice_library
+        meta = voice_library.get_voice(effective_voice_id)
+        if meta:
+            job.voice_family_id = meta.get("family_id")
+            job.variant_kind = meta.get("variant_kind")
+            job.style_preset = style_preset
+            job.postprocess_applied = (postprocess is not None)
+        # Base's generate_voice_clone has no tone/instruct parameter — VoiceDesign is the only
+        # checkpoint that consumes free-text instruct. No-op here rather than erroring, so a
+        # frontend that always sends `instruct` doesn't need to special-case Base.
+        print(f"[generate] instruct field ignored on Base checkpoint: {instruct!r}", flush=True)
 
     # Inject progress logits processor for cancel + live ETA.
     eos_id = _get_eos_token_id(model)

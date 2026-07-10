@@ -359,6 +359,11 @@ POCKET_BUILTIN_VOICES = {
     "rafael": {"display_name": "Rafael", "license": "CC BY 4.0", "note": "Portuguese"},
 }
 
+@app.get("/voices")
+def voices_list():
+    """Return list of all saved voices in the library."""
+    return jsonify({"voices": voice_library.list_voices()})
+
 @app.get("/voices/built-in")
 def voices_builtin():
     """Return a list of curated built-in voices for the Pocket TTS backend."""
