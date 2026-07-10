@@ -98,8 +98,6 @@ def _set_module_attr(module_name, attr, value):
 
 def _patch_omnivoice_run_job(app_module):
     def fake_run_omnivoice_job(
-    def fake_run_omnivoice_job(
-    def fake_run_omnivoice_job(
         segments,
         instruct,
         language,
@@ -115,7 +113,7 @@ def _patch_omnivoice_run_job(app_module):
         on_candidate_complete=None,
     ):
         time.sleep(0.15)
-
+ 
         for seg_idx, text in enumerate(segments):
             for cand_idx in range(candidates_per_segment):
                 wav = np.zeros(int(_SAMPLE_RATE * 0.3), dtype=np.float32)
@@ -130,10 +128,19 @@ def _patch_omnivoice_run_job(app_module):
                 if on_candidate_complete is not None:
                     on_candidate_complete(seg_idx, cand_idx, text, candidate)
                 time.sleep(0.03)
-
+ 
     app_module.omnivoice_engine.run_omnivoice_job = fake_run_omnivoice_job
     app_module.omnivoice_engine.swap_in_progress = lambda: False
     app_module.omnivoice_engine.mark_swap_pending = lambda: None
+
+def _patch_save_voice(app_module):
+    """Ensures the voice library save_voice is mocked.
+    
+    Since FakeModelRuntime is already installed, app_module.voice_library
+    is already a FakeVoiceLibrary instance.
+    """
+    pass
+
 
 
 def _install_fake_voice_design(app_module):
