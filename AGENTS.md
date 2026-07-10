@@ -1,5 +1,9 @@
 # Qwen3-TTS OpenVINO — Agent Guide
 
+## Shell command policy
+
+- Do not use `rtk` in this repository. Run normal shell commands directly.
+
 ## How to use this guide
 
 - This is your single source of truth for working on this repo.
@@ -14,6 +18,8 @@
   - `docs/agent-reference/EXPORT_SYSTEM.md`
 - For VoiceDesign and frontend work, follow:
   - `docs/dev/architecture/voice_design.md`
+- For local validation commands, see:
+  - `docs/dev/validation_checks.md`
 
 If a change conflicts with any of these, stop and propose alternatives explicitly.
 
