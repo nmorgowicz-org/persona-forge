@@ -32,7 +32,7 @@ import { ActivityStatusBar } from '@/components/ui/ActivityStatusBar'
 import { Separator } from '@/components/ui/separator'
 import { SwapBanner } from '@/components/SwapBanner'
 import { HealthStatusBanner } from '@/components/HealthStatusBanner'
-import { getRuntimeConfig } from '@/lib/api'
+import { getRuntimeConfig, getHealth } from '@/lib/api'
 import { type Page, useAppStore } from '@/store'
 import { THEMES, type Theme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
@@ -198,6 +198,24 @@ function ThemePaletteButton() {
   )
 }
 
+function SidebarVersionDisplay() {
+  const [version, setVersion] = useState<string | null>(null)
+
+  useEffect(() => {
+    getHealth()
+      .then((state) => setVersion(state.version as string | null))
+      .catch(() => {})
+  }, [])
+
+  if (!version) return null
+
+  return (
+    <div className="text-center text-[10px] font-mono text-muted-foreground/60">
+      v{version}
+    </div>
+  )
+}
+
 function SidebarCollapseButton() {
   const { open, toggleSidebar } = useSidebar()
 
@@ -296,11 +314,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             </p>
           </div>
           {/* Collapsed: theme button (same size as expand button) */}
-          <div className="hidden group-data-[collapsible=icon]:flex justify-center">
-            <ThemePaletteButton />
-          </div>
-          <SidebarCollapseButton />
-        </SidebarFooter>
+           <div className="hidden group-data-[collapsible=icon]:flex justify-center">
+             <ThemePaletteButton />
+           </div>
+           <SidebarCollapseButton />
+           <SidebarVersionDisplay />
+         </SidebarFooter>
+
       </Sidebar>
       <SidebarInset>
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/80 bg-background/80 px-4 backdrop-blur-sm">
