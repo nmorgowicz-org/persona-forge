@@ -7,9 +7,12 @@ import { VoiceLibraryPage } from '@/pages/VoiceLibraryPage'
 import { StitchStudioPage } from '@/pages/StitchStudioPage'
 import { IntegrationsPage } from '@/pages/IntegrationsPage'
 import { RuntimeConfigPage } from '@/pages/RuntimeConfigPage'
+import { Glossary } from '@/components/audio/Glossary'
 
 export default function App() {
   const page = useAppStore((s) => s.page)
+  const glossaryOpen = useAppStore((s) => s.glossaryOpen)
+  const setGlossaryOpen = useAppStore((s) => s.setGlossaryOpen)
 
   return (
     <TooltipProvider>
@@ -22,7 +25,9 @@ export default function App() {
           {page === 'integrations' && <IntegrationsPage />}
           {page === 'runtime' && <RuntimeConfigPage />}
         </AppShell>
+        <Glossary isOpen={glossaryOpen} onClose={() => setGlossaryOpen(false)} />
       </div>
     </TooltipProvider>
   )
 }
+

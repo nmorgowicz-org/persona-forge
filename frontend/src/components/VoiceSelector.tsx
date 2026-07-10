@@ -1,6 +1,6 @@
 import { Plus } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import type { VoiceMeta } from '../lib/api'
+import type { BuiltInVoiceMeta, VoiceMeta } from '../lib/api'
 import {
   Select,
   SelectContent,
@@ -48,11 +48,27 @@ function getSourceBadge(source?: string) {
 
 interface VoiceSelectorProps {
   voices: VoiceMeta[]
+  builtInVoices?: BuiltInVoiceMeta[]
   voiceId: string | null
   onChange: (voiceId: string | null) => void
 }
 
-export function VoiceSelector({ voices, voiceId, onChange }: VoiceSelectorProps) {
+function voiceLabel(voice: VoiceMeta): string {
+  const description = voice.description || voice.display_name || voice.voice_id
+  return description.length > 30 ? `${description.slice(0, 30)}...` : description
+}
+
+function categoryLabel(category: string): string {
+  const labels: Record<string, string> = {
+    conversation: 'Pocket built-ins: conversation',
+    reading: 'Pocket built-ins: reading',
+    multilingual: 'Pocket built-ins: multilingual',
+    other: 'Pocket built-ins: other',
+  }
+  return labels[category] ?? `Pocket built-ins: ${category}`
+}
+
+export function VoiceSelector({ voices, builtInVoices = [], voiceId, onChange }: VoiceSelectorProps) {
   const setPage = useAppStore((s) => s.setPage)
   const setTargetFamilyId = useAppStore((s) => s.setTargetFamilyId)
   const setDesignEngine = useAppStore((s) => s.setDesignEngine)
@@ -70,6 +86,21 @@ export function VoiceSelector({ voices, voiceId, onChange }: VoiceSelectorProps)
     }
   })
 
+  const builtInsByCategory = new Map<string, BuiltInVoiceMeta[]>()
+  builtInVoices.forEach((voice) => {
+    const category = voice.category || 'other'
+    if (!builtInsByCategory.has(category)) builtInsByCategory.set(category, [])
+    builtInsByCategory.get(category)!.push(voice)
+  })
+  const categoryOrder = ['conversation', 'reading', 'multilingual', 'other']
+  const builtInCategories = Array.from(builtInsByCategory.entries()).sort(
+    ([a], [b]) => {
+      const ai = categoryOrder.indexOf(a)
+      const bi = categoryOrder.indexOf(b)
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi) || a.localeCompare(b)
+    },
+  )
+
   return (
     <Select value={voiceId ?? 'default'} onValueChange={(v) => onChange(v === 'default' ? null : v)}>
       <SelectTrigger className="min-w-48">
@@ -77,6 +108,36 @@ export function VoiceSelector({ voices, voiceId, onChange }: VoiceSelectorProps)
       </SelectTrigger>
       <SelectContent>
         <SelectItem value="default">Default voice</SelectItem>
+
+        {builtInCategories.map(([category, categoryVoices]) => (
+          <div key={category}>
+            <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground opacity-70">
+              {categoryLabel(category)}
+            </div>
+            {categoryVoices.map((voice) => {
+              const isActive = voiceId === voice.voice_id
+              return (
+                <SelectItem
+                  key={voice.voice_id}
+                  value={voice.voice_id}
+                  className={isActive ? 'ring-1 ring-cyan-500/50 bg-cyan-500/5' : ''}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate max-w-[140px]">{voice.display_name}</span>
+                    {getSourceBadge('Pocket')}
+                    <span className="inline-flex items-center rounded-full border border-slate-500/30 bg-slate-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-slate-300">
+                      {voice.language_code}
+                    </span>
+                    <span className="hidden max-w-[110px] truncate text-[10px] text-muted-foreground sm:inline">
+                      {voice.note}
+                    </span>
+                  </span>
+                </SelectItem>
+              )
+            })}
+            <Separator className="my-1" />
+          </div>
+        ))}
 
         {/* Categorized Families */}
             {Array.from(families.entries()).map(([familyId, familyVoices]) => {
@@ -114,10 +175,8 @@ export function VoiceSelector({ voices, voiceId, onChange }: VoiceSelectorProps)
                       >
                         <span className="flex items-center gap-1.5">
                           <span className="truncate max-w-[140px]">
-                            {voice.variant_name ? `${voice.variant_name}: ` : ''}
-                            {voice.description.length > 30
-                              ? `${voice.description.slice(0, 30)}…`
-                              : voice.description}
+	                            {voice.variant_name ? `${voice.variant_name}: ` : ''}
+	                            {voiceLabel(voice)}
                           </span>
                           {getSourceBadge(voice.source)}
                           {voice.variant_name && (
@@ -178,9 +237,7 @@ export function VoiceSelector({ voices, voiceId, onChange }: VoiceSelectorProps)
                 >
                   <span className="flex items-center gap-1.5">
                     <span className="truncate max-w-[140px]">
-                      {voice.description.length > 30
-                        ? `${voice.description.slice(0, 30)}…`
-                        : voice.description}
+	                      {voiceLabel(voice)}
                     </span>
                     {getSourceBadge(voice.source)}
 {mounted && (

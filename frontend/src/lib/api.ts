@@ -85,8 +85,11 @@ export interface GenerateParams {
   text: string
   language?: string
   voiceId?: string | null
+  builtinVoice?: string | null
   seed?: number | null
   instruct?: string | null
+  stylePreset?: string | null
+  postprocess?: boolean | Record<string, unknown> | null
   responseFormat?: 'mp3' | 'wav'
 }
 
@@ -107,6 +110,9 @@ export interface VoiceMeta {
   sha256?: string
   sample_text_source?: 'env' | 'whisper' | 'user' | 'none' | 'unset' | string
   needs_review?: boolean
+  is_default?: boolean
+  quality_score?: number
+  quality_warnings?: string[]
   asr?: {
     ok?: boolean
     severity?: 'ok' | 'warn' | 'fail' | 'no_speech' | 'error' | string
@@ -115,6 +121,21 @@ export interface VoiceMeta {
     avg_logprob?: number | null
     suggestion?: string | null
   }
+}
+
+export interface BuiltInVoiceMeta {
+  voice_id: string
+  builtin_voice: string
+  backend: 'pocket_tts'
+  display_name: string
+  source: string
+  license: string
+  language: string
+  language_code: string
+  category: 'conversation' | 'reading' | 'multilingual' | 'other' | string
+  note: string
+  prompt: string
+  requires_backend: 'pocket_tts'
 }
 
 export interface GenerateResult {
@@ -134,9 +155,16 @@ export interface GenerateJobProgress {
   progress_pct: number
   elapsed_seconds: number
   audio_seconds_generated: number
+  audio_seconds?: number
   live_rtf_estimate: number | null
+  rtf?: number | null
   eta_seconds: number | null
   message: string | null
+  voice_family_id?: string | null
+  variant_kind?: string | null
+  style_preset?: string | null
+  postprocess_applied?: boolean
+  applied_steps?: string[] | null
   audio_available?: boolean
 }
 
@@ -149,6 +177,12 @@ async function readError(res: Response): Promise<string> {
   }
 }
 
+function builtinVoiceFromParams(params: GenerateParams): string | undefined {
+  if (params.builtinVoice) return params.builtinVoice.replace(/^pocket:/, '')
+  if (params.voiceId?.startsWith('pocket:')) return params.voiceId.slice('pocket:'.length)
+  return undefined
+}
+
 export async function generateSpeech(params: GenerateParams): Promise<GenerateResult> {
   const res = await fetch('/generate', {
     method: 'POST',
@@ -156,15 +190,68 @@ export async function generateSpeech(params: GenerateParams): Promise<GenerateRe
     body: JSON.stringify({
       text: params.text,
       language: params.language ?? 'English',
-      voice_id: params.voiceId ?? undefined,
+      voice_id: params.voiceId?.startsWith('pocket:') ? undefined : params.voiceId ?? undefined,
+      builtin_voice: builtinVoiceFromParams(params),
       seed: params.seed ?? undefined,
       instruct: params.instruct ?? undefined,
+      style_preset: params.stylePreset ?? undefined,
+      postprocess: params.postprocess ?? undefined,
       response_format: params.responseFormat ?? 'mp3',
     }),
   })
   if (!res.ok) throw new Error(await readError(res))
   const seedHeader = res.headers.get('X-Seed')
   return { blob: await res.blob(), seed: seedHeader ? Number(seedHeader) : null }
+}
+
+export interface ReferenceMetrics {
+  duration_seconds?: number
+  sample_rate?: number
+  lufs_integrated?: number | null
+  rms_dbfs?: number
+  peak_dbfs?: number
+  true_peak_dbtp?: number | null
+  speech_rate_proxy?: number
+  pause_count?: number
+  pause_total_seconds?: number
+  pause_ratio?: number
+  median_pause_ms?: number
+  longest_pause_ms?: number
+  pause_intervals?: [number, number][]
+  error?: string
+}
+
+export interface GenerateWithMetricsResult {
+  blob: Blob
+  seed: number | null
+  metrics: ReferenceMetrics
+}
+
+export async function generateSpeechWithMetrics(
+  params: GenerateParams,
+): Promise<GenerateWithMetricsResult> {
+  const res = await fetch('/generate/with_metrics', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text: params.text,
+      language: params.language ?? 'English',
+      voice_id: params.voiceId?.startsWith('pocket:') ? undefined : params.voiceId ?? undefined,
+      builtin_voice: builtinVoiceFromParams(params),
+      seed: params.seed ?? undefined,
+      instruct: params.instruct ?? undefined,
+      style_preset: params.stylePreset ?? undefined,
+      postprocess: params.postprocess ?? undefined,
+    }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  const bytes = Uint8Array.from(atob(body.audio_base64), (c) => c.charCodeAt(0))
+  return {
+    blob: new Blob([bytes], { type: body.media_type ?? 'audio/wav' }),
+    seed: typeof body.seed === 'number' ? body.seed : null,
+    metrics: body.metrics ?? {},
+  }
 }
 
 export interface VoiceDesignParams {
@@ -232,6 +319,13 @@ export async function listVoices(): Promise<VoiceMeta[]> {
   return body.voices
 }
 
+export async function listBuiltInVoices(): Promise<BuiltInVoiceMeta[]> {
+  const res = await fetch('/voices/built-in')
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  return body.voices ?? body
+}
+
 export async function getVoice(voiceId: string): Promise<VoiceMeta> {
   const res = await fetch(`/voices/${encodeURIComponent(voiceId)}`)
   if (!res.ok) throw new Error(await readError(res))
@@ -251,6 +345,24 @@ export async function updateVoiceSampleText(voiceId: string, sampleText: string)
 export async function deleteVoice(voiceId: string): Promise<void> {
   const res = await fetch(`/voices/${encodeURIComponent(voiceId)}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(await readError(res))
+}
+
+export async function normalizeVoiceReference(voiceId: string): Promise<VoiceMeta> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/normalize`, { method: 'POST' })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function trimVoiceReferenceSilence(voiceId: string): Promise<VoiceMeta> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/trim-silence`, { method: 'POST' })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function setDefaultVoiceVariant(voiceId: string): Promise<VoiceMeta> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/set-default`, { method: 'POST' })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
 }
 
 export interface HealthState {
@@ -467,6 +579,17 @@ export async function stitchOmniVoice(params: OmniVoiceStitchParams | string[]):
   return res.blob()
 }
 
+export interface StitchPlanRegionEdit {
+  type: 'gain' | 'mute' | 'delete' | 'fade' | 'insert_silence'
+  startMs?: number
+  endMs?: number
+  gainDb?: number
+  fadeInMs?: number
+  fadeOutMs?: number
+  atMs?: number
+  durationMs?: number
+}
+
 export interface StitchPlanPayload {
   clips: {
     segmentId?: string
@@ -476,6 +599,7 @@ export interface StitchPlanPayload {
     trimEndMs: number
     fadeInMs: number
     fadeOutMs: number
+    edits?: StitchPlanRegionEdit[]
   }[]
   paddingMs: number[]
   crossfadeMs: number
@@ -498,6 +622,18 @@ function serializeStitchPlan(plan: StitchPlanPayload) {
       trim_end_ms: c.trimEndMs,
       fade_in_ms: c.fadeInMs,
       fade_out_ms: c.fadeOutMs,
+      edits: c.edits?.length
+        ? c.edits.map((e) => ({
+            type: e.type,
+            start_ms: e.startMs,
+            end_ms: e.endMs,
+            gain_db: e.gainDb,
+            fade_in_ms: e.fadeInMs,
+            fade_out_ms: e.fadeOutMs,
+            at_ms: e.atMs,
+            duration_ms: e.durationMs,
+          }))
+        : undefined,
     })),
     padding_ms: plan.paddingMs,
     crossfade_ms: plan.crossfadeMs,
@@ -533,6 +669,8 @@ export interface OmniVoiceSaveParams {
   language?: string
   accentId?: string | null
   familyId?: string | null
+  variantName?: string | null
+  variantKind?: string | null
   /** Optional stitch_plan for full control (docs/dev/features/stitch_editor.md). */
   stitchPlan?: StitchPlanPayload | null
 }
@@ -555,6 +693,8 @@ export async function saveOmniVoice(params: OmniVoiceSaveParams): Promise<OmniVo
       language: params.language ?? 'english',
       accent_id: params.accentId ?? undefined,
       family_id: params.familyId ?? undefined,
+      variant_name: params.variantName ?? undefined,
+      variant_kind: params.variantKind ?? undefined,
       stitch_plan: params.stitchPlan
         ? serializeStitchPlan(params.stitchPlan)
         : undefined,
@@ -701,9 +841,12 @@ export async function generateAsync(
     body: JSON.stringify({
       text: params.text,
       language: params.language ?? 'English',
-      voice_id: params.voiceId ?? undefined,
+      voice_id: params.voiceId?.startsWith('pocket:') ? undefined : params.voiceId ?? undefined,
+      builtin_voice: builtinVoiceFromParams(params),
       seed: params.seed ?? undefined,
       instruct: params.instruct ?? undefined,
+      style_preset: params.stylePreset ?? undefined,
+      postprocess: params.postprocess ?? undefined,
       response_format: params.responseFormat ?? 'mp3',
     }),
   })

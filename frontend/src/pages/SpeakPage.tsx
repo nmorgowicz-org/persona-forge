@@ -2,22 +2,23 @@ import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   AlertCircle,
- AlertTriangle,
- ChevronDown,
- ChevronUp,
- Dice5,
- Loader2,
- Settings2,
- Square,
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Dice5,
+  Loader2,
+  Settings2,
+  Square,
 } from 'lucide-react'
 import {
   classifyGenerateError,
   generateAsync,
   getGenerateJobProgress,
   cancelGenerate,
+  listBuiltInVoices,
   listVoices,
+  type BuiltInVoiceMeta,
 } from '@/lib/api'
-import { TONE_OPTIONS } from '@/lib/voiceDesignChips'
 import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
 import { VoiceSelector } from '@/components/VoiceSelector'
@@ -31,7 +32,23 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { AdvancedDrawer } from '@/components/audio/AdvancedDrawer'
+
 import { Info } from 'lucide-react'
+
+
+// Helper for reduced motion
+const useReducedMotion = () => {
+  const [reduced, setReduced] = useState(false)
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    if (media.matches) setReduced(true)
+    const listener = (e: MediaQueryListEvent) => setReduced(e.matches)
+    media.addEventListener('change', listener)
+    return () => media.removeEventListener('change', listener)
+  }, [])
+  return reduced
+}
 
 function StructuredError({ error }: { error: string }) {
   const info = classifyGenerateError(error, null)
@@ -87,7 +104,27 @@ function formatEta(seconds: number | null): string {
   return `About ${Math.ceil(seconds / 60)}m remaining`
 }
 
+const POLISH_OPTIONS = [
+  { id: 'off', label: 'Off' },
+  { id: 'Neutral', label: 'Neutral' },
+  { id: 'Clean', label: 'Clean' },
+  { id: 'Broadcast', label: 'Broadcast' },
+  { id: 'Calm', label: 'Calm' },
+  { id: 'Energetic', label: 'Energetic' },
+  { id: 'Storyteller', label: 'Storyteller' },
+] as const
+
+interface SpeakResultMeta {
+  jobId: string | null
+  backend: string | null
+  stylePreset: string | null
+  appliedSteps: string[]
+  rtf: number | null
+  audioSeconds: number | null
+}
+
 export function SpeakPage() {
+  const reducedMotion = useReducedMotion()
   const {
     text,
     setText,
@@ -112,10 +149,14 @@ export function SpeakPage() {
     modelLoaded,
   } = useAppStore()
   const [language, setLanguage] = useState('English')
-  const [tone, setTone] = useState('neutral')
+  const [stylePreset, setStylePreset] = useState<(typeof POLISH_OPTIONS)[number]['id']>('off')
   const [seedInput, setSeedInput] = useState('')
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [builtInVoices, setBuiltInVoices] = useState<BuiltInVoiceMeta[]>([])
+  const [resultMeta, setResultMeta] = useState<SpeakResultMeta | null>(null)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const runtimeTtsBackend = useAppStore((s) => s.runtimeTtsBackend)
+  const isPocketBackend = runtimeTtsBackend === 'pocket_tts'
+
 
   async function refreshVoices() {
     try {
@@ -129,6 +170,17 @@ export function SpeakPage() {
     refreshVoices()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (!isPocketBackend) {
+      setBuiltInVoices([])
+      if (voiceId?.startsWith('pocket:')) setVoiceId(null)
+      return
+    }
+    listBuiltInVoices()
+      .then(setBuiltInVoices)
+      .catch(() => setBuiltInVoices([]))
+  }, [isPocketBackend, setVoiceId, voiceId])
 
   // Cleanup poll timer on unmount
   useEffect(() => {
@@ -160,6 +212,19 @@ export function SpeakPage() {
             setSpeakAudioUrl(URL.createObjectURL(blob))
             const seedHeader = audioRes.headers.get('X-Seed')
             if (seedHeader) setSpeakLastSeed(Number(seedHeader))
+            const rtfHeader = audioRes.headers.get('X-RTF')
+            const audioSecondsHeader = audioRes.headers.get('X-Audio-Seconds')
+            const appliedStepsHeader = audioRes.headers.get('X-Applied-Steps')
+            setResultMeta({
+              jobId,
+              backend: runtimeTtsBackend,
+              stylePreset: audioRes.headers.get('X-Style-Preset'),
+              appliedSteps: appliedStepsHeader
+                ? appliedStepsHeader.split(',').map((step) => step.trim()).filter(Boolean)
+                : [],
+              rtf: rtfHeader ? Number(rtfHeader) : p.rtf ?? null,
+              audioSeconds: audioSecondsHeader ? Number(audioSecondsHeader) : p.audio_seconds ?? null,
+            })
           } catch {
             setSpeakError('Failed to download generated audio')
           }
@@ -203,15 +268,14 @@ export function SpeakPage() {
     setSpeakIsGenerating(true)
     setSpeakError(null)
     setSpeakJobProgress(null)
+    setResultMeta(null)
     try {
-      const toneLabel = TONE_OPTIONS.find((t) => t.id === tone)?.label
-      const instruct = tone !== 'neutral' && toneLabel ? toneLabel : undefined
       const seed = seedInput.trim() ? Number(seedInput) : undefined
       const { job_id } = await generateAsync({
         text,
         language,
         voiceId,
-        instruct,
+        stylePreset: stylePreset === 'off' ? undefined : stylePreset,
         seed,
         responseFormat: 'mp3',
       })
@@ -233,28 +297,39 @@ export function SpeakPage() {
     // Let the poller detect cancelled status
   }
 
+  function handleVoiceChange(nextVoiceId: string | null) {
+    setVoiceId(nextVoiceId)
+    const builtIn = builtInVoices.find((voice) => voice.voice_id === nextVoiceId)
+    if (builtIn?.language) setLanguage(builtIn.language)
+  }
+
   return (
     <div className="flex flex-col gap-6">
-      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
+      <motion.div 
+        initial={{ opacity: 0, y: reducedMotion ? 0 : -8 }} 
+        animate={{ opacity: 1, y: 0 }}
+      >
         <h1 className="text-2xl font-semibold tracking-tight">Speak</h1>
-        <p className="text-sm text-muted-foreground">
-          Type text, pick a voice, and hear it spoken.
-        </p>
+         <p className="text-sm text-muted-foreground">
+           Type text, pick a curated Pocket voice or clone your own, and hear it spoken.
+         </p>
       </motion.div>
 
       <motion.div
         className="flex flex-col gap-5 rounded-xl border border-border bg-card p-6 text-card-foreground shadow-sm"
-        initial={{ opacity: 0, y: 12 }}
+        initial={{ opacity: 0, y: reducedMotion ? 0 : 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05 }}
       >
-        <textarea
-          data-testid="speak-text-input"
-          className="min-h-48 resize-y rounded-lg border border-input bg-transparent p-4 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-          placeholder="Say something..."
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-        />
+         <textarea
+           data-testid="speak-text-input"
+           aria-label="Text to synthesize"
+           className="min-h-48 resize-y rounded-lg border border-input bg-transparent p-4 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+           placeholder="Say something..."
+           value={text}
+           onChange={(e) => setText(e.target.value)}
+         />
+
 
         {/* Character count + length hint */}
         {text.length > 0 && (
@@ -271,7 +346,12 @@ export function SpeakPage() {
         )}
 
         <div className="flex flex-wrap items-center gap-3">
-          <VoiceSelector voices={voices} voiceId={voiceId} onChange={setVoiceId} />
+          <VoiceSelector
+            voices={voices}
+            builtInVoices={isPocketBackend ? builtInVoices : []}
+            voiceId={voiceId}
+            onChange={handleVoiceChange}
+          />
 
           <Select value={language} onValueChange={setLanguage}>
             <SelectTrigger>
@@ -280,32 +360,32 @@ export function SpeakPage() {
             <SelectContent>
               <SelectItem value="English">English</SelectItem>
               <SelectItem value="Chinese">Chinese</SelectItem>
+              <SelectItem value="French">French</SelectItem>
+              <SelectItem value="German">German</SelectItem>
+              <SelectItem value="Italian">Italian</SelectItem>
+              <SelectItem value="Portuguese">Portuguese</SelectItem>
+              <SelectItem value="Spanish">Spanish</SelectItem>
             </SelectContent>
           </Select>
 
-          <Select value={tone} onValueChange={setTone}>
+          <Select value={stylePreset} onValueChange={(value) => setStylePreset(value as typeof stylePreset)}>
             <SelectTrigger className="w-44">
-              <SelectValue placeholder="Tone" />
+              <SelectValue placeholder="Tone / polish" />
             </SelectTrigger>
             <SelectContent>
-              {TONE_OPTIONS.map((t) => (
-                <SelectItem key={t.id} value={t.id}>
-                  {t.label}
+              {POLISH_OPTIONS.map((option) => (
+                <SelectItem key={option.id} value={option.id}>
+                  {option.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Info className="size-3.5 shrink-0 text-muted-foreground" />
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-56">
-              Voice is what it sounds like. Tone is how it delivers this line. Tone currently
-              has no effect on the base voice-clone model — it's forwarded for
-              forward-compatibility with CustomVoice.
-            </TooltipContent>
-          </Tooltip>
+           <InfoIcon 
+             text="Tone / polish applies real post-processing after generation. Voice variants still control the performance; polish only finishes the rendered audio." 
+             className="size-3.5 shrink-0 text-muted-foreground" 
+           />
+
 
           <div className="flex items-center gap-1">
             <input
@@ -432,7 +512,13 @@ export function SpeakPage() {
 
         {speakAudioUrl && (
           <div data-testid="speak-result" className="flex flex-col gap-2">
-            <AudioPlayer src={speakAudioUrl} blob={speakAudioBlob} />
+            <AudioPlayer
+              src={speakAudioUrl}
+              blob={speakAudioBlob}
+              seed={speakLastSeed}
+              rtf={resultMeta?.rtf ?? null}
+              metrics={resultMeta?.audioSeconds ? { duration_seconds: resultMeta.audioSeconds } : null}
+            />
             {speakLastSeed !== null && (
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -463,59 +549,46 @@ export function SpeakPage() {
               </div>
             )}
 
-            {showAdvanced && (
-              <div className="rounded-lg border border-border bg-muted/20 p-3">
-                <p className="mb-2 text-[10px] font-medium text-muted-foreground">Diagnostics</p>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] font-mono">
-                  <div className="flex justify-between items-center gap-2">
-                    <span className="opacity-60">Job ID:</span>
-                    <span className="max-w-[120px] truncate">{speakJobId || 'n/a'}</span>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Info className="size-3 shrink-0 text-muted-foreground" />
-                      </TooltipTrigger>
-                      <TooltipContent side="top">
-                        Unique backend identifier for this generation job.
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                  <div className="flex justify-between items-center gap-2">
-                    <span className="opacity-60">Backend:</span>
-                    <span>OpenVINO</span>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Info className="size-3 shrink-0 text-muted-foreground" />
-                      </TooltipTrigger>
-                      <TooltipContent side="top">
-                        Accelerated by Intel OpenVINO for faster CPU inference.
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                                      <div className="flex justify-between items-center gap-2">
-                      <span className="opacity-60">Seed:</span>
-                      <span>{speakLastSeed}</span>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Info className="size-3 shrink-0 text-muted-foreground" />
-                        </TooltipTrigger>
-                        <TooltipContent side="top">
-                          Symmetric seed used to control randomness.
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>\n                                      <div className="flex justify-between items-center gap-2">
-                      <span className="opacity-60">Status:</span>
-                      <span className="text-green-500">Completed</span>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Info className="size-3 shrink-0 text-muted-foreground" />
-                        </TooltipTrigger>
-                        <TooltipContent side="top">
-                          Audio successfully generated and downloaded.
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>\n                </div>
+            <AdvancedDrawer
+              title="Advanced Diagnostics"
+              description="Detailed backend metadata for debugging and consistency checks."
+              trigger={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 gap-1 px-2 text-[10px]"
+                >
+                  <Settings2 className="size-3" />
+                  Advanced
+                </Button>
+              }
+            >
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] font-mono">
+                <div className="flex justify-between items-center gap-2">
+                  <span className="opacity-60">Job ID:</span>
+                  <span className="max-w-[120px] truncate">{speakJobId || 'n/a'}</span>
+                  <InfoIcon text="Unique backend identifier for this generation job." className="size-3 shrink-0 text-muted-foreground" />
+                </div>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="opacity-60">Backend:</span>
+                  <span className="capitalize">{runtimeTtsBackend.replace('_', ' ')}</span>
+                  <InfoIcon text="Accelerated by Intel OpenVINO for faster CPU inference." className="size-3 shrink-0 text-muted-foreground" />
+                </div>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="opacity-60">Seed:</span>
+                  <span className="tabular-nums">{speakLastSeed ?? 'N/A'}</span>
+                  <InfoIcon text="Symmetric seed used to control randomness." className="size-3 shrink-0 text-muted-foreground" />
+                </div>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="opacity-60">Status:</span>
+                  <span className="text-emerald-500">Completed</span>
+                  <InfoIcon text="Audio successfully generated and downloaded." className="size-3 shrink-0 text-muted-foreground" />
+                </div>
               </div>
-            )}
+            </AdvancedDrawer>
+
+
           </div>
         )}
       </motion.div>

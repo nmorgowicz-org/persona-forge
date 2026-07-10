@@ -1,7 +1,7 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion, Reorder } from 'framer-motion'
-import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play, Pause } from 'lucide-react'
+import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play, Pause, Scissors, Trash2, Volume2, VolumeX } from 'lucide-react'
 import { useAppStore, type StitchPlanClip } from '@/store'
 import { base64ToBlob, cn } from '@/lib/utils'
 import {
@@ -9,6 +9,7 @@ import {
   getSegmentAudioBase64,
   getVoice,
   type StitchPlanPayload,
+  type StitchPlanRegionEdit,
   type SegmentMeta,
   type VoiceMeta,
 } from '@/lib/api'
@@ -39,18 +40,266 @@ function clipEffectiveDurationMs(clip: StitchPlanClip): number {
   return Math.max(10, base - clip.trimStartMs - clip.trimEndMs)
 }
 
+type RegionEdit =
+  | { id: string; type: 'gain'; startMs: number; endMs: number; gainDb: number; fadeInMs: number; fadeOutMs: number }
+  | { id: string; type: 'mute'; startMs: number; endMs: number; fadeInMs: number; fadeOutMs: number }
+  | { id: string; type: 'delete'; startMs: number; endMs: number }
+  | { id: string; type: 'fade'; startMs: number; endMs: number; fadeInMs: number; fadeOutMs: number }
+  | { id: string; type: 'insert_silence'; atMs: number; durationMs: number; placement: 'before' | 'after' }
+
+type RegionEditsByClip = Record<string, RegionEdit[]>
+
+function hasRegionEdits(editsByClip: RegionEditsByClip): boolean {
+  return Object.values(editsByClip).some((edits) => edits.length > 0)
+}
+
+function clampMs(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.round(v)))
+}
+
+function makeRegionEditId(type: RegionEdit['type']): string {
+  return `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+}
+
+function dbToGain(db: number): number {
+  return Math.pow(10, db / 20)
+}
+
+function msToSample(ms: number, sampleRate: number): number {
+  return Math.max(0, Math.round((ms / 1000) * sampleRate))
+}
+
+function cloneChannels(buffer: AudioBuffer): Float32Array[] {
+  return Array.from({ length: buffer.numberOfChannels }, (_, channel) => new Float32Array(buffer.getChannelData(channel)))
+}
+
+function sliceChannels(channels: Float32Array[], start: number, end: number): Float32Array[] {
+  return channels.map((channel) => channel.slice(start, end))
+}
+
+function removeRange(channels: Float32Array[], start: number, end: number): Float32Array[] {
+  return channels.map((channel) => {
+    const next = new Float32Array(channel.length - (end - start))
+    next.set(channel.slice(0, start), 0)
+    next.set(channel.slice(end), start)
+    return next
+  })
+}
+
+function insertSilence(channels: Float32Array[], at: number, length: number): Float32Array[] {
+  if (length <= 0) return channels
+  return channels.map((channel) => {
+    const next = new Float32Array(channel.length + length)
+    next.set(channel.slice(0, at), 0)
+    next.set(channel.slice(at), at + length)
+    return next
+  })
+}
+
+function applyEnvelope(
+  channels: Float32Array[],
+  start: number,
+  end: number,
+  fadeIn: number,
+  fadeOut: number,
+  factorAt: (position: number, length: number) => number,
+) {
+  const length = Math.max(1, end - start)
+  for (const channel of channels) {
+    for (let i = start; i < end; i++) {
+      const pos = i - start
+      let factor = factorAt(pos, length)
+      if (fadeIn > 0 && pos < fadeIn) factor = 1 + (factor - 1) * (pos / fadeIn)
+      if (fadeOut > 0 && length - pos < fadeOut) factor = 1 + (factor - 1) * ((length - pos) / fadeOut)
+      channel[i] *= factor
+    }
+  }
+}
+
+function applyClipFade(channels: Float32Array[], sampleRate: number, fadeInMs: number, fadeOutMs: number) {
+  const length = channels[0]?.length ?? 0
+  if (!length) return
+  const fadeIn = Math.min(length, msToSample(fadeInMs, sampleRate))
+  const fadeOut = Math.min(length, msToSample(fadeOutMs, sampleRate))
+  for (const channel of channels) {
+    for (let i = 0; i < fadeIn; i++) channel[i] *= i / Math.max(1, fadeIn)
+    for (let i = 0; i < fadeOut; i++) {
+      const idx = length - 1 - i
+      channel[idx] *= i / Math.max(1, fadeOut)
+    }
+  }
+}
+
+async function decodeClipAudio(ctx: AudioContext, clip: StitchPlanClip): Promise<AudioBuffer> {
+  const blob = base64ToBlob(clip.sourceAudioBase64)
+  const arrayBuffer = await blob.arrayBuffer()
+  return ctx.decodeAudioData(arrayBuffer.slice(0))
+}
+
+function processClipAudio(buffer: AudioBuffer, clip: StitchPlanClip, edits: RegionEdit[]): Float32Array[] {
+  const sampleRate = buffer.sampleRate
+  const start = msToSample(clip.trimStartMs, sampleRate)
+  const end = Math.max(start + 1, buffer.length - msToSample(clip.trimEndMs, sampleRate))
+  let channels = sliceChannels(cloneChannels(buffer), start, Math.min(end, buffer.length))
+
+  for (const edit of edits) {
+    if (edit.type === 'insert_silence') continue
+    const editStart = Math.min(channels[0].length, msToSample(edit.startMs, sampleRate))
+    const editEnd = Math.min(channels[0].length, msToSample(edit.endMs, sampleRate))
+    if (editEnd <= editStart) continue
+    if (edit.type === 'gain') {
+      const gain = dbToGain(edit.gainDb)
+      applyEnvelope(channels, editStart, editEnd, msToSample(edit.fadeInMs, sampleRate), msToSample(edit.fadeOutMs, sampleRate), () => gain)
+    } else if (edit.type === 'mute') {
+      applyEnvelope(channels, editStart, editEnd, msToSample(edit.fadeInMs, sampleRate), msToSample(edit.fadeOutMs, sampleRate), () => 0)
+    } else if (edit.type === 'fade') {
+      const fadeIn = msToSample(edit.fadeInMs, sampleRate)
+      const fadeOut = msToSample(edit.fadeOutMs, sampleRate)
+      applyEnvelope(channels, editStart, editEnd, 0, 0, (position, length) => {
+        let factor = 1
+        if (fadeIn > 0 && position < fadeIn) factor = Math.min(factor, position / fadeIn)
+        if (fadeOut > 0 && length - position < fadeOut) factor = Math.min(factor, (length - position) / fadeOut)
+        return factor
+      })
+    }
+  }
+
+  const deletes = edits
+    .filter((edit): edit is Extract<RegionEdit, { type: 'delete' }> => edit.type === 'delete')
+    .sort((a, b) => b.startMs - a.startMs)
+  for (const edit of deletes) {
+    const editStart = Math.min(channels[0].length, msToSample(edit.startMs, sampleRate))
+    const editEnd = Math.min(channels[0].length, msToSample(edit.endMs, sampleRate))
+    if (editEnd > editStart) channels = removeRange(channels, editStart, editEnd)
+  }
+
+  let inserted = 0
+  const inserts = edits
+    .filter((edit): edit is Extract<RegionEdit, { type: 'insert_silence' }> => edit.type === 'insert_silence')
+    .sort((a, b) => a.atMs - b.atMs)
+  for (const edit of inserts) {
+    const at = Math.min(channels[0].length, msToSample(edit.atMs, sampleRate) + inserted)
+    const length = msToSample(edit.durationMs, sampleRate)
+    channels = insertSilence(channels, at, length)
+    inserted += length
+  }
+
+  applyClipFade(channels, sampleRate, clip.fadeInMs, clip.fadeOutMs)
+  return channels
+}
+
+function appendWithGapAndCrossfade(
+  output: Float32Array[],
+  clip: Float32Array[],
+  sampleRate: number,
+  gapMs: number,
+  crossfadeMs: number,
+): Float32Array[] {
+  if (!output.length) return clip
+  const channels = Math.max(output.length, clip.length)
+  const gap = msToSample(gapMs, sampleRate)
+  const fade = gap > 0 ? 0 : Math.min(msToSample(crossfadeMs, sampleRate), output[0].length, clip[0].length)
+  return Array.from({ length: channels }, (_, channelIndex) => {
+    const prev = output[channelIndex] ?? output[0]
+    const next = clip[channelIndex] ?? clip[0]
+    const length = prev.length + gap + next.length - fade
+    const merged = new Float32Array(length)
+    merged.set(prev, 0)
+    if (fade > 0) {
+      const start = prev.length - fade
+      for (let i = 0; i < fade; i++) {
+        const a = 1 - i / fade
+        const b = i / fade
+        merged[start + i] = prev[start + i] * a + next[i] * b
+      }
+      merged.set(next.slice(fade), prev.length + gap)
+    } else {
+      merged.set(next, prev.length + gap)
+    }
+    return merged
+  })
+}
+
+function encodeWav(channels: Float32Array[], sampleRate: number): Blob {
+  const channelCount = channels.length
+  const frameCount = channels[0]?.length ?? 0
+  const bytesPerSample = 2
+  const dataSize = frameCount * channelCount * bytesPerSample
+  const buffer = new ArrayBuffer(44 + dataSize)
+  const view = new DataView(buffer)
+  const writeString = (offset: number, value: string) => {
+    for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i))
+  }
+  writeString(0, 'RIFF')
+  view.setUint32(4, 36 + dataSize, true)
+  writeString(8, 'WAVE')
+  writeString(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, channelCount, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * channelCount * bytesPerSample, true)
+  view.setUint16(32, channelCount * bytesPerSample, true)
+  view.setUint16(34, bytesPerSample * 8, true)
+  writeString(36, 'data')
+  view.setUint32(40, dataSize, true)
+  let offset = 44
+  for (let i = 0; i < frameCount; i++) {
+    for (let channel = 0; channel < channelCount; channel++) {
+      const sample = Math.max(-1, Math.min(1, channels[channel][i]))
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true)
+      offset += bytesPerSample
+    }
+  }
+  return new Blob([buffer], { type: 'audio/wav' })
+}
+
+async function renderEditedStitchPreview(
+  clips: StitchPlanClip[],
+  paddingMs: number[],
+  crossfadeMs: number,
+  editsByClip: RegionEditsByClip,
+): Promise<Blob> {
+  const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext
+  if (!AudioContextCtor) throw new Error('Browser audio rendering is unavailable.')
+  const ctx = new AudioContextCtor() as AudioContext
+  try {
+    let sampleRate = 24000
+    let output: Float32Array[] = []
+    for (let i = 0; i < clips.length; i++) {
+      const clip = clips[i]
+      if (!clip.sourceAudioBase64) throw new Error('Region preview needs source audio for every clip.')
+      const buffer = await decodeClipAudio(ctx, clip)
+      sampleRate = buffer.sampleRate
+      const processed = processClipAudio(buffer, clip, editsByClip[clip.clipId] ?? [])
+      output = appendWithGapAndCrossfade(output, processed, sampleRate, i > 0 ? paddingMs[i - 1] || 0 : 0, i > 0 ? crossfadeMs : 0)
+    }
+    return encodeWav(output, sampleRate)
+  } finally {
+    await ctx.close()
+  }
+}
+
 /* ---------- sub-components ---------- */
 
 function StitchTimelineClip({
   clip,
   onRemove,
   onUpdate,
+  regionEdits,
+  onAddRegionEdit,
+  onRemoveRegionEdit,
+  onSplitRegion,
   isReordering,
   reducedMotion: _reducedMotion,
 }: {
   clip: StitchPlanClip
   onRemove: (clipId: string) => void
   onUpdate: (clipId: string, patch: Partial<StitchPlanClip>) => void
+  regionEdits: RegionEdit[]
+  onAddRegionEdit: (clipId: string, edit: RegionEdit) => void
+  onRemoveRegionEdit: (clipId: string, editId: string) => void
+  onSplitRegion: (clipId: string, startMs: number, endMs: number) => void
   isReordering?: boolean
   reducedMotion: boolean
 }) {
@@ -61,8 +310,14 @@ function StitchTimelineClip({
   const clipAudioUrlRef = useRef<string | null>(null)
   const [editingText, setEditingText] = useState(false)
   const [draftText, setDraftText] = useState(clip.text ?? '')
+  const [selection, setSelection] = useState<{ startMs: number; endMs: number } | null>(null)
+  const [gainDb, setGainDb] = useState(-3)
+  const [regionFadeInMs, setRegionFadeInMs] = useState(15)
+  const [regionFadeOutMs, setRegionFadeOutMs] = useState(35)
+  const [silenceMs, setSilenceMs] = useState(180)
   const textInputRef = useRef<HTMLInputElement | null>(null)
   const activeHandle = useRef<'leftTrim' | 'rightTrim' | 'leftFade' | 'rightFade' | null>(null)
+  const selectionDrag = useRef<{ startMs: number } | null>(null)
   const laneRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -146,20 +401,39 @@ function StitchTimelineClip({
 
   const effectiveDuration = clipEffectiveDurationMs(clip)
 
-  const clampTrimStart = (v: number) => {
+  const clampTrimStart = useCallback((v: number) => {
     const nv = Math.max(0, Math.min(v, (durMs ?? 0) - 20))
     if (nv + clip.trimEndMs >= (durMs ?? 0)) return durMs ? durMs - 20 - clip.trimEndMs : 0
     return nv
-  }
-  const clampTrimEnd = (v: number) => {
+  }, [clip.trimEndMs, durMs])
+  const clampTrimEnd = useCallback((v: number) => {
     const nv = Math.max(0, Math.min(v, (durMs ?? 0) - 20))
     if (nv + clip.trimStartMs >= (durMs ?? 0)) return durMs ? durMs - 20 - clip.trimStartMs : 0
     return nv
-  }
-  const clampFade = (v: number) => {
+  }, [clip.trimStartMs, durMs])
+  const clampFade = useCallback((v: number) => {
     const maxMs = Math.max(10, effectiveDuration - 10)
     return Math.max(0, Math.min(v, maxMs))
-  }
+  }, [effectiveDuration])
+  const clampSelection = useCallback((startMs: number, endMs: number) => {
+    let start = clampMs(Math.min(startMs, endMs), 0, effectiveDuration)
+    let end = clampMs(Math.max(startMs, endMs), 0, effectiveDuration)
+    if (end - start < 10) {
+      if (end >= effectiveDuration) start = Math.max(0, end - 10)
+      else end = Math.min(effectiveDuration, start + 10)
+    }
+    return { startMs: start, endMs: end }
+  }, [effectiveDuration])
+  const selectedRegion = selection ?? { startMs: 0, endMs: Math.min(500, effectiveDuration) }
+  const selectedDuration = Math.max(10, selectedRegion.endMs - selectedRegion.startMs)
+  const regionPercent = (ms: number) => `${(ms / Math.max(1, effectiveDuration)) * 100}%`
+
+  const pointToMs = useCallback((clientX: number) => {
+    if (!laneRef.current) return 0
+    const rect = laneRef.current.getBoundingClientRect()
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+    return ratio * effectiveDuration
+  }, [effectiveDuration])
 
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {
@@ -181,7 +455,7 @@ function StitchTimelineClip({
         onUpdate(clip.clipId, { fadeOutMs: clampFade(clip.fadeOutMs + (width - offsetX) * msPerPx) })
       }
     },
-    [clip, durMs, effectiveDuration, onUpdate],
+    [clip, durMs, effectiveDuration, onUpdate, clampTrimStart, clampTrimEnd, clampFade],
   )
 
   const handleMouseUp = useCallback(() => {
@@ -194,6 +468,92 @@ function StitchTimelineClip({
     activeHandle.current = handle
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
+  }
+
+  const handleSelectionMove = useCallback(
+    (e: MouseEvent) => {
+      if (!selectionDrag.current) return
+      setSelection(clampSelection(selectionDrag.current.startMs, pointToMs(e.clientX)))
+    },
+    [clampSelection, pointToMs],
+  )
+
+  const handleSelectionUp = useCallback(() => {
+    selectionDrag.current = null
+    window.removeEventListener('mousemove', handleSelectionMove)
+    window.removeEventListener('mouseup', handleSelectionUp)
+  }, [handleSelectionMove])
+
+  const startSelection = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (!durMs) return
+    e.preventDefault()
+    e.stopPropagation()
+    const startMs = pointToMs(e.clientX)
+    selectionDrag.current = { startMs }
+    setSelection(clampSelection(startMs, startMs + 10))
+    window.addEventListener('mousemove', handleSelectionMove)
+    window.addEventListener('mouseup', handleSelectionUp)
+  }
+
+  const addRegionEdit = (edit: RegionEdit) => onAddRegionEdit(clip.clipId, edit)
+
+  const applyGain = () => {
+    addRegionEdit({
+      id: makeRegionEditId('gain'),
+      type: 'gain',
+      startMs: selectedRegion.startMs,
+      endMs: selectedRegion.endMs,
+      gainDb,
+      fadeInMs: regionFadeInMs,
+      fadeOutMs: regionFadeOutMs,
+    })
+  }
+
+  const applyMute = () => {
+    addRegionEdit({
+      id: makeRegionEditId('mute'),
+      type: 'mute',
+      startMs: selectedRegion.startMs,
+      endMs: selectedRegion.endMs,
+      fadeInMs: regionFadeInMs,
+      fadeOutMs: regionFadeOutMs,
+    })
+  }
+
+  const applyDelete = () => {
+    addRegionEdit({
+      id: makeRegionEditId('delete'),
+      type: 'delete',
+      startMs: selectedRegion.startMs,
+      endMs: selectedRegion.endMs,
+    })
+  }
+
+  const applyFade = () => {
+    addRegionEdit({
+      id: makeRegionEditId('fade'),
+      type: 'fade',
+      startMs: selectedRegion.startMs,
+      endMs: selectedRegion.endMs,
+      fadeInMs: regionFadeInMs,
+      fadeOutMs: regionFadeOutMs,
+    })
+  }
+
+  const insertSilenceAt = (placement: 'before' | 'after') => {
+    addRegionEdit({
+      id: makeRegionEditId('insert_silence'),
+      type: 'insert_silence',
+      atMs: placement === 'before' ? selectedRegion.startMs : selectedRegion.endMs,
+      durationMs: silenceMs,
+      placement,
+    })
+  }
+
+  const describeEdit = (edit: RegionEdit) => {
+    if (edit.type === 'insert_silence') return `silence ${edit.durationMs}ms ${edit.placement} ${edit.atMs}ms`
+    if (edit.type === 'gain') return `gain ${edit.gainDb}dB ${edit.startMs}-${edit.endMs}ms`
+    return `${edit.type} ${edit.startMs}-${edit.endMs}ms`
   }
 
   const fadeOverlay = (side: 'left' | 'right', ms: number) => {
@@ -279,30 +639,81 @@ function StitchTimelineClip({
       </div>
 
       <div className="relative h-24 overflow-hidden rounded-md bg-black/40">
-        <div ref={laneRef} className="relative h-full w-full">
+        <div ref={laneRef} className="relative h-full w-full" onMouseDown={startSelection}>
           <WaveformLane peaks={peaks} durMs={durMs} trimStartMs={clip.trimStartMs} trimEndMs={clip.trimEndMs} fadeInMs={clip.fadeInMs} fadeOutMs={clip.fadeOutMs} />
           {fadeOverlay('left', clip.fadeInMs)}
           {fadeOverlay('right', clip.fadeOutMs)}
+
+          {regionEdits.map((edit) => {
+            if (edit.type === 'insert_silence') {
+              return (
+                <div
+                  key={edit.id}
+                  className="pointer-events-none absolute inset-y-2 w-1 rounded-full bg-sky-300/70"
+                  style={{ left: regionPercent(edit.atMs) }}
+                  title={describeEdit(edit)}
+                />
+              )
+            }
+            const left = regionPercent(edit.startMs)
+            const width = regionPercent(Math.max(10, edit.endMs - edit.startMs))
+            return (
+              <div
+                key={edit.id}
+                className={cn(
+                  'pointer-events-none absolute inset-y-1 rounded-sm border',
+                  edit.type === 'delete' && 'border-red-400/60 bg-red-500/20',
+                  edit.type === 'mute' && 'border-zinc-300/40 bg-zinc-950/55',
+                  edit.type === 'gain' && 'border-amber-300/50 bg-amber-400/15',
+                  edit.type === 'fade' && 'border-cyan-300/50 bg-gradient-to-r from-transparent via-cyan-300/20 to-transparent',
+                )}
+                style={{ left, width }}
+                title={describeEdit(edit)}
+              />
+            )
+          })}
+
+          {selection && (
+            <div
+              className="pointer-events-none absolute inset-y-0 rounded-sm border border-cyan-300/80 bg-cyan-300/15"
+              style={{ left: regionPercent(selection.startMs), width: regionPercent(selection.endMs - selection.startMs) }}
+            >
+              <div className="absolute inset-y-0 left-0 w-1 bg-cyan-300" />
+              <div className="absolute inset-y-0 right-0 w-1 bg-cyan-300" />
+            </div>
+          )}
 
           {durMs && (
             <>
               <div
                 className="absolute inset-y-0 left-0 w-[2px] cursor-ew-resize bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
-                onMouseDown={() => startDrag('leftTrim')}
+                onMouseDown={(e) => {
+                  e.stopPropagation()
+                  startDrag('leftTrim')
+                }}
               />
               <div
                 className="absolute inset-y-0 right-0 w-[2px] cursor-ew-resize bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
-                onMouseDown={() => startDrag('rightTrim')}
+                onMouseDown={(e) => {
+                  e.stopPropagation()
+                  startDrag('rightTrim')
+                }}
               />
               <div
                 className="absolute inset-y-0 w-[2px] cursor-ew-resize bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
                 style={{ left: `${(clip.fadeInMs / effectiveDuration) * 100}%` }}
-                onMouseDown={() => startDrag('leftFade')}
+                onMouseDown={(e) => {
+                  e.stopPropagation()
+                  startDrag('leftFade')
+                }}
               />
               <div
                 className="absolute inset-y-0 w-[2px] cursor-ew-resize bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
                 style={{ right: `${(clip.fadeOutMs / effectiveDuration) * 100}%` }}
-                onMouseDown={() => startDrag('rightFade')}
+                onMouseDown={(e) => {
+                  e.stopPropagation()
+                  startDrag('rightFade')
+                }}
               />
             </>
           )}
@@ -314,6 +725,39 @@ function StitchTimelineClip({
         <MsStepper label="Trim end" value={clip.trimEndMs} min={0} max={durMs ?? 0} step={10} onChange={(v) => onUpdate(clip.clipId, { trimEndMs: clampTrimEnd(v) })} />
         <MsStepper label="Fade in" value={clip.fadeInMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeInMs: clampFade(v) })} />
         <MsStepper label="Fade out" value={clip.fadeOutMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeOutMs: clampFade(v) })} />
+      </div>
+
+      <div className="mt-2 rounded-md border border-border/50 bg-black/20 p-2">
+        <div className="grid grid-cols-3 gap-1.5">
+          <MsStepper label="Region start" value={selectedRegion.startMs} min={0} max={effectiveDuration} step={10} onChange={(v) => setSelection(clampSelection(v, selectedRegion.endMs))} compact />
+          <MsStepper label="Region end" value={selectedRegion.endMs} min={0} max={effectiveDuration} step={10} onChange={(v) => setSelection(clampSelection(selectedRegion.startMs, v))} compact />
+          <span className="self-center text-[10px] font-mono text-muted-foreground">{selectedDuration}ms</span>
+          <MsStepper label="Gain" value={gainDb} min={-24} max={12} step={1} onChange={setGainDb} compact />
+          <MsStepper label="Fade in" value={regionFadeInMs} min={0} max={500} step={5} onChange={setRegionFadeInMs} compact />
+          <MsStepper label="Fade out" value={regionFadeOutMs} min={0} max={500} step={5} onChange={setRegionFadeOutMs} compact />
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyGain} title="Apply gain to selected region"><Volume2 className="size-3" /> gain</button>
+          <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyMute} title="Mute selected region"><VolumeX className="size-3" /> mute</button>
+          <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyDelete} title="Delete selected region"><Trash2 className="size-3" /> delete</button>
+          <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyFade} title="Fade selected region"><ChevronUp className="size-3" /> fade</button>
+          <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => onSplitRegion(clip.clipId, selectedRegion.startMs, selectedRegion.endMs)} title="Split clip at selected region boundaries"><Scissors className="size-3" /> split</button>
+          <MsStepper label="Silence" value={silenceMs} min={20} max={2000} step={10} onChange={setSilenceMs} compact />
+          <button type="button" className="rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => insertSilenceAt('before')} title="Insert silence before selected region">+ before</button>
+          <button type="button" className="rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => insertSilenceAt('after')} title="Insert silence after selected region">+ after</button>
+        </div>
+        {regionEdits.length > 0 && (
+          <div className="mt-2 flex flex-col gap-1 border-t border-border/40 pt-2">
+            {regionEdits.map((edit) => (
+              <div key={edit.id} className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                <span className="truncate">{describeEdit(edit)}</span>
+                <button type="button" className="shrink-0 rounded p-0.5 hover:bg-muted hover:text-foreground" onClick={() => onRemoveRegionEdit(clip.clipId, edit.id)} title="Remove edit">
+                  <X className="size-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -609,6 +1053,9 @@ interface StitchTimelineProps {
   isPreviewStale: boolean
   library: SegmentMeta[]
   onInsertFromLibrary: (seg: SegmentMeta) => void
+  regionEditsByClip: RegionEditsByClip
+  onAddRegionEdit: (clipId: string, edit: RegionEdit) => void
+  onRemoveRegionEdit: (clipId: string, editId: string) => void
   voiceLibrary?: VoiceMeta[]
   onInsertVoiceFromLibrary?: (voice: VoiceMeta) => void
 }
@@ -618,6 +1065,9 @@ export const StitchTimeline = memo(function StitchTimeline({
   isPreviewStale: _isPreviewStale,
   library,
   onInsertFromLibrary,
+  regionEditsByClip,
+  onAddRegionEdit,
+  onRemoveRegionEdit,
   voiceLibrary,
   onInsertVoiceFromLibrary,
 }: StitchTimelineProps) {
@@ -627,7 +1077,9 @@ export const StitchTimeline = memo(function StitchTimeline({
   const reorderClip = useAppStore((s) => s.reorderOvStitchPlanClip)
   const removeClip = useAppStore((s) => s.removeOvStitchPlanClip)
   const updateClip = useAppStore((s) => s.updateOvStitchPlanClip)
+  const setClips = useAppStore((s) => s.setOvStitchPlanClips)
   const setPadding = useAppStore((s) => s.setOvStitchPlanPaddingAt)
+  const setPaddingMs = useAppStore((s) => s.setOvStitchPlanPaddingMs)
   const hasVoiceLibrary = (voiceLibrary?.length ?? 0) > 0 && !!onInsertVoiceFromLibrary
 
   const handleReorder = useCallback(
@@ -656,6 +1108,48 @@ export const StitchTimeline = memo(function StitchTimeline({
       reorderClip(index, to)
     },
     [clips.length, reorderClip],
+  )
+
+  const splitRegion = useCallback(
+    (clipId: string, startMs: number, endMs: number) => {
+      const index = clips.findIndex((clip) => clip.clipId === clipId)
+      if (index === -1) return
+      const clip = clips[index]
+      const duration = clip.durationMs ?? 0
+      if (!duration) return
+      const effectiveDuration = clipEffectiveDurationMs(clip)
+      const start = clampMs(startMs, 0, effectiveDuration)
+      const end = clampMs(endMs, start + 10, effectiveDuration)
+      const absoluteStart = clip.trimStartMs + start
+      const absoluteEnd = clip.trimStartMs + end
+      const parts: StitchPlanClip[] = []
+      const addPart = (label: string, trimStartMs: number, trimEndMs: number) => {
+        if (duration - trimStartMs - trimEndMs < 20) return
+        parts.push({
+          ...clip,
+          clipId: `${clip.clipId}-${label}-${Date.now()}`,
+          trimStartMs,
+          trimEndMs,
+          fadeInMs: 0,
+          fadeOutMs: 0,
+        })
+      }
+      addPart('pre', clip.trimStartMs, duration - absoluteStart)
+      addPart('region', absoluteStart, duration - absoluteEnd)
+      addPart('post', absoluteEnd, clip.trimEndMs)
+      if (parts.length <= 1) return
+      setClips((prev) => {
+        const next = [...prev]
+        next.splice(index, 1, ...parts)
+        return next
+      })
+      const nextPadding = [...paddingMs]
+      const inheritedGap = nextPadding[index] ?? 0
+      nextPadding.splice(index, 0, ...new Array(parts.length - 1).fill(0))
+      if (index + parts.length - 1 < nextPadding.length) nextPadding[index + parts.length - 1] = inheritedGap
+      setPaddingMs(nextPadding.slice(0, Math.max(0, clips.length + parts.length - 2)))
+    },
+    [clips, paddingMs, setClips, setPaddingMs],
   )
 
   // Hooks must run unconditionally on every render — this used to sit after an early return
@@ -696,7 +1190,7 @@ export const StitchTimeline = memo(function StitchTimeline({
               getId={(v) => v.voice_id}
               getLabel={(v) => v.description || v.voice_id}
               getMeta={(v) =>
-                [v.language, v.sample_text ? `\"${v.sample_text.slice(0, 60)}${v.sample_text.length > 60 ? '…' : ''}\"` : null]
+                [v.language, v.sample_text ? `Sample: ${v.sample_text.slice(0, 60)}${v.sample_text.length > 60 ? '…' : ''}` : null]
                   .filter(Boolean)
                   .join(' · ') || null
               }
@@ -789,6 +1283,10 @@ export const StitchTimeline = memo(function StitchTimeline({
                   clip={clip}
                   onRemove={removeClip}
                   onUpdate={updateClip}
+                  regionEdits={regionEditsByClip[clip.clipId] ?? []}
+                  onAddRegionEdit={onAddRegionEdit}
+                  onRemoveRegionEdit={onRemoveRegionEdit}
+                  onSplitRegion={splitRegion}
                   isReordering
                   reducedMotion={reducedMotion}
                 />
@@ -918,6 +1416,7 @@ function StitchEditorBody({
   const [showDsp, setShowDsp] = useState(false)
   const [staleFlags, setStaleFlags] = useState(true)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  const [regionEditsByClip, setRegionEditsByClip] = useState<RegionEditsByClip>({})
   const debounceRef = useRef<number | null>(null)
   const lastHashRef = useRef('')
   // Guards against out-of-order network responses: an older in-flight render
@@ -930,6 +1429,7 @@ function StitchEditorBody({
     return {
       clips: clips.map((c) => {
         const anyRef = c.ref as Record<string, string>
+        const edits = regionEditsByClip[c.clipId] ?? []
         return {
           segmentId: 'segmentId' in anyRef ? anyRef.segmentId : undefined,
           candidateId: 'candidateId' in anyRef ? anyRef.candidateId : undefined,
@@ -938,6 +1438,22 @@ function StitchEditorBody({
           trimEndMs: c.trimEndMs,
           fadeInMs: c.fadeInMs,
           fadeOutMs: c.fadeOutMs,
+          edits: edits.length
+            ? edits.map((e): StitchPlanRegionEdit => {
+                switch (e.type) {
+                  case 'gain':
+                    return { type: 'gain', startMs: e.startMs, endMs: e.endMs, gainDb: e.gainDb, fadeInMs: e.fadeInMs, fadeOutMs: e.fadeOutMs }
+                  case 'mute':
+                    return { type: 'mute', startMs: e.startMs, endMs: e.endMs, fadeInMs: e.fadeInMs, fadeOutMs: e.fadeOutMs }
+                  case 'fade':
+                    return { type: 'fade', startMs: e.startMs, endMs: e.endMs, fadeInMs: e.fadeInMs, fadeOutMs: e.fadeOutMs }
+                  case 'delete':
+                    return { type: 'delete', startMs: e.startMs, endMs: e.endMs }
+                  case 'insert_silence':
+                    return { type: 'insert_silence', atMs: e.atMs, durationMs: e.durationMs }
+                }
+              })
+            : undefined,
         }
       }),
       paddingMs: paddingMs.length ? paddingMs : new Array(Math.max(0, clips.length - 1)).fill(0),
@@ -954,15 +1470,46 @@ function StitchEditorBody({
           }
         : null,
     }
-  }, [clips, paddingMs, dsp])
+  }, [clips, paddingMs, dsp, regionEditsByClip])
+
+  const addRegionEdit = useCallback((clipId: string, edit: RegionEdit) => {
+    setRegionEditsByClip((prev) => ({
+      ...prev,
+      [clipId]: [...(prev[clipId] ?? []), edit],
+    }))
+  }, [])
+
+  const removeRegionEdit = useCallback((clipId: string, editId: string) => {
+    setRegionEditsByClip((prev) => {
+      const nextEdits = (prev[clipId] ?? []).filter((edit) => edit.id !== editId)
+      const next = { ...prev }
+      if (nextEdits.length) next[clipId] = nextEdits
+      else delete next[clipId]
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    const liveClipIds = new Set(clips.map((clip) => clip.clipId))
+    setRegionEditsByClip((prev) => {
+      let changed = false
+      const next: RegionEditsByClip = {}
+      for (const [clipId, edits] of Object.entries(prev)) {
+        if (liveClipIds.has(clipId)) next[clipId] = edits
+        else changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [clips])
 
   const hash = useMemo(() => {
     return JSON.stringify({
       clips: clips.map((c) => [c.trimStartMs, c.trimEndMs, c.fadeInMs, c.fadeOutMs]),
       paddingMs,
       dsp,
+      regionEditsByClip,
     })
-  }, [clips, paddingMs, dsp])
+  }, [clips, paddingMs, dsp, regionEditsByClip])
 
   useEffect(() => {
     if (hash === lastHashRef.current || clips.length === 0) {
@@ -979,7 +1526,9 @@ function StitchEditorBody({
       const seq = ++renderSeqRef.current
       try {
         setIsRendering(true)
-        const blob = await renderStitchPlan(planPayload)
+        const blob = hasRegionEdits(regionEditsByClip)
+          ? await renderEditedStitchPreview(clips, planPayload.paddingMs, dsp.crossfadeMs, regionEditsByClip)
+          : await renderStitchPlan(planPayload)
         if (seq !== renderSeqRef.current) return // superseded by a newer edit
         if (previewUrl) URL.revokeObjectURL(previewUrl)
         const url = URL.createObjectURL(blob)
@@ -1004,7 +1553,7 @@ function StitchEditorBody({
         debounceRef.current = null
       }
     }
-  }, [hash, planPayload, clips.length, setPreviewUrl, setPreviewBlob, setIsRendering, previewUrl])
+  }, [hash, planPayload, clips, dsp.crossfadeMs, regionEditsByClip, setPreviewUrl, setPreviewBlob, setIsRendering, previewUrl])
 
   const handleSave = useCallback(async () => {
     renderSeqRef.current++
@@ -1058,6 +1607,9 @@ function StitchEditorBody({
         isPreviewStale={staleFlags}
         library={library}
         onInsertFromLibrary={onInsertFromLibrary}
+        regionEditsByClip={regionEditsByClip}
+        onAddRegionEdit={addRegionEdit}
+        onRemoveRegionEdit={removeRegionEdit}
         voiceLibrary={voiceLibrary}
         onInsertVoiceFromLibrary={onInsertVoiceFromLibrary}
       />

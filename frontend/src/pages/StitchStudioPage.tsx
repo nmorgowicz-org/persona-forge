@@ -11,6 +11,16 @@ import {
 } from '@/lib/api'
 import { insertSegmentIntoStitchTimeline, insertVoiceIntoStitchTimeline } from '@/lib/stitchClips'
 
+const DELIVERY_VARIANTS = [
+  { kind: 'natural', name: 'Natural', hint: 'Conversational and neutral' },
+  { kind: 'calm', name: 'Calm', hint: 'Slower and steadier' },
+  { kind: 'energetic', name: 'Energetic', hint: 'Brighter and tighter' },
+  { kind: 'broadcast', name: 'Broadcast', hint: 'Clear and projected' },
+  { kind: 'storyteller', name: 'Storyteller', hint: 'Warm and expressive' },
+] as const
+
+type DeliveryVariantKind = (typeof DELIVERY_VARIANTS)[number]['kind']
+
 // A second, more direct entry point into the same stitch editor used inside the OmniVoice
 // flow — lets a user jump straight to arranging saved segments/voices into a
 // reference voice without first running an audition. Shares the same store-backed stitch
@@ -26,6 +36,12 @@ export function StitchStudioPage() {
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [deliveryVariantKind, setDeliveryVariantKind] =
+    useState<DeliveryVariantKind>('natural')
+
+  const deliveryVariant = DELIVERY_VARIANTS.find(
+    (variant) => variant.kind === deliveryVariantKind,
+  ) ?? DELIVERY_VARIANTS[0]
 
   useEffect(() => {
     listOmniVoiceSegments().then(setLibrary).catch(() => {})
@@ -53,6 +69,9 @@ export function StitchStudioPage() {
           instruct: name.trim(),
           segments: segments.length ? segments : [name.trim()],
           stitchPlan: plan,
+          familyId: useAppStore.getState().targetFamilyId,
+          variantName: deliveryVariant.name,
+          variantKind: deliveryVariant.kind,
         })
         setSavedVoiceId(result.voice_id)
       } catch (err) {
@@ -61,7 +80,7 @@ export function StitchStudioPage() {
         setIsSaving(false)
       }
     },
-    [name, setSavedVoiceId],
+    [name, setSavedVoiceId, deliveryVariant],
   )
 
   return (
@@ -85,6 +104,11 @@ export function StitchStudioPage() {
         />
       </div>
 
+      <DeliveryVariantSelector
+        value={deliveryVariantKind}
+        onChange={setDeliveryVariantKind}
+      />
+
       {error && <p className="text-xs text-red-400">{error}</p>}
       {isSaving && <p className="text-xs text-muted-foreground">Saving…</p>}
 
@@ -101,6 +125,39 @@ export function StitchStudioPage() {
           Saved to voice library as <span className="font-mono text-foreground">{savedVoiceId}</span>.
         </p>
       )}
+    </div>
+  )
+}
+
+function DeliveryVariantSelector({
+  value,
+  onChange,
+}: {
+  value: DeliveryVariantKind
+  onChange: (value: DeliveryVariantKind) => void
+}) {
+  return (
+    <div className="flex max-w-3xl flex-col gap-1">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Delivery variant
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {DELIVERY_VARIANTS.map((variant) => (
+          <button
+            key={variant.kind}
+            type="button"
+            title={variant.hint}
+            onClick={() => onChange(variant.kind)}
+            className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+              value === variant.kind
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-input bg-background text-muted-foreground hover:bg-accent hover:text-foreground'
+            }`}
+          >
+            {variant.name}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }

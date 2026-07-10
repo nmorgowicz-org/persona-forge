@@ -9,9 +9,12 @@ import {
   Mic2,
   Pencil,
   Plus,
+  Scissors,
   Sparkles,
+  Star,
   Trash2,
   Shuffle,
+  Wand2,
 } from 'lucide-react'
 import {
   deleteOmniVoiceSegment,
@@ -19,6 +22,9 @@ import {
   getVoice,
   listOmniVoiceSegments,
   listVoices,
+  normalizeVoiceReference,
+  setDefaultVoiceVariant,
+  trimVoiceReferenceSilence,
   updateVoiceSampleText,
   type SegmentMeta,
   type VoiceMeta,
@@ -30,8 +36,36 @@ import { createStitchClipFromSegment } from '@/lib/stitchClips'
 import { useAppStore, type StitchPlanClip } from '@/store'
 import { VariantCompare } from '@/components/VariantCompare'
 import { cn } from '@/lib/utils'
+import { InfoIcon } from '@/components/InfoIcon'
 
 const MOUNTED_REF_SOURCE = 'mounted_ref_audio' as const
+
+interface VoiceReferenceMetrics {
+  duration_seconds?: number | null
+  sample_rate?: number | null
+  lufs_integrated?: number | null
+  peak_dbfs?: number | null
+  true_peak_dbtp?: number | null
+  true_peak_dbfs?: number | null
+  rms_dbfs?: number | null
+  speech_rate_proxy?: number | null
+  words_per_second?: number | null
+  pause_count?: number | null
+  pause_total_seconds?: number | null
+  pause_ratio?: number | null
+  median_pause_ms?: number | null
+  longest_pause_ms?: number | null
+}
+
+type VoiceWithReferenceMeta = VoiceMeta & {
+  metrics?: VoiceReferenceMetrics | null
+  source_model?: string | null
+  source_prompt?: string | null
+  source_generation_params?: Record<string, unknown> | null
+  source_use_case?: string | null
+  use_case?: string | null
+  use_cases?: string[] | null
+}
 
 // Helper for reduced motion
 const useReducedMotion = () => {
@@ -50,23 +84,431 @@ function isMountedRef(voice: VoiceMeta): boolean {
   return (voice as VoiceMeta & { source?: string }).source === MOUNTED_REF_SOURCE
 }
 
-function voiceNeedsReview(voice: VoiceMeta): boolean {
-  if (voice.sample_text_source === 'user' && !voice.needs_review) return false
+// needs_review is set from the audio quality gate (quality_warnings) for regular saves and
+// from ASR severity for the mounted reference voice -- keep the transcript badge scoped to
+// ASR only so a clipping/SNR warning doesn't get mislabeled as "review the transcript".
+function voiceTranscriptNeedsReview(voice: VoiceMeta): boolean {
   const severity = voice.asr?.severity
   return Boolean(
-    voice.needs_review ||
-      severity === 'warn' ||
-      severity === 'fail' ||
-      severity === 'no_speech' ||
-      severity === 'error',
+    severity === 'warn' || severity === 'fail' || severity === 'no_speech' || severity === 'error',
   )
 }
+
+function isClippingWarning(warning: string): boolean {
+  return /clipping/i.test(warning)
+}
+
+function isTooLongWarning(warning: string): boolean {
+  return /too long/i.test(warning)
+}
+
+// Only clipping (fixable by re-normalizing peak/loudness) and excess duration (often
+// trailing/leading silence, fixable by trimming) have an automatic remedy today. Low SNR
+// and "too short" require a fresh recording, so no fix action is offered for those.
+function getFixableQualityWarnings(
+  voice: VoiceMeta,
+): { warning: string; action: 'normalize' | 'trim' }[] {
+  const warnings = voice.quality_warnings ?? []
+  const fixable: { warning: string; action: 'normalize' | 'trim' }[] = []
+  const clipping = warnings.find(isClippingWarning)
+  if (clipping) fixable.push({ warning: clipping, action: 'normalize' })
+  const tooLong = warnings.find(isTooLongWarning)
+  if (tooLong) fixable.push({ warning: tooLong, action: 'trim' })
+  return fixable
+}
+
+
+function QualityGatePanel({
+  voice,
+  busy,
+  onNormalize,
+  onTrimSilence,
+  onFixAll,
+}: {
+  voice: VoiceMeta
+  busy: boolean
+  onNormalize: () => void
+  onTrimSilence: () => void
+  onFixAll: () => void
+}) {
+  const [isAdvanced, setIsAdvanced] = useState(false)
+  const warnings = voice.quality_warnings ?? []
+  if (warnings.length === 0) return null
+  const score = voice.quality_score
+  const scoreColor =
+    score === undefined
+      ? 'text-muted-foreground'
+      : score >= 80
+        ? 'text-emerald-400'
+        : score >= 50
+          ? 'text-amber-400'
+          : 'text-red-400'
+  const fixable = getFixableQualityWarnings(voice)
+  
+  return (
+    <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <p className="flex items-center gap-1 font-semibold uppercase tracking-wide text-[10px]">
+          <AlertTriangle className="size-3" />
+          Reference quality
+        </p>
+        <div className="flex items-center gap-2">
+          {score !== undefined && (
+            <span className={cn('font-mono text-[11px]', scoreColor)}>{Math.round(score)}/100</span>
+          )}
+          <button 
+            onClick={() => setIsAdvanced(!isAdvanced)}
+            className="text-[10px] opacity-60 hover:opacity-100 underline underline-offset-2"
+          >
+            {isAdvanced ? 'Simple' : 'Advanced'}
+          </button>
+        </div>
+      </div>
+      <ul className="list-disc space-y-0.5 pl-4">
+        {warnings.map((warning) => (
+          <li key={warning}>{warning}</li>
+        ))}
+      </ul>
+      {fixable.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {!isAdvanced ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1.5 border-amber-500/40 bg-transparent text-amber-100 hover:bg-amber-500/20"
+              disabled={busy}
+              onClick={onFixAll}
+            >
+              <Wand2 className="size-3.5" />
+              Auto-fix: {fixable.length > 1 ? 'Trim & Normalize' : fixable[0].action === 'normalize' ? 'Normalize loudness' : 'Trim silence'}
+            </Button>
+          ) : (
+            <>
+              {fixable.some(f => f.action === 'normalize') && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 border-amber-500/40 bg-transparent text-amber-100 hover:bg-amber-500/20"
+                  disabled={busy}
+                  onClick={onNormalize}
+                >
+                  <Wand2 className="size-3.5" />
+                  Normalize
+                </Button>
+              )}
+              {fixable.some(f => f.action === 'trim') && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1.5 border-amber-500/40 bg-transparent text-amber-100 hover:bg-amber-500/20"
+                  disabled={busy}
+                  onClick={onTrimSilence}
+                >
+                  <Scissors className="size-3.5" />
+                  Trim
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 function voiceTranscriptSource(voice: VoiceMeta): string {
   if (voice.sample_text_source === 'whisper') return 'Whisper draft'
   if (voice.sample_text_source === 'env') return 'Startup override'
   if (voice.sample_text_source === 'user') return 'User edited'
   return 'Transcript'
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function formatNumber(value: unknown, digits = 1, suffix = ''): string {
+  const numeric = finiteNumber(value)
+  if (numeric === null) return '--'
+  return `${numeric.toFixed(digits)}${suffix}`
+}
+
+function formatPercent(value: unknown): string {
+  const numeric = finiteNumber(value)
+  if (numeric === null) return '--'
+  return `${Math.round(numeric * 100)}%`
+}
+
+function formatDuration(value: unknown): string {
+  const numeric = finiteNumber(value)
+  if (numeric === null) return '--'
+  if (numeric < 60) return `${numeric.toFixed(1)}s`
+  const minutes = Math.floor(numeric / 60)
+  const seconds = Math.round(numeric % 60)
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
+}
+
+function labelFromToken(value: string): string {
+  return value
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function sourceLabel(source: string | null | undefined): string | null {
+  if (!source) return null
+  const normalized = source.toLowerCase()
+  if (normalized === MOUNTED_REF_SOURCE) return 'Mounted reference'
+  if (normalized.includes('omnivoice')) return 'OmniVoice'
+  if (normalized.includes('voice_design')) return 'VoiceDesign'
+  if (normalized.includes('qwen')) return 'Qwen'
+  if (normalized.includes('pocket')) return 'Pocket'
+  if (normalized.includes('upload')) return 'Upload'
+  if (normalized.includes('external')) return 'External'
+  return labelFromToken(source)
+}
+
+function getVoiceMetrics(voice: VoiceMeta): VoiceReferenceMetrics | null {
+  const metrics = (voice as VoiceWithReferenceMeta).metrics
+  if (!metrics) return null
+  return Object.values(metrics).some((value) => finiteNumber(value) !== null) ? metrics : null
+}
+
+function getSpeechRate(metrics: VoiceReferenceMetrics): number | null {
+  return finiteNumber(metrics.words_per_second) ?? finiteNumber(metrics.speech_rate_proxy)
+}
+
+function getTruePeak(metrics: VoiceReferenceMetrics): number | null {
+  return finiteNumber(metrics.true_peak_dbtp) ?? finiteNumber(metrics.true_peak_dbfs)
+}
+
+function getUseCaseBadges(voice: VoiceMeta): string[] {
+  const v = voice as VoiceWithReferenceMeta
+  const params = v.source_generation_params ?? {}
+  const raw = [
+    v.variant_name,
+    v.variant_kind,
+    v.source_use_case,
+    v.use_case,
+    ...(Array.isArray(v.use_cases) ? v.use_cases : []),
+    typeof params.use_case === 'string' ? params.use_case : null,
+    typeof params.delivery_variant === 'string' ? params.delivery_variant : null,
+    typeof params.style_preset === 'string' ? params.style_preset : null,
+  ]
+
+  const seen = new Set<string>()
+  return raw
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .map(labelFromToken)
+    .filter((label) => {
+      const key = label.toLowerCase()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, 3)
+}
+
+function getSourceBadges(voice: VoiceMeta): string[] {
+  const v = voice as VoiceWithReferenceMeta
+  const labels = [
+    sourceLabel(v.source),
+    sourceLabel(v.source_model ?? undefined),
+    isMountedRef(voice) ? 'Mounted reference' : null,
+  ].filter((value): value is string => Boolean(value))
+
+  const seen = new Set<string>()
+  return labels.filter((label) => {
+    const key = label.toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function metricLevel(value: number | null, min: number, max: number): number {
+  if (value === null || max <= min) return 0
+  return Math.max(0.08, Math.min(1, (value - min) / (max - min)))
+}
+
+function VoiceSourceBadges({ voice }: { voice: VoiceMeta }) {
+  const sourceBadges = getSourceBadges(voice)
+  const useCaseBadges = getUseCaseBadges(voice)
+
+  if (sourceBadges.length === 0 && useCaseBadges.length === 0) return null
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {sourceBadges.map((label) => (
+        <span
+          key={`source-${label}`}
+          className="inline-flex items-center rounded-full border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-cyan-300"
+        >
+          {label}
+        </span>
+      ))}
+      {useCaseBadges.map((label) => (
+        <span
+          key={`use-${label}`}
+          className="inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-emerald-300"
+        >
+          {label}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function FingerprintBar({
+  label,
+  value,
+  title,
+  className,
+}: {
+  label: string
+  value: number
+  title: string
+  className?: string
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-1" title={title}>
+      <span className="w-10 shrink-0 text-[9px] uppercase tracking-wide text-muted-foreground/70">
+        {label}
+      </span>
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted/70">
+        <div
+          className={cn('h-full rounded-full', className)}
+          style={{ width: `${Math.round(value * 100)}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function VoiceFingerprint({ metrics }: { metrics: VoiceReferenceMetrics }) {
+  const speechRate = getSpeechRate(metrics)
+  const pauseRatio = finiteNumber(metrics.pause_ratio)
+  const lufs = finiteNumber(metrics.lufs_integrated)
+  const peak = finiteNumber(metrics.peak_dbfs)
+
+  return (
+    <div
+      className="grid gap-1"
+      aria-label={[
+        `Speech rate ${formatNumber(speechRate, 2)} words per second`,
+        `Pause ratio ${formatPercent(pauseRatio)}`,
+        `Loudness ${formatNumber(lufs, 1, ' LUFS')}`,
+        `Peak ${formatNumber(peak, 1, ' dBFS')}`,
+      ].join(', ')}
+    >
+      <FingerprintBar
+        label="Pace"
+        value={metricLevel(speechRate, 1, 4)}
+        title="Speech rate from reference analysis"
+        className="bg-gradient-to-r from-cyan-500 to-sky-300"
+      />
+      <FingerprintBar
+        label="Pause"
+        value={metricLevel(pauseRatio, 0, 0.45)}
+        title="Share of the reference detected as pauses"
+        className="bg-gradient-to-r from-amber-500 to-yellow-300"
+      />
+      <FingerprintBar
+        label="LUFS"
+        value={metricLevel(lufs, -34, -14)}
+        title="Integrated loudness; farther right is louder"
+        className="bg-gradient-to-r from-fuchsia-500 to-pink-300"
+      />
+      <FingerprintBar
+        label="Peak"
+        value={metricLevel(peak, -18, 0)}
+        title="Peak level; farther right is closer to digital maximum"
+        className="bg-gradient-to-r from-emerald-500 to-lime-300"
+      />
+    </div>
+  )
+}
+
+function VoiceMetricChip({
+  label,
+  value,
+  help,
+}: {
+  label: string
+  value: string
+  help?: string
+}) {
+  return (
+    <div className="min-w-0 rounded-md border border-border/60 bg-background/50 px-2 py-1">
+      <div className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+        {help && <InfoIcon text={help} className="size-3" />}
+      </div>
+      <div className="truncate font-mono text-[11px] text-foreground">{value}</div>
+    </div>
+  )
+}
+
+function VoiceMetricsPanel({ metrics }: { metrics: VoiceReferenceMetrics | null }) {
+  if (!metrics) return null
+
+  const speechRate = getSpeechRate(metrics)
+  const pauseCount = finiteNumber(metrics.pause_count)
+  const truePeak = getTruePeak(metrics)
+
+  return (
+    <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Reference fingerprint
+          </p>
+          <InfoIcon
+            text="Measured from the saved reference clip. These values describe the voice asset, not a live generation."
+            className="size-3.5"
+          />
+        </div>
+        {finiteNumber(metrics.sample_rate) !== null && (
+          <span className="font-mono text-[10px] text-muted-foreground">
+            {formatNumber(metrics.sample_rate, 0, ' Hz')}
+          </span>
+        )}
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
+        <div className="grid grid-cols-2 gap-1.5">
+          <VoiceMetricChip label="Duration" value={formatDuration(metrics.duration_seconds)} />
+          <VoiceMetricChip
+            label="Speech rate"
+            value={`${formatNumber(speechRate, 2)} w/s`}
+            help="Approximate words per second from transcript-aware analysis when available."
+          />
+          <VoiceMetricChip
+            label="Pause"
+            value={`${formatPercent(metrics.pause_ratio)} (${formatNumber(pauseCount, 0)} gaps)`}
+            help="How much of the reference is silence or low-energy gaps, plus detected pause count."
+          />
+          <VoiceMetricChip
+            label="LUFS"
+            value={formatNumber(metrics.lufs_integrated, 1, ' LUFS')}
+            help="Integrated perceived loudness. More negative values are quieter."
+          />
+          <VoiceMetricChip
+            label="Peak"
+            value={formatNumber(metrics.peak_dbfs, 1, ' dBFS')}
+            help="Highest sample peak in the reference."
+          />
+          <VoiceMetricChip
+            label="True peak"
+            value={formatNumber(truePeak, 1, ' dBTP')}
+            help="Estimated inter-sample peak when available."
+          />
+        </div>
+        <VoiceFingerprint metrics={metrics} />
+      </div>
+    </div>
+  )
 }
 
 // Shape persisted by /omnivoice/save into voice.selections -- see app.py's omnivoice_save
@@ -203,6 +645,9 @@ function VoiceCard({
   onReopenInStitchStudio,
   onDelete,
   onSaveSampleText,
+  onNormalize,
+  onTrimSilence,
+  onSetDefault,
 }: {
   voice: VoiceMeta
   busy: boolean
@@ -211,6 +656,9 @@ function VoiceCard({
   onReopenInStitchStudio: (() => void) | null
   onDelete: () => void
   onSaveSampleText: (text: string) => Promise<void>
+  onNormalize: () => void
+  onTrimSilence: () => void
+  onSetDefault: (() => void) | null
 }) {
   const reducedMotion = useReducedMotion()
   const [editing, setEditing] = useState(false)
@@ -220,6 +668,7 @@ function VoiceCard({
   const needsReview = voiceNeedsReview(voice)
   const transcriptSource = voiceTranscriptSource(voice)
   const whisperTranscript = (voice.asr?.whisper_transcript || '').trim()
+  const metrics = getVoiceMetrics(voice)
   const reviewMessage =
     voice.asr?.suggestion ||
     (needsReview
@@ -254,12 +703,18 @@ function VoiceCard({
       className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm transition-shadow duration-200 hover:border-border/80 hover:shadow-lg"
     >
 
-      <div>
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-medium">{voice.voice_id}</p>
+      <div className="space-y-1.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="min-w-0 break-all text-sm font-medium">{voice.voice_id}</p>
           {voice.family_id && (
             <span className="inline-flex items-center rounded-full border border-purple-500/30 bg-purple-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-purple-400">
               Family: {voice.family_id}
+            </span>
+          )}
+          {voice.is_default && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-yellow-500/30 bg-yellow-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-yellow-400">
+              <Star className="size-3 fill-current" />
+              Default
             </span>
           )}
           {isMountedRef(voice) && (
@@ -281,6 +736,7 @@ function VoiceCard({
           </span>
         </div>
         <p className="line-clamp-2 text-xs text-muted-foreground">{voice.description}</p>
+        <VoiceSourceBadges voice={voice} />
       </div>
 
       {needsReview && (
@@ -335,6 +791,8 @@ function VoiceCard({
         )}
       </div>
 
+      <VoiceMetricsPanel metrics={metrics} />
+
       <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
 
       <div className="flex gap-2">
@@ -378,6 +836,38 @@ function VoiceCard({
         >
           <Pencil className="size-4" />
         </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          aria-label="Normalize reference audio (-20 LUFS, -1dBTP)"
+          title="Normalize reference audio (-20 LUFS, -1dBTP)"
+          disabled={busy}
+          onClick={onNormalize}
+        >
+          <Wand2 className="size-4" />
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          aria-label="Trim leading/trailing silence"
+          title="Trim leading/trailing silence"
+          disabled={busy}
+          onClick={onTrimSilence}
+        >
+          <Scissors className="size-4" />
+        </Button>
+        {onSetDefault && (
+          <Button
+            size="sm"
+            variant="outline"
+            aria-label="Set as default variant for this family"
+            title="Set as default variant for this family"
+            disabled={busy || voice.is_default}
+            onClick={onSetDefault}
+          >
+            <Star className={cn('size-4', voice.is_default && 'fill-current text-yellow-400')} />
+          </Button>
+        )}
         <Button
           size="sm"
           variant="outline"
@@ -606,6 +1096,53 @@ export function VoiceLibraryPage() {
     }
   }
 
+  async function normalize(voiceId: string) {
+    setBusyVoiceId(voiceId)
+    setError(null)
+    try {
+      await normalizeVoiceReference(voiceId)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusyVoiceId(null)
+    }
+  }
+
+  async function fixAll(voiceId: string) {
+    setBusyVoiceId(voiceId)
+    setError(null)
+    try {
+      const voice = await getVoice(voiceId)
+      if (!voice) return
+      const fixable = getFixableQualityWarnings(voice)
+      for (const fix of fixable) {
+        if (fix.action === 'normalize') {
+          await normalize(voiceId)
+        } else if (fix.action === 'trim') {
+          await trimSilence(voiceId)
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusyVoiceId(null)
+    }
+  }
+
+  async function setDefault(voiceId: string) {
+    setBusyVoiceId(voiceId)
+    setError(null)
+    try {
+      await setDefaultVoiceVariant(voiceId)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusyVoiceId(null)
+    }
+  }
+
   async function removeSegment(segmentId: string) {
     if (!window.confirm('Delete this segment? This can’t be undone.')) return
     setBusySegmentId(segmentId)
@@ -715,6 +1252,9 @@ export function VoiceLibraryPage() {
                     }
                     onDelete={() => remove(voice.voice_id)}
                     onSaveSampleText={(text) => saveSampleText(voice.voice_id, text)}
+                    onNormalize={() => normalize(voice.voice_id)}
+                    onTrimSilence={() => trimSilence(voice.voice_id)}
+                    onSetDefault={voice.family_id ? () => setDefault(voice.voice_id) : null}
                   />
                 ))}
               </div>

@@ -51,6 +51,16 @@ import {
 
 const DEFAULT_ACCENT = ACCENT_BANK[0] ?? null
 
+const DELIVERY_VARIANTS = [
+  { kind: 'natural', name: 'Natural', hint: 'Conversational and neutral' },
+  { kind: 'calm', name: 'Calm', hint: 'Slower and steadier' },
+  { kind: 'energetic', name: 'Energetic', hint: 'Brighter and tighter' },
+  { kind: 'broadcast', name: 'Broadcast', hint: 'Clear and projected' },
+  { kind: 'storyteller', name: 'Storyteller', hint: 'Warm and expressive' },
+] as const
+
+type DeliveryVariantKind = (typeof DELIVERY_VARIANTS)[number]['kind']
+
 const NON_VERBAL_TAGS = [
   '[laughter]',
   '[sigh]',
@@ -325,6 +335,8 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     Record<string, number | null>
   >({})
   const [postProcess, setPostProcess] = useState(true)
+  const [deliveryVariantKind, setDeliveryVariantKind] =
+    useState<DeliveryVariantKind>('natural')
   const anySegmentHasDuration = Object.values(segmentDurations).some(
     (d) => d != null,
   )
@@ -355,6 +367,9 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         ? 'over'
         : 'in-range'
 
+  const deliveryVariant = DELIVERY_VARIANTS.find(
+    (variant) => variant.kind === deliveryVariantKind,
+  ) ?? DELIVERY_VARIANTS[0]
 
 
   // -- Handlers --
@@ -1068,6 +1083,8 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         accentId:
           matchedAccentBankEntry?.id ?? null,
         familyId: targetFamilyId,
+        variantName: deliveryVariant.name,
+        variantKind: deliveryVariant.kind,
       })
       setSavedVoiceId(result.voice_id)
       onVoiceCreated?.(result.voice_id)
@@ -1089,6 +1106,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     setIsSaving,
     setError,
     setSavedVoiceId,
+    deliveryVariant,
   ])
 
   const openStitchEditor = useCallback(async () => {
@@ -2224,19 +2242,25 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
                 .
               </p>
             ) : (
-              <Button
-                type="button"
-                data-testid="omnivoice-save-button"
-                variant="outline"
-                size="sm"
-                onClick={handleSave}
-                disabled={isSaving}
-                className="self-start rounded-full px-3 py-1 text-[11px]"
-              >
-                {isSaving
-                  ? 'Saving…'
-                  : 'Save to voice library'}
-              </Button>
+              <div className="flex flex-col gap-2">
+                <DeliveryVariantSelector
+                  value={deliveryVariantKind}
+                  onChange={setDeliveryVariantKind}
+                />
+                <Button
+                  type="button"
+                  data-testid="omnivoice-save-button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className="self-start rounded-full px-3 py-1 text-[11px]"
+                >
+                  {isSaving
+                    ? 'Saving…'
+                    : `Save ${deliveryVariant.name} variant`}
+                </Button>
+              </div>
             )}
           </motion.div>
         )}
@@ -2261,6 +2285,9 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
                   accentId:
                     matchedAccentBankEntry?.id ?? null,
                   stitchPlan: plan,
+                  familyId: useAppStore.getState().targetFamilyId,
+                  variantName: deliveryVariant.name,
+                  variantKind: deliveryVariant.kind,
                 })
                 setSavedVoiceId(result.voice_id)
                 onVoiceCreated?.(result.voice_id)
@@ -2493,6 +2520,39 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
       >
         {leftColumn}
         {rightColumn}
+      </div>
+    </div>
+  )
+}
+
+function DeliveryVariantSelector({
+  value,
+  onChange,
+}: {
+  value: DeliveryVariantKind
+  onChange: (value: DeliveryVariantKind) => void
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        Delivery variant
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {DELIVERY_VARIANTS.map((variant) => (
+          <button
+            key={variant.kind}
+            type="button"
+            title={variant.hint}
+            onClick={() => onChange(variant.kind)}
+            className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+              value === variant.kind
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-input bg-background text-muted-foreground hover:bg-accent hover:text-foreground'
+            }`}
+          >
+            {variant.name}
+          </button>
+        ))}
       </div>
     </div>
   )

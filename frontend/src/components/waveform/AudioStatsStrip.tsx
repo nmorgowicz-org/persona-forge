@@ -15,6 +15,7 @@ interface AudioStatsStripProps {
     duration_diff: number
     speech_rate_diff: number
     lufs_diff: number
+    pause_ratio_diff?: number
   } | null
   className?: string
 }
@@ -83,6 +84,9 @@ export const AudioStatsStrip = memo(function AudioStatsStrip({
         </div>
         <span>{formatValue((metrics.pause_ratio ?? 0) * 100, '%')}</span>
         <span className="ml-1 opacity-50">({metrics.pause_count ?? 0})</span>
+        {diff && diff.pause_ratio_diff !== undefined && (
+          <div>{formatDiff(diff.pause_ratio_diff * 100, '%')}</div>
+        )}
       </div>
     </div>
   )
