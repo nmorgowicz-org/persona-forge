@@ -400,7 +400,7 @@ export function SpeakPage() {
                    · {speakJobProgress.audio_seconds_generated.toFixed(1)}s generated
                  </span>
                )}
-               {speakJobProgress.live_rtf_estimate !== null && (
+               {speakJobProgress.live_rtf_estimate !== null && speakJobProgress.live_rtf_estimate !== undefined && (
                  <span className="ml-2 text-[10px] text-primary/80 font-mono">
                    · RTF: {speakJobProgress.live_rtf_estimate.toFixed(2)}x
                  </span>

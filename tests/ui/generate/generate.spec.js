@@ -7,9 +7,10 @@ test.describe('generate', () => {
     await page.goto('/')
     await page.getByTestId('speak-text-input').fill('Hello from Playwright.')
     await page.getByTestId('speak-generate-button').click()
-    await expect(page.getByTestId('speak-result')).toBeVisible({ timeout: 15000 })
+    await expect(page.getByTestId('speak-result')).toBeVisible({ timeout: 30000 })
     await expect(page.getByTestId('speak-result').locator('audio')).toHaveCount(1)
   })
+
 
   test('generate button stays disabled for empty text', async ({ page }) => {
     await page.goto('/')

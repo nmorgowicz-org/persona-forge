@@ -34,7 +34,9 @@ def model_module(monkeypatch, tmp_path):
     fake_qwen_tts = types.ModuleType("qwen_tts")
 
     class _FakeQwen3TTSModel:
-        pass
+        @classmethod
+        def from_pretrained(cls, *args, **kwargs):
+            return cls()
 
     fake_qwen_tts.Qwen3TTSModel = _FakeQwen3TTSModel
     monkeypatch.setitem(sys.modules, "qwen_tts", fake_qwen_tts)

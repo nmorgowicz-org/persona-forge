@@ -489,7 +489,6 @@ def load_model(profile: ModelProfile | None = None):
         voice_clone_prompt = None
         if profile.build_voice_clone_prompt:
             effective_ref_text, ref_text_source, ref_text_result = _resolve_reference_text(profile)
-            profile.ref_text = effective_ref_text
             REF_TEXT = effective_ref_text or ""
             REF_TEXT_SOURCE = ref_text_source
             _ref_text_validation_result = ref_text_result

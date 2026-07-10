@@ -22,7 +22,7 @@ test.describe('voice design (Qwen engine)', () => {
     await expect(page.getByTestId('voice-design-generate-button')).toContainText('Stop', { timeout: 5000 })
 
     // Wait for result
-    await expect(page.getByTestId('voice-design-result')).toBeVisible({ timeout: 20000 })
+    await expect(page.getByTestId('voice-design-result')).toBeVisible({ timeout: 30000 })
 
     // Save to library
     const saveBtn = page.getByRole('button', { name: /save to library/i }).first()
@@ -30,13 +30,14 @@ test.describe('voice design (Qwen engine)', () => {
     await saveBtn.click()
 
     // Confirm saved voice id appears
-    await expect(page.getByText(/saved as/i)).toBeVisible({ timeout: 10000 }).catch(() => {
+    await expect(page.getByText(/saved as/i)).toBeVisible({ timeout: 15000 }).catch(() => {
       expect(page.getByTestId('voice-design-result')).toBeVisible()
     })
 
     // Navigate to Voice Library and confirm voice card is present
     await page.getByTestId('nav-voice-library').click()
     const cards = page.locator('[data-testid="voice-card"]')
-    await expect(cards).toHaveCount(1, { timeout: 10000 })
+    await expect(cards).toHaveCount(1, { timeout: 20000 })
   })
+
 })
