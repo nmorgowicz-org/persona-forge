@@ -94,6 +94,7 @@ function voiceTranscriptNeedsReview(voice: VoiceMeta): boolean {
   )
 }
 
+
 function isClippingWarning(warning: string): boolean {
   return /clipping/i.test(warning)
 }
@@ -118,6 +119,7 @@ function getFixableQualityWarnings(
 }
 
 
+// QualityGatePanel is currently not used in the main render loop
 function QualityGatePanel({
   voice,
   busy,
@@ -647,6 +649,7 @@ function VoiceCard({
   onSaveSampleText,
   onNormalize,
   onTrimSilence,
+  onFixAll,
   onSetDefault,
 }: {
   voice: VoiceMeta
@@ -658,6 +661,7 @@ function VoiceCard({
   onSaveSampleText: (text: string) => Promise<void>
   onNormalize: () => void
   onTrimSilence: () => void
+  onFixAll: () => void
   onSetDefault: (() => void) | null
 }) {
   const reducedMotion = useReducedMotion()
@@ -665,7 +669,7 @@ function VoiceCard({
   const [draft, setDraft] = useState(voice.sample_text)
   const [saving, setSaving] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
-  const needsReview = voiceNeedsReview(voice)
+  const needsReview = voiceTranscriptNeedsReview(voice)
   const transcriptSource = voiceTranscriptSource(voice)
   const whisperTranscript = (voice.asr?.whisper_transcript || '').trim()
   const metrics = getVoiceMetrics(voice)
@@ -745,53 +749,61 @@ function VoiceCard({
         </div>
       )}
 
-      <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-        <div className="mb-1 flex items-center justify-between gap-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Reference text
-          </p>
-          <span className="shrink-0 text-[10px] text-muted-foreground">{transcriptSource}</span>
-        </div>
-        {editing ? (
-          <textarea
-            ref={inputRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                commit()
-              } else if (e.key === 'Escape') {
-                e.preventDefault()
-                setDraft(voice.sample_text)
-                setEditing(false)
-              }
-            }}
-            rows={2}
-            className="w-full resize-none rounded border border-cyan-500/40 bg-background px-2 py-1 text-xs text-foreground outline-none"
-          />
-        ) : (
-          <p
-            className="cursor-text text-xs text-foreground hover:text-cyan-400"
-            title="Click to edit — this is the cloning transcript, so it must match the audio"
-            onClick={() => {
-              setDraft(voice.sample_text)
-              setEditing(true)
-            }}
-          >
-            {voice.sample_text || '(no reference text — click to add)'}
-            {saving && ' (saving…)'}
-          </p>
-        )}
-        {whisperTranscript && whisperTranscript !== voice.sample_text && (
-          <p className="mt-2 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
-            Whisper heard: "{whisperTranscript}"
-          </p>
-        )}
-      </div>
+       <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+         <div className="mb-1 flex items-center justify-between gap-2">
+           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+             Reference text
+           </p>
+           <span className="shrink-0 text-[10px] text-muted-foreground">{transcriptSource}</span>
+         </div>
+         {editing ? (
+           <textarea
+             ref={inputRef}
+             value={draft}
+             onChange={(e) => setDraft(e.target.value)}
+             onBlur={commit}
+             onKeyDown={(e) => {
+               if (e.key === 'Enter' && !e.shiftKey) {
+                 e.preventDefault()
+                 commit()
+               } else if (e.key === 'Escape') {
+                 e.preventDefault()
+                 setDraft(voice.sample_text)
+                 setEditing(false)
+               }
+             }}
+             rows={2}
+             className="w-full resize-none rounded border border-cyan-500/40 bg-background px-2 py-1 text-xs text-foreground outline-none"
+           />
+         ) : (
+           <p
+             className="cursor-text text-xs text-foreground hover:text-cyan-400"
+             title="Click to edit — this is the cloning transcript, so it must match the audio"
+             onClick={() => {
+               setDraft(voice.sample_text)
+               setEditing(true)
+             }}
+           >
+             {voice.sample_text || '(no reference text — click to add)'}
+             {saving && ' (saving…)'}
+           </p>
+         )}
+         {whisperTranscript && whisperTranscript !== voice.sample_text && (
+           <p className="mt-2 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+             Whisper heard: "{whisperTranscript}"
+           </p>
+         )}
+       </div>
 
-      <VoiceMetricsPanel metrics={metrics} />
+       <QualityGatePanel
+         voice={voice}
+         busy={busy}
+         onNormalize={onNormalize}
+         onTrimSilence={onTrimSilence}
+         onFixAll={onFixAll}
+       />
+
+       <VoiceMetricsPanel metrics={metrics} />
 
       <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
 
@@ -1109,7 +1121,9 @@ export function VoiceLibraryPage() {
     }
   }
 
+// fixAll is currently not used in the main render loop
   async function fixAll(voiceId: string) {
+    // Currently unused in favor of explicit fixes
     setBusyVoiceId(voiceId)
     setError(null)
     try {
@@ -1120,7 +1134,7 @@ export function VoiceLibraryPage() {
         if (fix.action === 'normalize') {
           await normalize(voiceId)
         } else if (fix.action === 'trim') {
-          await trimSilence(voiceId)
+          await trimVoiceReferenceSilence(voiceId)
         }
       }
     } catch (err) {
@@ -1251,11 +1265,12 @@ export function VoiceLibraryPage() {
                         : null
                     }
                     onDelete={() => remove(voice.voice_id)}
-                    onSaveSampleText={(text) => saveSampleText(voice.voice_id, text)}
-                    onNormalize={() => normalize(voice.voice_id)}
-                    onTrimSilence={() => trimSilence(voice.voice_id)}
-                    onSetDefault={voice.family_id ? () => setDefault(voice.voice_id) : null}
-                  />
+                     onSaveSampleText={(text) => saveSampleText(voice.voice_id, text)}
+                     onNormalize={() => normalize(voice.voice_id)}
+                     onTrimSilence={() => trimVoiceReferenceSilence(voice.voice_id)}
+                     onFixAll={() => fixAll(voice.voice_id)}
+                     onSetDefault={voice.family_id ? () => setDefault(voice.voice_id) : null}
+                   />
                 ))}
               </div>
             </section>
