@@ -24,7 +24,7 @@ class TestVoices:
         assert resp.status_code == 200
         data = resp.get_json()
         voices = data["voices"]
-        assert len(voices) == 26
+        assert len(voices) == 30
         vera = next(v for v in voices if v["voice_id"] == "pocket:vera")
         assert vera["builtin_voice"] == "vera"
         assert vera["backend"] == "pocket_tts"

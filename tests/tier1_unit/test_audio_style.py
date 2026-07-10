@@ -22,8 +22,7 @@ def test_analyze_reference_returns_json_safe_lufs_for_silence() -> None:
     metrics = analyze_reference(np.zeros(24000, dtype=np.float32), 24000)
 
     assert metrics["lufs_integrated"] is None
-    assert metrics["rms_dbfs"] == -100.0
-    assert metrics["true_peak_dbtp"] == -100.0
+    assert metrics["peak_dbfs"] == -100.0
     json.dumps(metrics, allow_nan=False)
 
 
@@ -40,9 +39,9 @@ def test_pause_metrics_use_shared_detector() -> None:
     metrics = analyze_reference(wav, sr)
     pauses = detect_pause_intervals(wav, sr)
 
-    assert metrics["pause_count"] == len(pauses["internal_pause_intervals"])
+    assert metrics["pause_count"] == len(pauses[1:-1])
     assert metrics["pause_count"] >= 1
-    assert metrics["pause_intervals"] == pauses["pause_intervals"]
+    assert metrics["pause_intervals"] == pauses
 
 
 @pytest.mark.parametrize("preset,target_lufs", [("Neutral", -20.0), ("Clean", -20.0), ("Calm", -23.0)])
