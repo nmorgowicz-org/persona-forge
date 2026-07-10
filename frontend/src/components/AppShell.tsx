@@ -317,9 +317,11 @@ export function AppShell({ children }: { children: ReactNode }) {
            <div className="hidden group-data-[collapsible=icon]:flex justify-center">
              <ThemePaletteButton />
            </div>
-           <SidebarCollapseButton />
-           <SidebarVersionDisplay />
-         </SidebarFooter>
+            <SidebarCollapseButton />
+            <div className="text-center text-xs text-white">DEBUG: VERSION COMPONENT HERE</div>
+            <SidebarVersionDisplay />
+          </SidebarFooter>
+
 
       </Sidebar>
       <SidebarInset>
