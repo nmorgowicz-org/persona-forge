@@ -1060,12 +1060,14 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         finalCeilingDb: -1,
         compress: null,
       }
+      const targetFamilyId = useAppStore.getState().targetFamilyId
       const result = await saveOmniVoice({
         stitchPlan: plan,
         instruct,
         segments,
         accentId:
           matchedAccentBankEntry?.id ?? null,
+        familyId: targetFamilyId,
       })
       setSavedVoiceId(result.voice_id)
       onVoiceCreated?.(result.voice_id)
@@ -2495,4 +2497,3 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     </div>
   )
 }
-

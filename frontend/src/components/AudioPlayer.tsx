@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { Pause, Play } from 'lucide-react'
+import { Pause, Play, Download, Repeat } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Waveform } from './Waveform'
 import { computePeaks } from '@/lib/waveform'
+import { cn } from '@/lib/utils'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 interface AudioPlayerProps {
   src: string
@@ -20,6 +28,8 @@ export function AudioPlayer({ src, blob, className, autoPlay = true }: AudioPlay
   const [isPlaying, setIsPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState<number | null>(null)
+  const [isLooping, setIsLooping] = useState(false)
+  const [playbackRate, setPlaybackRate] = useState(1)
 
   useEffect(() => {
     setPeaks(null)
@@ -54,6 +64,13 @@ export function AudioPlayer({ src, blob, className, autoPlay = true }: AudioPlay
     // Only re-trigger on src change — toggling autoPlay itself shouldn't restart playback.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src])
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.loop = isLooping
+      audioRef.current.playbackRate = playbackRate
+    }
+  }, [isLooping, playbackRate])
 
   function togglePlay() {
     const audio = audioRef.current
@@ -103,6 +120,48 @@ export function AudioPlayer({ src, blob, className, autoPlay = true }: AudioPlay
           duration={duration}
           className="flex-1"
         />
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="size-8"
+            onClick={() => setIsLooping(!isLooping)}
+            title="Toggle Loop"
+          >
+            <Repeat className={cn('size-3.5 transition-colors', isLooping ? 'text-primary' : 'text-muted-foreground')} />
+          </Button>
+          <div className="w-20">
+          <Select value={playbackRate.toString()} onValueChange={(v) => setPlaybackRate(Number(v))}>
+            <SelectTrigger className="h-8 px-1 text-[10px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="0.5">0.5x</SelectItem>
+              <SelectItem value="0.75">0.75x</SelectItem>
+              <SelectItem value="1">1.0x</SelectItem>
+              <SelectItem value="1.25">1.25x</SelectItem>
+              <SelectItem value="1.5">1.5x</SelectItem>
+              <SelectItem value="2">2.0x</SelectItem>
+            </SelectContent>
+          </Select>
+          </div>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="size-8"
+            onClick={() => {
+              const a = document.createElement('a')
+              a.href = src
+              a.download = `generated-audio-${Date.now()}.mp3`
+              a.click()
+            }}
+            title="Download"
+          >
+            <Download className="size-3.5 text-muted-foreground" />
+          </Button>
+        </div>
       </div>
     </div>
   )

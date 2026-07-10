@@ -16,8 +16,26 @@ Public API:
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from src.qwen3_tts.voice_library import VOICE_LIBRARY_DIR
+
+# Cache directory for persisted voice states (.safetensors)
+STATE_CACHE_DIR = VOICE_LIBRARY_DIR / ".state_cache"
+STATE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+_SAFE_CACHE_KEY_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def _state_cache_path(resolved_id: str) -> Path:
+    safe_stem = _SAFE_CACHE_KEY_RE.sub("_", resolved_id).strip("._")
+    if not safe_stem or safe_stem != resolved_id:
+        digest = hashlib.sha256(resolved_id.encode("utf-8")).hexdigest()[:16]
+        safe_stem = f"{safe_stem[:80] or 'voice'}-{digest}"
+    return STATE_CACHE_DIR / f"{safe_stem}.safetensors"
 
 from pocket_tts import TTSModel
 
@@ -194,12 +212,13 @@ def get_pocket_tts_voice_state(
     Priority:
         1. If voice_id is None or empty -> use default_voice_state.
         2. If voice_id is in cache -> use cached state.
-        3. If voice_id matches a library voice -> load from its WAV, cache it.
-        4. If none of the above -> raise RuntimeError.
+        3. If voice_id is a built-in preset or hf:// path -> load and cache.
+        4. If voice_id matches a library voice -> load from its WAV, cache it.
+        5. If none of the above -> raise RuntimeError.
 
     Args:
         model: Loaded Pocket TTS TTSModel.
-        voice_id: Optional voice library ID (e.g. "vd_123abc456def").
+        voice_id: Optional voice identifier (preset name, hf:// path, or library ID).
         default_voice_state: The default state derived from REF_AUDIO.
         ref_audio_path: Fallback reference audio path.
 
@@ -214,13 +233,11 @@ def get_pocket_tts_voice_state(
         if default_voice_state is not None:
             return default_voice_state
         # Last-ditch: try to rebuild from ref_audio_path.
-        # Cache result so we don't re-encode on every call.
         if ref_audio_path and os.path.isfile(ref_audio_path):
             print(
                 f"[pocket_tts] No default_voice_state; falling back to ref_audio_path={ref_audio_path!r}"
             )
             state = model.get_state_for_audio_prompt(ref_audio_path)
-            # Store as default for future requests to avoid redundant work.
             global pocket_tts_default_voice_state
             pocket_tts_default_voice_state = state
             return state
@@ -230,29 +247,59 @@ def get_pocket_tts_voice_state(
             "or in your startup config."
         )
 
-    # 2) Cached voice_state.
-    cached = pocket_tts_voice_state_cache.get(voice_id)
+    # Normalize "pocket:name" to "name"
+    resolved_id = voice_id
+    if voice_id.startswith("pocket:"):
+        resolved_id = voice_id[7:]
+
+    # 2) In-memory cache.
+    cached = pocket_tts_voice_state_cache.get(resolved_id)
     if cached is not None:
         return cached
 
-    # 3) Look up in voice_library.
+    # 3) Disk cache (.safetensors).
+    cache_path = _state_cache_path(resolved_id)
+    if cache_path.is_file():
+        try:
+            print(f"[pocket_tts] Loading cached voice state from disk: {cache_path.name}")
+            state = model.import_model_state(str(cache_path))
+            pocket_tts_voice_state_cache[resolved_id] = state
+            return state
+        except Exception as exc:
+            print(f"[pocket_tts] Failed to load cached state {cache_path.name}: {exc}. Falling back.")
+
+    # 3) Try built-in preset or hf:// path.
+    # If it doesn't look like a library ID (starts with 'vd_'), try treating it as a preset/path.
+    if not resolved_id.startswith("vd_"):
+        try:
+            print(f"[pocket_tts] Attempting to load built-in voice: {resolved_id!r}")
+            state = model.get_state_for_audio_prompt(resolved_id)
+            pocket_tts_voice_state_cache[resolved_id] = state
+            model.export_model_state(state, str(cache_path))
+            return state
+        except Exception as exc:
+            # Not a valid preset/path, fall through to library lookup.
+            print(f"[pocket_tts] {resolved_id!r} is not a built-in preset: {exc}")
+
+    # 4) Look up in voice_library.
     from qwen3_tts import voice_library
 
-    meta = voice_library.get_voice(voice_id)
+    meta = voice_library.get_voice(resolved_id)
     if meta is None:
         raise ValueError(
-            f"[pocket_tts] voice_id not found in voice_library: {voice_id!r}"
+            f"[pocket_tts] voice_id {resolved_id!r} not found in voice_library"
         )
 
     wav_path = meta.get("wav_path")
     if not wav_path or not os.path.isfile(wav_path):
         raise RuntimeError(
-            f"[pocket_tts] voice_id={voice_id!r} exists but wav_path is invalid: "
+            f"[pocket_tts] voice_id={resolved_id!r} exists but wav_path is invalid: "
             f"{wav_path!r}"
         )
 
     state = model.get_state_for_audio_prompt(wav_path)
-    pocket_tts_voice_state_cache[voice_id] = state
+    pocket_tts_voice_state_cache[resolved_id] = state
+    model.export_model_state(state, str(cache_path))
     return state
 
 

@@ -1,3 +1,4 @@
+import { Plus } from 'lucide-react'
 import type { VoiceMeta } from '../lib/api'
 import {
   Select,
@@ -6,6 +7,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Separator } from '@/components/ui/separator'
+import { Badge } from '@/components/ui/badge'
+import { useAppStore } from '@/store'
 
 const MOUNTED_REF_SOURCE = 'mounted_ref_audio' as const
 
@@ -25,6 +29,22 @@ function voiceNeedsReview(voice: VoiceMeta): boolean {
   )
 }
 
+function getSourceBadge(source?: string) {
+  const sources: Record<string, { label: string; color: string }> = {
+    'VoiceDesign': { label: 'VoiceDesign', color: 'bg-purple-500/10 text-purple-400 border-purple-500/30' },
+    'OmniVoice': { label: 'OmniVoice', color: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30' },
+    'Upload': { label: 'Upload', color: 'bg-slate-500/10 text-slate-400 border-slate-500/30' },
+    'Pocket': { label: 'Pocket', color: 'bg-amber-500/10 text-amber-400 border-amber-500/30' },
+  }
+  const config = sources[source || '']
+  if (!config) return null
+  return (
+    <Badge variant="outline" className={`border px-1 py-0 text-[9px] font-medium uppercase tracking-wide ${config.color}`}>
+      {config.label}
+    </Badge>
+  )
+}
+
 interface VoiceSelectorProps {
   voices: VoiceMeta[]
   voiceId: string | null
@@ -32,6 +52,23 @@ interface VoiceSelectorProps {
 }
 
 export function VoiceSelector({ voices, voiceId, onChange }: VoiceSelectorProps) {
+  const setPage = useAppStore((s) => s.setPage)
+  const setTargetFamilyId = useAppStore((s) => s.setTargetFamilyId)
+  const setDesignEngine = useAppStore((s) => s.setDesignEngine)
+
+  // Group voices by family_id
+  const families = new Map<string, VoiceMeta[]>()
+  const uncategorized: VoiceMeta[] = []
+
+  voices.forEach((v) => {
+    if (v.family_id) {
+      if (!families.has(v.family_id)) families.set(v.family_id, [])
+      families.get(v.family_id)!.push(v)
+    } else {
+      uncategorized.push(v)
+    }
+  })
+
   return (
     <Select value={voiceId ?? 'default'} onValueChange={(v) => onChange(v === 'default' ? null : v)}>
       <SelectTrigger className="min-w-48">
@@ -39,31 +76,114 @@ export function VoiceSelector({ voices, voiceId, onChange }: VoiceSelectorProps)
       </SelectTrigger>
       <SelectContent>
         <SelectItem value="default">Default voice</SelectItem>
-        {voices.map((voice) => {
-          const mounted = isMountedRef(voice)
-          const review = voiceNeedsReview(voice)
-          return (
-            <SelectItem key={voice.voice_id} value={voice.voice_id}>
-              <span className="flex items-center gap-1.5">
-                <span>
-                  {voice.description.length > 42
-                    ? `${voice.description.slice(0, 42)}…`
-                    : voice.description}
-                </span>
-                {mounted && (
-                  <span className="inline-flex items-center rounded-full border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-cyan-400">
-                    Mounted
-                  </span>
-                )}
-                {review && (
-                  <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-amber-300">
-                    Review
-                  </span>
-                )}
-              </span>
-            </SelectItem>
+
+        {/* Categorized Families */}
+            {Array.from(families.entries()).map(([familyId, familyVoices]) => {
+              const familyName = familyVoices[0].display_name || familyId
+              return (
+                <div key={familyId}>
+                  <div className="flex items-center justify-between px-2 py-1.5">
+                    <div className="text-xs font-semibold text-muted-foreground opacity-70">
+                      {familyName}
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setTargetFamilyId(familyId)
+                        setDesignEngine('omnivoice')
+                        setPage('voice-design')
+                      }}
+                      className="group flex items-center gap-1 text-[10px] text-muted-foreground opacity-0 transition-opacity hover:text-cyan-400 group-hover:opacity-100"
+                      title={`Create variant for ${familyName}`}
+                    >
+                      <Plus className="h-3 w-3" />
+                      <span className="hidden group-hover:inline">Add Variant</span>
+                    </button>
+                  </div>
+                  {familyVoices.map((voice) => {
+                    const mounted = isMountedRef(voice)
+                    const review = voiceNeedsReview(voice)
+                    const isActive = voiceId === voice.voice_id
+                    return (
+                      <SelectItem
+                        key={voice.voice_id}
+                        value={voice.voice_id}
+                        className={isActive ? 'ring-1 ring-cyan-500/50 bg-cyan-500/5' : ''}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <span className="truncate max-w-[140px]">
+                            {voice.variant_name ? `${voice.variant_name}: ` : ''}
+                            {voice.description.length > 30
+                              ? `${voice.description.slice(0, 30)}…`
+                              : voice.description}
+                          </span>
+                          {getSourceBadge(voice.source)}
+                          {voice.variant_name && (
+                            <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-amber-300">
+                              {voice.variant_name}
+                            </span>
+                          )}
+                          {mounted && (
+                            <span className="inline-flex items-center rounded-full border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-cyan-400">
+                              Mounted
+                            </span>
+                          )}
+                          {review && (
+                            <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-amber-300">
+                              Review
+                            </span>
+                          )}
+                        </span>
+                      </SelectItem>
+                    )
+                  })}
+              <Separator className="my-1" />
+            </div>
           )
         })}
+
+        {/* Uncategorized */}
+        {uncategorized.length > 0 && (
+          <>
+            {uncategorized.length > 0 && (
+              <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground opacity-70">
+                General
+              </div>
+            )}
+            {uncategorized.map((voice) => {
+              const mounted = isMountedRef(voice)
+              const review = voiceNeedsReview(voice)
+              const isActive = voiceId === voice.voice_id
+              return (
+                <SelectItem
+                  key={voice.voice_id}
+                  value={voice.voice_id}
+                  className={isActive ? 'ring-1 ring-cyan-500/50 bg-cyan-500/5' : ''}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate max-w-[140px]">
+                      {voice.description.length > 30
+                        ? `${voice.description.slice(0, 30)}…`
+                        : voice.description}
+                    </span>
+                    {getSourceBadge(voice.source)}
+                    {mounted && (
+                      <span className="inline-flex items-center rounded-full border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-cyan-400">
+                        Mounted
+                      </span>
+                    )}
+                    {review && (
+                      <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-amber-300">
+                        Review
+                      </span>
+                    )}
+                  </span>
+                </SelectItem>
+              )
+            })}
+            <Separator className="my-1" />
+          </>
+        )}
       </SelectContent>
     </Select>
   )

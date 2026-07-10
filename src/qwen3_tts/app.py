@@ -295,6 +295,7 @@ def voice_design_save(preview_id: str):
     """Persist a VoiceDesign preview into the voice library (explicit user approval step)."""
     if not model._service_started:
         return jsonify({"error": "Model not loaded"}), 503
+    data = _json_body() or {}
     entry = _voice_design_previews.pop(preview_id, None)
     if entry is None:
         return jsonify({"error": "Unknown or expired preview_id"}), 400
@@ -306,6 +307,9 @@ def voice_design_save(preview_id: str):
             language=entry["language"],
             seed=entry["seed"],
             selections=entry["selections"],
+            family_id=data.get("family_id"),
+            variant_name=data.get("variant_name"),
+            variant_kind=data.get("variant_kind"),
         )
     except Exception as exc:
         return jsonify({"error": f"VoiceDesign save error: {exc}"}), 500
@@ -324,9 +328,51 @@ def voice_design_progress():
     return jsonify(voice_design.get_progress())
 
 
-@app.get("/voices")
-def voices_list():
-    return jsonify({"voices": voice_library.list_voices()})
+# ── Built-in Pocket Voices ────────────────────────────────────────────────────────────────────
+
+POCKET_BUILTIN_VOICES = {
+    "vera": {"display_name": "Vera", "license": "CC BY 4.0", "note": "Female, natural Aussie"},
+    "jane": {"display_name": "Jane", "license": "CC0", "note": "Female conversation"},
+    "anna": {"display_name": "Anna", "license": "CC0", "note": "Female conversation"},
+    "fantine": {"display_name": "Fantine", "license": "CC BY 4.0", "note": "Female reading"},
+    "alba": {"display_name": "Alba", "license": "CC BY 4.0", "note": "Reading / character"},
+    "marius": {"display_name": "Marius", "license": "CC BY 4.0", "note": "Male reading"},
+    "jean": {"display_name": "Jean", "license": "CC0", "note": "Male reading"},
+    "azelma": {"display_name": "Azelma", "license": "CC0", "note": "Female"},
+    "bill_boerst": {"display_name": "Bill Boerst", "license": "CC0", "note": "Male"},
+    "caro_davy": {"display_name": "Caro Davy", "license": "CC0", "note": "Female"},
+    "charles": {"display_name": "Charles", "license": "CC0", "note": "Male"},
+    "cosette": {"display_name": "Cosette", "license": "CC BY 4.0", "note": "Female"},
+    "eponine": {"display_name": "Eponine", "license": "CC BY 4.0", "note": "Female"},
+    "eve": {"display_name": "Eve", "license": "CC0", "note": "Female"},
+    "george": {"display_name": "George", "license": "CC0", "note": "Male"},
+    "javert": {"display_name": "Javert", "license": "CC BY 4.0", "note": "Male"},
+    "mary": {"display_name": "Mary", "license": "CC0", "note": "Female"},
+    "michael": {"display_name": "Michael", "license": "CC0", "note": "Male"},
+    "paul": {"display_name": "Paul", "license": "CC0", "note": "Male"},
+    "peter_yearsley": {"display_name": "Peter Yearsley", "license": "CC0", "note": "Male"},
+    "stuart_bell": {"display_name": "Stuart Bell", "license": "CC0", "note": "Male"},
+    "estelle": {"display_name": "Estelle", "license": "CC BY 4.0", "note": "French"},
+    "giovanni": {"display_name": "Giovanni", "license": "CC BY 4.0", "note": "Italian"},
+    "juergen": {"display_name": "Juergen", "license": "CC BY 4.0", "note": "German"},
+    "lola": {"display_name": "Lola", "license": "CC BY 4.0", "note": "Spanish"},
+    "rafael": {"display_name": "Rafael", "license": "CC BY 4.0", "note": "Portuguese"},
+}
+
+@app.get("/voices/built-in")
+def voices_builtin():
+    """Return a list of curated built-in voices for the Pocket TTS backend."""
+    voices = []
+    for vid, meta in POCKET_BUILTIN_VOICES.items():
+        voices.append({
+            "voice_id": f"pocket:{vid}",
+            "backend": "pocket_tts",
+            "display_name": meta["display_name"],
+            "source": "kyutai/tts-voices",
+            "license": meta["license"],
+            "requires_backend": "pocket_tts",
+        })
+    return jsonify(voices)
 
 
 @app.get("/voices/<voice_id>")
@@ -1210,6 +1256,9 @@ def omnivoice_save():
                 "candidate_ids": data.get("selections"),
                 "stitch_plan": data.get("stitch_plan"),
             },
+            family_id=data.get("family_id"),
+            variant_name=data.get("variant_name"),
+            variant_kind=data.get("variant_kind"),
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -1272,11 +1321,27 @@ def generate():
         return jsonify({"error": f"unsupported response_format {fmt!r}; supported: "
                         f"{', '.join(sorted(_SUPPORTED_FORMATS))}"}), 400
     voice_id = (data.get("voice_id") or "").strip() or None
+    # ── Handle builtin_voice overrides (Pocket TTS only) ────────────────────────────
+    builtin_voice = data.get("builtin_voice")
+    if builtin_voice:
+        if model.TTS_BACKEND == "pocket_tts":
+            voice_id = f"pocket:{builtin_voice}" if not builtin_voice.startswith("pocket:") else builtin_voice
+        else:
+            print(f"[app] WARNING: builtin_voice={builtin_voice!r} provided but TTS_BACKEND is {model.TTS_BACKEND!r}; ignoring.", flush=True)
     instruct = (data.get("instruct") or "").strip() or None
     seed = data.get("seed")
     if seed is not None and not isinstance(seed, int):
         return jsonify({"error": "seed must be an integer"}), 400
     resolved_seed = model.resolve_seed(seed)
+
+    # ── Handle builtin_voice overrides (Pocket TTS only) ────────────────────────────
+    builtin_voice = data.get("builtin_voice")
+    if builtin_voice:
+        if model.TTS_BACKEND == "pocket_tts":
+            voice_id = f"pocket:{builtin_voice}" if not builtin_voice.startswith("pocket:") else builtin_voice
+        else:
+            print(f"[app] WARNING: builtin_voice={builtin_voice!r} provided but TTS_BACKEND is {model.TTS_BACKEND!r}; ignoring.", flush=True)
+
     try:
         wav, sr, job_id = model.executor.submit(
             model._run_generate,
@@ -1307,6 +1372,10 @@ def generate():
     response.headers["X-Seed"] = str(resolved_seed)
     if job_id:
         response.headers["X-Job-Id"] = job_id
+        prog = model.get_job_progress(job_id)
+        if prog and prog.get("applied_steps"):
+            steps = prog["applied_steps"]
+            response.headers["X-Applied-Steps"] = ", ".join(steps) if isinstance(steps, list) else str(steps)
     return response
 
 
@@ -1333,6 +1402,13 @@ def openai_audio_speech():
         )
     language = (data.get("language") or "English").strip()
     voice_id = (data.get("voice_id") or "").strip() or None
+    # ── Handle builtin_voice overrides (Pocket TTS only) ────────────────────────────
+    builtin_voice = data.get("builtin_voice")
+    if builtin_voice:
+        if model.TTS_BACKEND == "pocket_tts":
+            voice_id = f"pocket:{builtin_voice}" if not builtin_voice.startswith("pocket:") else builtin_voice
+        else:
+            print(f"[app] WARNING: builtin_voice={builtin_voice!r} provided but TTS_BACKEND is {model.TTS_BACKEND!r}; ignoring.", flush=True)
     instruct = (data.get("instruct") or "").strip() or None
     seed = data.get("seed")
     if seed is not None and not isinstance(seed, int):
@@ -1344,6 +1420,9 @@ def openai_audio_speech():
             text,
             language,
             voice_id=voice_id,
+            voice_variant_id=data.get("voice_variant_id"),
+            style_preset=data.get("style_preset"),
+            postprocess=data.get("postprocess"),
             seed_value=resolved_seed,
             instruct=instruct,
         ).result(timeout=480)
@@ -1367,10 +1446,24 @@ def openai_audio_speech():
     response.headers["X-Seed"] = str(resolved_seed)
     if job_id:
         response.headers["X-Job-Id"] = job_id
+        prog = model.get_job_progress(job_id)
+        if prog:
+            if prog.get("voice_family_id"):
+                response.headers["X-Voice-Family-Id"] = prog["voice_family_id"]
+            if prog.get("variant_kind"):
+                response.headers["X-Variant-Kind"] = prog["variant_kind"]
+            if prog.get("style_preset"):
+                response.headers["X-Style-Preset"] = prog["style_preset"]
+            if prog.get("postprocess_applied"):
+                response.headers["X-Postprocess-Applied"] = "true"
+            if prog.get("audio_seconds"):
+                response.headers["X-Audio-Seconds"] = str(prog["audio_seconds"])
+            if prog.get("rtf"):
+                response.headers["X-RTF"] = str(prog["rtf"])
+            if prog.get("applied_steps"):
+                steps = prog["applied_steps"]
+                response.headers["X-Applied-Steps"] = ", ".join(steps) if isinstance(steps, list) else str(steps)
     return response
-
-
-# ── Async generation endpoints (progress + cancel) ──────────────────────────────────────────
 
 @app.post("/generate/async")
 def generate_async():
@@ -1393,6 +1486,13 @@ def generate_async():
         return jsonify({"error": f"unsupported response_format {fmt!r}; supported: "
                         f"{', '.join(sorted(_SUPPORTED_FORMATS))}"}), 400
     voice_id = (data.get("voice_id") or "").strip() or None
+    # ── Handle builtin_voice overrides (Pocket TTS only) ────────────────────────────
+    builtin_voice = data.get("builtin_voice")
+    if builtin_voice:
+        if model.TTS_BACKEND == "pocket_tts":
+            voice_id = f"pocket:{builtin_voice}" if not builtin_voice.startswith("pocket:") else builtin_voice
+        else:
+            print(f"[app] WARNING: builtin_voice={builtin_voice!r} provided but TTS_BACKEND is {model.TTS_BACKEND!r}; ignoring.", flush=True)
     instruct = (data.get("instruct") or "").strip() or None
     seed = data.get("seed")
     if seed is not None and not isinstance(seed, int):
@@ -1405,15 +1505,19 @@ def generate_async():
 
     def _run():
         try:
-            model.executor.submit(
+            wav, sr, job_id = model.executor.submit(
                 model._run_generate,
                 text,
                 language,
                 voice_id=voice_id,
+                voice_variant_id=data.get("voice_variant_id"),
+                style_preset=data.get("style_preset"),
+                postprocess=data.get("postprocess"),
                 seed_value=resolved_seed,
                 instruct=instruct,
                 job_id=job_id,
             ).result(timeout=480)
+            audio, media_type = _encode(wav, sr, fmt)
         except Exception as exc:
             with model._active_jobs_lock:
                 j = model._active_jobs.get(job_id)
@@ -1503,6 +1607,10 @@ def generate_job_audio(job_id: str):
     if job.seed is not None:
         response.headers["X-Seed"] = str(job.seed)
     response.headers["X-Job-Id"] = job_id
+    prog = model.get_job_progress(job_id)
+    if prog and prog.get("applied_steps"):
+        steps = prog["applied_steps"]
+        response.headers["X-Applied-Steps"] = ", ".join(steps) if isinstance(steps, list) else str(steps)
     return response
 
 

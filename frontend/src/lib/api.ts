@@ -92,6 +92,10 @@ export interface GenerateParams {
 
 export interface VoiceMeta {
   voice_id: string
+  family_id?: string
+  display_name?: string
+  variant_name?: string
+  variant_kind?: string
   description: string
   sample_text: string
   language: string
@@ -129,6 +133,8 @@ export interface GenerateJobProgress {
   expected_total_frames: number
   progress_pct: number
   elapsed_seconds: number
+  audio_seconds_generated: number
+  live_rtf_estimate: number | null
   eta_seconds: number | null
   message: string | null
   audio_available?: boolean
@@ -200,11 +206,20 @@ export interface VoiceDesignSaveResult {
   voice_id: string
 }
 
-export async function saveVoiceDesign(previewId: string): Promise<VoiceDesignSaveResult> {
+export async function saveVoiceDesign(
+  previewId: string,
+  familyId?: string | null,
+  variantName?: string | null,
+  variantKind?: string | null,
+): Promise<VoiceDesignSaveResult> {
   const res = await fetch(`/voice_design/preview/${encodeURIComponent(previewId)}/save`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
+    body: JSON.stringify({
+      family_id: familyId,
+      variant_name: variantName,
+      variant_kind: variantKind,
+    }),
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
@@ -517,6 +532,7 @@ export interface OmniVoiceSaveParams {
   segments: string[]
   language?: string
   accentId?: string | null
+  familyId?: string | null
   /** Optional stitch_plan for full control (docs/dev/features/stitch_editor.md). */
   stitchPlan?: StitchPlanPayload | null
 }
@@ -538,6 +554,7 @@ export async function saveOmniVoice(params: OmniVoiceSaveParams): Promise<OmniVo
       segments: params.segments,
       language: params.language ?? 'english',
       accent_id: params.accentId ?? undefined,
+      family_id: params.familyId ?? undefined,
       stitch_plan: params.stitchPlan
         ? serializeStitchPlan(params.stitchPlan)
         : undefined,

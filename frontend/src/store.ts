@@ -130,6 +130,8 @@ interface StoreState {
   setSpeakAudioBlob: (v: Blob | null) => void
   setEditingVoice: (voice: EditingVoice | null) => void
   setDesignEngine: (engine: DesignEngine) => void
+  targetFamilyId: string | null
+  setTargetFamilyId: (familyId: string | null) => void
   setActivityStatus: (v: ActivityStatus | null) => void
 
   // ---- VoiceDesign (Qwen) ----
@@ -311,9 +313,10 @@ export const useAppStore = create<StoreState>((set) => ({
    speakJobId: null,
    speakJobProgress: null,
    speakLastSeed: null,
-   speakAudioBlob: null,
-   editingVoice: null,
-    designEngine: 'qwen',
+  speakAudioBlob: null,
+  editingVoice: null,
+  designEngine: 'qwen',
+  targetFamilyId: null,
     activityStatus: null,
     runtimeTtsBackend: null,
     pocketTtsVoiceCloningAvailable: null,
@@ -343,7 +346,8 @@ export const useAppStore = create<StoreState>((set) => ({
   setSpeakAudioBlob: (v) => set({ speakAudioBlob: v }),
   setEditingVoice: (editingVoice) => set({ editingVoice }),
   setDesignEngine: (engine) => set({ designEngine: engine }),
-   setActivityStatus: (activityStatus) => set({ activityStatus }),
+  setTargetFamilyId: (targetFamilyId) => set({ targetFamilyId }),
+  setActivityStatus: (activityStatus) => set({ activityStatus }),
    setRuntimeConfig: (patch) => set(patch),
    setRefTextValidation: (refTextValidation) => set({ refTextValidation }),
 

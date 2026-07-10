@@ -13,6 +13,23 @@ import {
   type VoiceMeta,
 } from '@/lib/api'
 import { AudioPlayer } from './AudioPlayer'
+import { WaveformLane } from './waveform/WaveformLane'
+
+// Helper for reduced motion
+const useReducedMotion = () => {
+  const [reduced, setReduced] = useState(false)
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    if (media.matches) setReduced(true)
+    const listener = (e: MediaQueryListEvent) => setReduced(e.matches)
+    media.addEventListener('change', listener)
+    return () => media.removeEventListener('change', listener)
+  }, [])
+  return reduced
+}
+
+
+/* ---------- helpers ---------- */
 
 /* ---------- helpers ---------- */
 
@@ -22,13 +39,6 @@ function clipEffectiveDurationMs(clip: StitchPlanClip): number {
   return Math.max(10, base - clip.trimStartMs - clip.trimEndMs)
 }
 
-function barColor(peak: number) {
-  const hue = 190 + peak * 140
-  const light = 40 + peak * 10
-  const alpha = 0.3 + peak * 0.25
-  return `hsl(${hue} 45% ${light}% / ${alpha})`
-}
-
 /* ---------- sub-components ---------- */
 
 function StitchTimelineClip({
@@ -36,11 +46,13 @@ function StitchTimelineClip({
   onRemove,
   onUpdate,
   isReordering,
+  reducedMotion: _reducedMotion,
 }: {
   clip: StitchPlanClip
   onRemove: (clipId: string) => void
   onUpdate: (clipId: string, patch: Partial<StitchPlanClip>) => void
   isReordering?: boolean
+  reducedMotion: boolean
 }) {
   const [peaks, setPeaks] = useState<number[] | null>(null)
   const [durMs, setDurMs] = useState<number | null>(null)
@@ -50,6 +62,8 @@ function StitchTimelineClip({
   const [editingText, setEditingText] = useState(false)
   const [draftText, setDraftText] = useState(clip.text ?? '')
   const textInputRef = useRef<HTMLInputElement | null>(null)
+  const activeHandle = useRef<'leftTrim' | 'rightTrim' | 'leftFade' | 'rightFade' | null>(null)
+  const laneRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (editingText) textInputRef.current?.focus()
@@ -147,14 +161,40 @@ function StitchTimelineClip({
     return Math.max(0, Math.min(v, maxMs))
   }
 
-  const visiblePeaks = useMemo(() => {
-    if (!peaks || !durMs || durMs <= 0) return peaks
-    const startRatio = clip.trimStartMs / durMs
-    const endRatio = clip.trimEndMs / durMs
-    const from = Math.floor(startRatio * peaks.length)
-    const to = peaks.length - Math.floor(endRatio * peaks.length)
-    return peaks.slice(from, to)
-  }, [peaks, durMs, clip.trimStartMs, clip.trimEndMs])
+  const handleMouseMove = useCallback(
+    (e: MouseEvent) => {
+      if (!activeHandle.current || !laneRef.current || !durMs) return
+
+      const rect = laneRef.current.getBoundingClientRect()
+      const offsetX = e.clientX - rect.left
+      const width = rect.width
+      const msPerPx = effectiveDuration / width
+
+      const handle = activeHandle.current
+      if (handle === 'leftTrim') {
+        onUpdate(clip.clipId, { trimStartMs: clampTrimStart(clip.trimStartMs + offsetX * msPerPx) })
+      } else if (handle === 'rightTrim') {
+        onUpdate(clip.clipId, { trimEndMs: clampTrimEnd(clip.trimEndMs + (width - offsetX) * msPerPx) })
+      } else if (handle === 'leftFade') {
+        onUpdate(clip.clipId, { fadeInMs: clampFade(clip.fadeInMs + offsetX * msPerPx) })
+      } else if (handle === 'rightFade') {
+        onUpdate(clip.clipId, { fadeOutMs: clampFade(clip.fadeOutMs + (width - offsetX) * msPerPx) })
+      }
+    },
+    [clip, durMs, effectiveDuration, onUpdate],
+  )
+
+  const handleMouseUp = useCallback(() => {
+    activeHandle.current = null
+    window.removeEventListener('mousemove', handleMouseMove)
+    window.removeEventListener('mouseup', handleMouseUp)
+  }, [handleMouseMove])
+
+  const startDrag = (handle: 'leftTrim' | 'rightTrim' | 'leftFade' | 'rightFade') => {
+    activeHandle.current = handle
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+  }
 
   const fadeOverlay = (side: 'left' | 'right', ms: number) => {
     if (!ms || ms <= 0) return null
@@ -199,11 +239,12 @@ function StitchTimelineClip({
               }
             }}
             className="min-w-0 flex-1 rounded border border-cyan-500/40 bg-muted/40 px-1.5 py-0.5 text-xs font-medium text-foreground outline-none"
+            aria-label="Edit clip text"
           />
         ) : (
           <span
             className="min-w-0 flex-1 cursor-text truncate text-xs font-medium text-foreground hover:text-cyan-400"
-            title={`${clip.text ?? ''}\n(click to edit reference text)`}
+            title={`${clip.text ?? ''}\\n(click to edit reference text)`}
             onClick={beginEditText}
           >
             {clip.text || '(untitled — click to add reference text)'}
@@ -220,6 +261,7 @@ function StitchTimelineClip({
             className="rounded p-0.5 text-muted-foreground hover:text-foreground"
             onClick={toggleClipPlay}
             disabled={!clip.sourceAudioBase64}
+            aria-label={clipPlaying ? "Pause clip playback" : "Play clip playback"}
             title="Listen to just this segment"
           >
             {clipPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
@@ -228,6 +270,7 @@ function StitchTimelineClip({
             type="button"
             className="rounded p-0.5 text-muted-foreground hover:text-destructive"
             onClick={() => onRemove(clip.clipId)}
+            aria-label="Remove clip"
             title="Remove clip"
           >
             <X className="size-3.5" />
@@ -236,30 +279,34 @@ function StitchTimelineClip({
       </div>
 
       <div className="relative h-24 overflow-hidden rounded-md bg-black/40">
-        {visiblePeaks && visiblePeaks.length > 0 ? (
-          <div className="flex h-full items-center gap-[0.5px] px-0.5">
-            {visiblePeaks.map((p, i) => {
-              const h = Math.max(0.06, p)
-              return (
-                <div
-                  key={i}
-                  className="h-full min-w-[1px] flex-1 rounded-full"
-                  style={{
-                    transformOrigin: 'center',
-                    transform: `scaleY(${h})`,
-                    background: barColor(p),
-                  }}
-                />
-              )
-            })}
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground/60">
-            loading…
-          </div>
-        )}
-        {fadeOverlay('left', clip.fadeInMs)}
-        {fadeOverlay('right', clip.fadeOutMs)}
+        <div ref={laneRef} className="relative h-full w-full">
+          <WaveformLane peaks={peaks} durMs={durMs} trimStartMs={clip.trimStartMs} trimEndMs={clip.trimEndMs} fadeInMs={clip.fadeInMs} fadeOutMs={clip.fadeOutMs} />
+          {fadeOverlay('left', clip.fadeInMs)}
+          {fadeOverlay('right', clip.fadeOutMs)}
+
+          {durMs && (
+            <>
+              <div
+                className="absolute inset-y-0 left-0 w-[2px] cursor-ew-resize bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
+                onMouseDown={() => startDrag('leftTrim')}
+              />
+              <div
+                className="absolute inset-y-0 right-0 w-[2px] cursor-ew-resize bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
+                onMouseDown={() => startDrag('rightTrim')}
+              />
+              <div
+                className="absolute inset-y-0 w-[2px] cursor-ew-resize bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
+                style={{ left: `${(clip.fadeInMs / effectiveDuration) * 100}%` }}
+                onMouseDown={() => startDrag('leftFade')}
+              />
+              <div
+                className="absolute inset-y-0 w-[2px] cursor-ew-resize bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
+                style={{ right: `${(clip.fadeOutMs / effectiveDuration) * 100}%` }}
+                onMouseDown={() => startDrag('rightFade')}
+              />
+            </>
+          )}
+        </div>
       </div>
 
       <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1.5">
@@ -274,7 +321,7 @@ function StitchTimelineClip({
 
 // Independent, always-visible control for the gap between two adjacent clips —
 // rendered between clips in the timeline (not nested inside either clip's card),
-// so it reads as belonging to "the space between" rather than to one clip.
+// so it reads as belonging to \"the space between\" rather than to one clip.
 function GapControl({
   gapIndex,
   paddingMs,
@@ -328,15 +375,15 @@ function MsStepper({
   return (
     <div className={cn('flex min-w-0 items-center gap-1', compact && 'gap-0.5')} title={label}>
       {!compact && <span className="min-w-0 flex-1 truncate text-[10px] uppercase text-muted-foreground/70">{label}</span>}
-      <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" onClick={() => onChange(Math.max(min, value - step))}>−</button>
+      <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" aria-label={`Decrease ${label}`} onClick={() => onChange(Math.max(min, value - step))}>−</button>
       <span className="inline-flex min-w-[28px] shrink-0 justify-center text-xs font-mono tabular-nums text-foreground">{value}</span>
-      <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" onClick={() => onChange(Math.min(max, value + step))}>+</button>
+      <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" aria-label={`Increase ${label}`} onClick={() => onChange(Math.min(max, value + step))}>+</button>
     </div>
   )
 }
 
 // Generic multi-select library picker: filter, per-item checkboxes, select-all toggle,
-// and a single bulk "Insert selected" action — used for both the segment library and the
+// and a single bulk \"Insert selected\" action — used for both the segment library and the
 // voice library (each saved voice inserts as one whole clip, same shape as a segment clip).
 function LibraryPickerButton<T>({
   label,
@@ -361,6 +408,7 @@ function LibraryPickerButton<T>({
   getAudioBase64?: (item: T) => Promise<string | null>
   onInsertMany: (items: T[]) => void
 }) {
+  const reducedMotion = useReducedMotion()
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -448,12 +496,13 @@ function LibraryPickerButton<T>({
 
       <AnimatePresence>
         {open && (
-          <motion.div
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            className="absolute right-0 top-9 z-30 flex max-h-96 w-96 flex-col gap-1.5 overflow-hidden rounded-lg border border-border bg-background p-2 shadow-lg"
-          >
+       <motion.div
+          initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: reducedMotion ? 0 : 0 }}
+          exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
+          className="absolute right-0 top-9 z-30 flex max-h-96 w-96 flex-col gap-1.5 overflow-hidden rounded-lg border border-border bg-background p-2 shadow-lg"
+        >
+
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] uppercase text-muted-foreground">{label}</span>
               <button
@@ -516,7 +565,7 @@ function LibraryPickerButton<T>({
                       )}
                       <span
                         className="min-w-0 flex-1"
-                        title={meta ? `${getLabel(it)}\n${meta}` : getLabel(it)}
+                        title={meta ? `${getLabel(it)}\\n${meta}` : getLabel(it)}
                       >
                         <span className="block truncate">{getLabel(it)}</span>
                         {meta && (
@@ -572,6 +621,7 @@ export const StitchTimeline = memo(function StitchTimeline({
   voiceLibrary,
   onInsertVoiceFromLibrary,
 }: StitchTimelineProps) {
+  const reducedMotion = useReducedMotion()
   const clips = useAppStore((s) => s.ovStitchPlanClips)
   const paddingMs = useAppStore((s) => s.ovStitchPlanPaddingMs)
   const reorderClip = useAppStore((s) => s.reorderOvStitchPlanClip)
@@ -609,7 +659,7 @@ export const StitchTimeline = memo(function StitchTimeline({
   )
 
   // Hooks must run unconditionally on every render — this used to sit after an early return
-  // for the empty-timeline case, which threw "rendered more hooks than previous render" (React
+  // for the empty-timeline case, which threw \"rendered more hooks than previous render\" (React
   // error #310) the instant a first clip was inserted (0 clips -> hook skipped, 1+ clips -> hook
   // ran), crashing the page. Stitch Studio hits the empty state on first load, so it surfaced
   // this immediately; OmniVoice's editor rarely opened with zero clips, so it went unnoticed.
@@ -646,7 +696,7 @@ export const StitchTimeline = memo(function StitchTimeline({
               getId={(v) => v.voice_id}
               getLabel={(v) => v.description || v.voice_id}
               getMeta={(v) =>
-                [v.language, v.sample_text ? `"${v.sample_text.slice(0, 60)}${v.sample_text.length > 60 ? '…' : ''}"` : null]
+                [v.language, v.sample_text ? `\"${v.sample_text.slice(0, 60)}${v.sample_text.length > 60 ? '…' : ''}\"` : null]
                   .filter(Boolean)
                   .join(' · ') || null
               }
@@ -740,6 +790,7 @@ export const StitchTimeline = memo(function StitchTimeline({
                   onRemove={removeClip}
                   onUpdate={updateClip}
                   isReordering
+                  reducedMotion={reducedMotion}
                 />
               </Reorder.Item>
             </div>
@@ -753,6 +804,7 @@ export const StitchTimeline = memo(function StitchTimeline({
 /* ---------- DSP controls panel ---------- */
 
 export function StitchDspControls({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const reducedMotion = useReducedMotion()
   const dsp = useAppStore((s) => s.ovStitchPlanDsp)
   const setDsp = useAppStore((s) => s.setOvStitchPlanDsp)
 
@@ -769,9 +821,9 @@ export function StitchDspControls({ open, onToggle }: { open: boolean; onToggle:
       <AnimatePresence initial={false}>
         {open && (
           <motion.div
-            initial={{ opacity: 0, height: 0 }}
+            initial={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
+            exit={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
             className="grid grid-cols-2 gap-x-6 gap-y-3 overflow-hidden rounded-lg border border-border/60 bg-muted/40 px-4 py-3"
           >
             <SliderField label="Segment target" value={dsp.segmentTargetDbfs} min={-40} max={-10} step={0.5} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ segmentTargetDbfs: v })} />
@@ -837,7 +889,7 @@ interface StitchEditorBodyProps {
   voiceLibrary?: VoiceMeta[]
   onInsertVoiceFromLibrary?: (voice: VoiceMeta) => void
   /** Renders a close button in the header when set — the standalone Stitch Studio page has
-   * nothing to "close" back to, so it omits this. */
+   * nothing to \"close\" back to, so it omits this. */
   onClose?: () => void
 }
 
@@ -937,7 +989,7 @@ function StitchEditorBody({
         setPreviewError(null)
       } catch (err) {
         // Keep the last-good preview showing, but surface the failure — otherwise
-        // the UI looks stuck on "changes pending" forever with no explanation.
+        // the UI looks stuck on \"changes pending\" forever with no explanation.
         if (seq === renderSeqRef.current) {
           setPreviewError(err instanceof Error ? err.message : 'Preview render failed.')
         }

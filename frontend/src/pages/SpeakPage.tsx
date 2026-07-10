@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import {
   AlertCircle,
-  AlertTriangle,
-  ChevronDown,
-  ChevronUp,
-  Loader2,
-  Square,
+ AlertTriangle,
+ ChevronDown,
+ ChevronUp,
+ Dice5,
+ Loader2,
+ Settings2,
+ Square,
 } from 'lucide-react'
 import {
   classifyGenerateError,
@@ -29,32 +31,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Info, Dices } from 'lucide-react'
-
-function formatEta(seconds: number | null): string {
-  if (seconds == null) return 'estimating remaining time…'
-  if (seconds < 1) return 'almost done'
-  if (seconds < 60) return `~${Math.round(seconds)}s remaining`
-  const m = Math.floor(seconds / 60)
-  const s = Math.round(seconds % 60)
-  return `~${m}m ${s > 0 ? s + 's' : ''} remaining`
-}
-
-function estimateInitialEta(text: string): string {
-  const words = text.trim() ? text.trim().split(/\s+/).length : 0
-  if (words === 0) return ''
-  if (words <= 5) return 'About 15–25 seconds'
-  if (words <= 15) return 'About 25–40 seconds'
-  if (words <= 30) return 'About 40–90 seconds'
-  if (words <= 60) return 'About 1–3 minutes'
-  if (words <= 100) return 'About 3–6 minutes'
-  return 'Very long — expect 6+ minutes'
-}
+import { Info } from 'lucide-react'
 
 function StructuredError({ error }: { error: string }) {
   const info = classifyGenerateError(error, null)
   const [expanded, setExpanded] = useState(false)
   const isStrong = info.type === 'TOO_LONG' || info.type === 'TIMEOUT'
+
 
   return (
     <div
@@ -97,6 +80,13 @@ function StructuredError({ error }: { error: string }) {
   )
 }
 
+function formatEta(seconds: number | null): string {
+  if (seconds == null) return 'Estimating…'
+  if (seconds <= 0) return 'Finishing…'
+  if (seconds < 60) return `About ${Math.ceil(seconds)}s remaining`
+  return `About ${Math.ceil(seconds / 60)}m remaining`
+}
+
 export function SpeakPage() {
   const {
     text,
@@ -124,6 +114,7 @@ export function SpeakPage() {
   const [language, setLanguage] = useState('English')
   const [tone, setTone] = useState('neutral')
   const [seedInput, setSeedInput] = useState('')
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   async function refreshVoices() {
@@ -242,9 +233,6 @@ export function SpeakPage() {
     // Let the poller detect cancelled status
   }
 
-  const hasText = text.trim().length > 0
-  const initialEta = hasText && !speakIsGenerating ? estimateInitialEta(text) : ''
-
   return (
     <div className="flex flex-col gap-6">
       <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
@@ -280,13 +268,6 @@ export function SpeakPage() {
               </p>
             )}
           </div>
-        )}
-
-        {/* Initial ETA hint (before generation starts) */}
-        {initialEta && (
-          <p className="text-[11px] text-muted-foreground">
-            Estimated time to generate: {initialEta}. This is approximate — actual time depends on text complexity and system load.
-          </p>
         )}
 
         <div className="flex flex-wrap items-center gap-3">
@@ -343,7 +324,7 @@ export function SpeakPage() {
                   onClick={() => setSeedInput('')}
                   className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                 >
-                  <Dices className="size-4" />
+                  <Dice5 className="size-4" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">
@@ -414,6 +395,16 @@ export function SpeakPage() {
                {speakJobProgress.status === 'cancelled'
                  ? 'Cancelling…'
                  : formatEta(speakJobProgress.eta_seconds)}
+               {speakJobProgress.audio_seconds_generated > 0 && (
+                 <span className="ml-2 text-[10px] text-muted-foreground/70">
+                   · {speakJobProgress.audio_seconds_generated.toFixed(1)}s generated
+                 </span>
+               )}
+               {speakJobProgress.live_rtf_estimate !== null && (
+                 <span className="ml-2 text-[10px] text-primary/80 font-mono">
+                   · RTF: {speakJobProgress.live_rtf_estimate.toFixed(2)}x
+                 </span>
+               )}
                {speakJobProgress.elapsed_seconds > 0 && (
                  <span className="ml-2 text-[10px] text-muted-foreground/70">
                    · {Math.round(speakJobProgress.elapsed_seconds)}s elapsed
@@ -443,19 +434,56 @@ export function SpeakPage() {
           <div data-testid="speak-result" className="flex flex-col gap-2">
             <AudioPlayer src={speakAudioUrl} blob={speakAudioBlob} />
             {speakLastSeed !== null && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span>
-                  Seed: <span className="font-mono text-foreground">{speakLastSeed}</span>
-                </span>
-                {seedInput !== String(speakLastSeed) && (
-                  <button
-                    type="button"
-                    onClick={() => setSeedInput(String(speakLastSeed))}
-                    className="underline decoration-dotted hover:text-foreground"
-                  >
-                    Lock this seed
-                  </button>
-                )}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>
+                    Seed: <span className="font-mono text-foreground">{speakLastSeed}</span>
+                  </span>
+                  {seedInput !== String(speakLastSeed) && (
+                    <button
+                      type="button"
+                      onClick={() => setSeedInput(String(speakLastSeed))}
+                      className="underline decoration-dotted hover:text-foreground"
+                    >
+                      Lock this seed
+                    </button>
+                  )}
+                </div>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 gap-1 px-2 text-[10px]"
+                  onClick={() => setShowAdvanced(!showAdvanced)}
+                >
+                  <Settings2 className="size-3" />
+                  {showAdvanced ? 'Hide Advanced' : 'Advanced'}
+                </Button>
+              </div>
+            )}
+
+            {showAdvanced && (
+              <div className="rounded-lg border border-border bg-muted/20 p-3">
+                <p className="mb-2 text-[10px] font-medium text-muted-foreground">Diagnostics</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] font-mono">
+                  <div className="flex justify-between">
+                    <span className="opacity-60">Job ID:</span>
+                    <span className="max-w-[120px] truncate">{speakJobId || 'n/a'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="opacity-60">Backend:</span>
+                    <span>OpenVINO</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="opacity-60">Seed:</span>
+                    <span>{speakLastSeed}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="opacity-60">Status:</span>
+                    <span className="text-green-500">Completed</span>
+                  </div>
+                </div>
               </div>
             )}
           </div>

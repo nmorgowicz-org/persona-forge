@@ -242,7 +242,11 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
     setIsSaving(true)
     setError(null)
     try {
-      const result = await saveVoiceDesign(previewId)
+      const targetFamilyId = useAppStore.getState().targetFamilyId
+      const result = await saveVoiceDesign(
+        previewId,
+        targetFamilyId,
+      )
       setSavedVoiceId(result.voice_id)
     } catch (err) {
       setError(

@@ -11,6 +11,7 @@ import {
   Plus,
   Sparkles,
   Trash2,
+  Shuffle,
 } from 'lucide-react'
 import {
   deleteOmniVoiceSegment,
@@ -27,8 +28,23 @@ import { AudioPlayer } from '@/components/AudioPlayer'
 import { Button } from '@/components/ui/button'
 import { createStitchClipFromSegment } from '@/lib/stitchClips'
 import { useAppStore, type StitchPlanClip } from '@/store'
+import { VariantCompare } from '@/components/VariantCompare'
+import { cn } from '@/lib/utils'
 
 const MOUNTED_REF_SOURCE = 'mounted_ref_audio' as const
+
+// Helper for reduced motion
+const useReducedMotion = () => {
+  const [reduced, setReduced] = useState(false)
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    if (media.matches) setReduced(true)
+    const listener = (e: MediaQueryListEvent) => setReduced(e.matches)
+    media.addEventListener('change', listener)
+    return () => media.removeEventListener('change', listener)
+  }, [])
+  return reduced
+}
 
 function isMountedRef(voice: VoiceMeta): boolean {
   return (voice as VoiceMeta & { source?: string }).source === MOUNTED_REF_SOURCE
@@ -196,6 +212,7 @@ function VoiceCard({
   onDelete: () => void
   onSaveSampleText: (text: string) => Promise<void>
 }) {
+  const reducedMotion = useReducedMotion()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(voice.sample_text)
   const [saving, setSaving] = useState(false)
@@ -231,14 +248,20 @@ function VoiceCard({
   return (
     <motion.div
       data-testid="voice-card"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      whileHover={{ y: -2 }}
+      initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: reducedMotion ? 0 : 0 }}
+      whileHover={reducedMotion ? {} : { y: -2 }}
       className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm transition-shadow duration-200 hover:border-border/80 hover:shadow-lg"
     >
+
       <div>
         <div className="flex items-center gap-2">
           <p className="text-sm font-medium">{voice.voice_id}</p>
+          {voice.family_id && (
+            <span className="inline-flex items-center rounded-full border border-purple-500/30 bg-purple-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-purple-400">
+              Family: {voice.family_id}
+            </span>
+          )}
           {isMountedRef(voice) && (
             <span className="inline-flex items-center rounded-full border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-cyan-400">
               Mounted reference
@@ -371,6 +394,7 @@ function VoiceCard({
 }
 
 export function VoiceLibraryPage() {
+  const reducedMotion = useReducedMotion()
   const voices = useAppStore((s) => s.voices)
   const segments = useAppStore((s) => s.ovLibrary)
   const storeSetVoices = useAppStore((s) => s.setVoices)
@@ -381,8 +405,9 @@ export function VoiceLibraryPage() {
   const [busySegmentId, setBusySegmentId] = useState<string | null>(null)
 
   const [segSearch, setSegSearch] = useState('')
-
+  const [compareMode, setCompareMode] = useState(false)
   const setVoiceId = useAppStore((s) => s.setVoiceId)
+
   const setPage = useAppStore((s) => s.setPage)
   const setEditingVoice = useAppStore((s) => s.setEditingVoice)
   const setDesignEngine = useAppStore((s) => s.setDesignEngine)
@@ -610,12 +635,43 @@ export function VoiceLibraryPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-2xl font-semibold tracking-tight">Voice Library</h1>
-        <p className="text-sm text-muted-foreground">
-          Voices you've designed and saved, ready to use in Speak or over the API.
-        </p>
-      </motion.div>
+        <motion.div
+          initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: reducedMotion ? 0 : 0 }}
+          className="flex flex-col gap-1"
+        >
+
+         <div className="flex items-center justify-between">
+           <h1 className="text-2xl font-semibold tracking-tight">Voice Library</h1>
+           <Button
+             variant="outline"
+             size="sm"
+             onClick={() => setCompareMode(!compareMode)}
+             className={cn(
+               "gap-2 transition-all",
+               compareMode ? "bg-primary text-primary-foreground border-primary" : ""
+             )}
+           >
+            <Shuffle className="size-3.5" />
+             {compareMode ? 'Exit Compare' : 'Compare Variants'}
+           </Button>
+         </div>
+         <p className="text-sm text-muted-foreground">
+           Voices you've designed and saved, ready to use in Speak or over the API.
+         </p>
+       </motion.div>
+
+     {compareMode && (
+        <motion.div
+          initial={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          className="mb-8"
+        >
+          <VariantCompare />
+        </motion.div>
+
+     )}
+
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
@@ -711,14 +767,15 @@ export function VoiceLibraryPage() {
             {filteredSegments.length > 0 ? (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {filteredSegments.map((seg, i) => (
-                  <motion.div
-                    key={seg.segment_id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.02 }}
-                    whileHover={{ y: -1 }}
-                    className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 text-card-foreground shadow-sm transition-shadow hover:shadow-lg"
-                  >
+                        <motion.div
+                          key={seg.segment_id}
+                          initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: reducedMotion ? 0 : 0 }}
+                          transition={{ delay: i * 0.02 }}
+                          whileHover={reducedMotion ? {} : { y: -1 }}
+                          className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 text-card-foreground shadow-sm transition-shadow hover:shadow-lg"
+                        >
+
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1">
                         <p className="text-xs">{seg.text}</p>

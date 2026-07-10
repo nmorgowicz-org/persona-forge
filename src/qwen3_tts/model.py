@@ -14,6 +14,7 @@ from qwen3_tts.asr_check import transcribe_reference_audio, validate_reference_t
 from qwen3_tts.config import REF_AUDIO_PATH, apply_preset_env
 from qwen3_tts.openvino.runtime_config import apply_thread_env, resolve_inference_threads
 from qwen3_tts.presets import get_voice_design_preset, seconds_for_capacity
+from .audio_style import apply_style_preset
 
 apply_preset_env()
 
@@ -1064,6 +1065,11 @@ class _JobState:
     error: str | None = None
     expected_total_frames: int = 0
     _watchdog_limit: float = 120.0
+    voice_family_id: str | None = None
+    variant_kind: str | None = None
+    style_preset: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    postprocess_applied: bool = False
 
 
 _active_jobs: dict[str, _JobState] = {}
@@ -1149,8 +1155,17 @@ def get_job_progress(job_id: str) -> dict[str, Any] | None:
         "expected_total_frames": expected_total_frames,
         "progress_pct": round(progress_pct, 1),
         "elapsed_seconds": round(elapsed, 1),
+        "audio_seconds_generated": round(frames / 12, 2),
+        "audio_seconds": round(frames / 12, 2),
+        "live_rtf_estimate": round(elapsed / max(1, frames / 12), 2) if frames > 0 else None,
+        "rtf": round(elapsed / max(1, frames / 12), 2) if frames > 0 else None,
         "eta_seconds": round(eta_seconds, 1) if eta_seconds is not None else None,
         "message": job.message,
+        "voice_family_id": job.voice_family_id,
+        "variant_kind": job.variant_kind,
+        "style_preset": job.style_preset,
+        "postprocess_applied": job.postprocess_applied,
+        "applied_steps": job.metadata.get("applied_steps"),
     }
 
 
@@ -1312,6 +1327,9 @@ def _run_generate(
     language: str,
     *,
     voice_id: str | None = None,
+    voice_variant_id: str | None = None,
+    style_preset: str | None = None,
+    postprocess: str | None = None,
     seed_value=None,
     instruct: str | None = None,
     job_id: str | None = None,
@@ -1322,6 +1340,8 @@ def _run_generate(
     _ensure_base_loaded()
     if model is None:
         raise RuntimeError("Model not loaded")
+
+    effective_voice_id = voice_variant_id or voice_id
 
     # ── Pocket TTS backend branch ──────────────────────────────────────────────
     if TTS_BACKEND == "pocket_tts":
@@ -1354,7 +1374,7 @@ def _run_generate(
         # Use Pocket TTS voice_state resolution instead of Qwen3TTS voice_clone_prompt.
         voice_state = pocket_tts_runtime.get_pocket_tts_voice_state(
             model,
-            voice_id=voice_id,
+            voice_id=effective_voice_id,
             default_voice_state=voice_clone_prompt,
             ref_audio_path=REF_AUDIO,
         )
@@ -1376,6 +1396,9 @@ def _run_generate(
             raise
 
         wav = _trim_silence(audio_tensor.cpu().numpy().ravel(), sr)
+        if job and job.style_preset:
+            wav, sr, metadata = apply_style_preset(wav, sr, job.style_preset)
+            job.metadata.setdefault('applied_steps', []).append(metadata.get('applied_steps', 'style_preset'))
         duration = len(wav) / sr
         elapsed = time.monotonic() - t0
         print(f"[generate] done   elapsed={elapsed:.1f}s  audio={duration:.1f}s  RTF={elapsed/duration:.2f}x", flush=True)
@@ -1392,10 +1415,19 @@ def _run_generate(
         return wav, sr, job_id
 
     # ── PyTorch / OpenVINO backends (unchanged) ────────────────────────────────
-    voice_prompt = get_voice_clone_prompt(voice_id)
+    voice_prompt = get_voice_clone_prompt(effective_voice_id)
     if voice_prompt is None:
         raise RuntimeError("Model not loaded")
-    if instruct:
+
+    # Store metadata in job for response headers/progress
+    if job:
+        from qwen3_tts import voice_library
+        meta = voice_library.get_voice(effective_voice_id)
+        if meta:
+            job.voice_family_id = meta.get("family_id")
+            job.variant_kind = meta.get("variant_kind")
+            job.style_preset = style_preset
+            job.postprocess_applied = (postprocess is not None)
         # Base's generate_voice_clone has no tone/instruct parameter — VoiceDesign is the only
         # checkpoint that consumes free-text instruct. No-op here rather than erroring, so a
         # frontend that always sends `instruct` doesn't need to special-case Base.
@@ -1659,6 +1691,9 @@ def _run_generate(
             flush=True,
         )
     wav, sr = _trim_silence(wavs[0], sr), sr
+    if job and job.style_preset:
+        wav, sr, metadata = apply_style_preset(wav, sr, job.style_preset)
+        job.metadata.setdefault('applied_steps', []).append(metadata.get('applied_steps', 'style_preset'))
     duration = len(wav) / sr
     elapsed = time.monotonic() - t0
     print(f"[generate] done   elapsed={elapsed:.1f}s  audio={duration:.1f}s  RTF={elapsed/duration:.2f}x  frames={job.frames_generated if job else '-'}", flush=True)
