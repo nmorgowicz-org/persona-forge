@@ -24,6 +24,59 @@ def _make_silent_wav(num_samples: int = 2400, sr: int = 24000) -> bytes:
     return buf.getvalue()
 
 
+
+
+
+
+
+
+
+class FakeOmniVoiceEngine:
+    """Fake OmniVoice engine for mocking audio stitching."""
+    def stitch_selected(self, selected, plan=None):
+        return np.zeros(2400, dtype=np.float32), 24000
+
+
+class FakeVoiceLibrary:
+    """Fake voice library for mocking voice saving/loading.
+    
+    It maintains a simple in-memory dictionary of 'saved' voices.
+    """
+    def __init__(self):
+        self.voices = {}
+        self._voice_counter = 0
+
+    def save_voice(self, wav_bytes, description, sample_text, language, 
+                    selections, family_id=None, variant_name=None, variant_kind=None):
+        voice_id = f"fake_voice_{len(self.voices)}"
+        meta = {
+            "voice_id": voice_id,
+            "description": description,
+            "sample_text": sample_text,
+            "language": language,
+            "selections": selections,
+            "family_id": family_id,
+            "variant_name": variant_name,
+            "variant_kind": variant_kind,
+        }
+        self.voices[voice_id] = meta
+        return meta
+
+    def get_voice(self, voice_id):
+        return self.voices.get(voice_id)
+
+    def delete_voice(self, voice_id):
+        if voice_id in self.voices:
+            del self.voices[voice_id]
+        return True
+
+    def list_voices(self):
+        return list(self.voices.values())
+
+    def __len__(self):
+        return len(self.voices)
+
+
 class _FakeLoadedModel:
     """Stands in for model.model — matches real shape: model.model.model.tts_model_type."""
 
@@ -56,7 +109,7 @@ class _FakeJobState:
         self.frames_generated = 0
         self.reference_frames = 0
         self.text_length = len(text)
-        self.message = None
+        self.message: str | None = None
         # Small fake waveform so /generate/job/<id>/audio can return 200.
         self.wav: Any = np.zeros(480, dtype=np.float32)
         self.sr = 24000
@@ -67,18 +120,16 @@ class _FakeJobState:
         self._watchdog_limit = 120.0
 
 
-class _FakeModelModule(types.ModuleType):
+class _FakeModule(types.ModuleType):
     """Proxy module that delegates attribute access to FakeModelRuntime instance.
-
+    
     This ensures model.X and rt.X are always in sync; patching one immediately
     affects the other, which is critical when tests manipulate rt.model,
     rt.generate_should_fail, etc. and then the app code reads from model.*.
     """
-
     _rt: Any  # reference to FakeModelRuntime
-
-    def __init__(self, rt: Any) -> None:
-        super().__init__("qwen3_tts.model")
+    def __init__(self, rt: Any, name: str) -> None:
+        super().__init__(name)
         self._rt = rt
 
     def __getattr__(self, name: str) -> Any:
@@ -91,29 +142,34 @@ class _FakeModelModule(types.ModuleType):
             setattr(self._rt, name, value)
 
 
+
 class FakeModelRuntime:
     """Central fake for qwen3_tts.model.
-
+    
     install() creates a _FakeModelModule proxy and puts it into
     sys.modules["qwen3_tts.model"] so imports of qwen3_tts.model resolve here.
     All attribute access on model.* is live-delegated to this instance.
     """
-
+ 
     # Basic flags
     _service_started: bool
     _model_loaded: bool
     startup_failed: bool
     tts_backend: str
     initial_service_started: bool
-
+    model: Any
+    omnivoice_engine: Any
+    voice_library: Any
+    _startup_error: Optional[str]
+    
     # Call tracking
     load_model_calls: List[Dict[str, Any]]
     force_unload_calls: List[Dict[str, Any]]
     generate_calls: List[Dict[str, Any]]
-
+ 
     # Async-job store
     jobs: Dict[str, Dict[str, Any]]
-
+ 
     # Configurable behaviors
     generate_should_fail: bool
     generate_error_code: int
@@ -121,7 +177,12 @@ class FakeModelRuntime:
     swap_in_progress: bool
     stream_vocoder_enabled: bool
     async_jobs_complete_immediately: bool
-
+ 
+    _job_counter: int
+    _active_jobs: Dict[str, _FakeJobState]
+    _active_jobs_lock: threading.Lock
+    executor: ThreadPoolExecutor
+ 
     def __init__(
         self,
         initial_service_started: bool = True,
@@ -144,32 +205,35 @@ class FakeModelRuntime:
         self._startup_error: Optional[str] = (
             "fake startup error" if startup_failed else None
         )
-
+        self.omnivoice_engine = FakeOmniVoiceEngine()
+        self.voice_library = FakeVoiceLibrary()
+ 
         self.load_model_calls: List[Dict[str, Any]] = []
         self.force_unload_calls: List[Dict[str, Any]] = []
         self.generate_calls: List[Dict[str, Any]] = []
-
+ 
         self.jobs: Dict[str, Dict[str, Any]] = {}
         self._job_counter: int = 0
         self._jobs_lock = threading.Lock()
-
+ 
         self.generate_should_fail = generate_should_fail
         self.generate_error_code = generate_error_code
         self.generate_delay_ms = generate_delay_ms
         self.swap_in_progress = swap_in_progress
         self.stream_vocoder_enabled = stream_vocoder_enabled
+        self._slow_async = False
         self.async_jobs_complete_immediately = async_jobs_complete_immediately
-
+ 
         # Async-job lock: app.py accesses model._active_jobs_lock directly.
         self._active_jobs: Dict[str, _FakeJobState] = {}
         self._active_jobs_lock = threading.Lock()
-
+ 
         # Executor: app.py uses model.executor.submit(...).
         self.executor = ThreadPoolExecutor(max_workers=1)
-
+ 
         # model.model: loaded checkpoint wrapper.
         self.model: Any = _FakeLoadedModel("BASE")
-
+ 
         # ov_runtime: used by app.py to gate streaming.
         self.ov_runtime = types.SimpleNamespace(
             vocoder_runtime=types.SimpleNamespace(
@@ -177,17 +241,17 @@ class FakeModelRuntime:
                 sample_rate=24000,
             )
         )
-
+ 
         # voice_clone_prompt: app.py / model.py usage.
         self.voice_clone_prompt = object()
-
+ 
         # Profiles: used by voice_design.py.
         self.BASE_PROFILE = "BASE"
         self.VOICE_DESIGN_PROFILE = "VOICE_DESIGN"
-
+ 
         # active_profile
         self.active_profile = self.BASE_PROFILE
-
+ 
         # Runtime config internals: /runtime/config endpoints.
         self._runtime_live: Dict[str, Any] = {
             "TTS_BACKEND": self.tts_backend,
@@ -212,13 +276,14 @@ class FakeModelRuntime:
         }
         self._reconfig_in_progress = False
 
+
     # ── install ──
 
     def install(self, overrides: Optional[Dict[str, Any]] = None) -> "FakeModelRuntime":
         rt = self
 
         # Use proxy module so all model.* attribute access is live-delegated to rt.
-        fake_module = _FakeModelModule(rt)
+        fake_module = _FakeModule(rt, "qwen3_tts.model")
 
         def health_state() -> Dict[str, Any]:
             if rt._startup_failed:
@@ -461,7 +526,7 @@ class FakeModelRuntime:
 
         qwen3_tts_pkg = sys.modules.get("qwen3_tts")
         if qwen3_tts_pkg is not None:
-            qwen3_tts_pkg.model = fake_module
+            setattr(qwen3_tts_pkg, "model", fake_module)
 
         return self
 

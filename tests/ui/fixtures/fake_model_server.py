@@ -98,6 +98,8 @@ def _set_module_attr(module_name, attr, value):
 
 def _patch_omnivoice_run_job(app_module):
     def fake_run_omnivoice_job(
+    def fake_run_omnivoice_job(
+    def fake_run_omnivoice_job(
         segments,
         instruct,
         language,
@@ -161,6 +163,7 @@ def main() -> None:
 
     _install_fake_voice_design(app_module)
     _patch_omnivoice_run_job(app_module)
+    _patch_save_voice(app_module)
 
     from werkzeug.serving import make_server  # noqa: E402
 
@@ -200,6 +203,7 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
 
     _install_fake_voice_design(app_module)
     _patch_omnivoice_run_job(app_module)
+    _patch_save_voice(app_module)
 
     shutdown_event = threading.Event()
     app_module._shutdown_hook = shutdown_event.set
