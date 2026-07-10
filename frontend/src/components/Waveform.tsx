@@ -3,10 +3,11 @@ import { cn } from '@/lib/utils'
 
 interface WaveformProps {
   peaks: number[]
-  progress?: number // 0..1, how much of the waveform is "played"
+  progress?: number // 0..1, how much of the waveform is \"played\"
   isActive?: boolean // pulses idle bars gently while audio is loading/generating
   duration?: number | null // total audio duration in seconds, drives time axis
   className?: string
+  onClick?: (progress: number) => void
 }
 
 function formatTime(sec: number): string {
@@ -39,9 +40,17 @@ function barColor(peak: number, played: boolean) {
 
 const PLAYHEAD_COLOR = 'hsl(38 95% 62%)' // warm amber cursor, pops against the cool waveform
 
-export function Waveform({ peaks, progress = 0, isActive = false, duration = null, className }: WaveformProps) {
+export function Waveform({ peaks, progress = 0, isActive = false, duration = null, className, onClick }: WaveformProps) {
   const playheadPct = Math.min(100, Math.max(0, progress * 100))
   const hasTimeAxis = duration != null && duration > 0 && isFinite(duration)
+
+  const handleWaveformClick = (e: React.MouseEvent) => {
+    if (!onClick) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const pct = x / rect.width
+    onClick(Math.min(1, Math.max(0, pct)))
+  }
 
   // Compute time ticks: simple, evenly spaced, 3-7 labels.
   // For short clips (< 5s) use small step (0.2–1s) and decimal labels.
@@ -92,10 +101,12 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
   return (
     <div
       className={cn(
-        'relative overflow-hidden rounded-md bg-gradient-to-b from-black/30 to-transparent px-0.5',
+        'relative cursor-pointer overflow-hidden rounded-md bg-gradient-to-b from-black/30 to-transparent px-0.5',
         hasTimeAxis ? 'h-20' : 'h-16',
         className,
       )}
+      onClick={handleWaveformClick}
+    .
     >
       {/* center track line, like a DAW lane */}
       <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-border/60" />

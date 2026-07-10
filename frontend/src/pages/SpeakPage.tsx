@@ -467,23 +467,27 @@ export function SpeakPage() {
               <div className="rounded-lg border border-border bg-muted/20 p-3">
                 <p className="mb-2 text-[10px] font-medium text-muted-foreground">Diagnostics</p>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] font-mono">
-                  <div className="flex justify-between">
+                  <div className="flex justify-between items-center gap-2">
                     <span className="opacity-60">Job ID:</span>
                     <span className="max-w-[120px] truncate">{speakJobId || 'n/a'}</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="size-3 shrink-0 text-muted-foreground" />
+                      </TooltipTrigger>
+                      <TooltipContent side=\"top\">\n                        Unique backend identifier for this generation job.\n                      </TooltipContent>
+                    </Tooltip>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="opacity-60">Backend:</span>
+                  <div className="flex justify-between items-center gap-2">
+                    <span className=\"opacity-60\">Backend:</span>
                     <span>OpenVINO</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className=\"size-3 shrink-0 text-muted-foreground\" />
+                      </TooltipTrigger>
+                      <TooltipContent side=\"top\">\n                        Accelerated by Intel OpenVINO for faster CPU inference.\n                      </TooltipContent>
+                    </Tooltip>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="opacity-60">Seed:</span>
-                    <span>{speakLastSeed}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="opacity-60">Status:</span>
-                    <span className="text-green-500">Completed</span>
-                  </div>
-                </div>
+                  <div className=\"flex justify-between items-center gap-2\">\n                    <span className=\"opacity-60\">Seed:</span>\n                    <span>{speakLastSeed}</span>\n                    <Tooltip>\n                      <TooltipTrigger asChild>\n                        <Info className=\"size-3 shrink-0 text-muted-foreground\" />\n                      </TooltipTrigger>\n                      <TooltipContent side=\"top\">\n                        Symmetric seed used to control randomness.\n                      </TooltipContent>\n                    </Tooltip>\n                  </div>\n                  <div className=\"flex justify-between items-center gap-2\">\n                    <span className=\"opacity-60\">Status:</span>\n                    <span className=\"text-green-500\">Completed</span>\n                    <Tooltip>\n                      <TooltipTrigger asChild>\n                        <Info className=\"size-3 shrink-0 text-muted-foreground\" />\n                      </TooltipTrigger>\n                      <TooltipContent side=\"top\">\n                        Audio successfully generated and downloaded.\n                      </TooltipContent>\n                    </Tooltip>\n                  </div>\n                </div>
               </div>
             )}
           </div>

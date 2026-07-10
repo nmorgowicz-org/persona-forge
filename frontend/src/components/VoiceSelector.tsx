@@ -1,4 +1,5 @@
 import { Plus } from 'lucide-react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { VoiceMeta } from '../lib/api'
 import {
   Select,
@@ -93,12 +94,13 @@ export function VoiceSelector({ voices, voiceId, onChange }: VoiceSelectorProps)
                         setDesignEngine('omnivoice')
                         setPage('voice-design')
                       }}
-                      className="group flex items-center gap-1 text-[10px] text-muted-foreground opacity-0 transition-opacity hover:text-cyan-400 group-hover:opacity-100"
+                      className=\"group flex items-center gap-1 text-muted-foreground transition-colors hover:text-cyan-400\"
                       title={`Create variant for ${familyName}`}
                     >
-                      <Plus className="h-3 w-3" />
-                      <span className="hidden group-hover:inline">Add Variant</span>
+                      <Plus className=\"h-3 w-3\" />
+                      <span className=\"text-pretty text-[10px] hidden group-hover:inline\">Add Variant</span>
                     </button>
+
                   </div>
                   {familyVoices.map((voice) => {
                     const mounted = isMountedRef(voice)
@@ -124,14 +126,28 @@ export function VoiceSelector({ voices, voiceId, onChange }: VoiceSelectorProps)
                             </span>
                           )}
                           {mounted && (
-                            <span className="inline-flex items-center rounded-full border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-cyan-400">
-                              Mounted
-                            </span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className=\"inline-flex items-center rounded-full border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-cyan-400\">
+                                  Mounted
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent side=\"top\" className=\"max-w-48\">
+                                This voice is directly backed by the mounted reference audio on the host system.
+                              </TooltipContent>
+                            </Tooltip>
                           )}
                           {review && (
-                            <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-amber-300">
-                              Review
-                            </span>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className=\"inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-amber-300\">
+                                  Review
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent side=\"top\" className=\"max-w-48\">
+                                This reference has been flagged for potential quality issues (clipping, silence, or low SNR).
+                              </TooltipContent>
+                            </Tooltip>
                           )}
                         </span>
                       </SelectItem>
@@ -167,16 +183,30 @@ export function VoiceSelector({ voices, voiceId, onChange }: VoiceSelectorProps)
                         : voice.description}
                     </span>
                     {getSourceBadge(voice.source)}
-                    {mounted && (
-                      <span className="inline-flex items-center rounded-full border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-cyan-400">
-                        Mounted
-                      </span>
-                    )}
-                    {review && (
-                      <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-amber-300">
-                        Review
-                      </span>
-                    )}
+{mounted && (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <span className=\"inline-flex items-center rounded-full border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-cyan-400\">
+        Mounted
+      </span>
+    </TooltipTrigger>
+    <TooltipContent side=\"top\" className=\"max-w-48\">
+      Reference directly mounted from host system.
+    </TooltipContent>
+  </Tooltip>
+)}
+{review && (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <span className=\"inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-amber-300\">
+        Review
+      </span>
+    </TooltipTrigger>
+    <TooltipContent side=\"top\" className=\"max-w-48\">
+      Reference flagged for quality issues.
+    </TooltipContent>
+  </Tooltip>
+)}
                   </span>
                 </SelectItem>
               )

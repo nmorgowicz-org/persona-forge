@@ -31,6 +31,12 @@ export function AudioPlayer({ src, blob, className, autoPlay = true }: AudioPlay
   const [isLooping, setIsLooping] = useState(false)
   const [playbackRate, setPlaybackRate] = useState(1)
 
+  const handleSeek = (pct: number) => {
+    const audio = audioRef.current
+    if (!audio || duration == null) return
+    audio.currentTime = pct * duration
+  }
+
   useEffect(() => {
     setPeaks(null)
     setProgress(0)
@@ -118,8 +124,10 @@ export function AudioPlayer({ src, blob, className, autoPlay = true }: AudioPlay
           peaks={peaks ?? Array(64).fill(0.15)}
           progress={progress}
           duration={duration}
-          className="flex-1"
+          className=\"flex-1\"
+          onClick={handleSeek}
         />
+
         <div className="flex items-center gap-1">
           <Button
             type="button"
