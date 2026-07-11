@@ -36,6 +36,15 @@ def _sine_wav_bytes(sr: int = 24000, duration: float = 4.0, amplitude: float = 0
     return buf.getvalue()
 
 
+def _paused_sine_wav_bytes(pause_seconds: float, sr: int = 24000) -> bytes:
+    t = np.linspace(0.0, 1.0, sr, endpoint=False, dtype=np.float32)
+    tone = (0.05 * np.sin(2 * np.pi * 220.0 * t)).astype(np.float32)
+    wav = np.concatenate([tone, np.zeros(int(sr * pause_seconds), dtype=np.float32), tone])
+    buf = io.BytesIO()
+    sf.write(buf, wav, sr, format="WAV", subtype="PCM_16")
+    return buf.getvalue()
+
+
 class TestSaveGet:
     def test_save_voice_persists_wav_and_metadata(self):
         meta = voice_library.save_voice(
@@ -143,6 +152,21 @@ class TestListVoices:
         voice_library.VOICE_LIBRARY_DIR = voice_library.VOICE_LIBRARY_DIR / "nonexistent"
         assert voice_library.list_voices() == []
 
+    def test_backfills_missing_metrics_without_changing_audio(self):
+        saved = voice_library.save_voice(
+            _sine_wav_bytes(), description="legacy", sample_text="hello there friend", language="English"
+        )
+        meta_path = voice_library.VOICE_LIBRARY_DIR / saved["voice_id"] / "meta.json"
+        meta = json.loads(meta_path.read_text())
+        meta["metrics"] = None
+        meta_path.write_text(json.dumps(meta))
+        before = voice_library.get_voice_wav_bytes(saved["voice_id"])
+
+        listed = voice_library.list_voices()
+
+        assert isinstance(listed[0]["metrics"], dict)
+        assert voice_library.get_voice_wav_bytes(saved["voice_id"]) == before
+
 
 class TestUpdateDelete:
     def test_update_sample_text(self):
@@ -163,6 +187,29 @@ class TestUpdateDelete:
     def test_delete_nonexistent(self):
         assert voice_library.delete_voice("vd_000000000000") is False
 
+    def test_duplicate_copies_audio_and_clears_default_flags(self):
+        saved = voice_library.save_voice(
+            _sine_wav_bytes(), description="original", sample_text="hello there friend", language="English"
+        )
+        source_meta_path = voice_library.VOICE_LIBRARY_DIR / saved["voice_id"] / "meta.json"
+        source_meta = json.loads(source_meta_path.read_text())
+        source_meta["is_default"] = True
+        source_meta["api_active"] = True
+        source_meta_path.write_text(json.dumps(source_meta))
+
+        duplicate = voice_library.duplicate_voice(saved["voice_id"])
+
+        assert duplicate is not None
+        assert duplicate["voice_id"] != saved["voice_id"]
+        assert duplicate["duplicated_from"] == saved["voice_id"]
+        assert duplicate["description"] == "original (copy)"
+        assert "is_default" not in duplicate
+        assert "api_active" not in duplicate
+        assert voice_library.get_voice_wav_bytes(duplicate["voice_id"]) == voice_library.get_voice_wav_bytes(saved["voice_id"])
+
+    def test_duplicate_unknown_returns_none(self):
+        assert voice_library.duplicate_voice("vd_000000000000") is None
+
 
 class TestNormalizeReference:
     def test_normalizes_loudness_in_place(self):
@@ -180,6 +227,20 @@ class TestNormalizeReference:
 
     def test_unknown_voice_returns_none(self):
         assert voice_library.normalize_reference("vd_000000000000") is None
+
+    def test_audio_rewrite_can_be_undone(self):
+        saved = voice_library.save_voice(
+            _sine_wav_bytes(amplitude=0.05), description="desc", sample_text="hello there friend", language="English"
+        )
+        original = voice_library.get_voice_wav_bytes(saved["voice_id"])
+        voice_library.normalize_reference(saved["voice_id"])
+        assert voice_library.get_voice(saved["voice_id"])["undo_available"] is True
+
+        restored = voice_library.undo_reference_edit(saved["voice_id"])
+
+        assert restored is not None
+        assert voice_library.get_voice_wav_bytes(saved["voice_id"]) == original
+        assert restored["undo_available"] is False
 
 
 class TestTrimReferenceSilence:
@@ -199,6 +260,46 @@ class TestTrimReferenceSilence:
 
     def test_unknown_voice_returns_none(self):
         assert voice_library.trim_reference_silence("vd_000000000000") is None
+
+
+class TestAdjustReferencePauses:
+    @pytest.mark.parametrize(
+        ("mode", "initial_pause", "target_ms"),
+        [("compress", 0.8, 300), ("expand", 0.1, 400)],
+    )
+    def test_adjusts_a_single_interior_pause(self, mode, initial_pause, target_ms):
+        saved = voice_library.save_voice(
+            _paused_sine_wav_bytes(initial_pause),
+            description="desc",
+            sample_text="hello there friend",
+            language="English",
+        )
+        before, sr = sf.read(io.BytesIO(voice_library.get_voice_wav_bytes(saved["voice_id"])), dtype="float32")
+        before_gap = next(
+            gap for gap in voice_library.detect_pause_intervals(before, sr)
+            if gap[0] > 0 and gap[1] < before.size / sr
+        )
+
+        updated = voice_library.adjust_reference_pauses(saved["voice_id"], target_ms, mode)
+        after, _ = sf.read(io.BytesIO(voice_library.get_voice_wav_bytes(saved["voice_id"])), dtype="float32")
+
+        assert updated is not None
+        after_gap = next(
+            gap for gap in voice_library.detect_pause_intervals(after, sr)
+            if gap[0] > 0 and gap[1] < after.size / sr
+        )
+        after_gap_ms = (after_gap[1] - after_gap[0]) * 1000
+        assert after_gap_ms == pytest.approx(target_ms, abs=15)
+        if mode == "compress":
+            assert after.size < before.size
+            assert after_gap[1] - after_gap[0] < before_gap[1] - before_gap[0]
+        else:
+            assert after.size > before.size
+            assert after_gap[1] - after_gap[0] > before_gap[1] - before_gap[0]
+
+    def test_rejects_unknown_mode(self):
+        with pytest.raises(ValueError, match="mode must be"):
+            voice_library.adjust_reference_pauses("vd_000000000000", 300, "sideways")
 
 
 class TestSetDefaultVariant:

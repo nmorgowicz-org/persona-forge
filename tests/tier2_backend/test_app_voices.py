@@ -72,6 +72,38 @@ class TestVoices:
             resp = client.delete("/voices/vd_doesnotexist")
         assert resp.status_code == 404
 
+    def test_duplicate_voice_ok(self, client, app_module):
+        with patch.object(
+            app_module.voice_library,
+            "duplicate_voice",
+            return_value={"voice_id": "vd_112233445566", "duplicated_from": "vd_aabbccddeeff"},
+        ):
+            resp = client.post("/voices/vd_aabbccddeeff/duplicate")
+        assert resp.status_code == 201
+        assert resp.get_json()["duplicated_from"] == "vd_aabbccddeeff"
+
+    def test_duplicate_voice_not_found(self, client, app_module):
+        with patch.object(app_module.voice_library, "duplicate_voice", return_value=None):
+            resp = client.post("/voices/vd_doesnotexist/duplicate")
+        assert resp.status_code == 404
+
+    def test_analyze_voice_ok(self, client, app_module):
+        with patch.object(app_module.voice_library, "analyze_reference", return_value={"voice_id": "vd_aabbccddeeff", "metrics": {"duration_seconds": 1.0}}):
+            resp = client.post("/voices/vd_aabbccddeeff/analyze")
+        assert resp.status_code == 200
+        assert resp.get_json()["metrics"]["duration_seconds"] == 1.0
+
+    def test_undo_reference_edit_ok(self, client, app_module):
+        with patch.object(app_module.voice_library, "undo_reference_edit", return_value={"voice_id": "vd_aabbccddeeff", "undo_available": False}):
+            resp = client.post("/voices/vd_aabbccddeeff/undo-reference-edit")
+        assert resp.status_code == 200
+        assert resp.get_json()["undo_available"] is False
+
+    def test_undo_reference_edit_without_history(self, client, app_module):
+        with patch.object(app_module.voice_library, "undo_reference_edit", return_value=None):
+            resp = client.post("/voices/vd_aabbccddeeff/undo-reference-edit")
+        assert resp.status_code == 409
+
     def test_update_voice_sample_text(self, client, app_module):
         with patch.object(
             app_module.voice_library,

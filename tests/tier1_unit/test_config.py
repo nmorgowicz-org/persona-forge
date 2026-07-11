@@ -24,6 +24,11 @@ class TestApplyPresetEnv:
         apply_preset_env(environ)
         assert environ["TTS_BACKEND"] == "pytorch"
 
+    def test_hyphenated_pocket_backend_is_canonicalized(self):
+        environ = {"MODEL_SIZE": "1.7B", "TTS_BACKEND": " pocket-tts "}
+        apply_preset_env(environ)
+        assert environ["TTS_BACKEND"] == "pocket_tts"
+
     def test_explicit_ov_var_wins(self):
         environ = {"MODEL_SIZE": "0.6B", "OPENVINO_MAIN_STATEFUL_MODEL": "/custom/path.xml"}
         apply_preset_env(environ)

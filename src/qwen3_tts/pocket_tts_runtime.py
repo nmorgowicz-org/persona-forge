@@ -155,6 +155,17 @@ def build_default_voice_state(
     """
     global pocket_tts_default_voice_state, pocket_tts_cloning_available, pocket_tts_cloning_status_message
 
+    # A saved voice "Activated for API" persists across restarts: prefer it over REF_AUDIO so the
+    # OpenAI endpoint keeps cloning from the user's chosen default instead of the mounted reference.
+    active_id = get_active_default_voice_id()
+    if active_id:
+        active_wav = _library_reference_wav(active_id)
+        if active_wav is not None:
+            print(f"[pocket_tts] Using persisted active default voice {active_id!r}")
+            ref_audio_path = str(active_wav)
+        else:
+            print(f"[pocket_tts] Persisted active default {active_id!r} has no reference.wav; ignoring.")
+
     if not ref_audio_path:
         print("[pocket_tts] No REF_AUDIO_PATH configured; default voice_state = None.")
         pocket_tts_default_voice_state = None
@@ -195,6 +206,55 @@ def build_default_voice_state(
             "Continuing without a default voice_state."
         )
         return None
+
+
+# ---------------------------------------------------------------------------
+# Runtime "Activate for API" default (hot-swap, persisted)
+# ---------------------------------------------------------------------------
+
+# Records which library voice the OpenAI endpoint should clone from when no voice is passed.
+ACTIVE_DEFAULT_FILE = VOICE_LIBRARY_DIR / ".active_default"
+
+
+def get_active_default_voice_id() -> str | None:
+    """Return the persisted "Activated for API" voice_id, or None if unset."""
+    try:
+        vid = ACTIVE_DEFAULT_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return vid or None
+
+
+def _library_reference_wav(voice_id: str) -> Path | None:
+    wav_path = VOICE_LIBRARY_DIR / voice_id / "reference.wav"
+    return wav_path if wav_path.is_file() else None
+
+
+def set_default_voice_state_from_library(
+    voice_id: str, model: TTSModel | None = None
+) -> dict[str, Any]:
+    """Hot-swap the API default voice_state to a saved library voice and persist the choice.
+
+    Rebuilds the module-level ``pocket_tts_default_voice_state`` from the voice's reference.wav so
+    subsequent no-voice requests (incl. the OpenAI endpoint) clone from it immediately -- no restart
+    -- and writes the id to ACTIVE_DEFAULT_FILE so build_default_voice_state() restores it on boot.
+    """
+    global pocket_tts_default_voice_state, pocket_tts_cloning_available, pocket_tts_cloning_status_message
+    model = model or pocket_tts_model
+    if model is None:
+        raise RuntimeError("[pocket_tts] Model is not loaded; cannot activate a voice.")
+    wav_path = _library_reference_wav(voice_id)
+    if wav_path is None:
+        raise FileNotFoundError(f"No reference.wav for voice_id {voice_id!r}")
+    pocket_tts_default_voice_state = model.get_state_for_audio_prompt(str(wav_path))
+    pocket_tts_cloning_available = True
+    pocket_tts_cloning_status_message = ""
+    try:
+        ACTIVE_DEFAULT_FILE.write_text(voice_id, encoding="utf-8")
+    except OSError as exc:
+        print(f"[pocket_tts] Could not persist active default {voice_id!r}: {exc}")
+    print(f"[pocket_tts] Activated library voice {voice_id!r} as the API default.")
+    return pocket_tts_default_voice_state
 
 
 # ---------------------------------------------------------------------------

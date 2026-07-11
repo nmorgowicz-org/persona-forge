@@ -19,6 +19,15 @@ from qwen3_tts.presets import get_preset, normalize_size
 REF_AUDIO_PATH = "/voice/reference.wav"
 
 
+def normalize_backend(value: str | None) -> str:
+    """Canonicalize a TTS_BACKEND value.
+
+    Accepts the repo-style hyphenated spelling (``pocket-tts``) as an alias for the
+    internal underscore form (``pocket_tts``) so either works in compose/.env.
+    """
+    return (value or "").strip().lower().replace("-", "_")
+
+
 def _setdefault(environ: MutableMapping[str, str], key: str, value: object) -> None:
     if value is None:
         return
@@ -42,7 +51,9 @@ def apply_preset_env(environ: MutableMapping[str, str] = os.environ) -> dict[str
     # Backend (MODEL_REPO is resolved from MODEL_SIZE by model_config.resolve_model_repo).
     # An explicit TTS_BACKEND wins; otherwise the preset default (openvino).
     _setdefault(environ, "TTS_BACKEND", preset["backend"])
-    backend = (environ.get("TTS_BACKEND") or preset["backend"]).strip().lower()
+    backend = normalize_backend(environ.get("TTS_BACKEND") or preset["backend"])
+    # Persist the canonical form so every downstream reader sees pocket_tts, not pocket-tts.
+    environ["TTS_BACKEND"] = backend
 
     # OpenVINO IR locations — the stable, size-keyed paths the export writes.
     _setdefault(environ, "OV_MODEL_DIR", preset["ov_model_dir"])

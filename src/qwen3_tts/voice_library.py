@@ -17,12 +17,14 @@ import re
 import secrets
 import tempfile
 import time
+import shutil
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import soundfile as sf
 
+from qwen3_tts.audio_post import apply_region_edits
 from qwen3_tts.audio_style import analyze_reference, apply_style_preset, detect_pause_intervals
 from qwen3_tts.reference_analysis import calculate_quality_score
 
@@ -167,6 +169,8 @@ def get_voice(voice_id: str) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     meta["wav_path"] = str(voice_dir / "reference.wav")
+    history_dir = voice_dir / ".history"
+    meta["undo_available"] = history_dir.is_dir() and any(history_dir.iterdir())
     return meta
 
 
@@ -210,14 +214,65 @@ def delete_voice(voice_id: str) -> bool:
     voice_dir = _voice_dir(voice_id)
     if not voice_dir.is_dir():
         return False
-    import shutil
-
     shutil.rmtree(voice_dir)
     return True
 
 
+def _snapshot_reference(voice_id: str) -> None:
+    voice_dir = _voice_dir(voice_id)
+    wav_path = voice_dir / "reference.wav"
+    meta_path = voice_dir / "meta.json"
+    if not wav_path.is_file() or not meta_path.is_file():
+        return
+    history_dir = voice_dir / ".history"
+    history_dir.mkdir(exist_ok=True)
+    snapshot = history_dir / f"{time.time_ns()}"
+    snapshot.mkdir()
+    shutil.copy2(wav_path, snapshot / "reference.wav")
+    shutil.copy2(meta_path, snapshot / "meta.json")
+    for stale in sorted((entry for entry in history_dir.iterdir() if entry.is_dir()), reverse=True)[10:]:
+        shutil.rmtree(stale)
+
+
+def undo_reference_edit(voice_id: str) -> dict[str, Any] | None:
+    """Restore the most recent reference-audio snapshot for a saved voice."""
+    voice_dir = _voice_dir(voice_id)
+    history_dir = voice_dir / ".history"
+    snapshots = sorted((entry for entry in history_dir.iterdir() if entry.is_dir()), reverse=True) if history_dir.is_dir() else []
+    if not snapshots:
+        return None
+    latest = snapshots[0]
+    shutil.copy2(latest / "reference.wav", voice_dir / "reference.wav")
+    shutil.copy2(latest / "meta.json", voice_dir / "meta.json")
+    shutil.rmtree(latest)
+    return get_voice(voice_id)
+
+
+def analyze_reference(voice_id: str) -> dict[str, Any] | None:
+    """Analyze an existing reference and persist metrics without rewriting its audio."""
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    wav_path = Path(meta["wav_path"])
+    if not wav_path.is_file():
+        return None
+    quality_score, quality_warnings, metrics = calculate_quality_score(
+        wav_path, transcript=meta.get("sample_text")
+    )
+    meta.pop("wav_path", None)
+    meta["metrics"] = metrics
+    meta["quality_score"] = quality_score
+    meta["quality_warnings"] = quality_warnings
+    asr_severity = (meta.get("asr") or {}).get("severity")
+    meta["needs_review"] = bool(quality_warnings) or asr_severity not in (None, "ok")
+    (_voice_dir(voice_id) / "meta.json").write_text(
+        json.dumps(meta, indent=2), encoding="utf-8"
+    )
+    return meta
+
+
 def list_voices() -> list[dict[str, Any]]:
-    """Return all voice metadata, newest first. Skips entries with missing/corrupt meta.json."""
+    """Return all voice metadata, backfilling analysis for legacy entries once."""
     if not VOICE_LIBRARY_DIR.is_dir():
         return []
     voices: list[dict[str, Any]] = []
@@ -231,6 +286,14 @@ def list_voices() -> list[dict[str, Any]]:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
+        if not isinstance(meta.get("metrics"), dict):
+            try:
+                meta = analyze_reference(entry.name) or meta
+            except Exception:
+                # Keep the voice usable and let the UI expose a manual retry action.
+                pass
+        history_dir = entry / ".history"
+        meta["undo_available"] = history_dir.is_dir() and any(history_dir.iterdir())
         voices.append(meta)
     voices.sort(key=lambda m: m.get("created_at", 0), reverse=True)
     return voices
@@ -280,6 +343,35 @@ def create_voice_variant(
         variant_kind=variant_kind,
         source="variant_fork",
     )
+
+
+def duplicate_voice(source_voice_id: str) -> dict[str, Any] | None:
+    """Create an independent, byte-for-byte copy of a saved voice.
+
+    This intentionally bypasses save_voice(): duplication is a safety operation before destructive
+    editing, so it must not re-run normalization or otherwise change the reference audio.
+    """
+    source = get_voice(source_voice_id)
+    wav_bytes = get_voice_wav_bytes(source_voice_id)
+    if source is None or wav_bytes is None:
+        return None
+
+    voice_id = new_voice_id()
+    voice_dir = _voice_dir(voice_id)
+    voice_dir.mkdir(parents=True, exist_ok=False)
+    (voice_dir / "reference.wav").write_bytes(wav_bytes)
+
+    meta = dict(source)
+    meta.pop("wav_path", None)
+    meta.pop("api_active", None)
+    meta.pop("is_default", None)
+    meta["voice_id"] = voice_id
+    meta["created_at"] = time.time()
+    meta["description"] = f"{source.get('description') or source_voice_id} (copy)"
+    meta["source"] = "duplicate"
+    meta["duplicated_from"] = source_voice_id
+    (voice_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    return meta
 
 
 def ensure_mounted_ref_voice(
@@ -360,6 +452,7 @@ def _rewrite_reference_wav(voice_id: str, wav: np.ndarray, sr: int) -> dict[str,
         return None
     voice_dir = _voice_dir(voice_id)
     wav_path = voice_dir / "reference.wav"
+    _snapshot_reference(voice_id)
     sf.write(wav_path, wav, sr, format="WAV", subtype="PCM_16")
     quality_score, quality_warnings, metrics = calculate_quality_score(wav_path, transcript=meta.get("sample_text"))
     meta.pop("wav_path", None)
@@ -419,6 +512,93 @@ def trim_reference_silence(voice_id: str, padding_ms: float = 80.0) -> dict[str,
     if start <= 0 and end >= wav.size:
         return meta
     return _rewrite_reference_wav(voice_id, wav[start:end], sr)
+
+
+def adjust_reference_pauses(
+    voice_id: str, target_ms: float = 300.0, mode: str = "compress"
+) -> dict[str, Any] | None:
+    """Compress or expand the *interior* pauses of a saved reference clip toward target_ms.
+
+    Unlike trim_reference_silence (which only touches leading/trailing silence), this walks the
+    gaps between speech that detect_pause_intervals() finds and, in one pass, either shortens
+    every over-long gap (``mode="compress"`` -> Pocket stops copying long mid-speech pauses) or
+    lengthens every too-short gap (``mode="expand"`` -> more breathing room, e.g. for a reference
+    assembled from tightly-stitched OmniVoice segments). Edits are applied through the shared
+    RegionEdit engine (audio_post.apply_region_edits); a single call only ever emits one edit
+    type, so delete/insert ordering never interacts.
+    """
+    if mode not in ("compress", "expand"):
+        raise ValueError(f"mode must be 'compress' or 'expand', got {mode!r}")
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    wav_bytes = get_voice_wav_bytes(voice_id)
+    if wav_bytes is None:
+        return None
+    wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+    wav = np.asarray(wav, dtype=np.float32).ravel()
+
+    gaps = detect_pause_intervals(wav, sr)
+    # Boundary silence is the trim operation's job. Do not discard the first/last detected gap
+    # by position: a clip with no boundary silence may have only one, genuinely interior gap.
+    duration_sec = wav.size / float(sr)
+    edge_tolerance = 1.0 / float(sr)
+    interior = [
+        (start_sec, end_sec)
+        for start_sec, end_sec in gaps
+        if start_sec > edge_tolerance and end_sec < duration_sec - edge_tolerance
+    ]
+    target_sec = max(0.0, target_ms / 1000.0)
+
+    edits: list[dict[str, Any]] = []
+    for start_sec, end_sec in interior:
+        dur_sec = end_sec - start_sec
+        mid_sec = (start_sec + end_sec) / 2.0
+        if mode == "compress" and dur_sec > target_sec + 0.01:
+            cut_sec = dur_sec - target_sec
+            edits.append(
+                {
+                    "type": "delete",
+                    "start_ms": (mid_sec - cut_sec / 2.0) * 1000.0,
+                    "end_ms": (mid_sec + cut_sec / 2.0) * 1000.0,
+                }
+            )
+        elif mode == "expand" and dur_sec < target_sec - 0.01:
+            edits.append(
+                {
+                    "type": "insert_silence",
+                    "at_ms": mid_sec * 1000.0,
+                    "duration_ms": (target_sec - dur_sec) * 1000.0,
+                }
+            )
+
+    if not edits:
+        return meta
+    adjusted = apply_region_edits(wav, sr, edits)
+    return _rewrite_reference_wav(voice_id, adjusted, sr)
+
+
+def apply_reference_region_edits(
+    voice_id: str, edits: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Apply a manual RegionEdit list to a saved reference clip in place.
+
+    Backs the hand-editing UI (drag-select -> delete a mid-clip pause / insert silence / fade).
+    Edits are the same validated shape used for stitch clips, applied through the shared
+    audio_post.apply_region_edits engine, then written back via _rewrite_reference_wav.
+    """
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    if not edits:
+        return meta
+    wav_bytes = get_voice_wav_bytes(voice_id)
+    if wav_bytes is None:
+        return None
+    wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+    wav = np.asarray(wav, dtype=np.float32).ravel()
+    edited = apply_region_edits(wav, sr, edits)
+    return _rewrite_reference_wav(voice_id, edited, sr)
 
 
 def set_default_variant(voice_id: str) -> dict[str, Any] | None:

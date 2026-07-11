@@ -368,8 +368,19 @@ POCKET_BUILTIN_VOICES = {
 
 @app.get("/voices")
 def voices_list():
-    """Return list of all saved voices in the library."""
-    return jsonify({"voices": voice_library.list_voices()})
+    """Return list of all saved voices in the library, flagging the runtime API default."""
+    voices = voice_library.list_voices()
+    active_id = None
+    if getattr(model, "TTS_BACKEND", None) == "pocket_tts":
+        try:
+            from qwen3_tts import pocket_tts_runtime
+
+            active_id = pocket_tts_runtime.get_active_default_voice_id()
+        except Exception:
+            active_id = None
+    for voice in voices:
+        voice["api_active"] = active_id is not None and voice.get("voice_id") == active_id
+    return jsonify({"voices": voices})
 
 @app.get("/voices/built-in")
 def voices_builtin():
@@ -432,6 +443,39 @@ def voices_update(voice_id: str):
     return jsonify(meta)
 
 
+@app.post("/voices/<voice_id>/duplicate")
+def voices_duplicate(voice_id: str):
+    """Create an independent copy before destructive reference-audio editing."""
+    try:
+        meta = voice_library.duplicate_voice(voice_id)
+    except Exception as exc:
+        return jsonify({"error": f"Duplicate failed: {exc}"}), 500
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    return jsonify(meta), 201
+
+
+@app.post("/voices/<voice_id>/analyze")
+def voices_analyze(voice_id: str):
+    """Backfill reference metrics without changing the saved WAV."""
+    try:
+        meta = voice_library.analyze_reference(voice_id)
+    except Exception as exc:
+        return jsonify({"error": f"Reference analysis failed: {exc}"}), 500
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    return jsonify(meta)
+
+
+@app.post("/voices/<voice_id>/undo-reference-edit")
+def voices_undo_reference_edit(voice_id: str):
+    meta = voice_library.undo_reference_edit(voice_id)
+    if meta is None:
+        return jsonify({"error": "No audio edit to undo"}), 409
+    _invalidate_voice_clone_state(voice_id)
+    return jsonify(meta)
+
+
 @app.delete("/voices/<voice_id>")
 def voices_delete(voice_id: str):
     deleted = voice_library.delete_voice(voice_id)
@@ -487,6 +531,72 @@ def voices_set_default(voice_id: str):
     meta = voice_library.set_default_variant(voice_id)
     if meta is None:
         return jsonify({"error": "voice_id not found"}), 404
+    return jsonify(meta)
+
+
+@app.post("/voices/<voice_id>/activate")
+def voices_activate(voice_id: str):
+    """Make a saved voice the runtime API default (hot-swap Pocket's default voice_state)."""
+    active_backend = getattr(model, "TTS_BACKEND", None)
+    if active_backend != "pocket_tts":
+        return (
+            jsonify({"error": "Activate-for-API requires TTS_BACKEND=pocket_tts"}),
+            409,
+        )
+    if not model._service_started:
+        return jsonify({"error": "Model not loaded"}), 503
+    meta = voice_library.get_voice(voice_id)
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+
+    from qwen3_tts import pocket_tts_runtime
+
+    def _run():
+        pocket_tts_runtime.set_default_voice_state_from_library(voice_id)
+
+    try:
+        # Run on the model executor so the voice-state forward pass never races generation.
+        model.executor.submit(_run).result(timeout=60)
+    except Exception as exc:
+        return jsonify({"error": f"Activate failed: {exc}"}), 500
+    return jsonify({**meta, "api_active": True})
+
+
+@app.post("/voices/<voice_id>/adjust-pauses")
+def voices_adjust_pauses(voice_id: str):
+    """Compress or expand the interior pauses of a saved reference clip toward a target."""
+    data = request.get_json(silent=True) or {}
+    mode = (data.get("mode") or "compress").strip().lower()
+    if mode not in ("compress", "expand"):
+        return jsonify({"error": "mode must be 'compress' or 'expand'"}), 400
+    try:
+        target_ms = float(data.get("target_ms", 300.0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "target_ms must be a number"}), 400
+    try:
+        meta = voice_library.adjust_reference_pauses(voice_id, target_ms=target_ms, mode=mode)
+    except Exception as exc:
+        return jsonify({"error": f"Pause adjust failed: {exc}"}), 500
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    _invalidate_voice_clone_state(voice_id)
+    return jsonify(meta)
+
+
+@app.post("/voices/<voice_id>/region-edits")
+def voices_region_edits(voice_id: str):
+    """Apply a manual RegionEdit list (delete / insert_silence / fade / gain / mute) to a clip."""
+    data = request.get_json(silent=True) or {}
+    edits = _validate_region_edits(data.get("edits"))
+    if edits is None:
+        return jsonify({"error": "invalid edits payload"}), 400
+    try:
+        meta = voice_library.apply_reference_region_edits(voice_id, edits)
+    except Exception as exc:
+        return jsonify({"error": f"Region edit failed: {exc}"}), 500
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    _invalidate_voice_clone_state(voice_id)
     return jsonify(meta)
 
 
