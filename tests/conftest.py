@@ -43,6 +43,22 @@ def pytest_configure(config):
         "markers",
         "slow: test that depends on torch/openvino or is otherwise slow",
     )
+    config.addinivalue_line(
+        "markers",
+        "fake_only: CI-safe test that uses fakes and does not require Torch, model weights, or OpenVINO IR",
+    )
+    config.addinivalue_line(
+        "markers",
+        "requires_torch: test imports or exercises real Torch-backed production code",
+    )
+    config.addinivalue_line(
+        "markers",
+        "requires_model_weights: test requires downloaded model weights",
+    )
+    config.addinivalue_line(
+        "markers",
+        "requires_openvino_ir: test requires exported OpenVINO IR artifacts",
+    )
 
 
 @pytest.fixture

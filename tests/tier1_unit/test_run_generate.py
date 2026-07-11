@@ -24,8 +24,9 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("torch")
 np = pytest.importorskip("numpy")
+
+pytestmark = pytest.mark.requires_torch
 
 _MODEL_PY = Path(__file__).resolve().parents[2] / "src" / "qwen3_tts" / "model.py"
 

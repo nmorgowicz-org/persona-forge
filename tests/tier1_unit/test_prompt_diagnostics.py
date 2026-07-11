@@ -40,6 +40,7 @@ class TestDumpReferencePrompt:
         assert set(manifest["versions"]) == {"qwen-tts", "torch", "transformers"}
 
 
+@pytest.mark.requires_torch
 @pytest.mark.slow
 class TestDumpTalkerParameterManifest:
     def test_selects_conditioning_parameters(self, tmp_path):

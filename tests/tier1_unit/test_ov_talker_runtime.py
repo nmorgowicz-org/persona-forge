@@ -13,7 +13,7 @@ from qwen3_tts.openvino.talker import (
     _to_numpy,
 )
 
-pytest.importorskip("torch")
+pytestmark = pytest.mark.requires_torch
 
 
 class TestStatefulGenerationSteps:

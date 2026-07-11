@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-torch = pytest.importorskip("torch")
+pytestmark = pytest.mark.requires_torch
 
 
 class FakeTTSModel:
@@ -43,6 +43,7 @@ class FakeTTSModel:
         return {"ref_path": path}
 
     def generate_audio(self, voice_state: dict[str, Any], text: str) -> torch.Tensor:
+        torch = pytest.importorskip("torch")
         return torch.ones(2000)  # ~1 frame at 24kHz/12fps
 
     def export_model_state(self, state: dict[str, Any], path: str) -> None:
@@ -279,6 +280,7 @@ class TestInvalidateVoiceState:
 
 class TestGeneratePocketTts:
     def test_generates_audio_tuple(self, pocket_tts_runtime):
+        torch = pytest.importorskip("torch")
         rt = pocket_tts_runtime
         model = FakeTTSModel()
         audio, sr = rt.generate_pocket_tts(model, {"ref_path": "x.wav"}, "hello world")
