@@ -114,6 +114,9 @@ export interface VoiceMeta {
   quality_score?: number
   quality_warnings?: string[]
   auto_fixed?: boolean
+  // True when this voice is the runtime default the OpenAI endpoint clones from (pocket_tts only).
+  api_active?: boolean
+  undo_available?: boolean
   asr?: {
     ok?: boolean
     severity?: 'ok' | 'warn' | 'fail' | 'no_speech' | 'error' | string
@@ -348,6 +351,24 @@ export async function deleteVoice(voiceId: string): Promise<void> {
   if (!res.ok) throw new Error(await readError(res))
 }
 
+export async function duplicateVoice(voiceId: string): Promise<VoiceMeta> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/duplicate`, { method: 'POST' })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function analyzeVoiceReference(voiceId: string): Promise<VoiceMeta> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/analyze`, { method: 'POST' })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function undoVoiceReferenceEdit(voiceId: string): Promise<VoiceMeta> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/undo-reference-edit`, { method: 'POST' })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 export async function normalizeVoiceReference(voiceId: string): Promise<VoiceMeta> {
   const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/normalize`, { method: 'POST' })
   if (!res.ok) throw new Error(await readError(res))
@@ -362,6 +383,50 @@ export async function trimVoiceReferenceSilence(voiceId: string): Promise<VoiceM
 
 export async function setDefaultVoiceVariant(voiceId: string): Promise<VoiceMeta> {
   const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/set-default`, { method: 'POST' })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function adjustVoiceReferencePauses(
+  voiceId: string,
+  targetMs: number,
+  mode: 'compress' | 'expand',
+): Promise<VoiceMeta> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/adjust-pauses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target_ms: targetMs, mode }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function applyVoiceReferenceRegionEdits(
+  voiceId: string,
+  edits: StitchPlanRegionEdit[],
+): Promise<VoiceMeta> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/region-edits`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      edits: edits.map((edit) => ({
+        type: edit.type,
+        start_ms: edit.startMs,
+        end_ms: edit.endMs,
+        gain_db: edit.gainDb,
+        fade_in_ms: edit.fadeInMs,
+        fade_out_ms: edit.fadeOutMs,
+        at_ms: edit.atMs,
+        duration_ms: edit.durationMs,
+      })),
+    }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function activateVoiceForApi(voiceId: string): Promise<VoiceMeta> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/activate`, { method: 'POST' })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
 }

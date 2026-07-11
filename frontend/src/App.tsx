@@ -1,4 +1,4 @@
-import { TooltipProvider } from '@/components/ui/tooltip'
+import { TitleTooltipBridge, TooltipProvider } from '@/components/ui/tooltip'
 import { AppShell } from '@/components/AppShell'
 import { useAppStore } from '@/store'
 import { SpeakPage } from '@/pages/SpeakPage'
@@ -16,6 +16,7 @@ export default function App() {
 
   return (
     <TooltipProvider>
+      <TitleTooltipBridge />
       <div className="relative flex min-h-screen w-full flex-col">
         <AppShell>
           {page === 'speak' && <SpeakPage />}
@@ -30,4 +31,3 @@ export default function App() {
     </TooltipProvider>
   )
 }
-

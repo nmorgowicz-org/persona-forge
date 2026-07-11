@@ -60,6 +60,20 @@ const NAV_ITEMS: { page: Page; label: string; icon: typeof Mic2; description: st
   { page: 'runtime', label: 'Runtime', icon: Settings2, description: 'Live server config' },
 ]
 
+function StudioNav({ page, setPage }: { page: Page; setPage: (page: Page) => void }) {
+  const { isMobile, setOpenMobile } = useSidebar()
+  return <SidebarMenu>{NAV_ITEMS.map((item) => {
+    const isActive = page === item.page
+    return <SidebarMenuItem key={item.page}><SidebarMenuButton
+      data-testid={`nav-${item.page}`}
+      isActive={isActive}
+      tooltip={item.label}
+      onClick={() => { setPage(item.page); if (isMobile) setOpenMobile(false) }}
+      className={cn('relative transition-all', isActive && 'before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-primary group-data-[collapsible=icon]:before:hidden')}
+    ><item.icon /><span className="group-data-[collapsible=icon]:hidden">{item.label}</span></SidebarMenuButton></SidebarMenuItem>
+  })}</SidebarMenu>
+}
+
 function PocketTTSWarningBanner() {
   const backend = useAppStore((s) => s.runtimeTtsBackend)
   const cloningAvailable = useAppStore((s) => s.pocketTtsVoiceCloningAvailable)
@@ -288,29 +302,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <SidebarGroup>
             <SidebarGroupLabel>Studio</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
-                {NAV_ITEMS.map((item) => {
-                  const isActive = page === item.page
-                  return (
-                    <SidebarMenuItem key={item.page}>
-                      <SidebarMenuButton
-                        data-testid={`nav-${item.page}`}
-                        isActive={isActive}
-                        tooltip={item.label}
-                        onClick={() => setPage(item.page)}
-                        className={cn(
-                          'relative transition-all',
-                          isActive &&
-                            'before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-primary group-data-[collapsible=icon]:before:hidden',
-                        )}
-                      >
-                        <item.icon />
-                        <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )
-                })}
-              </SidebarMenu>
+              <StudioNav page={page} setPage={setPage} />
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>

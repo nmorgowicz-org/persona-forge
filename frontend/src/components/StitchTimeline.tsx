@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion, Reorder } from 'framer-motion'
-import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play, Pause, Scissors, Trash2, Volume2, VolumeX } from 'lucide-react'
+import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play, Pause, Scissors, Trash2, Volume2, VolumeX, Gauge } from 'lucide-react'
 import { useAppStore, type StitchPlanClip } from '@/store'
 import { base64ToBlob, cn } from '@/lib/utils'
 import {
@@ -15,6 +15,7 @@ import {
 } from '@/lib/api'
 import { AudioPlayer } from './AudioPlayer'
 import { WaveformLane } from './waveform/WaveformLane'
+import { renderRegionEdits } from './waveform/regionAudio'
 
 // Helper for reduced motion
 const useReducedMotion = () => {
@@ -61,10 +62,6 @@ function makeRegionEditId(type: RegionEdit['type']): string {
   return `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
 
-function dbToGain(db: number): number {
-  return Math.pow(10, db / 20)
-}
-
 function msToSample(ms: number, sampleRate: number): number {
   return Math.max(0, Math.round((ms / 1000) * sampleRate))
 }
@@ -75,45 +72,6 @@ function cloneChannels(buffer: AudioBuffer): Float32Array[] {
 
 function sliceChannels(channels: Float32Array[], start: number, end: number): Float32Array[] {
   return channels.map((channel) => channel.slice(start, end))
-}
-
-function removeRange(channels: Float32Array[], start: number, end: number): Float32Array[] {
-  return channels.map((channel) => {
-    const next = new Float32Array(channel.length - (end - start))
-    next.set(channel.slice(0, start), 0)
-    next.set(channel.slice(end), start)
-    return next
-  })
-}
-
-function insertSilence(channels: Float32Array[], at: number, length: number): Float32Array[] {
-  if (length <= 0) return channels
-  return channels.map((channel) => {
-    const next = new Float32Array(channel.length + length)
-    next.set(channel.slice(0, at), 0)
-    next.set(channel.slice(at), at + length)
-    return next
-  })
-}
-
-function applyEnvelope(
-  channels: Float32Array[],
-  start: number,
-  end: number,
-  fadeIn: number,
-  fadeOut: number,
-  factorAt: (position: number, length: number) => number,
-) {
-  const length = Math.max(1, end - start)
-  for (const channel of channels) {
-    for (let i = start; i < end; i++) {
-      const pos = i - start
-      let factor = factorAt(pos, length)
-      if (fadeIn > 0 && pos < fadeIn) factor = 1 + (factor - 1) * (pos / fadeIn)
-      if (fadeOut > 0 && length - pos < fadeOut) factor = 1 + (factor - 1) * ((length - pos) / fadeOut)
-      channel[i] *= factor
-    }
-  }
 }
 
 function applyClipFade(channels: Float32Array[], sampleRate: number, fadeInMs: number, fadeOutMs: number) {
@@ -142,47 +100,7 @@ function processClipAudio(buffer: AudioBuffer, clip: StitchPlanClip, edits: Regi
   const end = Math.max(start + 1, buffer.length - msToSample(clip.trimEndMs, sampleRate))
   let channels = sliceChannels(cloneChannels(buffer), start, Math.min(end, buffer.length))
 
-  for (const edit of edits) {
-    if (edit.type === 'insert_silence') continue
-    const editStart = Math.min(channels[0].length, msToSample(edit.startMs, sampleRate))
-    const editEnd = Math.min(channels[0].length, msToSample(edit.endMs, sampleRate))
-    if (editEnd <= editStart) continue
-    if (edit.type === 'gain') {
-      const gain = dbToGain(edit.gainDb)
-      applyEnvelope(channels, editStart, editEnd, msToSample(edit.fadeInMs, sampleRate), msToSample(edit.fadeOutMs, sampleRate), () => gain)
-    } else if (edit.type === 'mute') {
-      applyEnvelope(channels, editStart, editEnd, msToSample(edit.fadeInMs, sampleRate), msToSample(edit.fadeOutMs, sampleRate), () => 0)
-    } else if (edit.type === 'fade') {
-      const fadeIn = msToSample(edit.fadeInMs, sampleRate)
-      const fadeOut = msToSample(edit.fadeOutMs, sampleRate)
-      applyEnvelope(channels, editStart, editEnd, 0, 0, (position, length) => {
-        let factor = 1
-        if (fadeIn > 0 && position < fadeIn) factor = Math.min(factor, position / fadeIn)
-        if (fadeOut > 0 && length - position < fadeOut) factor = Math.min(factor, (length - position) / fadeOut)
-        return factor
-      })
-    }
-  }
-
-  const deletes = edits
-    .filter((edit): edit is Extract<RegionEdit, { type: 'delete' }> => edit.type === 'delete')
-    .sort((a, b) => b.startMs - a.startMs)
-  for (const edit of deletes) {
-    const editStart = Math.min(channels[0].length, msToSample(edit.startMs, sampleRate))
-    const editEnd = Math.min(channels[0].length, msToSample(edit.endMs, sampleRate))
-    if (editEnd > editStart) channels = removeRange(channels, editStart, editEnd)
-  }
-
-  let inserted = 0
-  const inserts = edits
-    .filter((edit): edit is Extract<RegionEdit, { type: 'insert_silence' }> => edit.type === 'insert_silence')
-    .sort((a, b) => a.atMs - b.atMs)
-  for (const edit of inserts) {
-    const at = Math.min(channels[0].length, msToSample(edit.atMs, sampleRate) + inserted)
-    const length = msToSample(edit.durationMs, sampleRate)
-    channels = insertSilence(channels, at, length)
-    inserted += length
-  }
+  channels = renderRegionEdits({ channels, sampleRate }, edits)
 
   applyClipFade(channels, sampleRate, clip.fadeInMs, clip.fadeOutMs)
   return channels
@@ -1166,6 +1084,15 @@ export const StitchTimeline = memo(function StitchTimeline({
     return Math.max(1, sum)
   }, [clips, paddingMs])
 
+  const autoPace = useCallback(() => {
+    setPaddingMs(clips.slice(0, -1).map((clip) => {
+      const text = (clip.text ?? '').trim()
+      if (/[.!?]["')\]]?$/.test(text)) return 520
+      if (/[,;:]["')\]]?$/.test(text)) return 260
+      return 90
+    }))
+  }, [clips, setPaddingMs])
+
   if (!clips.length) {
     return (
       <div className="flex h-24 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
@@ -1212,6 +1139,9 @@ export const StitchTimeline = memo(function StitchTimeline({
             Drag to reorder clips, trim edges, and adjust gaps to build your 10–15s reference voice.
           </span>
           <div className="flex shrink-0 items-center gap-2">
+            <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted" onClick={autoPace}>
+              <Gauge className="size-3.5" /> Auto-pace
+            </button>
             {library.length > 0 && (
               <LibraryPickerButton
                 label="Saved segments"

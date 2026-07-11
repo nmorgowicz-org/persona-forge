@@ -4,21 +4,34 @@ import {
   AlertTriangle,
   AudioWaveform,
   CheckCircle2,
+  ChevronDown,
+  Copy,
+  FoldHorizontal,
   Layers,
   Loader2,
   Mic2,
+  MoreHorizontal,
   Pencil,
   Plus,
+  Radio,
   Scissors,
+  SlidersHorizontal,
   Sparkles,
   Star,
   Trash2,
   Shuffle,
+  UnfoldHorizontal,
+  Undo2,
   Wand2,
 } from 'lucide-react'
 import {
+  activateVoiceForApi,
+  analyzeVoiceReference,
+  adjustVoiceReferencePauses,
+  applyVoiceReferenceRegionEdits,
   deleteOmniVoiceSegment,
   deleteVoice,
+  duplicateVoice,
   getVoice,
   listOmniVoiceSegments,
   listVoices,
@@ -26,7 +39,9 @@ import {
   setDefaultVoiceVariant,
   trimVoiceReferenceSilence,
   updateVoiceSampleText,
+  undoVoiceReferenceEdit,
   type SegmentMeta,
+  type StitchPlanRegionEdit,
   type VoiceMeta,
 } from '@/lib/api'
 import { hasChipSelections, type ChipSelections } from '@/lib/voiceDesignChips'
@@ -37,6 +52,8 @@ import { useAppStore, type StitchPlanClip } from '@/store'
 import { VariantCompare } from '@/components/VariantCompare'
 import { cn } from '@/lib/utils'
 import { InfoIcon } from '@/components/InfoIcon'
+import { RegionEditor } from '@/components/waveform/RegionEditor'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 
 const MOUNTED_REF_SOURCE = 'mounted_ref_audio' as const
 
@@ -55,6 +72,7 @@ interface VoiceReferenceMetrics {
   pause_ratio?: number | null
   median_pause_ms?: number | null
   longest_pause_ms?: number | null
+  pause_intervals?: [number, number][] | null
 }
 
 type VoiceWithReferenceMeta = VoiceMeta & {
@@ -452,15 +470,27 @@ function VoiceMetricChip({
   )
 }
 
-function VoiceMetricsPanel({ metrics }: { metrics: VoiceReferenceMetrics | null }) {
-  if (!metrics) return null
+function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle }: { metrics: VoiceReferenceMetrics | null; busy: boolean; onAnalyze: () => void; expanded: boolean; onToggle: () => void }) {
+  if (!metrics) return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-border/60 bg-muted/10 p-3">
+      <div><p className="text-xs font-medium">Reference analysis unavailable</p><p className="text-[10px] text-muted-foreground">Analyze this saved WAV to add duration, pacing, pause, loudness, and peak data.</p></div>
+      <Button size="sm" variant="outline" disabled={busy} onClick={onAnalyze}>Analyze reference</Button>
+    </div>
+  )
 
   const speechRate = getSpeechRate(metrics)
   const pauseCount = finiteNumber(metrics.pause_count)
   const truePeak = getTruePeak(metrics)
 
   return (
-    <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+    <div className="border-y border-border/60 py-2">
+      <button type="button" className="flex w-full items-center justify-between gap-3 text-left" onClick={onToggle} aria-expanded={expanded}>
+        <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+          {formatDuration(metrics.duration_seconds)} · {formatNumber(speechRate, 2)} w/s · {formatPercent(metrics.pause_ratio)} pauses · {formatNumber(metrics.lufs_integrated, 1, ' LUFS')} · {formatNumber(metrics.peak_dbfs, 1, ' dBFS')}
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-foreground">Audio analysis <ChevronDown className={cn('size-3.5 transition-transform', expanded && 'rotate-180')} /></span>
+      </button>
+      {expanded && <div className="mt-3 rounded-lg bg-muted/20 p-2">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -509,6 +539,7 @@ function VoiceMetricsPanel({ metrics }: { metrics: VoiceReferenceMetrics | null 
         </div>
         <VoiceFingerprint metrics={metrics} />
       </div>
+      </div>}
     </div>
   )
 }
@@ -646,11 +677,17 @@ function VoiceCard({
   onDesignFrom,
   onReopenInStitchStudio,
   onDelete,
+  onDuplicate,
   onSaveSampleText,
   onNormalize,
   onTrimSilence,
   onFixAll,
   onSetDefault,
+  onAdjustPauses,
+  onActivateForApi,
+  onApplyReferenceEdits,
+  onAnalyze,
+  onUndo,
 }: {
   voice: VoiceMeta
   busy: boolean
@@ -658,16 +695,29 @@ function VoiceCard({
   onDesignFrom: (() => void) | null
   onReopenInStitchStudio: (() => void) | null
   onDelete: () => void
+  onDuplicate: () => Promise<VoiceMeta | null>
   onSaveSampleText: (text: string) => Promise<void>
-  onNormalize: () => void
-  onTrimSilence: () => void
+  onNormalize: (voiceId: string) => Promise<void>
+  onTrimSilence: (voiceId: string) => Promise<void>
   onFixAll: () => void
   onSetDefault: (() => void) | null
+  onAdjustPauses: (voiceId: string, mode: 'compress' | 'expand', targetMs: number) => Promise<void>
+  onActivateForApi: () => void
+  onApplyReferenceEdits: (voiceId: string, edits: StitchPlanRegionEdit[]) => Promise<void>
+  onAnalyze: () => void
+  onUndo: () => void
 }) {
   const reducedMotion = useReducedMotion()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(voice.sample_text)
   const [saving, setSaving] = useState(false)
+  const [editingAudio, setEditingAudio] = useState(false)
+  const [editorAudio, setEditorAudio] = useState<string | null>(null)
+  const [regionEdits, setRegionEdits] = useState<StitchPlanRegionEdit[]>([])
+  const [pauseTargetMs, setPauseTargetMs] = useState(300)
+  const [analysisExpanded, setAnalysisExpanded] = useState(() => localStorage.getItem('voice-library-analysis-expanded') !== 'false')
+  const [preserveOriginal, setPreserveOriginal] = useState(true)
+  const [editorVoiceId, setEditorVoiceId] = useState(voice.voice_id)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const needsReview = voiceTranscriptNeedsReview(voice)
   const transcriptSource = voiceTranscriptSource(voice)
@@ -698,6 +748,27 @@ function VoiceCard({
     }
   }
 
+  const mutationVoiceId = async () => {
+    if (!preserveOriginal) return voice.voice_id
+    const copy = await onDuplicate()
+    return copy?.voice_id ?? null
+  }
+
+  const openAudioEditor = async () => {
+    const targetId = await mutationVoiceId()
+    if (!targetId) return
+    const detail = await getVoice(targetId)
+    setEditorVoiceId(targetId)
+    setEditorAudio(detail.audio_base64 ?? null)
+    setRegionEdits([])
+    setEditingAudio(true)
+  }
+
+  const runMutation = async (action: (voiceId: string) => Promise<void>) => {
+    const targetId = await mutationVoiceId()
+    if (targetId) await action(targetId)
+  }
+
   return (
     <motion.div
       data-testid="voice-card"
@@ -721,9 +792,9 @@ function VoiceCard({
               Default
             </span>
           )}
-          {isMountedRef(voice) && (
-            <span className="inline-flex items-center rounded-full border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-cyan-400">
-              Mounted reference
+          {voice.api_active && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-px text-[9px] font-medium uppercase text-cyan-400">
+              <Radio className="size-3" /> API default
             </span>
           )}
           <span
@@ -798,99 +869,47 @@ function VoiceCard({
        <QualityGatePanel
          voice={voice}
          busy={busy}
-         onNormalize={onNormalize}
-         onTrimSilence={onTrimSilence}
+         onNormalize={() => { void runMutation(onNormalize) }}
+         onTrimSilence={() => { void runMutation(onTrimSilence) }}
          onFixAll={onFixAll}
        />
 
-       <VoiceMetricsPanel metrics={metrics} />
+       <VoiceMetricsPanel metrics={metrics} busy={busy} onAnalyze={onAnalyze} expanded={analysisExpanded} onToggle={() => setAnalysisExpanded((value) => { localStorage.setItem('voice-library-analysis-expanded', String(!value)); return !value })} />
 
       <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
 
-      <div className="flex gap-2">
-        <Button size="sm" className="flex-1" onClick={onUse}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" className="min-w-32" onClick={onUse}>
           Use in Speak
         </Button>
-        {onDesignFrom && (
-          <Button
-            size="sm"
-            variant="outline"
-            aria-label="Design a new voice from this one"
-            title="Design a new voice from this one's chip settings"
-            disabled={busy}
-            onClick={onDesignFrom}
-          >
-            <Sparkles className="size-4" />
-          </Button>
-        )}
-        {onReopenInStitchStudio && (
-          <Button
-            size="sm"
-            variant="outline"
-            aria-label="Reopen in Stitch Studio"
-            title="Reopen the clips this voice was assembled from in Stitch Studio"
-            disabled={busy}
-            onClick={onReopenInStitchStudio}
-          >
-            <Layers className="size-4" />
-          </Button>
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          aria-label="Edit reference text"
-          title="Edit reference text"
-          disabled={busy}
-          onClick={() => {
-            setDraft(voice.sample_text)
-            setEditing(true)
-          }}
-        >
-          <Pencil className="size-4" />
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          aria-label="Normalize reference audio (-20 LUFS, -1dBTP)"
-          title="Normalize reference audio (-20 LUFS, -1dBTP)"
-          disabled={busy}
-          onClick={onNormalize}
-        >
-          <Wand2 className="size-4" />
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          aria-label="Trim leading/trailing silence"
-          title="Trim leading/trailing silence"
-          disabled={busy}
-          onClick={onTrimSilence}
-        >
-          <Scissors className="size-4" />
-        </Button>
-        {onSetDefault && (
-          <Button
-            size="sm"
-            variant="outline"
-            aria-label="Set as default variant for this family"
-            title="Set as default variant for this family"
-            disabled={busy || voice.is_default}
-            onClick={onSetDefault}
-          >
-            <Star className={cn('size-4', voice.is_default && 'fill-current text-warning')} />
-          </Button>
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          aria-label="Delete this voice"
-          title="Delete this voice"
-          disabled={busy}
-          onClick={onDelete}
-        >
-          <Trash2 className="size-4" />
-        </Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={openAudioEditor}><SlidersHorizontal /> Edit audio</Button>
+        <Popover><PopoverTrigger asChild><Button size="sm" variant="outline" disabled={busy}><FoldHorizontal /> Adjust pauses <ChevronDown /></Button></PopoverTrigger><PopoverContent align="start" className="w-72">
+          <p className="text-xs font-medium">Target interior pause</p>
+          <div className="flex items-center gap-2"><Button size="icon-sm" variant="outline" onClick={() => setPauseTargetMs(Math.max(50, pauseTargetMs - 50))}>−</Button><div className="flex-1 text-center font-mono text-sm">{pauseTargetMs} ms</div><Button size="icon-sm" variant="outline" onClick={() => setPauseTargetMs(Math.min(2000, pauseTargetMs + 50))}>+</Button></div>
+          <label className="flex items-center gap-2 rounded bg-muted/30 p-2 text-xs"><input type="checkbox" checked={preserveOriginal} onChange={(event) => setPreserveOriginal(event.target.checked)} /> Edit a duplicate</label>
+          <div className="grid grid-cols-2 gap-2"><Button size="sm" variant="outline" onClick={() => runMutation((id) => onAdjustPauses(id, 'compress', pauseTargetMs))}><FoldHorizontal /> Tighten</Button><Button size="sm" variant="outline" onClick={() => runMutation((id) => onAdjustPauses(id, 'expand', pauseTargetMs))}><UnfoldHorizontal /> Loosen</Button></div>
+        </PopoverContent></Popover>
+        <Popover><PopoverTrigger asChild><Button size="icon-sm" variant="outline" aria-label="More voice actions" tooltip="More voice actions"><MoreHorizontal /></Button></PopoverTrigger><PopoverContent align="end" className="w-64 gap-1 p-1.5">
+          <label className="mb-1 flex items-center gap-2 rounded bg-muted/30 p-2 text-xs"><input type="checkbox" checked={preserveOriginal} onChange={(event) => setPreserveOriginal(event.target.checked)} /> Edit audio operations on a copy</label>
+          <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onDuplicate}><Copy /> Duplicate voice</Button>
+          <Button size="sm" variant="ghost" className="w-full justify-start" disabled={voice.api_active} onClick={onActivateForApi}><Radio /> Activate for API</Button>
+          {onDesignFrom && <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onDesignFrom}><Sparkles /> Design from voice</Button>}
+          {onReopenInStitchStudio && <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onReopenInStitchStudio}><Layers /> Open in Stitch Studio</Button>}
+          <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => setEditing(true)}><Pencil /> Edit transcript</Button>
+          <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => runMutation(onNormalize)}><Wand2 /> Normalize loudness</Button>
+          <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => runMutation(onTrimSilence)}><Scissors /> Trim boundary silence</Button>
+          {onSetDefault && <Button size="sm" variant="ghost" className="w-full justify-start" disabled={voice.is_default} onClick={onSetDefault}><Star /> Set family default</Button>}
+          {voice.undo_available && <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onUndo}><Undo2 /> Undo last audio edit</Button>}
+          <div className="my-1 border-t border-border" />
+          <Button size="sm" variant="ghost" className="w-full justify-start text-destructive hover:text-destructive" onClick={onDelete}><Trash2 /> Delete voice</Button>
+        </PopoverContent></Popover>
       </div>
+      {editingAudio && editorAudio && (
+        <RegionEditor audioBase64={editorAudio} edits={regionEdits} pauseIntervals={metrics?.pause_intervals as [number, number][] | undefined} onChange={setRegionEdits} busy={busy} onClose={() => setEditingAudio(false)} onApply={async () => {
+          await onApplyReferenceEdits(editorVoiceId, regionEdits)
+          setEditingAudio(false)
+        }} />
+      )}
     </motion.div>
   )
 }
@@ -1157,6 +1176,86 @@ export function VoiceLibraryPage() {
     }
   }
 
+  async function adjustPauses(voiceId: string, mode: 'compress' | 'expand', targetMs: number) {
+    setBusyVoiceId(voiceId)
+    setError(null)
+    try {
+      await adjustVoiceReferencePauses(voiceId, targetMs, mode)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusyVoiceId(null)
+    }
+  }
+
+  async function activateForApi(voiceId: string) {
+    setBusyVoiceId(voiceId)
+    setError(null)
+    try {
+      await activateVoiceForApi(voiceId)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusyVoiceId(null)
+    }
+  }
+
+  async function applyReferenceEdits(voiceId: string, edits: StitchPlanRegionEdit[]) {
+    setBusyVoiceId(voiceId)
+    setError(null)
+    try {
+      await applyVoiceReferenceRegionEdits(voiceId, edits)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusyVoiceId(null)
+    }
+  }
+
+  async function duplicate(voiceId: string): Promise<VoiceMeta | null> {
+    setBusyVoiceId(voiceId)
+    setError(null)
+    try {
+      const copy = await duplicateVoice(voiceId)
+      await refresh()
+      return copy
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      return null
+    } finally {
+      setBusyVoiceId(null)
+    }
+  }
+
+  async function analyze(voiceId: string) {
+    setBusyVoiceId(voiceId)
+    setError(null)
+    try {
+      await analyzeVoiceReference(voiceId)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusyVoiceId(null)
+    }
+  }
+
+  async function undoAudioEdit(voiceId: string) {
+    setBusyVoiceId(voiceId)
+    setError(null)
+    try {
+      await undoVoiceReferenceEdit(voiceId)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusyVoiceId(null)
+    }
+  }
+
   async function removeSegment(segmentId: string) {
     if (!window.confirm('Delete this segment? This can’t be undone.')) return
     setBusySegmentId(segmentId)
@@ -1245,7 +1344,7 @@ export function VoiceLibraryPage() {
                 </h2>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 min-[1600px]:grid-cols-2">
                 {voices.map((voice) => (
                   <VoiceCard
                     key={voice.voice_id}
@@ -1265,11 +1364,17 @@ export function VoiceLibraryPage() {
                         : null
                     }
                     onDelete={() => remove(voice.voice_id)}
+                    onDuplicate={() => duplicate(voice.voice_id)}
                      onSaveSampleText={(text) => saveSampleText(voice.voice_id, text)}
-                     onNormalize={() => normalize(voice.voice_id)}
-                     onTrimSilence={() => trimVoiceReferenceSilence(voice.voice_id)}
+                     onNormalize={(voiceId) => normalize(voiceId)}
+                     onTrimSilence={async (voiceId) => { await trimVoiceReferenceSilence(voiceId); await refresh() }}
                      onFixAll={() => fixAll(voice.voice_id)}
                      onSetDefault={voice.family_id ? () => setDefault(voice.voice_id) : null}
+                     onAdjustPauses={(voiceId, mode, targetMs) => adjustPauses(voiceId, mode, targetMs)}
+                     onActivateForApi={() => activateForApi(voice.voice_id)}
+                    onApplyReferenceEdits={(voiceId, edits) => applyReferenceEdits(voiceId, edits)}
+                    onAnalyze={() => analyze(voice.voice_id)}
+                    onUndo={() => undoAudioEdit(voice.voice_id)}
                    />
                 ))}
               </div>

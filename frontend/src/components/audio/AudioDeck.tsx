@@ -195,7 +195,7 @@ export function AudioDeck({
               size="icon-sm"
               variant="ghost"
               onClick={() => setIsLooping(!isLooping)}
-              title="Toggle loop"
+              tooltip="Toggle loop"
               aria-label="Toggle loop"
             >
               <Repeat className={cn('size-3.5', isLooping ? 'text-primary' : 'text-muted-foreground')} />
@@ -216,7 +216,7 @@ export function AudioDeck({
                 </SelectContent>
               </Select>
             )}
-            <Button type="button" size="icon-sm" variant="ghost" onClick={download} title="Download" aria-label="Download audio">
+            <Button type="button" size="icon-sm" variant="ghost" onClick={download} tooltip="Download" aria-label="Download audio">
               <Download className="size-3.5 text-muted-foreground" />
             </Button>
           </div>
