@@ -113,6 +113,7 @@ export interface VoiceMeta {
   is_default?: boolean
   quality_score?: number
   quality_warnings?: string[]
+  auto_fixed?: boolean
   asr?: {
     ok?: boolean
     severity?: 'ok' | 'warn' | 'fail' | 'no_speech' | 'error' | string
@@ -373,6 +374,7 @@ export interface HealthState {
   service_started?: boolean
   swap_in_progress: boolean
   backend: string
+  resolved_backend?: string
   model: string
   loading_message?: string
   [key: string]: unknown

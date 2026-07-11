@@ -7,6 +7,8 @@ name: qwen3-tts-openvino
 #   REF_TEXT="exact transcript reference audio"  # optional override; Whisper drafts by default
 # - Then:
 #     docker compose up --build qwen3-tts
+# The default backend (pocket_tts) needs no export step. Only run the export
+# below if you switch TTS_BACKEND=openvino for the accelerated Qwen path:
 #     docker compose run --rm --profile export export   (once, to generate IR)
 
 # All other knobs are optional and should be left at defaults.
@@ -38,8 +40,11 @@ services:
       - "${QWEN3_TTS_PORT:-8318}:8318"
     environment:
       <<: *model-environment
-      # Core behavior
-      TTS_BACKEND: ${TTS_BACKEND:-openvino}
+      # Core behavior. pocket_tts is the product default: it is self-contained
+      # (no IR export needed) and drives the built-in voice catalog + voice
+      # cloning the UI is built around. Set TTS_BACKEND=openvino for the
+      # accelerated Qwen path once you have run the export (see below).
+      TTS_BACKEND: ${TTS_BACKEND:-pocket_tts}
       TZ: ${TZ:-America/Detroit}
 
       # LOW_RAM_MODE=1 is recommended on typical 10-15 GiB hosts:

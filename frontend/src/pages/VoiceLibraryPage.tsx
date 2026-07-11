@@ -119,7 +119,6 @@ function getFixableQualityWarnings(
 }
 
 
-// QualityGatePanel is currently not used in the main render loop
 function QualityGatePanel({
   voice,
   busy,
@@ -141,14 +140,14 @@ function QualityGatePanel({
     score === undefined
       ? 'text-muted-foreground'
       : score >= 80
-        ? 'text-emerald-400'
+        ? 'text-success'
         : score >= 50
-          ? 'text-amber-400'
-          : 'text-red-400'
+          ? 'text-warning'
+          : 'text-destructive'
   const fixable = getFixableQualityWarnings(voice)
   
   return (
-    <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+    <div className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
       <div className="mb-1 flex items-center justify-between gap-2">
         <p className="flex items-center gap-1 font-semibold uppercase tracking-wide text-[10px]">
           <AlertTriangle className="size-3" />
@@ -177,7 +176,7 @@ function QualityGatePanel({
             <Button
               size="sm"
               variant="outline"
-              className="h-7 gap-1.5 border-amber-500/40 bg-transparent text-amber-100 hover:bg-amber-500/20"
+              className="h-7 gap-1.5 border-warning/40 bg-transparent text-warning hover:bg-warning/20"
               disabled={busy}
               onClick={onFixAll}
             >
@@ -190,7 +189,7 @@ function QualityGatePanel({
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-7 gap-1.5 border-amber-500/40 bg-transparent text-amber-100 hover:bg-amber-500/20"
+                  className="h-7 gap-1.5 border-warning/40 bg-transparent text-warning hover:bg-warning/20"
                   disabled={busy}
                   onClick={onNormalize}
                 >
@@ -202,7 +201,7 @@ function QualityGatePanel({
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-7 gap-1.5 border-amber-500/40 bg-transparent text-amber-100 hover:bg-amber-500/20"
+                  className="h-7 gap-1.5 border-warning/40 bg-transparent text-warning hover:bg-warning/20"
                   disabled={busy}
                   onClick={onTrimSilence}
                 >
@@ -318,6 +317,7 @@ function getSourceBadges(voice: VoiceMeta): string[] {
     sourceLabel(v.source),
     sourceLabel(v.source_model ?? undefined),
     isMountedRef(voice) ? 'Mounted reference' : null,
+    voice.auto_fixed ? 'Auto peak-limited' : null,
   ].filter((value): value is string => Boolean(value))
 
   const seen = new Set<string>()
@@ -353,7 +353,7 @@ function VoiceSourceBadges({ voice }: { voice: VoiceMeta }) {
       {useCaseBadges.map((label) => (
         <span
           key={`use-${label}`}
-          className="inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-emerald-300"
+          className="inline-flex items-center rounded-full border border-success/30 bg-success/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-success"
         >
           {label}
         </span>
@@ -414,7 +414,7 @@ function VoiceFingerprint({ metrics }: { metrics: VoiceReferenceMetrics }) {
         label="Pause"
         value={metricLevel(pauseRatio, 0, 0.45)}
         title="Share of the reference detected as pauses"
-        className="bg-gradient-to-r from-amber-500 to-yellow-300"
+        className="bg-gradient-to-r from-warning to-warning"
       />
       <FingerprintBar
         label="LUFS"
@@ -426,7 +426,7 @@ function VoiceFingerprint({ metrics }: { metrics: VoiceReferenceMetrics }) {
         label="Peak"
         value={metricLevel(peak, -18, 0)}
         title="Peak level; farther right is closer to digital maximum"
-        className="bg-gradient-to-r from-emerald-500 to-lime-300"
+        className="bg-gradient-to-r from-success to-lime-300"
       />
     </div>
   )
@@ -716,7 +716,7 @@ function VoiceCard({
             </span>
           )}
           {voice.is_default && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-yellow-500/30 bg-yellow-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-yellow-400">
+            <span className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-warning">
               <Star className="size-3 fill-current" />
               Default
             </span>
@@ -730,8 +730,8 @@ function VoiceCard({
             className={
               'inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[9px] font-medium uppercase tracking-wide ' +
               (needsReview
-                ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300')
+                ? 'border-warning/30 bg-warning/10 text-warning'
+                : 'border-success/30 bg-success/10 text-success')
             }
             title={reviewMessage}
           >
@@ -744,7 +744,7 @@ function VoiceCard({
       </div>
 
       {needsReview && (
-        <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+        <div className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
           {reviewMessage}
         </div>
       )}
@@ -877,7 +877,7 @@ function VoiceCard({
             disabled={busy || voice.is_default}
             onClick={onSetDefault}
           >
-            <Star className={cn('size-4', voice.is_default && 'fill-current text-yellow-400')} />
+            <Star className={cn('size-4', voice.is_default && 'fill-current text-warning')} />
           </Button>
         )}
         <Button

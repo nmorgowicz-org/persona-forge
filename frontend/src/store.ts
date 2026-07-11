@@ -630,16 +630,17 @@ const PROGRESS_POLL_MS = 700
       if (data.swap_in_progress !== store.swapInProgress) {
         useAppStore.setState({ swapInProgress: Boolean(data.swap_in_progress) })
       }
-      if (data.backend !== store.healthBackend) {
+      const resolvedBackend = data.resolved_backend || data.backend
+      if (resolvedBackend !== store.healthBackend) {
         useAppStore.setState({
-          healthBackend: data.backend || null,
-          runtimeTtsBackend: data.backend || null,
+          healthBackend: resolvedBackend || null,
+          runtimeTtsBackend: resolvedBackend || null,
         })
       }
       // Sync Pocket TTS voice-cloning status into the store whenever /health
       // indicates the backend is pocket_tts — this is the single source of truth
       // for PocketTTSWarningBanner and survives page navigations / refreshes.
-      if (data.backend === 'pocket_tts') {
+      if (resolvedBackend === 'pocket_tts') {
         const pt = (data as any).pocket_tts as
           | { voice_cloning_available?: boolean; message?: string }
           | null

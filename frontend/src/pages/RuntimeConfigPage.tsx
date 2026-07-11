@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Settings2 } from 'lucide-react'
 import { getRuntimeConfig, updateRuntimeConfig, type RuntimeConfigState } from '@/lib/api'
@@ -24,7 +24,7 @@ export function RuntimeConfigPage() {
   const [applying, setApplying] = useState(false)
   const setRuntimeConfig = useAppStore((s) => s.setRuntimeConfig)
 
-  function refresh() {
+  const refresh = useCallback(() => {
     getRuntimeConfig()
       .then((s) => {
         setState(s)
@@ -36,11 +36,11 @@ export function RuntimeConfigPage() {
         })
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-  }
+  }, [setRuntimeConfig])
 
   useEffect(() => {
     refresh()
-  }, [])
+  }, [refresh])
 
   async function apply() {
     if (!draft || !state) return
@@ -92,7 +92,7 @@ export function RuntimeConfigPage() {
       )}
 
       {state?.reconfig_in_progress && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+        <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
           Reconfiguration in progress — the model is reloading.
         </div>
       )}

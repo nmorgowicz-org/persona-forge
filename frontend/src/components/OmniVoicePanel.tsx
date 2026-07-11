@@ -1392,11 +1392,11 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
                         className={cn(
                           'rounded-full px-1.5 py-0.5 text-[9px] font-semibold tabular-nums',
                           heroMeterState === 'in-range' &&
-                            'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+                            'bg-success/15 text-success dark:text-success',
                           heroMeterState === 'under' &&
                             'bg-muted text-muted-foreground',
                           heroMeterState === 'over' &&
-                            'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+                            'bg-warning/15 text-warning dark:text-warning',
                         )}
                       >
                         ~{estimatedScriptSeconds.toFixed(1)}s
@@ -1577,7 +1577,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
                 </span>
               </div>
               {hasLongLines && (
-                <p className="mt-0.5 text-[10px] text-amber-400">
+                <p className="mt-0.5 text-[10px] text-warning">
                   Some lines are long; shorter lines produce more reliable results.
                 </p>
               )}
@@ -1963,7 +1963,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
                 </button>
               </div>
               {anySegmentHasDuration && (
-                <p className="text-[9px] leading-snug text-amber-500/90">
+                <p className="text-[9px] leading-snug text-warning/90">
                   One or more segments have an explicit Duration set — post-processing is
                   automatically disabled for those segments regardless of this toggle, to
                   keep their length accurate.
@@ -2105,13 +2105,13 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
                         'bg-muted text-muted-foreground',
                       segmentRackTally.selectedCount > 0 &&
                         segmentRackTallyState === 'in-range' &&
-                        'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+                        'bg-success/15 text-success dark:text-success',
                       segmentRackTally.selectedCount > 0 &&
                         segmentRackTallyState === 'under' &&
                         'bg-muted text-muted-foreground',
                       segmentRackTally.selectedCount > 0 &&
                         segmentRackTallyState === 'over' &&
-                        'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+                        'bg-warning/15 text-warning dark:text-warning',
                     )}
                   >
                     {segmentRackTally.selectedCount}/{segmentRack.length} selected
@@ -2192,7 +2192,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
                   segmentRack.length === 0 ||
                   isStitching
                 }
-                className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[hsl(190,90%,50%)] to-[hsl(210,90%,45%)] px-3 py-1 text-[11px] font-medium text-background shadow-[0_4px_15px_rgba(34,211,238,0.25)] transition-all hover:scale-[1.02] hover:shadow-[0_8px_25px_rgba(34,211,238,0.35)] disabled:opacity-50 disabled:shadow-none"
+                className="btn-brand shrink-0 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium"
               >
                 {isStitching
                   ? 'Stitching…'

@@ -662,9 +662,9 @@ function StitchTimelineClip({
                 key={edit.id}
                 className={cn(
                   'pointer-events-none absolute inset-y-1 rounded-sm border',
-                  edit.type === 'delete' && 'border-red-400/60 bg-red-500/20',
+                  edit.type === 'delete' && 'border-destructive/60 bg-destructive/20',
                   edit.type === 'mute' && 'border-zinc-300/40 bg-zinc-950/55',
-                  edit.type === 'gain' && 'border-amber-300/50 bg-amber-400/15',
+                  edit.type === 'gain' && 'border-warning/50 bg-warning/15',
                   edit.type === 'fade' && 'border-cyan-300/50 bg-gradient-to-r from-transparent via-cyan-300/20 to-transparent',
                 )}
                 style={{ left, width }}
@@ -1582,13 +1582,13 @@ function StitchEditorBody({
           <span className="text-sm font-semibold uppercase tracking-wider text-foreground">Arrange your reference clip</span>
           <span className="text-xs text-muted-foreground/70">{clips.length} clip{clips.length !== 1 ? 's' : ''}</span>
           {staleFlags && !previewError && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-400">
+            <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
               changes pending
             </span>
           )}
           {previewError && (
             <span
-              className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-400"
+              className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive"
               title={previewError}
             >
               preview failed — showing last good render
@@ -1644,7 +1644,7 @@ function StitchEditorBody({
             type="button"
             onClick={handleSave}
             disabled={isRendering || clips.length === 0}
-            className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[hsl(190,90%,50%)] to-[hsl(210,90%,45%)] px-4 py-1.5 text-xs font-medium text-background shadow-[0_4px_15px_rgba(34,211,238,0.25)] transition-all hover:scale-[1.02] hover:shadow-[0_8px_25px_rgba(34,211,238,0.35)] disabled:opacity-50 disabled:shadow-none"
+            className="btn-brand inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-medium"
             title="This will be used as a reusable cloning source for text-to-speech."
           >
             Save as reference voice

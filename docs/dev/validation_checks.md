@@ -14,6 +14,13 @@ For focused audio style and voice-library changes, add:
 PYTHONPATH=.:src pytest tests/tier1_unit/test_audio_style.py tests/tier1_unit/test_voice_library.py -q
 ```
 
+For output-polish (loudness/peak) changes, run the validation matrix — see
+docs/dev/OUTPUT_POLISH_MATRIX.md for the invariants and metadata parity checks:
+
+```bash
+PYTHONPATH=.:src pytest tests/tier1_unit/test_output_polish_matrix.py -q
+```
+
 For Pocket TTS built-in voice route changes, add:
 
 ```bash

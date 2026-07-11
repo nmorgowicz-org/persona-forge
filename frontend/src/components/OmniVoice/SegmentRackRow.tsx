@@ -105,7 +105,7 @@ export function SegmentRackRow({
       key={row.segmentId}
       className={cn(
         'flex min-w-0 flex-col gap-1 rounded-md border bg-muted/30 px-2 py-1.5',
-        isMissingTake ? 'border-amber-400/60' : 'border-border',
+        isMissingTake ? 'border-warning/60' : 'border-border',
       )}
     >
       {/* Header */}
@@ -178,11 +178,11 @@ export function SegmentRackRow({
                   onKeyDown={handleDurKeyDown}
                   className={cn(
                     'w-14 rounded-md border bg-transparent px-1 py-0.5 text-[9px] outline-none transition-colors focus-visible:border-ring',
-                    isDirty ? 'border-amber-500/70' : 'border-input',
+                    isDirty ? 'border-warning/70' : 'border-input',
                   )}
                 />
                 {isDirty && (
-                  <span className="absolute -top-1 -right-1 size-1.5 rounded-full bg-amber-500" />
+                  <span className="absolute -top-1 -right-1 size-1.5 rounded-full bg-warning" />
                 )}
               </div>
             </Tooltip.Trigger>
@@ -211,7 +211,7 @@ export function SegmentRackRow({
                 variant="outline"
                 className={cn(
                   'shrink-0 h-5 px-1.5 text-[9px] transition-all',
-                  isDirty && !isRackAuditioning && 'border-amber-500/70 text-amber-500 hover:text-amber-400',
+                  isDirty && !isRackAuditioning && 'border-warning/70 text-warning hover:text-warning',
                 )}
                 onClick={() =>
                   onRegen(row.segmentId)
@@ -295,7 +295,7 @@ export function SegmentRackRow({
                       <Tooltip.Trigger asChild>
                         <div>
                           <span
-                            className="shrink-0 rounded-full border border-amber-900/50 bg-amber-950/30 px-1 py-0.5 text-[9px] text-amber-300"
+                            className="shrink-0 rounded-full border border-warning/50 bg-warning/30 px-1 py-0.5 text-[9px] text-warning"
                           >
                             no-speech
                           </span>
@@ -378,7 +378,7 @@ export function SegmentRackRow({
                         className={cn(
                           'ml-0.5 shrink-0 inline-flex h-5 w-5 items-center justify-center rounded-full border border-border bg-muted/60 text-[9px] text-muted-foreground transition-colors',
                           savedIds.has(c.candidate_id)
-                            ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-400'
+                            ? 'border-success/60 bg-success/10 text-success'
                             : 'hover:bg-muted hover:text-foreground disabled:opacity-60',
                         )}
                       >

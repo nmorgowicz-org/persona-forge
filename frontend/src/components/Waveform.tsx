@@ -184,7 +184,3 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
     </div>
   )
 }
-
-export function idlePeaks(buckets = 64): number[] {
-  return Array.from({ length: buckets }, (_, i) => 0.15 + 0.1 * Math.sin(i / 3))
-}

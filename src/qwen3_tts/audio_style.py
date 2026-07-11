@@ -9,15 +9,12 @@ import logging
 import numpy as np
 import pyloudnorm as pyln
 import librosa
-import soundfile as sf
 from scipy import signal
-from typing import Any, Dict, Tuple, Optional, List
+from typing import Any, Callable, Dict, Tuple, Optional, List
 
 from .audio_post import (
     compress,
     limit_peak,
-    normalize_rms,
-    trim,
 )
 
 logger = logging.getLogger(__name__)
@@ -28,44 +25,13 @@ DEFAULT_SAMPLE_RATE = 24000
 TARGET_LUFS = -20.0
 PEAK_CEILING_DB = -1.0
 
-# Style preset configurations
-STYLE_PRESETS = {
-    "off": {
-        "lufs": TARGET_LUFS,
-        "peak": PEAK_CEILING_DB,
-        "compress": None,
-    },
-    "Neutral": {
-        "lufs": TARGET_LUFS,
-        "peak": PEAK_CEILING_DB,
-        "compress": {"threshold_db": -24.0, "ratio": 1.5},
-    },
-    "Clean": {
-        "lufs": -23.0,
-        "peak": -2.0,
-        "compress": {"threshold_db": -30.0, "ratio": 1.2},
-    },
-    "Broadcast": {
-        "lufs": -18.0,
-        "peak": PEAK_CEILING_DB,
-        "compress": {"threshold_db": -18.0, "ratio": 3.0},
-    },
-    "Calm": {
-        "lufs": -24.0,
-        "peak": -3.0,
-        "compress": {"threshold_db": -35.0, "ratio": 1.1},
-    },
-    "Energetic": {
-        "lufs": -16.0,
-        "peak": PEAK_CEILING_DB,
-        "compress": {"threshold_db": -15.0, "ratio": 4.0},
-    },
-    "Storyteller": {
-        "lufs": -22.0,
-        "peak": -2.0,
-        "compress": {"threshold_db": -28.0, "ratio": 2.0},
-    },
-}
+StepFn = Callable[..., np.ndarray | tuple[np.ndarray, float]]
+PipelineStep = tuple[str, StepFn, dict[str, Any]]
+
+
+def _steps(*steps: PipelineStep) -> list[PipelineStep]:
+    return list(steps)
+
 
 def _finite_float(value: Any) -> float | None:
     if value is None:
@@ -243,54 +209,110 @@ def _apply_presence_boost(wav: np.ndarray, sr: int) -> np.ndarray:
         logger.warning(f"Presence boost failed: {e}")
         return wav
 
+
+# Single source of truth for both advertised metadata and delivered DSP behavior.
+# "off" is a real bypass; all other presets derive STYLE_PRESETS and execution
+# from the same rows so UI copy cannot drift away from the pipeline.
+STYLE_PIPELINES: dict[str, dict[str, Any]] = {
+    "off": {
+        "lufs": None,
+        "peak": None,
+        "compress": None,
+        "steps": _steps(),
+    },
+    "Neutral": {
+        "lufs": TARGET_LUFS,
+        "peak": PEAK_CEILING_DB,
+        "compress": None,
+        "steps": _steps(
+            ("normalize_lufs", _normalize_lufs, {"target_lufs": TARGET_LUFS}),
+            ("limit_peak", limit_peak, {"ceiling_db": PEAK_CEILING_DB}),
+        ),
+    },
+    "Clean": {
+        "lufs": TARGET_LUFS,
+        "peak": PEAK_CEILING_DB,
+        "compress": {"threshold_db": -24.0, "ratio": 2.5},
+        "steps": _steps(
+            ("compress", compress, {"threshold_db": -24.0, "ratio": 2.5}),
+            ("normalize_lufs", _normalize_lufs, {"target_lufs": TARGET_LUFS}),
+            ("limit_peak", limit_peak, {"ceiling_db": PEAK_CEILING_DB}),
+        ),
+    },
+    "Broadcast": {
+        "lufs": TARGET_LUFS,
+        "peak": PEAK_CEILING_DB,
+        "compress": {"threshold_db": -20.0, "ratio": 3.0},
+        "steps": _steps(
+            ("compress", compress, {"threshold_db": -20.0, "ratio": 3.0}),
+            ("normalize_lufs", _normalize_lufs, {"target_lufs": TARGET_LUFS}),
+            ("presence_boost", _apply_presence_boost, {}),
+            ("limit_peak", limit_peak, {"ceiling_db": PEAK_CEILING_DB}),
+        ),
+    },
+    "Calm": {
+        "lufs": -23.0,
+        "peak": PEAK_CEILING_DB,
+        "compress": None,
+        "steps": _steps(
+            ("time_stretch", _apply_time_stretch, {"factor": 1.05}),
+            ("shape_pauses", _shape_pauses, {"factor": 1.10}),
+            ("warm_eq", _apply_warm_eq, {}),
+            ("normalize_lufs", _normalize_lufs, {"target_lufs": -23.0}),
+            ("limit_peak", limit_peak, {"ceiling_db": PEAK_CEILING_DB}),
+        ),
+    },
+    "Energetic": {
+        "lufs": TARGET_LUFS,
+        "peak": PEAK_CEILING_DB,
+        "compress": {"threshold_db": -20.0, "ratio": 2.0},
+        "steps": _steps(
+            ("time_stretch", _apply_time_stretch, {"factor": 0.95}),
+            ("shape_pauses", _shape_pauses, {"factor": 0.90}),
+            ("compress", compress, {"threshold_db": -20.0, "ratio": 2.0}),
+            ("normalize_lufs", _normalize_lufs, {"target_lufs": TARGET_LUFS}),
+            ("limit_peak", limit_peak, {"ceiling_db": PEAK_CEILING_DB}),
+        ),
+    },
+    "Storyteller": {
+        "lufs": -23.0,
+        "peak": PEAK_CEILING_DB,
+        "compress": {"threshold_db": -24.0, "ratio": 2.0},
+        "steps": _steps(
+            ("warm_eq", _apply_warm_eq, {}),
+            ("compress", compress, {"threshold_db": -24.0, "ratio": 2.0}),
+            ("shape_pauses", _shape_pauses, {"factor": 1.10}),
+            ("normalize_lufs", _normalize_lufs, {"target_lufs": -23.0}),
+            ("limit_peak", limit_peak, {"ceiling_db": PEAK_CEILING_DB}),
+        ),
+    },
+}
+
+STYLE_PRESETS = {
+    name: {key: value for key, value in config.items() if key != "steps"}
+    for name, config in STYLE_PIPELINES.items()
+}
+
+
 def apply_style_preset(wav: np.ndarray, sr: int, preset: str, options: Optional[Dict[str, Any]] = None) -> Tuple[np.ndarray, int, Dict[str, Any]]:
     """
     Apply a named audio style preset using a sequence of audio_post operations.
     """
     wav = np.asarray(wav, dtype=np.float32).ravel()
-    applied_steps = []
-
-    pipelines = {
-        "Neutral": [
-            ("normalize_lufs", _normalize_lufs, {"target_lufs": -20.0}),
-            ("limit_peak", limit_peak, {"ceiling_db": -1.0}),
-        ],
-        "Clean": [
-            ("compress", compress, {"threshold_db": -24.0, "ratio": 2.5}),
-            ("normalize_lufs", _normalize_lufs, {"target_lufs": -20.0}),
-            ("limit_peak", limit_peak, {"ceiling_db": -1.0}),
-        ],
-        "Broadcast": [
-            ("compress", compress, {"threshold_db": -20.0, "ratio": 3.0}),
-            ("normalize_lufs", _normalize_lufs, {"target_lufs": -20.0}),
-            ("presence_boost", _apply_presence_boost, {}),
-            ("limit_peak", limit_peak, {"ceiling_db": -1.0}),
-        ],
-        "Calm": [
-            ("time_stretch", _apply_time_stretch, {"factor": 1.05}),
-            ("shape_pauses", _shape_pauses, {"factor": 1.10}),
-            ("warm_eq", _apply_warm_eq, {}),
-            ("normalize_lufs", _normalize_lufs, {"target_lufs": -23.0}),
-            ("limit_peak", limit_peak, {"ceiling_db": -1.0}),
-        ],
-        "Energetic": [
-            ("time_stretch", _apply_time_stretch, {"factor": 0.95}),
-            ("shape_pauses", _shape_pauses, {"factor": 0.90}),
-            ("compress", compress, {"threshold_db": -20.0, "ratio": 2.0}),
-            ("normalize_lufs", _normalize_lufs, {"target_lufs": -20.0}),
-            ("limit_peak", limit_peak, {"ceiling_db": -1.0}),
-        ],
-        "Storyteller": [
-            ("warm_eq", _apply_warm_eq, {}),
-            ("compress", compress, {"threshold_db": -24.0, "ratio": 2.0}),
-            ("shape_pauses", _shape_pauses, {"factor": 1.10}),
-            ("normalize_lufs", _normalize_lufs, {"target_lufs": -23.0}),
-            ("limit_peak", limit_peak, {"ceiling_db": -1.0}),
-        ],
-    }
-
-    pipeline = pipelines.get(preset, pipelines["Neutral"])
+    preset_config = STYLE_PIPELINES.get(preset, STYLE_PIPELINES["Neutral"])
+    resolved_preset = preset if preset in STYLE_PIPELINES else "Neutral"
+    pipeline = preset_config["steps"]
     current_wav = wav.copy()
+
+    if not pipeline:
+        return current_wav, sr, {
+            "applied_steps": [],
+            "preset": preset,
+            "resolved_preset": resolved_preset,
+            "bypassed": True,
+        }
+
+    applied_steps = []
     for name, func, kwargs in pipeline:
         try:
             step_kwargs = kwargs.copy()
@@ -310,4 +332,10 @@ def apply_style_preset(wav: np.ndarray, sr: int, preset: str, options: Optional[
             logger.warning(f"Style preset step {name} failed: {e}. Failing open.")
             applied_steps.append(f"{name}_failed")
 
-    return current_wav, sr, {"applied_steps": applied_steps, "preset": preset}
+    return current_wav, sr, {
+        "applied_steps": applied_steps,
+        "preset": preset,
+        "resolved_preset": resolved_preset,
+        "target_lufs": preset_config["lufs"],
+        "peak_ceiling_db": preset_config["peak"],
+    }

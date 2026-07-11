@@ -26,8 +26,8 @@ export function HealthStatusBanner() {
           className={
             'flex items-center gap-2 border-b px-4 py-1.5 text-xs ' +
             (isFail
-              ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
-              : 'border-amber-500/30 bg-amber-500/10 text-amber-300')
+              ? 'border-destructive/30 bg-destructive/10 text-destructive'
+              : 'border-warning/30 bg-warning/10 text-warning')
           }
         >
           <AlertTriangle className="size-3 shrink-0" />

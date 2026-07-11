@@ -26,8 +26,8 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
-  useSidebar,
 } from '@/components/ui/sidebar'
+import { useSidebar } from '@/components/ui/sidebar-context'
 import { ActivityStatusBar } from '@/components/ui/ActivityStatusBar'
 import { Separator } from '@/components/ui/separator'
 import { SwapBanner } from '@/components/SwapBanner'
@@ -69,9 +69,9 @@ function PocketTTSWarningBanner() {
   if (!isPocketTTS || cloningOk) return null
 
   return (
-    <div className="flex flex-col border-b border-amber-400/50 bg-amber-500/10 px-4 py-2 text-amber-600">
+    <div className="flex flex-col border-b border-warning/50 bg-warning/10 px-4 py-2 text-warning">
       <div className="flex items-center gap-2 text-[11px]">
-        <span className="inline-flex size-2 shrink-0 items-center justify-center rounded-full bg-amber-400 animate-pulse" />
+        <span className="inline-flex size-2 shrink-0 items-center justify-center rounded-full bg-warning animate-pulse" />
         <span className="flex-1">
           Pocket TTS is active, but voice cloning is unavailable until you accept the license on Hugging Face:{' '}
           <a
@@ -216,7 +216,7 @@ function SidebarVersionDisplay() {
       })
   }, [])
 
-  if (error) return <div className="text-center text-[11px] text-red-500">vError</div>
+  if (error) return <div className="text-center text-[11px] text-destructive">vError</div>
   if (!version) return <div className="text-center text-[11px] text-muted-foreground">vLoading...</div>
 
   return (

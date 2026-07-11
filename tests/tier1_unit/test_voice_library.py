@@ -18,6 +18,14 @@ def tmp_voice_dir(tmp_path, monkeypatch):
     yield tmp_path
 
 
+def _clipped_sine_wav_bytes(sr: int = 24000, duration: float = 4.0) -> bytes:
+    t = np.linspace(0.0, duration, int(sr * duration), endpoint=False, dtype=np.float32)
+    tone = (0.99 * np.sin(2 * np.pi * 220.0 * t)).astype(np.float32)
+    buf = io.BytesIO()
+    sf.write(buf, tone, sr, format="WAV", subtype="FLOAT")
+    return buf.getvalue()
+
+
 def _sine_wav_bytes(sr: int = 24000, duration: float = 4.0, amplitude: float = 0.05, lead_silence: float = 0.5) -> bytes:
     t = np.linspace(0.0, duration, int(sr * duration), endpoint=False, dtype=np.float32)
     tone = (amplitude * np.sin(2 * np.pi * 220.0 * t)).astype(np.float32)
@@ -61,6 +69,34 @@ class TestSaveGet:
         )
 
         assert meta["needs_review"] is True
+
+    def test_clipping_reference_is_auto_fixed_and_saved(self):
+        meta = voice_library.save_voice(
+            _clipped_sine_wav_bytes(),
+            description="desc",
+            sample_text="hello there friend",
+            language="English",
+        )
+
+        assert meta["auto_fixed"] is True
+        assert not voice_library._has_clipping_failure(
+            meta["quality_warnings"], meta["metrics"]
+        )
+
+    def test_clipping_reference_still_failing_after_fix_raises(self, monkeypatch):
+        monkeypatch.setattr(
+            voice_library,
+            "calculate_quality_score",
+            lambda *_args, **_kwargs: (10.0, ["clipping detected"], {"peak_dbfs": 0.0}),
+        )
+
+        with pytest.raises(ValueError, match="clipping"):
+            voice_library.save_voice(
+                _clipped_sine_wav_bytes(),
+                description="desc",
+                sample_text="hello there friend",
+                language="English",
+            )
 
 
 class TestPathTraversal:

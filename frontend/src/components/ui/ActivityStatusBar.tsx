@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { Loader2, Timer } from 'lucide-react'
 import { useAppStore } from '@/store'
-import { useSidebar } from '@/components/ui/sidebar'
+import { useSidebar } from '@/components/ui/sidebar-context'
 import { cn } from '@/lib/utils'
 
 function formatEta(s: number) {
@@ -76,7 +76,7 @@ export function ActivityStatusBar() {
     >
       <div
         className={cn(
-          'w-full border-t border-border/70 bg-[#0B0B0F]/96 backdrop-blur-xl transition-[margin,width] duration-200 ease-linear',
+          'w-full border-t border-border/70 bg-surface-1/95 backdrop-blur-xl transition-[margin,width] duration-200 ease-linear',
           sidebarOpen
             ? 'md:ml-64 md:w-[calc(100%-16rem)]'
             : 'md:ml-12 md:w-[calc(100%-3rem)]',

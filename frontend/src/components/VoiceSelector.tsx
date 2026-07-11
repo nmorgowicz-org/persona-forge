@@ -35,7 +35,7 @@ function getSourceBadge(source?: string) {
     'VoiceDesign': { label: 'VoiceDesign', color: 'bg-purple-500/10 text-purple-400 border-purple-500/30' },
     'OmniVoice': { label: 'OmniVoice', color: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30' },
     'Upload': { label: 'Upload', color: 'bg-slate-500/10 text-slate-400 border-slate-500/30' },
-    'Pocket': { label: 'Pocket', color: 'bg-amber-500/10 text-amber-400 border-amber-500/30' },
+    'Pocket': { label: 'Pocket', color: 'bg-warning/10 text-warning border-warning/30' },
   }
   const config = sources[source || '']
   if (!config) return null
@@ -180,7 +180,7 @@ export function VoiceSelector({ voices, builtInVoices = [], voiceId, onChange }:
                           </span>
                           {getSourceBadge(voice.source)}
                           {voice.variant_name && (
-                            <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-amber-300">
+                            <span className="inline-flex items-center rounded-full border border-warning/30 bg-warning/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-warning">
                               {voice.variant_name}
                             </span>
                           )}
@@ -199,7 +199,7 @@ export function VoiceSelector({ voices, builtInVoices = [], voiceId, onChange }:
                           {review && (
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-amber-300">
+                                <span className="inline-flex items-center rounded-full border border-warning/30 bg-warning/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-warning">
                                   Review
                                 </span>
                               </TooltipTrigger>
@@ -255,7 +255,7 @@ export function VoiceSelector({ voices, builtInVoices = [], voiceId, onChange }:
 {review && (
   <Tooltip>
     <TooltipTrigger asChild>
-       <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-amber-300">
+       <span className="inline-flex items-center rounded-full border border-warning/30 bg-warning/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-warning">
         Review
       </span>
     </TooltipTrigger>

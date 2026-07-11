@@ -109,7 +109,7 @@ export function StitchStudioPage() {
         onChange={setDeliveryVariantKind}
       />
 
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
       {isSaving && <p className="text-xs text-muted-foreground">Saving…</p>}
 
       <StitchEditorInline

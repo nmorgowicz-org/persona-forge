@@ -394,7 +394,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden rounded-md border border-amber-900/50 bg-amber-950/30 p-2 text-xs text-amber-300"
+              className="overflow-hidden rounded-md border border-warning/50 bg-warning/30 p-2 text-xs text-warning"
             >
               {message}
             </motion.p>

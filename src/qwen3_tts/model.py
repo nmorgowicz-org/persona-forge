@@ -345,6 +345,12 @@ def load_model(profile: ModelProfile | None = None):
     if TTS_BACKEND not in ("pytorch", "openvino", "pocket_tts"):
         raise RuntimeError(f"Invalid TTS_BACKEND: {TTS_BACKEND!r}")
 
+    print(
+        f"[app_worker] Resolved TTS_BACKEND={TTS_BACKEND!r} "
+        f"(profile={profile.name!r}, model_size={MODEL_SIZE})",
+        flush=True,
+    )
+
     if TTS_BACKEND == "openvino":
         if not profile.ov_model_dir:
             raise RuntimeError(
@@ -743,6 +749,8 @@ def health_state() -> dict[str, Any]:
             "status": "error",
             "service_started": False,
             "model_loaded": False,
+            "backend": TTS_BACKEND,
+            "resolved_backend": TTS_BACKEND,
             "error": _startup_error,
         }
 
@@ -758,6 +766,7 @@ def health_state() -> dict[str, Any]:
         "process_rss_mib": _process_rss_mib(),
         "idle_unload_seconds": idle_unload_seconds,
         "backend": TTS_BACKEND,
+        "resolved_backend": TTS_BACKEND,
         "model": MODEL_ID,
         "model_revision": MODEL_REVISION,
         "device": DEVICE,

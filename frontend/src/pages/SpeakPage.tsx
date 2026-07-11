@@ -63,7 +63,7 @@ function StructuredError({ error }: { error: string }) {
       className={
         'flex flex-col gap-1 rounded-lg border px-3 py-2 text-xs ' +
         (isStrong
-          ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+          ? 'border-warning/40 bg-warning/10 text-warning'
           : 'border-destructive/40 bg-destructive/10 text-destructive')
       }
     >
@@ -339,7 +339,7 @@ export function SpeakPage() {
               {text.length} / 2000
             </p>
             {text.length > 1500 && (
-              <p className="text-[10px] text-amber-500">
+              <p className="text-[10px] text-warning">
                 Very long texts may fail or time out. Consider breaking into shorter pieces.
               </p>
             )}
@@ -494,13 +494,13 @@ export function SpeakPage() {
                {speakJobProgress.elapsed_seconds >= 30 &&
                  speakJobProgress.elapsed_seconds < 60 &&
                  speakJobProgress.status !== 'cancelled' && (
-                   <span className="ml-2 text-[10px] text-amber-500">
+                   <span className="ml-2 text-[10px] text-warning">
                      This is taking longer than usual.
                    </span>
                  )}
                {speakJobProgress.elapsed_seconds >= 60 &&
                  speakJobProgress.status !== 'cancelled' && (
-                   <span className="ml-2 text-[10px] text-amber-500">
+                   <span className="ml-2 text-[10px] text-warning">
                      Generation is in progress; this may take several minutes for longer texts.
                    </span>
                  )}
@@ -574,7 +574,7 @@ export function SpeakPage() {
                 </div>
                 <div className="flex justify-between items-center gap-2">
                   <span className="opacity-60">Status:</span>
-                  <span className="text-emerald-500">Completed</span>
+                  <span className="text-success">Completed</span>
                   <InfoIcon text="Audio successfully generated and downloaded." className="size-3 shrink-0 text-muted-foreground" />
                 </div>
               </div>

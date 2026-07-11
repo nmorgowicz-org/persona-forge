@@ -22,6 +22,23 @@
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  /* Semantic status colors — use these (bg-success / text-warning / border-info)
+     instead of raw palette classes (amber-500, emerald-400, rose-500) so status
+     meaning stays consistent and theme-aware. */
+  --success: oklch(0.62 0.17 152);
+  --success-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.78 0.16 70);
+  --warning-foreground: oklch(0.18 0.02 70);
+  --info: oklch(0.62 0.16 235);
+  --info-foreground: oklch(0.985 0 0);
+  /* Brand accent — the cyan "generate / primary action" gradient. Consumed via
+     the .btn-brand utility below; do not hand-roll this gradient in components. */
+  --brand-from: hsl(190 90% 50%);
+  --brand-to: hsl(210 90% 45%);
+  --brand-glow: 34 211 238;
+  /* Elevated app-chrome surface (status bars, docked panels) above --background. */
+  --surface-1: oklch(0.16 0.005 285);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -98,6 +115,14 @@ html {
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-surface-1: var(--surface-1);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -137,6 +162,14 @@ html {
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.72 0.15 152);
+  --success-foreground: oklch(0.18 0.03 152);
+  --warning: oklch(0.8 0.15 75);
+  --warning-foreground: oklch(0.2 0.03 75);
+  --info: oklch(0.7 0.14 235);
+  --info-foreground: oklch(0.16 0.03 235);
+  --surface-1: oklch(0.185 0.004 285);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
@@ -209,4 +242,44 @@ html {
 @keyframes pulse-subtle {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.85; }
+}
+
+@layer components {
+  /* Primary "generate / commit" call-to-action. Encodes the brand gradient,
+     glow, hover-lift, and disabled treatment so components only add layout
+     (padding, radius, gap) — see docs/dev/DESIGN_SYSTEM.md. */
+  .btn-brand {
+    background-image: linear-gradient(to right, var(--brand-from), var(--brand-to));
+    color: var(--background);
+    box-shadow: 0 4px 15px rgb(var(--brand-glow) / 0.25);
+    transition-property: transform, box-shadow, opacity;
+    transition-duration: 150ms;
+  }
+  .btn-brand:hover:not(:disabled) {
+    transform: scale(1.02);
+    box-shadow: 0 8px 25px rgb(var(--brand-glow) / 0.35);
+  }
+  .btn-brand:disabled {
+    opacity: 0.5;
+    box-shadow: none;
+  }
+
+  /* Status pill/badge. Compose with a tone class: .status-tone-{success,warning,
+     info,danger,neutral}. Tone classes set the semantic color via a single
+     --status var so the tint/text/border stay in lockstep. */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 9999px;
+    border-width: 1px;
+    border-color: color-mix(in oklch, var(--status) 35%, transparent);
+    background-color: color-mix(in oklch, var(--status) 12%, transparent);
+    color: var(--status);
+  }
+  .status-tone-success { --status: var(--success); }
+  .status-tone-warning { --status: var(--warning); }
+  .status-tone-info { --status: var(--info); }
+  .status-tone-danger { --status: var(--destructive); }
+  .status-tone-neutral { --status: var(--muted-foreground); }
 }

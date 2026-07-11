@@ -58,6 +58,33 @@ def _has_clipping_failure(quality_warnings: list[str], metrics: dict[str, Any]) 
     return any("clipping" in warning.lower() for warning in quality_warnings)
 
 
+def _analyze_wav_bytes(wav_bytes: bytes, transcript: str | None) -> tuple[float, list[str], dict[str, Any]]:
+    with tempfile.NamedTemporaryFile(dir=VOICE_LIBRARY_DIR, suffix=".wav", delete=False) as tmp:
+        tmp.write(wav_bytes)
+        tmp_path = Path(tmp.name)
+    try:
+        return calculate_quality_score(tmp_path, transcript=transcript)
+    finally:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+
+
+def _auto_fix_clipping(wav_bytes: bytes) -> bytes:
+    """Run the same peak-limit/loudness pass as normalize_reference() on raw upload bytes.
+
+    Applied once, before the quality gate, so a clipped reference doesn't need a round trip
+    through a rejected save just to get the same fix normalize_reference() would apply anyway.
+    """
+    wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+    wav = np.asarray(wav, dtype=np.float32).ravel()
+    fixed_wav, sr, _ = apply_style_preset(wav, sr, "Neutral")
+    buf = io.BytesIO()
+    sf.write(buf, fixed_wav, sr, format="WAV", subtype="PCM_16")
+    return buf.getvalue()
+
+
 def save_voice(
     wav_bytes: bytes,
     *,
@@ -80,20 +107,24 @@ def save_voice(
     scratch (docs/dev/architecture/voice_design.md §8.3 tune/tweak workflow).
     """
     VOICE_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=VOICE_LIBRARY_DIR, suffix=".wav", delete=False) as tmp:
-        tmp.write(wav_bytes)
-        tmp_path = Path(tmp.name)
-    try:
-        # Perform reference analysis and quality gating before the clip enters the library.
-        quality_score, quality_warnings, metrics = calculate_quality_score(tmp_path, transcript=sample_text)
-    finally:
-        try:
-            tmp_path.unlink()
-        except OSError:
-            pass
 
+    # Perform reference analysis and quality gating before the clip enters the library
+    # (Plan R1). A clipping failure gets one automatic peak-limit/normalize pass — the same
+    # fix normalize_reference() offers post-save — before hard-blocking the save.
+    quality_score, quality_warnings, metrics = _analyze_wav_bytes(wav_bytes, sample_text)
+    auto_fixed = False
     if _has_clipping_failure(quality_warnings, metrics):
-        raise ValueError("Reference audio failed quality gate: clipping detected.")
+        fixed_bytes = _auto_fix_clipping(wav_bytes)
+        fixed_score, fixed_warnings, fixed_metrics = _analyze_wav_bytes(fixed_bytes, sample_text)
+        if _has_clipping_failure(fixed_warnings, fixed_metrics):
+            raise ValueError("Reference audio failed quality gate: clipping detected.")
+        wav_bytes, quality_score, quality_warnings, metrics = (
+            fixed_bytes,
+            fixed_score,
+            fixed_warnings,
+            fixed_metrics,
+        )
+        auto_fixed = True
 
     voice_id = new_voice_id()
     voice_dir = _voice_dir(voice_id)
@@ -117,6 +148,7 @@ def save_voice(
         "quality_score": quality_score,
         "quality_warnings": quality_warnings,
         "needs_review": bool(quality_warnings),
+        "auto_fixed": auto_fixed,
     }
     (voice_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta
