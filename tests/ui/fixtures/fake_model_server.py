@@ -133,13 +133,15 @@ def _patch_omnivoice_run_job(app_module):
     app_module.omnivoice_engine.swap_in_progress = lambda: False
     app_module.omnivoice_engine.mark_swap_pending = lambda: None
 
-def _patch_save_voice(app_module):
-    """Ensures the voice library save_voice is mocked.
-    
-    Since FakeModelRuntime is already installed, app_module.voice_library
-    is already a FakeVoiceLibrary instance.
-    """
-    pass
+def _patch_save_voice(app_module, rt):
+    """Route app-level voice library calls to the in-memory fake library."""
+    fake_library = rt.voice_library
+    app_module.voice_library.save_voice = fake_library.save_voice
+    app_module.voice_library.get_voice = fake_library.get_voice
+    app_module.voice_library.get_voice_wav_bytes = fake_library.get_voice_wav_bytes
+    app_module.voice_library.update_voice = fake_library.update_voice
+    app_module.voice_library.delete_voice = fake_library.delete_voice
+    app_module.voice_library.list_voices = fake_library.list_voices
 
 
 
@@ -170,7 +172,7 @@ def main() -> None:
 
     _install_fake_voice_design(app_module)
     _patch_omnivoice_run_job(app_module)
-    _patch_save_voice(app_module)
+    _patch_save_voice(app_module, rt)
 
     from werkzeug.serving import make_server  # noqa: E402
 
@@ -210,7 +212,7 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
 
     _install_fake_voice_design(app_module)
     _patch_omnivoice_run_job(app_module)
-    _patch_save_voice(app_module)
+    _patch_save_voice(app_module, rt)
 
     shutdown_event = threading.Event()
     app_module._shutdown_hook = shutdown_event.set

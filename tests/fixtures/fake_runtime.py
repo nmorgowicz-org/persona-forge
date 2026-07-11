@@ -39,35 +39,70 @@ class FakeOmniVoiceEngine:
 
 class FakeVoiceLibrary:
     """Fake voice library for mocking voice saving/loading.
-    
+
     It maintains a simple in-memory dictionary of 'saved' voices.
     """
     def __init__(self):
         self.voices = {}
+        self.wav_bytes = {}
         self._voice_counter = 0
 
-    def save_voice(self, wav_bytes, description, sample_text, language, 
-                    selections, family_id=None, variant_name=None, variant_kind=None):
+    def save_voice(
+        self,
+        wav_bytes,
+        *,
+        description,
+        sample_text,
+        language,
+        seed=None,
+        selections=None,
+        family_id=None,
+        variant_name=None,
+        variant_kind=None,
+        source=None,
+        **_kwargs,
+    ):
         voice_id = f"fake_voice_{len(self.voices)}"
         meta = {
             "voice_id": voice_id,
             "description": description,
             "sample_text": sample_text,
             "language": language,
+            "seed": seed,
             "selections": selections,
             "family_id": family_id,
             "variant_name": variant_name,
             "variant_kind": variant_kind,
+            "source": source,
+            "quality_score": 100.0,
+            "quality_warnings": [],
+            "needs_review": False,
+            "auto_fixed": False,
+            "metrics": {},
         }
         self.voices[voice_id] = meta
+        self.wav_bytes[voice_id] = wav_bytes
         return meta
 
     def get_voice(self, voice_id):
         return self.voices.get(voice_id)
 
+    def get_voice_wav_bytes(self, voice_id):
+        return self.wav_bytes.get(voice_id)
+
+    def update_voice(self, voice_id, *, sample_text):
+        meta = self.voices.get(voice_id)
+        if meta is None:
+            return None
+        meta["sample_text"] = sample_text
+        meta["sample_text_source"] = "user"
+        meta["needs_review"] = False
+        return meta
+
     def delete_voice(self, voice_id):
         if voice_id in self.voices:
             del self.voices[voice_id]
+            self.wav_bytes.pop(voice_id, None)
         return True
 
     def list_voices(self):
