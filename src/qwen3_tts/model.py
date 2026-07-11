@@ -13,7 +13,7 @@ from qwen3_tts import __version__
 
 # Apply thread and runtime envs before heavy imports
 from qwen3_tts.asr_check import transcribe_reference_audio, validate_reference_text
-from qwen3_tts.config import REF_AUDIO_PATH, apply_preset_env
+from qwen3_tts.config import REF_AUDIO_PATH, apply_preset_env, normalize_backend
 from qwen3_tts.openvino.runtime_config import apply_thread_env, resolve_inference_threads
 from qwen3_tts.presets import get_voice_design_preset, seconds_for_capacity
 from qwen3_tts.audio_style import apply_style_preset
@@ -44,7 +44,7 @@ from qwen_tts import Qwen3TTSModel
 MODEL_ID = resolve_model_repo()
 MODEL_REVISION = os.getenv("MODEL_REVISION") or None
 DEVICE = os.getenv("DEVICE", "cpu")
-TTS_BACKEND = (os.getenv("TTS_BACKEND", "pytorch") or "pytorch").strip().lower()
+TTS_BACKEND = normalize_backend(os.getenv("TTS_BACKEND") or "pytorch")
 REF_AUDIO = (os.getenv("REF_AUDIO") or REF_AUDIO_PATH).strip() or None
 REF_TEXT = (os.getenv("REF_TEXT") or "").strip()
 REF_TEXT_SOURCE = "env" if REF_TEXT else "unset"
