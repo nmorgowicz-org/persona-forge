@@ -32,7 +32,7 @@ def apply_preset_env(environ: MutableMapping[str, str] = os.environ) -> dict[str
     ``TTS_BACKEND=pytorch`` is requested, the OpenVINO defaults are still set but ignored by the
     PyTorch backend, preserving the zero-IR rollback path.
     """
-    model_size = environ.get("MODEL_SIZE", "0.6B")
+    model_size = environ.get("MODEL_SIZE", "1.7B")
     environ["MODEL_SIZE"] = normalize_size(model_size)
 
     max_speech_seconds = environ.get("TTS_MAX_SPEECH_SECONDS")

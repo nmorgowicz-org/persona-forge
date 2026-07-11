@@ -145,7 +145,7 @@ def get_voice_design_preset(
 
 def normalize_size(model_size: str | None) -> str:
     """Return the canonical preset key for a user-supplied MODEL_SIZE (case-insensitive)."""
-    key = (model_size or "0.6B").strip()
+    key = (model_size or "1.7B").strip()
     for preset_key in PRESETS:
         if preset_key.lower() == key.lower():
             return preset_key

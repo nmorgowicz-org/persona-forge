@@ -347,7 +347,7 @@ def load_model(profile: ModelProfile | None = None):
 
     print(
         f"[app_worker] Resolved TTS_BACKEND={TTS_BACKEND!r} "
-        f"(profile={profile.name!r}, model_size={MODEL_SIZE})",
+        f"(profile={profile.name!r}, model_size={os.getenv('MODEL_SIZE', '1.7B')})",
         flush=True,
     )
 

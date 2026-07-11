@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+import threading
 import types
 from pathlib import Path
 
@@ -33,7 +34,23 @@ _MODEL_PY = Path(__file__).resolve().parents[2] / "src" / "qwen3_tts" / "model.p
 def model_module(monkeypatch, tmp_path):
     fake_qwen_tts = types.ModuleType("qwen_tts")
 
+    class _FakeInnerModel:
+        tts_model_type = "base"
+
+        def named_modules(self):
+            return []
+
+    class _FakeOuterModel:
+        def __init__(self):
+            self.model = _FakeInnerModel()
+
+        def named_modules(self):
+            return []
+
     class _FakeQwen3TTSModel:
+        def __init__(self):
+            self.model = _FakeOuterModel()
+
         @classmethod
         def from_pretrained(cls, *args, **kwargs):
             return cls()
@@ -52,6 +69,18 @@ def model_module(monkeypatch, tmp_path):
     # sys.modules["qwen3_tts.model"]/"qwen3_tts" package cache (e.g. tier2_backend/conftest.py
     # permanently replaces sys.modules["qwen3_tts.model"] with FakeModelRuntime at collection
     # time). model.py has no relative imports, so executing it under an unrelated name is safe.
+    class _NoStartThread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def join(self, timeout=None):
+            pass
+
+    monkeypatch.setattr(threading, "Thread", _NoStartThread)
+
     spec = importlib.util.spec_from_file_location("_model_under_test", _MODEL_PY)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)

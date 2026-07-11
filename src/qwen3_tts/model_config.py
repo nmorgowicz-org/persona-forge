@@ -69,7 +69,7 @@ def resolve_model_repo(environ: MutableMapping[str, str] = os.environ) -> str:
     if override:
         return override
 
-    model_size = environ.get("MODEL_SIZE", "0.6B").strip().upper()
+    model_size = environ.get("MODEL_SIZE", "1.7B").strip().upper()
     try:
         return MODEL_PRESETS[model_size]
     except KeyError as exc:
