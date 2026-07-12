@@ -384,44 +384,8 @@ function FingerprintDelta({ label, refVal, prevVal, unit = '' }: { label: string
   )
 }
 
-function PreviewFingerprint({ metrics, refMetrics }: { metrics: VoiceReferenceMetrics; refMetrics: VoiceReferenceMetrics }) {
-  return (
-    <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-2">
-      <div className="mb-2 flex items-center justify-between">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-cyan-400">Preview Impact</p>
-        <Sparkles className="size-3 text-cyan-400" />
-      </div>
-      <div className="grid gap-1">
-        <FingerprintDelta 
-          label="Duration" 
-          refVal={refMetrics.duration_seconds ?? 0} 
-          prevVal={metrics.duration_seconds ?? 0} 
-          unit="s" 
-        />
-        <FingerprintDelta 
-          label="Speech Rate" 
-          refVal={refMetrics.speech_rate_proxy ?? 0} 
-          prevVal={metrics.speech_rate_proxy ?? 0} 
-          unit=" w/s" 
-        />
-        <FingerprintDelta 
-          label="Pause Ratio" 
-          refVal={metrics.pause_ratio ?? 0} 
-          prevVal={metrics.pause_ratio ?? 0} 
-          unit="%" 
-        />
-        <FingerprintDelta 
-          label="Loudness" 
-          refVal={refMetrics.lufs_integrated ?? 0} 
-          prevVal={metrics.lufs_integrated ?? 0} 
-          unit=" LUFS" 
-        />
-      </div>
-    </div>
-  )
-}
-
 function VoiceSourceBadges({ voice }: { voice: VoiceMeta }) {
+
   const sourceBadges = getSourceBadges(voice)
   const useCaseBadges = getUseCaseBadges(voice)
 
