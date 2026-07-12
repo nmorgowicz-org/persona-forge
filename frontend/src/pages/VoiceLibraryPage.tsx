@@ -1017,10 +1017,12 @@ function VoiceCard({
               <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
             </div>
 
-              <div className="relative">
-                <div className="absolute -top-2 left-2 z-10 rounded bg-cyan-500 px-1 py-px text-[9px] font-bold text-white">PREVIEW</div>
-                <MiniAudioDeck src={previewAudio.url} blob={previewAudio.blob} autoPlay={false} />
-              </div>
+               <div className="relative">
+                 <div className="absolute -top-2 left-2 z-10 rounded bg-cyan-500 px-1 py-px text-[9px] font-bold text-white">
+                   {stylePreset.toUpperCase()} PREVIEW
+                 </div>
+                 <MiniAudioDeck src={previewAudio.url} blob={previewAudio.blob} autoPlay={false} />
+               </div>
             </div>
           ) : (
             <VoiceAudioAutoPlayer voiceId={voice.voice_id} />

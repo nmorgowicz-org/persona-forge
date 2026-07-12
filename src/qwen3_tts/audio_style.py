@@ -153,9 +153,9 @@ def _apply_time_stretch(wav: np.ndarray, sr: int, factor: float) -> Tuple[np.nda
     rate = 1.0 / factor
     return librosa.effects.time_stretch(wav, rate=rate).astype(np.float32), float(factor)
 
-def get_pause_targets(prompt: str, style_preset: str, pace_multiplier: float, gap_count: int, pause_offset_ms: float = 0.0) -> List[float]:
+def get_pause_targets(prompt: str, style_preset: str, pace_multiplier: float, gap_count: int, pause_offset_ms: float = 0.0) -> List[Tuple[float, str]]:
     """
-    Calculate target durations (in seconds) for a sequence of gaps based on 
+    Calculate target durations (in seconds) and trigger types for a sequence of gaps based on 
     punctuation in the prompt and a style preset.
     """
     prosody = PROSODY_MAPS.get(style_preset, PROSODY_MAPS["Neutral"])
@@ -183,7 +183,7 @@ def get_pause_targets(prompt: str, style_preset: str, pace_multiplier: float, ga
             target_key = "natural"
         
         target_ms = prosody.get(target_key, prosody["natural"])
-        targets.append((target_ms * pace_multiplier + pause_offset_ms) / 1000.0)
+        targets.append(((target_ms * pace_multiplier + pause_offset_ms) / 1000.0, target_key))
         
     return targets
 
@@ -212,18 +212,20 @@ def _shape_pauses(wav: np.ndarray, sr: int, prompt: str = "", style_preset: str 
             gap_len = start - last_end
             
             if gap_len > 0:
-                if i > 0:
-                    # Only expand significant gaps (>= 20ms) to avoid phantom pauses
-                         # Distinguish between micro-pauses (word-level) and structural pauses (phrase-level)
-                         if gap_len < 0.1:
-                             # Micro-pause: scale proportionally to preserve natural word spacing
-                             new_gap_len = int(gap_len * pace_multiplier * sr)
-                             new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
-                         else:
-                             # Structural pause: use the specific target for this interior gap
-                             target_sec = targets[i-1] if (i-1) < len(targets) else targets[-1]
-                             new_gap_len = max(1, int(target_sec * sr))
-                             new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
+                    if i > 0:
+                        # Only expand significant gaps (>= 20ms) to avoid phantom pauses
+                        # Distinguish between micro-pauses (word-level) and structural pauses (phrase-level)
+                        
+                        target_sec, trigger_type = targets[i-1] if (i-1) < len(targets) else (targets[-1][0], "natural")
+                        
+                        if gap_len < 0.1 and trigger_type == "natural":
+                            # Micro-pause: scale proportionally to preserve natural word spacing
+                            new_gap_len = int(gap_len * pace_multiplier * sr)
+                            new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
+                        else:
+                            # Structural pause or significant natural gap: use the specific target
+                            new_gap_len = max(1, int(target_sec * sr))
+                            new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
                 else:
                     # Boundary silence: leave as is
                     new_wav_parts.append(wav[last_end:start])

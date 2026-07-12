@@ -124,13 +124,13 @@ def get_prosody_adjusted_wav(
         mid_sec = (start_sec + end_sec) / 2.0
         
         # Micro-pause protection: preserve natural word spacing for gaps < 100ms
-        if dur_sec < 0.1:
+        target_sec, trigger_type = targets[i] if i < len(targets) else (targets[-1][0], "natural")
+        
+        if dur_sec < 0.1 and trigger_type == "natural":
             # Only scale proportionally to avoid "blowing up" tiny gaps
             # We'll just let these be, or you could apply pace_multiplier here
             continue
             
-        target_sec = targets[i] if i < len(targets) else targets[-1]
-
         if dur_sec > target_sec + 0.01:
             cut_sec = dur_sec - target_sec
             edits.append({
