@@ -106,8 +106,13 @@ const useReducedMotion = () => {
   return reduced
 }
 
-function isMountedRef(voice: VoiceMeta): boolean {
-  return (voice as VoiceMeta & { source?: string }).source === MOUNTED_REF_SOURCE
+const STYLE_DESCRIPTIONS: Record<string, string> = {
+  Neutral: 'Natural pacing and standard pauses.',
+  Storyteller: 'Dramatic, extended pauses for narrative effect.',
+  Calm: 'Slow and relaxed pacing with longer gaps.',
+  Energetic: 'Fast, punchy delivery with minimal pauses.',
+  Broadcast: 'Professional, clear pacing with controlled gaps.',
+  Clean: 'Precise and minimal pauses for high clarity.',
 }
 
 // needs_review is set from the audio quality gate (quality_warnings) for regular saves and
@@ -734,6 +739,7 @@ function VoiceCard({
   const [activeVariant, setActiveVariant] = useState<string | null>(null)
   const [prosodyBusy, setProsodyBusy] = useState(false)
   const [previewBusy, setPreviewBusy] = useState(false)
+  const [previewAudio, setPreviewAudio] = useState<{ url: string; blob: Blob } | null>(null)
   const [analysisExpanded, setAnalysisExpanded] = useState(() => localStorage.getItem('voice-library-analysis-expanded') !== 'false')
   const [preserveOriginal, setPreserveOriginal] = useState(true)
   const [editorVoiceId, setEditorVoiceId] = useState(voice.voice_id)
@@ -935,7 +941,27 @@ function VoiceCard({
         <VoiceMetricsPanel metrics={metrics} busy={busy} onAnalyze={onAnalyze} expanded={analysisExpanded} onToggle={() => setAnalysisExpanded((value) => { localStorage.setItem('voice-library-analysis-expanded', String(!value)); return !value })} layoutMode={layoutMode} />
 
 
-      <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
+       <div className="relative group">
+         {previewAudio ? (
+           <div className="relative">
+             <div className="absolute -top-2 left-2 z-10 rounded bg-cyan-500 px-1 py-px text-[9px] font-bold text-white">PREVIEW</div>
+             <MiniAudioDeck src={previewAudio.url} blob={previewAudio.blob} autoPlay={false} />
+           </div>
+         ) : (
+           <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
+         )}
+         {previewAudio && (
+           <button
+             onClick={() => {
+               URL.revokeObjectURL(previewAudio.url)
+               setPreviewAudio(null)
+             }}
+             className="absolute right-2 top-1/2 -translate-y-1/2 rounded bg-background/80 p-1 text-[10px] hover:bg-background opacity-0 group-hover:opacity-100 transition-opacity"
+           >
+             Clear
+           </button>
+         )}
+       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" className="min-w-32" onClick={onUse}>
@@ -951,18 +977,24 @@ function VoiceCard({
            <PopoverContent align="start" className="w-72">
              <p className="text-xs font-medium mb-2">Prosody Settings</p>
              <div className="space-y-3">
-               <div className="flex flex-col gap-1.5">
-                 <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Style Preset</label>
-                 <select
-                   value={stylePreset}
-                   onChange={(e) => setStylePreset(e.target.value)}
-                   className="w-full rounded bg-background px-2 py-1 text-xs outline-none border border-border"
-                 >
-                   {['Neutral', 'Storyteller', 'Calm', 'Energetic', 'Broadcast', 'Clean'].map(s => (
-                     <option key={s} value={s}>{s}</option>
-                   ))}
-                 </select>
-               </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Style Preset</label>
+                  <select
+                    value={stylePreset}
+                    onChange={(e) => {
+                      setStylePreset(e.target.value)
+                      setPreviewAudio(null)
+                    }}
+                    className="w-full rounded bg-background px-2 py-1 text-xs outline-none border border-border"
+                  >
+                    {Object.keys(STYLE_DESCRIPTIONS).map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-muted-foreground italic">
+                    {STYLE_DESCRIPTIONS[stylePreset]}
+                  </p>
+                </div>
                <div className="flex flex-col gap-1.5">
                  <div className="flex justify-between items-center">
                    <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Pace Multiplier</label>
@@ -976,29 +1008,27 @@ function VoiceCard({
                  />
                </div>
                 <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy || prosodyBusy || previewBusy}
-                    onClick={async () => {
-                      setPreviewBusy(true)
-                      try {
-                        const response = await fetch(`/voices/${voice.voice_id}/preview-prosody?style_preset=${encodeURIComponent(stylePreset)}&pace_multiplier=${paceMultiplier}`)
-                        if (!response.ok) throw new Error('Preview fetch failed')
-                        const blob = await response.blob()
-                        const url = URL.createObjectURL(blob)
-                        const audio = new Audio(url)
-                        audio.play()
-                        audio.onended = () => URL.revokeObjectURL(url)
-                      } catch (err) {
-                        console.error('Prosody preview failed:', err)
-                      } finally {
-                        setPreviewBusy(false)
-                      }
-                    }}
-                  >
-                    <Play className="size-3.5" /> Preview
-                  </Button>
+                   <Button
+                     size="sm"
+                     variant="outline"
+                     disabled={busy || prosodyBusy || previewBusy}
+                     onClick={async () => {
+                       setPreviewBusy(true)
+                       try {
+                         const response = await fetch(`/voices/${voice.voice_id}/preview-prosody?style_preset=${encodeURIComponent(stylePreset)}&pace_multiplier=${paceMultiplier}`)
+                         if (!response.ok) throw new Error('Preview fetch failed')
+                         const blob = await response.blob()
+                         const url = URL.createObjectURL(blob)
+                         setPreviewAudio({ url, blob })
+                       } catch (err) {
+                         console.error('Prosody preview failed:', err)
+                       } finally {
+                         setPreviewBusy(false)
+                       }
+                     }}
+                   >
+                     {previewAudio ? <Undo2 className="size-3.5" /> : <Play className="size-3.5" />} {previewAudio ? 'Reset Preview' : 'Preview'}
+                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
