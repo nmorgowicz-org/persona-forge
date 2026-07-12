@@ -1,6 +1,15 @@
 # Qwen3-TTS OpenVINO — Agent Guide
 
+## Agent Operational Guidelines
+
+To ensure code integrity and prevent accidental deletions:
+- **Post-Edit Diffing**: Run `git diff` after non-trivial edits to verify exactly what changed.
+- **Precise Anchoring**: Insert new code above or below existing blocks rather than replacing function signatures.
+- **Context Verification**: Re-read the surrounding block before editing to ensure the `oldString` is unique and non-destructive.
+- **Verification**: Always run provided lint/typecheck commands after implementation.
+
 ## Shell command policy
+
 
 - Do not use `rtk` in this repository. Run normal shell commands directly.
 

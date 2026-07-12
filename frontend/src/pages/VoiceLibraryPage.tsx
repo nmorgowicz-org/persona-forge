@@ -369,6 +369,58 @@ function metricLevel(value: number | null, min: number, max: number): number {
   return Math.min(1, Math.max(0, (value - min) / (max - min)))
 }
 
+function FingerprintDelta({ label, refVal, prevVal, unit = '' }: { label: string; refVal: number | null; prevVal: number | null; unit?: string }) {
+  if (refVal === null || prevVal === null) return null
+  const delta = prevVal - refVal
+  const color = delta > 0 ? 'text-success' : delta < 0 ? 'text-destructive' : 'text-muted-foreground'
+  const sign = delta > 0 ? '+' : ''
+  return (
+    <div className="flex items-center justify-between gap-2 py-0.5 border-b border-border/30 last:border-0">
+      <span className="text-[10px] text-muted-foreground">{label}</span>
+      <span className={cn('font-mono text-[10px] font-medium', color)}>
+        {sign}{delta.toFixed(2)}{unit}
+      </span>
+    </div>
+  )
+}
+
+function PreviewFingerprint({ metrics, refMetrics }: { metrics: VoiceReferenceMetrics; refMetrics: VoiceReferenceMetrics }) {
+  return (
+    <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-2">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-cyan-400">Preview Impact</p>
+        <Sparkles className="size-3 text-cyan-400" />
+      </div>
+      <div className="grid gap-1">
+        <FingerprintDelta 
+          label="Duration" 
+          refVal={refMetrics.duration_seconds ?? 0} 
+          prevVal={metrics.duration_seconds ?? 0} 
+          unit="s" 
+        />
+        <FingerprintDelta 
+          label="Speech Rate" 
+          refVal={refMetrics.speech_rate_proxy ?? 0} 
+          prevVal={metrics.speech_rate_proxy ?? 0} 
+          unit=" w/s" 
+        />
+        <FingerprintDelta 
+          label="Pause Ratio" 
+          refVal={metrics.pause_ratio ?? 0} 
+          prevVal={metrics.pause_ratio ?? 0} 
+          unit="%" 
+        />
+        <FingerprintDelta 
+          label="Loudness" 
+          refVal={refMetrics.lufs_integrated ?? 0} 
+          prevVal={metrics.lufs_integrated ?? 0} 
+          unit=" LUFS" 
+        />
+      </div>
+    </div>
+  )
+}
+
 function VoiceSourceBadges({ voice }: { voice: VoiceMeta }) {
   const sourceBadges = getSourceBadges(voice)
   const useCaseBadges = getUseCaseBadges(voice)
@@ -487,7 +539,7 @@ function VoiceMetricChip({
   )
 }
 
-function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle, layoutMode }: { metrics: VoiceReferenceMetrics | null; busy: boolean; onAnalyze: () => void; expanded: boolean; onToggle: () => void; layoutMode: string }) {
+function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle, previewMetrics, layoutMode }: { metrics: VoiceReferenceMetrics | null; busy: boolean; onAnalyze: () => void; expanded: boolean; onToggle: () => void; previewMetrics: VoiceReferenceMetrics | null; layoutMode: string }) {
   if (!metrics) return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-border/60 bg-muted/10 p-3">
       <div><p className="text-xs font-medium">Reference analysis unavailable</p><p className="text-[10px] text-muted-foreground">Analyze this saved WAV to add duration, pacing, pause, loudness, and peak data.</p></div>
@@ -525,41 +577,47 @@ function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle, layou
         )}
       </div>
 
-      <div className={cn(
-        "grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]",
-        layoutMode === 'list' && "grid-cols-1",
-        layoutMode === 'grid-3' && "max-w-sm mx-auto"
-      )}>
-        <div className="grid grid-cols-2 gap-1.5">
-          <VoiceMetricChip label="Duration" value={formatDuration(metrics.duration_seconds)} />
-          <VoiceMetricChip
-            label="Speech rate"
-            value={`${formatNumber(speechRate, 2)} w/s`}
-            help="Approximate words per second from transcript-aware analysis when available."
-          />
-          <VoiceMetricChip
-            label="Pause"
-            value={`${formatPercent(metrics.pause_ratio)} (${formatNumber(pauseCount, 0)} gaps)`}
-            help="How much of the reference is silence or low-energy gaps, plus detected pause count."
-          />
-          <VoiceMetricChip
-            label="LUFS"
-            value={formatNumber(metrics.lufs_integrated, 1, ' LUFS')}
-            help="Integrated perceived loudness. More negative values are quieter."
-          />
-          <VoiceMetricChip
-            label="Peak"
-            value={formatNumber(metrics.peak_dbfs, 1, ' dBFS')}
-            help="Highest sample peak in the reference."
-          />
-          <VoiceMetricChip
-            label="True peak"
-            value={formatNumber(truePeak, 1, ' dBTP')}
-            help="Estimated inter-sample peak when available."
-          />
+        <div className={cn(
+          "grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]",
+          layoutMode === 'list' && "grid-cols-1",
+          layoutMode === 'grid-3' && "max-w-sm mx-auto"
+        )}>
+          <div className="grid grid-cols-2 gap-1.5">
+            <VoiceMetricChip label="Duration" value={formatDuration(metrics.duration_seconds)} />
+            <VoiceMetricChip
+              label="Speech rate"
+              value={`${formatNumber(speechRate, 2)} w/s`}
+              help="Approximate words per second from transcript-aware analysis when available."
+            />
+            <VoiceMetricChip
+              label="Pause"
+              value={`${formatPercent(metrics.pause_ratio)} (${formatNumber(pauseCount, 0)} gaps)`}
+              help="How much of the reference is silence or low-energy gaps, plus detected pause count."
+            />
+            <VoiceMetricChip
+              label="LUFS"
+              value={formatNumber(metrics.lufs_integrated, 1, ' LUFS')}
+              help="Integrated perceived loudness. More negative values are quieter."
+            />
+            <VoiceMetricChip
+              label="Peak"
+              value={formatNumber(metrics.peak_dbfs, 1, ' dBFS')}
+              help="Highest sample peak in the reference."
+            />
+            <VoiceMetricChip
+              label="True peak"
+              value={formatNumber(truePeak, 1, ' dBTP')}
+              help="Estimated inter-sample peak when available."
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <VoiceFingerprint metrics={metrics} />
+            {previewMetrics && (
+              <PreviewFingerprint metrics={previewMetrics} refMetrics={metrics} />
+            )}
+          </div>
         </div>
-        <VoiceFingerprint metrics={metrics} />
-      </div>
+
       </div>}
     </div>
   )
@@ -730,6 +788,7 @@ function VoiceCard({
   onAnalyze: () => void
   onUndo: () => void
 }) {
+
   const reducedMotion = useReducedMotion()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(voice.sample_text)
@@ -744,6 +803,7 @@ function VoiceCard({
   const [prosodyBusy, setProsodyBusy] = useState(false)
   const [previewBusy, setPreviewBusy] = useState(false)
   const [previewAudio, setPreviewAudio] = useState<{ url: string; blob: Blob } | null>(null)
+  const [previewMetrics, setPreviewMetrics] = useState<VoiceReferenceMetrics | null>(null)
   const [analysisExpanded, setAnalysisExpanded] = useState(() => localStorage.getItem('voice-library-analysis-expanded') !== 'false')
   const [preserveOriginal, setPreserveOriginal] = useState(true)
   const [editorVoiceId, setEditorVoiceId] = useState(voice.voice_id)
@@ -942,7 +1002,9 @@ function VoiceCard({
          onFixAll={onFixAll}
        />
 
-        <VoiceMetricsPanel metrics={metrics} busy={busy} onAnalyze={onAnalyze} expanded={analysisExpanded} onToggle={() => setAnalysisExpanded((value) => { localStorage.setItem('voice-library-analysis-expanded', String(!value)); return !value })} layoutMode={layoutMode} />
+          <VoiceMetricsPanel metrics={metrics} busy={busy} onAnalyze={onAnalyze} expanded={analysisExpanded} onToggle={() => setAnalysisExpanded((value) => { localStorage.setItem('voice-library-analysis-expanded', String(!value)); return !value })} previewMetrics={previewMetrics} layoutMode={layoutMode} />
+
+
 
 
        <div className="relative group">
@@ -1016,20 +1078,23 @@ function VoiceCard({
                      size="sm"
                      variant="outline"
                      disabled={busy || prosodyBusy || previewBusy}
-                     onClick={async () => {
-                       setPreviewBusy(true)
-                       try {
-                         const response = await fetch(`/voices/${voice.voice_id}/preview-prosody?style_preset=${encodeURIComponent(stylePreset)}&pace_multiplier=${paceMultiplier}`)
-                         if (!response.ok) throw new Error('Preview fetch failed')
-                         const blob = await response.blob()
-                         const url = URL.createObjectURL(blob)
-                         setPreviewAudio({ url, blob })
-                       } catch (err) {
-                         console.error('Prosody preview failed:', err)
-                       } finally {
-                         setPreviewBusy(false)
-                       }
-                     }}
+                      onClick={async () => {
+                        setPreviewBusy(true)
+                        try {
+                          const response = await fetch(`/voices/${voice.voice_id}/preview-prosody?style_preset=${encodeURIComponent(stylePreset)}&pace_multiplier=${paceMultiplier}`)
+                          if (!response.ok) throw new Error('Preview fetch failed')
+                          const data = await response.json()
+                          const blob = new Blob([Uint8Array.from(atob(data.audio_base64), c => c.charCodeAt(0))], { type: 'audio/wav' })
+                          const url = URL.createObjectURL(blob)
+                          setPreviewAudio({ url, blob })
+                          setPreviewMetrics(data.metrics)
+                        } catch (err) {
+                          console.error('Prosody preview failed:', err)
+                        } finally {
+                          setPreviewBusy(false)
+                        }
+                      }}
+
                    >
                      {previewAudio ? <Undo2 className="size-3.5" /> : <Play className="size-3.5" />} {previewAudio ? 'Reset Preview' : 'Preview'}
                    </Button>
