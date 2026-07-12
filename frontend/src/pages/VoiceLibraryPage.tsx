@@ -522,17 +522,26 @@ function VoiceFingerprint({ metrics }: { metrics: VoiceReferenceMetrics }) {
 function VoiceMetricChip({
   label,
   value,
+  delta,
   help,
 }: {
   label: string
   value: string
+  delta?: { value: string; isPositive: boolean }
   help?: string
 }) {
   return (
     <div className="min-w-0 rounded-md border border-border/60 bg-background/50 px-2 py-1">
-      <div className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-        {help && <InfoIcon text={help} className="size-3" />}
+      <div className="flex items-center justify-between text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="flex items-center gap-1">
+          {label}
+          {help && <InfoIcon text={help} className="size-3" />}
+        </div>
+        {delta && (
+          <span className={cn('font-mono font-medium', delta.isPositive ? 'text-success' : 'text-destructive')}>
+            {delta.value}
+          </span>
+        )}
       </div>
       <div className="truncate font-mono text-[11px] text-foreground">{value}</div>
     </div>
@@ -550,6 +559,24 @@ function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle, previ
   const speechRate = getSpeechRate(metrics)
   const pauseCount = finiteNumber(metrics.pause_count)
   const truePeak = getTruePeak(metrics)
+
+  const getDelta = (ref: number | null, prev: number | null, unit = '', digits = 2, inverse = false) => {
+    if (ref === null || prev === null) return null
+    const diff = prev - ref
+    if (diff === 0) return null
+    const sign = diff > 0 ? '+' : ''
+    const isPositive = inverse ? diff < 0 : diff > 0
+    return { value: `${sign}${diff.toFixed(digits)}${unit}`, isPositive }
+  }
+
+  const deltas = previewMetrics ? {
+    duration: getDelta(metrics.duration_seconds, previewMetrics.duration_seconds, 's', 2),
+    rate: getDelta(metrics.speech_rate_proxy ?? metrics.words_per_second, previewMetrics.speech_rate_proxy ?? previewMetrics.words_per_second, ' w/s', 2),
+    pause: getDelta(metrics.pause_ratio, previewMetrics.pause_ratio, '%', 1, true),
+    lufs: getDelta(metrics.lufs_integrated, previewMetrics.lufs_integrated, ' LUFS', 1),
+    peak: getDelta(metrics.peak_dbfs, previewMetrics.peak_dbfs, ' dBFS', 1),
+  } : null
+
 
   return (
     <div className="border-y border-border/60 py-2">
@@ -583,27 +610,32 @@ function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle, previ
           layoutMode === 'grid-3' && "max-w-sm mx-auto"
         )}>
           <div className="grid grid-cols-2 gap-1.5">
-            <VoiceMetricChip label="Duration" value={formatDuration(metrics.duration_seconds)} />
+            <VoiceMetricChip label="Duration" value={formatDuration(metrics.duration_seconds)} delta={deltas?.duration} />
             <VoiceMetricChip
               label="Speech rate"
               value={`${formatNumber(speechRate, 2)} w/s`}
+              delta={deltas?.rate}
               help="Approximate words per second from transcript-aware analysis when available."
             />
             <VoiceMetricChip
               label="Pause"
               value={`${formatPercent(metrics.pause_ratio)} (${formatNumber(pauseCount, 0)} gaps)`}
+              delta={deltas?.pause}
               help="How much of the reference is silence or low-energy gaps, plus detected pause count."
             />
             <VoiceMetricChip
               label="LUFS"
               value={formatNumber(metrics.lufs_integrated, 1, ' LUFS')}
+              delta={deltas?.lufs}
               help="Integrated perceived loudness. More negative values are quieter."
             />
             <VoiceMetricChip
               label="Peak"
               value={formatNumber(metrics.peak_dbfs, 1, ' dBFS')}
+              delta={deltas?.peak}
               help="Highest sample peak in the reference."
             />
+
             <VoiceMetricChip
               label="True peak"
               value={formatNumber(truePeak, 1, ' dBTP')}
@@ -612,9 +644,6 @@ function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle, previ
           </div>
           <div className="flex flex-col gap-2">
             <VoiceFingerprint metrics={metrics} />
-            {previewMetrics && (
-              <PreviewFingerprint metrics={previewMetrics} refMetrics={metrics} />
-            )}
           </div>
         </div>
 
@@ -1007,27 +1036,33 @@ function VoiceCard({
 
 
 
-       <div className="relative group">
-         {previewAudio ? (
-           <div className="relative">
-             <div className="absolute -top-2 left-2 z-10 rounded bg-cyan-500 px-1 py-px text-[9px] font-bold text-white">PREVIEW</div>
-             <MiniAudioDeck src={previewAudio.url} blob={previewAudio.blob} autoPlay={false} />
-           </div>
-         ) : (
-           <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
-         )}
-         {previewAudio && (
-           <button
-             onClick={() => {
-               URL.revokeObjectURL(previewAudio.url)
-               setPreviewAudio(null)
-             }}
-             className="absolute right-2 top-1/2 -translate-y-1/2 rounded bg-background/80 p-1 text-[10px] hover:bg-background opacity-0 group-hover:opacity-100 transition-opacity"
-           >
-             Clear
-           </button>
-         )}
-       </div>
+        <div className="relative group space-y-1">
+          {previewAudio ? (
+            <div className="relative space-y-1">
+              <div className="relative group/original opacity-40 pointer-events-none grayscale">
+                <div className="absolute -top-2 left-2 z-10 rounded bg-muted px-1 py-px text-[9px] font-bold text-muted-foreground">ORIGINAL</div>
+                <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
+              </div>
+              <div className="relative">
+                <div className="absolute -top-2 left-2 z-10 rounded bg-cyan-500 px-1 py-px text-[9px] font-bold text-white">PREVIEW</div>
+                <MiniAudioDeck src={previewAudio.url} blob={previewAudio.blob} autoPlay={false} />
+              </div>
+            </div>
+          ) : (
+            <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
+          )}
+          {previewAudio && (
+            <button
+              onClick={() => {
+                URL.revokeObjectURL(previewAudio.url)
+                setPreviewAudio(null)
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded bg-background/80 p-1 text-[10px] hover:bg-background opacity-0 group-hover:opacity-100 transition-opacity"
+            >
+              Clear
+            </button>
+          )}
+        </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" className="min-w-32" onClick={onUse}>
