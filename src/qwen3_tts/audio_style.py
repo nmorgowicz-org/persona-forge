@@ -168,7 +168,10 @@ def get_pause_targets(
     prosody = PROSODY_MAPS.get(style_preset, PROSODY_MAPS["Neutral"])
 
     # 1. Identify punctuation triggers and their character positions in the prompt.
-    pattern = r"(\.{3,}|…|\u2026)|([.!?])|(,)"
+    # Group 3 is the comma-class: commas plus other clause-level breaks (semicolon, colon,
+    # em/en dash) all read as a comma-length pause. `!`/`?` collapse to sentence_end — the
+    # perceived pause after them matches a period.
+    pattern = r"(\.{3,}|…|\u2026)|([.!?])|([,;:]|—|–)"
     triggers = []
     for match in re.finditer(pattern, prompt):
         if match.group(1):
@@ -245,14 +248,16 @@ def _shape_pauses(wav: np.ndarray, sr: int, prompt: str = "", style_preset: str 
                     # Match this gap to its target duration
                     target_sec, trigger_type = targets.get(i-1, (0.0, "natural"))
 
-                    if gap_len < 0.1 and trigger_type == "natural":
-                        # Micro-pause: scale proportionally to preserve natural word spacing
-                        new_gap_len = int(gap_len * pace_multiplier * sr)
-                        new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
+                    if trigger_type == "natural":
+                        # Unmatched gap (breath/hesitation): scale by pace to preserve the
+                        # speaker's own delivery character. Never snap a breath to a fixed
+                        # constant — that mechanizes the pacing. (gap_len is in samples, so
+                        # scale it directly; no seconds conversion needed.)
+                        new_gap_len = max(1, int(gap_len * pace_multiplier))
                     else:
-                        # Structural pause or significant natural gap: use the specific target
+                        # Punctuation-driven structural pause: resize to the absolute target.
                         new_gap_len = max(1, int(target_sec * sr))
-                        new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
+                    new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
                 else:
                     # Boundary silence: leave as is
                     new_wav_parts.append(wav[last_end:start])
@@ -300,11 +305,16 @@ PROSODY_DESCRIPTIONS: dict[str, str] = {
     "Clean": "Tight, efficient pacing with minimal unnecessary gaps.",
 }
 
+# Target pause durations (ms) per delivery preset. Ordering within a preset is intentional:
+# ellipsis > sentence_end > comma. `natural` is the seed/fallback target for gaps that do NOT
+# map to any punctuation (breaths, hesitations); those gaps are pace-scaled to preserve the
+# speaker's own delivery rather than snapped to this constant (see get_pause_targets /
+# _shape_pauses), so `natural` should stay <= comma and rarely applies verbatim.
 PROSODY_MAPS: dict[str, dict[str, float]] = {
     "Neutral": {"comma": 300.0, "ellipsis": 700.0, "sentence_end": 500.0, "natural": 300.0},
-    "Storyteller": {"comma": 500.0, "ellipsis": 1500.0, "sentence_end": 1000.0, "natural": 600.0},
+    "Storyteller": {"comma": 500.0, "ellipsis": 1500.0, "sentence_end": 1000.0, "natural": 500.0},
     "Calm": {"comma": 400.0, "ellipsis": 900.0, "sentence_end": 700.0, "natural": 400.0},
-    "Energetic": {"comma": 200.0, "ellipsis": 400.0, "sentence_end": 300.0, "natural": 250.0},
+    "Energetic": {"comma": 200.0, "ellipsis": 400.0, "sentence_end": 300.0, "natural": 200.0},
     "Broadcast": {"comma": 300.0, "ellipsis": 600.0, "sentence_end": 500.0, "natural": 300.0},
     "Clean": {"comma": 150.0, "ellipsis": 400.0, "sentence_end": 300.0, "natural": 150.0},
 }

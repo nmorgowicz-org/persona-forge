@@ -124,11 +124,12 @@ def get_prosody_adjusted_wav(
         dur_sec = end_sec - start_sec
         mid_sec = (start_sec + end_sec) / 2.0
         
-        # Micro-pause protection: preserve natural word spacing for gaps < 100ms
         target_sec, trigger_type = targets.get(i, (0.0, "natural"))
-        
-        if dur_sec < 0.1 and trigger_type == "natural":
-            # Scale proportionally to avoid "blowing up" tiny gaps
+
+        if trigger_type == "natural":
+            # Unmatched gap (breath/hesitation): scale by pace to preserve the speaker's own
+            # delivery character rather than snapping every breath to the natural constant
+            # (which mechanizes the pacing). Punctuation gaps below get an absolute target.
             new_dur = dur_sec * pace_multiplier
             diff = new_dur - dur_sec
             if abs(diff) > 0.001:
@@ -145,7 +146,7 @@ def get_prosody_adjusted_wav(
                         "end_ms": (mid_sec + abs(diff) / 2.0) * 1000.0,
                     })
             continue
-            
+
         if dur_sec > target_sec + 0.01:
             cut_sec = dur_sec - target_sec
             edits.append({

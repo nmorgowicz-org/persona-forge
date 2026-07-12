@@ -529,6 +529,15 @@ def voices_trim_silence(voice_id: str):
     return jsonify(meta)
 
 
+@app.post("/voices/<voice_id>/set-default")
+def voices_set_default(voice_id: str):
+    """Mark voice_id as the default variant within its family."""
+    meta = voice_library.set_default_variant(voice_id)
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    return jsonify(meta)
+
+
 @app.post("/voices/<voice_id>/set-active-variant")
 def voices_set_active_variant(voice_id: str):
     """Set the active prosody variant for a voice, or reset to original."""

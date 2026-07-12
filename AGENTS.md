@@ -10,8 +10,12 @@ To ensure code integrity and prevent accidental deletions:
 
 ## Shell command policy
 
-
-- Do not use `rtk` in this repository. Run normal shell commands directly.
+- `rtk` may be used for routine commands when its compressed output remains complete and
+  trustworthy for the task.
+- Switch to the raw command whenever compression hides, truncates, rewrites, or otherwise
+  complicates evidence needed for debugging, validation, exact-text review, or handoff.
+- If an `rtk`-wrapped command produces ambiguous or problematic output, rerun it raw before
+  drawing conclusions or making changes.
 
 ## How to use this guide
 
@@ -297,3 +301,18 @@ END_COMMIT_OVERRIDE
 One Conventional Commit line per entry; separate multiple entries with a blank line; one
 supported type per entry; no composite headers. Release Please version PRs are exempt.
 Keep model artifacts and benchmark audio out of PRs.
+
+
+<!-- headroom:memory-instructions -->
+## Memory
+
+Use the `headroom_memory` MCP server for persistent cross-session knowledge.
+
+**Before** answering questions about prior decisions, conventions, project context,
+architecture, user preferences, org info, codenames, debugging history, or anything
+from past sessions — call `memory_search` first.
+
+**After** making durable decisions, discovering conventions, or learning important
+facts — call `memory_save` to persist them for future sessions.
+
+Memory is your first source of truth for anything not visible in the current conversation.

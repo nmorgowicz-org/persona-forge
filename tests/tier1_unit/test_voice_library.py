@@ -264,10 +264,10 @@ class TestTrimReferenceSilence:
 
 class TestAdjustReferencePauses:
     @pytest.mark.parametrize(
-        ("mode", "initial_pause", "target_ms"),
-        [("compress", 0.8, 300), ("expand", 0.1, 400)],
+        ("pace_multiplier", "initial_pause"),
+        [(0.375, 0.8), (4.0, 0.1)],
     )
-    def test_adjusts_a_single_interior_pause(self, mode, initial_pause, target_ms):
+    def test_adjusts_a_single_unmatched_pause(self, pace_multiplier, initial_pause):
         saved = voice_library.save_voice(
             _paused_sine_wav_bytes(initial_pause),
             description="desc",
@@ -280,7 +280,9 @@ class TestAdjustReferencePauses:
             if gap[0] > 0 and gap[1] < before.size / sr
         )
 
-        updated = voice_library.adjust_reference_pauses(saved["voice_id"], target_ms, mode)
+        updated = voice_library.adjust_reference_pauses(
+            saved["voice_id"], style_preset="Neutral", pace_multiplier=pace_multiplier
+        )
         after, _ = sf.read(io.BytesIO(voice_library.get_voice_wav_bytes(saved["voice_id"])), dtype="float32")
 
         assert updated is not None
@@ -288,18 +290,18 @@ class TestAdjustReferencePauses:
             gap for gap in voice_library.detect_pause_intervals(after, sr)
             if gap[0] > 0 and gap[1] < after.size / sr
         )
+        before_gap_ms = (before_gap[1] - before_gap[0]) * 1000
         after_gap_ms = (after_gap[1] - after_gap[0]) * 1000
-        assert after_gap_ms == pytest.approx(target_ms, abs=15)
-        if mode == "compress":
+        assert after_gap_ms == pytest.approx(before_gap_ms * pace_multiplier, abs=15)
+        if pace_multiplier < 1.0:
             assert after.size < before.size
             assert after_gap[1] - after_gap[0] < before_gap[1] - before_gap[0]
         else:
             assert after.size > before.size
             assert after_gap[1] - after_gap[0] > before_gap[1] - before_gap[0]
 
-    def test_rejects_unknown_mode(self):
-        with pytest.raises(ValueError, match="mode must be"):
-            voice_library.adjust_reference_pauses("vd_000000000000", 300, "sideways")
+    def test_unknown_voice_returns_none(self):
+        assert voice_library.adjust_reference_pauses("vd_000000000000") is None
 
 
 class TestSetDefaultVariant:
