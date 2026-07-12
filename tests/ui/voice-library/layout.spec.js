@@ -26,7 +26,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     const card = page.locator('[data-testid="voice-card"]').first()
     await expect(card.getByRole('button', { name: 'Use in Speak' })).toBeVisible()
     await expect(card.getByRole('button', { name: /Edit audio/i })).toBeVisible()
-    await expect(card.getByRole('button', { name: /Adjust pauses/i })).toBeVisible()
+    await expect(card.getByRole('button', { name: /Adjust prosody/i })).toBeVisible()
     await expect(card.getByRole('button', { name: 'More voice actions' })).toBeVisible()
     await expect(page.locator('body')).toHaveJSProperty('scrollWidth', viewport.width)
 

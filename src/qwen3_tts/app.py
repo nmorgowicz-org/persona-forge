@@ -933,11 +933,8 @@ def _candidate_callback_factory(job_id: str):
 def omnivoice_audition():
     _evict_old_audition_jobs()
 
-    # If another swap is explicitly in progress, treat as busy (still 503).
-    if voice_design.swap_in_progress() or omnivoice_engine.swap_in_progress():
-        return jsonify({"error": "Another swap already in progress"}), 503
-
-    # Parse and validate request.
+    # Parse and validate the complete request before consulting mutable runtime state. Invalid
+    # payloads must deterministically return 400 even when another worker/job is swapping.
     data = _json_body()
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
@@ -1015,6 +1012,10 @@ def omnivoice_audition():
         if not isinstance(min_match_score, (int, float)):
             return jsonify({"error": "min_match_score must be a number"}), 400
         min_match_score = max(0.0, min(1.0, float(min_match_score)))
+
+    # A structurally valid request cannot start while another model swap is in progress.
+    if voice_design.swap_in_progress() or omnivoice_engine.swap_in_progress():
+        return jsonify({"error": "Another swap already in progress"}), 503
 
     job_id = uuid.uuid4().hex
 
