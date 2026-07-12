@@ -8,7 +8,6 @@ import {
   ChevronDown,
   Copy,
   FoldHorizontal,
-  Info,
   Layers,
   Loader2,
   Mic2,
@@ -1077,15 +1076,9 @@ function VoiceCard({
                          ))}
                        </SelectGroup>
                      </SelectContent>
-                   </Select>
-                    <div className="flex gap-2 rounded bg-muted/50 p-2 text-[10px] text-muted-foreground border border-border">
-                      <Info className="size-3 shrink-0 mt-0.5" />
-                      <span className="italic leading-tight">
-                        {STYLE_DESCRIPTIONS[stylePreset]}
-                      </span>
-                    </div>
-                </div>
-                <div className="flex flex-col gap-1.5">
+                     </Select>
+                 </div>
+                 <div className="flex flex-col gap-1.5">
                   <div className="flex justify-between items-center">
                     <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Global Pace Scale</label>
                     <span className="font-mono text-[10px]">{paceMultiplier.toFixed(1)}x</span>
