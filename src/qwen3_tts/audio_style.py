@@ -186,7 +186,7 @@ def _shape_pauses(wav: np.ndarray, sr: int, prompt: str = "", style_preset: str 
 
     try:
         # 1. Identify all gaps in the audio
-        non_silent = librosa.effects.split(wav, top_db=60)
+        non_silent = librosa.effects.split(wav, top_db=40)
         if len(non_silent) <= 1:
             return wav, 1.0
 
@@ -203,10 +203,14 @@ def _shape_pauses(wav: np.ndarray, sr: int, prompt: str = "", style_preset: str 
             
             if gap_len > 0:
                 if i > 0:
-                    # Use the specific target for this interior gap
-                    target_sec = targets[i-1] if (i-1) < len(targets) else targets[-1]
-                    new_gap_len = max(1, int(target_sec * sr))
-                    new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
+                    # Only expand significant gaps (>= 20ms) to avoid phantom pauses
+                    if gap_len < 0.02:
+                        new_wav_parts.append(wav[last_end:start])
+                    else:
+                        # Use the specific target for this interior gap
+                        target_sec = targets[i-1] if (i-1) < len(targets) else targets[-1]
+                        new_gap_len = max(1, int(target_sec * sr))
+                        new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
                 else:
                     # Boundary silence: leave as is
                     new_wav_parts.append(wav[last_end:start])
@@ -245,18 +249,24 @@ def _apply_presence_boost(wav: np.ndarray, sr: int) -> np.ndarray:
         return wav
 
 
-# Single source of truth for both advertised metadata and delivered DSP behavior.
-# "off" is a real bypass; all other presets derive STYLE_PRESETS and execution
-# from the same rows so UI copy cannot drift away from the pipeline.
+PROSODY_DESCRIPTIONS: dict[str, str] = {
+    "Neutral": "Standard natural pacing and pauses.",
+    "Storyteller": "Slower, dramatic pacing with emphasized pauses.",
+    "Calm": "Relaxed, steady pace with longer, soothing gaps.",
+    "Energetic": "Fast-paced, tight gaps for a high-energy feel.",
+    "Broadcast": "Professional, clear pacing typical of news or radio.",
+    "Clean": "Tight, efficient pacing with minimal unnecessary gaps.",
+}
 
 PROSODY_MAPS: dict[str, dict[str, float]] = {
-    "Neutral": {"comma": 200.0, "ellipsis": 600.0, "sentence_end": 400.0, "natural": 200.0},
-    "Storyteller": {"comma": 400.0, "ellipsis": 1200.0, "sentence_end": 800.0, "natural": 400.0},
-    "Calm": {"comma": 300.0, "ellipsis": 800.0, "sentence_end": 600.0, "natural": 300.0},
-    "Energetic": {"comma": 100.0, "ellipsis": 300.0, "sentence_end": 200.0, "natural": 150.0},
-    "Broadcast": {"comma": 200.0, "ellipsis": 500.0, "sentence_end": 400.0, "natural": 200.0},
+    "Neutral": {"comma": 300.0, "ellipsis": 700.0, "sentence_end": 500.0, "natural": 300.0},
+    "Storyteller": {"comma": 500.0, "ellipsis": 1500.0, "sentence_end": 1000.0, "natural": 600.0},
+    "Calm": {"comma": 400.0, "ellipsis": 900.0, "sentence_end": 700.0, "natural": 400.0},
+    "Energetic": {"comma": 200.0, "ellipsis": 400.0, "sentence_end": 300.0, "natural": 250.0},
+    "Broadcast": {"comma": 300.0, "ellipsis": 600.0, "sentence_end": 500.0, "natural": 300.0},
     "Clean": {"comma": 150.0, "ellipsis": 400.0, "sentence_end": 300.0, "natural": 150.0},
 }
+
 
 STYLE_PIPELINES: dict[str, dict[str, Any]] = {
 
