@@ -606,13 +606,19 @@ def voices_preview_prosody(voice_id: str):
         pace_multiplier = float(request.args.get("pace_multiplier", 1.0))
     except (TypeError, ValueError):
         return jsonify({"error": "pace_multiplier must be a number"}), 400
+    try:
+        pause_offset = float(request.args.get("pause_offset", 0.0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "pause_offset must be a number"}), 400
 
     meta = voice_library.get_voice(voice_id)
     if meta is None:
         return jsonify({"error": "voice_id not found"}), 404
 
     # Get the adjusted audio (wav, sr)
-    result = voice_library.get_prosody_adjusted_wav(voice_id, style_preset, pace_multiplier)
+    result = voice_library.get_prosody_adjusted_wav(
+        voice_id, style_preset, pace_multiplier, pause_offset
+    )
     if result is None:
         return jsonify({"error": "Preview failed"}), 500
 
@@ -646,8 +652,12 @@ def voices_adjust_pauses(voice_id: str):
     except (TypeError, ValueError):
         return jsonify({"error": "pace_multiplier must be a number"}), 400
     try:
+        pause_offset = float(data.get("pause_offset", 0.0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "pause_offset must be a number"}), 400
+    try:
         meta = voice_library.adjust_reference_pauses(
-            voice_id, style_preset=style_preset, pace_multiplier=pace_multiplier
+            voice_id, style_preset=style_preset, pace_multiplier=pace_multiplier, pause_offset_ms=pause_offset
         )
     except Exception as exc:
         return jsonify({"error": f"Pause adjust failed: {exc}"}), 500
