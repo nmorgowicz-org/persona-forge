@@ -471,11 +471,13 @@ function VoiceFingerprint({ metrics }: { metrics: VoiceReferenceMetrics }) {
 function VoiceMetricChip({
   label,
   value,
+  previewValue,
   delta,
   help,
 }: {
   label: string
   value: string
+  previewValue?: string
   delta?: { value: string; isPositive: boolean } | null
   help?: string
 }) {
@@ -486,13 +488,20 @@ function VoiceMetricChip({
           {label}
           {help && <InfoIcon text={help} className="size-3" />}
         </div>
-        {delta && (
-          <span className={cn('font-mono font-medium', delta.isPositive ? 'text-success' : 'text-destructive')}>
-            {delta.value}
-          </span>
-        )}
       </div>
-      <div className="truncate font-mono text-[11px] text-foreground">{value}</div>
+      <div className="flex items-center justify-between gap-2 mt-1">
+        <span className="truncate font-mono text-[10px] text-muted-foreground/60">{value}</span>
+        <div className="flex items-center gap-2">
+          {delta && (
+            <span className={cn('font-mono text-[10px] font-medium', delta.isPositive ? 'text-success' : 'text-destructive')}>
+              {delta.value}
+            </span>
+          )}
+          {previewValue && (
+            <span className="truncate font-mono text-[11px] font-bold text-foreground">{previewValue}</span>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -524,6 +533,14 @@ function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle, previ
     pause: getDelta(metrics.pause_ratio, previewMetrics.pause_ratio, '%', 1, true),
     lufs: getDelta(metrics.lufs_integrated, previewMetrics.lufs_integrated, ' LUFS', 1),
     peak: getDelta(metrics.peak_dbfs, previewMetrics.peak_dbfs, ' dBFS', 1),
+  } : null
+
+  const pVals = previewMetrics ? {
+    duration: formatDuration(previewMetrics.duration_seconds),
+    rate: `${formatNumber(previewMetrics.speech_rate_proxy ?? previewMetrics.words_per_second, 2)} w/s`,
+    pause: `${formatPercent(previewMetrics.pause_ratio)} (${formatNumber(previewMetrics.pause_count, 0)} gaps)`,
+    lufs: formatNumber(previewMetrics.lufs_integrated, 1, ' LUFS'),
+    peak: formatNumber(previewMetrics.peak_dbfs, 1, ' dBFS'),
   } : null
 
 
@@ -559,31 +576,36 @@ function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle, previ
           layoutMode === 'grid-3' && "max-w-sm mx-auto"
         )}>
           <div className="grid grid-cols-2 gap-1.5">
-            <VoiceMetricChip label="Duration" value={formatDuration(metrics.duration_seconds)} delta={deltas?.duration} />
+            <VoiceMetricChip label="Duration" value={formatDuration(metrics.duration_seconds)} delta={deltas?.duration} previewValue={pVals?.duration} />
             <VoiceMetricChip
               label="Speech rate"
               value={`${formatNumber(speechRate, 2)} w/s`}
               delta={deltas?.rate}
+              previewValue={pVals?.rate}
               help="Approximate words per second from transcript-aware analysis when available."
             />
             <VoiceMetricChip
               label="Pause"
               value={`${formatPercent(metrics.pause_ratio)} (${formatNumber(pauseCount, 0)} gaps)`}
               delta={deltas?.pause}
+              previewValue={pVals?.pause}
               help="How much of the reference is silence or low-energy gaps, plus detected pause count."
             />
             <VoiceMetricChip
               label="LUFS"
               value={formatNumber(metrics.lufs_integrated, 1, ' LUFS')}
               delta={deltas?.lufs}
+              previewValue={pVals?.lufs}
               help="Integrated perceived loudness. More negative values are quieter."
             />
             <VoiceMetricChip
               label="Peak"
               value={formatNumber(metrics.peak_dbfs, 1, ' dBFS')}
               delta={deltas?.peak}
+              previewValue={pVals?.peak}
               help="Highest sample peak in the reference."
             />
+
 
             <VoiceMetricChip
               label="True peak"
@@ -988,10 +1010,11 @@ function VoiceCard({
         <div className="relative group space-y-1">
           {previewAudio ? (
             <div className="relative space-y-1">
-              <div className="relative group/original opacity-40 pointer-events-none grayscale">
-                <div className="absolute -top-2 left-2 z-10 rounded bg-muted px-1 py-px text-[9px] font-bold text-muted-foreground">ORIGINAL</div>
-                <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
-              </div>
+            <div className="relative group/original opacity-40 grayscale">
+              <div className="absolute -top-2 left-2 z-10 rounded bg-muted px-1 py-px text-[9px] font-bold text-muted-foreground">ORIGINAL</div>
+              <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
+            </div>
+
               <div className="relative">
                 <div className="absolute -top-2 left-2 z-10 rounded bg-cyan-500 px-1 py-px text-[9px] font-bold text-white">PREVIEW</div>
                 <MiniAudioDeck src={previewAudio.url} blob={previewAudio.blob} autoPlay={false} />
