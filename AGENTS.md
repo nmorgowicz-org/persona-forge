@@ -37,6 +37,14 @@ compose.yml        Services (qwen3-tts, export, export-voice-design) sharing one
 
 `PYTHONPATH=/app/src:/app/src/export` — both `qwen3_tts.*` and export modules are importable inside the container.
 
+### Runtime Architecture
+The system supports three primary runtime backends for inference:
+- **Pocket-TTS**: The primary high-performance engine.
+- **OpenVINO**: Provides Intel CPU acceleration for Qwen3-TTS (Base, VoiceDesign, and custom voices).
+- **PyTorch**: The baseline and fallback path for Qwen3-TTS (Base, VoiceDesign, and custom voices).
+
+For **VoiceDesign**, additional generation and synthesis options are available to refine voice characteristics before saving.
+
 **One image, two behaviors.** `scripts/entrypoint.sh` is the container ENTRYPOINT; it applies
 `LOW_RAM_MODE` tuning before exec-ing the CMD. The serving container runs the image's default CMD (gunicorn). The export service overrides CMD with `python scripts/export.py`. There are no multi-stage build targets.
 
@@ -49,8 +57,7 @@ in `model_config.py` maps it to the checkpoint and IR paths. 1.7B is the recomme
 
 ## Project objective
 
-Reproducible Linux AMD64 container that accelerates 0.6B or 1.7B Qwen3-TTS Base voice-cloning
-checkpoints on Intel CPUs with OpenVINO while preserving a tested PyTorch rollback path.
+Reproducible Linux AMD64 container for Qwen3-TTS voice-cloning. Supports multiple runtime backends: Pocket-TTS (primary engine), OpenVINO (Intel CPU acceleration), and PyTorch (baseline/rollback).
 
 Read `docs/dev/architecture/OPENVINO_IMPLEMENTATION.md` before changing model export, cache handling,
 generation, quantization, memory loading, Docker packaging, or deployment behavior.
