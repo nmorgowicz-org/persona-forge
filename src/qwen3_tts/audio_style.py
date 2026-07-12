@@ -9,6 +9,7 @@ import logging
 import numpy as np
 import pyloudnorm as pyln
 import librosa
+import re
 from scipy import signal
 from typing import Any, Callable, Dict, Tuple, Optional, List
 
@@ -152,36 +153,45 @@ def _apply_time_stretch(wav: np.ndarray, sr: int, factor: float) -> Tuple[np.nda
     rate = 1.0 / factor
     return librosa.effects.time_stretch(wav, rate=rate).astype(np.float32), float(factor)
 
-def get_pause_targets(prompt: str, style_preset: str, pace_multiplier: float, gap_count: int) -> List[float]:
+def get_pause_targets(prompt: str, style_preset: str, pace_multiplier: float, gap_count: int, pause_offset_ms: float = 0.0) -> List[float]:
     """
     Calculate target durations (in seconds) for a sequence of gaps based on 
     punctuation in the prompt and a style preset.
     """
     prosody = PROSODY_MAPS.get(style_preset, PROSODY_MAPS["Neutral"])
     
-    # Simple proxy: map punctuation to gap indices.
-    # In a real aligner, we'd know exactly which gap is which.
-    # Here, we'll just return a sequence of targets.
-    # For now, we'll use the 'natural' target for most, and punctuation targets for others.
-    # To be truly smart, we'd need the alignment.
+    # Heuristic: Extract punctuation markers that typically trigger structural pauses.
+    # We prioritize ellipsis over sentence ends to avoid double-counting.
+    pattern = r"(\.{3,}|…|\u2026)|([.!?])|(,)"
+    matches = re.findall(pattern, prompt)
     
-    import re
-    tokens = re.findall(r"\w+|[.,!?;:\"\']+|[…\u2026]|\s+", prompt)
-    
+    punctuation_triggers = []
+    for ellipsis, sentence_end, comma in matches:
+        if ellipsis:
+            punctuation_triggers.append("ellipsis")
+        elif sentence_end:
+            punctuation_triggers.append("sentence_end")
+        elif comma:
+            punctuation_triggers.append("comma")
+            
     targets = []
-    # We assume gaps occur after punctuation or at the end of a spoken unit.
-    # This is a heuristic: we'll just provide the 'natural' target for all gaps
-    # unless we implement a full alignment.
-    for _ in range(gap_count):
-        targets.append(prosody["natural"] * pace_multiplier / 1000.0)
+    for i in range(gap_count):
+        # Map the i-th gap to the i-th punctuation trigger, if available.
+        if i < len(punctuation_triggers):
+            target_key = punctuation_triggers[i]
+        else:
+            target_key = "natural"
+        
+        target_ms = prosody.get(target_key, prosody["natural"])
+        targets.append((target_ms * pace_multiplier + pause_offset_ms) / 1000.0)
         
     return targets
 
-def _shape_pauses(wav: np.ndarray, sr: int, prompt: str = "", style_preset: str = "Neutral", pace_multiplier: float = 1.0, **kwargs) -> Tuple[np.ndarray, float]:
+def _shape_pauses(wav: np.ndarray, sr: int, prompt: str = "", style_preset: str = "Neutral", pace_multiplier: float = 1.0, pause_offset_ms: float = 0.0, **kwargs) -> Tuple[np.ndarray, float]:
     """
     Modify internal pauses based on punctuation in the prompt and a style map.
     """
-    if np.abs(pace_multiplier - 1.0) < 1e-4 and not prompt:
+    if np.abs(pace_multiplier - 1.0) < 1e-4 and not prompt and np.abs(pause_offset_ms) < 1e-4:
         return wav, 1.0
 
     try:
@@ -192,7 +202,7 @@ def _shape_pauses(wav: np.ndarray, sr: int, prompt: str = "", style_preset: str 
 
         # 2. Get punctuation-aware targets for each gap
         gap_count = len(non_silent) - 1
-        targets = get_pause_targets(prompt, style_preset, pace_multiplier, gap_count)
+        targets = get_pause_targets(prompt, style_preset, pace_multiplier, gap_count, pause_offset_ms)
         
         new_wav_parts = []
         last_end = 0
@@ -204,13 +214,16 @@ def _shape_pauses(wav: np.ndarray, sr: int, prompt: str = "", style_preset: str 
             if gap_len > 0:
                 if i > 0:
                     # Only expand significant gaps (>= 20ms) to avoid phantom pauses
-                    if gap_len < 0.02:
-                        new_wav_parts.append(wav[last_end:start])
-                    else:
-                        # Use the specific target for this interior gap
-                        target_sec = targets[i-1] if (i-1) < len(targets) else targets[-1]
-                        new_gap_len = max(1, int(target_sec * sr))
-                        new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
+                         # Distinguish between micro-pauses (word-level) and structural pauses (phrase-level)
+                         if gap_len < 0.1:
+                             # Micro-pause: scale proportionally to preserve natural word spacing
+                             new_gap_len = int(gap_len * pace_multiplier * sr)
+                             new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
+                         else:
+                             # Structural pause: use the specific target for this interior gap
+                             target_sec = targets[i-1] if (i-1) < len(targets) else targets[-1]
+                             new_gap_len = max(1, int(target_sec * sr))
+                             new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
                 else:
                     # Boundary silence: leave as is
                     new_wav_parts.append(wav[last_end:start])
