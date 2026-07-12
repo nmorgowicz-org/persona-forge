@@ -79,7 +79,7 @@ def set_active_variant(voice_id: str, variant_filename: str | None = None) -> bo
 
 
 def get_prosody_adjusted_wav(
-    voice_id: str, style_preset: str, pace_multiplier: float
+    voice_id: str, style_preset: str, pace_multiplier: float, pause_offset_ms: float = 0.0
 ) -> tuple[np.ndarray, int] | None:
     """Calculate prosody-adjusted audio for a voice without persisting it.
     Returns (wav, sr) or None on error.
@@ -116,12 +116,19 @@ def get_prosody_adjusted_wav(
         return wav, sr
 
     sample_text = meta.get("sample_text", "")
-    targets = get_pause_targets(sample_text, style_preset, pace_multiplier, len(interior))
+    targets = get_pause_targets(sample_text, style_preset, pace_multiplier, len(interior), pause_offset_ms)
 
     edits: list[dict[str, Any]] = []
     for i, (start_sec, end_sec) in enumerate(interior):
         dur_sec = end_sec - start_sec
         mid_sec = (start_sec + end_sec) / 2.0
+        
+        # Micro-pause protection: preserve natural word spacing for gaps < 100ms
+        if dur_sec < 0.1:
+            # Only scale proportionally to avoid "blowing up" tiny gaps
+            # We'll just let these be, or you could apply pace_multiplier here
+            continue
+            
         target_sec = targets[i] if i < len(targets) else targets[-1]
 
         if dur_sec > target_sec + 0.01:
@@ -144,12 +151,12 @@ def get_prosody_adjusted_wav(
     return apply_region_edits(wav, sr, edits), sr
 
 def create_prosody_variant(
-    voice_id: str, style_preset: str, pace_multiplier: float
+    voice_id: str, style_preset: str, pace_multiplier: float, pause_offset_ms: float = 0.0
 ) -> str | None:
     """Create a prosody-adjusted variant of the master reference.
     Returns the filename of the created variant.
     """
-    result = get_prosody_adjusted_wav(voice_id, style_preset, pace_multiplier)
+    result = get_prosody_adjusted_wav(voice_id, style_preset, pace_multiplier, pause_offset_ms)
     if result is None:
         return None
 
@@ -169,11 +176,11 @@ def create_prosody_variant(
     return variant_filename
 
 def preview_prosody_variant(
-    voice_id: str, style_preset: str, pace_multiplier: float
+    voice_id: str, style_preset: str, pace_multiplier: float, pause_offset_ms: float = 0.0
 ) -> bytes | None:
     """Return the prosody-adjusted audio bytes for a voice without saving.
     """
-    result = get_prosody_adjusted_wav(voice_id, style_preset, pace_multiplier)
+    result = get_prosody_adjusted_wav(voice_id, style_preset, pace_multiplier, pause_offset_ms)
     if result is None:
         return None
 
@@ -672,12 +679,12 @@ def trim_reference_silence(voice_id: str, padding_ms: float = 80.0) -> dict[str,
 
 
 def adjust_reference_pauses(
-    voice_id: str, style_preset: str = "Neutral", pace_multiplier: float = 1.0
+    voice_id: str, style_preset: str = "Neutral", pace_multiplier: float = 1.0, pause_offset_ms: float = 0.0
 ) -> dict[str, Any] | None:
     """Create a prosody variant and set it as active.
     Returns the voice metadata.
     """
-    variant_filename = create_prosody_variant(voice_id, style_preset, pace_multiplier)
+    variant_filename = create_prosody_variant(voice_id, style_preset, pace_multiplier, pause_offset_ms)
     if not variant_filename:
         return None
 
