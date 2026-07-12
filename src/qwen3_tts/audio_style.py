@@ -58,7 +58,7 @@ def _normalize_lufs(wav: np.ndarray, sr: int, target_lufs: float = -20.0) -> np.
     gain_db = float(target_lufs) - current_lufs
     return (x * (10.0 ** (gain_db / 20.0))).astype(np.float32)
 
-def detect_pause_intervals(wav: np.ndarray, sr: int, top_db: float = 60.0) -> List[Tuple[float, float]]:
+def detect_pause_intervals(wav: np.ndarray, sr: int, top_db: float = 40.0) -> List[Tuple[float, float]]:
     """Returns a list of (start, end) seconds for silence intervals."""
     # librosa.effects.split returns non-silent intervals
     non_silent = librosa.effects.split(wav, top_db=top_db)
@@ -90,6 +90,8 @@ def analyze_reference(wav: np.ndarray, sr: int, transcript: Optional[str] = None
     # 1. Basic Metrics
     peak_val = np.max(np.abs(wav))
     peak_dbfs = 20.0 * np.log10(peak_val / 1.0) if peak_val > 1e-9 else -100.0
+    true_peak_dbfs = peak_dbfs  # Simple proxy; full inter-sample peak requires oversampling
+
 
     # 2. Loudness (LUFS)
     try:
@@ -130,6 +132,7 @@ def analyze_reference(wav: np.ndarray, sr: int, transcript: Optional[str] = None
         "sample_rate": int(sr),
         "lufs_integrated": lufs_integrated,
         "peak_dbfs": float(peak_dbfs),
+        "true_peak_dbfs": float(true_peak_dbfs),
         "speech_rate_proxy": float(speech_rate),
         "pause_count": int(pause_count),
         "pause_total_seconds": float(pause_total_seconds),
