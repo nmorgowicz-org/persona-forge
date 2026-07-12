@@ -89,8 +89,13 @@ def get_prosody_adjusted_wav(
         return None
 
     voice_dir = _voice_dir(voice_id)
+    # Prioritize original.wav, fallback to legacy reference.wav for master audio
     master_path = voice_dir / "original.wav"
     if not master_path.is_file():
+        master_path = voice_dir / "reference.wav"
+
+    if not master_path.is_file():
+        print(f"[DEBUG] master_path {master_path} is not a file")
         return None
 
     wav_bytes = master_path.read_bytes()

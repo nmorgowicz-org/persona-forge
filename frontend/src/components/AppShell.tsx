@@ -219,7 +219,7 @@ function SidebarVersionDisplay() {
   useEffect(() => {
     getHealth()
       .then((state) => {
-        console.log('Health check response:', state)
+        // Health check response removed from logs
         const s = state as any
         const v = s.version || s.openvino?.version
         setVersion(v as string | null)
