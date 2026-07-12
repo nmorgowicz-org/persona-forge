@@ -474,7 +474,7 @@ function VoiceMetricChip({
   )
 }
 
-function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle }: { metrics: VoiceReferenceMetrics | null; busy: boolean; onAnalyze: () => void; expanded: boolean; onToggle: () => void }) {
+function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle, layoutMode }: { metrics: VoiceReferenceMetrics | null; busy: boolean; onAnalyze: () => void; expanded: boolean; onToggle: () => void; layoutMode: string }) {
   if (!metrics) return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-border/60 bg-muted/10 p-3">
       <div><p className="text-xs font-medium">Reference analysis unavailable</p><p className="text-[10px] text-muted-foreground">Analyze this saved WAV to add duration, pacing, pause, loudness, and peak data.</p></div>
@@ -884,7 +884,8 @@ function VoiceCard({
          onFixAll={onFixAll}
        />
 
-       <VoiceMetricsPanel metrics={metrics} busy={busy} onAnalyze={onAnalyze} expanded={analysisExpanded} onToggle={() => setAnalysisExpanded((value) => { localStorage.setItem('voice-library-analysis-expanded', String(!value)); return !value })} />
+        <VoiceMetricsPanel metrics={metrics} busy={busy} onAnalyze={onAnalyze} expanded={analysisExpanded} onToggle={() => setAnalysisExpanded((value) => { localStorage.setItem('voice-library-analysis-expanded', String(!value)); return !value })} layoutMode={layoutMode} />
+
 
       <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
 
@@ -1356,11 +1357,46 @@ export function VoiceLibraryPage() {
         <>
           {voices.length > 0 && (
             <section className="flex flex-col gap-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold tracking-tight">
-                  Saved voices ({voices.length})
-                </h2>
-              </div>
+               <div className="flex items-center justify-between">
+                 <h2 className="text-sm font-semibold tracking-tight">
+                   Saved voices ({voices.length})
+                 </h2>
+                 <div className="flex items-center gap-1 rounded-lg bg-muted/50 p-1">
+                   <Button
+                     variant={layoutMode === 'grid-1' ? 'secondary' : 'ghost'}
+                     size="icon-sm"
+                     onClick={() => setLayoutMode('grid-1')}
+                     title="Single column"
+                   >
+                     <LayoutGrid className="size-3.5" />
+                   </Button>
+                   <Button
+                     variant={layoutMode === 'grid-2' ? 'secondary' : 'ghost'}
+                     size="icon-sm"
+                     onClick={() => setLayoutMode('grid-2')}
+                     title="Two columns"
+                   >
+                     <Columns2 className="size-3.5" />
+                   </Button>
+                   <Button
+                     variant={layoutMode === 'grid-3' ? 'secondary' : 'ghost'}
+                     size="icon-sm"
+                     onClick={() => setLayoutMode('grid-3')}
+                     title="Three columns"
+                   >
+                     <Columns3 className="size-3.5" />
+                   </Button>
+                   <Button
+                     variant={layoutMode === 'list' ? 'secondary' : 'ghost'}
+                     size="icon-sm"
+                     onClick={() => setLayoutMode('list')}
+                     title="List view"
+                   >
+                     <Rows className="size-3.5" />
+                   </Button>
+                 </div>
+               </div>
+
 
             <div className={cn(
               "grid gap-4",
