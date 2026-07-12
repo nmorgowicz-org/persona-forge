@@ -389,14 +389,30 @@ export async function setDefaultVoiceVariant(voiceId: string): Promise<VoiceMeta
 
 export async function adjustVoiceReferencePauses(
   voiceId: string,
-  targetMs: number,
-  mode: 'compress' | 'expand',
+  stylePreset: string,
+  paceMultiplier: number,
 ): Promise<VoiceMeta> {
   const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/adjust-pauses`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ target_ms: targetMs, mode }),
+    body: JSON.stringify({ style_preset: stylePreset, pace_multiplier: paceMultiplier }),
   })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function setActiveVoiceVariant(voiceId: string, variantFilename: string | null): Promise<{ status: string; active_variant: string }> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/set-active-variant`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ variant_filename: variantFilename }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function getVoiceVariants(voiceId: string): Promise<{ variants: string[]; active_variant: string | null }> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/variants`)
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
 }

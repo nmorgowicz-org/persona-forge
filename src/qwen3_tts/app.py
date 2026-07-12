@@ -525,13 +525,43 @@ def voices_trim_silence(voice_id: str):
     return jsonify(meta)
 
 
-@app.post("/voices/<voice_id>/set-default")
-def voices_set_default(voice_id: str):
-    """Mark voice_id as the default variant within its family."""
-    meta = voice_library.set_default_variant(voice_id)
-    if meta is None:
-        return jsonify({"error": "voice_id not found"}), 404
-    return jsonify(meta)
+@app.post("/voices/<voice_id>/set-active-variant")
+def voices_set_active_variant(voice_id: str):
+    """Set the active prosody variant for a voice, or reset to original."""
+    data = request.get_json(silent=True) or {}
+    variant_filename = data.get("variant_filename")
+    try:
+        success = voice_library.set_active_variant(voice_id, variant_filename)
+    except Exception as exc:
+        return jsonify({"error": f"Failed to set active variant: {exc}"}), 500
+    if not success:
+        return jsonify({"error": "Could not set active variant (invalid voice or file)"}), 400
+    return jsonify({"status": "active variant updated", "active_variant": variant_filename or "original"})
+
+
+@app.get("/voices/<voice_id>/variants")
+def voices_get_variants(voice_id: str):
+    """List all available prosody variants for a saved voice."""
+    if not voice_library._is_valid_voice_id(voice_id):
+        return jsonify({"error": "invalid voice_id"}), 400
+    voice_dir = voice_library._voice_dir(voice_id)
+    if not voice_dir.is_dir():
+        return jsonify({"error": "voice not found"}), 404
+    
+    variants = [f.name for f in voice_dir.iterdir() if f.name.startswith("prosody_") and f.name.endswith(".wav")]
+    
+    # Find which one is currently active
+    current_wav = voice_dir / "current.wav"
+    active_variant = None
+    if current_wav.is_symlink():
+        target = current_wav.resolve().name
+        if target in variants:
+            active_variant = target
+
+    return jsonify({
+        "variants": sorted(variants),
+        "active_variant": active_variant
+    })
 
 
 @app.post("/voices/<voice_id>/activate")
@@ -564,17 +594,17 @@ def voices_activate(voice_id: str):
 
 @app.post("/voices/<voice_id>/adjust-pauses")
 def voices_adjust_pauses(voice_id: str):
-    """Compress or expand the interior pauses of a saved reference clip toward a target."""
+    """Adjust interior pauses of a saved reference clip based on a prosody map and pace."""
     data = request.get_json(silent=True) or {}
-    mode = (data.get("mode") or "compress").strip().lower()
-    if mode not in ("compress", "expand"):
-        return jsonify({"error": "mode must be 'compress' or 'expand'"}), 400
+    style_preset = (data.get("style_preset") or "Neutral").strip()
     try:
-        target_ms = float(data.get("target_ms", 300.0))
+        pace_multiplier = float(data.get("pace_multiplier", 1.0))
     except (TypeError, ValueError):
-        return jsonify({"error": "target_ms must be a number"}), 400
+        return jsonify({"error": "pace_multiplier must be a number"}), 400
     try:
-        meta = voice_library.adjust_reference_pauses(voice_id, target_ms=target_ms, mode=mode)
+        meta = voice_library.adjust_reference_pauses(
+            voice_id, style_preset=style_preset, pace_multiplier=pace_multiplier
+        )
     except Exception as exc:
         return jsonify({"error": f"Pause adjust failed: {exc}"}), 500
     if meta is None:

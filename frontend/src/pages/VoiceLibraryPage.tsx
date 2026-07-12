@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import {
   AlertTriangle,
   AudioWaveform,
+  Check,
   CheckCircle2,
   ChevronDown,
   Copy,
@@ -20,7 +21,6 @@ import {
   Star,
   Trash2,
   Shuffle,
-  UnfoldHorizontal,
   Undo2,
   Wand2,
   RefreshCcw,
@@ -38,9 +38,11 @@ import {
   deleteVoice,
   duplicateVoice,
   getVoice,
+  getVoiceVariants,
   listOmniVoiceSegments,
   listVoices,
   normalizeVoiceReference,
+  setActiveVoiceVariant,
   setDefaultVoiceVariant,
   trimVoiceReferenceSilence,
   updateVoiceSampleText,
@@ -712,7 +714,7 @@ function VoiceCard({
   onTrimSilence: (voiceId: string) => Promise<void>
   onFixAll: () => void
   onSetDefault: (() => void) | null
-  onAdjustPauses: (voiceId: string, mode: 'compress' | 'expand', targetMs: number) => Promise<void>
+  onAdjustPauses: (voiceId: string, stylePreset: string, paceMultiplier: number) => Promise<void>
   onActivateForApi: () => void
   onApplyReferenceEdits: (voiceId: string, edits: StitchPlanRegionEdit[]) => Promise<void>
   onAnalyze: () => void
@@ -725,7 +727,11 @@ function VoiceCard({
   const [editingAudio, setEditingAudio] = useState(false)
   const [editorAudio, setEditorAudio] = useState<string | null>(null)
   const [regionEdits, setRegionEdits] = useState<StitchPlanRegionEdit[]>([])
-  const [pauseTargetMs, setPauseTargetMs] = useState(300)
+  const [stylePreset, setStylePreset] = useState('Neutral')
+  const [paceMultiplier, setPaceMultiplier] = useState(1.0)
+  const [variants, setVariants] = useState<string[]>([])
+  const [activeVariant, setActiveVariant] = useState<string | null>(null)
+  const [prosodyBusy, setProsodyBusy] = useState(false)
   const [analysisExpanded, setAnalysisExpanded] = useState(() => localStorage.getItem('voice-library-analysis-expanded') !== 'false')
   const [preserveOriginal, setPreserveOriginal] = useState(true)
   const [editorVoiceId, setEditorVoiceId] = useState(voice.voice_id)
@@ -741,8 +747,17 @@ function VoiceCard({
       : 'Transcript is ready for Qwen backends.')
 
   useEffect(() => {
-    if (editing) inputRef.current?.focus()
-  }, [editing])
+    async function loadVariants() {
+      try {
+        const data = await getVoiceVariants(voice.voice_id)
+        setVariants(data.variants)
+        setActiveVariant(data.active_variant)
+      } catch (err) {
+        console.error(`Failed to load variants for ${voice.voice_id}:`, err)
+      }
+    }
+    loadVariants()
+  }, [voice.voice_id])
 
   const commit = async () => {
     const trimmed = draft.trim()
@@ -790,7 +805,37 @@ function VoiceCard({
     >
 
       <div className="space-y-1.5">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-2 overflow-hidden rounded-lg border border-border/60 bg-muted/10 p-2">
+         <div className="flex items-center justify-between px-1">
+           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Prosody Variants</p>
+           <div className="flex items-center gap-1">
+             {variants.length === 0 ? <span className="text-[10px] text-muted-foreground/50">None</span> : <span className="text-[10px] text-muted-foreground">{variants.length} total</span>}
+           </div>
+         </div>
+         <div className="max-h-24 overflow-y-auto space-y-1 px-1">
+           {variants.map(v => (
+             <div key={v} className="flex items-center justify-between group">
+               <button 
+                 onClick={async () => {
+                   try {
+                     await setActiveVoiceVariant(voice.voice_id, v)
+                     setActiveVariant(v)
+                   } catch (err) { console.error(err) }
+                 }}
+                 className={cn(
+                   "text-left truncate text-[11px] py-0.5 px-1 rounded transition-colors",
+                   activeVariant === v ? "bg-cyan-500/20 text-cyan-300" : "text-muted-foreground hover:bg-muted/40"
+                 )}
+               >
+                 {v}
+               </button>
+               {activeVariant === v && <Check className="size-3 text-cyan-400" />}
+             </div>
+           ))}
+         </div>
+       </div>
+
+       <div className="flex flex-wrap items-center gap-2">
           <p className="min-w-0 break-all text-sm font-medium">{voice.voice_id}</p>
           {voice.family_id && (
             <span className="inline-flex items-center rounded-full border border-purple-500/30 bg-purple-500/10 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-purple-400">
@@ -895,12 +940,61 @@ function VoiceCard({
           Use in Speak
         </Button>
         <Button size="sm" variant="outline" disabled={busy} onClick={openAudioEditor}><SlidersHorizontal /> Edit audio</Button>
-        <Popover><PopoverTrigger asChild><Button size="sm" variant="outline" disabled={busy}><FoldHorizontal /> Adjust pauses <ChevronDown /></Button></PopoverTrigger><PopoverContent align="start" className="w-72">
-          <p className="text-xs font-medium">Target interior pause</p>
-          <div className="flex items-center gap-2"><Button size="icon-sm" variant="outline" onClick={() => setPauseTargetMs(Math.max(50, pauseTargetMs - 50))}>−</Button><div className="flex-1 text-center font-mono text-sm">{pauseTargetMs} ms</div><Button size="icon-sm" variant="outline" onClick={() => setPauseTargetMs(Math.min(2000, pauseTargetMs + 50))}>+</Button></div>
-          <label className="flex items-center gap-2 rounded bg-muted/30 p-2 text-xs"><input type="checkbox" checked={preserveOriginal} onChange={(event) => setPreserveOriginal(event.target.checked)} /> Edit a duplicate</label>
-          <div className="grid grid-cols-2 gap-2"><Button size="sm" variant="outline" onClick={() => runMutation((id) => onAdjustPauses(id, 'compress', pauseTargetMs))}><FoldHorizontal /> Tighten</Button><Button size="sm" variant="outline" onClick={() => runMutation((id) => onAdjustPauses(id, 'expand', pauseTargetMs))}><UnfoldHorizontal /> Loosen</Button></div>
-        </PopoverContent></Popover>
+         <Popover>
+           <PopoverTrigger asChild>
+             <Button size="sm" variant="outline" disabled={busy}>
+               <FoldHorizontal /> Adjust prosody <ChevronDown />
+             </Button>
+           </PopoverTrigger>
+           <PopoverContent align="start" className="w-72">
+             <p className="text-xs font-medium mb-2">Prosody Settings</p>
+             <div className="space-y-3">
+               <div className="flex flex-col gap-1.5">
+                 <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Style Preset</label>
+                 <select 
+                   value={stylePreset} 
+                   onChange={(e) => setStylePreset(e.target.value)}
+                   className="w-full rounded bg-background px-2 py-1 text-xs outline-none border border-border"
+                 >
+                   {['Neutral', 'Storyteller', 'Calm', 'Energetic', 'Broadcast', 'Clean'].map(s => (
+                     <option key={s} value={s}>{s}</option>
+                   ))}
+                 </select>
+               </div>
+               <div className="flex flex-col gap-1.5">
+                 <div className="flex justify-between items-center">
+                   <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Pace Multiplier</label>
+                   <span className="font-mono text-[10px]">{paceMultiplier.toFixed(1)}x</span>
+                 </div>
+                 <input 
+                   type="range" min="0.5" max="2.0" step="0.1" 
+                   value={paceMultiplier} 
+                   onChange={(e) => setPaceMultiplier(parseFloat(e.target.value))}
+                   className="w-full accent-cyan-500"
+                 />
+               </div>
+               <Button 
+                 size="sm" 
+                 variant="outline" 
+                 disabled={busy || prosodyBusy} 
+                 onClick={async () => {
+                   setProsodyBusy(true)
+                   try {
+                     await onAdjustPauses(voice.voice_id, stylePreset, paceMultiplier)
+                     const data = await getVoiceVariants(voice.voice_id)
+                     setVariants(data.variants)
+                     setActiveVariant(data.active_variant)
+                   } finally {
+                     setProsodyBusy(false)
+                   }
+                 }}
+               >
+                 <Wand2 className="size-3.5" /> Save as Variant
+               </Button>
+             </div>
+           </PopoverContent>
+         </Popover>
+
         <Popover><PopoverTrigger asChild><Button size="icon-sm" variant="outline" aria-label="More voice actions" tooltip="More voice actions"><MoreHorizontal /></Button></PopoverTrigger><PopoverContent align="end" className="w-64 gap-1 p-1.5">
           <label className="mb-1 flex items-center gap-2 rounded bg-muted/30 p-2 text-xs"><input type="checkbox" checked={preserveOriginal} onChange={(event) => setPreserveOriginal(event.target.checked)} /> Edit audio operations on a copy</label>
           <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onDuplicate}><Copy /> Duplicate voice</Button>
@@ -1198,11 +1292,11 @@ export function VoiceLibraryPage() {
     }
   }
 
-  async function adjustPauses(voiceId: string, mode: 'compress' | 'expand', targetMs: number) {
+  async function adjustPauses(voiceId: string, stylePreset: string, paceMultiplier: number) {
     setBusyVoiceId(voiceId)
     setError(null)
     try {
-      await adjustVoiceReferencePauses(voiceId, targetMs, mode)
+      await adjustVoiceReferencePauses(voiceId, stylePreset, paceMultiplier)
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -1434,7 +1528,8 @@ export function VoiceLibraryPage() {
                    onTrimSilence={async (voiceId) => { await trimVoiceReferenceSilence(voiceId); await refresh() }}
                    onFixAll={() => fixAll(voice.voice_id)}
                    onSetDefault={voice.family_id ? () => setDefault(voice.voice_id) : null}
-                   onAdjustPauses={(voiceId, mode, targetMs) => adjustPauses(voiceId, mode, targetMs)}
+                    onAdjustPauses={(voiceId, stylePreset, paceMultiplier) => adjustPauses(voiceId, stylePreset, paceMultiplier)}
+
                    onActivateForApi={() => activateForApi(voice.voice_id)}
                   onApplyReferenceEdits={(voiceId, edits) => applyReferenceEdits(voiceId, edits)}
                   onAnalyze={() => analyze(voice.voice_id)}

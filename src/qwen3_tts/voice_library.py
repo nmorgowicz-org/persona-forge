@@ -25,7 +25,13 @@ import numpy as np
 import soundfile as sf
 
 from qwen3_tts.audio_post import apply_region_edits
-from qwen3_tts.audio_style import analyze_reference, apply_style_preset, detect_pause_intervals
+from qwen3_tts.audio_style import (
+    analyze_reference,
+    apply_style_preset,
+    detect_pause_intervals,
+    get_pause_targets,
+    PROSODY_MAPS,
+)
 from qwen3_tts.reference_analysis import calculate_quality_score
 
 
@@ -44,6 +50,102 @@ def _is_valid_voice_id(voice_id: str) -> bool:
     # Endpoint input travels straight into a filesystem path (get_voice/_voice_dir), so this
     # doubles as path-traversal defense, not just a format check.
     return bool(voice_id) and bool(_VOICE_ID_RE.match(voice_id))
+
+
+def set_active_variant(voice_id: str, variant_filename: str | None = None) -> bool:
+    """Set the active reference audio for a voice. 
+    If variant_filename is None, reset to original.wav.
+    """
+    if not _is_valid_voice_id(voice_id):
+        return False
+    voice_dir = _voice_dir(voice_id)
+    current_wav = voice_dir / "current.wav"
+    original_wav = voice_dir / "original.wav"
+    
+    try:
+        if current_wav.exists() or current_wav.is_symlink():
+            current_wav.unlink()
+        
+        if variant_filename:
+            target = voice_dir / variant_filename
+            if not target.is_file():
+                return False
+            current_wav.symlink_to(target)
+        else:
+            current_wav.symlink_to(original_wav)
+        return True
+    except OSError:
+        return False
+
+
+def create_prosody_variant(
+    voice_id: str, style_preset: str, pace_multiplier: float
+) -> str | None:
+    """Create a prosody-adjusted variant of the master reference.
+    Returns the filename of the created variant.
+    """
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    
+    # Always base variants on the original master
+    voice_dir = _voice_dir(voice_id)
+    master_path = voice_dir / "original.wav"
+    if not master_path.is_file():
+        return None
+        
+    wav_bytes = master_path.read_bytes()
+    wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+    wav = np.asarray(wav, dtype=np.float32).ravel()
+    
+    # Use the existing prosody logic
+    gaps = detect_pause_intervals(wav, sr)
+    duration_sec = wav.size / float(sr)
+    edge_tolerance = 1.0 / float(sr)
+    
+    interior = [
+        (start_sec, end_sec)
+        for start_sec, end_sec in gaps
+        if start_sec > edge_tolerance and end_sec < duration_sec - edge_tolerance
+    ]
+    
+    if not interior:
+        # No interior pauses to adjust, just return the original
+        return "original.wav"
+
+    sample_text = meta.get("sample_text", "")
+    targets = get_pause_targets(sample_text, style_preset, pace_multiplier, len(interior))
+    
+    edits: list[dict[str, Any]] = []
+    for i, (start_sec, end_sec) in enumerate(interior):
+        dur_sec = end_sec - start_sec
+        mid_sec = (start_sec + end_sec) / 2.0
+        target_sec = targets[i] if i < len(targets) else targets[-1]
+        
+        if dur_sec > target_sec + 0.01:
+            cut_sec = dur_sec - target_sec
+            edits.append({
+                "type": "delete",
+                "start_ms": (mid_sec - cut_sec / 2.0) * 1000.0,
+                "end_ms": (mid_sec + cut_sec / 2.0) * 1000.0,
+            })
+        elif dur_sec < target_sec - 0.01:
+            edits.append({
+                "type": "insert_silence",
+                "at_ms": mid_sec * 1000.0,
+                "duration_ms": (target_sec - dur_sec) * 1000.0,
+            })
+
+    if not edits:
+        return "original.wav"
+        
+    adjusted = apply_region_edits(wav, sr, edits)
+    
+    variant_filename = f"prosody_{style_preset}_{pace_multiplier}x.wav"
+    buf = io.BytesIO()
+    sf.write(buf, adjusted, sr, format="WAV", subtype="PCM_16")
+    (voice_dir / variant_filename).write_bytes(buf.getvalue())
+    return variant_filename
 
 
 def _voice_dir(voice_id: str) -> Path:
@@ -131,7 +233,7 @@ def save_voice(
     voice_id = new_voice_id()
     voice_dir = _voice_dir(voice_id)
     voice_dir.mkdir(parents=True, exist_ok=True)
-    wav_path = voice_dir / "reference.wav"
+    wav_path = voice_dir / "original.wav"
     wav_path.write_bytes(wav_bytes)
 
     meta = {
@@ -168,7 +270,13 @@ def get_voice(voice_id: str) -> dict[str, Any] | None:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    meta["wav_path"] = str(voice_dir / "reference.wav")
+
+    # Resolution Priority Chain: current -> original
+    current_wav = voice_dir / "current.wav"
+    original_wav = voice_dir / "original.wav"
+    resolved_wav = current_wav if current_wav.is_symlink() or current_wav.is_file() else original_wav
+    
+    meta["wav_path"] = str(resolved_wav)
     history_dir = voice_dir / ".history"
     meta["undo_available"] = history_dir.is_dir() and any(history_dir.iterdir())
     return meta
@@ -179,6 +287,9 @@ def get_voice_wav_bytes(voice_id: str) -> bytes | None:
     if meta is None:
         return None
     wav_path = Path(meta["wav_path"])
+    # Resolve symlinks to ensure we get the actual file
+    if wav_path.is_symlink():
+        wav_path = wav_path.resolve()
     if not wav_path.is_file():
         return None
     return wav_path.read_bytes()
@@ -220,7 +331,7 @@ def delete_voice(voice_id: str) -> bool:
 
 def _snapshot_reference(voice_id: str) -> None:
     voice_dir = _voice_dir(voice_id)
-    wav_path = voice_dir / "reference.wav"
+    wav_path = voice_dir / "original.wav"
     meta_path = voice_dir / "meta.json"
     if not wav_path.is_file() or not meta_path.is_file():
         return
@@ -413,10 +524,13 @@ def ensure_mounted_ref_voice(
             meta_path.write_text(json.dumps(updated, indent=2), encoding="utf-8")
             return MOUNTED_VOICE_ID
         voice_dir.mkdir(parents=True, exist_ok=True)
-        (voice_dir / "reference.wav").write_bytes(data)
+        # Bridge to the actual mounted physical file
+        (voice_dir / "original.wav").symlink_to(ref_audio_path)
+        # Also set the current pointer to original
+        (voice_dir / "current.wav").symlink_to(voice_dir / "original.wav")
 
         # Perform reference analysis and quality gating
-        quality_score, quality_warnings, metrics = calculate_quality_score(voice_dir / "reference.wav", transcript=sample_text)
+        quality_score, quality_warnings, metrics = calculate_quality_score(voice_dir / "original.wav", transcript=sample_text)
 
         meta = {
             "voice_id": MOUNTED_VOICE_ID,
@@ -442,19 +556,17 @@ def ensure_mounted_ref_voice(
 
 
 def _rewrite_reference_wav(voice_id: str, wav: np.ndarray, sr: int) -> dict[str, Any] | None:
-    """Overwrite reference.wav in place and refresh derived metrics/quality gate.
-
-    Shared by any operation that edits the stored reference audio itself (normalize, trim),
-    as opposed to update_voice(), which only patches metadata.
+    """Overwrite original.wav in place and refresh derived metrics/quality gate.
     """
     meta = get_voice(voice_id)
     if meta is None:
         return None
     voice_dir = _voice_dir(voice_id)
-    wav_path = voice_dir / "reference.wav"
+    wav_path = voice_dir / "original.wav"
     _snapshot_reference(voice_id)
     sf.write(wav_path, wav, sr, format="WAV", subtype="PCM_16")
     quality_score, quality_warnings, metrics = calculate_quality_score(wav_path, transcript=meta.get("sample_text"))
+
     meta.pop("wav_path", None)
     meta["metrics"] = metrics
     meta["quality_score"] = quality_score
@@ -515,67 +627,21 @@ def trim_reference_silence(voice_id: str, padding_ms: float = 80.0) -> dict[str,
 
 
 def adjust_reference_pauses(
-    voice_id: str, target_ms: float = 300.0, mode: str = "compress"
+    voice_id: str, style_preset: str = "Neutral", pace_multiplier: float = 1.0
 ) -> dict[str, Any] | None:
-    """Compress or expand the *interior* pauses of a saved reference clip toward target_ms.
-
-    Unlike trim_reference_silence (which only touches leading/trailing silence), this walks the
-    gaps between speech that detect_pause_intervals() finds and, in one pass, either shortens
-    every over-long gap (``mode="compress"`` -> Pocket stops copying long mid-speech pauses) or
-    lengthens every too-short gap (``mode="expand"`` -> more breathing room, e.g. for a reference
-    assembled from tightly-stitched OmniVoice segments). Edits are applied through the shared
-    RegionEdit engine (audio_post.apply_region_edits); a single call only ever emits one edit
-    type, so delete/insert ordering never interacts.
+    """Create a prosody variant and set it as active.
+    Returns the voice metadata.
     """
-    if mode not in ("compress", "expand"):
-        raise ValueError(f"mode must be 'compress' or 'expand', got {mode!r}")
-    meta = get_voice(voice_id)
-    if meta is None:
+    variant_filename = create_prosody_variant(voice_id, style_preset, pace_multiplier)
+    if not variant_filename:
         return None
-    wav_bytes = get_voice_wav_bytes(voice_id)
-    if wav_bytes is None:
+    
+    if not set_active_variant(voice_id, variant_filename):
         return None
-    wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
-    wav = np.asarray(wav, dtype=np.float32).ravel()
+        
+    return get_voice(voice_id)
 
-    gaps = detect_pause_intervals(wav, sr)
-    # Boundary silence is the trim operation's job. Do not discard the first/last detected gap
-    # by position: a clip with no boundary silence may have only one, genuinely interior gap.
-    duration_sec = wav.size / float(sr)
-    edge_tolerance = 1.0 / float(sr)
-    interior = [
-        (start_sec, end_sec)
-        for start_sec, end_sec in gaps
-        if start_sec > edge_tolerance and end_sec < duration_sec - edge_tolerance
-    ]
-    target_sec = max(0.0, target_ms / 1000.0)
 
-    edits: list[dict[str, Any]] = []
-    for start_sec, end_sec in interior:
-        dur_sec = end_sec - start_sec
-        mid_sec = (start_sec + end_sec) / 2.0
-        if mode == "compress" and dur_sec > target_sec + 0.01:
-            cut_sec = dur_sec - target_sec
-            edits.append(
-                {
-                    "type": "delete",
-                    "start_ms": (mid_sec - cut_sec / 2.0) * 1000.0,
-                    "end_ms": (mid_sec + cut_sec / 2.0) * 1000.0,
-                }
-            )
-        elif mode == "expand" and dur_sec < target_sec - 0.01:
-            edits.append(
-                {
-                    "type": "insert_silence",
-                    "at_ms": mid_sec * 1000.0,
-                    "duration_ms": (target_sec - dur_sec) * 1000.0,
-                }
-            )
-
-    if not edits:
-        return meta
-    adjusted = apply_region_edits(wav, sr, edits)
-    return _rewrite_reference_wav(voice_id, adjusted, sr)
 
 
 def apply_reference_region_edits(
