@@ -10,8 +10,12 @@ import sys
 import time
 import threading
 import uuid
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
 
 import soundfile as sf
 from flask import Flask, Response, jsonify, request, send_from_directory, send_file
@@ -595,7 +599,7 @@ def voices_activate(voice_id: str):
 @app.get("/voices/<voice_id>/preview-prosody")
 def voices_preview_prosody(voice_id: str):
     """Preview prosody adjustments without saving a variant.
-    Returns a WAV file.
+    Returns JSON with base64 audio and calculated metrics.
     """
     style_preset = request.args.get("style_preset", "Neutral").strip()
     try:
@@ -603,16 +607,34 @@ def voices_preview_prosody(voice_id: str):
     except (TypeError, ValueError):
         return jsonify({"error": "pace_multiplier must be a number"}), 400
 
-    wav_bytes = voice_library.preview_prosody_variant(voice_id, style_preset, pace_multiplier)
-    if wav_bytes is None:
+    meta = voice_library.get_voice(voice_id)
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+
+    # Get the adjusted audio (wav, sr)
+    result = voice_library.get_prosody_adjusted_wav(voice_id, style_preset, pace_multiplier)
+    if result is None:
         return jsonify({"error": "Preview failed"}), 500
 
-    return send_file(
-        io.BytesIO(wav_bytes),
-        mimetype="audio/wav",
-        as_attachment=False,
-        download_name="preview.wav"
-    )
+    wav, sr = result
+    
+    # 1. Calculate metrics for the adjusted audio
+    try:
+        metrics = audio_style.analyze_reference(wav, sr, transcript=meta.get("sample_text"))
+    except Exception as exc:
+        logger.warning(f"Preview analysis failed: {exc}")
+        metrics = {"error": f"analysis failed: {exc}"}
+
+    # 2. Encode audio to base64
+    buf = io.BytesIO()
+    sf.write(buf, wav, sr, format="WAV", subtype="PCM_16")
+    audio_base64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+    return jsonify({
+        "audio_base64": audio_base64,
+        "metrics": metrics,
+        "sample_rate": sr,
+    })
 
 @app.post("/voices/<voice_id>/adjust-pauses")
 def voices_adjust_pauses(voice_id: str):
