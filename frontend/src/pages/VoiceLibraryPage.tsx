@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Copy,
   FoldHorizontal,
+  Info,
   Layers,
   Loader2,
   Mic2,
@@ -111,12 +112,12 @@ function isMountedRef(voice: VoiceMeta): boolean {
 }
 
 const STYLE_DESCRIPTIONS: Record<string, string> = {
-  Neutral: 'Standard natural pacing and pauses.',
-  Storyteller: 'Slower, dramatic pacing with emphasized pauses.',
-  Calm: 'Relaxed, steady pace with longer, soothing gaps.',
-  Energetic: 'Fast-paced, tight gaps for a high-energy feel.',
-  Broadcast: 'Professional, clear pacing typical of news or radio.',
-  Clean: 'Tight, efficient pacing with minimal unnecessary gaps.',
+  Neutral: 'Standard natural pacing and pauses for balanced speech.',
+  Storyteller: 'Slower, more dramatic pacing with extended pauses for narrative effect.',
+  Calm: 'Relaxed, steady pace with longer, soothing gaps between phrases.',
+  Energetic: 'Fast-paced, tight gaps and rapid delivery for a high-energy feel.',
+  Broadcast: 'Professional, clear pacing typical of news or radio announcements.',
+  Clean: 'Tight, efficient pacing that removes unnecessary gaps for a crisp result.',
 }
 
 // needs_review is set from the audio quality gate (quality_warnings) for regular saves and
@@ -1065,9 +1066,12 @@ function VoiceCard({
                       <option key={s} value={s}>{s}</option>
                     ))}
                   </select>
-                  <p className="text-[10px] text-muted-foreground italic">
-                    {STYLE_DESCRIPTIONS[stylePreset]}
-                  </p>
+                    <div className="flex gap-2 rounded bg-muted/50 p-2 text-[10px] text-muted-foreground border border-border">
+                      <Info className="size-3 shrink-0 mt-0.5" />
+                      <span className="italic leading-tight">
+                        {STYLE_DESCRIPTIONS[stylePreset]}
+                      </span>
+                    </div>
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <div className="flex justify-between items-center">
