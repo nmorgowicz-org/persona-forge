@@ -23,6 +23,7 @@ import {
   UnfoldHorizontal,
   Undo2,
   Wand2,
+  RefreshCcw,
   LayoutGrid,
   Rows,
   Columns2,
@@ -911,8 +912,10 @@ function VoiceCard({
           <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => runMutation(onTrimSilence)}><Scissors /> Trim boundary silence</Button>
           {onSetDefault && <Button size="sm" variant="ghost" className="w-full justify-start" disabled={voice.is_default} onClick={onSetDefault}><Star /> Set family default</Button>}
           {voice.undo_available && <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onUndo}><Undo2 /> Undo last audio edit</Button>}
-          <div className="my-1 border-t border-border" />
-          <Button size="sm" variant="ghost" className="w-full justify-start text-destructive hover:text-destructive" onClick={onDelete}><Trash2 /> Delete voice</Button>
+           <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onAnalyze}><RefreshCcw className="size-3.5" /> Refresh analysis</Button>
+           <div className="my-1 border-t border-border" />
+           <Button size="sm" variant="ghost" className="w-full justify-start text-destructive hover:text-destructive" onClick={onDelete}><Trash2 /> Delete voice</Button>
+
         </PopoverContent></Popover>
       </div>
       {editingAudio && editorAudio && (
