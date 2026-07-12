@@ -479,7 +479,7 @@ def duplicate_voice(source_voice_id: str) -> dict[str, Any] | None:
     voice_id = new_voice_id()
     voice_dir = _voice_dir(voice_id)
     voice_dir.mkdir(parents=True, exist_ok=False)
-    (voice_dir / "reference.wav").write_bytes(wav_bytes)
+    (voice_dir / "original.wav").write_bytes(wav_bytes)
 
     meta = dict(source)
     meta.pop("wav_path", None)

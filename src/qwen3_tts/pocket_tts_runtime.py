@@ -21,7 +21,7 @@ import os
 import re
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
-from qwen3_tts.voice_library import VOICE_LIBRARY_DIR
+from qwen3_tts.voice_library import VOICE_LIBRARY_DIR, get_voice
 
 # Cache directory for persisted voice states (.safetensors)
 STATE_CACHE_DIR = VOICE_LIBRARY_DIR / ".state_cache"
@@ -226,7 +226,13 @@ def get_active_default_voice_id() -> str | None:
 
 
 def _library_reference_wav(voice_id: str) -> Path | None:
-    wav_path = VOICE_LIBRARY_DIR / voice_id / "reference.wav"
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    wav_path = Path(meta["wav_path"])
+    if wav_path.is_symlink():
+        wav_path = wav_path.resolve()
+    return wav_path if wav_path.is_file() else None
     return wav_path if wav_path.is_file() else None
 
 
