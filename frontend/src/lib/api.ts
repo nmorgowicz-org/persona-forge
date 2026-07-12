@@ -391,11 +391,16 @@ export async function adjustVoiceReferencePauses(
   voiceId: string,
   stylePreset: string,
   paceMultiplier: number,
+  pauseOffset: number,
 ): Promise<VoiceMeta> {
   const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/adjust-pauses`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ style_preset: stylePreset, pace_multiplier: paceMultiplier }),
+    body: JSON.stringify({ 
+      style_preset: stylePreset, 
+      pace_multiplier: paceMultiplier, 
+      pause_offset: pauseOffset 
+    }),
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()

@@ -111,12 +111,12 @@ function isMountedRef(voice: VoiceMeta): boolean {
 }
 
 const STYLE_DESCRIPTIONS: Record<string, string> = {
-  Neutral: 'Natural pacing and standard pauses.',
-  Storyteller: 'Dramatic, extended pauses for narrative effect.',
-  Calm: 'Slow and relaxed pacing with longer gaps.',
-  Energetic: 'Fast, punchy delivery with minimal pauses.',
-  Broadcast: 'Professional, clear pacing with controlled gaps.',
-  Clean: 'Precise and minimal pauses for high clarity.',
+  Neutral: 'Standard natural pacing and pauses.',
+  Storyteller: 'Slower, dramatic pacing with emphasized pauses.',
+  Calm: 'Relaxed, steady pace with longer, soothing gaps.',
+  Energetic: 'Fast-paced, tight gaps for a high-energy feel.',
+  Broadcast: 'Professional, clear pacing typical of news or radio.',
+  Clean: 'Tight, efficient pacing with minimal unnecessary gaps.',
 }
 
 // needs_review is set from the audio quality gate (quality_warnings) for regular saves and
@@ -782,7 +782,7 @@ function VoiceCard({
   onTrimSilence: (voiceId: string) => Promise<void>
   onFixAll: () => void
   onSetDefault: (() => void) | null
-  onAdjustPauses: (voiceId: string, stylePreset: string, paceMultiplier: number) => Promise<void>
+  onAdjustPauses: (voiceId: string, stylePreset: string, paceMultiplier: number, pauseOffset: number) => Promise<void>
   onActivateForApi: () => void
   onApplyReferenceEdits: (voiceId: string, edits: StitchPlanRegionEdit[]) => Promise<void>
   onAnalyze: () => void
@@ -798,6 +798,7 @@ function VoiceCard({
   const [regionEdits, setRegionEdits] = useState<StitchPlanRegionEdit[]>([])
   const [stylePreset, setStylePreset] = useState('Neutral')
   const [paceMultiplier, setPaceMultiplier] = useState(1.0)
+  const [pauseOffset, setPauseOffset] = useState(0)
   const [variants, setVariants] = useState<string[]>([])
   const [activeVariant, setActiveVariant] = useState<string | null>(null)
   const [prosodyBusy, setProsodyBusy] = useState(false)
@@ -1068,62 +1069,80 @@ function VoiceCard({
                     {STYLE_DESCRIPTIONS[stylePreset]}
                   </p>
                 </div>
-               <div className="flex flex-col gap-1.5">
-                 <div className="flex justify-between items-center">
-                   <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Pace Multiplier</label>
-                   <span className="font-mono text-[10px]">{paceMultiplier.toFixed(1)}x</span>
-                 </div>
-                 <input
-                   type="range" min="0.5" max="2.0" step="0.1"
-                   value={paceMultiplier}
-                   onChange={(e) => setPaceMultiplier(parseFloat(e.target.value))}
-                   className="w-full accent-cyan-500"
-                 />
-               </div>
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex justify-between items-center">
+                    <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Global Pace Scale</label>
+                    <span className="font-mono text-[10px]">{paceMultiplier.toFixed(1)}x</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground italic leading-tight mb-1">
+                    Scales all pauses proportionally (e.g., 1.2x increases all gaps by 20%).
+                  </p>
+                  <input
+                    type="range" min="0.5" max="2.0" step="0.1"
+                    value={paceMultiplier}
+                    onChange={(e) => setPaceMultiplier(parseFloat(e.target.value))}
+                    className="w-full accent-cyan-500"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex justify-between items-center">
+                    <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Pause Offset</label>
+                    <span className="font-mono text-[10px]">{pauseOffset > 0 ? `+${pauseOffset}` : pauseOffset}ms</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground italic leading-tight mb-1">
+                    Shifts all gaps by a flat amount (e.g., +100ms adds 100ms to every pause).
+                  </p>
+                  <input
+                    type="range" min="-500" max="500" step="10"
+                    value={pauseOffset}
+                    onChange={(e) => setPauseOffset(parseInt(e.target.value))}
+                    className="w-full accent-cyan-500"
+                  />
+                </div>
                 <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy || prosodyBusy || previewBusy}
+                       onClick={async () => {
+                         setPreviewBusy(true)
+                         try {
+                           const response = await fetch(`/voices/${voice.voice_id}/preview-prosody?style_preset=${encodeURIComponent(stylePreset)}&pace_multiplier=${paceMultiplier}&pause_offset=${pauseOffset}`)
+                           if (!response.ok) throw new Error('Preview fetch failed')
+                           const data = await response.json()
+                           const blob = new Blob([Uint8Array.from(atob(data.audio_base64), c => c.charCodeAt(0))], { type: 'audio/wav' })
+                           const url = URL.createObjectURL(blob)
+                           setPreviewAudio({ url, blob })
+                           setPreviewMetrics(data.metrics)
+                         } catch (err) {
+                           console.error('Prosody preview failed:', err)
+                         } finally {
+                           setPreviewBusy(false)
+                         }
+                       }}
+                    >
+                      {previewAudio ? <Undo2 className="size-3.5" /> : <Play className="size-3.5" />} {previewAudio ? 'Reset Preview' : 'Preview'}
+                    </Button>
                    <Button
                      size="sm"
                      variant="outline"
                      disabled={busy || prosodyBusy || previewBusy}
-                      onClick={async () => {
-                        setPreviewBusy(true)
-                        try {
-                          const response = await fetch(`/voices/${voice.voice_id}/preview-prosody?style_preset=${encodeURIComponent(stylePreset)}&pace_multiplier=${paceMultiplier}`)
-                          if (!response.ok) throw new Error('Preview fetch failed')
-                          const data = await response.json()
-                          const blob = new Blob([Uint8Array.from(atob(data.audio_base64), c => c.charCodeAt(0))], { type: 'audio/wav' })
-                          const url = URL.createObjectURL(blob)
-                          setPreviewAudio({ url, blob })
-                          setPreviewMetrics(data.metrics)
-                        } catch (err) {
-                          console.error('Prosody preview failed:', err)
-                        } finally {
-                          setPreviewBusy(false)
-                        }
-                      }}
-
+                     onClick={async () => {
+                       setProsodyBusy(true)
+                       try {
+                         await onAdjustPauses(voice.voice_id, stylePreset, paceMultiplier, pauseOffset)
+                         const data = await getVoiceVariants(voice.voice_id)
+                         setVariants(data.variants)
+                         setActiveVariant(data.active_variant)
+                       } finally {
+                         setProsodyBusy(false)
+                       }
+                     }}
                    >
-                     {previewAudio ? <Undo2 className="size-3.5" /> : <Play className="size-3.5" />} {previewAudio ? 'Reset Preview' : 'Preview'}
+                     <Wand2 className="size-3.5" /> Save as Variant
                    </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy || prosodyBusy || previewBusy}
-                    onClick={async () => {
-                      setProsodyBusy(true)
-                      try {
-                        await onAdjustPauses(voice.voice_id, stylePreset, paceMultiplier)
-                        const data = await getVoiceVariants(voice.voice_id)
-                        setVariants(data.variants)
-                        setActiveVariant(data.active_variant)
-                      } finally {
-                        setProsodyBusy(false)
-                      }
-                    }}
-                  >
-                    <Wand2 className="size-3.5" /> Save as Variant
-                  </Button>
-                </div>
+                 </div>
+
 
              </div>
            </PopoverContent>
@@ -1426,11 +1445,11 @@ export function VoiceLibraryPage() {
     }
   }
 
-  async function adjustPauses(voiceId: string, stylePreset: string, paceMultiplier: number) {
+  async function adjustPauses(voiceId: string, stylePreset: string, paceMultiplier: number, pauseOffset: number) {
     setBusyVoiceId(voiceId)
     setError(null)
     try {
-      await adjustVoiceReferencePauses(voiceId, stylePreset, paceMultiplier)
+      await adjustVoiceReferencePauses(voiceId, stylePreset, paceMultiplier, pauseOffset)
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -1662,7 +1681,7 @@ export function VoiceLibraryPage() {
                    onTrimSilence={async (voiceId) => { await trimVoiceReferenceSilence(voiceId); await refresh() }}
                    onFixAll={() => fixAll(voice.voice_id)}
                    onSetDefault={voice.family_id ? () => setDefault(voice.voice_id) : null}
-                    onAdjustPauses={(voiceId, stylePreset, paceMultiplier) => adjustPauses(voiceId, stylePreset, paceMultiplier)}
+                    onAdjustPauses={(voiceId, stylePreset, paceMultiplier, pauseOffset) => adjustPauses(voiceId, stylePreset, paceMultiplier, pauseOffset)}
 
                    onActivateForApi={() => activateForApi(voice.voice_id)}
                   onApplyReferenceEdits={(voiceId, edits) => applyReferenceEdits(voiceId, edits)}
