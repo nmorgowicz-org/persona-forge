@@ -76,7 +76,10 @@ export function RegionEditor({ audioBase64, edits, pauseIntervals = [], onChange
     window.addEventListener('mouseup', up)
   }
   const add = (edit: StitchPlanRegionEdit) => onChange([...edits, edit])
-  const selectionStyle = useMemo(() => ({ left: `${selected.startMs / Math.max(1, durationMs) * 100}%`, width: `${(selected.endMs - selected.startMs) / Math.max(1, durationMs) * 100}%` }), [durationMs, selected])
+  const selectionStyle = useMemo(() => {
+    const s = selection ?? { startMs: 0, endMs: Math.min(300, durationMs) }
+    return { left: `${s.startMs / Math.max(1, durationMs) * 100}%`, width: `${(s.endMs - s.startMs) / Math.max(1, durationMs) * 100}%` }
+  }, [durationMs, selection])
 
   return <div className="space-y-3 border-t border-border/60 pt-3">
     <div className="flex items-center justify-between"><div><p className="text-xs font-medium">Reference audio editor</p><p className="text-[10px] text-muted-foreground">Playback and waveform include all queued edits.</p></div><Button size="icon-sm" variant="ghost" aria-label="Close audio editor" tooltip="Close audio editor" onClick={onClose}><X /></Button></div>
