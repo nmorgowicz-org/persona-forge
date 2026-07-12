@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import soundfile as sf
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory, send_file
 
 from qwen3_tts import audio_style, model, omnivoice_engine, segment_library, voice_design, voice_library
 from qwen3_tts.asr_check import validate_reference_text
@@ -547,9 +547,9 @@ def voices_get_variants(voice_id: str):
     voice_dir = voice_library._voice_dir(voice_id)
     if not voice_dir.is_dir():
         return jsonify({"error": "voice not found"}), 404
-    
+
     variants = [f.name for f in voice_dir.iterdir() if f.name.startswith("prosody_") and f.name.endswith(".wav")]
-    
+
     # Find which one is currently active
     current_wav = voice_dir / "current.wav"
     active_variant = None
@@ -591,6 +591,28 @@ def voices_activate(voice_id: str):
         return jsonify({"error": f"Activate failed: {exc}"}), 500
     return jsonify({**meta, "api_active": True})
 
+
+@app.get("/voices/<voice_id>/preview-prosody")
+def voices_preview_prosody(voice_id: str):
+    """Preview prosody adjustments without saving a variant.
+    Returns a WAV file.
+    """
+    style_preset = request.args.get("style_preset", "Neutral").strip()
+    try:
+        pace_multiplier = float(request.args.get("pace_multiplier", 1.0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "pace_multiplier must be a number"}), 400
+
+    wav_bytes = voice_library.preview_prosody_variant(voice_id, style_preset, pace_multiplier)
+    if wav_bytes is None:
+        return jsonify({"error": "Preview failed"}), 500
+
+    return send_file(
+        io.BytesIO(wav_bytes),
+        mimetype="audio/wav",
+        as_attachment=False,
+        download_name="preview.wav"
+    )
 
 @app.post("/voices/<voice_id>/adjust-pauses")
 def voices_adjust_pauses(voice_id: str):

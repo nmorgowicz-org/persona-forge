@@ -14,6 +14,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  Play,
   Radio,
   Scissors,
   SlidersHorizontal,
@@ -170,7 +171,7 @@ function QualityGatePanel({
           ? 'text-warning'
           : 'text-destructive'
   const fixable = getFixableQualityWarnings(voice)
-  
+
   return (
     <div className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
       <div className="mb-1 flex items-center justify-between gap-2">
@@ -182,7 +183,7 @@ function QualityGatePanel({
           {score !== undefined && (
             <span className={cn('font-mono text-[11px]', scoreColor)}>{Math.round(score)}/100</span>
           )}
-          <button 
+          <button
             onClick={() => setIsAdvanced(!isAdvanced)}
             className="text-[10px] opacity-60 hover:opacity-100 underline underline-offset-2"
           >
@@ -732,6 +733,7 @@ function VoiceCard({
   const [variants, setVariants] = useState<string[]>([])
   const [activeVariant, setActiveVariant] = useState<string | null>(null)
   const [prosodyBusy, setProsodyBusy] = useState(false)
+  const [previewBusy, setPreviewBusy] = useState(false)
   const [analysisExpanded, setAnalysisExpanded] = useState(() => localStorage.getItem('voice-library-analysis-expanded') !== 'false')
   const [preserveOriginal, setPreserveOriginal] = useState(true)
   const [editorVoiceId, setEditorVoiceId] = useState(voice.voice_id)
@@ -815,7 +817,7 @@ function VoiceCard({
          <div className="max-h-24 overflow-y-auto space-y-1 px-1">
            {variants.map(v => (
              <div key={v} className="flex items-center justify-between group">
-               <button 
+               <button
                  onClick={async () => {
                    try {
                      await setActiveVoiceVariant(voice.voice_id, v)
@@ -951,8 +953,8 @@ function VoiceCard({
              <div className="space-y-3">
                <div className="flex flex-col gap-1.5">
                  <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Style Preset</label>
-                 <select 
-                   value={stylePreset} 
+                 <select
+                   value={stylePreset}
                    onChange={(e) => setStylePreset(e.target.value)}
                    className="w-full rounded bg-background px-2 py-1 text-xs outline-none border border-border"
                  >
@@ -966,31 +968,57 @@ function VoiceCard({
                    <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Pace Multiplier</label>
                    <span className="font-mono text-[10px]">{paceMultiplier.toFixed(1)}x</span>
                  </div>
-                 <input 
-                   type="range" min="0.5" max="2.0" step="0.1" 
-                   value={paceMultiplier} 
+                 <input
+                   type="range" min="0.5" max="2.0" step="0.1"
+                   value={paceMultiplier}
                    onChange={(e) => setPaceMultiplier(parseFloat(e.target.value))}
                    className="w-full accent-cyan-500"
                  />
                </div>
-               <Button 
-                 size="sm" 
-                 variant="outline" 
-                 disabled={busy || prosodyBusy} 
-                 onClick={async () => {
-                   setProsodyBusy(true)
-                   try {
-                     await onAdjustPauses(voice.voice_id, stylePreset, paceMultiplier)
-                     const data = await getVoiceVariants(voice.voice_id)
-                     setVariants(data.variants)
-                     setActiveVariant(data.active_variant)
-                   } finally {
-                     setProsodyBusy(false)
-                   }
-                 }}
-               >
-                 <Wand2 className="size-3.5" /> Save as Variant
-               </Button>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy || prosodyBusy || previewBusy}
+                    onClick={async () => {
+                      setPreviewBusy(true)
+                      try {
+                        const response = await fetch(`/voices/${voice.voice_id}/preview-prosody?style_preset=${encodeURIComponent(stylePreset)}&pace_multiplier=${paceMultiplier}`)
+                        if (!response.ok) throw new Error('Preview fetch failed')
+                        const blob = await response.blob()
+                        const url = URL.createObjectURL(blob)
+                        const audio = new Audio(url)
+                        audio.play()
+                        audio.onended = () => URL.revokeObjectURL(url)
+                      } catch (err) {
+                        console.error('Prosody preview failed:', err)
+                      } finally {
+                        setPreviewBusy(false)
+                      }
+                    }}
+                  >
+                    <Play className="size-3.5" /> Preview
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy || prosodyBusy || previewBusy}
+                    onClick={async () => {
+                      setProsodyBusy(true)
+                      try {
+                        await onAdjustPauses(voice.voice_id, stylePreset, paceMultiplier)
+                        const data = await getVoiceVariants(voice.voice_id)
+                        setVariants(data.variants)
+                        setActiveVariant(data.active_variant)
+                      } finally {
+                        setProsodyBusy(false)
+                      }
+                    }}
+                  >
+                    <Wand2 className="size-3.5" /> Save as Variant
+                  </Button>
+                </div>
+
              </div>
            </PopoverContent>
          </Popover>

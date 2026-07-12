@@ -53,7 +53,7 @@ def _is_valid_voice_id(voice_id: str) -> bool:
 
 
 def set_active_variant(voice_id: str, variant_filename: str | None = None) -> bool:
-    """Set the active reference audio for a voice. 
+    """Set the active reference audio for a voice.
     If variant_filename is None, reset to original.wav.
     """
     if not _is_valid_voice_id(voice_id):
@@ -61,11 +61,11 @@ def set_active_variant(voice_id: str, variant_filename: str | None = None) -> bo
     voice_dir = _voice_dir(voice_id)
     current_wav = voice_dir / "current.wav"
     original_wav = voice_dir / "original.wav"
-    
+
     try:
         if current_wav.exists() or current_wav.is_symlink():
             current_wav.unlink()
-        
+
         if variant_filename:
             target = voice_dir / variant_filename
             if not target.is_file():
@@ -78,50 +78,47 @@ def set_active_variant(voice_id: str, variant_filename: str | None = None) -> bo
         return False
 
 
-def create_prosody_variant(
+def get_prosody_adjusted_wav(
     voice_id: str, style_preset: str, pace_multiplier: float
-) -> str | None:
-    """Create a prosody-adjusted variant of the master reference.
-    Returns the filename of the created variant.
+) -> tuple[np.ndarray, int] | None:
+    """Calculate prosody-adjusted audio for a voice without persisting it.
+    Returns (wav, sr) or None on error.
     """
     meta = get_voice(voice_id)
     if meta is None:
         return None
-    
-    # Always base variants on the original master
+
     voice_dir = _voice_dir(voice_id)
     master_path = voice_dir / "original.wav"
     if not master_path.is_file():
         return None
-        
+
     wav_bytes = master_path.read_bytes()
     wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
     wav = np.asarray(wav, dtype=np.float32).ravel()
-    
-    # Use the existing prosody logic
+
     gaps = detect_pause_intervals(wav, sr)
     duration_sec = wav.size / float(sr)
     edge_tolerance = 1.0 / float(sr)
-    
+
     interior = [
         (start_sec, end_sec)
         for start_sec, end_sec in gaps
         if start_sec > edge_tolerance and end_sec < duration_sec - edge_tolerance
     ]
-    
+
     if not interior:
-        # No interior pauses to adjust, just return the original
-        return "original.wav"
+        return wav, sr
 
     sample_text = meta.get("sample_text", "")
     targets = get_pause_targets(sample_text, style_preset, pace_multiplier, len(interior))
-    
+
     edits: list[dict[str, Any]] = []
     for i, (start_sec, end_sec) in enumerate(interior):
         dur_sec = end_sec - start_sec
         mid_sec = (start_sec + end_sec) / 2.0
         target_sec = targets[i] if i < len(targets) else targets[-1]
-        
+
         if dur_sec > target_sec + 0.01:
             cut_sec = dur_sec - target_sec
             edits.append({
@@ -137,15 +134,49 @@ def create_prosody_variant(
             })
 
     if not edits:
-        return "original.wav"
-        
-    adjusted = apply_region_edits(wav, sr, edits)
-    
+        return wav, sr
+
+    return apply_region_edits(wav, sr, edits), sr
+
+def create_prosody_variant(
+    voice_id: str, style_preset: str, pace_multiplier: float
+) -> str | None:
+    """Create a prosody-adjusted variant of the master reference.
+    Returns the filename of the created variant.
+    """
+    result = get_prosody_adjusted_wav(voice_id, style_preset, pace_multiplier)
+    if result is None:
+        return None
+
+    adjusted, sr = result
+
+    # If no changes were made, we can just return the original
+    # (Note: this is slightly simplified as apply_region_edits might return same wav)
+    # We'll just always save it to be sure it's a distinct file if the user expects a variant.
+    # Actually, if adjusted is identical to original, we can return "original.wav".
+    # But for simplicity, let's always save the variant.
+
     variant_filename = f"prosody_{style_preset}_{pace_multiplier}x.wav"
+    voice_dir = _voice_dir(voice_id)
     buf = io.BytesIO()
     sf.write(buf, adjusted, sr, format="WAV", subtype="PCM_16")
     (voice_dir / variant_filename).write_bytes(buf.getvalue())
     return variant_filename
+
+def preview_prosody_variant(
+    voice_id: str, style_preset: str, pace_multiplier: float
+) -> bytes | None:
+    """Return the prosody-adjusted audio bytes for a voice without saving.
+    """
+    result = get_prosody_adjusted_wav(voice_id, style_preset, pace_multiplier)
+    if result is None:
+        return None
+
+    adjusted, sr = result
+    buf = io.BytesIO()
+    sf.write(buf, adjusted, sr, format="WAV", subtype="PCM_16")
+    return buf.getvalue()
+
 
 
 def _voice_dir(voice_id: str) -> Path:
@@ -275,7 +306,7 @@ def get_voice(voice_id: str) -> dict[str, Any] | None:
     current_wav = voice_dir / "current.wav"
     original_wav = voice_dir / "original.wav"
     legacy_wav = voice_dir / "reference.wav"
-    
+
     if current_wav.is_symlink() or current_wav.is_file():
         resolved_wav = current_wav
     elif original_wav.is_symlink() or original_wav.is_file():
@@ -284,7 +315,7 @@ def get_voice(voice_id: str) -> dict[str, Any] | None:
         resolved_wav = legacy_wav
     else:
         resolved_wav = original_wav
-    
+
     meta["wav_path"] = str(resolved_wav)
     history_dir = voice_dir / ".history"
     meta["undo_available"] = history_dir.is_dir() and any(history_dir.iterdir())
@@ -620,13 +651,13 @@ def trim_reference_silence(voice_id: str, padding_ms: float = 80.0) -> dict[str,
     gaps = detect_pause_intervals(wav, sr)
     if not gaps:
         return meta
-    
+
     speech_start_sec = gaps[0][1]
     speech_end_sec = gaps[-1][0]
-    
+
     if speech_start_sec >= speech_end_sec:
         return meta
-        
+
     pad = int(sr * padding_ms / 1000.0)
     start = max(0, int(speech_start_sec * sr) - pad)
     end = min(wav.size, int(speech_end_sec * sr) + pad)
@@ -644,10 +675,10 @@ def adjust_reference_pauses(
     variant_filename = create_prosody_variant(voice_id, style_preset, pace_multiplier)
     if not variant_filename:
         return None
-    
+
     if not set_active_variant(voice_id, variant_filename):
         return None
-        
+
     return get_voice(voice_id)
 
 
