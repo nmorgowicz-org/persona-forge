@@ -106,6 +106,10 @@ const useReducedMotion = () => {
   return reduced
 }
 
+function isMountedRef(voice: VoiceMeta): boolean {
+  return (voice as VoiceMeta & { source?: string }).source === MOUNTED_REF_SOURCE
+}
+
 const STYLE_DESCRIPTIONS: Record<string, string> = {
   Neutral: 'Natural pacing and standard pauses.',
   Storyteller: 'Dramatic, extended pauses for narrative effect.',
