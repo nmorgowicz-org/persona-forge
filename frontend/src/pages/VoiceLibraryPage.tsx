@@ -353,7 +353,7 @@ function getSourceBadges(voice: VoiceMeta): string[] {
 
 function metricLevel(value: number | null, min: number, max: number): number {
   if (value === null || max <= min) return 0
-  return Math.max(0.08, Math.min(1, (value - min) / (max - min)))
+  return Math.min(1, Math.max(0, (value - min) / (max - min)))
 }
 
 function VoiceSourceBadges({ voice }: { voice: VoiceMeta }) {
