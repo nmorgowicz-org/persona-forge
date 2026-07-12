@@ -127,8 +127,22 @@ def get_prosody_adjusted_wav(
         target_sec, trigger_type = targets[i] if i < len(targets) else (targets[-1][0], "natural")
         
         if dur_sec < 0.1 and trigger_type == "natural":
-            # Only scale proportionally to avoid "blowing up" tiny gaps
-            # We'll just let these be, or you could apply pace_multiplier here
+            # Scale proportionally to avoid "blowing up" tiny gaps
+            new_dur = dur_sec * pace_multiplier
+            diff = new_dur - dur_sec
+            if abs(diff) > 0.001:
+                if diff > 0:
+                    edits.append({
+                        "type": "insert_silence",
+                        "at_ms": mid_sec * 1000.0,
+                        "duration_ms": diff * 1000.0,
+                    })
+                else:
+                    edits.append({
+                        "type": "delete",
+                        "start_ms": (mid_sec - abs(diff) / 2.0) * 1000.0,
+                        "end_ms": (mid_sec + abs(diff) / 2.0) * 1000.0,
+                    })
             continue
             
         if dur_sec > target_sec + 0.01:

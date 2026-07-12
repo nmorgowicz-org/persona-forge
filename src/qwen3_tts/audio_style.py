@@ -196,7 +196,7 @@ def _shape_pauses(wav: np.ndarray, sr: int, prompt: str = "", style_preset: str 
 
     try:
         # 1. Identify all gaps in the audio
-        non_silent = librosa.effects.split(wav, top_db=40)
+        non_silent = librosa.effects.split(wav, top_db=30)
         if len(non_silent) <= 1:
             return wav, 1.0
 
