@@ -1750,22 +1750,23 @@ export function VoiceLibraryPage() {
                       </Button>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1">
-                        <ClipPlayerUrl
-                          segmentId={seg.segment_id}
-                          className="w-full"
-                        />
-                      </div>
-                      <Button
-                        size="sm"
-                        className="gap-1"
-                        onClick={() => insertSegmentIntoStitchEditor(seg)}
-                      >
-                        <Plus className="size-3.5" />
-                        Insert into stitch editor
-                      </Button>
-                    </div>
+                     <div className="flex flex-col gap-2">
+                       <div>
+                         <ClipPlayerUrl
+                           segmentId={seg.segment_id}
+                           className="w-full"
+                         />
+                       </div>
+                       <Button
+                         size="sm"
+                         className="gap-1 w-full"
+                         onClick={() => insertSegmentIntoStitchEditor(seg)}
+                       >
+                         <Plus className="size-3.5" />
+                         Insert into stitch editor
+                       </Button>
+                     </div>
+
                   </motion.div>
                 ))}
               </div>
