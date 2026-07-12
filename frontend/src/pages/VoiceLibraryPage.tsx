@@ -63,6 +63,7 @@ import { cn } from '@/lib/utils'
 import { InfoIcon } from '@/components/InfoIcon'
 import { RegionEditor } from '@/components/waveform/RegionEditor'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const MOUNTED_REF_SOURCE = 'mounted_ref_audio' as const
 
@@ -1054,18 +1055,29 @@ function VoiceCard({
              <div className="space-y-3">
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Style Preset</label>
-                  <select
-                    value={stylePreset}
-                    onChange={(e) => {
-                      setStylePreset(e.target.value)
-                      setPreviewAudio(null)
-                    }}
-                    className="w-full rounded bg-background px-2 py-1 text-xs outline-none border border-border"
-                  >
-                    {Object.keys(STYLE_DESCRIPTIONS).map(s => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
+                   <Select 
+                     value={stylePreset} 
+                     onValueChange={(val) => {
+                       setStylePreset(val)
+                       setPreviewAudio(null)
+                     }}
+                   >
+                     <SelectTrigger size="sm" className="w-full h-7 px-2 text-xs">
+                       <SelectValue />
+                     </SelectTrigger>
+                     <SelectContent>
+                       <SelectGroup>
+                         {Object.keys(STYLE_DESCRIPTIONS).map(s => (
+                           <SelectItem key={s} value={s}>
+                             <div className="flex flex-col text-left">
+                               <span className="font-medium">{s}</span>
+                               <span className="text-[10px] opacity-60 leading-tight">{STYLE_DESCRIPTIONS[s]}</span>
+                             </div>
+                           </SelectItem>
+                         ))}
+                       </SelectGroup>
+                     </SelectContent>
+                   </Select>
                     <div className="flex gap-2 rounded bg-muted/50 p-2 text-[10px] text-muted-foreground border border-border">
                       <Info className="size-3 shrink-0 mt-0.5" />
                       <span className="italic leading-tight">
