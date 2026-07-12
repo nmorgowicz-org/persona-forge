@@ -58,7 +58,7 @@ def _normalize_lufs(wav: np.ndarray, sr: int, target_lufs: float = -20.0) -> np.
     gain_db = float(target_lufs) - current_lufs
     return (x * (10.0 ** (gain_db / 20.0))).astype(np.float32)
 
-def detect_pause_intervals(wav: np.ndarray, sr: int, top_db: float = 40.0) -> List[Tuple[float, float]]:
+def detect_pause_intervals(wav: np.ndarray, sr: int, top_db: float = 30.0) -> List[Tuple[float, float]]:
     """Returns a list of (start, end) seconds for silence intervals."""
     # librosa.effects.split returns non-silent intervals
     non_silent = librosa.effects.split(wav, top_db=top_db)
