@@ -116,7 +116,8 @@ def get_prosody_adjusted_wav(
         return wav, sr
 
     sample_text = meta.get("sample_text", "")
-    targets = get_pause_targets(sample_text, style_preset, pace_multiplier, len(interior), pause_offset_ms)
+    gap_starts = [start for start, end in interior]
+    targets = get_pause_targets(sample_text, style_preset, pace_multiplier, gap_starts, duration_sec, pause_offset_ms)
 
     edits: list[dict[str, Any]] = []
     for i, (start_sec, end_sec) in enumerate(interior):
@@ -124,7 +125,7 @@ def get_prosody_adjusted_wav(
         mid_sec = (start_sec + end_sec) / 2.0
         
         # Micro-pause protection: preserve natural word spacing for gaps < 100ms
-        target_sec, trigger_type = targets[i] if i < len(targets) else (targets[-1][0], "natural")
+        target_sec, trigger_type = targets.get(i, (0.0, "natural"))
         
         if dur_sec < 0.1 and trigger_type == "natural":
             # Scale proportionally to avoid "blowing up" tiny gaps
