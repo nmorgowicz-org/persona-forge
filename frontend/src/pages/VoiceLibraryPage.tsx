@@ -369,21 +369,6 @@ function metricLevel(value: number | null, min: number, max: number): number {
   return Math.min(1, Math.max(0, (value - min) / (max - min)))
 }
 
-function FingerprintDelta({ label, refVal, prevVal, unit = '' }: { label: string; refVal: number | null; prevVal: number | null; unit?: string }) {
-  if (refVal === null || prevVal === null) return null
-  const delta = prevVal - refVal
-  const color = delta > 0 ? 'text-success' : delta < 0 ? 'text-destructive' : 'text-muted-foreground'
-  const sign = delta > 0 ? '+' : ''
-  return (
-    <div className="flex items-center justify-between gap-2 py-0.5 border-b border-border/30 last:border-0">
-      <span className="text-[10px] text-muted-foreground">{label}</span>
-      <span className={cn('font-mono text-[10px] font-medium', color)}>
-        {sign}{delta.toFixed(2)}{unit}
-      </span>
-    </div>
-  )
-}
-
 function VoiceSourceBadges({ voice }: { voice: VoiceMeta }) {
 
   const sourceBadges = getSourceBadges(voice)
@@ -491,7 +476,7 @@ function VoiceMetricChip({
 }: {
   label: string
   value: string
-  delta?: { value: string; isPositive: boolean }
+  delta?: { value: string; isPositive: boolean } | null
   help?: string
 }) {
   return (
@@ -524,8 +509,8 @@ function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle, previ
   const pauseCount = finiteNumber(metrics.pause_count)
   const truePeak = getTruePeak(metrics)
 
-  const getDelta = (ref: number | null, prev: number | null, unit = '', digits = 2, inverse = false) => {
-    if (ref === null || prev === null) return null
+  const getDelta = (ref: number | null | undefined, prev: number | null | undefined, unit = '', digits = 2, inverse = false) => {
+    if (ref === null || ref === undefined || prev === null || prev === undefined) return null
     const diff = prev - ref
     if (diff === 0) return null
     const sign = diff > 0 ? '+' : ''
