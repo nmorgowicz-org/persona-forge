@@ -212,20 +212,20 @@ def _shape_pauses(wav: np.ndarray, sr: int, prompt: str = "", style_preset: str 
             gap_len = start - last_end
             
             if gap_len > 0:
-                    if i > 0:
-                        # Only expand significant gaps (>= 20ms) to avoid phantom pauses
-                        # Distinguish between micro-pauses (word-level) and structural pauses (phrase-level)
-                        
-                        target_sec, trigger_type = targets[i-1] if (i-1) < len(targets) else (targets[-1][0], "natural")
-                        
-                        if gap_len < 0.1 and trigger_type == "natural":
-                            # Micro-pause: scale proportionally to preserve natural word spacing
-                            new_gap_len = int(gap_len * pace_multiplier * sr)
-                            new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
-                        else:
-                            # Structural pause or significant natural gap: use the specific target
-                            new_gap_len = max(1, int(target_sec * sr))
-                            new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
+                if i > 0:
+                    # Only expand significant gaps (>= 20ms) to avoid phantom pauses
+                    # Distinguish between micro-pauses (word-level) and structural pauses (phrase-level)
+                    
+                    target_sec, trigger_type = targets[i-1] if (i-1) < len(targets) else (targets[-1][0], "natural")
+                    
+                    if gap_len < 0.1 and trigger_type == "natural":
+                        # Micro-pause: scale proportionally to preserve natural word spacing
+                        new_gap_len = int(gap_len * pace_multiplier * sr)
+                        new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
+                    else:
+                        # Structural pause or significant natural gap: use the specific target
+                        new_gap_len = max(1, int(target_sec * sr))
+                        new_wav_parts.append(np.zeros(new_gap_len, dtype=np.float32))
                 else:
                     # Boundary silence: leave as is
                     new_wav_parts.append(wav[last_end:start])
