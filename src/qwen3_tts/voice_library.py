@@ -271,10 +271,19 @@ def get_voice(voice_id: str) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
 
-    # Resolution Priority Chain: current -> original
+    # Resolution Priority Chain: current -> original -> legacy (reference)
     current_wav = voice_dir / "current.wav"
     original_wav = voice_dir / "original.wav"
-    resolved_wav = current_wav if current_wav.is_symlink() or current_wav.is_file() else original_wav
+    legacy_wav = voice_dir / "reference.wav"
+    
+    if current_wav.is_symlink() or current_wav.is_file():
+        resolved_wav = current_wav
+    elif original_wav.is_symlink() or original_wav.is_file():
+        resolved_wav = original_wav
+    elif legacy_wav.is_symlink() or legacy_wav.is_file():
+        resolved_wav = legacy_wav
+    else:
+        resolved_wav = original_wav
     
     meta["wav_path"] = str(resolved_wav)
     history_dir = voice_dir / ".history"
@@ -339,7 +348,7 @@ def _snapshot_reference(voice_id: str) -> None:
     history_dir.mkdir(exist_ok=True)
     snapshot = history_dir / f"{time.time_ns()}"
     snapshot.mkdir()
-    shutil.copy2(wav_path, snapshot / "reference.wav")
+    shutil.copy2(wav_path, snapshot / "original.wav")
     shutil.copy2(meta_path, snapshot / "meta.json")
     for stale in sorted((entry for entry in history_dir.iterdir() if entry.is_dir()), reverse=True)[10:]:
         shutil.rmtree(stale)
@@ -353,7 +362,7 @@ def undo_reference_edit(voice_id: str) -> dict[str, Any] | None:
     if not snapshots:
         return None
     latest = snapshots[0]
-    shutil.copy2(latest / "reference.wav", voice_dir / "reference.wav")
+    shutil.copy2(latest / "original.wav", voice_dir / "original.wav")
     shutil.copy2(latest / "meta.json", voice_dir / "meta.json")
     shutil.rmtree(latest)
     return get_voice(voice_id)
