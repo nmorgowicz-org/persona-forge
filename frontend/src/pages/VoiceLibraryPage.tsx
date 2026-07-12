@@ -23,6 +23,10 @@ import {
   UnfoldHorizontal,
   Undo2,
   Wand2,
+  LayoutGrid,
+  Rows,
+  Columns2,
+  Columns3,
 } from 'lucide-react'
 import {
   activateVoiceForApi,
@@ -508,7 +512,11 @@ function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle }: { m
         )}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
+      <div className={cn(
+        "grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]",
+        layoutMode === 'list' && "grid-cols-1",
+        layoutMode === 'grid-3' && "max-w-sm mx-auto"
+      )}>
         <div className="grid grid-cols-2 gap-1.5">
           <VoiceMetricChip label="Duration" value={formatDuration(metrics.duration_seconds)} />
           <VoiceMetricChip
@@ -673,6 +681,7 @@ function VoiceAudioAutoPlayer({ voiceId }: { voiceId: string }) {
 function VoiceCard({
   voice,
   busy,
+  layoutMode,
   onUse,
   onDesignFrom,
   onReopenInStitchStudio,
@@ -691,6 +700,7 @@ function VoiceCard({
 }: {
   voice: VoiceMeta
   busy: boolean
+  layoutMode: string
   onUse: () => void
   onDesignFrom: (() => void) | null
   onReopenInStitchStudio: (() => void) | null
@@ -927,6 +937,10 @@ export function VoiceLibraryPage() {
 
   const [segSearch, setSegSearch] = useState('')
   const [compareMode, setCompareMode] = useState(false)
+  const [layoutMode, setLayoutMode] = useState(() => {
+    if (typeof window === 'undefined') return 'grid-1'
+    return localStorage.getItem('voice-library-layout') || 'grid-1'
+  })
   const setVoiceId = useAppStore((s) => s.setVoiceId)
 
   const setPage = useAppStore((s) => s.setPage)
@@ -962,6 +976,10 @@ export function VoiceLibraryPage() {
       return (s.tags ?? []).some((t) => (t ?? '').toLowerCase().includes(q))
     })
   }, [segments, segSearch])
+
+  useEffect(() => {
+    localStorage.setItem('voice-library-layout', layoutMode)
+  }, [layoutMode])
 
   async function insertSegmentIntoStitchEditor(seg: SegmentMeta) {
     setError(null)
@@ -1344,40 +1362,48 @@ export function VoiceLibraryPage() {
                 </h2>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 min-[1600px]:grid-cols-2">
-                {voices.map((voice) => (
-                  <VoiceCard
-                    key={voice.voice_id}
-                    voice={voice}
-                    busy={busyVoiceId === voice.voice_id}
-                    onUse={() => {
-                      setVoiceId(voice.voice_id)
-                      setPage('speak')
-                    }}
-                    onDesignFrom={
-                      hasChipSelections(voice.selections) ? () => designFromVoice(voice.voice_id) : null
-                    }
-                    onReopenInStitchStudio={
-                      (voice.selections as OmniVoiceSelections | null | undefined)?.stitch_plan?.clips
-                        ?.length
-                        ? () => reopenInStitchStudio(voice)
-                        : null
-                    }
-                    onDelete={() => remove(voice.voice_id)}
-                    onDuplicate={() => duplicate(voice.voice_id)}
-                     onSaveSampleText={(text) => saveSampleText(voice.voice_id, text)}
-                     onNormalize={(voiceId) => normalize(voiceId)}
-                     onTrimSilence={async (voiceId) => { await trimVoiceReferenceSilence(voiceId); await refresh() }}
-                     onFixAll={() => fixAll(voice.voice_id)}
-                     onSetDefault={voice.family_id ? () => setDefault(voice.voice_id) : null}
-                     onAdjustPauses={(voiceId, mode, targetMs) => adjustPauses(voiceId, mode, targetMs)}
-                     onActivateForApi={() => activateForApi(voice.voice_id)}
-                    onApplyReferenceEdits={(voiceId, edits) => applyReferenceEdits(voiceId, edits)}
-                    onAnalyze={() => analyze(voice.voice_id)}
-                    onUndo={() => undoAudioEdit(voice.voice_id)}
-                   />
-                ))}
-              </div>
+            <div className={cn(
+              "grid gap-4",
+              layoutMode === 'grid-1' && "grid-cols-1 max-w-4xl mx-auto",
+              layoutMode === 'grid-2' && "grid-cols-1 sm:grid-cols-2",
+              layoutMode === 'grid-3' && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3",
+              layoutMode === 'list' && "grid-cols-1"
+            )}>
+              {voices.map((voice) => (
+                <VoiceCard
+                  key={voice.voice_id}
+                  voice={voice}
+                  busy={busyVoiceId === voice.voice_id}
+                  layoutMode={layoutMode}
+                  onUse={() => {
+                    setVoiceId(voice.voice_id)
+                    setPage('speak')
+                  }}
+                  onDesignFrom={
+                    hasChipSelections(voice.selections) ? () => designFromVoice(voice.voice_id) : null
+                  }
+                  onReopenInStitchStudio={
+                    (voice.selections as OmniVoiceSelections | null | undefined)?.stitch_plan?.clips
+                      ?.length
+                      ? () => reopenInStitchStudio(voice)
+                      : null
+                  }
+                  onDelete={() => remove(voice.voice_id)}
+                  onDuplicate={() => duplicate(voice.voice_id)}
+                   onSaveSampleText={(text) => saveSampleText(voice.voice_id, text)}
+                   onNormalize={(voiceId) => normalize(voiceId)}
+                   onTrimSilence={async (voiceId) => { await trimVoiceReferenceSilence(voiceId); await refresh() }}
+                   onFixAll={() => fixAll(voice.voice_id)}
+                   onSetDefault={voice.family_id ? () => setDefault(voice.voice_id) : null}
+                   onAdjustPauses={(voiceId, mode, targetMs) => adjustPauses(voiceId, mode, targetMs)}
+                   onActivateForApi={() => activateForApi(voice.voice_id)}
+                  onApplyReferenceEdits={(voiceId, edits) => applyReferenceEdits(voiceId, edits)}
+                  onAnalyze={() => analyze(voice.voice_id)}
+                  onUndo={() => undoAudioEdit(voice.voice_id)}
+                />
+              ))}
+            </div>
+
             </section>
           )}
 
