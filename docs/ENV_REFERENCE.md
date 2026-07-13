@@ -46,6 +46,7 @@ Recommended (simple knobs):
 | `ALIGNER_PROVIDERS` | `CPUExecutionProvider` | Comma-separated onnxruntime execution providers for the aligner (portable CPU baseline; add OpenVINO/CoreML where available). |
 | `ALIGNER_LATENCY_BUDGET_SECONDS` | `5` | Fail-closed warm p95 budget for Precise alignment. Job responses and `GET /alignment/performance` expose observed duration and budget status. |
 | `ALIGNER_IDLE_UNLOAD_SECONDS` | `120` | Seconds after the serialized alignment queue drains before releasing the ONNX session. |
+| `GENERATION_REPAIR_BUDGET_SECONDS` | `5` | Hard per-request deadline for explicit `prosody_repair` on complete-file generation routes. Timeout returns the original un-repaired output with a `budget_fallback` outcome. |
 
 ## Memory / OpenVINO (advanced)
 

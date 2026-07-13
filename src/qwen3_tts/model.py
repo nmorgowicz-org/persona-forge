@@ -1195,6 +1195,7 @@ def get_job_progress(job_id: str) -> dict[str, Any] | None:
         "style_preset": job.style_preset,
         "postprocess_applied": job.postprocess_applied,
         "applied_steps": job.metadata.get("applied_steps"),
+        "prosody_repair": job.metadata.get("prosody_repair"),
     }
 
 
@@ -1388,6 +1389,111 @@ def _apply_output_style(
     return wav, sr
 
 
+def _generation_repair_budget_seconds() -> float:
+    raw = os.getenv("GENERATION_REPAIR_BUDGET_SECONDS", "5").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 5.0
+    return value if value > 0 else 5.0
+
+
+def _initial_generation_repair_metadata(requested: bool) -> dict[str, Any]:
+    return {
+        "requested": requested,
+        "outcome": "pending" if requested else "not_requested",
+        "budget_seconds": _generation_repair_budget_seconds() if requested else None,
+        "duration_seconds": None,
+        "boundary_count": 0,
+    }
+
+
+def _apply_generation_prosody_repair(
+    wav: Any,
+    sr: int,
+    text: str,
+    job: _JobState | None,
+    *,
+    requested: bool,
+    style_preset: str | None,
+) -> Any:
+    """Apply bounded output repair, preserving the original waveform on any fallback.
+
+    ONNX Runtime cannot cancel an in-flight ``session.run``. The repair therefore runs in
+    a daemon worker with a cancellation event: the request returns at its deadline while
+    the shared repair engine suppresses rendering/caching if the late inference completes.
+    """
+    metadata = _initial_generation_repair_metadata(requested)
+    if job is not None:
+        job.metadata["prosody_repair"] = metadata
+    if not requested:
+        return wav
+
+    import queue as _queue
+    import numpy as np
+    from qwen3_tts import prosody_repair as _prosody_repair
+
+    original = np.asarray(wav, dtype=np.float32).ravel().copy()
+    budget = float(metadata["budget_seconds"])
+    cancel_event = threading.Event()
+    result_queue: _queue.Queue[tuple[str, Any]] = _queue.Queue(maxsize=1)
+
+    def _repair() -> None:
+        try:
+            result_queue.put_nowait((
+                "result",
+                _prosody_repair.repair_segment_audio(
+                    original.copy(),
+                    int(sr),
+                    text,
+                    mode="auto",
+                    style_preset=style_preset or "Neutral",
+                    cancel_event=cancel_event,
+                ),
+            ))
+        except Exception as exc:  # noqa: BLE001 — clean audio fallback is the contract
+            result_queue.put_nowait(("error", exc))
+
+    started = time.monotonic()
+    worker = threading.Thread(target=_repair, daemon=True, name="generation-prosody-repair")
+    worker.start()
+    worker.join(timeout=budget)
+    duration = max(0.0, time.monotonic() - started)
+    metadata["duration_seconds"] = round(duration, 6)
+
+    if worker.is_alive() or duration >= budget:
+        cancel_event.set()
+        metadata["outcome"] = "budget_fallback"
+        return original
+
+    try:
+        kind, payload = result_queue.get_nowait()
+    except _queue.Empty:
+        metadata["outcome"] = "failed"
+        metadata["error"] = "repair worker returned no result"
+        return original
+    if kind == "error":
+        metadata["outcome"] = "failed"
+        metadata["error"] = str(payload)
+        return original
+
+    repaired, plan, repair_metadata = payload
+    metadata["boundary_count"] = len(plan)
+    metadata["resolved_mode"] = repair_metadata.get("resolved_mode")
+    metadata["fallback"] = repair_metadata.get("fallback")
+    if plan:
+        metadata["outcome"] = "repaired"
+        if job is not None:
+            job.metadata.setdefault("applied_steps", []).append("prosody_repair")
+        return repaired
+    if repair_metadata.get("fallback") == "unchanged":
+        metadata["outcome"] = "failed"
+        metadata["error"] = "repair produced no usable boundary plan"
+    else:
+        metadata["outcome"] = "unnecessary"
+    return original
+
+
 def _run_generate(
     text: str,
     language: str,
@@ -1396,6 +1502,7 @@ def _run_generate(
     voice_variant_id: str | None = None,
     style_preset: str | None = None,
     postprocess: bool | dict[str, Any] | None = None,
+    prosody_repair: bool = False,
     seed_value=None,
     instruct: str | None = None,
     job_id: str | None = None,
@@ -1432,6 +1539,7 @@ def _run_generate(
             job = _create_job(text, seed=seed_value)
             job_id = job.job_id
         job.style_preset = resolved_style_preset
+        job.metadata["prosody_repair"] = _initial_generation_repair_metadata(prosody_repair)
 
         # Pre-generate cancel check
         if job.cancel_event.is_set():
@@ -1464,6 +1572,14 @@ def _run_generate(
             raise
 
         wav = _trim_silence(audio_tensor.cpu().numpy().ravel(), sr)
+        wav = _apply_generation_prosody_repair(
+            wav,
+            sr,
+            text,
+            job,
+            requested=prosody_repair,
+            style_preset=style_preset,
+        )
         wav, sr = _apply_output_style(wav, sr, job, resolved_style_preset)
         duration = len(wav) / sr
         elapsed = time.monotonic() - t0
@@ -1513,6 +1629,7 @@ def _run_generate(
     if job:
         job.style_preset = resolved_style_preset
         job.postprocess_applied = False
+        job.metadata["prosody_repair"] = _initial_generation_repair_metadata(prosody_repair)
         from qwen3_tts import voice_library
         meta = voice_library.get_voice(effective_voice_id)
         if meta:
@@ -1761,6 +1878,14 @@ def _run_generate(
             flush=True,
         )
     wav, sr = _trim_silence(wavs[0], sr), sr
+    wav = _apply_generation_prosody_repair(
+        wav,
+        sr,
+        text,
+        job,
+        requested=prosody_repair,
+        style_preset=style_preset,
+    )
     wav, sr = _apply_output_style(wav, sr, job, resolved_style_preset)
     duration = len(wav) / sr
     elapsed = time.monotonic() - t0

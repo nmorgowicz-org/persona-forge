@@ -18,6 +18,22 @@ the same command before they are recommended.
   VAD-safe fallback.
 - Invalid/non-positive budget or idle-unload environment values fail safe to their defaults.
 
+## Generation output repair contract
+
+- Complete-file routes (`/generate`, `/generate/with_metrics`, `/v1/audio/speech`, and
+  `/generate/async`) accept only an explicit boolean `prosody_repair`; omission is a strict
+  no-op and never invokes triage or alignment.
+- Repair reuses `prosody_repair.repair_segment_audio`, including the canonical resolved
+  boundary plan and renderer used by Voice Library, Stitch Studio, and OmniVoice.
+- `GENERATION_REPAIR_BUDGET_SECONDS` defaults to 5 seconds. The request returns the original
+  pre-repair waveform on deadline or failure. A late ONNX call may finish in its daemon
+  worker because ONNX Runtime cannot interrupt `session.run`, but cancellation checks prevent
+  the late result from being rendered or cached.
+- Outcomes are `repaired`, `unnecessary`, `failed`, or `budget_fallback`; omitted requests
+  report `not_requested`. Raw audio routes expose `X-Prosody-Repair-*` headers, while metrics
+  and async progress expose the same record as JSON.
+- Streaming rejects `prosody_repair: true`: already-emitted PCM cannot be repaired safely.
+
 ## Target-CPU benchmark gate
 
 Keep benchmark audio outside Git and use its exact transcript:

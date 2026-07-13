@@ -30,6 +30,7 @@ VALID_REPAIR_MODES = frozenset({"off", "auto", "precise"})
 _PUNCT_TRIGGER = re.compile(r"(\.{3,}|…)|([.!?])|([,;:]|—|–)")
 _CACHE_MAX = 128
 _CACHE_LOCK = threading.Lock()
+_REPAIR_WORKER_LOCK = threading.Lock()
 _REPAIR_CACHE: OrderedDict[
     tuple[str, int, str, str, str, float, float],
     tuple[np.ndarray, list[dict[str, Any]], dict[str, Any]],
@@ -156,6 +157,7 @@ def repair_segment_audio(
     pace_multiplier: float = 1.0,
     pause_offset_ms: float = 0.0,
     emit: Any = None,
+    cancel_event: threading.Event | None = None,
 ) -> tuple[np.ndarray, list[dict[str, Any]], dict[str, Any]]:
     """Triage and repair one segment's internal blended boundaries.
 
@@ -175,7 +177,8 @@ def repair_segment_audio(
         float(pace_multiplier),
         float(pause_offset_ms),
     )
-    if emit is None:
+    use_cache = emit is None and cancel_event is None
+    if use_cache:
         with _CACHE_LOCK:
             if cache_key in _REPAIR_CACHE:
                 cached_audio, cached_plan, cached_metadata = _REPAIR_CACHE.pop(cache_key)
@@ -191,48 +194,65 @@ def repair_segment_audio(
     }
     if mode == "off" or not (transcript or "").strip():
         result = (audio, [], metadata)
-        if emit is None:
+        if use_cache:
             _cache_result(cache_key, result)
         return result
     if mode == "auto" and verdict.mode != MODE_PRECISE:
         result = (audio, [], metadata)
-        if emit is None:
+        if use_cache:
             _cache_result(cache_key, result)
         return result
 
-    try:
-        boundaries = [
-            boundary.to_dict()
-            for boundary in forced_alignment.align(audio, int(sr), transcript, emit=emit)
-        ]
-        edits = build_alignment_pause_edits(
-            boundaries, style_preset, pace_multiplier, pause_offset_ms
+    # ONNX Runtime cannot interrupt an in-flight session.run call. Serialize the heavy
+    # section and honor cancellation immediately before and after it, so a generation
+    # request that exhausts its latency budget never renders or caches the late result.
+    with _REPAIR_WORKER_LOCK:
+        if cancel_event is not None and cancel_event.is_set():
+            metadata["fallback"] = "cancelled"
+            return audio, [], metadata
+        try:
+            boundaries = [
+                boundary.to_dict()
+                for boundary in forced_alignment.align(audio, int(sr), transcript, emit=emit)
+            ]
+            if cancel_event is not None and cancel_event.is_set():
+                metadata["fallback"] = "cancelled"
+                return audio, [], metadata
+            edits = build_alignment_pause_edits(
+                boundaries, style_preset, pace_multiplier, pause_offset_ms
+            )
+            if edits:
+                plan = plan_boundary_pauses(audio, int(sr), edits)
+                metadata["resolved_mode"] = "precise"
+                result = (
+                    apply_resolved_boundary_pause_plan(audio, int(sr), plan),
+                    plan,
+                    metadata,
+                )
+                if use_cache:
+                    _cache_result(cache_key, result)
+                return result
+        except Exception:
+            logger.exception("Per-segment forced alignment failed; using VAD safe-cut fallback")
+
+        if cancel_event is not None and cancel_event.is_set():
+            metadata["fallback"] = "cancelled"
+            return audio, [], metadata
+        edits = build_vad_pause_edits(
+            audio, int(sr), transcript, style_preset, pace_multiplier, pause_offset_ms
         )
         if edits:
             plan = plan_boundary_pauses(audio, int(sr), edits)
             metadata["resolved_mode"] = "precise"
+            metadata["fallback"] = "vad"
             result = (apply_resolved_boundary_pause_plan(audio, int(sr), plan), plan, metadata)
-            if emit is None:
+            if use_cache:
                 _cache_result(cache_key, result)
             return result
-    except Exception:
-        logger.exception("Per-segment forced alignment failed; using VAD safe-cut fallback")
-
-    edits = build_vad_pause_edits(
-        audio, int(sr), transcript, style_preset, pace_multiplier, pause_offset_ms
-    )
-    if edits:
-        plan = plan_boundary_pauses(audio, int(sr), edits)
-        metadata["resolved_mode"] = "precise"
-        metadata["fallback"] = "vad"
-        result = (apply_resolved_boundary_pause_plan(audio, int(sr), plan), plan, metadata)
-        if emit is None:
-            _cache_result(cache_key, result)
-        return result
 
     metadata["fallback"] = "unchanged"
     result = (audio, [], metadata)
-    if emit is None:
+    if use_cache:
         _cache_result(cache_key, result)
     return result
 

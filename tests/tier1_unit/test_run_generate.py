@@ -80,11 +80,13 @@ def model_module(monkeypatch, tmp_path):
         def join(self, timeout=None):
             pass
 
+    real_thread = threading.Thread
     monkeypatch.setattr(threading, "Thread", _NoStartThread)
 
     spec = importlib.util.spec_from_file_location("_model_under_test", _MODEL_PY)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
+    monkeypatch.setattr(threading, "Thread", real_thread)
 
     yield m
 
@@ -154,6 +156,115 @@ class TestRunGenerateSuccessPath:
         assert job.style_preset is None
         assert job.postprocess_applied is False
         assert job.metadata.get("applied_steps") is None
+
+    def test_unflagged_generation_never_calls_prosody_repair(
+        self, monkeypatch, model_module
+    ):
+        m = model_module
+        self._configure_model(monkeypatch, m)
+        from qwen3_tts import prosody_repair
+
+        def unexpected(*args, **kwargs):
+            raise AssertionError("unflagged generation invoked repair")
+
+        monkeypatch.setattr(prosody_repair, "repair_segment_audio", unexpected)
+        _wav, _sr, job_id = m._run_generate("First. Second.", "English", postprocess=False)
+
+        with m._active_jobs_lock:
+            metadata = m._active_jobs[job_id].metadata["prosody_repair"]
+        assert metadata["requested"] is False
+        assert metadata["outcome"] == "not_requested"
+
+    def test_flagged_generation_uses_shared_repair_engine(
+        self, monkeypatch, model_module
+    ):
+        m = model_module
+        self._configure_model(monkeypatch, m)
+        from qwen3_tts import prosody_repair
+
+        calls = []
+
+        def repaired(wav, sr, transcript, **kwargs):
+            calls.append((wav.copy(), sr, transcript, kwargs))
+            plan = [{"cut_sample": 1200, "insert_ms": 100.0, "origin": "alignment"}]
+            return np.concatenate([wav, np.ones(100, dtype=np.float32)]), plan, {
+                "resolved_mode": "precise",
+                "fallback": None,
+            }
+
+        monkeypatch.setattr(prosody_repair, "repair_segment_audio", repaired)
+        wav, _sr, job_id = m._run_generate(
+            "First. Second.",
+            "English",
+            prosody_repair=True,
+            postprocess=False,
+        )
+
+        assert len(calls) == 1
+        assert calls[0][2] == "First. Second."
+        assert calls[0][3]["mode"] == "auto"
+        assert isinstance(calls[0][3]["cancel_event"], type(threading.Event()))
+        assert wav.size == 2500
+        with m._active_jobs_lock:
+            job = m._active_jobs[job_id]
+        assert job.metadata["prosody_repair"]["outcome"] == "repaired"
+        assert job.metadata["prosody_repair"]["boundary_count"] == 1
+        assert job.metadata["applied_steps"] == ["prosody_repair"]
+
+    def test_repair_failure_returns_original_audio(self, monkeypatch, model_module):
+        m = model_module
+        self._configure_model(monkeypatch, m)
+        from qwen3_tts import prosody_repair
+
+        monkeypatch.setattr(
+            prosody_repair,
+            "repair_segment_audio",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("aligner failed")),
+        )
+        expected = m._trim_silence(np.ones(2400, dtype=np.float32), 24000)
+        wav, _sr, job_id = m._run_generate(
+            "First. Second.",
+            "English",
+            prosody_repair=True,
+            postprocess=False,
+        )
+
+        np.testing.assert_array_equal(wav, expected)
+        with m._active_jobs_lock:
+            metadata = m._active_jobs[job_id].metadata["prosody_repair"]
+        assert metadata["outcome"] == "failed"
+        assert metadata["error"] == "aligner failed"
+
+    def test_repair_budget_abort_returns_original_audio(self, monkeypatch, model_module):
+        m = model_module
+        self._configure_model(monkeypatch, m)
+        from qwen3_tts import prosody_repair
+
+        release = threading.Event()
+
+        def slow_repair(wav, sr, transcript, **kwargs):
+            release.wait(timeout=1.0)
+            return wav, [], {"resolved_mode": "precise", "fallback": "cancelled"}
+
+        monkeypatch.setattr(prosody_repair, "repair_segment_audio", slow_repair)
+        monkeypatch.setenv("GENERATION_REPAIR_BUDGET_SECONDS", "0.01")
+        expected = m._trim_silence(np.ones(2400, dtype=np.float32), 24000)
+        started = m.time.monotonic()
+        wav, _sr, job_id = m._run_generate(
+            "First. Second.",
+            "English",
+            prosody_repair=True,
+            postprocess=False,
+        )
+        elapsed = m.time.monotonic() - started
+        release.set()
+
+        assert elapsed < 0.25
+        np.testing.assert_array_equal(wav, expected)
+        with m._active_jobs_lock:
+            metadata = m._active_jobs[job_id].metadata["prosody_repair"]
+        assert metadata["outcome"] == "budget_fallback"
+        assert metadata["duration_seconds"] >= 0.01
 
     def test_default_dsp_kill_switch_does_not_disable_explicit_style(
         self, monkeypatch, model_module

@@ -1,3 +1,4 @@
+import threading
 from unittest.mock import patch
 
 import numpy as np
@@ -65,3 +66,32 @@ def test_alignment_failure_falls_back_to_vad_safe_cut():
     assert repaired.size > wav.size
     assert plan[0]["origin"] == "vad"
     assert metadata["fallback"] == "vad"
+
+
+def test_cancelled_alignment_never_renders_late_result():
+    wav = _voiced(2.0, 1000)
+    cancel = threading.Event()
+    boundaries = [
+        Boundary("first", 0.1, 0.8, 0.99, "sentence_split"),
+        Boundary("second", 0.8, 1.8, 0.99, "word"),
+    ]
+
+    def finish_after_deadline(*args, **kwargs):
+        cancel.set()
+        return boundaries
+
+    with patch(
+        "qwen3_tts.prosody_repair.forced_alignment.align",
+        side_effect=finish_after_deadline,
+    ):
+        repaired, plan, metadata = repair_segment_audio(
+            wav,
+            1000,
+            "First. Second.",
+            mode="precise",
+            cancel_event=cancel,
+        )
+
+    np.testing.assert_array_equal(repaired, wav)
+    assert plan == []
+    assert metadata["fallback"] == "cancelled"

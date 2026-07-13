@@ -235,8 +235,10 @@ Use these only if you have a reason. All other internals are preset-derived and 
   - Health, readiness, OpenVINO status, and `swap_in_progress`.
 
 - `POST /v1/audio/speech` (OpenAI-compatible)
-  - `{ "input": "text", "language": "English", "response_format": "mp3|wav", "voice_id": "vd_...", "instruct": "..." }`
+  - `{ "input": "text", "language": "English", "response_format": "mp3|wav", "voice_id": "vd_...", "instruct": "...", "prosody_repair": true }`
   - `voice_id` selects a saved voice from the library.
+  - `prosody_repair` is an explicit batch/offline opt-in. It uses the input text and returns
+    `X-Prosody-Repair-Outcome`; timeout preserves the original output.
 
 - `POST /generate` (native)
   - Same fields as above but `text` instead of `input`.

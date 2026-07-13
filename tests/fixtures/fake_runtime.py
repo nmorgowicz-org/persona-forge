@@ -153,6 +153,11 @@ class _FakeJobState:
         self.started_at = time.monotonic()
         self.expected_total_frames = 60
         self._watchdog_limit = 120.0
+        self.voice_family_id: str | None = None
+        self.variant_kind: str | None = None
+        self.style_preset: str | None = None
+        self.postprocess_applied = False
+        self.metadata: Dict[str, Any] = {}
 
 
 class _FakeModule(types.ModuleType):
@@ -391,9 +396,29 @@ class FakeModelRuntime:
             if rt.generate_should_fail:
                 raise RuntimeError("fake generate error")
             wav = np.zeros(480, dtype=np.float32)
-            job_id = kwargs.get("job_id") or (
-                "fake-job-" + str(int(time.time() * 1000))
-            )
+            job_id = kwargs.get("job_id")
+            created_here = job_id is None
+            if created_here:
+                with rt._jobs_lock:
+                    rt._job_counter += 1
+                    job_id = f"fake-job-{rt._job_counter}"
+                job = _FakeJobState(job_id=job_id, text=text, seed=kwargs.get("seed_value"))
+                job.status = "completed"
+                job.wav = wav
+                job.sr = 24000
+                with rt._active_jobs_lock:
+                    rt._active_jobs[job_id] = job
+            else:
+                job = rt._active_jobs.get(job_id)
+            if job is not None:
+                requested = bool(kwargs.get("prosody_repair", False))
+                job.metadata["prosody_repair"] = {
+                    "requested": requested,
+                    "outcome": "unnecessary" if requested else "not_requested",
+                    "budget_seconds": 5.0 if requested else None,
+                    "duration_seconds": 0.001 if requested else None,
+                    "boundary_count": 0,
+                }
             return wav, 24000, job_id
 
         def _run_generate_with_streaming(
@@ -476,6 +501,12 @@ class FakeModelRuntime:
                 else None,
                 "eta_seconds": None,
                 "message": job.message,
+                "voice_family_id": job.voice_family_id,
+                "variant_kind": job.variant_kind,
+                "style_preset": job.style_preset,
+                "postprocess_applied": job.postprocess_applied,
+                "applied_steps": job.metadata.get("applied_steps"),
+                "prosody_repair": job.metadata.get("prosody_repair"),
             }
 
         def cancel_job(job_id: str) -> bool:
@@ -581,10 +612,18 @@ class FakeModelRuntime:
     def wait_for_job_completion(
         self, job_id: str, timeout: float = 2.0
     ) -> Dict[str, Any]:
-        job = self.jobs.get(job_id)
-        if job is None:
-            return {"status": "not_found"}
-        return dict(job)
+        deadline = time.monotonic() + timeout
+        progress: Dict[str, Any] | None = None
+        while time.monotonic() < deadline:
+            progress = self.get_job_progress(job_id)
+            if progress is None:
+                return {"status": "not_found"}
+            repair = progress.get("prosody_repair")
+            repair_done = not isinstance(repair, dict) or repair.get("outcome") != "pending"
+            if progress.get("status") in ("completed", "failed", "cancelled") and repair_done:
+                return progress
+            time.sleep(0.01)
+        return progress or {"status": "not_found"}
 
     def ensure_job_status(self, job_id: str, status: str) -> bool:
         job = self._active_jobs.get(job_id)

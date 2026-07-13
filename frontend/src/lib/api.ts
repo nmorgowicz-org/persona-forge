@@ -90,7 +90,27 @@ export interface GenerateParams {
   instruct?: string | null
   stylePreset?: string | null
   postprocess?: boolean | Record<string, unknown> | null
+  prosodyRepair?: boolean
   responseFormat?: 'mp3' | 'wav'
+}
+
+export type ProsodyRepairOutcome =
+  | 'not_requested'
+  | 'pending'
+  | 'repaired'
+  | 'unnecessary'
+  | 'failed'
+  | 'budget_fallback'
+
+export interface ProsodyRepairMetadata {
+  requested: boolean
+  outcome: ProsodyRepairOutcome
+  budget_seconds?: number | null
+  duration_seconds?: number | null
+  boundary_count?: number
+  resolved_mode?: string | null
+  fallback?: string | null
+  error?: string
 }
 
 export interface VoiceMeta {
@@ -145,10 +165,12 @@ export interface BuiltInVoiceMeta {
 export interface GenerateResult {
   blob: Blob
   seed: number | null
+  prosodyRepair?: ProsodyRepairMetadata
 }
 
 export interface AsyncJobIdResult {
   job_id: string
+  prosody_repair?: ProsodyRepairMetadata
 }
 
 export interface GenerateJobProgress {
@@ -170,6 +192,7 @@ export interface GenerateJobProgress {
   postprocess_applied?: boolean
   applied_steps?: string[] | null
   audio_available?: boolean
+  prosody_repair?: ProsodyRepairMetadata
 }
 
 async function readError(res: Response): Promise<string> {
@@ -187,6 +210,22 @@ function builtinVoiceFromParams(params: GenerateParams): string | undefined {
   return undefined
 }
 
+function prosodyRepairFromHeaders(res: Response): ProsodyRepairMetadata | undefined {
+  const outcome = res.headers.get('X-Prosody-Repair-Outcome') as ProsodyRepairOutcome | null
+  if (!outcome) return undefined
+  const numberHeader = (name: string): number | null => {
+    const value = res.headers.get(name)
+    return value === null ? null : Number(value)
+  }
+  return {
+    requested: outcome !== 'not_requested',
+    outcome,
+    budget_seconds: numberHeader('X-Prosody-Repair-Budget-Seconds'),
+    duration_seconds: numberHeader('X-Prosody-Repair-Duration-Seconds'),
+    boundary_count: numberHeader('X-Prosody-Repair-Boundaries') ?? 0,
+  }
+}
+
 export async function generateSpeech(params: GenerateParams): Promise<GenerateResult> {
   const res = await fetch('/generate', {
     method: 'POST',
@@ -200,12 +239,17 @@ export async function generateSpeech(params: GenerateParams): Promise<GenerateRe
       instruct: params.instruct ?? undefined,
       style_preset: params.stylePreset ?? undefined,
       postprocess: params.postprocess ?? undefined,
+      prosody_repair: params.prosodyRepair ?? undefined,
       response_format: params.responseFormat ?? 'mp3',
     }),
   })
   if (!res.ok) throw new Error(await readError(res))
   const seedHeader = res.headers.get('X-Seed')
-  return { blob: await res.blob(), seed: seedHeader ? Number(seedHeader) : null }
+  return {
+    blob: await res.blob(),
+    seed: seedHeader ? Number(seedHeader) : null,
+    prosodyRepair: prosodyRepairFromHeaders(res),
+  }
 }
 
 export interface ReferenceMetrics {
@@ -229,6 +273,7 @@ export interface GenerateWithMetricsResult {
   blob: Blob
   seed: number | null
   metrics: ReferenceMetrics
+  prosodyRepair?: ProsodyRepairMetadata
 }
 
 export async function generateSpeechWithMetrics(
@@ -246,6 +291,7 @@ export async function generateSpeechWithMetrics(
       instruct: params.instruct ?? undefined,
       style_preset: params.stylePreset ?? undefined,
       postprocess: params.postprocess ?? undefined,
+      prosody_repair: params.prosodyRepair ?? undefined,
     }),
   })
   if (!res.ok) throw new Error(await readError(res))
@@ -255,6 +301,7 @@ export async function generateSpeechWithMetrics(
     blob: new Blob([bytes], { type: body.media_type ?? 'audio/wav' }),
     seed: typeof body.seed === 'number' ? body.seed : null,
     metrics: body.metrics ?? {},
+    prosodyRepair: body.prosody_repair,
   }
 }
 
@@ -1069,6 +1116,7 @@ export async function generateAsync(
       instruct: params.instruct ?? undefined,
       style_preset: params.stylePreset ?? undefined,
       postprocess: params.postprocess ?? undefined,
+      prosody_repair: params.prosodyRepair ?? undefined,
       response_format: params.responseFormat ?? 'mp3',
     }),
   })

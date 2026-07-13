@@ -181,6 +181,29 @@ def _generation_fields(data: dict[str, Any]) -> tuple[str, str]:
     return (data.get("text") or "").strip(), (data.get("language") or "English").strip()
 
 
+def _generation_repair_requested(data: dict[str, Any]) -> tuple[bool, str | None]:
+    value = data.get("prosody_repair", False)
+    if not isinstance(value, bool):
+        return False, "prosody_repair must be a boolean"
+    return value, None
+
+
+def _add_generation_repair_headers(response: Response, progress: dict[str, Any]) -> None:
+    metadata = progress.get("prosody_repair")
+    if not isinstance(metadata, dict):
+        return
+    outcome = metadata.get("outcome")
+    if outcome:
+        response.headers["X-Prosody-Repair-Outcome"] = str(outcome)
+    for key, header in (
+        ("duration_seconds", "X-Prosody-Repair-Duration-Seconds"),
+        ("budget_seconds", "X-Prosody-Repair-Budget-Seconds"),
+        ("boundary_count", "X-Prosody-Repair-Boundaries"),
+    ):
+        if metadata.get(key) is not None:
+            response.headers[header] = str(metadata[key])
+
+
 @app.get("/health")
 def health():
     # Always 200: lets the container be considered "up" while the model loads in the background.
@@ -1825,6 +1848,9 @@ def generate():
     text, language = _generation_fields(data)
     if not text:
         return jsonify({"error": "text is required"}), 400
+    repair_requested, repair_error = _generation_repair_requested(data)
+    if repair_error:
+        return jsonify({"error": repair_error}), 400
     fmt = _canonical_format(data.get("response_format"))
     if fmt not in _SUPPORTED_FORMATS:
         return jsonify({"error": f"unsupported response_format {fmt!r}; supported: "
@@ -1848,6 +1874,7 @@ def generate():
             voice_variant_id=data.get("voice_variant_id"),
             style_preset=data.get("style_preset"),
             postprocess=data.get("postprocess"),
+            prosody_repair=repair_requested,
             seed_value=resolved_seed,
             instruct=instruct,
         ).result(timeout=480)
@@ -1873,9 +1900,11 @@ def generate():
     if job_id:
         response.headers["X-Job-Id"] = job_id
         prog = model.get_job_progress(job_id)
-        if prog and prog.get("applied_steps"):
-            steps = prog["applied_steps"]
-            response.headers["X-Applied-Steps"] = ", ".join(steps) if isinstance(steps, list) else str(steps)
+        if prog:
+            _add_generation_repair_headers(response, prog)
+            if prog.get("applied_steps"):
+                steps = prog["applied_steps"]
+                response.headers["X-Applied-Steps"] = ", ".join(steps) if isinstance(steps, list) else str(steps)
     return response
 
 
@@ -1896,6 +1925,9 @@ def generate_with_metrics():
     text, language = _generation_fields(data)
     if not text:
         return jsonify({"error": "text is required"}), 400
+    repair_requested, repair_error = _generation_repair_requested(data)
+    if repair_error:
+        return jsonify({"error": repair_error}), 400
     voice_id = (data.get("voice_id") or "").strip() or None
     voice_id, builtin_error = _resolve_builtin_voice(data, voice_id)
     if builtin_error:
@@ -1915,6 +1947,7 @@ def generate_with_metrics():
             voice_variant_id=data.get("voice_variant_id"),
             style_preset=data.get("style_preset"),
             postprocess=data.get("postprocess"),
+            prosody_repair=repair_requested,
             seed_value=resolved_seed,
             instruct=instruct,
         ).result(timeout=480)
@@ -1942,6 +1975,9 @@ def generate_with_metrics():
     }
     if job_id:
         response_payload["job_id"] = job_id
+        progress = model.get_job_progress(job_id)
+        if progress and progress.get("prosody_repair"):
+            response_payload["prosody_repair"] = progress["prosody_repair"]
     return jsonify(response_payload)
 
 
@@ -1959,6 +1995,9 @@ def openai_audio_speech():
     text = (data.get("input") or data.get("text") or "").strip()
     if not text:
         return _openai_error("'input' is required", 400)
+    repair_requested, repair_error = _generation_repair_requested(data)
+    if repair_error:
+        return _openai_error(repair_error, 400)
     fmt = _canonical_format(data.get("response_format"))
     if fmt not in _SUPPORTED_FORMATS:
         return _openai_error(
@@ -1985,6 +2024,7 @@ def openai_audio_speech():
             voice_variant_id=data.get("voice_variant_id"),
             style_preset=data.get("style_preset"),
             postprocess=data.get("postprocess"),
+            prosody_repair=repair_requested,
             seed_value=resolved_seed,
             instruct=instruct,
         ).result(timeout=480)
@@ -2010,6 +2050,7 @@ def openai_audio_speech():
         response.headers["X-Job-Id"] = job_id
         prog = model.get_job_progress(job_id)
         if prog:
+            _add_generation_repair_headers(response, prog)
             if prog.get("voice_family_id"):
                 response.headers["X-Voice-Family-Id"] = prog["voice_family_id"]
             if prog.get("variant_kind"):
@@ -2043,6 +2084,9 @@ def generate_async():
     text, language = _generation_fields(data)
     if not text:
         return jsonify({"error": "text is required"}), 400
+    repair_requested, repair_error = _generation_repair_requested(data)
+    if repair_error:
+        return jsonify({"error": repair_error}), 400
     fmt = _canonical_format(data.get("response_format"))
     if fmt not in _SUPPORTED_FORMATS:
         return jsonify({"error": f"unsupported response_format {fmt!r}; supported: "
@@ -2060,10 +2104,19 @@ def generate_async():
     # Pre-create the job so the frontend knows the job_id immediately.
     job = model._create_job(text, seed=resolved_seed)
     job_id = job.job_id
+    if hasattr(job, "metadata"):
+        job.metadata["prosody_repair"] = {
+            "requested": repair_requested,
+            "outcome": "pending" if repair_requested else "not_requested",
+            "budget_seconds": None,
+            "duration_seconds": None,
+            "boundary_count": 0,
+        }
+    active_job_id = job_id
 
     def _run():
         try:
-            wav, sr, job_id = model.executor.submit(
+            wav, sr, _completed_job_id = model.executor.submit(
                 model._run_generate,
                 text,
                 language,
@@ -2071,14 +2124,15 @@ def generate_async():
                 voice_variant_id=data.get("voice_variant_id"),
                 style_preset=data.get("style_preset"),
                 postprocess=data.get("postprocess"),
+                prosody_repair=repair_requested,
                 seed_value=resolved_seed,
                 instruct=instruct,
-                job_id=job_id,
+                job_id=active_job_id,
             ).result(timeout=480)
             audio, media_type = _encode(wav, sr, fmt)
         except Exception as exc:
             with model._active_jobs_lock:
-                j = model._active_jobs.get(job_id)
+                j = model._active_jobs.get(active_job_id)
             if j:
                 j.status = "failed"
                 j.error = str(exc)
@@ -2086,11 +2140,17 @@ def generate_async():
             # Clean up after some time; caller has downloaded audio.
             import time as _t
             _t.sleep(120)
-            model._cleanup_job(job_id)
+            model._cleanup_job(active_job_id)
 
     threading.Thread(target=_run, daemon=True).start()
 
-    return jsonify({"job_id": job_id})
+    return jsonify({
+        "job_id": job_id,
+        "prosody_repair": {
+            "requested": repair_requested,
+            "outcome": "pending" if repair_requested else "not_requested",
+        },
+    })
 
 
 @app.get("/generate/progress")
@@ -2167,6 +2227,7 @@ def generate_job_audio(job_id: str):
     response.headers["X-Job-Id"] = job_id
     prog = model.get_job_progress(job_id)
     if prog:
+        _add_generation_repair_headers(response, prog)
         if prog.get("style_preset"):
             response.headers["X-Style-Preset"] = prog["style_preset"]
         if prog.get("postprocess_applied"):
@@ -2199,6 +2260,16 @@ def generate_stream():
     text, language = _generation_fields(data)
     if not text:
         return jsonify({"error": "text is required"}), 400
+    repair_requested, repair_error = _generation_repair_requested(data)
+    if repair_error:
+        return jsonify({"error": repair_error}), 400
+    if repair_requested:
+        return jsonify({
+            "error": (
+                "prosody_repair is not supported by /generate/stream; "
+                "use /generate or /generate/async for complete-file repair"
+            )
+        }), 400
     voice_id = (data.get("voice_id") or "").strip() or None
 
     events: queue.Queue[tuple[str, Any]] = queue.Queue()
