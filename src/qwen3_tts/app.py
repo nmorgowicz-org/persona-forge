@@ -22,7 +22,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory, send_f
 
 from qwen3_tts import audio_style, model, omnivoice_engine, segment_library, voice_design, voice_library
 from qwen3_tts.asr_check import validate_reference_text
-from qwen3_tts.alignment_jobs import AlignmentJobManager, LowRamError
+from qwen3_tts.alignment_jobs import AlignmentJobManager
 
 # candidate_id -> (wav, sample_rate). In-memory only, single-user local tool (locked decision,
 # docs/dev/features/persona_forge_studio.md §5): cleared at the start of every /omnivoice/audition call, so
@@ -695,10 +695,10 @@ def voices_region_edits(voice_id: str):
 
 
 # --- Prosody triage + forced alignment (plan §5.5) ---------------------------
-# Triage is cheap and synchronous; alignment is a lazy, RSS-heavy model pass, so
-# it runs through a bounded, serialized job manager with idle-unload + LOW_RAM
-# refusal (see alignment_jobs.py). The runner delegates to the voice_library
-# cache, which computes only on a miss.
+# Triage is cheap and synchronous; alignment is a lazy model pass, so it runs
+# through a bounded, serialized job manager with idle-unload (see
+# alignment_jobs.py). The runner delegates to the voice_library cache, which
+# computes only on a miss.
 
 def _alignment_unload() -> None:
     from qwen3_tts import forced_alignment
@@ -739,10 +739,7 @@ def voices_align(voice_id: str):
     if not (meta.get("sample_text") or "").strip():
         return jsonify({"error": "Reference has no transcript; alignment needs text."}), 400
     force = bool((request.get_json(silent=True) or {}).get("force"))
-    try:
-        job = _alignment_jobs.submit(voice_id, force=force)
-    except LowRamError as exc:
-        return jsonify({"error": str(exc)}), 503
+    job = _alignment_jobs.submit(voice_id, force=force)
     return jsonify(job), 202
 
 

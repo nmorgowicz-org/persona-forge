@@ -10,8 +10,6 @@ RTF), so alignment gets its own small manager (plan §5.5). Guarantees:
   to check it, and a cancelled job never reports `completed`.
 - **Idle-unload:** when the last job drains, an idle timer releases the ONNX
   session to reclaim RSS.
-- **LOW_RAM_MODE:** submission is refused outright (the aligner's peak RSS is not
-  affordable), surfaced as `LowRamError`.
 - **Bounded:** terminal jobs are evicted by TTL / count so the map cannot grow
   without limit.
 """
@@ -19,7 +17,6 @@ RTF), so alignment gets its own small manager (plan §5.5). Guarantees:
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 import uuid
@@ -28,14 +25,6 @@ from typing import Any, Callable, Optional
 logger = logging.getLogger(__name__)
 
 _TERMINAL = ("completed", "failed", "cancelled")
-
-
-class LowRamError(RuntimeError):
-    """Raised when alignment is refused because LOW_RAM_MODE is active."""
-
-
-def low_ram_enabled() -> bool:
-    return os.getenv("LOW_RAM_MODE", "").strip().lower() in ("1", "true", "on", "yes")
 
 
 # runner(voice_id, cancel_event) -> result record (or None if cancelled mid-flight)
@@ -51,12 +40,10 @@ class AlignmentJobManager:
         ttl_seconds: float = 600.0,
         idle_unload_seconds: float = 120.0,
         unload: Optional[Callable[[], Any]] = None,
-        low_ram: Optional[Callable[[], bool]] = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
         self._runner = runner
         self._unload = unload
-        self._low_ram = low_ram or low_ram_enabled
         self._clock = clock
         self._max_jobs = max_jobs
         self._ttl = ttl_seconds
@@ -70,8 +57,6 @@ class AlignmentJobManager:
     # --- submission ---------------------------------------------------------
 
     def submit(self, voice_id: str, *, spawn: bool = True, **runner_kwargs: Any) -> dict[str, Any]:
-        if self._low_ram():
-            raise LowRamError("Forced alignment is disabled in LOW_RAM_MODE.")
         self._evict()
         job_id = uuid.uuid4().hex
         job = {

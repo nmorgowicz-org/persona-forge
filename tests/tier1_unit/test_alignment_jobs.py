@@ -1,13 +1,11 @@
-"""Phase 2 gate: alignment jobs serialize + obey cancellation / idle-unload / LOW_RAM."""
+"""Phase 2 gate: alignment jobs serialize + obey cancellation / idle-unload."""
 
 from __future__ import annotations
 
 import threading
 import time
 
-import pytest
-
-from qwen3_tts.alignment_jobs import AlignmentJobManager, LowRamError
+from qwen3_tts.alignment_jobs import AlignmentJobManager
 
 
 def _wait_status(mgr, job_id, status, timeout=2.0):
@@ -67,12 +65,6 @@ def test_cancellation_stops_before_completion():
     assert mgr.cancel(job["job_id"])
     done = _wait_status(mgr, job["job_id"], "cancelled")
     assert done["status"] == "cancelled"
-
-
-def test_low_ram_refuses_submission():
-    mgr = AlignmentJobManager(lambda vid, cancel: {}, low_ram=lambda: True)
-    with pytest.raises(LowRamError):
-        mgr.submit("vd_x")
 
 
 def test_idle_unload_releases_after_drain():
