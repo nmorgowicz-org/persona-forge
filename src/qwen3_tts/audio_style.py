@@ -129,6 +129,16 @@ def analyze_reference(wav: np.ndarray, sr: int, transcript: Optional[str] = None
         voiced_frames = np.sum(np.abs(wav) > 1e-4)
         speech_rate = (voiced_frames / sr) / duration if duration > 0 else 0.0
 
+    # 5. Prosody triage (Phase 1): does this clip need the heavy alignment pass?
+    # Lazy import avoids a circular dependency (prosody_triage imports from here).
+    try:
+        from .prosody_triage import triage as _triage
+
+        triage_result = _triage(wav, sr, transcript).to_dict()
+    except Exception as e:
+        logger.warning(f"Prosody triage failed: {e}")
+        triage_result = None
+
     return {
         "duration_seconds": float(duration),
         "sample_rate": int(sr),
@@ -142,6 +152,7 @@ def analyze_reference(wav: np.ndarray, sr: int, transcript: Optional[str] = None
         "median_pause_ms": float(median_pause_ms),
         "longest_pause_ms": float(longest_pause_ms),
         "pause_intervals": pause_intervals,
+        "triage": triage_result,
     }
 
 def _apply_time_stretch(wav: np.ndarray, sr: int, factor: float) -> Tuple[np.ndarray, float]:

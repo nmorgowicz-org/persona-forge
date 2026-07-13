@@ -60,11 +60,23 @@ import { useAppStore, type StitchPlanClip } from '@/store'
 import { VariantCompare } from '@/components/VariantCompare'
 import { cn } from '@/lib/utils'
 import { InfoIcon } from '@/components/InfoIcon'
+import { Badge } from '@/components/ui/badge'
 import { RegionEditor } from '@/components/waveform/RegionEditor'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 const MOUNTED_REF_SOURCE = 'mounted_ref_audio' as const
+
+interface TriageInfo {
+  mode?: string | null
+  coverage?: number | null
+  boundaries_expected?: number | null
+  gaps_detected?: number | null
+  reasons?: string[] | null
+  median_gap_ms?: number | null
+  speech_rate_cv?: number | null
+  snr_db?: number | null
+}
 
 interface VoiceReferenceMetrics {
   duration_seconds?: number | null
@@ -82,6 +94,7 @@ interface VoiceReferenceMetrics {
   median_pause_ms?: number | null
   longest_pause_ms?: number | null
   pause_intervals?: [number, number][] | null
+  triage?: TriageInfo | null
 }
 
 type VoiceWithReferenceMeta = VoiceMeta & {
@@ -425,6 +438,26 @@ function FingerprintBar({
   )
 }
 
+// Phase 1 triage verdict. PRECISE means the clip reads as blended (a sentence
+// boundary lacks an audible gap) and should escalate to forced alignment once it
+// ships (Phase 2); NATURAL keeps today's fast energy path. Reasons drive the
+// explainability tooltip the plan requires (§5.6).
+function TriageBadge({ triage }: { triage?: TriageInfo | null }) {
+  if (!triage || !triage.mode) return null
+  const precise = triage.mode === 'precise'
+  const reasons = (triage.reasons ?? []).filter(Boolean)
+  const title = reasons.length ? reasons.join('\n') : undefined
+  return (
+    <Badge
+      variant={precise ? 'destructive' : 'outline'}
+      className="h-4 px-1.5 text-[9px] font-medium"
+      title={title}
+    >
+      {precise ? 'Blended · align' : 'Clean · natural'}
+    </Badge>
+  )
+}
+
 function VoiceFingerprint({ metrics }: { metrics: VoiceReferenceMetrics }) {
   const speechRate = getSpeechRate(metrics)
   const pauseRatio = finiteNumber(metrics.pause_ratio)
@@ -563,6 +596,7 @@ function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle, previ
             text="Measured from the saved reference clip. These values describe the voice asset, not a live generation."
             className="size-3.5"
           />
+          <TriageBadge triage={metrics.triage} />
         </div>
         {finiteNumber(metrics.sample_rate) !== null && (
           <span className="font-mono text-[10px] text-muted-foreground">
@@ -800,6 +834,9 @@ function VoiceCard({
   const [stylePreset, setStylePreset] = useState('Neutral')
   const [paceMultiplier, setPaceMultiplier] = useState(1.0)
   const [pauseOffset, setPauseOffset] = useState(0)
+  // Phase 1: processing-mode override. Auto follows triage; Precise (forced
+  // alignment) is disabled until the alignment engine lands in Phase 2.
+  const [processingMode, setProcessingMode] = useState<'auto' | 'natural' | 'precise'>('auto')
   const [variants, setVariants] = useState<string[]>([])
   const [activeVariant, setActiveVariant] = useState<string | null>(null)
   const [prosodyBusy, setProsodyBusy] = useState(false)
@@ -1054,6 +1091,44 @@ function VoiceCard({
            <PopoverContent align="start" className="w-72">
              <p className="text-xs font-medium mb-2">Prosody Settings</p>
              <div className="space-y-3">
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Processing mode</label>
+                    {(() => {
+                      const t = getVoiceMetrics(voice)?.triage
+                      if (!t?.mode) return null
+                      return (
+                        <span
+                          className="text-[9px] text-muted-foreground"
+                          title={(t.reasons ?? []).filter(Boolean).join('\n')}
+                        >
+                          triage: {t.mode}
+                        </span>
+                      )
+                    })()}
+                  </div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {(['auto', 'natural', 'precise'] as const).map((m) => {
+                      const disabled = m === 'precise'  // enabled once alignment ships (Phase 2)
+                      return (
+                        <Button
+                          key={m}
+                          size="sm"
+                          variant={processingMode === m ? 'default' : 'outline'}
+                          disabled={disabled}
+                          className="h-7 px-1 text-[10px] capitalize"
+                          title={disabled ? 'Forced alignment ships in a later phase' : undefined}
+                          onClick={() => setProcessingMode(m)}
+                        >
+                          {m}
+                        </Button>
+                      )
+                    })}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground italic leading-tight">
+                    Auto follows triage: blended clips escalate to forced alignment, clean clips keep the fast path.
+                  </p>
+                </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Style Preset</label>
                    <Select 
