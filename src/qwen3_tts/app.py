@@ -620,19 +620,23 @@ def voices_preview_prosody(voice_id: str):
         pause_offset = float(request.args.get("pause_offset", 0.0))
     except (TypeError, ValueError):
         return jsonify({"error": "pause_offset must be a number"}), 400
+    mode = (request.args.get("mode") or "auto").strip().lower()
+    if mode not in ("natural", "precise", "auto"):
+        return jsonify({"error": "mode must be natural, precise, or auto"}), 400
 
     meta = voice_library.get_voice(voice_id)
     if meta is None:
         return jsonify({"error": "voice_id not found"}), 404
 
-    # Get the adjusted audio (wav, sr)
+    # Get the adjusted audio (wav, sr). Preview uses the same engine + mode as the saved
+    # render so the waveform the user auditions is sample-equivalent to what they save.
     result = voice_library.get_prosody_adjusted_wav(
-        voice_id, style_preset, pace_multiplier, pause_offset
+        voice_id, style_preset, pace_multiplier, pause_offset, mode, return_plan=True
     )
     if result is None:
         return jsonify({"error": "Preview failed"}), 500
 
-    wav, sr = result
+    wav, sr, plan = result
     
     # 1. Calculate metrics for the adjusted audio
     try:
@@ -650,6 +654,8 @@ def voices_preview_prosody(voice_id: str):
         "audio_base64": audio_base64,
         "metrics": metrics,
         "sample_rate": sr,
+        "sample_count": int(wav.size),
+        "plan": plan,
     })
 
 @app.post("/voices/<voice_id>/adjust-pauses")
@@ -665,9 +671,13 @@ def voices_adjust_pauses(voice_id: str):
         pause_offset = float(data.get("pause_offset", 0.0))
     except (TypeError, ValueError):
         return jsonify({"error": "pause_offset must be a number"}), 400
+    mode = (data.get("mode") or "auto").strip().lower()
+    if mode not in ("natural", "precise", "auto"):
+        return jsonify({"error": "mode must be natural, precise, or auto"}), 400
     try:
         meta = voice_library.adjust_reference_pauses(
-            voice_id, style_preset=style_preset, pace_multiplier=pace_multiplier, pause_offset_ms=pause_offset
+            voice_id, style_preset=style_preset, pace_multiplier=pace_multiplier,
+            pause_offset_ms=pause_offset, mode=mode,
         )
     except Exception as exc:
         return jsonify({"error": f"Pause adjust failed: {exc}"}), 500

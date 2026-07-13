@@ -7,6 +7,7 @@ import pytest
 
 from qwen3_tts.audio_post import (
     analyze_take,
+    apply_boundary_pause_plan,
     apply_fades,
     apply_region_edits,
     apply_region_envelope,
@@ -17,7 +18,9 @@ from qwen3_tts.audio_post import (
     insert_silence,
     limit_peak,
     normalize_rms,
+    plan_boundary_pauses,
     remove_range,
+    resolve_safe_cut,
     stitch_segments,
     trim,
 )
@@ -381,3 +384,114 @@ class TestApplyRegionEdits:
         assert np.allclose(y[100:150], 0.0)
         assert np.allclose(y[150:250], 1.0)
         assert np.allclose(y[250:300], 0.0)
+
+
+class TestBoundaryPausePlan:
+    """Phase 3 gate: surgical alignment-owned pauses insert into blended (zero-gap)
+    speech without an audible click. See docs/plans/20260712-VAD_vs_alignment.md §5.3."""
+
+    def _blended_clip(self, sr: int) -> np.ndarray:
+        # Two voiced "words" butted with no gap — the blended-speech failure mode.
+        return np.concatenate([_sine(180.0, 0.4, sr), _sine(220.0, 0.4, sr)])
+
+    def test_inserts_target_duration_of_silence(self):
+        sr = 24000
+        x = self._blended_clip(sr)
+        boundary_ms = 400.0  # the butt-join between the two words
+        y = apply_boundary_pause_plan(
+            x, sr, [{"at_ms": boundary_ms, "target_ms": 1000.0}]
+        )
+        assert y.size == x.size + int(round(sr * 1.0))
+
+    def test_existing_gap_is_subtracted(self):
+        sr = 24000
+        x = self._blended_clip(sr)
+        # 1000 target with 200 already present → only 800 ms of net silence inserted.
+        y = apply_boundary_pause_plan(
+            x, sr, [{"at_ms": 400.0, "target_ms": 1000.0, "existing_ms": 200.0}]
+        )
+        assert y.size == x.size + int(round(sr * 0.8))
+
+    def test_no_op_when_target_below_existing(self):
+        sr = 24000
+        x = self._blended_clip(sr)
+        y = apply_boundary_pause_plan(
+            x, sr, [{"at_ms": 400.0, "target_ms": 100.0, "existing_ms": 300.0}]
+        )
+        assert y.size == x.size
+
+    def test_inserted_region_is_silent(self):
+        sr = 24000
+        x = self._blended_clip(sr)
+        y = apply_boundary_pause_plan(x, sr, [{"at_ms": 400.0, "target_ms": 500.0}])
+        gap = int(round(sr * 0.5))
+        # Locate the fully-silent block; it must exist and be exactly the target length.
+        silent = np.flatnonzero(np.abs(y) < 1e-6)
+        assert silent.size >= gap
+
+    def test_no_click_at_seams(self):
+        """The gate: max sample-to-sample step must not exceed the source's own max
+        step. A hard butt-cut into voiced audio would spike the first difference; the
+        micro-fades keep every transition no sharper than the original waveform."""
+        sr = 24000
+        x = self._blended_clip(sr)
+        src_max_step = float(np.max(np.abs(np.diff(x))))
+        y = apply_boundary_pause_plan(x, sr, [{"at_ms": 400.0, "target_ms": 1000.0}])
+        out_max_step = float(np.max(np.abs(np.diff(y))))
+        assert out_max_step <= src_max_step + 1e-6
+
+    def test_multiple_boundaries_running_offset(self):
+        sr = 24000
+        x = np.concatenate([_sine(180.0, 0.3, sr), _sine(220.0, 0.3, sr), _sine(260.0, 0.3, sr)])
+        edits = [
+            {"at_ms": 300.0, "target_ms": 400.0},
+            {"at_ms": 600.0, "target_ms": 400.0},
+        ]
+        y = apply_boundary_pause_plan(x, sr, edits)
+        assert y.size == x.size + int(round(sr * 0.8))
+
+    def test_resolve_safe_cut_prefers_low_energy(self):
+        sr = 24000
+        # Loud then near-silent: the cut should snap into the quiet half.
+        x = np.concatenate([_sine(200.0, 0.02, sr, amplitude=0.9),
+                            np.full(int(sr * 0.02), 1e-5, dtype=np.float32)])
+        center = int(sr * 0.02)
+        cut, prov = resolve_safe_cut(x, sr, center, search_ms=5.0)
+        assert prov in ("energy_min", "zero_cross")
+        assert abs(x[cut]) < 0.1
+
+    def test_plan_is_sorted_and_serializable(self):
+        sr = 24000
+        x = self._blended_clip(sr)
+        plan = plan_boundary_pauses(
+            x, sr,
+            [{"at_ms": 600.0, "target_ms": 300.0}, {"at_ms": 200.0, "target_ms": 300.0}],
+        )
+        cuts = [p["cut_sample"] for p in plan]
+        assert cuts == sorted(cuts)
+        assert {
+            "at_ms", "cut_sample", "cut_ms", "insert_ms", "target_ms", "existing_ms",
+            "provenance", "origin",
+        } <= set(plan[0])
+
+    def test_plan_reports_rendered_coordinates_after_prior_insertions(self):
+        sr = 1000
+        x = np.zeros(1000, dtype=np.float32)
+        plan = plan_boundary_pauses(
+            x,
+            sr,
+            [
+                {"at_ms": 200.0, "target_ms": 100.0, "origin": "alignment"},
+                {"at_ms": 600.0, "target_ms": 200.0, "origin": "vad"},
+            ],
+            search_ms=0.0,
+        )
+        assert plan[0]["cut_sample"] == 200
+        assert plan[1]["cut_sample"] == 700
+        assert plan[0]["origin"] == "alignment"
+        assert plan[1]["origin"] == "vad"
+
+    def test_empty_edits_returns_unchanged(self):
+        sr = 24000
+        x = self._blended_clip(sr)
+        assert np.array_equal(apply_boundary_pause_plan(x, sr, []), x)

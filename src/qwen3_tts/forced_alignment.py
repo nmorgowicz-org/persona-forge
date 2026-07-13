@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 ENGINE_ID = "mms-onnx-v1"
 MODEL_ID = "onnx-community/mms-300m-1130-forced-aligner-ONNX"
 MODEL_REVISION = "2100fb247d8e43962eef24491597fbeb8b469531"  # immutable pin
+MODEL_ONNX_FILE = "onnx/model_int8.onnx"  # INT8 aligner weights within the repo
 PREPROCESS_VERSION = 1
 SCHEMA_VERSION = 1
 DEFAULT_LANGUAGE = "en"
@@ -216,6 +217,42 @@ def _model_path() -> str:
     return os.getenv("ALIGNER_MODEL_PATH", "").strip()
 
 
+def resolve_model_path() -> str:
+    """Return a filesystem path to the aligner ONNX weights, downloading them on
+    first use if necessary.
+
+    Resolution order:
+      1. ``ALIGNER_MODEL_PATH`` — explicit override (offline/air-gapped hosts,
+         locally-exported IR). Honored verbatim; must point at an existing file.
+      2. Hugging Face hub — download ``MODEL_ONNX_FILE`` from ``MODEL_ID`` pinned
+         to the immutable ``MODEL_REVISION`` into the shared HF cache. This
+         mirrors how the base / Pocket-TTS checkpoints self-provision on first
+         run, so a fresh deploy needs zero manual model placement.
+    """
+    override = _model_path()
+    if override:
+        if not os.path.isfile(override):
+            raise RuntimeError(
+                f"ALIGNER_MODEL_PATH is set to {override!r} but no file exists there."
+            )
+        return override
+
+    from huggingface_hub import hf_hub_download  # noqa: PLC0415 — deferred import
+
+    logger.info(
+        "Fetching forced-aligner weights %s@%s:%s (first-run cache warm)",
+        MODEL_ID, MODEL_REVISION, MODEL_ONNX_FILE,
+    )
+    # HF caches by (repo, revision, file); subsequent calls resolve to the cached
+    # copy without a network round-trip. The revision pin keeps the cache
+    # identity stamped into meta.json valid across restarts.
+    return hf_hub_download(
+        repo_id=MODEL_ID,
+        filename=MODEL_ONNX_FILE,
+        revision=MODEL_REVISION,
+    )
+
+
 def load_session():
     """Lazily construct the ONNX session (imports onnxruntime only here)."""
     global _session
@@ -223,11 +260,7 @@ def load_session():
         if _session is None:
             import onnxruntime as ort  # noqa: PLC0415 — deferred heavy import
 
-            path = _model_path()
-            if not path or not os.path.isfile(path):
-                raise RuntimeError(
-                    "ALIGNER_MODEL_PATH is unset or missing; cannot run forced alignment."
-                )
+            path = resolve_model_path()
             logger.info("Loading forced-aligner ONNX model: %s (providers=%s)", path, _providers())
             _session = ort.InferenceSession(path, providers=_providers())
         return _session

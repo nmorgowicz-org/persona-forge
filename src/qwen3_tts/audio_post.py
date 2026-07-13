@@ -286,6 +286,152 @@ def apply_region_edits(audio: np.ndarray, sr: int, edits: list[dict] | None) -> 
     return x
 
 
+def resolve_safe_cut(
+    audio: np.ndarray, sr: int, center_sample: int, *, search_ms: float = 2.0
+) -> tuple[int, str]:
+    """Snap an aligned word boundary to the safest nearby splice point.
+
+    Cutting into voiced audio to insert a pause clicks unless the cut lands where the
+    waveform is quiet and ideally crossing zero. We search a small window around the
+    aligned boundary (plan §5.3 step 1): low local energy is the *primary* criterion,
+    zero-cross proximity a *secondary* tie-break, and proximity to the boundary the
+    final tie-break. Returns (cut_sample, provenance) where provenance is one of
+    ``"zero_cross"``, ``"energy_min"``, or ``"boundary"`` (no room to search).
+    """
+    x = np.asarray(audio, dtype=np.float32).ravel()
+    n = x.size
+    center = max(0, min(int(round(center_sample)), n))
+    search = int(round(sr * search_ms / 1000.0))
+    if search <= 0 or n == 0:
+        return center, "boundary"
+    lo = max(0, center - search)
+    hi = min(n, center + search + 1)
+    if hi - lo <= 1:
+        return center, "boundary"
+
+    window = x[lo:hi]
+    amp = np.abs(window)
+    # Candidates sitting at (or a hair above) the local energy floor.
+    tol = float(amp.min()) + 1e-3
+    candidates = np.flatnonzero(amp <= tol)
+    # Among those, prefer a genuine zero-crossing (sign flip vs the previous sample).
+    sign = np.signbit(window)
+    zero_cross = [int(i) for i in candidates if i > 0 and sign[i] != sign[i - 1]]
+    pool = zero_cross if zero_cross else [int(i) for i in candidates]
+    center_local = center - lo
+    best = min(pool, key=lambda i: abs(i - center_local))
+    provenance = "zero_cross" if zero_cross else "energy_min"
+    return lo + best, provenance
+
+
+def _splice_padded_gap(
+    x: np.ndarray, at: int, gap_samples: int, fade_len: int
+) -> np.ndarray:
+    """Insert `gap_samples` of silence at `at`, micro-fading the voiced audio into and
+    out of the gap so the cut is inaudible. Reuses the equal-power curve of `apply_fades`
+    (cos^2 ramp-down before the gap, sin^2 ramp-up after it)."""
+    at = max(0, min(int(at), x.size))
+    left = x[:at].copy()
+    right = x[at:].copy()
+    fade_out = min(max(0, fade_len), left.size)
+    if fade_out > 0:
+        t = np.linspace(0.0, 1.0, fade_out, dtype=np.float32)
+        left[left.size - fade_out:] *= np.cos(t * np.pi / 2.0) ** 2
+    fade_in = min(max(0, fade_len), right.size)
+    if fade_in > 0:
+        t = np.linspace(0.0, 1.0, fade_in, dtype=np.float32)
+        right[:fade_in] *= np.sin(t * np.pi / 2.0) ** 2
+    gap = np.zeros(max(0, int(gap_samples)), dtype=np.float32)
+    return np.concatenate([left, gap, right])
+
+
+def plan_boundary_pauses(
+    audio: np.ndarray, sr: int, pause_edits: list[dict], *, search_ms: float = 2.0
+) -> list[dict]:
+    """Resolve each alignment-owned pause edit to a concrete, sample-exact splice.
+
+    Separated from `apply_boundary_pause_plan` so the resolved plan (cut position, snap
+    provenance, inserted duration, fade semantics) is a serializable contract the frontend
+    waveform preview can render identically to the backend render (plan §5.3 step 4). Each
+    input edit is ``{"at_ms": <aligned boundary>, "target_ms": <final pause>,
+    "existing_ms": <natural gap already present, default 0>}``; net inserted silence is
+    ``max(0, target_ms - existing_ms)``. Output is sorted by cut position.
+    """
+    x = np.asarray(audio, dtype=np.float32).ravel()
+    source_resolved: list[dict] = []
+    for edit in pause_edits or []:
+        at_ms = float(edit.get("at_ms", 0.0))
+        target_ms = float(edit.get("target_ms", 0.0))
+        existing_ms = float(edit.get("existing_ms", 0.0))
+        insert_ms = max(0.0, target_ms - existing_ms)
+        cut, provenance = resolve_safe_cut(
+            x, sr, int(round(sr * at_ms / 1000.0)), search_ms=search_ms
+        )
+        source_resolved.append({
+            "at_ms": at_ms,
+            "cut_sample": cut,
+            "insert_ms": round(insert_ms, 3),
+            "target_ms": target_ms,
+            "existing_ms": existing_ms,
+            "provenance": provenance,
+            "origin": edit.get("origin", "alignment"),
+        })
+    source_resolved.sort(key=lambda r: r["cut_sample"])
+
+    # The public cut coordinate is in the rendered preview's sample space. This folds in
+    # earlier insertions on the server so waveform consumers never need to reproduce gap
+    # offset math (and later markers cannot drift after an earlier manufactured pause).
+    resolved: list[dict] = []
+    inserted_samples = 0
+    for item in source_resolved:
+        rendered_cut = int(item["cut_sample"]) + inserted_samples
+        item["cut_sample"] = rendered_cut
+        item["cut_ms"] = round(rendered_cut * 1000.0 / sr, 3) if sr else 0.0
+        resolved.append(item)
+        inserted_samples += int(round(sr * float(item["insert_ms"]) / 1000.0))
+    return resolved
+
+
+def apply_resolved_boundary_pause_plan(
+    audio: np.ndarray, sr: int, resolved_plan: list[dict], *, fade_ms: float = 2.0
+) -> np.ndarray:
+    """Apply a sample-exact plan returned by :func:`plan_boundary_pauses`."""
+    out = np.asarray(audio, dtype=np.float32).ravel()
+    if out.size == 0 or not resolved_plan:
+        return out
+    fade_len = max(0, int(round(sr * fade_ms / 1000.0)))
+    for edit in resolved_plan:
+        insert_samples = int(round(sr * float(edit["insert_ms"]) / 1000.0))
+        if insert_samples <= 0:
+            continue
+        out = _splice_padded_gap(out, int(edit["cut_sample"]), insert_samples, fade_len)
+    return out
+
+
+def apply_boundary_pause_plan(
+    audio: np.ndarray,
+    sr: int,
+    pause_edits: list[dict],
+    *,
+    search_ms: float = 2.0,
+    fade_ms: float = 2.0,
+) -> np.ndarray:
+    """Insert alignment-owned pauses at aligned word boundaries without an audible click.
+
+    For each punctuation-owned boundary (plan §5.3): snap to a safe low-energy/zero-cross
+    cut near the aligned position, micro-fade the voiced audio into and out of the cut, and
+    splice in the final target-duration silence directly — no second pass through
+    `get_pause_targets`, the preset's target is already resolved. This is the *cut-into-
+    voiced-audio* path; the raw-`np.zeros` gap *replacement* path in audio_style stays
+    distinct (it edits already-silent regions and needs no anti-click).
+    """
+    x = np.asarray(audio, dtype=np.float32).ravel()
+    if x.size == 0 or not pause_edits:
+        return x
+    resolved = plan_boundary_pauses(x, sr, pause_edits, search_ms=search_ms)
+    return apply_resolved_boundary_pause_plan(x, sr, resolved, fade_ms=fade_ms)
+
+
 def concat_with_padding(
     segments: list[np.ndarray],
     sr: int,

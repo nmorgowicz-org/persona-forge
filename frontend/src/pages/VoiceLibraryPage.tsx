@@ -35,6 +35,10 @@ import {
   analyzeVoiceReference,
   adjustVoiceReferencePauses,
   applyVoiceReferenceRegionEdits,
+  startVoiceAlignment,
+  getVoiceAlignmentStatus,
+  cancelVoiceAlignment,
+  previewVoiceProsody,
   deleteOmniVoiceSegment,
   deleteVoice,
   duplicateVoice,
@@ -51,6 +55,9 @@ import {
   type SegmentMeta,
   type StitchPlanRegionEdit,
   type VoiceMeta,
+  type ProsodyMode,
+  type AlignmentBoundary,
+  type ProsodyPausePlanEntry,
 } from '@/lib/api'
 import { hasChipSelections, type ChipSelections } from '@/lib/voiceDesignChips'
 import { MiniAudioDeck } from '@/components/audio/MiniAudioDeck'
@@ -817,7 +824,7 @@ function VoiceCard({
   onTrimSilence: (voiceId: string) => Promise<void>
   onFixAll: () => void
   onSetDefault: (() => void) | null
-  onAdjustPauses: (voiceId: string, stylePreset: string, paceMultiplier: number, pauseOffset: number) => Promise<void>
+  onAdjustPauses: (voiceId: string, stylePreset: string, paceMultiplier: number, pauseOffset: number, mode: ProsodyMode) => Promise<void>
   onActivateForApi: () => void
   onApplyReferenceEdits: (voiceId: string, edits: StitchPlanRegionEdit[]) => Promise<void>
   onAnalyze: () => void
@@ -834,14 +841,27 @@ function VoiceCard({
   const [stylePreset, setStylePreset] = useState('Neutral')
   const [paceMultiplier, setPaceMultiplier] = useState(1.0)
   const [pauseOffset, setPauseOffset] = useState(0)
-  // Phase 1: processing-mode override. Auto follows triage; Precise (forced
-  // alignment) is disabled until the alignment engine lands in Phase 2.
-  const [processingMode, setProcessingMode] = useState<'auto' | 'natural' | 'precise'>('auto')
+  // Processing-mode override. Auto follows triage; Natural keeps the fast energy
+  // path; Precise forces forced-alignment-directed surgical insertion (§5.5/§5.6).
+  const [processingMode, setProcessingMode] = useState<ProsodyMode>('auto')
+  // Latency-masked alignment (§5.6): the forced-alignment pass is async, so we poll
+  // a job and surface a boundary badge once it lands. `alignBoundaries === null`
+  // means "not yet run"; an empty array means "ran, no usable boundaries".
+  const [alignBusy, setAlignBusy] = useState(false)
+  const [alignBoundaries, setAlignBoundaries] = useState<AlignmentBoundary[] | null>(null)
+  const [alignError, setAlignError] = useState<string | null>(null)
+  const alignJobRef = useRef<{ jobId: string; cancelled: boolean } | null>(null)
   const [variants, setVariants] = useState<string[]>([])
   const [activeVariant, setActiveVariant] = useState<string | null>(null)
   const [prosodyBusy, setProsodyBusy] = useState(false)
   const [previewBusy, setPreviewBusy] = useState(false)
-  const [previewAudio, setPreviewAudio] = useState<{ url: string; blob: Blob } | null>(null)
+  const [previewAudio, setPreviewAudio] = useState<{
+    url: string
+    blob: Blob
+    audioBase64: string
+    sampleCount: number
+    plan: ProsodyPausePlanEntry[]
+  } | null>(null)
   const [previewMetrics, setPreviewMetrics] = useState<VoiceReferenceMetrics | null>(null)
   const [analysisExpanded, setAnalysisExpanded] = useState(() => localStorage.getItem('voice-library-analysis-expanded') !== 'false')
   const [preserveOriginal, setPreserveOriginal] = useState(true)
@@ -856,6 +876,74 @@ function VoiceCard({
     (needsReview
       ? 'Review the transcript before using Qwen backends.'
       : 'Transcript is ready for Qwen backends.')
+
+  const hasTranscript = Boolean((voice.sample_text || '').trim())
+  const triage = metrics?.triage ?? null
+  // Whether the current mode will actually attempt forced alignment: explicit Precise,
+  // or Auto when triage judged the clip blended. Natural never aligns.
+  const resolvedPrecise =
+    processingMode === 'precise' || (processingMode === 'auto' && triage?.mode === 'precise')
+  // Boundaries the surgical pass acts on: sentence splits own the big sentence-end
+  // pause; clause owners own comma-scale pauses. Plain/uncertain words are skipped.
+  const sentenceBoundaries = (alignBoundaries ?? []).filter((b) => b.kind === 'sentence_split')
+  const clauseBoundaries = (alignBoundaries ?? []).filter(
+    (b) => b.kind !== 'sentence_split' && b.owns_clause,
+  )
+  const shapedBoundaryCount = sentenceBoundaries.length + clauseBoundaries.length
+
+  // Run (or reuse) an async forced-alignment pass, masking the 1–5 s latency with a
+  // polled progress state. Cancellable on unmount / mode change via alignJobRef.
+  const runAlignment = async () => {
+    if (!hasTranscript || alignBusy) return
+    setAlignBusy(true)
+    setAlignError(null)
+    try {
+      const job = await startVoiceAlignment(voice.voice_id)
+      alignJobRef.current = { jobId: job.job_id, cancelled: false }
+      let current = job
+      while (current.status === 'queued' || current.status === 'running') {
+        if (alignJobRef.current?.cancelled) return
+        await new Promise((r) => setTimeout(r, 500))
+        if (alignJobRef.current?.cancelled) return
+        current = await getVoiceAlignmentStatus(voice.voice_id, job.job_id)
+      }
+      if (alignJobRef.current?.cancelled) return
+      if (current.status === 'completed') {
+        setAlignBoundaries(current.result?.boundaries ?? [])
+      } else if (current.status === 'failed') {
+        setAlignError(current.error || 'Alignment failed')
+        setAlignBoundaries([])
+      }
+    } catch (err) {
+      setAlignError(err instanceof Error ? err.message : String(err))
+    } finally {
+      alignJobRef.current = null
+      setAlignBusy(false)
+    }
+  }
+
+  // Reset any cached boundaries when the clip identity or its transcript changes —
+  // the old alignment no longer describes this audio/text.
+  useEffect(() => {
+    setAlignBoundaries(null)
+    setAlignError(null)
+  }, [voice.voice_id, voice.sample_text, voice.sha256])
+
+  // Trigger alignment lazily the first time Precise resolves for this clip, and cancel
+  // any in-flight job on unmount.
+  useEffect(() => {
+    if (resolvedPrecise && hasTranscript && alignBoundaries === null && !alignBusy) {
+      void runAlignment()
+    }
+    return () => {
+      const inflight = alignJobRef.current
+      if (inflight && !inflight.cancelled) {
+        inflight.cancelled = true
+        void cancelVoiceAlignment(voice.voice_id, inflight.jobId).catch(() => {})
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedPrecise, hasTranscript, alignBoundaries])
 
   useEffect(() => {
     async function loadVariants() {
@@ -1059,6 +1147,15 @@ function VoiceCard({
                    {stylePreset.toUpperCase()} PREVIEW
                  </div>
                  <MiniAudioDeck src={previewAudio.url} blob={previewAudio.blob} autoPlay={false} />
+                 {previewAudio.plan.length > 0 && (
+                   <RegionEditor
+                     audioBase64={previewAudio.audioBase64}
+                     boundaryPlan={previewAudio.plan}
+                     sampleCount={previewAudio.sampleCount}
+                     readOnly
+                     showPlayer={false}
+                   />
+                 )}
                </div>
             </div>
           ) : (
@@ -1109,7 +1206,17 @@ function VoiceCard({
                   </div>
                   <div className="grid grid-cols-3 gap-1">
                     {(['auto', 'natural', 'precise'] as const).map((m) => {
-                      const disabled = m === 'precise'  // enabled once alignment ships (Phase 2)
+                      // Precise needs a transcript to align against; disable it (with a
+                      // reason) when the clip has none.
+                      const disabled = m === 'precise' && !hasTranscript
+                      const title =
+                        m === 'precise'
+                          ? hasTranscript
+                            ? 'Force forced-alignment-directed surgical pauses'
+                            : 'Add reference text to enable forced alignment'
+                          : m === 'natural'
+                            ? 'Fast energy path — never re-aligns'
+                            : 'Let triage decide: align blended clips, keep clean clips fast'
                       return (
                         <Button
                           key={m}
@@ -1117,7 +1224,7 @@ function VoiceCard({
                           variant={processingMode === m ? 'default' : 'outline'}
                           disabled={disabled}
                           className="h-7 px-1 text-[10px] capitalize"
-                          title={disabled ? 'Forced alignment ships in a later phase' : undefined}
+                          title={title}
                           onClick={() => setProcessingMode(m)}
                         >
                           {m}
@@ -1125,8 +1232,45 @@ function VoiceCard({
                       )
                     })}
                   </div>
+                  {/* Latency masking + boundary badge (§5.6): only meaningful when the
+                      resolved mode actually aligns. */}
+                  {resolvedPrecise && (
+                    alignBusy ? (
+                      <div className="flex items-center gap-1.5 text-[10px] text-cyan-400">
+                        <Loader2 className="size-3 animate-spin" />
+                        Finding linguistic boundaries…
+                      </div>
+                    ) : alignError ? (
+                      <div className="flex items-center gap-1 text-[10px] text-warning" title={alignError}>
+                        <AlertTriangle className="size-3" /> Alignment unavailable — using safe fallback
+                      </div>
+                    ) : alignBoundaries !== null ? (
+                      shapedBoundaryCount > 0 ? (
+                        <div
+                          className="flex items-center gap-1"
+                          title={[
+                            `${sentenceBoundaries.length} sentence boundary${sentenceBoundaries.length === 1 ? '' : 'ies'} (manufactured sentence-end pauses)`,
+                            `${clauseBoundaries.length} clause boundary${clauseBoundaries.length === 1 ? '' : 'ies'} (comma-scale pauses)`,
+                          ].join('\n')}
+                        >
+                          <Badge variant="outline" className="h-4 gap-1 px-1.5 text-[9px] font-medium text-cyan-400 border-cyan-500/40">
+                            <AudioWaveform className="size-2.5" />
+                            Aligned · {shapedBoundaryCount} boundar{shapedBoundaryCount === 1 ? 'y' : 'ies'}
+                          </Badge>
+                        </div>
+                      ) : (
+                        <div className="text-[10px] text-muted-foreground">Aligned · no surgical pauses needed</div>
+                      )
+                    ) : null
+                  )}
                   <p className="text-[10px] text-muted-foreground italic leading-tight">
-                    Auto follows triage: blended clips escalate to forced alignment, clean clips keep the fast path.
+                    {!hasTranscript
+                      ? 'No transcript on this clip — Precise (forced alignment) needs reference text.'
+                      : triage?.mode === 'precise'
+                        ? `${triage.gaps_detected ?? '?'} gaps detected, ${triage.boundaries_expected ?? '?'} sentence boundaries expected → blended speech; Auto escalates to alignment.`
+                        : triage?.mode === 'natural'
+                          ? 'Gaps line up with sentence boundaries → clean; Auto keeps the fast energy path.'
+                          : 'Auto follows triage: blended clips escalate to forced alignment, clean clips keep the fast path.'}
                   </p>
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -1193,12 +1337,18 @@ function VoiceCard({
                        onClick={async () => {
                          setPreviewBusy(true)
                          try {
-                           const response = await fetch(`/voices/${voice.voice_id}/preview-prosody?style_preset=${encodeURIComponent(stylePreset)}&pace_multiplier=${paceMultiplier}&pause_offset=${pauseOffset}`)
-                           if (!response.ok) throw new Error('Preview fetch failed')
-                           const data = await response.json()
+                           const data = await previewVoiceProsody(
+                             voice.voice_id, stylePreset, paceMultiplier, pauseOffset, processingMode,
+                           )
                            const blob = new Blob([Uint8Array.from(atob(data.audio_base64), c => c.charCodeAt(0))], { type: 'audio/wav' })
                            const url = URL.createObjectURL(blob)
-                           setPreviewAudio({ url, blob })
+                           setPreviewAudio({
+                             url,
+                             blob,
+                             audioBase64: data.audio_base64,
+                             sampleCount: data.sample_count,
+                             plan: data.plan,
+                           })
                            setPreviewMetrics(data.metrics)
                          } catch (err) {
                            console.error('Prosody preview failed:', err)
@@ -1216,7 +1366,7 @@ function VoiceCard({
                      onClick={async () => {
                        setProsodyBusy(true)
                        try {
-                         await onAdjustPauses(voice.voice_id, stylePreset, paceMultiplier, pauseOffset)
+                         await onAdjustPauses(voice.voice_id, stylePreset, paceMultiplier, pauseOffset, processingMode)
                          const data = await getVoiceVariants(voice.voice_id)
                          setVariants(data.variants)
                          setActiveVariant(data.active_variant)
@@ -1531,11 +1681,11 @@ export function VoiceLibraryPage() {
     }
   }
 
-  async function adjustPauses(voiceId: string, stylePreset: string, paceMultiplier: number, pauseOffset: number) {
+  async function adjustPauses(voiceId: string, stylePreset: string, paceMultiplier: number, pauseOffset: number, mode: ProsodyMode) {
     setBusyVoiceId(voiceId)
     setError(null)
     try {
-      await adjustVoiceReferencePauses(voiceId, stylePreset, paceMultiplier, pauseOffset)
+      await adjustVoiceReferencePauses(voiceId, stylePreset, paceMultiplier, pauseOffset, mode)
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -1767,7 +1917,7 @@ export function VoiceLibraryPage() {
                    onTrimSilence={async (voiceId) => { await trimVoiceReferenceSilence(voiceId); await refresh() }}
                    onFixAll={() => fixAll(voice.voice_id)}
                    onSetDefault={voice.family_id ? () => setDefault(voice.voice_id) : null}
-                    onAdjustPauses={(voiceId, stylePreset, paceMultiplier, pauseOffset) => adjustPauses(voiceId, stylePreset, paceMultiplier, pauseOffset)}
+                    onAdjustPauses={(voiceId, stylePreset, paceMultiplier, pauseOffset, mode) => adjustPauses(voiceId, stylePreset, paceMultiplier, pauseOffset, mode)}
 
                    onActivateForApi={() => activateForApi(voice.voice_id)}
                   onApplyReferenceEdits={(voiceId, edits) => applyReferenceEdits(voiceId, edits)}

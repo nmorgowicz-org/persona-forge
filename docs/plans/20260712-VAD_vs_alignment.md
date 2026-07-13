@@ -345,6 +345,48 @@ panel in the screenshot), reusing `RegionEditor.tsx` for manual edits.
 - **Explainability:** if triage chose Precise, tooltip shows "2 gaps detected, 5 sentence
   boundaries expected → blended speech." If no transcript, show why alignment is disabled.
 
+> **Landed (2026-07-13):** Processing-mode control, latency masking, the **Aligned · N
+> boundaries** badge (sentence/clause breakdown in tooltip), and explainability text are live
+> in `VoiceLibraryPage.tsx`. The badge count comes straight from the alignment record; the
+> *reveal-over-the-waveform* and *manufactured-vs-natural* halves of the boundary badge are
+> deferred to §5.6.1 because they need the resolved edit plan, which the render endpoints do
+> not yet return.
+
+### 5.6.1 Boundary overlay & shared edit-plan contract (Phase 3.5 fast-follow)
+
+The boundary badge answers *how many* boundaries were found; the overlay answers *where they
+are and what happened to each*. It is the highest-value refinement of the Library surface
+because it makes the surgical pass legible: the user sees the exact cut the renderer chose and
+whether a gap was **natural** (already silent, preserved) or **manufactured** (cut into voiced
+audio + padded to the preset target).
+
+**Blocking dependency — surface the edit plan (backend).** §5.3 step 4 already defines the
+shared region-edit schema (resolved cut position, duration, snap provenance, fade semantics);
+today it lives only inside `apply_boundary_pause_plan` and never crosses the wire.
+
+- `GET /voices/<id>/preview-prosody` returns a `plan` array alongside `audio_base64`/`metrics`:
+  each entry `{ at_ms, cut_sample, cut_ms, insert_ms, target_ms, existing_ms, provenance,
+  origin }` where `provenance ∈ {zero_cross, energy_min, boundary}` and `origin ∈ {alignment,
+  vad, energy}`. This is the same list `plan_boundary_pauses` already computes — expose it,
+  don't recompute it, so overlay and saved render stay sample-equivalent by construction.
+- `insert_ms > 0` ⇒ **manufactured**; `insert_ms == 0` (target already satisfied by an
+  existing gap) ⇒ **natural**. The frontend derives the marker distinction from `insert_ms`,
+  never re-implements the DSP.
+
+**Overlay (frontend, `RegionEditor.tsx` + `Waveform.tsx`).**
+- Read-only markers first (per Open Question #3): a vertical tick at each `cut_sample`, tinted
+  by `origin` (alignment vs VAD-directed vs energy fallback) and shaped by manufactured-vs-
+  natural; hover shows `target_ms`, `insert_ms`, and `provenance`.
+- Render on the **preview** waveform (the adjusted audio the user auditions), with cut samples
+  mapped through the same sample-rate the plan carries — no client-side gap math.
+- Editable handles (drag a boundary, nudge a target) are a fast-follow *after* read-only ships,
+  reusing RegionEditor's existing region-drag affordances and posting back through the same
+  edit-plan schema.
+
+**Reuse note:** the `preview-prosody` `plan` payload is the same contract Stitch (§6.2),
+OmniVoice (§6.3), and generation repair (§6.4) will each surface per-segment, so building it
+here pays down those phases too.
+
 ---
 
 ## 6. Surface Integration
@@ -465,6 +507,53 @@ before or alongside Phase 0.
   path for clean clips is unchanged. Frontend preview and backend saved render are sample-
   equivalent for the shared edit contract. Listening test + click-detection assertion.
 
+> **Backend status (2026-07-13):** `audio_post.resolve_safe_cut` / `plan_boundary_pauses` /
+> `apply_boundary_pause_plan` land the anti-click surgical insertion (energy-min + zero-cross
+> snap, 2 ms equal-power micro-fades). `voice_library.build_alignment_pause_edits` maps
+> punctuation-owned aligned boundaries to preset targets (sentence_end/comma, existing-gap
+> resized), and `get_alignment_directed_wav` runs the §5.5 chain (cached alignment → align →
+> plan → render) behind `get_prosody_adjusted_wav(mode=...)`. `adjust-pauses` +
+> `preview-prosody` accept `mode=natural|precise|auto` (default `auto`). Click-detection
+> assertion is green (`test_no_click_at_seams`). The pure-VAD fallback (step 3) now lands via
+> `build_vad_pause_edits` / `get_vad_directed_wav` — proportional punctuation placement +
+> VAD-safe anti-click cut — wired into the auto/precise chain (alignment → VAD → energy).
+>
+> **Frontend status (2026-07-13):** §5.6 UX landed in `VoiceLibraryPage.tsx`. The
+> Processing-mode control (Natural/Precise/Auto) is fully wired — Precise is enabled when the
+> clip has a transcript (disabled with a reason otherwise) and `mode` is threaded to both
+> `preview-prosody` and `adjust-pauses`. When the resolved mode aligns (explicit Precise, or
+> Auto + triage=precise), the card kicks off the async `/align` job, masks the 1–5 s latency
+> with a "Finding linguistic boundaries…" state (polled + cancel-on-unmount), then shows an
+> **Aligned · N boundaries** badge (sentence vs clause breakdown in tooltip) and falls to a
+> "safe fallback" note on job failure. Explainability text renders the triage rationale
+> ("N gaps detected, M sentence boundaries expected → blended speech") or the no-transcript
+> reason. `frontend/src/lib/api.ts` gained `ProsodyMode`, alignment types, and
+> `startVoiceAlignment` / `getVoiceAlignmentStatus` / `cancelVoiceAlignment`. **Remaining
+> (deferred):** revealing detected boundaries as an overlay on the RegionEditor waveform and a
+> per-render manufactured-vs-natural gap contract — both need the backend to surface the
+> resolved edit plan (cut sample / duration / provenance) from `preview-prosody`, which it
+> does not yet return.
+
+### Phase 3.5 — Boundary overlay & edit-plan contract (Library fast-follow)
+Highest-value refinement of the Phase 3 surface (§5.6.1). Surface the resolved edit plan from
+`preview-prosody` (the list `plan_boundary_pauses` already computes — `cut_sample`, `cut_ms`,
+`insert_ms`, `target_ms`, `existing_ms`, `provenance`, `origin`), then render read-only
+boundary markers over the preview waveform in `RegionEditor.tsx`, tinted by `origin` and
+distinguishing manufactured (`insert_ms > 0`) from natural (`insert_ms == 0`) gaps.
+- **Gate:** for the screenshot clip under Storyteller, every rendered cut has a marker at the
+  exact `cut_sample` the saved render used (overlay ↔ audio sample-equivalent); manufactured
+  vs natural is visually distinct; no client-side gap recomputation. Editable handles are an
+  explicit fast-follow, not part of this gate.
+
+> **Landed (2026-07-13):** `preview-prosody` now returns the canonical resolved plan plus
+> preview `sample_rate` / `sample_count`. `cut_sample` is expressed in rendered-preview
+> coordinates with all prior server-side insertions already folded in, and the same plan is
+> applied by the backend renderer. Voice Library renders read-only RegionEditor markers from
+> those samples directly: origin controls color, while diamond/solid and circle/dashed markers
+> distinguish manufactured from natural gaps. Hover text exposes target, inserted duration,
+> snap provenance, and the exact sample. Tests cover running-offset coordinates and PCM-
+> equivalent preview/saved output. **Phase 3 and Phase 3.5 are complete.**
+
 ### Phase 4 — Stitch Studio + OmniVoice
 - Per-segment triage/alignment-directed edits; StitchTimeline per-gap targets; OmniVoice
   per-segment repair.
@@ -525,7 +614,8 @@ before or alongside Phase 0.
 2. Warm-load the aligner at boot (faster first Precise, higher idle RAM) or purely lazy?
    (Default lazy; env flag for warm.)
 3. Do we expose detected boundaries as *editable* handles in RegionEditor, or read-only
-   overlays first? (Read-only in Phase 3; editable is a fast-follow.)
+   overlays first? (**Resolved:** read-only markers land in Phase 3.5 / §5.6.1, gated on the
+   `preview-prosody` edit-plan payload; editable handles are an explicit fast-follow after.)
 
 ---
 

@@ -387,11 +387,53 @@ export async function setDefaultVoiceVariant(voiceId: string): Promise<VoiceMeta
   return res.json()
 }
 
+// Processing mode for pause shaping: 'auto' lets triage decide, 'natural' forces the
+// fast energy path, 'precise' forces forced-alignment-directed surgical insertion.
+export type ProsodyMode = 'auto' | 'natural' | 'precise'
+
+export interface ProsodyPausePlanEntry {
+  at_ms: number
+  cut_sample: number
+  cut_ms: number
+  insert_ms: number
+  target_ms: number
+  existing_ms: number
+  provenance: 'zero_cross' | 'energy_min' | 'boundary'
+  origin: 'alignment' | 'vad' | 'energy'
+}
+
+export interface ProsodyPreview {
+  audio_base64: string
+  metrics: ReferenceMetrics
+  sample_rate: number
+  sample_count: number
+  plan: ProsodyPausePlanEntry[]
+}
+
+export async function previewVoiceProsody(
+  voiceId: string,
+  stylePreset: string,
+  paceMultiplier: number,
+  pauseOffset: number,
+  mode: ProsodyMode,
+): Promise<ProsodyPreview> {
+  const query = new URLSearchParams({
+    style_preset: stylePreset,
+    pace_multiplier: String(paceMultiplier),
+    pause_offset: String(pauseOffset),
+    mode,
+  })
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/preview-prosody?${query}`)
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 export async function adjustVoiceReferencePauses(
   voiceId: string,
   stylePreset: string,
   paceMultiplier: number,
   pauseOffset: number,
+  mode: ProsodyMode = 'auto',
 ): Promise<VoiceMeta> {
   const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/adjust-pauses`, {
     method: 'POST',
@@ -399,9 +441,66 @@ export async function adjustVoiceReferencePauses(
     body: JSON.stringify({ 
       style_preset: stylePreset, 
       pace_multiplier: paceMultiplier, 
-      pause_offset: pauseOffset 
+      pause_offset: pauseOffset,
+      mode,
     }),
   })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+// --- Forced alignment (plan §5.5/§5.6) ---------------------------------------
+// A detected linguistic boundary. `kind` distinguishes a sentence split (owns the
+// big sentence-end pause) from a plain word and an uncertain (low-confidence, skipped)
+// boundary; `owns_clause` marks a comma/clause owner. Times are seconds into the clip.
+export interface AlignmentBoundary {
+  text: string
+  start: number
+  end: number
+  score: number
+  kind: 'word' | 'sentence_split' | 'uncertain'
+  owns_clause: boolean
+}
+
+export interface AlignmentRecord {
+  boundaries: AlignmentBoundary[]
+  model_revision?: string
+  transcript_sha256?: string
+}
+
+export interface AlignJob {
+  job_id: string
+  voice_id: string
+  status: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed'
+  created_at: number
+  result: AlignmentRecord | null
+  error: string | null
+}
+
+// Kick off (or reuse) an async forced-alignment pass. Returns a job to poll.
+export async function startVoiceAlignment(voiceId: string, force = false): Promise<AlignJob> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/align`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ force }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function getVoiceAlignmentStatus(voiceId: string, jobId: string): Promise<AlignJob> {
+  const res = await fetch(
+    `/voices/${encodeURIComponent(voiceId)}/align/${encodeURIComponent(jobId)}`,
+  )
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function cancelVoiceAlignment(voiceId: string, jobId: string): Promise<AlignJob> {
+  const res = await fetch(
+    `/voices/${encodeURIComponent(voiceId)}/align/${encodeURIComponent(jobId)}`,
+    { method: 'DELETE' },
+  )
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
 }

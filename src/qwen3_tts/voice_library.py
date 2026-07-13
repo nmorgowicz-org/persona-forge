@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import os
 import re
 import secrets
@@ -24,7 +25,11 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 
-from qwen3_tts.audio_post import apply_region_edits
+from qwen3_tts.audio_post import (
+    apply_region_edits,
+    apply_resolved_boundary_pause_plan,
+    plan_boundary_pauses,
+)
 from qwen3_tts.audio_style import (
     analyze_reference,
     apply_style_preset,
@@ -38,6 +43,8 @@ from qwen3_tts.reference_analysis import calculate_quality_score
 # Fixed container-side mount point, same pattern as qwen3_tts.config.REF_AUDIO_PATH.
 # compose.yml binds ${VOICE_LIBRARY_PATH:-./data/voices} (host) -> this path (container).
 VOICE_LIBRARY_DIR = Path(os.getenv("VOICE_LIBRARY_DIR", "/voices"))
+
+logger = logging.getLogger(__name__)
 
 _VOICE_ID_RE = re.compile(r"^vd_[0-9a-f]{12}$")
 
@@ -78,29 +85,274 @@ def set_active_variant(voice_id: str, variant_filename: str | None = None) -> bo
         return False
 
 
+# Interior punctuation → pause-type classification, shared by the alignment-free VAD path
+# and mirrored from get_pause_targets: ellipsis, then sentence-enders, then clause marks.
+_PUNCT_TRIGGER = re.compile(r"(\.{3,}|…|…)|([.!?])|([,;:]|—|–)")
+
+
+def _load_master_wav(voice_id: str) -> tuple[np.ndarray, int, bytes] | None:
+    """Resolve and read a voice's master reference (original.wav, legacy reference.wav).
+
+    Returns ``(wav, sr, wav_bytes)`` or ``None`` if the voice or its master is missing.
+    Centralizes the master-resolution the prosody engines share.
+    """
+    voice_dir = _voice_dir(voice_id)
+    master_path = voice_dir / "original.wav"
+    if not master_path.is_file():
+        master_path = voice_dir / "reference.wav"
+    if not master_path.is_file():
+        return None
+    wav_bytes = master_path.read_bytes()
+    wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
+    return np.asarray(wav, dtype=np.float32).ravel(), int(sr), wav_bytes
+
+
+def build_vad_pause_edits(
+    wav: np.ndarray,
+    sr: int,
+    transcript: str,
+    style_preset: str,
+    pace_multiplier: float,
+    pause_offset_ms: float = 0.0,
+) -> list[dict[str, Any]]:
+    """Alignment-free surgical pause edits (plan §5.5 step 3).
+
+    Used when forced alignment is unavailable or low-confidence but the clip is blended.
+    Each interior punctuation mark is placed at its *proportional* time position in the
+    audio (character offset / length), given the preset target, and the residual silence
+    already present at that spot is measured from detected gaps so we resize rather than
+    double-pad. ``apply_boundary_pause_plan`` then snaps each to a VAD-safe low-energy cut
+    and inserts with anti-click micro-fades — the same contract as the aligned path, minus
+    the model. Less precise than alignment (proportional, not acoustic), but strictly
+    better than the energy path on a zero-gap clip, which has no interior gap to edit.
+    """
+    prosody = PROSODY_MAPS.get(style_preset, PROSODY_MAPS["Neutral"])
+    text = transcript or ""
+    trimmed_len = len(text.rstrip())
+    if trimmed_len == 0:
+        return []
+    duration = wav.size / float(sr) if sr else 0.0
+    gaps = detect_pause_intervals(wav, sr)
+    edits: list[dict[str, Any]] = []
+    for m in _PUNCT_TRIGGER.finditer(text):
+        if m.group(1):
+            key = "ellipsis"
+        elif m.group(2):
+            key = "sentence_end"
+        elif m.group(3):
+            key = "comma"
+        else:
+            continue
+        if m.end() >= trimmed_len:  # interior only — a terminal mark has no downstream audio
+            continue
+        target_ms = prosody.get(key, prosody["natural"]) * pace_multiplier + pause_offset_ms
+        if target_ms <= 0:
+            continue
+        at_sec = (m.start() / len(text)) * duration
+        existing_ms = 0.0
+        for gap_start, gap_end in gaps:
+            if gap_start <= at_sec <= gap_end:
+                existing_ms = (gap_end - gap_start) * 1000.0
+                break
+        edits.append({
+            "at_ms": at_sec * 1000.0,
+            "target_ms": target_ms,
+            "existing_ms": existing_ms,
+            "origin": "vad",
+        })
+    return edits
+
+
+def get_vad_directed_wav(
+    voice_id: str,
+    style_preset: str,
+    pace_multiplier: float,
+    pause_offset_ms: float = 0.0,
+    *,
+    mode: str = "precise",
+    return_plan: bool = False,
+) -> tuple[np.ndarray, int] | tuple[np.ndarray, int, list[dict[str, Any]]] | None:
+    """Alignment-free surgical insertion (plan §5.5 step 3): proportional punctuation
+    placement + VAD-safe anti-click cut. Returns ``(wav, sr)`` or ``None`` to fall through
+    (no transcript, ``auto`` where triage says not blended, or no interior punctuation)."""
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    transcript = (meta.get("sample_text") or "").strip()
+    if not transcript:
+        return None
+    loaded = _load_master_wav(voice_id)
+    if loaded is None:
+        return None
+    wav, sr, _ = loaded
+
+    if mode == "auto":
+        from qwen3_tts.prosody_triage import MODE_PRECISE, triage
+        if triage(wav, sr, transcript).mode != MODE_PRECISE:
+            return None
+
+    edits = build_vad_pause_edits(wav, sr, transcript, style_preset, pace_multiplier, pause_offset_ms)
+    if not edits:
+        return None
+    plan = plan_boundary_pauses(wav, sr, edits)
+    adjusted = apply_resolved_boundary_pause_plan(wav, sr, plan)
+    return (adjusted, sr, plan) if return_plan else (adjusted, sr)
+
+
+def build_alignment_pause_edits(
+    boundaries: list[dict[str, Any]],
+    style_preset: str,
+    pace_multiplier: float,
+    pause_offset_ms: float = 0.0,
+) -> list[dict[str, Any]]:
+    """Map punctuation-owned aligned boundaries to alignment-owned pause edits (plan §5.3).
+
+    Each ``sentence_split`` boundary gets the preset's ``sentence_end`` target; each
+    clause-owning boundary the ``comma`` target — using the same absolute duration
+    formula as ``get_pause_targets`` (``preset * pace + offset``), emitted directly with
+    no second expansion pass. ``uncertain`` boundaries (transcript/audio divergence) are
+    skipped so we never cut blindly. ``existing_ms`` is derived from the aligned gap to the
+    next word, so a partially-blended boundary is resized rather than double-padded; a
+    boundary that already has enough silence yields a net no-op insert.
+    """
+    prosody = PROSODY_MAPS.get(style_preset, PROSODY_MAPS["Neutral"])
+    edits: list[dict[str, Any]] = []
+    for i, b in enumerate(boundaries):
+        kind = b.get("kind")
+        if kind == "uncertain":
+            continue
+        if kind == "sentence_split":
+            target_key = "sentence_end"
+        elif b.get("owns_clause"):
+            target_key = "comma"
+        else:
+            continue
+        target_ms = prosody.get(target_key, prosody["natural"]) * pace_multiplier + pause_offset_ms
+        if target_ms <= 0:
+            continue
+        word_end = float(b.get("end", 0.0))
+        existing_ms = 0.0
+        if i + 1 < len(boundaries):
+            existing_ms = max(0.0, (float(boundaries[i + 1].get("start", word_end)) - word_end) * 1000.0)
+        edits.append({
+            "at_ms": word_end * 1000.0,
+            "target_ms": target_ms,
+            "existing_ms": existing_ms,
+            "origin": "alignment",
+        })
+    return edits
+
+
+def get_alignment_directed_wav(
+    voice_id: str,
+    style_preset: str,
+    pace_multiplier: float,
+    pause_offset_ms: float = 0.0,
+    *,
+    mode: str = "precise",
+    emit: Any = None,
+    return_plan: bool = False,
+) -> tuple[np.ndarray, int] | tuple[np.ndarray, int, list[dict[str, Any]]] | None:
+    """Alignment-directed surgical pause insertion for blended speech (plan §5.3/§5.5).
+
+    Aligns the master reference to its transcript (reusing the ``meta["alignment"]`` cache
+    when its identity still matches) and inserts each punctuation-owned pause at the aligned
+    word boundary via the anti-click ``apply_boundary_pause_plan``. Returns ``(wav, sr)`` on
+    success, or ``None`` to signal the caller to fall back to the energy path — no transcript,
+    ``auto`` mode where triage says the clip is not blended, alignment yielding no confident
+    owned boundaries, or any alignment error. This keeps the chain "never worse than status
+    quo" (plan §5.5 step 4).
+    """
+    from qwen3_tts import forced_alignment as _fa
+
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    transcript = (meta.get("sample_text") or "").strip()
+    if not transcript:
+        return None
+    loaded = _load_master_wav(voice_id)
+    if loaded is None:
+        return None
+    wav, sr, wav_bytes = loaded
+    voice_dir = _voice_dir(voice_id)
+
+    # auto escalates to alignment only when triage classifies the clip as blended.
+    if mode == "auto":
+        from qwen3_tts.prosody_triage import MODE_PRECISE, triage
+        if triage(wav, sr, transcript).mode != MODE_PRECISE:
+            return None
+
+    identity = _fa.cache_identity(_fa.sha256_bytes(wav_bytes), _fa.sha256_text(transcript))
+    cached = meta.get("alignment")
+    if _fa.identity_matches(cached, identity):
+        boundaries = list(cached.get("boundaries", []))
+    else:
+        try:
+            aligned = _fa.align(wav, int(sr), transcript, emit=emit)
+        except Exception:
+            logger.exception("Forced alignment failed for %s; falling back to energy path", voice_id)
+            return None
+        boundaries = [b.to_dict() for b in aligned]
+        # Persist the fresh alignment so later adjusts and the triage badge reuse it.
+        fresh = get_voice(voice_id)
+        if fresh is not None:
+            fresh.pop("wav_path", None)
+            fresh.pop("undo_available", None)
+            fresh["alignment"] = _fa.build_alignment_record(aligned, identity)
+            (voice_dir / "meta.json").write_text(json.dumps(fresh, indent=2), encoding="utf-8")
+
+    edits = build_alignment_pause_edits(boundaries, style_preset, pace_multiplier, pause_offset_ms)
+    if not edits:
+        return None
+    plan = plan_boundary_pauses(wav, int(sr), edits)
+    adjusted = apply_resolved_boundary_pause_plan(wav, int(sr), plan)
+    return (adjusted, int(sr), plan) if return_plan else (adjusted, int(sr))
+
+
 def get_prosody_adjusted_wav(
-    voice_id: str, style_preset: str, pace_multiplier: float, pause_offset_ms: float = 0.0
-) -> tuple[np.ndarray, int] | None:
+    voice_id: str,
+    style_preset: str,
+    pace_multiplier: float,
+    pause_offset_ms: float = 0.0,
+    mode: str = "natural",
+    return_plan: bool = False,
+) -> tuple[np.ndarray, int] | tuple[np.ndarray, int, list[dict[str, Any]]] | None:
     """Calculate prosody-adjusted audio for a voice without persisting it.
     Returns (wav, sr) or None on error.
+
+    ``mode`` selects the pause engine (plan §5.5 fallback chain):
+      - ``natural`` (default): today's energy/gap-based path only.
+      - ``precise`` / ``auto``: try alignment-directed surgical insertion first (1/2), then
+        alignment-free VAD-directed surgical insertion (3), then the energy path (4) — each
+        step strictly no worse than the next. ``auto`` gates the surgical steps on triage
+        (blended only); ``precise`` forces them.
     """
+    if mode in ("auto", "precise"):
+        directed = get_alignment_directed_wav(
+            voice_id, style_preset, pace_multiplier, pause_offset_ms, mode=mode,
+            return_plan=return_plan,
+        )
+        if directed is not None:
+            return directed
+        # Step 3: alignment unusable — alignment-free VAD-directed surgical insertion.
+        vad = get_vad_directed_wav(
+            voice_id, style_preset, pace_multiplier, pause_offset_ms, mode=mode,
+            return_plan=return_plan,
+        )
+        if vad is not None:
+            return vad
+        # Step 4: fall through to the energy path (never worse than status quo).
+
     meta = get_voice(voice_id)
     if meta is None:
         return None
 
-    voice_dir = _voice_dir(voice_id)
-    # Prioritize original.wav, fallback to legacy reference.wav for master audio
-    master_path = voice_dir / "original.wav"
-    if not master_path.is_file():
-        master_path = voice_dir / "reference.wav"
-
-    if not master_path.is_file():
-        print(f"[DEBUG] master_path {master_path} is not a file")
+    loaded = _load_master_wav(voice_id)
+    if loaded is None:
+        print(f"[DEBUG] master audio for {voice_id} is not a file")
         return None
-
-    wav_bytes = master_path.read_bytes()
-    wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
-    wav = np.asarray(wav, dtype=np.float32).ravel()
+    wav, sr, _ = loaded
 
     gaps = detect_pause_intervals(wav, sr)
     duration_sec = wav.size / float(sr)
@@ -113,7 +365,7 @@ def get_prosody_adjusted_wav(
     ]
 
     if not interior:
-        return wav, sr
+        return (wav, sr, []) if return_plan else (wav, sr)
 
     sample_text = meta.get("sample_text", "")
     gap_starts = [start for start, end in interior]
@@ -162,17 +414,19 @@ def get_prosody_adjusted_wav(
             })
 
     if not edits:
-        return wav, sr
+        return (wav, sr, []) if return_plan else (wav, sr)
 
-    return apply_region_edits(wav, sr, edits), sr
+    adjusted = apply_region_edits(wav, sr, edits)
+    return (adjusted, sr, []) if return_plan else (adjusted, sr)
 
 def create_prosody_variant(
-    voice_id: str, style_preset: str, pace_multiplier: float, pause_offset_ms: float = 0.0
+    voice_id: str, style_preset: str, pace_multiplier: float, pause_offset_ms: float = 0.0,
+    mode: str = "natural",
 ) -> str | None:
     """Create a prosody-adjusted variant of the master reference.
     Returns the filename of the created variant.
     """
-    result = get_prosody_adjusted_wav(voice_id, style_preset, pace_multiplier, pause_offset_ms)
+    result = get_prosody_adjusted_wav(voice_id, style_preset, pace_multiplier, pause_offset_ms, mode)
     if result is None:
         return None
 
@@ -754,12 +1008,13 @@ def trim_reference_silence(voice_id: str, padding_ms: float = 80.0) -> dict[str,
 
 
 def adjust_reference_pauses(
-    voice_id: str, style_preset: str = "Neutral", pace_multiplier: float = 1.0, pause_offset_ms: float = 0.0
+    voice_id: str, style_preset: str = "Neutral", pace_multiplier: float = 1.0, pause_offset_ms: float = 0.0,
+    mode: str = "natural",
 ) -> dict[str, Any] | None:
     """Create a prosody variant and set it as active.
     Returns the voice metadata.
     """
-    variant_filename = create_prosody_variant(voice_id, style_preset, pace_multiplier, pause_offset_ms)
+    variant_filename = create_prosody_variant(voice_id, style_preset, pace_multiplier, pause_offset_ms, mode)
     if not variant_filename:
         return None
 
