@@ -450,6 +450,65 @@ def analyze_reference(voice_id: str) -> dict[str, Any] | None:
     return meta
 
 
+def get_or_compute_alignment(
+    voice_id: str,
+    *,
+    emit: Any = None,
+    force: bool = False,
+    language: str = "en",
+    granularity: str = "word",
+    cancel: Any = None,
+) -> dict[str, Any] | None:
+    """Return a cached forced alignment or compute + persist a fresh one.
+
+    The cache lives in ``meta["alignment"]`` and is keyed by the full identity
+    (audio + transcript hashes, language, immutable model/tokenizer revision,
+    preprocess + schema versions, sample rate, granularity). Any difference —
+    including an edited ``sample_text`` with unchanged audio — invalidates it.
+    We hash the *actual resolved master* used by the voice (current/original),
+    not an assumed ``original.wav``. Raises ``ValueError`` if there is no
+    transcript, since alignment needs text.
+    """
+    from qwen3_tts import forced_alignment as _fa
+
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    transcript = (meta.get("sample_text") or "").strip()
+    if not transcript:
+        raise ValueError("Reference has no transcript; forced alignment needs text.")
+    wav_bytes = get_voice_wav_bytes(voice_id)
+    if wav_bytes is None:
+        return None
+
+    identity = _fa.cache_identity(
+        _fa.sha256_bytes(wav_bytes),
+        _fa.sha256_text(transcript),
+        language=language,
+        granularity=granularity,
+    )
+    cached = meta.get("alignment")
+    if not force and _fa.identity_matches(cached, identity):
+        return cached
+    if cancel is not None and getattr(cancel, "is_set", lambda: False)():
+        return None
+
+    wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32", always_2d=False)
+    boundaries = _fa.align(
+        np.asarray(wav, dtype=np.float32), int(sr), transcript,
+        emit=emit, language=language, granularity=granularity,
+    )
+    record = _fa.build_alignment_record(boundaries, identity)
+
+    meta.pop("wav_path", None)
+    meta.pop("undo_available", None)
+    meta["alignment"] = record
+    (_voice_dir(voice_id) / "meta.json").write_text(
+        json.dumps(meta, indent=2), encoding="utf-8"
+    )
+    return record
+
+
 def list_voices() -> list[dict[str, Any]]:
     """Return all voice metadata, backfilling analysis for legacy entries once."""
     if not VOICE_LIBRARY_DIR.is_dir():

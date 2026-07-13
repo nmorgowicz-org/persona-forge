@@ -1,0 +1,103 @@
+"""Phase 2 gate: alignment jobs serialize + obey cancellation / idle-unload / LOW_RAM."""
+
+from __future__ import annotations
+
+import threading
+import time
+
+import pytest
+
+from qwen3_tts.alignment_jobs import AlignmentJobManager, LowRamError
+
+
+def _wait_status(mgr, job_id, status, timeout=2.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        job = mgr.get(job_id)
+        if job and job["status"] == status:
+            return job
+        time.sleep(0.01)
+    raise AssertionError(f"job never reached {status}: {mgr.get(job_id)}")
+
+
+def test_completes_and_returns_result():
+    mgr = AlignmentJobManager(lambda vid, cancel: {"voice": vid, "boundaries": []})
+    job = mgr.submit("vd_a")
+    assert job["status"] in ("queued", "running", "completed")
+    done = _wait_status(mgr, job["job_id"], "completed")
+    assert done["result"] == {"voice": "vd_a", "boundaries": []}
+
+
+def test_runs_are_serialized():
+    concurrent = 0
+    peak = 0
+    lock = threading.Lock()
+
+    def runner(vid, cancel):
+        nonlocal concurrent, peak
+        with lock:
+            concurrent += 1
+            peak = max(peak, concurrent)
+        time.sleep(0.05)
+        with lock:
+            concurrent -= 1
+        return {"v": vid}
+
+    mgr = AlignmentJobManager(runner)
+    ids = [mgr.submit(f"vd_{i}")["job_id"] for i in range(4)]
+    for jid in ids:
+        _wait_status(mgr, jid, "completed")
+    assert peak == 1  # never two alignments at once
+
+
+def test_cancellation_stops_before_completion():
+    started = threading.Event()
+
+    def runner(vid, cancel):
+        started.set()
+        for _ in range(200):
+            if cancel.is_set():
+                return None
+            time.sleep(0.01)
+        return {"v": vid}
+
+    mgr = AlignmentJobManager(runner)
+    job = mgr.submit("vd_c")
+    assert started.wait(1.0)
+    assert mgr.cancel(job["job_id"])
+    done = _wait_status(mgr, job["job_id"], "cancelled")
+    assert done["status"] == "cancelled"
+
+
+def test_low_ram_refuses_submission():
+    mgr = AlignmentJobManager(lambda vid, cancel: {}, low_ram=lambda: True)
+    with pytest.raises(LowRamError):
+        mgr.submit("vd_x")
+
+
+def test_idle_unload_releases_after_drain():
+    unloaded = threading.Event()
+    mgr = AlignmentJobManager(
+        lambda vid, cancel: {"v": vid},
+        idle_unload_seconds=0.05,
+        unload=unloaded.set,
+    )
+    jid = mgr.submit("vd_u")["job_id"]
+    _wait_status(mgr, jid, "completed")
+    assert unloaded.wait(1.0), "idle-unload should fire once jobs drain"
+
+
+def test_failed_runner_surfaces_error():
+    def runner(vid, cancel):
+        raise RuntimeError("boom")
+
+    mgr = AlignmentJobManager(runner)
+    jid = mgr.submit("vd_f")["job_id"]
+    done = _wait_status(mgr, jid, "failed")
+    assert "boom" in done["error"]
+
+
+def test_unknown_job_id_returns_none():
+    mgr = AlignmentJobManager(lambda vid, cancel: {})
+    assert mgr.get("nope") is None
+    assert mgr.cancel("nope") is False

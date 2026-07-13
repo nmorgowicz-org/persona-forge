@@ -42,6 +42,8 @@ Recommended (simple knobs):
 | `DEVICE` | `cpu` | Torch/OpenVINO device; always `cpu` in current deployments. |
 | `TTS_MAX_SPEECH_SECONDS` | Preset-specific (e.g. 64) | Max speech duration per request. Baked into IR at export time; changing it requires re-export. |
 | `IDLE_UNLOAD_SECONDS` | `0` | Seconds after last request to unload model and free RAM; reload is transparent but adds latency. Set by LOW_RAM_MODE. |
+| `ALIGNER_MODEL_PATH` | (unset) | Path to the MMS-300M forced-aligner ONNX model, used by Precise prosody. Lazily loaded on first alignment and idle-unloaded; alignment is unavailable if unset. |
+| `ALIGNER_PROVIDERS` | `CPUExecutionProvider` | Comma-separated onnxruntime execution providers for the aligner (portable CPU baseline; add OpenVINO/CoreML where available). `LOW_RAM_MODE=1` refuses alignment outright. |
 
 ## Memory / OpenVINO (advanced)
 

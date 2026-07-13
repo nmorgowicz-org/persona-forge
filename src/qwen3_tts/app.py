@@ -22,6 +22,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory, send_f
 
 from qwen3_tts import audio_style, model, omnivoice_engine, segment_library, voice_design, voice_library
 from qwen3_tts.asr_check import validate_reference_text
+from qwen3_tts.alignment_jobs import AlignmentJobManager, LowRamError
 
 # candidate_id -> (wav, sample_rate). In-memory only, single-user local tool (locked decision,
 # docs/dev/features/persona_forge_studio.md §5): cleared at the start of every /omnivoice/audition call, so
@@ -691,6 +692,77 @@ def voices_region_edits(voice_id: str):
         return jsonify({"error": "voice_id not found"}), 404
     _invalidate_voice_clone_state(voice_id)
     return jsonify(meta)
+
+
+# --- Prosody triage + forced alignment (plan §5.5) ---------------------------
+# Triage is cheap and synchronous; alignment is a lazy, RSS-heavy model pass, so
+# it runs through a bounded, serialized job manager with idle-unload + LOW_RAM
+# refusal (see alignment_jobs.py). The runner delegates to the voice_library
+# cache, which computes only on a miss.
+
+def _alignment_unload() -> None:
+    from qwen3_tts import forced_alignment
+    forced_alignment.unload_session()
+
+
+def _alignment_runner(voice_id: str, cancel, **kwargs):
+    return voice_library.get_or_compute_alignment(voice_id, cancel=cancel, **kwargs)
+
+
+_alignment_jobs = AlignmentJobManager(_alignment_runner, unload=_alignment_unload)
+
+
+@app.post("/voices/<voice_id>/triage")
+def voices_triage(voice_id: str):
+    """Cheap, synchronous triage: does this reference need forced alignment?"""
+    meta = voice_library.get_voice(voice_id)
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    wav_bytes = voice_library.get_voice_wav_bytes(voice_id)
+    if wav_bytes is None:
+        return jsonify({"error": "reference audio missing"}), 404
+    try:
+        wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32", always_2d=False)
+        from qwen3_tts.prosody_triage import triage as _triage
+        result = _triage(wav, int(sr), meta.get("sample_text"))
+    except Exception as exc:
+        return jsonify({"error": f"triage failed: {exc}"}), 500
+    return jsonify(result.to_dict())
+
+
+@app.post("/voices/<voice_id>/align")
+def voices_align(voice_id: str):
+    """Start (or reuse) a forced-alignment job. Async: returns a job_id to poll."""
+    meta = voice_library.get_voice(voice_id)
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    if not (meta.get("sample_text") or "").strip():
+        return jsonify({"error": "Reference has no transcript; alignment needs text."}), 400
+    force = bool((request.get_json(silent=True) or {}).get("force"))
+    try:
+        job = _alignment_jobs.submit(voice_id, force=force)
+    except LowRamError as exc:
+        return jsonify({"error": str(exc)}), 503
+    return jsonify(job), 202
+
+
+@app.get("/voices/<voice_id>/align/<job_id>")
+def voices_align_status(voice_id: str, job_id: str):
+    """Poll a forced-alignment job."""
+    job = _alignment_jobs.get(job_id)
+    if job is None or job.get("voice_id") != voice_id:
+        return jsonify({"error": "job not found"}), 404
+    return jsonify(job)
+
+
+@app.delete("/voices/<voice_id>/align/<job_id>")
+def voices_align_cancel(voice_id: str, job_id: str):
+    """Cancel a forced-alignment job."""
+    job = _alignment_jobs.get(job_id)
+    if job is None or job.get("voice_id") != voice_id:
+        return jsonify({"error": "job not found"}), 404
+    _alignment_jobs.cancel(job_id)
+    return jsonify(_alignment_jobs.get(job_id))
 
 
 @app.post("/voices/<voice_id>/validate")

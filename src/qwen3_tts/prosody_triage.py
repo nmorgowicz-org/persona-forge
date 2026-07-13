@@ -105,7 +105,7 @@ def count_expected_boundaries(transcript: str, comma_weight: float = COMMA_WEIGH
         if match.group(1):
             strong += 1
         elif match.group(2):
-            if match.group(2) == "." and _is_non_boundary_dot(trimmed, match.start()):
+            if match.group(2) == "." and is_non_boundary_dot(trimmed, match.start()):
                 continue
             strong += 1
         elif match.group(3):
@@ -113,7 +113,7 @@ def count_expected_boundaries(transcript: str, comma_weight: float = COMMA_WEIGH
     return float(strong) + comma_weight * float(weak)
 
 
-def _is_non_boundary_dot(text: str, pos: int) -> bool:
+def is_non_boundary_dot(text: str, pos: int) -> bool:
     """True when the '.' at `pos` is a decimal point or a known abbreviation."""
     # Decimal: digit on both sides (e.g. "3.5").
     if 0 < pos < len(text) - 1 and text[pos - 1].isdigit() and text[pos + 1].isdigit():
