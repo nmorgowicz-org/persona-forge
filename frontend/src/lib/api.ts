@@ -442,6 +442,9 @@ export interface ProsodyPausePlanEntry {
   at_ms: number
   cut_sample: number
   cut_ms: number
+  // Snapped cut in the *original* (pre-insertion) timeline — lets the UI place the
+  // marker on the ORIGINAL lane next to the word labels, which live in original time.
+  src_cut_ms?: number
   insert_ms: number
   target_ms: number
   existing_ms: number

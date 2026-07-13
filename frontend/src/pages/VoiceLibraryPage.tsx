@@ -1902,7 +1902,7 @@ export function VoiceLibraryPage() {
 
             <div className={cn(
               "grid gap-4",
-              layoutMode === 'grid-1' && "grid-cols-1 max-w-4xl mx-auto",
+              layoutMode === 'grid-1' && "grid-cols-1",
               layoutMode === 'grid-2' && "grid-cols-1 sm:grid-cols-2",
               layoutMode === 'grid-3' && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3",
               layoutMode === 'list' && "grid-cols-1"

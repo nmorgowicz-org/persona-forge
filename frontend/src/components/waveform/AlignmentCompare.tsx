@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Pause, Play } from 'lucide-react'
 import type { AlignmentBoundary, ProsodyPausePlanEntry } from '@/lib/api'
 import { getVoice } from '@/lib/api'
 import { base64ToBlob } from '@/lib/utils'
@@ -58,6 +59,24 @@ function wordClass(boundary: AlignmentBoundary): string {
   return 'text-foreground/70'
 }
 
+// A play/scrub-able <audio> for a lane, sourced from a base64 clip via an object URL.
+function useLaneAudio(base64: string | null) {
+  const ref = useRef<HTMLAudioElement | null>(null)
+  useEffect(() => {
+    if (!base64) return
+    const url = URL.createObjectURL(base64ToBlob(base64))
+    const el = new Audio(url)
+    el.preload = 'auto'
+    ref.current = el
+    return () => {
+      el.pause()
+      ref.current = null
+      URL.revokeObjectURL(url)
+    }
+  }, [base64])
+  return ref
+}
+
 export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount, boundaryPlan = [], boundaries }: {
   voiceId: string
   adjustedBase64: string
@@ -67,6 +86,8 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
 }) {
   const [originalBase64, setOriginalBase64] = useState<string | null>(null)
   const [hoverPct, setHoverPct] = useState<number | null>(null)
+  const [playing, setPlaying] = useState<'original' | 'adjusted' | null>(null)
+  const [positionMs, setPositionMs] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -83,17 +104,71 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
 
   const original = useDecodedPeaks(originalBase64)
   const adjusted = useDecodedPeaks(adjustedBase64)
+  const origAudio = useLaneAudio(originalBase64)
+  const adjAudio = useLaneAudio(adjustedBase64)
 
   const maxDurMs = Math.max(original?.durationMs ?? 0, adjusted?.durationMs ?? 0, 1)
   const pct = (ms: number) => `${Math.max(0, Math.min(100, (ms / maxDurMs) * 100))}%`
   const cutMs = (sample: number) => (adjusted ? (sample / Math.max(1, adjustedSampleCount)) * adjusted.durationMs : 0)
 
-  // Space words so short ones stay readable: min-width per label, truncate overflow.
   const words = useMemo(() => (boundaries ?? []).filter((b) => b.text), [boundaries])
+
+  // Drive the shared playhead off whichever lane is playing (rAF, so it stays smooth).
+  const rafRef = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (!playing) return
+    const el = playing === 'original' ? origAudio.current : adjAudio.current
+    if (!el) return
+    const onEnd = () => setPlaying(null)
+    el.addEventListener('ended', onEnd)
+    const tick = () => {
+      setPositionMs(el.currentTime * 1000)
+      rafRef.current = requestAnimationFrame(tick)
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      el.removeEventListener('ended', onEnd)
+    }
+  }, [playing, origAudio, adjAudio])
+
+  const togglePlay = (lane: 'original' | 'adjusted') => {
+    const el = lane === 'original' ? origAudio.current : adjAudio.current
+    const other = lane === 'original' ? adjAudio.current : origAudio.current
+    other?.pause()
+    if (!el) return
+    if (playing === lane) {
+      el.pause()
+      setPlaying(null)
+      return
+    }
+    el.currentTime = Math.max(0, positionMs / 1000)
+    void el.play().then(() => setPlaying(lane)).catch(() => {})
+  }
+
+  const seekTo = (ms: number) => {
+    setPositionMs(ms)
+    const el = playing === 'original' ? origAudio.current : adjAudio.current
+    if (el) el.currentTime = Math.max(0, ms / 1000)
+  }
 
   if (!adjusted) return null
 
   const hoverMs = hoverPct !== null ? (hoverPct / 100) * maxDurMs : null
+  const hovered = hoverMs !== null
+    ? words.find((w) => hoverMs / 1000 >= w.start && hoverMs / 1000 <= w.end) ?? null
+    : null
+
+  const PlayButton = ({ lane }: { lane: 'original' | 'adjusted' }) => (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); togglePlay(lane) }}
+      className="absolute right-1.5 top-1.5 z-20 grid size-6 place-items-center rounded-full border border-border bg-background/80 text-foreground/80 transition hover:bg-background hover:text-foreground"
+      title={playing === lane ? 'Pause' : 'Play this lane'}
+    >
+      {playing === lane ? <Pause className="size-3" /> : <Play className="size-3 translate-x-px" />}
+    </button>
+  )
 
   return (
     <div
@@ -104,19 +179,37 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
       }}
       onMouseLeave={() => setHoverPct(null)}
     >
-      {/* ORIGINAL lane — word text rides its true (pre-insertion) timeline. */}
+      {/* ORIGINAL lane — word text + the snapped cut in its true (pre-insertion) time. */}
       <div className="relative">
         <div className="absolute -top-2 left-2 z-20 rounded bg-muted px-1 py-px text-[9px] font-bold text-muted-foreground">ORIGINAL</div>
-        <div className="relative h-16 overflow-hidden rounded border border-border bg-muted/20">
-          <div className="absolute inset-y-0 left-0 opacity-70" style={{ width: pct(original?.durationMs ?? 0) }}>
+        <div
+          className="relative h-14 cursor-text overflow-hidden rounded border border-border bg-muted/20"
+          onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); seekTo(((e.clientX - r.left) / r.width) * maxDurMs) }}
+        >
+          <div className="absolute inset-y-0 left-0 opacity-80" style={{ width: pct(original?.durationMs ?? 0) }}>
             <WaveformLane peaks={original?.peaks ?? null} durMs={original?.durationMs ?? null} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
           </div>
+          {/* The cut mapped back to original time (src_cut_ms) — lines up with the words. */}
+          {boundaryPlan.map((marker, index) => {
+            const at = marker.src_cut_ms ?? marker.at_ms
+            const color = marker.origin === 'alignment' ? 'border-cyan-300' : marker.origin === 'vad' ? 'border-warning' : 'border-violet-300'
+            return (
+              <span
+                key={`o-${marker.cut_sample}-${index}`}
+                className={`pointer-events-none absolute inset-y-0 z-10 -translate-x-1/2 border-l ${marker.insert_ms > 0 ? 'border-solid' : 'border-dashed'} ${color} opacity-80`}
+                style={{ left: pct(at) }}
+              />
+            )
+          })}
+          <PlayButton lane="original" />
+        </div>
+        {/* Word labels ride below, tilted so dense clips stay readable. */}
+        <div className="pointer-events-none relative h-7">
           {words.map((word, index) => (
             <span
               key={`${word.text}-${index}`}
-              className={`pointer-events-none absolute bottom-0.5 overflow-hidden text-ellipsis whitespace-nowrap px-0.5 text-[9px] leading-tight ${wordClass(word)}`}
-              style={{ left: pct(word.start * 1000), maxWidth: pct(Math.max(0.001, word.end - word.start) * 1000) }}
-              title={`"${word.text}"  ${word.start.toFixed(2)}–${word.end.toFixed(2)}s · conf ${word.score.toFixed(2)}${word.kind === 'uncertain' ? ' · low confidence (skipped)' : ''}`}
+              className={`absolute top-0 origin-top-left rotate-[30deg] whitespace-nowrap text-[9px] leading-none ${wordClass(word)} ${hovered === word ? 'z-10 !text-foreground' : ''}`}
+              style={{ left: pct((word.start + word.end) / 2 * 1000) }}
             >
               {word.text}
             </span>
@@ -127,7 +220,10 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
       {/* ADJUSTED lane — cut markers + manufactured-gap shading in rendered time. */}
       <div className="relative">
         <div className="absolute -top-2 left-2 z-20 rounded bg-cyan-500 px-1 py-px text-[9px] font-bold text-white">ADJUSTED</div>
-        <div className="relative h-16 overflow-hidden rounded border border-border bg-muted/20">
+        <div
+          className="relative h-14 cursor-text overflow-hidden rounded border border-border bg-muted/20"
+          onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); seekTo(((e.clientX - r.left) / r.width) * maxDurMs) }}
+        >
           <div className="absolute inset-y-0 left-0" style={{ width: pct(adjusted.durationMs) }}>
             <WaveformLane peaks={adjusted.peaks} durMs={adjusted.durationMs} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
           </div>
@@ -141,28 +237,37 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
                 {manufactured && (
                   <span className="pointer-events-none absolute inset-y-0 z-0 bg-cyan-400/15" style={{ left: pct(start), width: pct(marker.insert_ms) }} />
                 )}
-                <span className={`absolute inset-y-0 z-10 -translate-x-1/2 border-l-2 ${manufactured ? 'border-solid' : 'border-dashed'} ${color}`} style={{ left: pct(start) }} title={title} aria-label={title}>
+                <span className={`pointer-events-none absolute inset-y-0 z-10 -translate-x-1/2 border-l-2 ${manufactured ? 'border-solid' : 'border-dashed'} ${color}`} style={{ left: pct(start) }} title={title} aria-label={title}>
                   <span className={`absolute left-1/2 top-1 -translate-x-1/2 border-current bg-background ${manufactured ? 'size-2 rotate-45 border' : 'size-2 rounded-full border-2'}`} />
                 </span>
               </span>
             )
           })}
+          <PlayButton lane="adjusted" />
         </div>
       </div>
 
       <TimeRuler durationMs={maxDurMs} />
 
-      {/* Shared scrub cursor for eyeballing where original and adjusted diverge. */}
+      {/* Playhead (during playback) + hover cursor with the word under the pointer. */}
+      {playing && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 bottom-4 z-30" style={{ left: pct(positionMs) }}>
+          <div className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-emerald-400/90" />
+        </div>
+      )}
       {hoverPct !== null && hoverMs !== null && (
         <>
           <div className="pointer-events-none absolute inset-x-0 top-0 bottom-4 z-30" style={{ left: `${hoverPct}%` }}>
             <div className="absolute inset-y-0 w-px bg-cyan-300/70" />
           </div>
-          <span className="pointer-events-none absolute top-0 z-30 rounded bg-background/90 px-1 text-[9px] font-mono tabular-nums text-cyan-200 shadow-sm" style={{ left: `${hoverPct}%`, transform: hoverPct <= 8 ? 'translateX(0)' : hoverPct >= 92 ? 'translateX(-100%)' : 'translateX(-50%)' }}>{(hoverMs / 1000).toFixed(2)}s</span>
+          <span className="pointer-events-none absolute top-0 z-30 rounded bg-background/90 px-1 text-[9px] font-mono tabular-nums text-cyan-200 shadow-sm" style={{ left: `${hoverPct}%`, transform: hoverPct <= 8 ? 'translateX(0)' : hoverPct >= 92 ? 'translateX(-100%)' : 'translateX(-50%)' }}>
+            {(hoverMs / 1000).toFixed(2)}s{hovered ? ` · "${hovered.text}" ${(hovered.score * 100).toFixed(0)}%` : ''}
+          </span>
         </>
       )}
 
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-muted-foreground">
+        <span>▶ click a lane to play · click the strip to seek</span>
         <span>◆ manufactured pause</span>
         <span>● natural boundary</span>
         <span className="text-cyan-300">sentence</span>

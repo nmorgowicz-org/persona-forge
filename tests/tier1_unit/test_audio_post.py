@@ -474,6 +474,22 @@ class TestBoundaryPausePlan:
         assert gap_start <= cut <= gap_start + gap.size
         assert abs(x[cut]) < 0.01
 
+    def test_resolve_safe_cut_never_snaps_to_the_preceding_gap(self):
+        sr = 24000
+        # gap_A | "know" | gap_B | next word. The boundary is "know"'s end; the aligner
+        # placed it a little early (inside "know"). The cut must move *forward* into
+        # gap_B, never back across the word into gap_A (which would sever "know").
+        gap_a = np.full(int(sr * 0.05), 1e-5, dtype=np.float32)
+        know = _sine(180.0, 0.14, sr, amplitude=0.8)
+        gap_b = np.full(int(sr * 0.05), 1e-5, dtype=np.float32)
+        nxt = _sine(180.0, 0.10, sr, amplitude=0.8)
+        x = np.concatenate([gap_a, know, gap_b, nxt])
+        know_end = gap_a.size + know.size
+        misplaced = know_end - int(sr * 0.02)  # 20 ms early, inside "know"
+        cut, prov = resolve_safe_cut(x, sr, misplaced, search_ms=120.0, back_ms=30.0)
+        assert know_end <= cut <= know_end + gap_b.size  # landed in the trailing gap
+        assert cut > gap_a.size + know.size // 2  # nowhere near the leading gap
+
     def test_plan_clamps_search_between_close_boundaries(self):
         sr = 24000
         x = self._blended_clip(sr)

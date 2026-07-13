@@ -287,27 +287,37 @@ def apply_region_edits(audio: np.ndarray, sr: int, edits: list[dict] | None) -> 
 
 
 def resolve_safe_cut(
-    audio: np.ndarray, sr: int, center_sample: int, *, search_ms: float = 50.0
+    audio: np.ndarray,
+    sr: int,
+    center_sample: int,
+    *,
+    search_ms: float = 120.0,
+    back_ms: float = 30.0,
 ) -> tuple[int, str]:
     """Snap an aligned word boundary to the safest nearby splice point.
 
     Cutting into voiced audio to insert a pause clicks — and, worse, splits a word —
     unless the cut lands in the genuine inter-word gap, which the INT8 aligner routinely
-    misses by tens of milliseconds. We therefore search a *wide* window around the
-    aligned boundary (plan §5.3 step 1) and lock onto the deepest short-time energy
-    trough in it rather than the nearest incidental low sample: the trough is the real
-    pause. Zero-cross proximity is a secondary tie-break. Returns (cut_sample,
-    provenance) where provenance is one of ``"zero_cross"``, ``"energy_min"``, or
-    ``"boundary"`` (no room to search).
+    misses by tens of milliseconds. The boundary we snap is a word *end*, so the real
+    silence lies at (or just after) it, essentially never far *before* it: searching
+    symmetrically risks locking onto the *previous* inter-word gap and slicing the word
+    off its own phrase. We therefore search asymmetrically — a small ``back_ms`` look-back
+    (only to recover an end the aligner placed a hair late) and a generous ``search_ms``
+    look-ahead — and snap to the *nearest* sustained-quiet region rather than the globally
+    deepest trough (which can overshoot into a later word's gap). Zero-cross proximity is
+    a tie-break inside the chosen quiet run. Returns (cut_sample, provenance) where
+    provenance is one of ``"zero_cross"``, ``"energy_min"``, or ``"boundary"`` (no room
+    to search).
     """
     x = np.asarray(audio, dtype=np.float32).ravel()
     n = x.size
     center = max(0, min(int(round(center_sample)), n))
-    search = int(round(sr * search_ms / 1000.0))
-    if search <= 0 or n == 0:
+    fwd = int(round(sr * max(0.0, search_ms) / 1000.0))
+    back = int(round(sr * max(0.0, min(back_ms, search_ms)) / 1000.0))
+    if (fwd + back) <= 0 or n == 0:
         return center, "boundary"
-    lo = max(0, center - search)
-    hi = min(n, center + search + 1)
+    lo = max(0, center - back)
+    hi = min(n, center + fwd + 1)
     if hi - lo <= 1:
         return center, "boundary"
 
@@ -322,16 +332,34 @@ def resolve_safe_cut(
         else amp
     )
     trough = int(np.argmin(env))
-    # Among samples at (or a hair above) the trough floor, prefer a genuine
-    # zero-crossing near the trough (sign flip vs the previous sample).
-    floor = float(env[trough]) + 1e-4
-    near = np.flatnonzero(env <= floor)
+    peak = float(env.max())
+    # "Quiet" = within a hair of the window floor, or below ~15 % of its loudest point.
+    # Scanning forward for the *first* such region (rather than argmin over the whole
+    # window) keeps the cut in the nearest real gap and out of a later word's gap.
+    floor = float(env[trough])
+    # Quiet is defined relative to the window's *floor* (the real inter-word gap sits
+    # far below any voiced dip), capped so it can never rise into clearly voiced audio.
+    sil_thresh = min(floor * 4.0 + 1e-4, peak * 0.15)
+    quiet = np.flatnonzero(env <= sil_thresh)
+    if quiet.size:
+        first = int(quiet[0])
+        # Walk the contiguous quiet run out from its start and cut at its deepest point.
+        run_end = first
+        while run_end + 1 < env.size and env[run_end + 1] <= sil_thresh:
+            run_end += 1
+        seg = env[first:run_end + 1]
+        target = first + int(np.argmin(seg))
+    else:
+        target = trough
+    # Prefer a genuine zero-crossing near the chosen cut (sign flip vs previous sample).
     sign = np.signbit(window)
-    zero_cross = [int(i) for i in near if i > 0 and sign[i] != sign[i - 1]]
+    lo_z = max(1, target - kernel)
+    hi_z = min(window.size, target + kernel + 1)
+    zero_cross = [int(i) for i in range(lo_z, hi_z) if sign[i] != sign[i - 1]]
     if zero_cross:
-        best = min(zero_cross, key=lambda i: abs(i - trough))
+        best = min(zero_cross, key=lambda i: abs(i - target))
         return lo + best, "zero_cross"
-    return lo + trough, "energy_min"
+    return lo + target, "energy_min"
 
 
 def _splice_padded_gap(
@@ -356,7 +384,12 @@ def _splice_padded_gap(
 
 
 def plan_boundary_pauses(
-    audio: np.ndarray, sr: int, pause_edits: list[dict], *, search_ms: float = 50.0
+    audio: np.ndarray,
+    sr: int,
+    pause_edits: list[dict],
+    *,
+    search_ms: float = 120.0,
+    back_ms: float = 30.0,
 ) -> list[dict]:
     """Resolve each alignment-owned pause edit to a concrete, sample-exact splice.
 
@@ -381,17 +414,23 @@ def plan_boundary_pauses(
         target_ms = float(edit.get("target_ms", 0.0))
         existing_ms = float(edit.get("existing_ms", 0.0))
         insert_ms = max(0.0, target_ms - existing_ms)
-        half_ms = search_ms
+        # Clamp the (asymmetric) search so two adjacent cuts can never meet in the middle:
+        # look-ahead to half the gap to the next edit, look-back to half the gap to the
+        # previous one.
+        fwd_ms = search_ms
+        bwd_ms = back_ms
         if pos > 0:
-            half_ms = min(half_ms, (at_ms - at_ms_sorted[pos - 1]) / 2.0)
+            bwd_ms = min(bwd_ms, (at_ms - at_ms_sorted[pos - 1]) / 2.0)
         if pos < len(order) - 1:
-            half_ms = min(half_ms, (at_ms_sorted[pos + 1] - at_ms) / 2.0)
+            fwd_ms = min(fwd_ms, (at_ms_sorted[pos + 1] - at_ms) / 2.0)
         cut, provenance = resolve_safe_cut(
-            x, sr, int(round(sr * at_ms / 1000.0)), search_ms=max(0.0, half_ms)
+            x, sr, int(round(sr * at_ms / 1000.0)),
+            search_ms=max(0.0, fwd_ms), back_ms=max(0.0, bwd_ms),
         )
         source_resolved.append({
             "at_ms": at_ms,
             "cut_sample": cut,
+            "src_cut_ms": round(cut * 1000.0 / sr, 3) if sr else 0.0,
             "insert_ms": round(insert_ms, 3),
             "target_ms": target_ms,
             "existing_ms": existing_ms,
@@ -435,7 +474,8 @@ def apply_boundary_pause_plan(
     sr: int,
     pause_edits: list[dict],
     *,
-    search_ms: float = 50.0,
+    search_ms: float = 120.0,
+    back_ms: float = 30.0,
     fade_ms: float = 8.0,
 ) -> np.ndarray:
     """Insert alignment-owned pauses at aligned word boundaries without an audible click.
@@ -450,7 +490,7 @@ def apply_boundary_pause_plan(
     x = np.asarray(audio, dtype=np.float32).ravel()
     if x.size == 0 or not pause_edits:
         return x
-    resolved = plan_boundary_pauses(x, sr, pause_edits, search_ms=search_ms)
+    resolved = plan_boundary_pauses(x, sr, pause_edits, search_ms=search_ms, back_ms=back_ms)
     return apply_resolved_boundary_pause_plan(x, sr, resolved, fade_ms=fade_ms)
 
 
