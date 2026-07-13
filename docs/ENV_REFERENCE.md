@@ -126,6 +126,7 @@ Leave at defaults unless you know what you're doing.
 | `SILENCE_TRIM` | `1` | Trim leading/trailing silence from generated audio. Set `0` to disable. |
 | `SILENCE_TRIM_THRESH` | `0.01` | Silence threshold as fraction of peak amplitude. |
 | `SILENCE_TRIM_PAD_MS` | `30` | Padding (ms) after detected silence to avoid clipping consonants. |
+| `TTS_DEFAULT_DSP` | `on` | Applies the transparent `default` house preset (-16 LUFS normalization and -1 dBFS sample-peak limiting) when `style_preset` is omitted. Set `off` to restore trim-only output by default; explicit presets still apply. |
 
 ## Pocket TTS backend
 

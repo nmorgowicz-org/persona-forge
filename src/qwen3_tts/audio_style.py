@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SAMPLE_RATE = 24000
 TARGET_LUFS = -20.0
+DEFAULT_TARGET_LUFS = -16.0
 PEAK_CEILING_DB = -1.0
 
 StepFn = Callable[..., np.ndarray | tuple[np.ndarray, float]]
@@ -327,6 +328,15 @@ STYLE_PIPELINES: dict[str, dict[str, Any]] = {
         "peak": None,
         "compress": None,
         "steps": _steps(),
+    },
+    "default": {
+        "lufs": DEFAULT_TARGET_LUFS,
+        "peak": PEAK_CEILING_DB,
+        "compress": None,
+        "steps": _steps(
+            ("normalize_lufs", _normalize_lufs, {"target_lufs": DEFAULT_TARGET_LUFS}),
+            ("limit_peak", limit_peak, {"ceiling_db": PEAK_CEILING_DB}),
+        ),
     },
     "Neutral": {
         "lufs": TARGET_LUFS,

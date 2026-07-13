@@ -21,6 +21,7 @@ SR = 24000
 
 # preset -> integrated LUFS the pipeline's final normalize step targets.
 EXPECTED_LUFS = {
+    "default": -16.0,
     "Neutral": -20.0,
     "Clean": -20.0,
     "Broadcast": -20.0,

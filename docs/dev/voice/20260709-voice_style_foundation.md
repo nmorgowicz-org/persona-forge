@@ -470,7 +470,7 @@ Minimal metadata shape:
   },
   "processing": {
     "reference_preprocess": ["mono_24khz", "trim_edges", "loudness_normalize"],
-    "speak_postprocess_default": "none"
+    "speak_postprocess_default": "default"
   }
 }
 ```

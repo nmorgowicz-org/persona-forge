@@ -1351,6 +1351,43 @@ def invalidate_voice_clone_prompt(voice_id: str) -> None:
     _voice_clone_prompt_cache.pop(voice_id, None)
 
 
+def _resolve_output_style_preset(
+    style_preset: str | None,
+    postprocess: bool | dict[str, Any] | None,
+) -> str | None:
+    """Resolve explicit styling, the default house chain, and true bypass.
+
+    ``postprocess=False`` is the request-level escape hatch for the historical
+    trim-only output. ``TTS_DEFAULT_DSP=off`` disables only the implicit house
+    preset; callers that explicitly select a style still get that style.
+    """
+    if postprocess is False:
+        return None
+    if style_preset:
+        return style_preset
+    if os.getenv("TTS_DEFAULT_DSP", "on").strip().lower() in {"0", "false", "no", "off"}:
+        return None
+    return "default"
+
+
+def _apply_output_style(
+    wav: Any,
+    sr: int,
+    job: _JobState | None,
+    resolved_preset: str | None,
+) -> tuple[Any, int]:
+    if resolved_preset is None:
+        return wav, sr
+    wav, sr, metadata = apply_style_preset(wav, sr, resolved_preset)
+    if job:
+        steps = metadata.get("applied_steps", ["style_preset"])
+        job.metadata.setdefault("applied_steps", []).extend(
+            steps if isinstance(steps, list) else [steps]
+        )
+        job.postprocess_applied = not bool(metadata.get("bypassed"))
+    return wav, sr
+
+
 def _run_generate(
     text: str,
     language: str,
@@ -1358,7 +1395,7 @@ def _run_generate(
     voice_id: str | None = None,
     voice_variant_id: str | None = None,
     style_preset: str | None = None,
-    postprocess: str | None = None,
+    postprocess: bool | dict[str, Any] | None = None,
     seed_value=None,
     instruct: str | None = None,
     job_id: str | None = None,
@@ -1371,6 +1408,7 @@ def _run_generate(
         raise RuntimeError("Model not loaded")
 
     effective_voice_id = voice_variant_id or voice_id
+    resolved_style_preset = _resolve_output_style_preset(style_preset, postprocess)
 
     # ── Pocket TTS backend branch ──────────────────────────────────────────────
     if TTS_BACKEND == "pocket_tts":
@@ -1393,7 +1431,7 @@ def _run_generate(
         else:
             job = _create_job(text, seed=seed_value)
             job_id = job.job_id
-        job.style_preset = style_preset
+        job.style_preset = resolved_style_preset
 
         # Pre-generate cancel check
         if job.cancel_event.is_set():
@@ -1426,13 +1464,7 @@ def _run_generate(
             raise
 
         wav = _trim_silence(audio_tensor.cpu().numpy().ravel(), sr)
-        if job and job.style_preset:
-            wav, sr, metadata = apply_style_preset(wav, sr, job.style_preset)
-            steps = metadata.get("applied_steps", ["style_preset"])
-            job.metadata.setdefault("applied_steps", []).extend(
-                steps if isinstance(steps, list) else [steps]
-            )
-            job.postprocess_applied = True
+        wav, sr = _apply_output_style(wav, sr, job, resolved_style_preset)
         duration = len(wav) / sr
         elapsed = time.monotonic() - t0
         print(f"[generate] done   elapsed={elapsed:.1f}s  audio={duration:.1f}s  RTF={elapsed/duration:.2f}x", flush=True)
@@ -1479,13 +1511,13 @@ def _run_generate(
         print(f"[generate] instruct field ignored on Base checkpoint: {instruct!r}", flush=True)
 
     if job:
+        job.style_preset = resolved_style_preset
+        job.postprocess_applied = False
         from qwen3_tts import voice_library
         meta = voice_library.get_voice(effective_voice_id)
         if meta:
             job.voice_family_id = meta.get("family_id")
             job.variant_kind = meta.get("variant_kind")
-            job.style_preset = style_preset
-            job.postprocess_applied = False
 
     # Inject progress logits processor for cancel + live ETA.
     eos_id = _get_eos_token_id(model)
@@ -1729,13 +1761,7 @@ def _run_generate(
             flush=True,
         )
     wav, sr = _trim_silence(wavs[0], sr), sr
-    if job and job.style_preset:
-        wav, sr, metadata = apply_style_preset(wav, sr, job.style_preset)
-        steps = metadata.get("applied_steps", ["style_preset"])
-        job.metadata.setdefault("applied_steps", []).extend(
-            steps if isinstance(steps, list) else [steps]
-        )
-        job.postprocess_applied = True
+    wav, sr = _apply_output_style(wav, sr, job, resolved_style_preset)
     duration = len(wav) / sr
     elapsed = time.monotonic() - t0
     print(f"[generate] done   elapsed={elapsed:.1f}s  audio={duration:.1f}s  RTF={elapsed/duration:.2f}x  frames={job.frames_generated if job else '-'}", flush=True)
