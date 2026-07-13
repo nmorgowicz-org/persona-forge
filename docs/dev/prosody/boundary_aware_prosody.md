@@ -1,8 +1,8 @@
-# Prosody Re-Architecture: Boundary-Aware Pause Handling
+# Boundary-Aware Prosody Alignment and Repair
 
-Date: 2026-07-12
-Status: Proposed (aligned with nick — decisions locked in §3)
-Priority: High
+Designed: 2026-07-12
+Implemented and validated: 2026-07-13
+Status: Complete
 Supersedes: v2.0 "Prosody Boundary Awareness & Forced Alignment" draft (local-model)
 Owner: Nick M
 
@@ -10,12 +10,13 @@ Owner: Nick M
 
 ## 1. Executive Summary
 
-Our prosody system cannot handle **blended speech** — audio where sentences run together
-with no audible/visible gap (e.g. *"She's right, no worries. We'll sort it out later."*
-spoken as one breath). Every prosody path today depends on finding silence gaps to use as
-"handles"; when there is no gap, punctuation-driven pauses are silently dropped.
+The previous prosody system could not handle **blended speech** — audio where sentences run
+together with no audible/visible gap (e.g. *"She's right, no worries. We'll sort it out
+later."* spoken as one breath). Every old prosody path depended on finding silence gaps to
+use as "handles"; when there was no gap, punctuation-driven pauses were silently dropped.
 
-The fix is **not** "VAD vs forced alignment" as a global choice. It is a **tiered pipeline**:
+The implemented solution is **not** "VAD vs forced alignment" as a global choice. It is a
+**tiered pipeline**:
 
 1. **Triage** — a cheap, transcript-aware waveform check decides whether a clip *needs* the
    heavy pass. Clean, well-gapped audio keeps using today's fast energy-based path.
@@ -30,9 +31,11 @@ Because we **already store the transcript** (`meta.sample_text`, the "REFERENCE 
 the Voice Library), we do **not** need ASR/Whisper. We need *pure forced alignment given
 audio + known text*, which is lighter, faster, and more accurate than WhisperX.
 
-### Locked decisions (see §3)
-- **Aligner:** ONNX MMS CTC forced-aligner (`ctc-forced-aligner`) is the preferred candidate,
-  subject to the mandatory Phase 0 feasibility gate, run via **`onnxruntime`**.
+### Implemented decisions (see §3)
+- **Aligner:** ONNX MMS CTC forced alignment with project-owned normalization and Viterbi,
+  run via **`onnxruntime`**. The upstream `ctc-forced-aligner` package informed the design
+  but is not a serving dependency because its pinned dependency chain is incompatible with
+  Python 3.13.
   The portable **CPU execution provider** is the baseline — it runs on any CPU (Intel/AMD
   x86-64, ARM64, **Apple Silicon**). OpenVINO EP (Intel) and CoreML EP (Apple) are *optional*
   accelerators, never load-bearing. No PyTorch in the serving path. Default MMS model's
@@ -41,17 +44,17 @@ audio + known text*, which is lighter, faster, and more accurate than WhisperX.
   explicitly relaxed — nothing in this plan depends on OpenVINO being present.
 - **UX:** Auto-triage + auto-fix, with a manual **Processing mode: Natural / Precise**
   override and a badge indicating when alignment was used.
-- **Surfaces (build now):** Voice Library (cloning prep), Stitch Studio, OmniVoice segments.
-- **Generation / OpenAI output:** a **required delivery phase** (Phase 6). It reuses the same
-  engine, stays opt-in, and uses a strict latency budget so it never blocks a live turn.
+- **Surfaces:** Voice Library (cloning prep), Stitch Studio, OmniVoice segments.
+- **Generation / OpenAI output:** complete-file routes reuse the same engine behind an
+  explicit opt-in and strict latency budget; streaming rejects repair.
 
 ---
 
 ## 2. Problem Statement & Root-Cause Validation
 
-### 2.1 The failure, in code
+### 2.1 The original failure, in code
 
-The system is *gap-dependent* end to end. Two functions embody it:
+The old path was *gap-dependent* end to end. Two functions embodied it:
 
 - **`get_prosody_adjusted_wav`** (`src/qwen3_tts/voice_library.py:81`) — loads the master,
   calls `detect_pause_intervals`, filters to `interior` gaps, and at
@@ -92,18 +95,16 @@ This is the "pause drift" — it is real and it is structural, not a tuning bug.
   and `meta.sample_text` (the transcript). The variant model is a good fit for caching
   aligned/repaired outputs without destroying the master.
 
-### 2.4 Where DSP actually runs today (important, from validation)
+### 2.4 Implemented DSP order
 
-- **Generation path** (`_run_generate`, `model.py:1354`): `apply_style_preset` runs **only
-  if a `style_preset` is passed** (`model.py:1429`). Otherwise the sole processing is
-  `_trim_silence` (`model.py:1428`).
-- **`/v1/audio/speech`** (`app.py:1759`) forwards `style_preset=data.get("style_preset")`
-  (`app.py:1797`) — which is `None` for a bare hermes request. **So today, the OpenAI
-  endpoint applies no prosodic DSP at all** — output prosody is entirely the reference +
-  the clone. This is why fixing the *reference* is the highest-leverage lever (see §2.5).
-- **Reference edits** are already wired: `/voices/<id>/adjust-pauses` (`app.py:645`),
-  `/voices/<id>/region-edits` (`app.py:670`), `normalize`, `trim-silence`, plus
-  `apply_reference_region_edits` (`voice_library.py:714`).
+- **Generation:** trim silence → optional bounded output prosody repair → explicit style
+  preset or the default house chain. `postprocess: false` preserves the historical trim-only
+  behavior and does not disable an explicitly requested repair.
+- **`/v1/audio/speech`:** uses the same complete-file generation path and returns repair
+  outcome metadata in `X-Prosody-Repair-*` headers.
+- **Reference preparation:** `/voices/<id>/adjust-pauses`, `preview-prosody`, region edits,
+  Stitch Studio, and OmniVoice all converge on the canonical resolved boundary plan and
+  renderer.
 
 ### 2.5 The strategic implication
 
@@ -118,14 +119,14 @@ repair as the required final extension of the same engine.
 
 | # | Decision | Choice | Rationale |
 |---|----------|--------|-----------|
-| D1 | Aligner footprint | **ONNX MMS CTC aligner preferred, subject to the mandatory Phase 0 feasibility gate**, via `onnxruntime` (portable CPU EP baseline; OpenVINO/CoreML optional) | Target posture runs on any CPU incl. Apple Silicon with no torch serving path; Phase 0 must prove the selected package/export/provider combination before implementation locks to it |
+| D1 | Aligner footprint | **Pinned MMS INT8 ONNX + project-owned CTC alignment**, via `onnxruntime` (portable CPU EP baseline; optional providers require separate validation) | Runs without a PyTorch aligner path; the upstream package was incompatible with Python 3.13, so its algorithms were adapted behind the same backend-agnostic contract |
 | D7 | Runtime posture | **Backend-agnostic** (not OpenVINO-specific) | Recent decisions trend cross-platform; don't re-lock to OpenVINO |
-| D8 | Default output DSP | **Add a conservative "house" preset** (normalize + peak limit, on by default when no `style_preset`) | Bare hermes requests get only `_trim_silence` today; safe polish improves all output, independent of alignment; reserve true-peak/dBTP wording for an oversampled implementation |
+| D8 | Default output DSP | **Conservative "house" preset** (normalize + peak limit, on by default when no `style_preset`) | Safe polish improves bare requests independently of alignment; `postprocess: false` preserves trim-only behavior; reserve true-peak/dBTP wording for an oversampled implementation |
 | D2 | Model license | **CC-BY-NC default MMS OK** | Personal/research use, not commercially shipped |
 | D3 | Trigger UX | **Auto-triage + manual override** | Silent fast path; escalate only when blended; user can force Natural/Precise |
-| D4 | Surfaces (build) | **Voice Library, Stitch Studio, OmniVoice** | Reference-prep surfaces; Stitch seams are known → prevents later Library rework |
+| D4 | Surfaces | **Voice Library, Stitch Studio, OmniVoice** | Reference-prep surfaces; Stitch seams are known → prevents later Library rework |
 | D5 | hermes profile | **Batch/offline rendering** | Per-request aligner *tolerable*, but still not on any live turn |
-| D6 | Output/OpenAI surface | **Build in Phase 6** | Reuse engine behind an opt-in flag + latency budget; required scope, with graceful fallback to un-repaired audio when the budget expires |
+| D6 | Output/OpenAI surface | **Implemented for complete-file routes** | Reuses the engine behind an opt-in flag + latency budget, with graceful fallback to un-repaired audio when the budget expires |
 
 ---
 
@@ -176,7 +177,7 @@ blast radius small while making Precise mapping deterministic.
 
 ### 5.1 Triage — "does this clip need the heavy pass?"
 
-New module: `src/qwen3_tts/prosody_triage.py`.
+Implemented in `src/qwen3_tts/prosody_triage.py`.
 
 **Signal:** compare *acoustic evidence* to *linguistic expectation* as a cheap heuristic.
 
@@ -209,38 +210,31 @@ Precise remain available as deterministic manual overrides.
 
 ### 5.2 Forced alignment engine
 
-New module: `src/qwen3_tts/forced_alignment.py`.
+Implemented in `src/qwen3_tts/forced_alignment.py`.
 
-- **Preferred candidate (pending the Phase 0 feasibility gate):** `ctc-forced-aligner`
-  with MMS-300M. It advertises sentence/word/char granularity,
-  `<star>` token for transcript-vs-audio divergence, structured JSON output, ~5× less
-  memory than torchaudio's (deprecated) `forced_align`.
-- **Runtime candidate:** ONNX model via the already-present **`onnxruntime`** dependency
-  (`onnx-community/mms-300m-1130-forced-aligner-ONNX`).
-  **Baseline = portable CPU execution provider** — runs on Intel/AMD x86-64, ARM64, and
-  Apple Silicon with no code change. Optional accelerators selected at load time if present:
-  **OpenVINO EP** (Intel) and **CoreML EP** (Apple). Provider selection is a single
-  config point; the CPU EP is always the guaranteed fallback. No PyTorch in the serving path.
-  Phase 0 must prove that the package's normalization/tokenization/alignment logic can be
-  used with this ONNX export without importing a PyTorch model path; verify output names,
-  blank/`<star>` tokens, score semantics, provider packaging, and immutable model revision.
+- **Model:** immutable-pinned MMS-300M INT8 ONNX from
+  `onnx-community/mms-300m-1130-forced-aligner-ONNX`.
+- **Alignment code:** project-owned transcript normalization, `<star>` targets, CTC Viterbi,
+  confidence scoring, and punctuation ownership. The upstream `ctc-forced-aligner` source
+  informed these algorithms but is not imported at runtime.
+- **Runtime:** **`onnxruntime`** with `CPUExecutionProvider` as the portable baseline.
+  `ALIGNER_PROVIDERS` permits explicitly validated alternatives; none is assumed available.
+  No PyTorch model path is imported by the serving aligner.
 - **Interface:**
   ```python
-  def align(wav: np.ndarray, sr: int, transcript: str,
-            granularity: str = "word") -> list[Boundary]
+  def align(wav: np.ndarray, sr: int, transcript: str, *,
+            granularity: str = "word", language: str = "en") -> list[Boundary]
   # Boundary = {"text": str, "start": float, "end": float, "score": float, "kind": str}
   ```
-- **Preprocessing for alignment only** (never mutates the saved master): resample to the
-  model's expected rate, optional light spectral-subtraction *for the emission pass only*
-  when SNR is low.
-- **Model loading:** lazy singleton, loaded on first PRECISE request; guarded by the same
-  startup pattern as the TTS model. Warm-load option at boot behind an env flag.
+- **Preprocessing for alignment only** (never mutates the saved master): downmix, resample
+  to 16 kHz, and normalize the emission input.
+- **Model loading:** lazy singleton on first Precise request, followed by configurable idle
+  unload through the serialized alignment job manager.
 
 **Boundary derivation:** normalize the transcript while retaining source character offsets;
-align spoken words; then attach punctuation to the preceding aligned word (or an explicitly
-defined neighboring word for leading punctuation). Repeated words, abbreviations, decimals,
-quotes, ellipses, and non-verbal tags must have deterministic fixtures. Punctuation itself is
-not assumed to produce an acoustic token.
+align spoken words; then attach punctuation to the preceding aligned word. Repeated words,
+abbreviations, decimals, quotes, ellipses, and divergence cases have deterministic fixtures.
+Punctuation itself is not assumed to produce an acoustic token.
 
 **Divergence handling:** if the transcript and audio disagree (user edited text but not
 audio), CTC scores drop. Per-boundary `score < CONF_MIN` (e.g. 0.6) ⇒ mark that boundary
@@ -249,11 +243,11 @@ cutting blindly.
 
 ### 5.3 Surgical micro-gap insertion (anti-click)
 
-New in `audio_post.py` (co-located with the DSP it depends on):
+Implemented in `audio_post.py` (co-located with the DSP it depends on):
 
 ```python
-def apply_boundary_pause_plan(wav, sr, pause_edits, *,
-                              search_ms=2.0, fade_ms=2.0) -> np.ndarray
+plan = plan_boundary_pauses(wav, sr, pause_edits)
+repaired = apply_resolved_boundary_pause_plan(wav, sr, plan)
 ```
 
 For each punctuation-owned aligned boundary, emit the final target-duration edit directly:
@@ -264,9 +258,9 @@ For each punctuation-owned aligned boundary, emit the final target-duration edit
    equal-power curve already in `apply_fades`).
 3. **Insert or resize silence** — emit an alignment-owned pause edit at the cut for the final
    target duration. Do not pass it back through `get_pause_targets`.
-4. **Shared contract** — extend the region-edit schema with the resolved cut position,
-   duration, snap provenance, and fade semantics. Implement it identically in frontend and
-   backend so waveform preview and saved render are sample-equivalent.
+4. **Shared contract** — the backend returns resolved cut position, duration, provenance,
+   origin, and rendered-preview coordinates. The frontend displays those server-owned
+   markers without recomputation, keeping preview and saved render sample-equivalent.
 
 This transforms blended speech into correctly segmented speech **without a perceptible
 click**. The alignment-owned edit already carries the preset's final target (for example,
@@ -479,18 +473,26 @@ before or alongside Phase 0.
   false` = sample-equivalent prior trim-only PCM, with byte identity only on deterministic
   encoding paths).
 
+> **Complete (2026-07-12):** omitted `style_preset` selects the conservative default
+> normalize/limit chain, `postprocess: false` remains the request-level bypass, and
+> `TTS_DEFAULT_DSP=off` disables only the implicit default.
+
 ### Phase 0 — Spike & footprint validation
-- Prototype the preferred `ctc-forced-aligner` + ONNX export first on portable CPU EP, then
-  optional OpenVINO EP, in a dev container. Prove tokenizer/normalization compatibility,
+- The spike evaluated the upstream `ctc-forced-aligner` logic and ONNX artifact on portable
+  CPU EP in a dev container. It proved tokenizer/normalization compatibility,
   output names, blank/`<star>` behavior, score semantics, immutable revision pinning, and that
   no PyTorch model path is imported. Align the screenshot clip; compare safe-cut policies;
   measure cold/warm latency, peak RSS, retained idle RSS, and unload behavior on the target
-  16-core Intel CPU. Validate provider/package behavior on every supported platform before
-  claiming optional acceleration there.
+  16-core Intel CPU. Optional providers remain unclaimed until validated on their platforms.
 - **Gate:** aligner runs offline on portable CPU, boundaries for *"…no worries. We'll sort…"*
   land within ±50 ms of hand-marked truth; package/model/license/provisioning contracts and
-  runtime footprint are documented and acceptable. If the preferred candidate fails, choose
-  another backend-agnostic ONNX CTC aligner without reducing any product surface or phase.
+  runtime footprint are documented and acceptable. The upstream package install failed on
+  Python 3.13, so the shipped backend-agnostic path uses the ONNX model plus project-owned
+  normalization and CTC Viterbi without reducing product scope.
+
+> **Complete (2026-07-12):** the pinned MMS INT8 ONNX model, CPU execution provider,
+> vocabulary, `<star>` handling, custom CTC Viterbi, revision identity, and no-Torch serving
+> path were proven. Reproducible evidence is in `docs/spikes/phase0_alignment/`.
 
 ### Phase 1 — Triage (no alignment yet)
 - Build `prosody_triage.py`; wire `TriageResult` into `analyze_reference` output and the
@@ -501,6 +503,10 @@ before or alongside Phase 0.
   transcripts. Blended clips meet the agreed detection threshold without unacceptable clean-
   clip escalation. Synthetic tests remain necessary but are not sufficient alone.
 
+> **Complete (2026-07-13):** transcript-aware triage, Natural/Precise/Auto selection,
+> explainability metadata, the labeled punctuation/noise/accent matrix, and clean fast-path
+> regression coverage are implemented and green.
+
 ### Phase 2 — Alignment engine
 - Build `forced_alignment.py`; async `/voices/<id>/align`; `meta.json` cache + hash
   invalidation.
@@ -510,8 +516,13 @@ before or alongside Phase 0.
   divergence fallback is proven on deliberately mismatched and repeated-word transcripts;
   alignment jobs serialize safely and obey cancellation/idle-unload/LOW_RAM rules.
 
+> **Complete (2026-07-13):** `forced_alignment.py`, serialized asynchronous voice alignment,
+> immutable cache identity/invalidation, confidence fallback, cancellation, provisioning,
+> and idle unload are implemented and validated.
+
 ### Phase 3 — Surgical insertion + Voice Library end-to-end
-- Build `apply_boundary_pause_plan`; wire `adjust-pauses` `mode=auto` fallback chain;
+- Build the canonical boundary-pause planner/renderer; wire the `adjust-pauses` `mode=auto`
+  fallback chain;
   anti-click validated; variant caching; manual override + RegionEditor. Precise mode maps
   punctuation directly to aligned-word edits and never re-enters proportional gap mapping.
 - **Gate (the headline test):** a Storyteller preset injects ~1000 ms pauses at the periods
@@ -540,11 +551,9 @@ before or alongside Phase 0.
 > "safe fallback" note on job failure. Explainability text renders the triage rationale
 > ("N gaps detected, M sentence boundaries expected → blended speech") or the no-transcript
 > reason. `frontend/src/lib/api.ts` gained `ProsodyMode`, alignment types, and
-> `startVoiceAlignment` / `getVoiceAlignmentStatus` / `cancelVoiceAlignment`. **Remaining
-> (deferred):** revealing detected boundaries as an overlay on the RegionEditor waveform and a
-> per-render manufactured-vs-natural gap contract — both need the backend to surface the
-> resolved edit plan (cut sample / duration / provenance) from `preview-prosody`, which it
-> does not yet return.
+> `startVoiceAlignment` / `getVoiceAlignmentStatus` / `cancelVoiceAlignment`. The boundary
+> overlay and manufactured-vs-natural edit-plan contract described here were subsequently
+> completed in Phase 3.5 below.
 
 ### Phase 3.5 — Boundary overlay & edit-plan contract (Library fast-follow)
 Highest-value refinement of the Phase 3 surface (§5.6.1). Surface the resolved edit plan from
@@ -624,27 +633,25 @@ distinguishing manufactured (`insert_ms > 0`) from natural (`insert_ms == 0`) ga
 
 | Risk | Mitigation |
 |------|-----------|
-| Preferred aligner/package/export combination is incompatible | Phase 0 proves tokenizer, outputs, scores, providers, and no-torch serving path before lock-in; select another backend-agnostic ONNX CTC aligner without reducing scope if it fails |
+| Upstream aligner package is incompatible | Resolved: keep the validated pinned ONNX artifact and project-owned normalization/CTC Viterbi; no upstream package or PyTorch aligner dependency |
 | Aligner footprint too heavy on dev container | Phase 0 measures cold/warm latency, peak/idle RSS, and unload behavior; ONNX/int8 + optional accelerator EP; smaller compatible model if needed |
 | Transcript ↔ audio divergence | `<star>` token + per-boundary confidence; low-conf → VAD-assisted local search, never blind cut |
 | Audible clicks from cutting voiced audio | Low-energy safe-cut selection with zero-cross proximity + micro-fades; automated click-detection test in Phase 3 gate |
-| Low-SNR references degrade CTC | Spectral subtraction *for emission pass only*; surface SNR warning; keep master untouched |
+| Low-SNR references degrade CTC | Surface the SNR warning; confidence-gate boundaries and use VAD-safe fallback; keep the master untouched |
 | Gap counts hide missing boundaries or over-triage clean audio | Treat triage as a calibrated classifier; labeled matrix records false-negative/false-positive rates; user retains Natural/Precise override |
-| Fast-path regression | Fallback chain always terminates in today's energy path; snapshot tests on current behavior |
+| Fast-path regression | Fallback chain always terminates in the legacy energy path; snapshot tests protect current behavior |
 | Non-English / accented refs (e.g. the Aussie sample) | MMS is multilingual (158 langs); pass language; `<star>` absorbs accent-driven mismatch |
 
 ---
 
 ## 9. Dependencies & Footprint
 
-- **Existing runtime dep:** `onnxruntime` is already installed. The candidate new dependency
-  is `ctc-forced-aligner`, used only if Phase 0 proves its normalization/tokenization/alignment
-  logic can drive the selected ONNX model without importing a PyTorch model path. No PyTorch
-  is added to the serving path. CPU EP is load-bearing; optional OpenVINO/CoreML provider
-  availability and wheel compatibility must be detected and validated per platform rather
-  than assumed additive.
-- **Model asset:** MMS-300M forced-aligner ONNX (~300 MB–1 GB). Ship via the existing
-  model-provisioning path; lazy-load on first PRECISE use.
+- **Runtime dependency:** `onnxruntime`; no PyTorch aligner path and no
+  `ctc-forced-aligner` package dependency. Project-owned normalization, tokenization, CTC
+  Viterbi, and boundary derivation live in `forced_alignment.py`. CPU EP is load-bearing;
+  optional OpenVINO/CoreML providers require platform-specific validation.
+- **Model asset:** pinned MMS-300M forced-aligner INT8 ONNX (~302 MB), provisioned through
+  the existing Hugging Face cache and lazy-loaded on first Precise use.
 - **License:** default MMS model is CC-BY-NC 4.0 — acceptable per D2. If the project later
   goes commercial, replace it with a permissively licensed aligner behind the same internal
   `align()` contract. Do not assume a one-line model-id swap: vocabulary, normalization,
@@ -652,19 +659,20 @@ distinguishing manufactured (`insert_ms > 0`) from natural (`insert_ms == 0`) ga
 
 ---
 
-## 10. Open Questions (non-blocking; resolve during build)
+## 10. Resolved implementation choices
 
-1. Should `,` count toward `boundaries_expected` in triage, or only sentence-enders? (Start
-   with sentence-enders; make comma weighting a tunable.)
-2. Warm-load the aligner at boot (faster first Precise, higher idle RAM) or purely lazy?
-   (Default lazy; env flag for warm.)
-3. Do we expose detected boundaries as *editable* handles in RegionEditor, or read-only
-   overlays first? (**Resolved:** read-only markers land in Phase 3.5 / §5.6.1, gated on the
-   `preview-prosody` edit-plan payload; editable handles are an explicit fast-follow after.)
+1. Triage counts sentence-ending punctuation by default; clause/comma behavior remains a
+   tunable rather than increasing default escalation.
+2. The aligner loads lazily and unloads after the configured idle interval. This preserves
+   the validated low-memory posture while exposing cold starts in operational telemetry.
+3. RegionEditor exposes read-only boundary markers from the server-resolved plan. Editable
+   handles remain a separate enhancement and are not required by this implementation.
 
 ---
 
-## 11. Success Criteria
+## 11. Acceptance criteria
+
+All criteria below are satisfied by the phase evidence in §7.
 
 - **Blended repair:** Storyteller injects target pauses at periods in a 0-gap clip; ±50 ms
   of target duration; no audible click.

@@ -1,5 +1,8 @@
 # Prosody alignment hardening
 
+Architecture, shared edit contracts, and implementation history are documented in
+[Boundary-Aware Prosody Alignment and Repair](prosody/boundary_aware_prosody.md).
+
 Phase 5 turns the plan's five-second PRECISE latency target into an observable, repeatable
 gate. The portable `CPUExecutionProvider` remains the baseline; optional providers must pass
 the same command before they are recommended.
