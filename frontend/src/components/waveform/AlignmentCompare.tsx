@@ -77,12 +77,17 @@ function useLaneAudio(base64: string | null) {
   return ref
 }
 
-export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount, boundaryPlan = [], boundaries }: {
+export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount, boundaryPlan = [], boundaries, overrides = {}, onNudgeTarget, onResetTarget }: {
   voiceId: string
   adjustedBase64: string
   adjustedSampleCount: number
   boundaryPlan?: ProsodyPausePlanEntry[]
   boundaries: AlignmentBoundary[] | null
+  // Per-boundary target deltas (ms) keyed by rounded at_ms, and callbacks to change them by
+  // dragging a manufactured pause's trailing edge. Absent callbacks = read-only (e.g. busy).
+  overrides?: Record<string, number>
+  onNudgeTarget?: (key: string, deltaMs: number) => void
+  onResetTarget?: (key: string) => void
 }) {
   const [originalBase64, setOriginalBase64] = useState<string | null>(null)
   const [hoverPct, setHoverPct] = useState<number | null>(null)
@@ -145,6 +150,10 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
   const loopRef = useRef(loop)
   loopRef.current = loop
   const dragRef = useRef<{ lane: 'original' | 'adjusted'; startMs: number; endMs: number; moved: boolean } | null>(null)
+  // A live drag on a manufactured pause's trailing edge — resizes the inserted gap. Kept in a
+  // ref for the math, mirrored into state so the band grows under the cursor before re-preview.
+  const markerDragRef = useRef<{ key: string; baseInsertMs: number; startX: number; deltaMs: number } | null>(null)
+  const [liveNudge, setLiveNudge] = useState<{ key: string; insertMs: number } | null>(null)
 
   const msAtClientX = (clientX: number) => {
     const r = containerRef.current?.getBoundingClientRect()
@@ -217,9 +226,24 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
     dragRef.current = { lane, startMs: ms, endMs: ms, moved: false }
   }
 
+  // Start resizing a manufactured pause. Stops propagation so the lane's select-drag doesn't fire.
+  const onMarkerDown = (key: string, baseInsertMs: number) => (e: React.MouseEvent) => {
+    if (!onNudgeTarget) return
+    e.preventDefault()
+    e.stopPropagation()
+    markerDragRef.current = { key, baseInsertMs, startX: e.clientX, deltaMs: 0 }
+    setLiveNudge({ key, insertMs: baseInsertMs })
+  }
+
   const onStripMove = (e: React.MouseEvent) => {
     const r = containerRef.current?.getBoundingClientRect()
     if (r) setHoverPct(Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100)))
+    const m = markerDragRef.current
+    if (m && r) {
+      m.deltaMs = ((e.clientX - m.startX) / r.width) * maxDurMs
+      setLiveNudge({ key: m.key, insertMs: Math.max(0, m.baseInsertMs + m.deltaMs) })
+      return
+    }
     const d = dragRef.current
     if (!d) return
     d.endMs = msAtClientX(e.clientX)
@@ -228,6 +252,13 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
   }
 
   const finishDrag = () => {
+    const m = markerDragRef.current
+    if (m) {
+      markerDragRef.current = null
+      setLiveNudge(null)
+      if (Math.abs(m.deltaMs) > 5) onNudgeTarget?.(m.key, m.deltaMs)
+      return
+    }
     const d = dragRef.current
     dragRef.current = null
     if (!d) return
@@ -379,16 +410,32 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
           {boundaryPlan.map((marker, index) => {
             const start = cutMs(marker.cut_sample)
             const manufactured = marker.insert_ms > 0
+            const key = String(Math.round(marker.at_ms))
+            // While dragging this marker, grow the band under the cursor; otherwise use the plan.
+            const insertMs = liveNudge?.key === key ? liveNudge.insertMs : marker.insert_ms
+            const overridden = overrides[key] != null
             const color = marker.origin === 'alignment' ? 'border-cyan-300 text-cyan-300' : marker.origin === 'vad' ? 'border-warning text-warning' : 'border-violet-300 text-violet-300'
-            const title = `${manufactured ? 'Manufactured' : 'Natural'} ${marker.origin} boundary\nTarget ${marker.target_ms.toFixed(0)} ms · inserted ${marker.insert_ms.toFixed(0)} ms\n${marker.provenance.replace('_', ' ')}`
+            const title = `${manufactured ? 'Manufactured' : 'Natural'} ${marker.origin} boundary\nTarget ${marker.target_ms.toFixed(0)} ms · inserted ${insertMs.toFixed(0)} ms${overridden ? ` (nudged ${overrides[key] > 0 ? '+' : ''}${overrides[key].toFixed(0)} ms)` : ''}\n${marker.provenance.replace('_', ' ')}${onNudgeTarget && manufactured ? '\nDrag the edge to resize · double-click to reset' : ''}`
             return (
               <span key={`${marker.cut_sample}-${index}`}>
                 {manufactured && (
-                  <span className="pointer-events-none absolute inset-y-0 z-0 bg-cyan-400/15" style={{ left: pct(start), width: pct(marker.insert_ms) }} />
+                  <span className={`pointer-events-none absolute inset-y-0 z-0 ${overridden || liveNudge?.key === key ? 'bg-amber-400/20' : 'bg-cyan-400/15'}`} style={{ left: pct(start), width: pct(insertMs) }} />
                 )}
                 <span className={`pointer-events-none absolute inset-y-0 z-10 -translate-x-1/2 border-l-2 ${manufactured ? 'border-solid' : 'border-dashed'} ${color}`} style={{ left: pct(start) }} title={title} aria-label={title}>
                   <span className={`absolute left-1/2 top-1 -translate-x-1/2 border-current bg-background ${manufactured ? 'size-2 rotate-45 border' : 'size-2 rounded-full border-2'}`} />
                 </span>
+                {/* Trailing-edge resize handle — drag to lengthen/shorten the inserted silence. */}
+                {manufactured && onNudgeTarget && (
+                  <span
+                    className="group absolute inset-y-0 z-20 flex w-3 -translate-x-1/2 cursor-ew-resize items-center justify-center"
+                    style={{ left: pct(start + insertMs) }}
+                    onMouseDown={onMarkerDown(key, marker.insert_ms)}
+                    onDoubleClick={(e) => { e.stopPropagation(); if (overridden) onResetTarget?.(key) }}
+                    title={title}
+                  >
+                    <span className={`h-2/3 w-0.5 rounded ${overridden || liveNudge?.key === key ? 'bg-amber-300' : 'bg-cyan-300/70 group-hover:bg-cyan-200'}`} />
+                  </span>
+                )}
               </span>
             )
           })}
@@ -417,7 +464,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
 
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-muted-foreground">
         <span>click to seek · drag to select &amp; loop</span>
-        <span>◆ manufactured pause</span>
+        <span>◆ manufactured pause{onNudgeTarget ? ' · drag its edge to resize, double-click to reset' : ''}</span>
         <span>● natural boundary</span>
         <span className="text-cyan-300">sentence</span>
         <span className="text-warning">clause</span>

@@ -466,6 +466,9 @@ export async function previewVoiceProsody(
   paceMultiplier: number,
   pauseOffset: number,
   mode: ProsodyMode,
+  // Per-boundary target deltas (ms), keyed by the boundary's rounded at_ms. Layered on
+  // top of pauseOffset so one manufactured pause can be lengthened/shortened in isolation.
+  targetOverrides?: Record<string, number>,
 ): Promise<ProsodyPreview> {
   const query = new URLSearchParams({
     style_preset: stylePreset,
@@ -473,6 +476,9 @@ export async function previewVoiceProsody(
     pause_offset: String(pauseOffset),
     mode,
   })
+  if (targetOverrides && Object.keys(targetOverrides).length > 0) {
+    query.set('target_overrides', JSON.stringify(targetOverrides))
+  }
   const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/preview-prosody?${query}`)
   if (!res.ok) throw new Error(await readError(res))
   return res.json()

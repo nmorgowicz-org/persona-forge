@@ -109,6 +109,7 @@ def build_vad_pause_edits(
     style_preset: str,
     pace_multiplier: float,
     pause_offset_ms: float = 0.0,
+    target_overrides: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
     """Alignment-free surgical pause edits (plan §5.5 step 3).
 
@@ -124,7 +125,7 @@ def build_vad_pause_edits(
     from qwen3_tts.prosody_repair import build_vad_pause_edits as shared_builder
 
     return shared_builder(
-        wav, sr, transcript, style_preset, pace_multiplier, pause_offset_ms
+        wav, sr, transcript, style_preset, pace_multiplier, pause_offset_ms, target_overrides
     )
 
 
@@ -136,6 +137,7 @@ def get_vad_directed_wav(
     *,
     mode: str = "precise",
     return_plan: bool = False,
+    target_overrides: dict[str, float] | None = None,
 ) -> tuple[np.ndarray, int] | tuple[np.ndarray, int, list[dict[str, Any]]] | None:
     """Alignment-free surgical insertion (plan §5.5 step 3): proportional punctuation
     placement + VAD-safe anti-click cut. Returns ``(wav, sr)`` or ``None`` to fall through
@@ -156,7 +158,9 @@ def get_vad_directed_wav(
         if triage(wav, sr, transcript).mode != MODE_PRECISE:
             return None
 
-    edits = build_vad_pause_edits(wav, sr, transcript, style_preset, pace_multiplier, pause_offset_ms)
+    edits = build_vad_pause_edits(
+        wav, sr, transcript, style_preset, pace_multiplier, pause_offset_ms, target_overrides
+    )
     if not edits:
         return None
     plan = plan_boundary_pauses(wav, sr, edits)
@@ -169,6 +173,7 @@ def build_alignment_pause_edits(
     style_preset: str,
     pace_multiplier: float,
     pause_offset_ms: float = 0.0,
+    target_overrides: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
     """Map punctuation-owned aligned boundaries to alignment-owned pause edits (plan §5.3).
 
@@ -183,7 +188,7 @@ def build_alignment_pause_edits(
     from qwen3_tts.prosody_repair import build_alignment_pause_edits as shared_builder
 
     return shared_builder(
-        boundaries, style_preset, pace_multiplier, pause_offset_ms
+        boundaries, style_preset, pace_multiplier, pause_offset_ms, target_overrides
     )
 
 
@@ -196,6 +201,7 @@ def get_alignment_directed_wav(
     mode: str = "precise",
     emit: Any = None,
     return_plan: bool = False,
+    target_overrides: dict[str, float] | None = None,
 ) -> tuple[np.ndarray, int] | tuple[np.ndarray, int, list[dict[str, Any]]] | None:
     """Alignment-directed surgical pause insertion for blended speech (plan §5.3/§5.5).
 
@@ -246,7 +252,9 @@ def get_alignment_directed_wav(
             fresh["alignment"] = _fa.build_alignment_record(aligned, identity)
             (voice_dir / "meta.json").write_text(json.dumps(fresh, indent=2), encoding="utf-8")
 
-    edits = build_alignment_pause_edits(boundaries, style_preset, pace_multiplier, pause_offset_ms)
+    edits = build_alignment_pause_edits(
+        boundaries, style_preset, pace_multiplier, pause_offset_ms, target_overrides
+    )
     if not edits:
         return None
     plan = plan_boundary_pauses(wav, int(sr), edits)
@@ -261,6 +269,7 @@ def get_prosody_adjusted_wav(
     pause_offset_ms: float = 0.0,
     mode: str = "natural",
     return_plan: bool = False,
+    target_overrides: dict[str, float] | None = None,
 ) -> tuple[np.ndarray, int] | tuple[np.ndarray, int, list[dict[str, Any]]] | None:
     """Calculate prosody-adjusted audio for a voice without persisting it.
     Returns (wav, sr) or None on error.
@@ -275,14 +284,14 @@ def get_prosody_adjusted_wav(
     if mode in ("auto", "precise"):
         directed = get_alignment_directed_wav(
             voice_id, style_preset, pace_multiplier, pause_offset_ms, mode=mode,
-            return_plan=return_plan,
+            return_plan=return_plan, target_overrides=target_overrides,
         )
         if directed is not None:
             return directed
         # Step 3: alignment unusable — alignment-free VAD-directed surgical insertion.
         vad = get_vad_directed_wav(
             voice_id, style_preset, pace_multiplier, pause_offset_ms, mode=mode,
-            return_plan=return_plan,
+            return_plan=return_plan, target_overrides=target_overrides,
         )
         if vad is not None:
             return vad

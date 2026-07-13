@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import os
 import queue
 import sys
@@ -656,6 +657,17 @@ def voices_preview_prosody(voice_id: str):
     if mode not in ("natural", "precise", "auto"):
         return jsonify({"error": "mode must be natural, precise, or auto"}), 400
 
+    # Optional per-boundary target deltas (ms), keyed by rounded at_ms — the UI's
+    # drag-to-resize on a manufactured pause. Layered on top of pause_offset.
+    target_overrides: dict[str, float] | None = None
+    raw_overrides = request.args.get("target_overrides")
+    if raw_overrides:
+        try:
+            parsed = json.loads(raw_overrides)
+            target_overrides = {str(k): float(v) for k, v in dict(parsed).items()}
+        except (ValueError, TypeError):
+            return jsonify({"error": "target_overrides must be a JSON object of numbers"}), 400
+
     meta = voice_library.get_voice(voice_id)
     if meta is None:
         return jsonify({"error": "voice_id not found"}), 404
@@ -663,7 +675,8 @@ def voices_preview_prosody(voice_id: str):
     # Get the adjusted audio (wav, sr). Preview uses the same engine + mode as the saved
     # render so the waveform the user auditions is sample-equivalent to what they save.
     result = voice_library.get_prosody_adjusted_wav(
-        voice_id, style_preset, pace_multiplier, pause_offset, mode, return_plan=True
+        voice_id, style_preset, pace_multiplier, pause_offset, mode, return_plan=True,
+        target_overrides=target_overrides,
     )
     if result is None:
         return jsonify({"error": "Preview failed"}), 500

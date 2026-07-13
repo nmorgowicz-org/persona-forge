@@ -865,6 +865,47 @@ function VoiceCard({
     plan: ProsodyPausePlanEntry[]
   } | null>(null)
   const [previewMetrics, setPreviewMetrics] = useState<VoiceReferenceMetrics | null>(null)
+  // Per-boundary target deltas (ms) keyed by rounded at_ms — set by dragging a manufactured
+  // pause's trailing edge in the A/B view. Cleared when the preview is reset or the voice changes.
+  const [targetOverrides, setTargetOverrides] = useState<Record<string, number>>({})
+
+  // One place to render a prosody preview, so the Preview button and per-marker nudges
+  // stay in sync. Passing an explicit overrides map avoids stale-state races on rapid drags.
+  const runPreview = async (overrides: Record<string, number>) => {
+    setPreviewBusy(true)
+    try {
+      const data = await previewVoiceProsody(
+        voice.voice_id, stylePreset, paceMultiplier, pauseOffset, processingMode, overrides,
+      )
+      const blob = new Blob([Uint8Array.from(atob(data.audio_base64), (c) => c.charCodeAt(0))], { type: 'audio/wav' })
+      const url = URL.createObjectURL(blob)
+      setPreviewAudio({ url, blob, audioBase64: data.audio_base64, sampleCount: data.sample_count, plan: data.plan })
+      setPreviewMetrics(data.metrics)
+    } catch (err) {
+      console.error('Prosody preview failed:', err)
+    } finally {
+      setPreviewBusy(false)
+    }
+  }
+
+  // Merge an incremental target delta for one boundary and immediately re-preview.
+  const nudgeTarget = (key: string, deltaMs: number) => {
+    setTargetOverrides((prev) => {
+      const next = { ...prev, [key]: (prev[key] ?? 0) + deltaMs }
+      void runPreview(next)
+      return next
+    })
+  }
+  const resetTarget = (key: string) => {
+    setTargetOverrides((prev) => {
+      if (!(key in prev)) return prev
+      const next = { ...prev }
+      delete next[key]
+      void runPreview(next)
+      return next
+    })
+  }
+
   const [analysisExpanded, setAnalysisExpanded] = useState(() => localStorage.getItem('voice-library-analysis-expanded') !== 'false')
   const [preserveOriginal, setPreserveOriginal] = useState(true)
   const [editorVoiceId, setEditorVoiceId] = useState(voice.voice_id)
@@ -1166,6 +1207,9 @@ function VoiceCard({
                      adjustedSampleCount={previewAudio.sampleCount}
                      boundaryPlan={previewAudio.plan}
                      boundaries={alignBoundaries}
+                     overrides={targetOverrides}
+                     onNudgeTarget={previewBusy ? undefined : nudgeTarget}
+                     onResetTarget={previewBusy ? undefined : resetTarget}
                    />
                  </div>
                )}
@@ -1178,6 +1222,7 @@ function VoiceCard({
               onClick={() => {
                 URL.revokeObjectURL(previewAudio.url)
                 setPreviewAudio(null)
+                setTargetOverrides({})
               }}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded bg-background/80 p-1 text-[10px] hover:bg-background opacity-0 group-hover:opacity-100 transition-opacity"
             >
@@ -1350,27 +1395,11 @@ function VoiceCard({
                       size="sm"
                       variant="outline"
                       disabled={busy || prosodyBusy || previewBusy}
-                       onClick={async () => {
-                         setPreviewBusy(true)
-                         try {
-                           const data = await previewVoiceProsody(
-                             voice.voice_id, stylePreset, paceMultiplier, pauseOffset, processingMode,
-                           )
-                           const blob = new Blob([Uint8Array.from(atob(data.audio_base64), c => c.charCodeAt(0))], { type: 'audio/wav' })
-                           const url = URL.createObjectURL(blob)
-                           setPreviewAudio({
-                             url,
-                             blob,
-                             audioBase64: data.audio_base64,
-                             sampleCount: data.sample_count,
-                             plan: data.plan,
-                           })
-                           setPreviewMetrics(data.metrics)
-                         } catch (err) {
-                           console.error('Prosody preview failed:', err)
-                         } finally {
-                           setPreviewBusy(false)
-                         }
+                       onClick={() => {
+                         // Preview / Reset Preview both re-render from the sliders and clear
+                         // any per-marker nudges, so this is always a clean baseline.
+                         setTargetOverrides({})
+                         void runPreview({})
                        }}
                     >
                       {previewAudio ? <Undo2 className="size-3.5" /> : <Play className="size-3.5" />} {previewAudio ? 'Reset Preview' : 'Preview'}

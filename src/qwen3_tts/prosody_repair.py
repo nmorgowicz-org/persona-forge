@@ -52,6 +52,20 @@ def _target_ms(
     )
 
 
+def _override_target(
+    at_ms: float, target_ms: float, overrides: dict[str, float] | None
+) -> float:
+    """Add a per-boundary delta (keyed by the boundary's rounded ``at_ms``) to its target,
+    layered on top of the global ``pause_offset``. Lets the UI nudge one manufactured pause
+    without touching the others. Clamped non-negative."""
+    if not overrides:
+        return target_ms
+    delta = overrides.get(str(round(at_ms)))
+    if delta is None:
+        return target_ms
+    return max(0.0, target_ms + float(delta))
+
+
 def suggest_stitch_gap_targets(
     transcripts: list[str],
     style_preset: str = "Neutral",
@@ -82,6 +96,7 @@ def build_alignment_pause_edits(
     style_preset: str,
     pace_multiplier: float,
     pause_offset_ms: float,
+    target_overrides: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
     edits: list[dict[str, Any]] = []
     for index, boundary in enumerate(boundaries):
@@ -104,11 +119,14 @@ def build_alignment_pause_edits(
         # Expand-only for clause pauses: don't cut into running speech at a comma.
         if key == "comma" and existing_ms < CLAUSE_MIN_EXISTING_MS:
             continue
+        at_ms = end * 1000.0
         edits.append(
             {
-                "at_ms": end * 1000.0,
-                "target_ms": _target_ms(
-                    style_preset, key, pace_multiplier, pause_offset_ms
+                "at_ms": at_ms,
+                "target_ms": _override_target(
+                    at_ms,
+                    _target_ms(style_preset, key, pace_multiplier, pause_offset_ms),
+                    target_overrides,
                 ),
                 "existing_ms": existing_ms,
                 "origin": "alignment",
@@ -124,6 +142,7 @@ def build_vad_pause_edits(
     style_preset: str,
     pace_multiplier: float,
     pause_offset_ms: float,
+    target_overrides: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
     text = transcript or ""
     trimmed_len = len(text.rstrip())
@@ -145,11 +164,14 @@ def build_vad_pause_edits(
         # Expand-only for clause pauses (mirrors the alignment path): no fabricated commas.
         if key == "comma" and existing_ms < CLAUSE_MIN_EXISTING_MS:
             continue
+        at_ms = at_sec * 1000.0
         edits.append(
             {
-                "at_ms": at_sec * 1000.0,
-                "target_ms": _target_ms(
-                    style_preset, key, pace_multiplier, pause_offset_ms
+                "at_ms": at_ms,
+                "target_ms": _override_target(
+                    at_ms,
+                    _target_ms(style_preset, key, pace_multiplier, pause_offset_ms),
+                    target_overrides,
                 ),
                 "existing_ms": existing_ms,
                 "origin": "vad",

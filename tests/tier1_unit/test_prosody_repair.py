@@ -49,6 +49,40 @@ def test_clause_pause_kept_when_gap_exists():
     assert edits[0]["existing_ms"] == pytest.approx(100.0)
 
 
+def test_target_override_adjusts_only_the_matching_boundary():
+    # A per-boundary delta keyed by rounded at_ms (end*1000) is added on top of the preset
+    # target for that one boundary; the others are untouched.
+    boundaries = [
+        Boundary("first", 0.0, 1.0, 0.99, "sentence_split").to_dict(),
+        Boundary("second", 1.4, 2.0, 0.99, "sentence_split").to_dict(),
+    ]
+    base = build_alignment_pause_edits(boundaries, "Neutral", 1.0, 0.0)
+    bumped = build_alignment_pause_edits(boundaries, "Neutral", 1.0, 0.0, {"1000": 250.0})
+    base_by_at = {round(e["at_ms"]): e["target_ms"] for e in base}
+    bumped_by_at = {round(e["at_ms"]): e["target_ms"] for e in bumped}
+    assert bumped_by_at[1000] == pytest.approx(base_by_at[1000] + 250.0)
+    assert bumped_by_at[2000] == pytest.approx(base_by_at[2000])  # untouched
+
+
+def test_target_override_clamps_negative_to_zero():
+    boundaries = [
+        Boundary("only", 0.0, 1.0, 0.99, "sentence_split").to_dict(),
+        Boundary("next", 1.4, 2.0, 0.99, "word").to_dict(),
+    ]
+    edits = build_alignment_pause_edits(boundaries, "Neutral", 1.0, 0.0, {"1000": -99999.0})
+    assert edits[0]["target_ms"] == 0.0
+
+
+def test_no_overrides_is_identical_to_none():
+    boundaries = [
+        Boundary("first", 0.0, 1.0, 0.99, "sentence_split").to_dict(),
+        Boundary("second", 1.4, 2.0, 0.99, "sentence_split").to_dict(),
+    ]
+    assert build_alignment_pause_edits(boundaries, "Neutral", 1.0, 0.0, {}) == (
+        build_alignment_pause_edits(boundaries, "Neutral", 1.0, 0.0)
+    )
+
+
 def test_auto_clean_segment_stays_sample_equivalent():
     sr = 24000
     first = _voiced(0.4, sr)
