@@ -117,7 +117,27 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
 
   const laneAudio = (lane: 'original' | 'adjusted') => (lane === 'original' ? origAudio.current : adjAudio.current)
 
+  // Cut positions per lane (original lane in src time, adjusted in rendered time) so a
+  // drag-selection can snap its edges to the boundaries we actually cut at.
+  const snapPointsFor = (lane: 'original' | 'adjusted') =>
+    boundaryPlan.map((m) => (lane === 'original' ? m.src_cut_ms ?? m.at_ms : cutMs(m.cut_sample)))
+  const snapMs = (ms: number, lane: 'original' | 'adjusted') => {
+    const tol = maxDurMs * 0.02
+    let best = ms
+    let bestD = tol
+    for (const p of snapPointsFor(lane)) {
+      const d = Math.abs(p - ms)
+      if (d < bestD) {
+        bestD = d
+        best = p
+      }
+    }
+    return best
+  }
+
   const containerRef = useRef<HTMLDivElement | null>(null)
+  // Which lane space/keyboard transport acts on — the last one the user played.
+  const lastLaneRef = useRef<'original' | 'adjusted'>('adjusted')
   const rafRef = useRef<number | undefined>(undefined)
   // The active play region (loop bounds) and loop flag are read inside the rAF loop, so
   // keep them in refs to dodge stale closures.
@@ -167,6 +187,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
     laneAudio(lane === 'original' ? 'adjusted' : 'original')?.pause()
     if (!el) return
     regionRef.current = region
+    lastLaneRef.current = lane
     el.currentTime = Math.max(0, fromMs / 1000)
     setPositionMs(fromMs)
     void el.play().then(() => setPlaying(lane)).catch(() => {})
@@ -216,9 +237,30 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
       seekTo(d.startMs)
       return
     }
-    const region = { start: Math.min(d.startMs, d.endMs), end: Math.max(d.startMs, d.endMs) }
+    const rawStart = Math.min(d.startMs, d.endMs)
+    const rawEnd = Math.max(d.startMs, d.endMs)
+    // Snap each edge to the nearest cut in this lane; fall back to raw if snapping collapses it.
+    const start = snapMs(rawStart, d.lane)
+    const end = snapMs(rawEnd, d.lane)
+    const region = end - start > 30 ? { start, end } : { start: rawStart, end: rawEnd }
     setSelection(region)
     startPlay(d.lane, region.start, region)
+  }
+
+  // Keyboard transport: space = play/pause the last lane, L = loop, ←/→ = step the playhead
+  // (hold Shift for a fine 20 ms nudge instead of 100 ms).
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault()
+      togglePlay(playing ?? lastLaneRef.current)
+    } else if (e.key === 'l' || e.key === 'L') {
+      e.preventDefault()
+      setLoop((v) => !v)
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault()
+      const step = (e.shiftKey ? 20 : 100) * (e.key === 'ArrowRight' ? 1 : -1)
+      seekTo(Math.max(0, Math.min(maxDurMs, positionMs + step)))
+    }
   }
 
   if (!adjusted) return null
@@ -246,10 +288,15 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
   return (
     <div
       ref={containerRef}
-      className="relative select-none space-y-1"
+      tabIndex={0}
+      role="group"
+      aria-label="A/B waveform comparison"
+      className="relative select-none space-y-1 rounded outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
       onMouseMove={onStripMove}
       onMouseUp={finishDrag}
       onMouseLeave={() => { setHoverPct(null); finishDrag() }}
+      onMouseDownCapture={() => containerRef.current?.focus()}
+      onKeyDown={onKeyDown}
     >
       {/* Transport — A/B play, loop, and the current drag-selection. */}
       <div className="flex items-center gap-2 pb-0.5">
@@ -273,7 +320,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
             </button>
           </span>
         )}
-        <span className="ml-auto text-[9px] text-muted-foreground/70">drag a lane to loop a slice</span>
+        <span className="ml-auto text-[9px] text-muted-foreground/70">drag to loop a slice · space play · L loop · ←/→ step</span>
       </div>
 
       {/* ORIGINAL lane — word text + the snapped cut in its true (pre-insertion) time. */}
