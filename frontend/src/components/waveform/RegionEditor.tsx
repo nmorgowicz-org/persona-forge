@@ -5,6 +5,7 @@ import { base64ToBlob } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { MiniAudioDeck } from '@/components/audio/MiniAudioDeck'
 import { WaveformLane } from './WaveformLane'
+import { TimeRuler } from './TimeRuler'
 import { encodeRegionWav, renderRegionEdits, type RegionAudio } from './regionAudio'
 
 type Selection = { startMs: number; endMs: number }
@@ -26,6 +27,7 @@ export function RegionEditor({ audioBase64, edits, pauseIntervals = [], onChange
   const [silenceMs, setSilenceMs] = useState(250)
   const [audioUrl, setAudioUrl] = useState('')
   const [decoded, setDecoded] = useState<DecodedAudio | null>(null)
+  const [hoverMs, setHoverMs] = useState<number | null>(null)
 
   useEffect(() => {
     const blob = base64ToBlob(audioBase64)
@@ -84,12 +86,20 @@ export function RegionEditor({ audioBase64, edits, pauseIntervals = [], onChange
   return <div className="space-y-3 border-t border-border/60 pt-3">
     <div className="flex items-center justify-between"><div><p className="text-xs font-medium">Reference audio editor</p><p className="text-[10px] text-muted-foreground">Playback and waveform include all queued edits.</p></div><Button size="icon-sm" variant="ghost" aria-label="Close audio editor" tooltip="Close audio editor" onClick={onClose}><X /></Button></div>
     {audioUrl && <MiniAudioDeck src={audioUrl} autoPlay={false} />}
-    <div ref={laneRef} className="relative h-20 cursor-crosshair overflow-hidden rounded border border-border bg-muted/20" onMouseDown={startSelection}>
+    <div ref={laneRef} className="relative h-20 cursor-crosshair overflow-hidden rounded border border-border bg-muted/20" onMouseDown={startSelection} onMouseMove={(event) => setHoverMs(pointToMs(event.clientX))} onMouseLeave={() => setHoverMs(null)}>
       <WaveformLane peaks={peaks} durMs={durationMs} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
       {pauseIntervals.map(([start, end], index) => <div key={`${start}-${end}-${index}`} className="pointer-events-none absolute inset-y-0 border-x border-warning/40 bg-warning/10" style={{ left: `${start * 1000 / Math.max(1, durationMs) * 100}%`, width: `${(end - start) * 1000 / Math.max(1, durationMs) * 100}%` }} />)}
       <div className="pointer-events-none absolute inset-y-0 border-x border-cyan-400 bg-cyan-400/15" style={selectionStyle} />
+      {hoverMs !== null && durationMs > 0 && (() => {
+        const pct = hoverMs / durationMs * 100
+        return <>
+          <div className="pointer-events-none absolute inset-y-0 z-10 w-px bg-cyan-300" style={{ left: `${pct}%` }} />
+          <span className="pointer-events-none absolute top-0.5 z-10 rounded bg-background/90 px-1 text-[9px] font-mono tabular-nums text-cyan-200 shadow-sm" style={{ left: `${pct}%`, transform: pct <= 8 ? 'translateX(0)' : pct >= 92 ? 'translateX(-100%)' : 'translateX(-50%)' }}>{(hoverMs / 1000).toFixed(3)}s</span>
+        </>
+      })()}
     </div>
-    <p className="text-[10px] tabular-nums text-muted-foreground">Selection {selected.startMs}-{selected.endMs}ms · amber regions are detected pauses</p>
+    <TimeRuler durationMs={durationMs} />
+    <p className="text-[10px] tabular-nums text-muted-foreground">Selection {selected.startMs}-{selected.endMs}ms ({(selected.startMs / 1000).toFixed(3)}-{(selected.endMs / 1000).toFixed(3)}s) · cursor {hoverMs !== null ? `${(hoverMs / 1000).toFixed(3)}s` : '—'} · amber regions are detected pauses</p>
     <div className="flex flex-wrap items-center gap-2">
       <Button size="sm" variant="outline" onClick={() => add({ type: 'delete', startMs: selected.startMs, endMs: selected.endMs })}><Scissors /> Delete</Button>
       <Button size="sm" variant="outline" onClick={() => add({ type: 'fade', startMs: selected.startMs, endMs: selected.endMs, fadeInMs: 50, fadeOutMs: 50 })}><Volume2 /> Fade</Button>
