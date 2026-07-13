@@ -34,6 +34,22 @@ the same command before they are recommended.
   and async progress expose the same record as JSON.
 - Streaming rejects `prosody_repair: true`: already-emitted PCM cannot be repaired safely.
 
+### Validated generation result (2026-07-13)
+
+- Runtime: `dockermisc1`, Pocket TTS, `qwen3-tts-openvino:local`, development bind mounts,
+  source candidate `88d0149`.
+- Input: `The rain stopped suddenly. Everyone stepped outside to listen. Then the city
+  began to breathe again.` with seed `424242`, WAV output, and ordinary postprocessing off.
+- Unflagged control: HTTP 200, `not_requested`, SHA-256
+  `6a1423df520946cc613c3fdd8ae021d99f98a57368f83039c2c659a2320e0bbe`.
+- Cold flagged request: HTTP 200, `budget_fallback` at `5.000339 s` against the `5.0 s`
+  deadline, with the exact same byte hash as the control.
+- Warm native and OpenAI-compatible requests: HTTP 200 with `unnecessary` because triage
+  found adequate natural gaps; repair decision time was `0.011341 s` and `0.004914 s`.
+- Async request: pending metadata at submission, then completed audio plus structured
+  `unnecessary` progress and matching download headers (`0.009405 s`).
+- Container logs showed no late-worker, alignment, renderer, or generation errors.
+
 ## Target-CPU benchmark gate
 
 Keep benchmark audio outside Git and use its exact transcript:

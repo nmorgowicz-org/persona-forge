@@ -603,6 +603,21 @@ distinguishing manufactured (`insert_ms > 0`) from natural (`insert_ms == 0`) ga
   un-repaired audio cleanly; flagged requests attempt repair on every supported generation
   path; successful repair uses the same canonical boundary/edit renderer as reference audio.
 
+> **Complete (2026-07-13):** complete-file generation now accepts the strict boolean
+> `prosody_repair` opt-in on `/generate`, `/generate/with_metrics`, `/v1/audio/speech`, and
+> `/generate/async`; streaming rejects it because emitted PCM cannot be repaired
+> retroactively. Every request records `not_requested`, `repaired`, `unnecessary`, `failed`,
+> or `budget_fallback` through raw-audio headers or structured JSON/progress metadata. The
+> five-second server deadline runs the existing `repair_segment_audio` engine with
+> cancellation checks, so successful edits use the canonical boundary planner/renderer and
+> late ONNX results are neither rendered nor cached. On `dockermisc1`, an unflagged
+> same-seed Pocket request returned `not_requested`; its cold flagged counterpart returned
+> `budget_fallback` at **5.000339 s**, and both WAV files were byte-identical at SHA-256
+> `6a1423df520946cc613c3fdd8ae021d99f98a57368f83039c2c659a2320e0bbe`. Warm native,
+> OpenAI-compatible, and async requests all returned usable audio and the expected
+> `unnecessary` metadata for a naturally well-gapped clip. Focused, fake-only, Torch,
+> frontend, repository, and Compose gates are green. **Phase 6 is complete.**
+
 ---
 
 ## 8. Risks & Mitigations
