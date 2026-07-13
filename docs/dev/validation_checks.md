@@ -49,6 +49,12 @@ For Pocket TTS built-in voice route changes, add:
 PYTHONPATH=.:src pytest tests/tier2_backend/test_app_voices.py -q
 ```
 
+## Prosody alignment hardening
+
+Phase 5 and later alignment changes must also run the real target-CPU p95 gate documented in
+`docs/dev/PROSODY_HARDENING.md`. The command is intentionally separate from fake-only CI
+because it requires the pinned ONNX weights and a representative, non-Git reference clip.
+
 ## Fake Runtime Parity
 
 The CI fake lane validates product contracts without real inference. When

@@ -17,9 +17,11 @@ RTF), so alignment gets its own small manager (plan §5.5). Guarantees:
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 import uuid
+from collections import deque
 from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -39,8 +41,11 @@ class AlignmentJobManager:
         max_jobs: int = 50,
         ttl_seconds: float = 600.0,
         idle_unload_seconds: float = 120.0,
+        latency_budget_seconds: float = 5.0,
+        latency_window_size: int = 100,
         unload: Optional[Callable[[], Any]] = None,
         clock: Callable[[], float] = time.time,
+        timer: Callable[[], float] = time.monotonic,
     ) -> None:
         self._runner = runner
         self._unload = unload
@@ -48,11 +53,14 @@ class AlignmentJobManager:
         self._max_jobs = max_jobs
         self._ttl = ttl_seconds
         self._idle_unload = idle_unload_seconds
+        self._latency_budget = max(0.001, float(latency_budget_seconds))
+        self._latencies: deque[float] = deque(maxlen=max(1, latency_window_size))
         self._jobs: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._worker = threading.Lock()  # serializes alignment work
         self._active = 0
         self._idle_timer: Optional[threading.Timer] = None
+        self._timer = timer
 
     # --- submission ---------------------------------------------------------
 
@@ -67,6 +75,11 @@ class AlignmentJobManager:
             "cancel": threading.Event(),
             "result": None,
             "error": None,
+            "started_at": None,
+            "finished_at": None,
+            "duration_seconds": None,
+            "latency_budget_seconds": self._latency_budget,
+            "within_latency_budget": None,
             "runner_kwargs": runner_kwargs,
         }
         with self._lock:
@@ -87,7 +100,9 @@ class AlignmentJobManager:
             if cancel.is_set():
                 self._set(job_id, status="cancelled")
             else:
-                self._set(job_id, status="running")
+                started_at = self._clock()
+                started = self._timer()
+                self._set(job_id, status="running", started_at=started_at)
                 try:
                     result = self._runner(job["voice_id"], cancel, **job.get("runner_kwargs", {}))
                     if cancel.is_set():
@@ -97,6 +112,17 @@ class AlignmentJobManager:
                 except Exception as exc:  # noqa: BLE001 — surface any failure to the caller
                     logger.exception("Alignment job %s failed", job_id)
                     self._set(job_id, status="failed", error=str(exc))
+                finally:
+                    duration = max(0.0, self._timer() - started)
+                    within_budget = duration < self._latency_budget
+                    with self._lock:
+                        self._latencies.append(duration)
+                    self._set(
+                        job_id,
+                        finished_at=self._clock(),
+                        duration_seconds=round(duration, 6),
+                        within_latency_budget=within_budget,
+                    )
         self._drain()
 
     # --- control / query ----------------------------------------------------
@@ -116,7 +142,45 @@ class AlignmentJobManager:
             job = self._jobs.get(job_id)
             if job is None:
                 return None
-            return {k: job[k] for k in ("job_id", "voice_id", "status", "created_at", "result", "error")}
+            return {
+                k: job[k]
+                for k in (
+                    "job_id",
+                    "voice_id",
+                    "status",
+                    "created_at",
+                    "started_at",
+                    "finished_at",
+                    "duration_seconds",
+                    "latency_budget_seconds",
+                    "within_latency_budget",
+                    "result",
+                    "error",
+                )
+            }
+
+    def performance(self) -> dict[str, Any]:
+        """Return the bounded runtime latency window used by health/error surfaces."""
+        with self._lock:
+            samples = list(self._latencies)
+        ordered = sorted(samples)
+
+        def percentile(value: float) -> float | None:
+            if not ordered:
+                return None
+            index = max(0, math.ceil(value * len(ordered)) - 1)
+            return round(ordered[index], 6)
+
+        p95 = percentile(0.95)
+        return {
+            "sample_count": len(ordered),
+            "window_size": self._latencies.maxlen,
+            "budget_seconds": self._latency_budget,
+            "p50_seconds": percentile(0.50),
+            "p95_seconds": p95,
+            "within_budget": p95 is None or p95 < self._latency_budget,
+            "breach_count": sum(duration >= self._latency_budget for duration in ordered),
+        }
 
     # --- internals ----------------------------------------------------------
 

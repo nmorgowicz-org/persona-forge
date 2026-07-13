@@ -193,6 +193,7 @@ def health():
     # model_loaded only reflects Base/VoiceDesign (model.model) — OmniVoice bypasses that
     # slot entirely (see omnivoice_engine.py docstring), so surface its residency too.
     state["omnivoice_loaded"] = omnivoice_engine.omnivoice_loaded()
+    state["alignment_performance"] = _alignment_jobs.performance()
 
     # Human-readable hint when model is still loading at startup.
     if not model._service_started:
@@ -727,7 +728,33 @@ def _alignment_runner(voice_id: str, cancel, **kwargs):
     return voice_library.get_or_compute_alignment(voice_id, cancel=cancel, **kwargs)
 
 
-_alignment_jobs = AlignmentJobManager(_alignment_runner, unload=_alignment_unload)
+def _positive_float_env(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("Ignoring invalid %s=%r; using %.3f", name, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("Ignoring non-positive %s=%r; using %.3f", name, raw, default)
+        return default
+    return value
+
+
+_alignment_jobs = AlignmentJobManager(
+    _alignment_runner,
+    unload=_alignment_unload,
+    latency_budget_seconds=_positive_float_env("ALIGNER_LATENCY_BUDGET_SECONDS", 5.0),
+    idle_unload_seconds=_positive_float_env("ALIGNER_IDLE_UNLOAD_SECONDS", 120.0),
+)
+
+
+@app.get("/alignment/performance")
+def alignment_performance():
+    """Bounded warm-runtime latency window for the Phase 5 p95 budget gate."""
+    return jsonify(_alignment_jobs.performance())
 
 
 @app.post("/voices/<voice_id>/triage")

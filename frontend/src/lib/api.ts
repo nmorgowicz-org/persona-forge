@@ -475,6 +475,11 @@ export interface AlignJob {
   created_at: number
   result: AlignmentRecord | null
   error: string | null
+  started_at: number | null
+  finished_at: number | null
+  duration_seconds: number | null
+  latency_budget_seconds: number
+  within_latency_budget: boolean | null
 }
 
 // Kick off (or reuse) an async forced-alignment pass. Returns a job to poll.

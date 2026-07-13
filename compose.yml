@@ -60,6 +60,13 @@ services:
       VOICE_DESIGN_MODEL_SIZE: ${VOICE_DESIGN_MODEL_SIZE:-1.7B}
       VOICE_DESIGN_MODEL_REPO: ${VOICE_DESIGN_MODEL_REPO:-}
       VOICE_DESIGN_MAX_SPEECH_SECONDS: ${VOICE_DESIGN_MAX_SPEECH_SECONDS:-}
+
+      # Forced-aligner hardening (Precise/Auto prosody). The portable CPU provider and
+      # five-second warm p95 budget are the load-bearing defaults.
+      ALIGNER_MODEL_PATH: ${ALIGNER_MODEL_PATH:-}
+      ALIGNER_PROVIDERS: ${ALIGNER_PROVIDERS:-CPUExecutionProvider}
+      ALIGNER_LATENCY_BUDGET_SECONDS: ${ALIGNER_LATENCY_BUDGET_SECONDS:-5}
+      ALIGNER_IDLE_UNLOAD_SECONDS: ${ALIGNER_IDLE_UNLOAD_SECONDS:-120}
     volumes:
       - ${MODEL_CACHE_PATH:-./data/model}:/root/.cache/huggingface/hub:rw
       - ${OV_DATA_PATH:-./data/ov}:/ov:rw

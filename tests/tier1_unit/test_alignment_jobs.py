@@ -93,3 +93,33 @@ def test_unknown_job_id_returns_none():
     mgr = AlignmentJobManager(lambda vid, cancel: {})
     assert mgr.get("nope") is None
     assert mgr.cancel("nope") is False
+
+
+def test_latency_budget_is_recorded_and_p95_fails_closed():
+    timer_values = iter([10.0, 16.0])
+    mgr = AlignmentJobManager(
+        lambda vid, cancel: {"v": vid},
+        latency_budget_seconds=5.0,
+        timer=lambda: next(timer_values),
+    )
+    jid = mgr.submit("vd_slow")["job_id"]
+    done = _wait_status(mgr, jid, "completed")
+    assert done["duration_seconds"] == 6.0
+    assert done["latency_budget_seconds"] == 5.0
+    assert done["within_latency_budget"] is False
+    assert mgr.performance() == {
+        "sample_count": 1,
+        "window_size": 100,
+        "budget_seconds": 5.0,
+        "p50_seconds": 6.0,
+        "p95_seconds": 6.0,
+        "within_budget": False,
+        "breach_count": 1,
+    }
+
+
+def test_empty_performance_window_is_healthy_but_unmeasured():
+    perf = AlignmentJobManager(lambda vid, cancel: {}).performance()
+    assert perf["sample_count"] == 0
+    assert perf["p95_seconds"] is None
+    assert perf["within_budget"] is True

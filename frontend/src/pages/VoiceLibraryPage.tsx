@@ -850,6 +850,7 @@ function VoiceCard({
   const [alignBusy, setAlignBusy] = useState(false)
   const [alignBoundaries, setAlignBoundaries] = useState<AlignmentBoundary[] | null>(null)
   const [alignError, setAlignError] = useState<string | null>(null)
+  const [alignWarning, setAlignWarning] = useState<string | null>(null)
   const alignJobRef = useRef<{ jobId: string; cancelled: boolean } | null>(null)
   const [variants, setVariants] = useState<string[]>([])
   const [activeVariant, setActiveVariant] = useState<string | null>(null)
@@ -897,6 +898,7 @@ function VoiceCard({
     if (!hasTranscript || alignBusy) return
     setAlignBusy(true)
     setAlignError(null)
+    setAlignWarning(null)
     try {
       const job = await startVoiceAlignment(voice.voice_id)
       alignJobRef.current = { jobId: job.job_id, cancelled: false }
@@ -910,6 +912,11 @@ function VoiceCard({
       if (alignJobRef.current?.cancelled) return
       if (current.status === 'completed') {
         setAlignBoundaries(current.result?.boundaries ?? [])
+        if (current.within_latency_budget === false) {
+          setAlignWarning(
+            `Alignment took ${current.duration_seconds?.toFixed(1) ?? '?'}s, above the ${current.latency_budget_seconds.toFixed(1)}s budget. The result is usable; consider a faster provider or shorter clip.`,
+          )
+        }
       } else if (current.status === 'failed') {
         setAlignError(current.error || 'Alignment failed')
         setAlignBoundaries([])
@@ -927,6 +934,7 @@ function VoiceCard({
   useEffect(() => {
     setAlignBoundaries(null)
     setAlignError(null)
+    setAlignWarning(null)
   }, [voice.voice_id, voice.sample_text, voice.sha256])
 
   // Trigger alignment lazily the first time Precise resolves for this clip, and cancel
@@ -1243,6 +1251,10 @@ function VoiceCard({
                     ) : alignError ? (
                       <div className="flex items-center gap-1 text-[10px] text-warning" title={alignError}>
                         <AlertTriangle className="size-3" /> Alignment unavailable — using safe fallback
+                      </div>
+                    ) : alignWarning ? (
+                      <div className="flex items-center gap-1 text-[10px] text-warning" title={alignWarning}>
+                        <AlertTriangle className="size-3" /> Alignment exceeded latency budget
                       </div>
                     ) : alignBoundaries !== null ? (
                       shapedBoundaryCount > 0 ? (

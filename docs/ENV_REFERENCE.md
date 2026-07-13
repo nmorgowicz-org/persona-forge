@@ -44,6 +44,8 @@ Recommended (simple knobs):
 | `IDLE_UNLOAD_SECONDS` | `0` | Seconds after last request to unload model and free RAM; reload is transparent but adds latency. Set by LOW_RAM_MODE. |
 | `ALIGNER_MODEL_PATH` | (unset) | Optional override path to the MMS-300M forced-aligner ONNX model used by Precise prosody. When unset (the default) the model auto-downloads from Hugging Face on first alignment (pinned to an immutable revision, cached like the base checkpoints) — no manual placement needed. Set this only to point at a locally-provisioned copy on air-gapped hosts. Lazily loaded on first alignment and idle-unloaded. |
 | `ALIGNER_PROVIDERS` | `CPUExecutionProvider` | Comma-separated onnxruntime execution providers for the aligner (portable CPU baseline; add OpenVINO/CoreML where available). |
+| `ALIGNER_LATENCY_BUDGET_SECONDS` | `5` | Fail-closed warm p95 budget for Precise alignment. Job responses and `GET /alignment/performance` expose observed duration and budget status. |
+| `ALIGNER_IDLE_UNLOAD_SECONDS` | `120` | Seconds after the serialized alignment queue drains before releasing the ONNX session. |
 
 ## Memory / OpenVINO (advanced)
 

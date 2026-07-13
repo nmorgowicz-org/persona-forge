@@ -79,6 +79,16 @@ class TestOmniVoiceAudition:
 
 
 @pytest.mark.integration
+def test_alignment_performance_endpoint_exposes_budget(client):
+    response = client.get("/alignment/performance")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["budget_seconds"] > 0
+    assert payload["sample_count"] >= 0
+    assert isinstance(payload["within_budget"], bool)
+
+
+@pytest.mark.integration
 class TestOmniVoiceStitch:
 
     def test_pacing_targets_uses_shared_storyteller_targets(self, client):
