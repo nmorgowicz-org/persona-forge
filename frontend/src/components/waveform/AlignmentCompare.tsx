@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pause, Play } from 'lucide-react'
+import { Pause, Play, Repeat, X } from 'lucide-react'
 import type { AlignmentBoundary, ProsodyPausePlanEntry } from '@/lib/api'
 import { getVoice } from '@/lib/api'
 import { base64ToBlob } from '@/lib/utils'
@@ -88,6 +88,8 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
   const [hoverPct, setHoverPct] = useState<number | null>(null)
   const [playing, setPlaying] = useState<'original' | 'adjusted' | null>(null)
   const [positionMs, setPositionMs] = useState(0)
+  const [selection, setSelection] = useState<{ start: number; end: number } | null>(null)
+  const [loop, setLoop] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -113,15 +115,43 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
 
   const words = useMemo(() => (boundaries ?? []).filter((b) => b.text), [boundaries])
 
-  // Drive the shared playhead off whichever lane is playing (rAF, so it stays smooth).
+  const laneAudio = (lane: 'original' | 'adjusted') => (lane === 'original' ? origAudio.current : adjAudio.current)
+
+  const containerRef = useRef<HTMLDivElement | null>(null)
   const rafRef = useRef<number | undefined>(undefined)
+  // The active play region (loop bounds) and loop flag are read inside the rAF loop, so
+  // keep them in refs to dodge stale closures.
+  const regionRef = useRef<{ start: number; end: number } | null>(null)
+  const loopRef = useRef(loop)
+  loopRef.current = loop
+  const dragRef = useRef<{ lane: 'original' | 'adjusted'; startMs: number; endMs: number; moved: boolean } | null>(null)
+
+  const msAtClientX = (clientX: number) => {
+    const r = containerRef.current?.getBoundingClientRect()
+    if (!r) return 0
+    return Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * maxDurMs
+  }
+
+  // Drive the shared playhead off whichever lane is playing (rAF, so it stays smooth),
+  // honouring the loop region when one is set from a drag-selection.
   useEffect(() => {
     if (!playing) return
-    const el = playing === 'original' ? origAudio.current : adjAudio.current
+    const el = laneAudio(playing)
     if (!el) return
     const onEnd = () => setPlaying(null)
     el.addEventListener('ended', onEnd)
     const tick = () => {
+      const region = regionRef.current
+      if (region && el.currentTime * 1000 >= region.end) {
+        if (loopRef.current) {
+          el.currentTime = region.start / 1000
+        } else {
+          el.pause()
+          setPositionMs(region.end)
+          setPlaying(null)
+          return
+        }
+      }
       setPositionMs(el.currentTime * 1000)
       rafRef.current = requestAnimationFrame(tick)
     }
@@ -132,24 +162,63 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
     }
   }, [playing, origAudio, adjAudio])
 
-  const togglePlay = (lane: 'original' | 'adjusted') => {
-    const el = lane === 'original' ? origAudio.current : adjAudio.current
-    const other = lane === 'original' ? adjAudio.current : origAudio.current
-    other?.pause()
+  const startPlay = (lane: 'original' | 'adjusted', fromMs: number, region: { start: number; end: number } | null) => {
+    const el = laneAudio(lane)
+    laneAudio(lane === 'original' ? 'adjusted' : 'original')?.pause()
     if (!el) return
+    regionRef.current = region
+    el.currentTime = Math.max(0, fromMs / 1000)
+    setPositionMs(fromMs)
+    void el.play().then(() => setPlaying(lane)).catch(() => {})
+  }
+
+  const togglePlay = (lane: 'original' | 'adjusted') => {
     if (playing === lane) {
-      el.pause()
+      laneAudio(lane)?.pause()
       setPlaying(null)
       return
     }
-    el.currentTime = Math.max(0, positionMs / 1000)
-    void el.play().then(() => setPlaying(lane)).catch(() => {})
+    // Play the selection if one is set, else the whole lane from the playhead.
+    if (selection) startPlay(lane, selection.start, selection)
+    else startPlay(lane, positionMs, null)
   }
 
   const seekTo = (ms: number) => {
     setPositionMs(ms)
-    const el = playing === 'original' ? origAudio.current : adjAudio.current
+    const el = playing ? laneAudio(playing) : null
     if (el) el.currentTime = Math.max(0, ms / 1000)
+  }
+
+  // Click = seek, click-and-drag = select a region and immediately play (loop-aware) it.
+  const onLaneDown = (lane: 'original' | 'adjusted') => (e: React.MouseEvent) => {
+    e.preventDefault()
+    const ms = msAtClientX(e.clientX)
+    dragRef.current = { lane, startMs: ms, endMs: ms, moved: false }
+  }
+
+  const onStripMove = (e: React.MouseEvent) => {
+    const r = containerRef.current?.getBoundingClientRect()
+    if (r) setHoverPct(Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100)))
+    const d = dragRef.current
+    if (!d) return
+    d.endMs = msAtClientX(e.clientX)
+    if (Math.abs(d.endMs - d.startMs) > 40) d.moved = true
+    setSelection({ start: Math.min(d.startMs, d.endMs), end: Math.max(d.startMs, d.endMs) })
+  }
+
+  const finishDrag = () => {
+    const d = dragRef.current
+    dragRef.current = null
+    if (!d) return
+    if (!d.moved) {
+      setSelection(null)
+      regionRef.current = null
+      seekTo(d.startMs)
+      return
+    }
+    const region = { start: Math.min(d.startMs, d.endMs), end: Math.max(d.startMs, d.endMs) }
+    setSelection(region)
+    startPlay(d.lane, region.start, region)
   }
 
   if (!adjusted) return null
@@ -159,36 +228,67 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
     ? words.find((w) => hoverMs / 1000 >= w.start && hoverMs / 1000 <= w.end) ?? null
     : null
 
-  const PlayButton = ({ lane }: { lane: 'original' | 'adjusted' }) => (
+  const selWidth = selection ? `${Math.max(0, ((selection.end - selection.start) / maxDurMs) * 100)}%` : '0%'
+  const TransportButton = ({ lane }: { lane: 'original' | 'adjusted' }) => (
     <button
       type="button"
-      onClick={(e) => { e.stopPropagation(); togglePlay(lane) }}
-      className="absolute right-1.5 top-1.5 z-20 grid size-6 place-items-center rounded-full border border-border bg-background/80 text-foreground/80 transition hover:bg-background hover:text-foreground"
-      title={playing === lane ? 'Pause' : 'Play this lane'}
+      onClick={() => togglePlay(lane)}
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold transition ${
+        playing === lane ? 'border-amber-400 bg-amber-400/15 text-amber-200' : 'border-border bg-background/60 text-foreground/80 hover:bg-background'
+      }`}
+      title={playing === lane ? 'Pause' : selection ? 'Play selection' : 'Play from playhead'}
     >
       {playing === lane ? <Pause className="size-3" /> : <Play className="size-3 translate-x-px" />}
+      {lane === 'original' ? 'Original' : 'Adjusted'}
     </button>
   )
 
   return (
     <div
-      className="relative space-y-1"
-      onMouseMove={(event) => {
-        const rect = event.currentTarget.getBoundingClientRect()
-        setHoverPct(Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100)))
-      }}
-      onMouseLeave={() => setHoverPct(null)}
+      ref={containerRef}
+      className="relative select-none space-y-1"
+      onMouseMove={onStripMove}
+      onMouseUp={finishDrag}
+      onMouseLeave={() => { setHoverPct(null); finishDrag() }}
     >
+      {/* Transport — A/B play, loop, and the current drag-selection. */}
+      <div className="flex items-center gap-2 pb-0.5">
+        <TransportButton lane="original" />
+        <TransportButton lane="adjusted" />
+        <button
+          type="button"
+          onClick={() => setLoop((v) => !v)}
+          className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold transition ${
+            loop ? 'border-cyan-400 bg-cyan-400/15 text-cyan-200' : 'border-border bg-background/60 text-foreground/70 hover:bg-background'
+          }`}
+          title="Loop the selected region"
+        >
+          <Repeat className="size-3" /> Loop
+        </button>
+        {selection && (
+          <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/10 px-2 py-1 font-mono text-[10px] tabular-nums text-amber-200">
+            {(selection.start / 1000).toFixed(2)}–{(selection.end / 1000).toFixed(2)}s
+            <button type="button" onClick={() => { setSelection(null); regionRef.current = null }} title="Clear selection" className="text-amber-200/70 hover:text-amber-100">
+              <X className="size-3" />
+            </button>
+          </span>
+        )}
+        <span className="ml-auto text-[9px] text-muted-foreground/70">drag a lane to loop a slice</span>
+      </div>
+
       {/* ORIGINAL lane — word text + the snapped cut in its true (pre-insertion) time. */}
       <div className="relative">
         <div className="absolute -top-2 left-2 z-20 rounded bg-muted px-1 py-px text-[9px] font-bold text-muted-foreground">ORIGINAL</div>
         <div
-          className="relative h-14 cursor-text overflow-hidden rounded border border-border bg-muted/20"
-          onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); seekTo(((e.clientX - r.left) / r.width) * maxDurMs) }}
+          className="relative h-14 cursor-ew-resize overflow-hidden rounded border border-border bg-muted/20"
+          onMouseDown={onLaneDown('original')}
         >
           <div className="absolute inset-y-0 left-0 opacity-80" style={{ width: pct(original?.durationMs ?? 0) }}>
             <WaveformLane peaks={original?.peaks ?? null} durMs={original?.durationMs ?? null} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
           </div>
+          {selection && (
+            <div className="pointer-events-none absolute inset-y-0 z-0 border-x border-amber-300/60 bg-amber-300/15" style={{ left: pct(selection.start), width: selWidth }} />
+          )}
           {/* The cut mapped back to original time (src_cut_ms) — lines up with the words. */}
           {boundaryPlan.map((marker, index) => {
             const at = marker.src_cut_ms ?? marker.at_ms
@@ -201,7 +301,6 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
               />
             )
           })}
-          <PlayButton lane="original" />
         </div>
         {/* Word labels ride below, tilted so dense clips stay readable. */}
         <div className="pointer-events-none relative h-7">
@@ -221,12 +320,15 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
       <div className="relative">
         <div className="absolute -top-2 left-2 z-20 rounded bg-cyan-500 px-1 py-px text-[9px] font-bold text-white">ADJUSTED</div>
         <div
-          className="relative h-14 cursor-text overflow-hidden rounded border border-border bg-muted/20"
-          onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); seekTo(((e.clientX - r.left) / r.width) * maxDurMs) }}
+          className="relative h-14 cursor-ew-resize overflow-hidden rounded border border-border bg-muted/20"
+          onMouseDown={onLaneDown('adjusted')}
         >
           <div className="absolute inset-y-0 left-0" style={{ width: pct(adjusted.durationMs) }}>
             <WaveformLane peaks={adjusted.peaks} durMs={adjusted.durationMs} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
           </div>
+          {selection && (
+            <div className="pointer-events-none absolute inset-y-0 z-0 border-x border-amber-300/60 bg-amber-300/15" style={{ left: pct(selection.start), width: selWidth }} />
+          )}
           {boundaryPlan.map((marker, index) => {
             const start = cutMs(marker.cut_sample)
             const manufactured = marker.insert_ms > 0
@@ -243,31 +345,31 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
               </span>
             )
           })}
-          <PlayButton lane="adjusted" />
         </div>
       </div>
 
       <TimeRuler durationMs={maxDurMs} />
 
-      {/* Playhead (during playback) + hover cursor with the word under the pointer. */}
-      {playing && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 bottom-4 z-30" style={{ left: pct(positionMs) }}>
-          <div className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-emerald-400/90" />
+      {/* Amber playhead — pins the current position across both lanes, like the decks. */}
+      {positionMs > 0 && (
+        <div className="pointer-events-none absolute inset-x-0 top-6 bottom-4 z-30" style={{ left: pct(positionMs) }}>
+          <div className="absolute inset-y-0 w-0.5 -translate-x-1/2" style={{ backgroundColor: 'hsl(38 95% 62%)' }} />
+          <div className="absolute -top-1 size-1.5 -translate-x-1/2 rotate-45" style={{ backgroundColor: 'hsl(38 95% 62%)' }} />
         </div>
       )}
       {hoverPct !== null && hoverMs !== null && (
         <>
-          <div className="pointer-events-none absolute inset-x-0 top-0 bottom-4 z-30" style={{ left: `${hoverPct}%` }}>
+          <div className="pointer-events-none absolute inset-x-0 top-6 bottom-4 z-30" style={{ left: `${hoverPct}%` }}>
             <div className="absolute inset-y-0 w-px bg-cyan-300/70" />
           </div>
-          <span className="pointer-events-none absolute top-0 z-30 rounded bg-background/90 px-1 text-[9px] font-mono tabular-nums text-cyan-200 shadow-sm" style={{ left: `${hoverPct}%`, transform: hoverPct <= 8 ? 'translateX(0)' : hoverPct >= 92 ? 'translateX(-100%)' : 'translateX(-50%)' }}>
+          <span className="pointer-events-none absolute top-6 z-30 rounded bg-background/90 px-1 text-[9px] font-mono tabular-nums text-cyan-200 shadow-sm" style={{ left: `${hoverPct}%`, transform: hoverPct <= 8 ? 'translateX(0)' : hoverPct >= 92 ? 'translateX(-100%)' : 'translateX(-50%)' }}>
             {(hoverMs / 1000).toFixed(2)}s{hovered ? ` · "${hovered.text}" ${(hovered.score * 100).toFixed(0)}%` : ''}
           </span>
         </>
       )}
 
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-muted-foreground">
-        <span>▶ click a lane to play · click the strip to seek</span>
+        <span>click to seek · drag to select &amp; loop</span>
         <span>◆ manufactured pause</span>
         <span>● natural boundary</span>
         <span className="text-cyan-300">sentence</span>
