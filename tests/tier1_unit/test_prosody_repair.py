@@ -2,9 +2,14 @@ import threading
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 from qwen3_tts.forced_alignment import Boundary
-from qwen3_tts.prosody_repair import repair_segment_audio, suggest_stitch_gap_targets
+from qwen3_tts.prosody_repair import (
+    build_alignment_pause_edits,
+    repair_segment_audio,
+    suggest_stitch_gap_targets,
+)
 
 
 def _voiced(seconds: float = 2.0, sr: int = 1000) -> np.ndarray:
@@ -16,6 +21,32 @@ def test_stitch_gap_targets_use_terminal_punctuation_and_style():
     assert suggest_stitch_gap_targets(
         ["First sentence.", "Wait…", "last"], "Storyteller"
     ) == [1000.0, 1500.0]
+
+
+def test_clause_pause_is_expand_only():
+    # "togs," ran straight into the next word (no natural gap): the comma must be
+    # skipped, never fabricated. The sentence-end owner is still manufactured.
+    boundaries = [
+        Boundary("togs", 0.0, 0.5, 0.99, "word", owns_clause=True).to_dict(),
+        Boundary("heading", 0.5, 1.0, 0.99, "word").to_dict(),
+        Boundary("arvo", 1.0, 1.5, 0.99, "sentence_split").to_dict(),
+        Boundary("its", 1.6, 2.0, 0.99, "word").to_dict(),
+    ]
+    edits = build_alignment_pause_edits(boundaries, "Neutral", 1.0, 0.0)
+    ats = {round(e["at_ms"]) for e in edits}
+    assert 500 not in ats  # zero-gap comma skipped
+    assert 1500 in ats  # sentence-end still manufactured
+
+
+def test_clause_pause_kept_when_gap_exists():
+    # A comma the speaker *did* pause at (100 ms gap) is expanded toward target.
+    boundaries = [
+        Boundary("first", 0.0, 0.5, 0.99, "word", owns_clause=True).to_dict(),
+        Boundary("second", 0.6, 1.0, 0.99, "word").to_dict(),
+    ]
+    edits = build_alignment_pause_edits(boundaries, "Neutral", 1.0, 0.0)
+    assert [round(e["at_ms"]) for e in edits] == [500]
+    assert edits[0]["existing_ms"] == pytest.approx(100.0)
 
 
 def test_auto_clean_segment_stays_sample_equivalent():

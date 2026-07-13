@@ -38,9 +38,11 @@ logger = logging.getLogger(__name__)
 ENGINE_ID = "mms-onnx-v1"
 MODEL_ID = "onnx-community/mms-300m-1130-forced-aligner-ONNX"
 MODEL_REVISION = "2100fb247d8e43962eef24491597fbeb8b469531"  # immutable pin
-MODEL_ONNX_FILE = "onnx/model_int8.onnx"  # INT8 aligner weights within the repo
+MODEL_ONNX_FILE = "onnx/model_int8.onnx"  # default INT8 aligner weights within the repo
+# fp32 weights (``onnx/model.onnx``) give tighter word boundaries at higher latency/RAM;
+# select via ALIGNER_ONNX_FILE. Both files ship at the pinned MODEL_REVISION.
 PREPROCESS_VERSION = 1
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # bumped: cache identity now includes the ONNX weight file
 DEFAULT_LANGUAGE = "en"
 TARGET_SR = 16000
 DEFAULT_GRANULARITY = "word"
@@ -217,6 +219,12 @@ def _model_path() -> str:
     return os.getenv("ALIGNER_MODEL_PATH", "").strip()
 
 
+def _onnx_file() -> str:
+    """Which ONNX weight file to fetch from the repo. Defaults to INT8; set
+    ``ALIGNER_ONNX_FILE=onnx/model.onnx`` for the fp32 weights."""
+    return os.getenv("ALIGNER_ONNX_FILE", "").strip() or MODEL_ONNX_FILE
+
+
 def resolve_model_path() -> str:
     """Return a filesystem path to the aligner ONNX weights, downloading them on
     first use if necessary.
@@ -239,16 +247,17 @@ def resolve_model_path() -> str:
 
     from huggingface_hub import hf_hub_download  # noqa: PLC0415 — deferred import
 
+    onnx_file = _onnx_file()
     logger.info(
         "Fetching forced-aligner weights %s@%s:%s (first-run cache warm)",
-        MODEL_ID, MODEL_REVISION, MODEL_ONNX_FILE,
+        MODEL_ID, MODEL_REVISION, onnx_file,
     )
     # HF caches by (repo, revision, file); subsequent calls resolve to the cached
     # copy without a network round-trip. The revision pin keeps the cache
     # identity stamped into meta.json valid across restarts.
     return hf_hub_download(
         repo_id=MODEL_ID,
-        filename=MODEL_ONNX_FILE,
+        filename=onnx_file,
         revision=MODEL_REVISION,
     )
 
@@ -359,8 +368,8 @@ def sha256_text(text: str) -> str:
 # invalidates a cached alignment (plan §5.4).
 IDENTITY_KEYS = (
     "engine", "audio_sha256", "transcript_sha256", "language",
-    "model_id", "model_revision", "preprocess_version", "schema_version",
-    "sample_rate", "granularity",
+    "model_id", "model_revision", "model_file", "preprocess_version",
+    "schema_version", "sample_rate", "granularity",
 )
 
 
@@ -371,6 +380,10 @@ def cache_identity(
     language: str = DEFAULT_LANGUAGE,
     granularity: str = DEFAULT_GRANULARITY,
 ) -> dict[str, Any]:
+    # ``model_file`` records which ONNX weights produced the alignment (INT8 vs fp32),
+    # so switching ALIGNER_ONNX_FILE / ALIGNER_MODEL_PATH invalidates stale cached runs.
+    override = _model_path()
+    model_file = os.path.basename(override) if override else _onnx_file()
     return {
         "engine": ENGINE_ID,
         "audio_sha256": audio_sha256,
@@ -378,6 +391,7 @@ def cache_identity(
         "language": language,
         "model_id": MODEL_ID,
         "model_revision": MODEL_REVISION,
+        "model_file": model_file,
         "preprocess_version": PREPROCESS_VERSION,
         "schema_version": SCHEMA_VERSION,
         "sample_rate": TARGET_SR,

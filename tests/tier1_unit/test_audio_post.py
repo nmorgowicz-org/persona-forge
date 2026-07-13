@@ -460,6 +460,32 @@ class TestBoundaryPausePlan:
         assert prov in ("energy_min", "zero_cross")
         assert abs(x[cut]) < 0.1
 
+    def test_resolve_safe_cut_snaps_to_distant_trough(self):
+        sr = 24000
+        # Word, a real 30 ms gap, then the next word. The aligner mis-placed the
+        # boundary 25 ms early (inside the first word). A wide search must escape the
+        # word and land in the gap, not at the near-boundary sample.
+        word = _sine(180.0, 0.10, sr, amplitude=0.8)
+        gap = np.full(int(sr * 0.03), 1e-5, dtype=np.float32)
+        x = np.concatenate([word, gap, word])
+        gap_start = word.size
+        misplaced = gap_start - int(sr * 0.025)  # 25 ms before the true gap
+        cut, prov = resolve_safe_cut(x, sr, misplaced, search_ms=50.0)
+        assert gap_start <= cut <= gap_start + gap.size
+        assert abs(x[cut]) < 0.01
+
+    def test_plan_clamps_search_between_close_boundaries(self):
+        sr = 24000
+        x = self._blended_clip(sr)
+        # Two boundaries 40 ms apart: even with a 50 ms search each cut must stay on its
+        # own side of the midpoint so they never collide.
+        plan = plan_boundary_pauses(
+            x, sr,
+            [{"at_ms": 300.0, "target_ms": 200.0}, {"at_ms": 340.0, "target_ms": 200.0}],
+        )
+        cuts = sorted(p["cut_ms"] for p in plan)
+        assert cuts[0] <= 320.0 <= cuts[1]
+
     def test_plan_is_sorted_and_serializable(self):
         sr = 24000
         x = self._blended_clip(sr)

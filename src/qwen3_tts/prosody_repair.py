@@ -27,6 +27,11 @@ from qwen3_tts.prosody_triage import MODE_PRECISE, triage
 logger = logging.getLogger(__name__)
 
 VALID_REPAIR_MODES = frozenset({"off", "auto", "precise"})
+# A clause/comma pause is only ever *expanded* from a gap the speaker already left — we
+# never fabricate one from zero, because a comma inserted where the speaker ran straight
+# through reads as a jarring out-of-nowhere pause (the "Grab your togs, |" case). A
+# sentence-end owner is exempt: manufacturing a full stop where none existed is expected.
+CLAUSE_MIN_EXISTING_MS = 40.0
 _PUNCT_TRIGGER = re.compile(r"(\.{3,}|…)|([.!?])|([,;:]|—|–)")
 _CACHE_MAX = 128
 _CACHE_LOCK = threading.Lock()
@@ -96,6 +101,9 @@ def build_alignment_pause_edits(
                 0.0,
                 (float(boundaries[index + 1].get("start", end)) - end) * 1000.0,
             )
+        # Expand-only for clause pauses: don't cut into running speech at a comma.
+        if key == "comma" and existing_ms < CLAUSE_MIN_EXISTING_MS:
+            continue
         edits.append(
             {
                 "at_ms": end * 1000.0,
@@ -134,6 +142,9 @@ def build_vad_pause_edits(
             if gap_start <= at_sec <= gap_end:
                 existing_ms = (gap_end - gap_start) * 1000.0
                 break
+        # Expand-only for clause pauses (mirrors the alignment path): no fabricated commas.
+        if key == "comma" and existing_ms < CLAUSE_MIN_EXISTING_MS:
+            continue
         edits.append(
             {
                 "at_ms": at_sec * 1000.0,

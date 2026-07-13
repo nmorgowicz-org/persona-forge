@@ -69,6 +69,7 @@ import { cn } from '@/lib/utils'
 import { InfoIcon } from '@/components/InfoIcon'
 import { Badge } from '@/components/ui/badge'
 import { RegionEditor } from '@/components/waveform/RegionEditor'
+import { AlignmentCompare } from '@/components/waveform/AlignmentCompare'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
@@ -1145,7 +1146,7 @@ function VoiceCard({
         <div className="relative group space-y-1">
           {previewAudio ? (
             <div className="relative space-y-1">
-            <div className="relative group/original opacity-40 grayscale">
+            <div className="relative group/original opacity-75">
               <div className="absolute -top-2 left-2 z-10 rounded bg-muted px-1 py-px text-[9px] font-bold text-muted-foreground">ORIGINAL</div>
               <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
             </div>
@@ -1155,16 +1156,19 @@ function VoiceCard({
                    {stylePreset.toUpperCase()} PREVIEW
                  </div>
                  <MiniAudioDeck src={previewAudio.url} blob={previewAudio.blob} autoPlay={false} />
-                 {previewAudio.plan.length > 0 && (
-                   <RegionEditor
-                     audioBase64={previewAudio.audioBase64}
-                     boundaryPlan={previewAudio.plan}
-                     sampleCount={previewAudio.sampleCount}
-                     readOnly
-                     showPlayer={false}
-                   />
-                 )}
                </div>
+
+               {previewAudio.plan.length > 0 && (
+                 <div className="rounded border border-border/60 bg-muted/10 p-2 pt-3">
+                   <AlignmentCompare
+                     voiceId={voice.voice_id}
+                     adjustedBase64={previewAudio.audioBase64}
+                     adjustedSampleCount={previewAudio.sampleCount}
+                     boundaryPlan={previewAudio.plan}
+                     boundaries={alignBoundaries}
+                   />
+                 </div>
+               )}
             </div>
           ) : (
             <VoiceAudioAutoPlayer voiceId={voice.voice_id} />

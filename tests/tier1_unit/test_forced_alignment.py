@@ -127,6 +127,18 @@ def test_cache_identity_covers_all_fields_and_invalidates():
     assert not fa.identity_matches(None, ident)
 
 
+def test_cache_identity_tracks_onnx_weight_file(monkeypatch):
+    # Switching the aligner weights (INT8 -> fp32) must invalidate a cached run.
+    monkeypatch.delenv("ALIGNER_MODEL_PATH", raising=False)
+    monkeypatch.delenv("ALIGNER_ONNX_FILE", raising=False)
+    int8 = fa.cache_identity(fa.sha256_text("audio"), fa.sha256_text("hello world."))
+    assert int8["model_file"] == fa.MODEL_ONNX_FILE
+    monkeypatch.setenv("ALIGNER_ONNX_FILE", "onnx/model.onnx")
+    fp32 = fa.cache_identity(fa.sha256_text("audio"), fa.sha256_text("hello world."))
+    assert fp32["model_file"] == "onnx/model.onnx"
+    assert not fa.identity_matches(int8, fp32)
+
+
 def test_hashing_is_stable_and_distinct():
     assert fa.sha256_text("abc") == fa.sha256_text("abc")
     assert fa.sha256_text("abc") != fa.sha256_text("abcd")
