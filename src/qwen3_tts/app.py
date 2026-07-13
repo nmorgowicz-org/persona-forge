@@ -20,7 +20,15 @@ logger = logging.getLogger(__name__)
 import soundfile as sf
 from flask import Flask, Response, jsonify, request, send_from_directory, send_file
 
-from qwen3_tts import audio_style, model, omnivoice_engine, segment_library, voice_design, voice_library
+from qwen3_tts import (
+    audio_style,
+    model,
+    omnivoice_engine,
+    prosody_repair,
+    segment_library,
+    voice_design,
+    voice_library,
+)
 from qwen3_tts.asr_check import validate_reference_text
 from qwen3_tts.alignment_jobs import AlignmentJobManager
 
@@ -1405,6 +1413,7 @@ def _resolve_stitch_plan(
     trims: list[tuple[float, float]] = []
     fades: list[tuple[float, float]] = []
     edits: list[list[dict[str, Any]]] = []
+    repair_requests: list[tuple[str, str]] = []
     for clip in clips:
         if not isinstance(clip, dict):
             return None
@@ -1412,6 +1421,10 @@ def _resolve_stitch_plan(
         if entry is None:
             return None
         selected.append(entry)
+        repair_mode = clip.get("prosody_mode", "off")
+        if repair_mode not in prosody_repair.VALID_REPAIR_MODES:
+            return None
+        repair_requests.append((repair_mode, str(clip.get("text") or "").strip()))
         try:
             trims.append(
                 (float(clip.get("trim_start_ms") or 0.0), float(clip.get("trim_end_ms") or 0.0))
@@ -1427,6 +1440,16 @@ def _resolve_stitch_plan(
         edits.append(clip_edits)
 
     kwargs: dict[str, Any] = {}
+
+    style_preset = str(stitch_plan.get("style_preset") or "Neutral")
+    try:
+        pace_multiplier = float(stitch_plan.get("pace_multiplier", 1.0))
+        pause_offset_ms = float(stitch_plan.get("pause_offset_ms", 0.0))
+    except (TypeError, ValueError):
+        return None
+    if not 0.25 <= pace_multiplier <= 4.0 or not -2000.0 <= pause_offset_ms <= 5000.0:
+        return None
+
     if any(t != (0.0, 0.0) for t in trims):
         kwargs["trims"] = trims
     if any(f != (0.0, 0.0) for f in fades):
@@ -1463,7 +1486,57 @@ def _resolve_stitch_plan(
         except (TypeError, ValueError):
             return None
 
+    repaired_selected: list[tuple[Any, int]] = []
+    for (wav, sr), (repair_mode, transcript) in zip(selected, repair_requests):
+        if repair_mode == "off":
+            repaired_selected.append((wav, sr))
+            continue
+        repaired, _plan, _metadata = prosody_repair.repair_segment_audio(
+            wav,
+            int(sr),
+            transcript,
+            mode=repair_mode,
+            style_preset=style_preset,
+            pace_multiplier=pace_multiplier,
+            pause_offset_ms=pause_offset_ms,
+        )
+        repaired_selected.append((repaired, sr))
+
+    selected = repaired_selected
     return selected, kwargs
+
+
+@app.post("/omnivoice/stitch/pacing-targets")
+def omnivoice_stitch_pacing_targets():
+    """Resolve inter-segment pause targets through the canonical prosody target table."""
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    transcripts = data.get("transcripts")
+    if (
+        not isinstance(transcripts, list)
+        or not transcripts
+        or not all(isinstance(text, str) for text in transcripts)
+    ):
+        return jsonify({"error": "transcripts must be a non-empty list of strings"}), 400
+    try:
+        pace_multiplier = float(data.get("pace_multiplier", 1.0))
+        pause_offset_ms = float(data.get("pause_offset_ms", 0.0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "pace_multiplier and pause_offset_ms must be numeric"}), 400
+    if not 0.25 <= pace_multiplier <= 4.0 or not -2000.0 <= pause_offset_ms <= 5000.0:
+        return jsonify({"error": "pacing values are out of range"}), 400
+    style_preset = str(data.get("style_preset") or "Neutral")
+    return jsonify(
+        {
+            "padding_ms": prosody_repair.suggest_stitch_gap_targets(
+                transcripts, style_preset, pace_multiplier, pause_offset_ms
+            ),
+            "style_preset": style_preset
+                if style_preset in audio_style.PROSODY_MAPS
+                else "Neutral",
+        }
+    )
 
 
 @app.post("/omnivoice/segments")

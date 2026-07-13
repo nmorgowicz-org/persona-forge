@@ -60,6 +60,7 @@ export interface StitchPlanClip {
   trimEndMs: number
   fadeInMs: number
   fadeOutMs: number
+  prosodyMode?: 'off' | 'auto' | 'precise'
 }
 
 export interface StitchPlanDsp {
@@ -70,6 +71,9 @@ export interface StitchPlanDsp {
   compressEnabled: boolean
   compressThresholdDb: number
   compressRatio: number
+  prosodyStylePreset: 'Neutral' | 'Storyteller' | 'Calm' | 'Energetic' | 'Broadcast' | 'Clean'
+  paceMultiplier: number
+  pauseOffsetMs: number
 }
 
 interface StoreState {
@@ -465,6 +469,9 @@ export const useAppStore = create<StoreState>((set) => ({
       compressEnabled: true,
       compressThresholdDb: -24,
       compressRatio: 2.5,
+      prosodyStylePreset: 'Neutral',
+      paceMultiplier: 1,
+      pauseOffsetMs: 0,
     },
     ovStitchEditorOpen: false,
     ovStitchPreviewUrl: null,

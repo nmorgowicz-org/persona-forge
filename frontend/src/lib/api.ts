@@ -786,6 +786,8 @@ export interface StitchPlanPayload {
     trimEndMs: number
     fadeInMs: number
     fadeOutMs: number
+    text?: string
+    prosodyMode?: 'off' | 'auto' | 'precise'
     edits?: StitchPlanRegionEdit[]
   }[]
   paddingMs: number[]
@@ -794,6 +796,9 @@ export interface StitchPlanPayload {
   finalTargetDbfs: number
   finalCeilingDb: number
   compress: { thresholdDb: number; ratio: number; attackMs: number; releaseMs: number } | null
+  stylePreset: string
+  paceMultiplier: number
+  pauseOffsetMs: number
 }
 
 // Backend (_resolve_stitch_plan/_resolve_one_clip_ref in app.py) reads snake_case keys only —
@@ -809,6 +814,8 @@ function serializeStitchPlan(plan: StitchPlanPayload) {
       trim_end_ms: c.trimEndMs,
       fade_in_ms: c.fadeInMs,
       fade_out_ms: c.fadeOutMs,
+      text: c.text,
+      prosody_mode: c.prosodyMode,
       edits: c.edits?.length
         ? c.edits.map((e) => ({
             type: e.type,
@@ -835,7 +842,30 @@ function serializeStitchPlan(plan: StitchPlanPayload) {
           release_ms: plan.compress.releaseMs,
         }
       : undefined,
+    style_preset: plan.stylePreset,
+    pace_multiplier: plan.paceMultiplier,
+    pause_offset_ms: plan.pauseOffsetMs,
   }
+}
+
+export async function getStitchPacingTargets(params: {
+  transcripts: string[]
+  stylePreset: string
+  paceMultiplier: number
+  pauseOffsetMs: number
+}): Promise<{ padding_ms: number[]; style_preset: string }> {
+  const res = await fetch('/omnivoice/stitch/pacing-targets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      transcripts: params.transcripts,
+      style_preset: params.stylePreset,
+      pace_multiplier: params.paceMultiplier,
+      pause_offset_ms: params.pauseOffsetMs,
+    }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
 }
 
 export async function renderStitchPlan(plan: StitchPlanPayload): Promise<Blob> {

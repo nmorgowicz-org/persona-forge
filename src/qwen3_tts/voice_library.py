@@ -85,11 +85,6 @@ def set_active_variant(voice_id: str, variant_filename: str | None = None) -> bo
         return False
 
 
-# Interior punctuation → pause-type classification, shared by the alignment-free VAD path
-# and mirrored from get_pause_targets: ellipsis, then sentence-enders, then clause marks.
-_PUNCT_TRIGGER = re.compile(r"(\.{3,}|…|…)|([.!?])|([,;:]|—|–)")
-
-
 def _load_master_wav(voice_id: str) -> tuple[np.ndarray, int, bytes] | None:
     """Resolve and read a voice's master reference (original.wav, legacy reference.wav).
 
@@ -126,41 +121,11 @@ def build_vad_pause_edits(
     the model. Less precise than alignment (proportional, not acoustic), but strictly
     better than the energy path on a zero-gap clip, which has no interior gap to edit.
     """
-    prosody = PROSODY_MAPS.get(style_preset, PROSODY_MAPS["Neutral"])
-    text = transcript or ""
-    trimmed_len = len(text.rstrip())
-    if trimmed_len == 0:
-        return []
-    duration = wav.size / float(sr) if sr else 0.0
-    gaps = detect_pause_intervals(wav, sr)
-    edits: list[dict[str, Any]] = []
-    for m in _PUNCT_TRIGGER.finditer(text):
-        if m.group(1):
-            key = "ellipsis"
-        elif m.group(2):
-            key = "sentence_end"
-        elif m.group(3):
-            key = "comma"
-        else:
-            continue
-        if m.end() >= trimmed_len:  # interior only — a terminal mark has no downstream audio
-            continue
-        target_ms = prosody.get(key, prosody["natural"]) * pace_multiplier + pause_offset_ms
-        if target_ms <= 0:
-            continue
-        at_sec = (m.start() / len(text)) * duration
-        existing_ms = 0.0
-        for gap_start, gap_end in gaps:
-            if gap_start <= at_sec <= gap_end:
-                existing_ms = (gap_end - gap_start) * 1000.0
-                break
-        edits.append({
-            "at_ms": at_sec * 1000.0,
-            "target_ms": target_ms,
-            "existing_ms": existing_ms,
-            "origin": "vad",
-        })
-    return edits
+    from qwen3_tts.prosody_repair import build_vad_pause_edits as shared_builder
+
+    return shared_builder(
+        wav, sr, transcript, style_preset, pace_multiplier, pause_offset_ms
+    )
 
 
 def get_vad_directed_wav(
@@ -215,32 +180,11 @@ def build_alignment_pause_edits(
     next word, so a partially-blended boundary is resized rather than double-padded; a
     boundary that already has enough silence yields a net no-op insert.
     """
-    prosody = PROSODY_MAPS.get(style_preset, PROSODY_MAPS["Neutral"])
-    edits: list[dict[str, Any]] = []
-    for i, b in enumerate(boundaries):
-        kind = b.get("kind")
-        if kind == "uncertain":
-            continue
-        if kind == "sentence_split":
-            target_key = "sentence_end"
-        elif b.get("owns_clause"):
-            target_key = "comma"
-        else:
-            continue
-        target_ms = prosody.get(target_key, prosody["natural"]) * pace_multiplier + pause_offset_ms
-        if target_ms <= 0:
-            continue
-        word_end = float(b.get("end", 0.0))
-        existing_ms = 0.0
-        if i + 1 < len(boundaries):
-            existing_ms = max(0.0, (float(boundaries[i + 1].get("start", word_end)) - word_end) * 1000.0)
-        edits.append({
-            "at_ms": word_end * 1000.0,
-            "target_ms": target_ms,
-            "existing_ms": existing_ms,
-            "origin": "alignment",
-        })
-    return edits
+    from qwen3_tts.prosody_repair import build_alignment_pause_edits as shared_builder
+
+    return shared_builder(
+        boundaries, style_preset, pace_multiplier, pause_offset_ms
+    )
 
 
 def get_alignment_directed_wav(

@@ -6,6 +6,7 @@ import { useAppStore, type StitchPlanClip } from '@/store'
 import { base64ToBlob, cn } from '@/lib/utils'
 import {
   renderStitchPlan,
+  getStitchPacingTargets,
   getSegmentAudioBase64,
   getVoice,
   type StitchPlanPayload,
@@ -529,6 +530,18 @@ function StitchTimelineClip({
           </span>
         )}
         <div className="flex shrink-0 items-center gap-1.5">
+          <select
+            value={clip.prosodyMode ?? 'auto'}
+            onChange={(event) => onUpdate(clip.clipId, { prosodyMode: event.currentTarget.value as StitchPlanClip['prosodyMode'] })}
+            onMouseDown={(event) => event.stopPropagation()}
+            className="rounded border border-border/50 bg-muted/50 px-1 py-0.5 text-[10px] text-muted-foreground"
+            aria-label="Internal pacing repair mode"
+            title="Repair internal blended sentence boundaries before stitching"
+          >
+            <option value="off">Repair off</option>
+            <option value="auto">Repair auto</option>
+            <option value="precise">Repair precise</option>
+          </select>
           {isReordering && (
             <div className="flex items-center text-muted-foreground/60">
               <GripVertical className="size-3.5" />
@@ -1258,6 +1271,13 @@ export function StitchDspControls({ open, onToggle }: { open: boolean; onToggle:
             <SliderField label="Final target" value={dsp.finalTargetDbfs} min={-40} max={-10} step={0.5} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ finalTargetDbfs: v })} />
             <SliderField label="Final ceiling" value={dsp.finalCeilingDb} min={-6} max={0} step={0.2} format={(v) => `${v} dB`} onChange={(v) => setDsp({ finalCeilingDb: v })} />
             <SliderField label="Crossfade" value={dsp.crossfadeMs} min={0} max={400} step={5} format={(v) => `${v} ms`} onChange={(v) => setDsp({ crossfadeMs: v })} />
+            <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
+              Pacing style
+              <select value={dsp.prosodyStylePreset} onChange={(e) => setDsp({ prosodyStylePreset: e.currentTarget.value as typeof dsp.prosodyStylePreset })} className="rounded border border-border bg-background px-2 py-1 text-xs text-foreground">
+                {['Neutral', 'Storyteller', 'Calm', 'Energetic', 'Broadcast', 'Clean'].map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </label>
+            <SliderField label="Pace" value={dsp.paceMultiplier} min={0.5} max={2} step={0.05} format={(v) => `${v.toFixed(2)}×`} onChange={(v) => setDsp({ paceMultiplier: v })} />
             <div className="col-span-2 flex items-center justify-between pt-1">
               <label className="flex items-center gap-2 text-xs text-foreground">
                 <input type="checkbox" checked={dsp.compressEnabled} onChange={(e) => setDsp({ compressEnabled: e.currentTarget.checked })} className="h-3.5 w-3.5 accent-cyan-500" />
@@ -1343,9 +1363,12 @@ function StitchEditorBody({
   const setPreviewUrl = useAppStore((s) => s.setOvStitchPreviewUrl)
   const setPreviewBlob = useAppStore((s) => s.setOvStitchPreviewBlob)
   const setIsRendering = useAppStore((s) => s.setOvIsRenderingPreview)
+  const setPaddingMs = useAppStore((s) => s.setOvStitchPlanPaddingMs)
+  const setClips = useAppStore((s) => s.setOvStitchPlanClips)
   const [showDsp, setShowDsp] = useState(false)
   const [staleFlags, setStaleFlags] = useState(true)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  const [isNormalizingPacing, setIsNormalizingPacing] = useState(false)
   const [regionEditsByClip, setRegionEditsByClip] = useState<RegionEditsByClip>({})
   const debounceRef = useRef<number | null>(null)
   const lastHashRef = useRef('')
@@ -1368,6 +1391,8 @@ function StitchEditorBody({
           trimEndMs: c.trimEndMs,
           fadeInMs: c.fadeInMs,
           fadeOutMs: c.fadeOutMs,
+          text: c.text,
+          prosodyMode: c.prosodyMode ?? 'auto',
           edits: edits.length
             ? edits.map((e): StitchPlanRegionEdit => {
                 switch (e.type) {
@@ -1399,6 +1424,9 @@ function StitchEditorBody({
             releaseMs: 80,
           }
         : null,
+      stylePreset: dsp.prosodyStylePreset,
+      paceMultiplier: dsp.paceMultiplier,
+      pauseOffsetMs: dsp.pauseOffsetMs,
     }
   }, [clips, paddingMs, dsp, regionEditsByClip])
 
@@ -1434,7 +1462,7 @@ function StitchEditorBody({
 
   const hash = useMemo(() => {
     return JSON.stringify({
-      clips: clips.map((c) => [c.trimStartMs, c.trimEndMs, c.fadeInMs, c.fadeOutMs]),
+      clips: clips.map((c) => [c.trimStartMs, c.trimEndMs, c.fadeInMs, c.fadeOutMs, c.text, c.prosodyMode]),
       paddingMs,
       dsp,
       regionEditsByClip,
@@ -1456,7 +1484,8 @@ function StitchEditorBody({
       const seq = ++renderSeqRef.current
       try {
         setIsRendering(true)
-        const blob = hasRegionEdits(regionEditsByClip)
+        const requiresServerRepair = clips.some((clip) => (clip.prosodyMode ?? 'auto') !== 'off')
+        const blob = hasRegionEdits(regionEditsByClip) && !requiresServerRepair
           ? await renderEditedStitchPreview(clips, planPayload.paddingMs, dsp.crossfadeMs, regionEditsByClip)
           : await renderStitchPlan(planPayload)
         if (seq !== renderSeqRef.current) return // superseded by a newer edit
@@ -1496,6 +1525,26 @@ function StitchEditorBody({
     await onSave(planPayload, segments)
   }, [planPayload, onSave, clips])
 
+  const normalizePacing = useCallback(async () => {
+    if (!clips.length) return
+    setIsNormalizingPacing(true)
+    setPreviewError(null)
+    try {
+      const result = await getStitchPacingTargets({
+        transcripts: clips.map((clip) => clip.text ?? ''),
+        stylePreset: dsp.prosodyStylePreset,
+        paceMultiplier: dsp.paceMultiplier,
+        pauseOffsetMs: dsp.pauseOffsetMs,
+      })
+      setPaddingMs(result.padding_ms)
+      setClips((current) => current.map((clip) => ({ ...clip, prosodyMode: 'auto' })))
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : 'Could not normalize pacing.')
+    } finally {
+      setIsNormalizingPacing(false)
+    }
+  }, [clips, dsp, setClips, setPaddingMs])
+
   const totalMs = useMemo(() => {
     let sum = 0
     for (const c of clips) {
@@ -1511,6 +1560,16 @@ function StitchEditorBody({
         <div className="flex items-center gap-2.5">
           <span className="text-sm font-semibold uppercase tracking-wider text-foreground">Arrange your reference clip</span>
           <span className="text-xs text-muted-foreground/70">{clips.length} clip{clips.length !== 1 ? 's' : ''}</span>
+          <button
+            type="button"
+            onClick={normalizePacing}
+            disabled={!clips.length || isNormalizingPacing}
+            className="inline-flex items-center gap-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-medium text-cyan-300 hover:bg-cyan-500/15 disabled:opacity-50"
+            title="Set seam targets from the shared pacing engine and auto-repair internal blended boundaries"
+          >
+            {isNormalizingPacing ? <Loader2 className="size-3 animate-spin" /> : <Gauge className="size-3" />}
+            Normalize pacing
+          </button>
           {staleFlags && !previewError && (
             <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
               changes pending

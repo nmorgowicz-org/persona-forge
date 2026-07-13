@@ -413,6 +413,18 @@ via `stitch_segments` with `postprocess_output` controlling its own silence/norm
 (`omnivoice_engine.py:196`). Add triage+alignment-directed repair per segment so a chosen
 take that is internally blended can be repaired before it becomes a saved reference.
 
+> **Landed (2026-07-13):** `prosody_repair.repair_segment_audio` is the shared in-memory
+> segment engine: Auto triages each clip, Precise forces alignment, and both use the same
+> alignment → VAD-safe-cut fallback and canonical resolved pause plan as Voice Library.
+> Stitch-plan clips carry their transcript and independent `off|auto|precise` repair mode;
+> repair runs before trim/region DSP and before `stitch_segments`, for both preview and save.
+> Unchanged clips are cached by audio/transcript/target identity so timeline rerenders do not
+> repeat alignment. The standalone Stitch Studio and OmniVoice quick-stitch/save paths both
+> opt new clips into Auto. `POST /omnivoice/stitch/pacing-targets` resolves known seams from
+> the canonical prosody target table, and StitchTimeline's **Normalize pacing** action applies
+> those per-gap targets while enabling Auto repair. Existing payloads remain backward-
+> compatible because omitted repair modes resolve to off server-side.
+
 ### 6.4 Generation / OpenAI output (Phase 6 — required delivery)
 - **Not** on any live conversational turn. hermes is batch/offline (D5), so an opt-in
   per-request aligner is *tolerable*, but it must be explicit and budgeted.
@@ -558,6 +570,12 @@ distinguishing manufactured (`insert_ms > 0`) from natural (`insert_ms == 0`) ga
 - Per-segment triage/alignment-directed edits; StitchTimeline per-gap targets; OmniVoice
   per-segment repair.
 - **Gate:** a stitched clip from blended segments needs no Library-side surgery.
+
+> **Complete (2026-07-13):** the shared segment repair contract is wired through Stitch
+> preview/save and OmniVoice chosen-take flows; per-gap targets and per-clip repair controls
+> are exposed in StitchTimeline. Tests prove clean Auto clips remain sample-equivalent,
+> alignment failure falls back to VAD safe cuts, and a blended Storyteller segment receives
+> its exact internal 1000 ms sentence pause in the stitched output. **Phase 4 is complete.**
 
 ### Phase 5 — Hardening
 - Perf budget enforcement, error surfaces, docs, `pytest` + frontend build, dev-container

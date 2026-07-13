@@ -56,6 +56,7 @@ export async function createStitchClipFromSegment(seg: SegmentMeta): Promise<Sti
     trimEndMs: 0,
     fadeInMs: 0,
     fadeOutMs: 0,
+    prosodyMode: 'auto',
     durationMs,
   }
 }
@@ -88,6 +89,7 @@ export async function createStitchClipFromVoice(voice: VoiceMeta): Promise<Stitc
     trimEndMs: 0,
     fadeInMs: 0,
     fadeOutMs: 0,
+    prosodyMode: 'auto',
     durationMs,
   }
 }

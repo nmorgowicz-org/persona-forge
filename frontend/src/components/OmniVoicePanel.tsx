@@ -1007,6 +1007,8 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
             trimEndMs: 0,
             fadeInMs: 0,
             fadeOutMs: 0,
+            text: row.text,
+            prosodyMode: 'auto',
           }
         }),
         paddingMs: new Array(Math.max(0, selectedRows.length - 1)).fill(0),
@@ -1015,6 +1017,9 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         finalTargetDbfs: -18,
         finalCeilingDb: -1,
         compress: null,
+        stylePreset: 'Neutral',
+        paceMultiplier: 1,
+        pauseOffsetMs: 0,
       }
       const blob = await renderStitchPlan(plan)
       setStitchedUrl(URL.createObjectURL(blob))
@@ -1066,6 +1071,8 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
             trimEndMs: 0,
             fadeInMs: 0,
             fadeOutMs: 0,
+            text: row.text,
+            prosodyMode: 'auto',
           }
         }),
         paddingMs: new Array(Math.max(0, selectedRows.length - 1)).fill(0),
@@ -1074,6 +1081,9 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         finalTargetDbfs: -18,
         finalCeilingDb: -1,
         compress: null,
+        stylePreset: 'Neutral',
+        paceMultiplier: 1,
+        pauseOffsetMs: 0,
       }
       const targetFamilyId = useAppStore.getState().targetFamilyId
       const result = await saveOmniVoice({
@@ -1173,6 +1183,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         trimEndMs: 0,
         fadeInMs: 0,
         fadeOutMs: 0,
+        prosodyMode: 'auto',
         durationMs,
       })
     }
