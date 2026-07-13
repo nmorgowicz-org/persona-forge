@@ -47,6 +47,8 @@ export function AudioDeck({
   const [duration, setDuration] = useState<number | null>(null)
   const [isLooping, setIsLooping] = useState(false)
   const [playbackRate, setPlaybackRate] = useState(1)
+  // A drag-selected slice (0..1 fractions) to audition on repeat; overrides whole-clip loop.
+  const [region, setRegion] = useState<{ start: number; end: number } | null>(null)
 
   const currentLevel = useMemo(() => {
     if (!peaks || peaks.length === 0) return 0
@@ -111,6 +113,15 @@ export function AudioDeck({
     audio.currentTime = pct * duration
   }
 
+  // A drag on the waveform selects a slice, then plays it; a click clears any slice.
+  function handleSelectRegion(next: { start: number; end: number } | null) {
+    setRegion(next)
+    const audio = audioRef.current
+    if (!next || !audio || duration == null) return
+    audio.currentTime = next.start * duration
+    audio.play().catch(() => {})
+  }
+
   function download() {
     const a = document.createElement('a')
     a.href = src
@@ -142,7 +153,12 @@ export function AudioDeck({
         }}
         onTimeUpdate={(e) => {
           const audio = e.currentTarget
-          if (audio.duration) setProgress(audio.currentTime / audio.duration)
+          if (!audio.duration) return
+          // Loop the selected slice on repeat until the user pauses or clears it.
+          if (region && audio.currentTime / audio.duration >= region.end) {
+            audio.currentTime = region.start * audio.duration
+          }
+          setProgress(audio.currentTime / audio.duration)
         }}
         className="hidden"
       />
@@ -183,6 +199,8 @@ export function AudioDeck({
             duration={compact ? null : duration}
             className={compact ? 'h-10' : undefined}
             onClick={handleSeek}
+            selection={region}
+            onSelectRegion={handleSelectRegion}
           />
           {!compact && <SpectralAccent peaks={peaks} className="mt-2" />}
         </div>
