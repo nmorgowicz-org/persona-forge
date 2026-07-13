@@ -753,7 +753,7 @@ _alignment_jobs = AlignmentJobManager(
 
 @app.get("/alignment/performance")
 def alignment_performance():
-    """Bounded warm-runtime latency window for the Phase 5 p95 budget gate."""
+    """Bounded observed latency window; includes cold starts and cache hits."""
     return jsonify(_alignment_jobs.performance())
 
 

@@ -583,6 +583,18 @@ distinguishing manufactured (`insert_ms > 0`) from natural (`insert_ms == 0`) ga
 - **Gate:** full test suite green; latency < 5 s p95 on target CPU; no regression on the
   energy fast path.
 
+> **Complete (2026-07-13):** alignment jobs now expose per-job duration/budget status and a
+> bounded runtime p50/p95 window through `/alignment/performance` and `/health`; the Voice
+> Library warns on a slow successful alignment without discarding its usable result. Compose
+> passes the aligner provider, latency budget, and idle-unload controls into the serving
+> container. `scripts/benchmark_aligner.py` is the fail-closed real-model gate. On
+> `dockermisc1` (Intel i7-1360P, 8 allocated CPU threads), the exact 11.16 s Aussie screenshot
+> reference ran through pinned MMS INT8 ONNX / CPU EP at warm p50 **3.511 s** and p95
+> **4.136 s** over 10 measured iterations (cold session load 5.106 s; peak benchmark RSS
+> 958.4 MiB), passing the strict `< 5 s` gate. The complete fake lane, frontend build,
+> Compose config, live dev-container health/alignment, and clean Auto fast-path invariants are
+> green. **Phase 5 is complete.**
+
 ### Phase 6 — Generation/output repair (required)
 - Request-flag plumbing on `/generate` + `/v1/audio/speech`; latency-budgeted opt-in;
   reuse engine. Include async generation paths and response/progress metadata indicating
