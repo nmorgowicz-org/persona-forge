@@ -77,7 +77,7 @@ function useLaneAudio(base64: string | null) {
   return ref
 }
 
-export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount, boundaryPlan = [], boundaries, overrides = {}, onNudgeTarget, onResetTarget }: {
+export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount, boundaryPlan = [], boundaries, overrides = {}, onNudgeTarget, onResetTarget, stylePreset }: {
   voiceId: string
   adjustedBase64: string
   adjustedSampleCount: number
@@ -88,6 +88,9 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
   overrides?: Record<string, number>
   onNudgeTarget?: (key: string, deltaMs: number) => void
   onResetTarget?: (key: string) => void
+  // The prosody style preset this adjusted clip was rendered with — mirrors the label on the
+  // preview deck above so the choice stays visible all the way down to this lane.
+  stylePreset?: string
 }) {
   const [originalBase64, setOriginalBase64] = useState<string | null>(null)
   const [hoverPct, setHoverPct] = useState<number | null>(null)
@@ -208,9 +211,16 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
       setPlaying(null)
       return
     }
-    // Play the selection if one is set, else the whole lane from the playhead.
-    if (selection) startPlay(lane, selection.start, selection)
-    else startPlay(lane, positionMs, null)
+    // Play the selection if one is set, else the whole lane from the playhead — but if the
+    // playhead is sitting at (or past) this lane's own end, e.g. it just finished playing,
+    // restart from the top instead of no-op'ing at the tail.
+    if (selection) {
+      startPlay(lane, selection.start, selection)
+      return
+    }
+    const el = laneAudio(lane)
+    const durMs = el && Number.isFinite(el.duration) ? el.duration * 1000 : Infinity
+    startPlay(lane, positionMs >= durMs - 25 ? 0 : positionMs, null)
   }
 
   const seekTo = (ms: number) => {
@@ -396,7 +406,9 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
 
       {/* ADJUSTED lane — cut markers + manufactured-gap shading in rendered time. */}
       <div className="relative">
-        <div className="absolute -top-2 left-2 z-20 rounded bg-cyan-500 px-1 py-px text-[9px] font-bold text-white">ADJUSTED</div>
+        <div className="absolute -top-2 left-2 z-20 rounded bg-cyan-500 px-1 py-px text-[9px] font-bold text-white">
+          {stylePreset ? `${stylePreset.toUpperCase()} ADJUSTED` : 'ADJUSTED'}
+        </div>
         <div
           className="relative h-14 cursor-ew-resize overflow-hidden rounded border border-border bg-muted/20"
           onMouseDown={onLaneDown('adjusted')}

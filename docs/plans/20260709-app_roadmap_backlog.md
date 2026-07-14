@@ -161,7 +161,75 @@ To overcome the hard limits of the TTS engines, the Workbench decouples *Definit
 
 ---
 
-## 8. Suggested Sequencing (Post-Foundation)
+## 8. Theme 8: Waveform & Audio-Editing UX (Prosody Workbench)
+
+**Vision**: Bring standard DAW/audio-editor ergonomics to the alignment-compare and
+region-editing surfaces (`frontend/src/components/waveform/*`), which today are
+serviceable for verifying a single "Precise" preview but lack the inspection and
+correction tools expert users expect from waveform editing.
+
+### 8.1 Horizontal Zoom (P1)
+- **Status**: Not Implemented.
+- **Current State**: `WaveformLane`/`AlignmentCompare` always render at a fixed
+  seconds-per-pixel that fits the container width, so dense or long clips compress
+  cut points and word labels past the point of being individually clickable.
+- **Technical Implementation Path**: Add scroll-wheel and +/- zoom on the compare
+  strip, tracking a zoom level + horizontal scroll offset in component state; keep
+  the shared time axis across lanes so original/adjusted stay aligned while zoomed.
+- **Why**: Precise placement/verification of a cut is the core workflow this view
+  exists for; a compressed view makes exactly that harder on real-length clips.
+
+### 8.2 Marker/Region List Panel (P1)
+- **Status**: Not Implemented.
+- **Current State**: The only way to locate a manufactured pause is to spot it on
+  the canvas; there is no index of all `boundaryPlan` entries for a clip.
+- **Technical Implementation Path**: A sidebar/list view driven by the existing
+  `boundaryPlan` data, one row per marker (position, origin, insert_ms), with
+  click-to-seek/select and keyboard up/down to step between markers.
+- **Why**: Standard DAW pattern (regions list); scales to clips with many boundaries
+  where canvas-only discovery breaks down.
+
+### 8.3 Undo History for Pause Nudges (P2)
+- **Status**: Partial (`onResetTarget` resets a single marker; no cross-drag undo
+  stack).
+- **Technical Implementation Path**: Maintain a small in-memory undo/redo stack of
+  `target_overrides` snapshots in `VoiceLibraryPage.tsx`, wired to Cmd/Ctrl+Z and a
+  toolbar button.
+- **Why**: A sequence of drags with no way to step back means a bad nudge forces
+  manual re-nudging back to the prior value.
+
+### 8.4 Adjustable Crossfade at Cut (P1)
+- **Status**: Not Implemented.
+- **Current State**: `resolve_safe_cut`/`apply_boundary_pause_plan`
+  (`src/qwen3_tts/audio_post.py`) apply a fixed `fade_ms` at each cut; there is no
+  per-cut or per-clip control over fade length or curve.
+- **Technical Implementation Path**: Expose fade length (ms) and intensity/curve
+  (e.g., linear vs equal-power) as adjustable parameters — a clip-level default in
+  the prosody settings popover, with a per-marker override analogous to
+  `target_overrides`, threaded through `build_alignment_pause_edits`/
+  `build_vad_pause_edits` similarly to the existing override mechanism.
+- **Why**: Fixed fade length/intensity can't cover every cut; audible clicks or
+  overly-soft transitions both become uncorrectable without this.
+
+### 8.5 Vertical/Gain Zoom (P2)
+- **Status**: Not Implemented.
+- **Technical Implementation Path**: A vertical scale control on `WaveformLane`
+  rendering (amplitude multiplier applied to the peaks display only, not the audio),
+  so quiet reference clips aren't rendered as a near-flat line.
+- **Why**: Low-level clips are currently hard to visually inspect for pause/energy
+  detail at native scale.
+
+### 8.6 Spectrogram Toggle (P2)
+- **Status**: Not Implemented.
+- **Technical Implementation Path**: An alternate render mode for `WaveformLane`
+  (or a toggle button on the compare strip) that computes and draws a spectrogram
+  instead of/alongside the amplitude waveform for the active lane.
+- **Why**: Clicks, artifacts, and cut-boundary discontinuities are often visible in
+  frequency content before they're audible or visible in the amplitude trace.
+
+---
+
+## 9. Suggested Sequencing (Post-Foundation)
 
 1. **Security Hardening**: Auth + Rate Limiting (Theme 4).
 2. **The "App" Leap**: Generation History (Theme 1) + Pronunciation Lexicon (Theme 2).

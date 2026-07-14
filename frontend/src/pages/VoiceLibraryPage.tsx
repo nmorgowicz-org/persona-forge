@@ -1210,6 +1210,7 @@ function VoiceCard({
                      overrides={targetOverrides}
                      onNudgeTarget={previewBusy ? undefined : nudgeTarget}
                      onResetTarget={previewBusy ? undefined : resetTarget}
+                     stylePreset={stylePreset}
                    />
                  </div>
                )}
