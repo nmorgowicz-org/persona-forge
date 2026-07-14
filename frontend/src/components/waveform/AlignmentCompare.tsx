@@ -77,10 +77,12 @@ function useLaneAudio(base64: string | null) {
   return ref
 }
 
-export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount, boundaryPlan = [], boundaries, overrides = {}, onNudgeTarget, onResetTarget, stylePreset }: {
+export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampleCount = null, boundaryPlan = [], boundaries, overrides = {}, onNudgeTarget, onResetTarget, stylePreset }: {
   voiceId: string
-  adjustedBase64: string
-  adjustedSampleCount: number
+  // Absent when there is no prosody-adjusted preview yet — the strip then shows only the
+  // original clip (word labels, transport, hover) with no second lane or cut markers.
+  adjustedBase64?: string | null
+  adjustedSampleCount?: number | null
   boundaryPlan?: ProsodyPausePlanEntry[]
   boundaries: AlignmentBoundary[] | null
   // Per-boundary target deltas (ms) keyed by rounded at_ms, and callbacks to change them by
@@ -117,9 +119,10 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
   const origAudio = useLaneAudio(originalBase64)
   const adjAudio = useLaneAudio(adjustedBase64)
 
+  const hasAdjusted = adjustedBase64 != null
   const maxDurMs = Math.max(original?.durationMs ?? 0, adjusted?.durationMs ?? 0, 1)
   const pct = (ms: number) => `${Math.max(0, Math.min(100, (ms / maxDurMs) * 100))}%`
-  const cutMs = (sample: number) => (adjusted ? (sample / Math.max(1, adjustedSampleCount)) * adjusted.durationMs : 0)
+  const cutMs = (sample: number) => (adjusted && adjustedSampleCount ? (sample / Math.max(1, adjustedSampleCount)) * adjusted.durationMs : 0)
 
   const words = useMemo(() => (boundaries ?? []).filter((b) => b.text), [boundaries])
 
@@ -144,8 +147,9 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
   }
 
   const containerRef = useRef<HTMLDivElement | null>(null)
-  // Which lane space/keyboard transport acts on — the last one the user played.
-  const lastLaneRef = useRef<'original' | 'adjusted'>('adjusted')
+  // Which lane space/keyboard transport acts on — the last one the user played. Defaults to
+  // whichever lane actually exists — 'adjusted' when there's a preview, else 'original'.
+  const lastLaneRef = useRef<'original' | 'adjusted'>(hasAdjusted ? 'adjusted' : 'original')
   const rafRef = useRef<number | undefined>(undefined)
   // The active play region (loop bounds) and loop flag are read inside the rAF loop, so
   // keep them in refs to dodge stale closures.
@@ -304,7 +308,10 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
     }
   }
 
-  if (!adjusted) return null
+  if (hasAdjusted && !adjusted) return null
+  if (!hasAdjusted && !original) {
+    return <p className="text-xs text-muted-foreground">Loading waveform…</p>
+  }
 
   const hoverMs = hoverPct !== null ? (hoverPct / 100) * maxDurMs : null
   const hovered = hoverMs !== null
@@ -342,7 +349,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
       {/* Transport — A/B play, loop, and the current drag-selection. */}
       <div className="flex items-center gap-2 pb-0.5">
         <TransportButton lane="original" />
-        <TransportButton lane="adjusted" />
+        {hasAdjusted && <TransportButton lane="adjusted" />}
         <button
           type="button"
           onClick={() => setLoop((v) => !v)}
@@ -404,7 +411,9 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
         </div>
       </div>
 
-      {/* ADJUSTED lane — cut markers + manufactured-gap shading in rendered time. */}
+      {/* ADJUSTED lane — cut markers + manufactured-gap shading in rendered time. Only
+          rendered once a prosody-adjusted preview actually exists. */}
+      {hasAdjusted && adjusted && (
       <div className="relative">
         <div className="absolute -top-2 left-2 z-20 rounded bg-cyan-500 px-1 py-px text-[9px] font-bold text-white">
           {stylePreset ? `${stylePreset.toUpperCase()} ADJUSTED` : 'ADJUSTED'}
@@ -453,6 +462,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64, adjustedSampleCount,
           })}
         </div>
       </div>
+      )}
 
       <TimeRuler durationMs={maxDurMs} />
 

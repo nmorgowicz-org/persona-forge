@@ -31,6 +31,8 @@ export function StitchStudioPage() {
 
   const savedVoiceId = useAppStore((s) => s.ovSavedVoiceId)
   const setSavedVoiceId = useAppStore((s) => s.setOvSavedVoiceId)
+  const setDeepLinkProsodyVoiceId = useAppStore((s) => s.setDeepLinkProsodyVoiceId)
+  const setPage = useAppStore((s) => s.setPage)
 
   const [library, setLibrary] = useState<SegmentMeta[]>([])
   const [name, setName] = useState('')
@@ -74,13 +76,15 @@ export function StitchStudioPage() {
           variantKind: deliveryVariant.kind,
         })
         setSavedVoiceId(result.voice_id)
+        setDeepLinkProsodyVoiceId(result.voice_id)
+        setPage('voice-library')
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       } finally {
         setIsSaving(false)
       }
     },
-    [name, setSavedVoiceId, deliveryVariant],
+    [name, setSavedVoiceId, deliveryVariant, setDeepLinkProsodyVoiceId, setPage],
   )
 
   return (

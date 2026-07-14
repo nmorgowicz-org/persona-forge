@@ -467,6 +467,8 @@ def save_voice(
     variant_name: str | None = None,
     variant_kind: str | None = None,
     source: str | None = None,
+    project_id: str | None = None,
+    project_name: str | None = None,
 ) -> dict[str, Any]:
     """Persist a newly captured VoiceDesign reference sample; returns its metadata.
 
@@ -519,9 +521,33 @@ def save_voice(
         "quality_warnings": quality_warnings,
         "needs_review": bool(quality_warnings),
         "auto_fixed": auto_fixed,
+        "project_id": project_id,
+        "project_name": project_name,
     }
     (voice_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta
+
+
+def is_mounted_or_readonly_reference(voice_id: str) -> bool:
+    """True if editing this voice in place is risky: its original.wav is a symlink
+    resolving outside the voice library tree (e.g. a container bind-mount), which is
+    often mounted read-only by the deployment. Generalizes beyond the hardcoded
+    "vd_000000000001" mounted-reference voice to any future mounted/read-only source.
+    """
+    if not _is_valid_voice_id(voice_id):
+        return False
+    original_wav = _voice_dir(voice_id) / "original.wav"
+    if not original_wav.is_symlink():
+        return False
+    try:
+        target = original_wav.resolve()
+    except OSError:
+        return True
+    try:
+        target.relative_to(VOICE_LIBRARY_DIR.resolve())
+        return False
+    except ValueError:
+        return True
 
 
 def get_voice(voice_id: str) -> dict[str, Any] | None:
@@ -554,6 +580,7 @@ def get_voice(voice_id: str) -> dict[str, Any] | None:
     meta["wav_path"] = str(resolved_wav)
     history_dir = voice_dir / ".history"
     meta["undo_available"] = history_dir.is_dir() and any(history_dir.iterdir())
+    meta["mounted_reference"] = is_mounted_or_readonly_reference(voice_id)
     return meta
 
 
@@ -568,6 +595,21 @@ def get_voice_wav_bytes(voice_id: str) -> bytes | None:
     if not wav_path.is_file():
         return None
     return wav_path.read_bytes()
+
+
+def set_voice_project(
+    voice_id: str, project_id: str | None, project_name: str | None = None,
+) -> dict[str, Any] | None:
+    """Assign or clear the Accent Design Project this voice belongs to (§4)."""
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    meta.pop("wav_path", None)
+    meta["project_id"] = project_id
+    meta["project_name"] = project_name
+    voice_dir = _voice_dir(voice_id)
+    (voice_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    return meta
 
 
 def update_voice(voice_id: str, *, sample_text: str) -> dict[str, Any] | None:
@@ -739,6 +781,7 @@ def list_voices() -> list[dict[str, Any]]:
                 pass
         history_dir = entry / ".history"
         meta["undo_available"] = history_dir.is_dir() and any(history_dir.iterdir())
+        meta["mounted_reference"] = is_mounted_or_readonly_reference(entry.name)
         voices.append(meta)
     voices.sort(key=lambda m: m.get("created_at", 0), reverse=True)
     return voices
@@ -790,21 +833,35 @@ def create_voice_variant(
     )
 
 
-def duplicate_voice(source_voice_id: str) -> dict[str, Any] | None:
-    """Create an independent, byte-for-byte copy of a saved voice.
+def duplicate_voice(source_voice_id: str, variant_filename: str | None = None) -> dict[str, Any] | None:
+    """Fork a saved voice into an independent, byte-for-byte copy.
 
     This intentionally bypasses save_voice(): duplication is a safety operation before destructive
     editing, so it must not re-run normalization or otherwise change the reference audio.
+
+    By default forks whichever audio ``current.wav`` resolves to (the active variant, or
+    ``original.wav`` if none is set). Pass ``variant_filename`` to fork a *specific* variant
+    regardless of which one is currently active — this is the "Fork to independent voice_id"
+    per-variant action, which must not disturb the source voice's active variant as a side effect.
     """
     source = get_voice(source_voice_id)
-    wav_bytes = get_voice_wav_bytes(source_voice_id)
-    if source is None or wav_bytes is None:
+    if source is None:
+        return None
+    if variant_filename:
+        voice_dir = _voice_dir(source_voice_id)
+        variant_path = voice_dir / variant_filename
+        if not variant_path.is_file():
+            return None
+        wav_bytes = variant_path.read_bytes()
+    else:
+        wav_bytes = get_voice_wav_bytes(source_voice_id)
+    if wav_bytes is None:
         return None
 
     voice_id = new_voice_id()
-    voice_dir = _voice_dir(voice_id)
-    voice_dir.mkdir(parents=True, exist_ok=False)
-    (voice_dir / "original.wav").write_bytes(wav_bytes)
+    new_voice_dir = _voice_dir(voice_id)
+    new_voice_dir.mkdir(parents=True, exist_ok=False)
+    (new_voice_dir / "original.wav").write_bytes(wav_bytes)
 
     meta = dict(source)
     meta.pop("wav_path", None)
@@ -812,11 +869,38 @@ def duplicate_voice(source_voice_id: str) -> dict[str, Any] | None:
     meta.pop("is_default", None)
     meta["voice_id"] = voice_id
     meta["created_at"] = time.time()
-    meta["description"] = f"{source.get('description') or source_voice_id} (copy)"
+    suffix = f" ({variant_filename})" if variant_filename else ""
+    meta["description"] = f"{source.get('description') or source_voice_id} (copy{suffix})"
     meta["source"] = "duplicate"
     meta["duplicated_from"] = source_voice_id
-    (voice_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    (new_voice_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta
+
+
+def delete_variant(voice_id: str, variant_filename: str) -> bool:
+    """Delete a prosody variant file. If it was the active variant, fall back to original.wav."""
+    if not _is_valid_voice_id(voice_id) or not variant_filename.startswith("prosody_") or not variant_filename.endswith(".wav"):
+        return False
+    voice_dir = _voice_dir(voice_id)
+    variant_path = voice_dir / variant_filename
+    if not variant_path.is_file():
+        return False
+
+    current_wav = voice_dir / "current.wav"
+    if current_wav.is_symlink() and current_wav.resolve().name == variant_filename:
+        set_active_variant(voice_id, None)
+    variant_path.unlink()
+    return True
+
+
+def get_variant_wav_bytes(voice_id: str, variant_filename: str) -> bytes | None:
+    """Read a specific variant's audio bytes, for per-variant preview."""
+    if not _is_valid_voice_id(voice_id) or not variant_filename.startswith("prosody_") or not variant_filename.endswith(".wav"):
+        return None
+    variant_path = _voice_dir(voice_id) / variant_filename
+    if not variant_path.is_file():
+        return None
+    return variant_path.read_bytes()
 
 
 def ensure_mounted_ref_voice(
@@ -891,7 +975,19 @@ def ensure_mounted_ref_voice(
 
 def _rewrite_reference_wav(voice_id: str, wav: np.ndarray, sr: int) -> dict[str, Any] | None:
     """Overwrite original.wav in place and refresh derived metrics/quality gate.
+
+    Raises PermissionError up front — before touching the file — if original.wav is a
+    symlink to a mounted/read-only source (§2.3): writing through it would either fail
+    with a raw filesystem permission error or silently corrupt the mounted host file,
+    neither of which is acceptable. Callers (normalize/trim/pause-adjust/region-edits)
+    should route through "edit on a copy" instead.
     """
+    if is_mounted_or_readonly_reference(voice_id):
+        raise PermissionError(
+            f"{voice_id} is backed by a mounted, read-only reference file — in-place edits are "
+            "blocked to avoid corrupting or failing against the mounted source. Use 'Edit on a "
+            "copy' (or 'Fork to independent voice_id') and edit the copy instead."
+        )
     meta = get_voice(voice_id)
     if meta is None:
         return None

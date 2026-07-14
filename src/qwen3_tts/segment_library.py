@@ -66,6 +66,9 @@ def save_segment(
     whisper_transcript: str | None = None,
     match_score: float | None = None,
     duration_sec: float | None = None,
+    feature_tags: list[str] | None = None,
+    project_id: str | None = None,
+    project_name: str | None = None,
 ) -> dict[str, Any]:
     """Persist one locked-in candidate take; returns its metadata.
 
@@ -98,6 +101,9 @@ def save_segment(
         "whisper_transcript": whisper_transcript,
         "match_score": match_score,
         "duration_sec": duration_sec,
+        "feature_tags": feature_tags or [],
+        "project_id": project_id,
+        "project_name": project_name,
         "created_at": time.time(),
     }
     (segment_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
@@ -117,6 +123,21 @@ def get_segment(segment_id: str) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     meta["wav_path"] = str(segment_dir / "clip.wav")
+    return meta
+
+
+def set_segment_project(
+    segment_id: str, project_id: str | None, project_name: str | None = None,
+) -> dict[str, Any] | None:
+    """Assign or clear the Accent Design Project this segment belongs to (§4)."""
+    meta = get_segment(segment_id)
+    if meta is None:
+        return None
+    meta.pop("wav_path", None)
+    meta["project_id"] = project_id
+    meta["project_name"] = project_name
+    segment_dir = _segment_dir(segment_id)
+    (segment_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta
 
 

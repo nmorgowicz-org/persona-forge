@@ -250,3 +250,18 @@ export const ACCENT_BANK: AccentBankEntry[] = [
     previewAudioUrl: null,
   },
 ]
+
+// Looks up which AccentFeatures a saved segment's text was designed to exercise, by matching
+// it against the curated showcase bank for its accent. Free-typed text that doesn't match any
+// showcase sentence verbatim returns []  — classifying arbitrary text is the Option B follow-up.
+export function lookupFeatureTags(
+  accentId: string | null | undefined,
+  text: string,
+): AccentFeature[] {
+  if (!accentId) return []
+  const entry = ACCENT_BANK.find((e) => e.id === accentId)
+  if (!entry) return []
+  const trimmed = text.trim()
+  const sentence = entry.showcaseSentences.find((s) => s.text.trim() === trimmed)
+  return sentence?.features ?? []
+}

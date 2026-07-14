@@ -25,6 +25,7 @@ from qwen3_tts import (
     audio_style,
     model,
     omnivoice_engine,
+    project_library,
     prosody_repair,
     segment_library,
     voice_design,
@@ -483,9 +484,13 @@ def voices_update(voice_id: str):
 
 @app.post("/voices/<voice_id>/duplicate")
 def voices_duplicate(voice_id: str):
-    """Create an independent copy before destructive reference-audio editing."""
+    """Fork a voice into an independent voice_id (also used as a safety copy before
+    destructive reference-audio editing). Optionally fork a specific prosody variant
+    rather than whichever one is currently active."""
+    data = request.get_json(silent=True) or {}
+    variant_filename = data.get("variant_filename")
     try:
-        meta = voice_library.duplicate_voice(voice_id)
+        meta = voice_library.duplicate_voice(voice_id, variant_filename)
     except Exception as exc:
         return jsonify({"error": f"Duplicate failed: {exc}"}), 500
     if meta is None:
@@ -542,6 +547,8 @@ def voices_normalize(voice_id: str):
     """Re-normalize a saved reference clip's loudness/peak in place (-20 LUFS, -1dBTP)."""
     try:
         meta = voice_library.normalize_reference(voice_id)
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 409
     except Exception as exc:
         return jsonify({"error": f"Normalize failed: {exc}"}), 500
     if meta is None:
@@ -555,6 +562,8 @@ def voices_trim_silence(voice_id: str):
     """Trim leading/trailing silence from a saved reference clip in place."""
     try:
         meta = voice_library.trim_reference_silence(voice_id)
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 409
     except Exception as exc:
         return jsonify({"error": f"Trim failed: {exc}"}), 500
     if meta is None:
@@ -572,6 +581,18 @@ def voices_set_default(voice_id: str):
     return jsonify(meta)
 
 
+@app.post("/voices/<voice_id>/project")
+def voices_set_project(voice_id: str):
+    """Assign or clear the Accent Design Project this voice belongs to (§4)."""
+    data = request.get_json(silent=True) or {}
+    project_id = data.get("project_id")
+    project_name = data.get("project_name")
+    meta = voice_library.set_voice_project(voice_id, project_id, project_name)
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    return jsonify(meta)
+
+
 @app.post("/voices/<voice_id>/set-active-variant")
 def voices_set_active_variant(voice_id: str):
     """Set the active prosody variant for a voice, or reset to original."""
@@ -583,6 +604,7 @@ def voices_set_active_variant(voice_id: str):
         return jsonify({"error": f"Failed to set active variant: {exc}"}), 500
     if not success:
         return jsonify({"error": "Could not set active variant (invalid voice or file)"}), 400
+    _invalidate_voice_clone_state(voice_id)
     return jsonify({"status": "active variant updated", "active_variant": variant_filename or "original"})
 
 
@@ -609,6 +631,25 @@ def voices_get_variants(voice_id: str):
         "variants": sorted(variants),
         "active_variant": active_variant
     })
+
+
+@app.get("/voices/<voice_id>/variants/<variant_filename>/audio")
+def voices_get_variant_audio(voice_id: str, variant_filename: str):
+    """Fetch a single variant's raw audio (base64), for per-variant preview playback."""
+    wav_bytes = voice_library.get_variant_wav_bytes(voice_id, variant_filename)
+    if wav_bytes is None:
+        return jsonify({"error": "variant not found"}), 404
+    return jsonify({"audio_base64": base64.b64encode(wav_bytes).decode("ascii")})
+
+
+@app.delete("/voices/<voice_id>/variants/<variant_filename>")
+def voices_delete_variant(voice_id: str, variant_filename: str):
+    """Delete a prosody variant. If it was active, the voice falls back to original.wav."""
+    deleted = voice_library.delete_variant(voice_id, variant_filename)
+    if not deleted:
+        return jsonify({"error": "variant not found"}), 404
+    _invalidate_voice_clone_state(voice_id)
+    return jsonify({"deleted": variant_filename})
 
 
 @app.post("/voices/<voice_id>/activate")
@@ -760,6 +801,8 @@ def voices_adjust_pauses(voice_id: str):
             voice_id, style_preset=style_preset, pace_multiplier=pace_multiplier,
             pause_offset_ms=pause_offset, mode=mode,
         )
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 409
     except Exception as exc:
         return jsonify({"error": f"Pause adjust failed: {exc}"}), 500
     if meta is None:
@@ -777,6 +820,8 @@ def voices_region_edits(voice_id: str):
         return jsonify({"error": "invalid edits payload"}), 400
     try:
         meta = voice_library.apply_reference_region_edits(voice_id, edits)
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 409
     except Exception as exc:
         return jsonify({"error": f"Region edit failed: {exc}"}), 500
     if meta is None:
@@ -1638,6 +1683,44 @@ def omnivoice_stitch_pacing_targets():
     )
 
 
+@app.get("/projects")
+def projects_list():
+    return jsonify(project_library.list_projects())
+
+
+@app.post("/projects")
+def projects_create():
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    description = data.get("description")
+    return jsonify(project_library.create_project(name, description))
+
+
+@app.patch("/projects/<project_id>")
+def projects_rename(project_id: str):
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    entry = project_library.rename_project(project_id, name, data.get("description"))
+    if entry is None:
+        return jsonify({"error": "Unknown project_id"}), 404
+    return jsonify(entry)
+
+
+@app.delete("/projects/<project_id>")
+def projects_delete(project_id: str):
+    if not project_library.delete_project(project_id):
+        return jsonify({"error": "Unknown project_id"}), 404
+    return jsonify({"deleted": True})
+
+
 @app.post("/omnivoice/segments")
 def omnivoice_segments_create():
     # Locks in one audition candidate by persisting it to the durable segment library —
@@ -1660,6 +1743,11 @@ def omnivoice_segments_create():
     if not instruct:
         return jsonify({"error": "instruct is required"}), 400
     accent_id = data.get("accent_id")
+    feature_tags = data.get("feature_tags")
+    if not isinstance(feature_tags, list) or not all(isinstance(t, str) for t in feature_tags):
+        feature_tags = None
+    project_id = data.get("project_id")
+    project_name = data.get("project_name")
 
     wav, sr = entry
     wav_bytes, _ = _encode(wav, sr, "wav")
@@ -1717,6 +1805,9 @@ def omnivoice_segments_create():
         whisper_transcript=whisper_transcript,
         match_score=match_score,
         duration_sec=round(duration_sec, 2),
+        feature_tags=feature_tags,
+        project_id=project_id,
+        project_name=project_name,
     )
     meta["audio_base64"] = base64.b64encode(wav_bytes).decode("ascii")
     return jsonify(meta)
@@ -1751,6 +1842,18 @@ def omnivoice_segments_delete(segment_id: str):
     if not segment_library.delete_segment(segment_id):
         return jsonify({"error": "Unknown segment_id"}), 404
     return jsonify({"deleted": True})
+
+
+@app.post("/omnivoice/segments/<segment_id>/project")
+def omnivoice_segments_set_project(segment_id: str):
+    """Assign or clear the Accent Design Project this segment belongs to (§4)."""
+    data = request.get_json(silent=True) or {}
+    project_id = data.get("project_id")
+    project_name = data.get("project_name")
+    meta = segment_library.set_segment_project(segment_id, project_id, project_name)
+    if meta is None:
+        return jsonify({"error": "Unknown segment_id"}), 404
+    return jsonify(meta)
 
 
 # (Time-stretch endpoints removed; duration is now controlled via generation-time durations parameter per-segment.)
@@ -1840,6 +1943,8 @@ def omnivoice_save():
             variant_name=data.get("variant_name"),
             variant_kind=data.get("variant_kind"),
             source="OmniVoice",
+            project_id=data.get("project_id"),
+            project_name=data.get("project_name"),
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400

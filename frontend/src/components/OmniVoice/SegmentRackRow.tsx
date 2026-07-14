@@ -4,6 +4,7 @@ import * as Tooltip from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { lockInOmniVoiceSegment, type SegmentMeta } from '@/lib/api'
+import { lookupFeatureTags } from '@/lib/accentBank'
 import { ClipPlayer } from './ClipPlayer'
 import { TakeDebugButton } from './TakeDebugButton'
 
@@ -364,6 +365,7 @@ export function SegmentRackRow({
                               text: row.text,
                               instruct,
                               accentId,
+                              featureTags: lookupFeatureTags(accentId, row.text),
                             })
                             setSavedIds((prev) => {
                               const next = new Set(prev)

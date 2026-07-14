@@ -6,12 +6,13 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
-  Copy,
   FoldHorizontal,
+  GitFork,
   Layers,
   Loader2,
   Mic2,
   MoreHorizontal,
+  Pause,
   Pencil,
   Plus,
   Play,
@@ -29,6 +30,8 @@ import {
   Rows,
   Columns2,
   Columns3,
+  Folder,
+  FolderPlus,
 } from 'lucide-react'
 import {
   activateVoiceForApi,
@@ -42,8 +45,10 @@ import {
   previewVoiceProsody,
   deleteOmniVoiceSegment,
   deleteVoice,
+  deleteVoiceVariant,
   duplicateVoice,
   getVoice,
+  getVoiceVariantAudio,
   getVoiceVariants,
   listOmniVoiceSegments,
   listVoices,
@@ -53,12 +58,17 @@ import {
   trimVoiceReferenceSilence,
   updateVoiceSampleText,
   undoVoiceReferenceEdit,
+  listProjects,
+  createProject,
+  setVoiceProject,
+  setSegmentProject,
   type SegmentMeta,
   type StitchPlanRegionEdit,
   type VoiceMeta,
   type ProsodyMode,
   type AlignmentBoundary,
   type ProsodyPausePlanEntry,
+  type Project,
 } from '@/lib/api'
 import { hasChipSelections, type ChipSelections } from '@/lib/voiceDesignChips'
 import { MiniAudioDeck } from '@/components/audio/MiniAudioDeck'
@@ -73,6 +83,10 @@ import { RegionEditor } from '@/components/waveform/RegionEditor'
 import { AlignmentCompare } from '@/components/waveform/AlignmentCompare'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+
+// Radix Select forbids an empty-string item value, so "Ungrouped" needs a placeholder token
+// that gets translated back to a null project_id at the call site.
+const UNGROUPED_VALUE = '__ungrouped__'
 
 const MOUNTED_REF_SOURCE = 'mounted_ref_audio' as const
 
@@ -745,54 +759,6 @@ function ClipPlayerUrl({ segmentId, className }: { segmentId: string; className?
   return <MiniAudioDeck src={src} blob={blob} className={className} autoPlay={false} />
 }
 
-// Auto-loads (but does not auto-play) a saved voice's reference audio without a
-// "Load preview" click, mirroring the saved-segment cards below (ClipPlayerUrl).
-function VoiceAudioAutoPlayer({ voiceId }: { voiceId: string }) {
-  const [state, setState] = useState<{ url: string; blob: Blob } | 'loading' | 'error'>('loading')
-
-  useEffect(() => {
-    let cancelled = false
-    setState('loading')
-    getVoice(voiceId)
-      .then((full) => {
-        if (cancelled) return
-        if (!full.audio_base64) {
-          setState('error')
-          return
-        }
-        const bytes = Uint8Array.from(atob(full.audio_base64), (c) => c.charCodeAt(0))
-        const blob = new Blob([bytes], { type: 'audio/wav' })
-        setState({ url: URL.createObjectURL(blob), blob })
-      })
-      .catch(() => {
-        if (!cancelled) setState('error')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [voiceId])
-
-  useEffect(() => {
-    return () => {
-      if (state !== 'loading' && state !== 'error') URL.revokeObjectURL(state.url)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voiceId])
-
-  if (state === 'loading') {
-    return (
-      <div className="flex h-9 items-center gap-1.5 text-xs text-muted-foreground">
-        <Loader2 className="size-3.5 animate-spin" />
-        Loading waveform…
-      </div>
-    )
-  }
-  if (state === 'error') {
-    return <p className="text-xs text-muted-foreground">Couldn't load audio.</p>
-  }
-  return <MiniAudioDeck src={state.url} blob={state.blob} autoPlay={false} />
-}
-
 function VoiceCard({
   voice,
   busy,
@@ -812,6 +778,10 @@ function VoiceCard({
   onApplyReferenceEdits,
   onAnalyze,
   onUndo,
+  autoOpenProsody,
+  onAutoOpenProsodyConsumed,
+  projects,
+  onSetProject,
 }: {
   voice: VoiceMeta
   busy: boolean
@@ -820,7 +790,10 @@ function VoiceCard({
   onDesignFrom: (() => void) | null
   onReopenInStitchStudio: (() => void) | null
   onDelete: () => void
-  onDuplicate: () => Promise<VoiceMeta | null>
+  // Fork this voice into a brand-new voice_id. Omitting variantFilename forks whichever
+  // audio is currently active; a specific variantFilename forks that variant without
+  // changing which one is active on the source voice.
+  onDuplicate: (variantFilename?: string) => Promise<VoiceMeta | null>
   onSaveSampleText: (text: string) => Promise<void>
   onNormalize: (voiceId: string) => Promise<void>
   onTrimSilence: (voiceId: string) => Promise<void>
@@ -831,6 +804,13 @@ function VoiceCard({
   onApplyReferenceEdits: (voiceId: string, edits: StitchPlanRegionEdit[]) => Promise<void>
   onAnalyze: () => void
   onUndo: () => void
+  // True right after this voice was created via a Stitch Studio save — pops its Adjust
+  // Prosody popover open and scrolls it into view so the user lands straight in the
+  // prosody workflow instead of having to find the new voice manually.
+  autoOpenProsody?: boolean
+  onAutoOpenProsodyConsumed?: () => void
+  projects: Project[]
+  onSetProject: (voiceId: string, projectId: string) => void
 }) {
 
   const reducedMotion = useReducedMotion()
@@ -856,6 +836,11 @@ function VoiceCard({
   const alignJobRef = useRef<{ jobId: string; cancelled: boolean } | null>(null)
   const [variants, setVariants] = useState<string[]>([])
   const [activeVariant, setActiveVariant] = useState<string | null>(null)
+  // Which variant is playing a Preview clip right now, plus the Audio element itself so a
+  // second click on the same variant stops it instead of overlapping playback.
+  const [previewingVariant, setPreviewingVariant] = useState<string | null>(null)
+  const variantPreviewAudioRef = useRef<HTMLAudioElement | null>(null)
+  const [variantBusy, setVariantBusy] = useState<string | null>(null)
   const [prosodyBusy, setProsodyBusy] = useState(false)
   const [previewBusy, setPreviewBusy] = useState(false)
   const [previewAudio, setPreviewAudio] = useState<{
@@ -875,6 +860,17 @@ function VoiceCard({
   // hover-lift mid-interaction. Pin the lift on while either popover is open to stop that.
   const [prosodyPopoverOpen, setProsodyPopoverOpen] = useState(false)
   const [moreActionsPopoverOpen, setMoreActionsPopoverOpen] = useState(false)
+  const cardRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!autoOpenProsody) return
+    setProsodyPopoverOpen(true)
+    cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    onAutoOpenProsodyConsumed?.()
+    // Only ever fire once per mount for a freshly-stitched voice — consuming clears the
+    // store flag so this doesn't retrigger if the parent re-renders the card.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenProsody])
 
   // One place to render a prosody preview, so the Preview button and per-marker nudges
   // stay in sync. Passing an explicit overrides map avoids stale-state races on rapid drags.
@@ -1015,6 +1011,13 @@ function VoiceCard({
     loadVariants()
   }, [voice.voice_id])
 
+  useEffect(() => {
+    return () => {
+      variantPreviewAudioRef.current?.pause()
+      variantPreviewAudioRef.current = null
+    }
+  }, [voice.voice_id])
+
   const commit = async () => {
     const trimmed = draft.trim()
     setEditing(false)
@@ -1051,8 +1054,82 @@ function VoiceCard({
     if (targetId) await action(targetId)
   }
 
+  // "Promote to API reference" — explicit, first-class version of the implicit
+  // "click the pill" interaction (§2.1). Confirms first when this voice_id is also the
+  // persisted global API default, since the swap changes what the live default sounds
+  // like immediately.
+  const promoteVariant = async (v: string) => {
+    if (voice.api_active) {
+      const ok = window.confirm(
+        'This voice is the live API default. Promoting this variant will change what the ' +
+        'default API voice sounds like immediately. Continue?',
+      )
+      if (!ok) return
+    }
+    setVariantBusy(v)
+    try {
+      await setActiveVoiceVariant(voice.voice_id, v)
+      setActiveVariant(v)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setVariantBusy(null)
+    }
+  }
+
+  const previewVariant = async (v: string) => {
+    if (previewingVariant === v) {
+      variantPreviewAudioRef.current?.pause()
+      variantPreviewAudioRef.current = null
+      setPreviewingVariant(null)
+      return
+    }
+    variantPreviewAudioRef.current?.pause()
+    setVariantBusy(v)
+    try {
+      const { audio_base64 } = await getVoiceVariantAudio(voice.voice_id, v)
+      const bytes = Uint8Array.from(atob(audio_base64), (c) => c.charCodeAt(0))
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }))
+      const el = new Audio(url)
+      variantPreviewAudioRef.current = el
+      setPreviewingVariant(v)
+      el.addEventListener('ended', () => setPreviewingVariant(null))
+      await el.play()
+    } catch (err) {
+      console.error(err)
+      setPreviewingVariant(null)
+    } finally {
+      setVariantBusy(null)
+    }
+  }
+
+  const forkVariant = async (v: string) => {
+    setVariantBusy(v)
+    try {
+      await onDuplicate(v)
+    } finally {
+      setVariantBusy(null)
+    }
+  }
+
+  const deleteVariant = async (v: string) => {
+    if (!window.confirm(`Delete variant "${v}"? This cannot be undone.`)) return
+    setVariantBusy(v)
+    try {
+      await deleteVoiceVariant(voice.voice_id, v)
+      const data = await getVoiceVariants(voice.voice_id)
+      setVariants(data.variants)
+      setActiveVariant(data.active_variant)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setVariantBusy(null)
+    }
+  }
+
   return (
     <motion.div
+      ref={cardRef}
       data-testid="voice-card"
       initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: reducedMotion || !(prosodyPopoverOpen || moreActionsPopoverOpen) ? 0 : -2 }}
@@ -1070,22 +1147,45 @@ function VoiceCard({
          </div>
          <div className="max-h-24 overflow-y-auto space-y-1 px-1">
            {variants.map(v => (
-             <div key={v} className="flex items-center justify-between group">
+             <div key={v} className="flex items-center justify-between gap-1 group">
                <button
-                 onClick={async () => {
-                   try {
-                     await setActiveVoiceVariant(voice.voice_id, v)
-                     setActiveVariant(v)
-                   } catch (err) { console.error(err) }
-                 }}
+                 onClick={() => promoteVariant(v)}
+                 disabled={variantBusy === v}
+                 title="Click to promote this variant to the API reference for this voice_id"
                  className={cn(
-                   "text-left truncate text-[11px] py-0.5 px-1 rounded transition-colors",
+                   "min-w-0 flex-1 text-left truncate text-[11px] py-0.5 px-1 rounded transition-colors",
                    activeVariant === v ? "bg-cyan-500/20 text-cyan-300" : "text-muted-foreground hover:bg-muted/40"
                  )}
                >
                  {v}
                </button>
-               {activeVariant === v && <Check className="size-3 text-cyan-400" />}
+               {activeVariant === v && <Check className="size-3 shrink-0 text-cyan-400" />}
+               <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                 <button
+                   onClick={() => previewVariant(v)}
+                   disabled={variantBusy === v && previewingVariant !== v}
+                   title={previewingVariant === v ? 'Stop preview' : 'Preview this variant'}
+                   className="rounded p-0.5 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                 >
+                   {previewingVariant === v ? <Pause className="size-3" /> : <Play className="size-3" />}
+                 </button>
+                 <button
+                   onClick={() => forkVariant(v)}
+                   disabled={variantBusy === v}
+                   title="Fork this variant to an independent voice_id"
+                   className="rounded p-0.5 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                 >
+                   <GitFork className="size-3" />
+                 </button>
+                 <button
+                   onClick={() => deleteVariant(v)}
+                   disabled={variantBusy === v}
+                   title="Delete this variant"
+                   className="rounded p-0.5 text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
+                 >
+                   <Trash2 className="size-3" />
+                 </button>
+               </div>
              </div>
            ))}
          </div>
@@ -1192,39 +1292,19 @@ function VoiceCard({
 
 
         <div className="relative group space-y-1">
-          {previewAudio ? (
-            <div className="relative space-y-1">
-            <div className="relative group/original opacity-75">
-              <div className="absolute -top-2 left-2 z-10 rounded bg-muted px-1 py-px text-[9px] font-bold text-muted-foreground">ORIGINAL</div>
-              <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
-            </div>
-
-               <div className="relative">
-                 <div className="absolute -top-2 left-2 z-10 rounded bg-cyan-500 px-1 py-px text-[9px] font-bold text-white">
-                   {stylePreset.toUpperCase()} PREVIEW
-                 </div>
-                 <MiniAudioDeck src={previewAudio.url} blob={previewAudio.blob} autoPlay={false} />
-               </div>
-
-               {previewAudio.plan.length > 0 && (
-                 <div className="rounded border border-border/60 bg-muted/10 p-2 pt-3">
-                   <AlignmentCompare
-                     voiceId={voice.voice_id}
-                     adjustedBase64={previewAudio.audioBase64}
-                     adjustedSampleCount={previewAudio.sampleCount}
-                     boundaryPlan={previewAudio.plan}
-                     boundaries={alignBoundaries}
-                     overrides={targetOverrides}
-                     onNudgeTarget={previewBusy ? undefined : nudgeTarget}
-                     onResetTarget={previewBusy ? undefined : resetTarget}
-                     stylePreset={stylePreset}
-                   />
-                 </div>
-               )}
-            </div>
-          ) : (
-            <VoiceAudioAutoPlayer voiceId={voice.voice_id} />
-          )}
+          <div className="rounded border border-border/60 bg-muted/10 p-2 pt-3">
+            <AlignmentCompare
+              voiceId={voice.voice_id}
+              adjustedBase64={previewAudio?.audioBase64}
+              adjustedSampleCount={previewAudio?.sampleCount}
+              boundaryPlan={previewAudio?.plan ?? []}
+              boundaries={alignBoundaries}
+              overrides={targetOverrides}
+              onNudgeTarget={previewBusy ? undefined : nudgeTarget}
+              onResetTarget={previewBusy ? undefined : resetTarget}
+              stylePreset={previewAudio ? stylePreset : undefined}
+            />
+          </div>
           {previewAudio && (
             <button
               onClick={() => {
@@ -1438,8 +1518,22 @@ function VoiceCard({
          </Popover>
 
         <Popover open={moreActionsPopoverOpen} onOpenChange={setMoreActionsPopoverOpen}><PopoverTrigger asChild><Button size="icon-sm" variant="outline" aria-label="More voice actions" tooltip="More voice actions"><MoreHorizontal /></Button></PopoverTrigger><PopoverContent align="end" className="w-64 gap-1 p-1.5">
-          <label className="mb-1 flex items-center gap-2 rounded bg-muted/30 p-2 text-xs"><input type="checkbox" checked={preserveOriginal} onChange={(event) => setPreserveOriginal(event.target.checked)} /> Edit audio operations on a copy</label>
-          <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onDuplicate}><Copy /> Duplicate voice</Button>
+          {voice.mounted_reference ? (
+            <div className="mb-1 rounded border border-warning/30 bg-warning/10 p-2 text-xs">
+              <label className="flex items-center gap-2 font-medium text-warning">
+                <input type="checkbox" checked={preserveOriginal} onChange={(event) => setPreserveOriginal(event.target.checked)} />
+                Edit audio operations on a copy
+              </label>
+              <p className="mt-1 text-[10px] text-warning/80">
+                This voice is backed by a mounted, read-only file — edits will be made on a new
+                copy so the source stays intact. Unchecking this will fail with a clear error
+                rather than silently corrupting or losing the mounted source.
+              </p>
+            </div>
+          ) : (
+            <label className="mb-1 flex items-center gap-2 rounded bg-muted/30 p-2 text-xs"><input type="checkbox" checked={preserveOriginal} onChange={(event) => setPreserveOriginal(event.target.checked)} /> Edit audio operations on a copy</label>
+          )}
+          <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => onDuplicate()} title="Materialize the currently-active audio as a brand-new, independent voice_id"><GitFork /> Fork to independent voice_id</Button>
           <Button size="sm" variant="ghost" className="w-full justify-start" disabled={voice.api_active} onClick={onActivateForApi}><Radio /> Activate for API</Button>
           {onDesignFrom && <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onDesignFrom}><Sparkles /> Design from voice</Button>}
           {onReopenInStitchStudio && <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onReopenInStitchStudio}><Layers /> Open in Stitch Studio</Button>}
@@ -1449,6 +1543,24 @@ function VoiceCard({
           {onSetDefault && <Button size="sm" variant="ghost" className="w-full justify-start" disabled={voice.is_default} onClick={onSetDefault}><Star /> Set family default</Button>}
           {voice.undo_available && <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onUndo}><Undo2 /> Undo last audio edit</Button>}
            <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onAnalyze}><RefreshCcw className="size-3.5" /> Refresh analysis</Button>
+           <div className="my-1 border-t border-border" />
+           <div className="px-1.5 py-1">
+             <label className="mb-1 flex items-center gap-1 text-[10px] font-medium text-muted-foreground"><Folder className="size-3" /> Accent Design Project</label>
+             <Select
+               value={voice.project_id || UNGROUPED_VALUE}
+               onValueChange={(v) => onSetProject(voice.voice_id, v === UNGROUPED_VALUE ? '' : v)}
+             >
+               <SelectTrigger className="h-7 w-full text-xs"><SelectValue placeholder="Ungrouped" /></SelectTrigger>
+               <SelectContent>
+                 <SelectGroup>
+                   <SelectItem value={UNGROUPED_VALUE}>Ungrouped</SelectItem>
+                   {projects.map((p) => (
+                     <SelectItem key={p.project_id} value={p.project_id}>{p.name}</SelectItem>
+                   ))}
+                 </SelectGroup>
+               </SelectContent>
+             </Select>
+           </div>
            <div className="my-1 border-t border-border" />
            <Button size="sm" variant="ghost" className="w-full justify-start text-destructive hover:text-destructive" onClick={onDelete}><Trash2 /> Delete voice</Button>
 
@@ -1481,6 +1593,9 @@ export function VoiceLibraryPage() {
     if (typeof window === 'undefined') return 'grid-1'
     return localStorage.getItem('voice-library-layout') || 'grid-1'
   })
+  const [projects, setProjects] = useState<Project[]>([])
+  const [groupByProject, setGroupByProject] = useState(false)
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
   const setVoiceId = useAppStore((s) => s.setVoiceId)
 
   const setPage = useAppStore((s) => s.setPage)
@@ -1490,17 +1605,21 @@ export function VoiceLibraryPage() {
   const setOvStitchPlanClips = useAppStore((s) => s.setOvStitchPlanClips)
   const setOvStitchPlanPaddingMs = useAppStore((s) => s.setOvStitchPlanPaddingMs)
   const setOvStitchPlanDsp = useAppStore((s) => s.setOvStitchPlanDsp)
+  const deepLinkProsodyVoiceId = useAppStore((s) => s.deepLinkProsodyVoiceId)
+  const setDeepLinkProsodyVoiceId = useAppStore((s) => s.setDeepLinkProsodyVoiceId)
 
   async function refresh() {
-    const [v, segs] = await Promise.all([
+    const [v, segs, projs] = await Promise.all([
       listVoices().catch((err) => {
         setError(err instanceof Error ? err.message : String(err))
         return [] as VoiceMeta[]
       }),
       listOmniVoiceSegments().catch(() => [] as SegmentMeta[]),
+      listProjects().catch(() => [] as Project[]),
     ])
     storeSetVoices(v)
     storeSetSegments(segs)
+    setProjects(projs)
   }
 
   useEffect(() => {
@@ -1786,11 +1905,11 @@ export function VoiceLibraryPage() {
     }
   }
 
-  async function duplicate(voiceId: string): Promise<VoiceMeta | null> {
+  async function duplicate(voiceId: string, variantFilename?: string): Promise<VoiceMeta | null> {
     setBusyVoiceId(voiceId)
     setError(null)
     try {
-      const copy = await duplicateVoice(voiceId)
+      const copy = await duplicateVoice(voiceId, variantFilename)
       await refresh()
       return copy
     } catch (err) {
@@ -1841,6 +1960,69 @@ export function VoiceLibraryPage() {
     }
   }
 
+  // "" project_id means Ungrouped -- Select can't carry null, so it's translated back to null here.
+  async function moveVoiceToProject(voiceId: string, projectId: string) {
+    setError(null)
+    try {
+      const project = projects.find((p) => p.project_id === projectId)
+      await setVoiceProject(voiceId, projectId || null, project?.name ?? null)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function moveSegmentToProject(segmentId: string, projectId: string) {
+    setError(null)
+    try {
+      const project = projects.find((p) => p.project_id === projectId)
+      await setSegmentProject(segmentId, projectId || null, project?.name ?? null)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function createNewProject(name: string): Promise<Project | null> {
+    if (!name.trim()) return null
+    setError(null)
+    try {
+      const project = await createProject(name.trim())
+      await refresh()
+      return project
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      return null
+    }
+  }
+
+  function toggleProjectCollapsed(key: string) {
+    setCollapsedProjects((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function groupByProjectKey<T extends { project_id?: string | null; project_name?: string | null }>(
+    items: T[],
+  ): Array<{ key: string; name: string; items: T[] }> {
+    const groups = new Map<string, { key: string; name: string; items: T[] }>()
+    for (const item of items) {
+      const key = item.project_id || '__ungrouped__'
+      const name = item.project_id ? item.project_name || 'Untitled project' : 'Ungrouped'
+      if (!groups.has(key)) groups.set(key, { key, name, items: [] })
+      groups.get(key)!.items.push(item)
+    }
+    const ordered = Array.from(groups.values()).sort((a, b) => {
+      if (a.key === '__ungrouped__') return 1
+      if (b.key === '__ungrouped__') return -1
+      return a.name.localeCompare(b.name)
+    })
+    return ordered
+  }
+
   const formatSegmentMeta = (m: SegmentMeta) => {
     const parts: string[] = []
     const tags = m.tags?.join(', ')
@@ -1853,6 +2035,117 @@ export function VoiceLibraryPage() {
     }
     return parts.join(' · ')
   }
+
+  const renderVoiceCard = (voice: VoiceMeta) => (
+    <VoiceCard
+      key={voice.voice_id}
+      voice={voice}
+      busy={busyVoiceId === voice.voice_id}
+      layoutMode={layoutMode}
+      onUse={() => { void useInSpeak(voice.voice_id) }}
+      onDesignFrom={
+        hasChipSelections(voice.selections) ? () => designFromVoice(voice.voice_id) : null
+      }
+      onReopenInStitchStudio={
+        (voice.selections as OmniVoiceSelections | null | undefined)?.stitch_plan?.clips?.length
+          ? () => reopenInStitchStudio(voice)
+          : null
+      }
+      onDelete={() => remove(voice.voice_id)}
+      onDuplicate={(variantFilename) => duplicate(voice.voice_id, variantFilename)}
+      autoOpenProsody={deepLinkProsodyVoiceId === voice.voice_id}
+      onAutoOpenProsodyConsumed={() => setDeepLinkProsodyVoiceId(null)}
+      onSaveSampleText={(text) => saveSampleText(voice.voice_id, text)}
+      onNormalize={(voiceId) => normalize(voiceId)}
+      onTrimSilence={async (voiceId) => { await trimVoiceReferenceSilence(voiceId); await refresh() }}
+      onFixAll={() => fixAll(voice.voice_id)}
+      onSetDefault={voice.family_id ? () => setDefault(voice.voice_id) : null}
+      onAdjustPauses={(voiceId, stylePreset, paceMultiplier, pauseOffset, mode) =>
+        adjustPauses(voiceId, stylePreset, paceMultiplier, pauseOffset, mode)
+      }
+      onActivateForApi={() => activateForApi(voice.voice_id)}
+      onApplyReferenceEdits={(voiceId, edits) => applyReferenceEdits(voiceId, edits)}
+      onAnalyze={() => analyze(voice.voice_id)}
+      onUndo={() => undoAudioEdit(voice.voice_id)}
+      projects={projects}
+      onSetProject={moveVoiceToProject}
+    />
+  )
+
+  const voiceGridClass = cn(
+    "grid gap-4",
+    layoutMode === 'grid-1' && "grid-cols-1",
+    layoutMode === 'grid-2' && "grid-cols-1 sm:grid-cols-2",
+    layoutMode === 'grid-3' && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3",
+    layoutMode === 'list' && "grid-cols-1"
+  )
+
+  const renderSegmentCard = (seg: SegmentMeta, i: number) => (
+    <motion.div
+      key={seg.segment_id}
+      initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: reducedMotion ? 0 : 0 }}
+      transition={{ delay: i * 0.02 }}
+      whileHover={reducedMotion ? {} : { y: -1 }}
+      className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 text-card-foreground shadow-sm transition-shadow hover:shadow-lg"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1">
+          <p className="text-xs">{seg.text}</p>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            {formatSegmentMeta(seg)}
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="self-start"
+          aria-label="Delete segment"
+          title="Delete segment"
+          disabled={busySegmentId === seg.segment_id}
+          onClick={() => removeSegment(seg.segment_id)}
+        >
+          <Trash2 className="size-3.5 text-muted-foreground" />
+        </Button>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <div>
+          <ClipPlayerUrl
+            segmentId={seg.segment_id}
+            className="w-full"
+          />
+        </div>
+        <Button
+          size="sm"
+          className="gap-1 w-full"
+          onClick={() => insertSegmentIntoStitchEditor(seg)}
+        >
+          <Plus className="size-3.5" />
+          Insert into stitch editor
+        </Button>
+        <Select
+          value={seg.project_id || UNGROUPED_VALUE}
+          onValueChange={(v) =>
+            moveSegmentToProject(seg.segment_id, v === UNGROUPED_VALUE ? '' : v)
+          }
+        >
+          <SelectTrigger className="h-7 w-full text-xs">
+            <Folder className="size-3 text-muted-foreground" />
+            <SelectValue placeholder="Ungrouped" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value={UNGROUPED_VALUE}>Ungrouped</SelectItem>
+              {projects.map((p) => (
+                <SelectItem key={p.project_id} value={p.project_id}>{p.name}</SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </div>
+    </motion.div>
+  )
 
   return (
     <div className="flex flex-col gap-6">
@@ -1913,82 +2206,92 @@ export function VoiceLibraryPage() {
                  <h2 className="text-sm font-semibold tracking-tight">
                    Saved voices ({voices.length})
                  </h2>
-                 <div className="flex items-center gap-1 rounded-lg bg-muted/50 p-1">
+                 <div className="flex items-center gap-2">
                    <Button
-                     variant={layoutMode === 'grid-1' ? 'secondary' : 'ghost'}
-                     size="icon-sm"
-                     onClick={() => setLayoutMode('grid-1')}
-                     title="Single column"
+                     size="sm"
+                     variant="outline"
+                     className="gap-1"
+                     onClick={async () => {
+                       const name = window.prompt('New Accent Design Project name:')
+                       if (name?.trim()) await createNewProject(name)
+                     }}
                    >
-                     <LayoutGrid className="size-3.5" />
+                     <FolderPlus className="size-3.5" /> New project
                    </Button>
                    <Button
-                     variant={layoutMode === 'grid-2' ? 'secondary' : 'ghost'}
+                     variant={groupByProject ? 'secondary' : 'ghost'}
                      size="icon-sm"
-                     onClick={() => setLayoutMode('grid-2')}
-                     title="Two columns"
+                     onClick={() => setGroupByProject((v) => !v)}
+                     title="Group by project"
                    >
-                     <Columns2 className="size-3.5" />
+                     <Folder className="size-3.5" />
                    </Button>
-                   <Button
-                     variant={layoutMode === 'grid-3' ? 'secondary' : 'ghost'}
-                     size="icon-sm"
-                     onClick={() => setLayoutMode('grid-3')}
-                     title="Three columns"
-                   >
-                     <Columns3 className="size-3.5" />
-                   </Button>
-                   <Button
-                     variant={layoutMode === 'list' ? 'secondary' : 'ghost'}
-                     size="icon-sm"
-                     onClick={() => setLayoutMode('list')}
-                     title="List view"
-                   >
-                     <Rows className="size-3.5" />
-                   </Button>
+                   <div className="flex items-center gap-1 rounded-lg bg-muted/50 p-1">
+                     <Button
+                       variant={layoutMode === 'grid-1' ? 'secondary' : 'ghost'}
+                       size="icon-sm"
+                       onClick={() => setLayoutMode('grid-1')}
+                       title="Single column"
+                     >
+                       <LayoutGrid className="size-3.5" />
+                     </Button>
+                     <Button
+                       variant={layoutMode === 'grid-2' ? 'secondary' : 'ghost'}
+                       size="icon-sm"
+                       onClick={() => setLayoutMode('grid-2')}
+                       title="Two columns"
+                     >
+                       <Columns2 className="size-3.5" />
+                     </Button>
+                     <Button
+                       variant={layoutMode === 'grid-3' ? 'secondary' : 'ghost'}
+                       size="icon-sm"
+                       onClick={() => setLayoutMode('grid-3')}
+                       title="Three columns"
+                     >
+                       <Columns3 className="size-3.5" />
+                     </Button>
+                     <Button
+                       variant={layoutMode === 'list' ? 'secondary' : 'ghost'}
+                       size="icon-sm"
+                       onClick={() => setLayoutMode('list')}
+                       title="List view"
+                     >
+                       <Rows className="size-3.5" />
+                     </Button>
+                   </div>
                  </div>
                </div>
 
-
-            <div className={cn(
-              "grid gap-4",
-              layoutMode === 'grid-1' && "grid-cols-1",
-              layoutMode === 'grid-2' && "grid-cols-1 sm:grid-cols-2",
-              layoutMode === 'grid-3' && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3",
-              layoutMode === 'list' && "grid-cols-1"
-            )}>
-              {voices.map((voice) => (
-                <VoiceCard
-                  key={voice.voice_id}
-                  voice={voice}
-                  busy={busyVoiceId === voice.voice_id}
-                  layoutMode={layoutMode}
-                  onUse={() => { void useInSpeak(voice.voice_id) }}
-                  onDesignFrom={
-                    hasChipSelections(voice.selections) ? () => designFromVoice(voice.voice_id) : null
-                  }
-                  onReopenInStitchStudio={
-                    (voice.selections as OmniVoiceSelections | null | undefined)?.stitch_plan?.clips
-                      ?.length
-                      ? () => reopenInStitchStudio(voice)
-                      : null
-                  }
-                  onDelete={() => remove(voice.voice_id)}
-                  onDuplicate={() => duplicate(voice.voice_id)}
-                   onSaveSampleText={(text) => saveSampleText(voice.voice_id, text)}
-                   onNormalize={(voiceId) => normalize(voiceId)}
-                   onTrimSilence={async (voiceId) => { await trimVoiceReferenceSilence(voiceId); await refresh() }}
-                   onFixAll={() => fixAll(voice.voice_id)}
-                   onSetDefault={voice.family_id ? () => setDefault(voice.voice_id) : null}
-                    onAdjustPauses={(voiceId, stylePreset, paceMultiplier, pauseOffset, mode) => adjustPauses(voiceId, stylePreset, paceMultiplier, pauseOffset, mode)}
-
-                   onActivateForApi={() => activateForApi(voice.voice_id)}
-                  onApplyReferenceEdits={(voiceId, edits) => applyReferenceEdits(voiceId, edits)}
-                  onAnalyze={() => analyze(voice.voice_id)}
-                  onUndo={() => undoAudioEdit(voice.voice_id)}
-                />
-              ))}
-            </div>
+            {groupByProject ? (
+              <div className="flex flex-col gap-4">
+                {groupByProjectKey(voices).map((group) => {
+                  const collapsed = collapsedProjects.has(group.key)
+                  return (
+                    <div key={group.key} className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 text-left text-xs font-semibold text-muted-foreground hover:text-foreground"
+                        onClick={() => toggleProjectCollapsed(group.key)}
+                      >
+                        <ChevronDown className={cn('size-3.5 transition-transform', collapsed && '-rotate-90')} />
+                        <Folder className="size-3.5" />
+                        {group.name} ({group.items.length})
+                      </button>
+                      {!collapsed && (
+                        <div className={voiceGridClass}>
+                          {group.items.map((voice) => renderVoiceCard(voice))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className={voiceGridClass}>
+                {voices.map((voice) => renderVoiceCard(voice))}
+              </div>
+            )}
 
             </section>
           )}
@@ -2037,57 +2340,35 @@ export function VoiceLibraryPage() {
             )}
 
             {filteredSegments.length > 0 ? (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {filteredSegments.map((seg, i) => (
-                        <motion.div
-                          key={seg.segment_id}
-                          initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: reducedMotion ? 0 : 0 }}
-                          transition={{ delay: i * 0.02 }}
-                          whileHover={reducedMotion ? {} : { y: -1 }}
-                          className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 text-card-foreground shadow-sm transition-shadow hover:shadow-lg"
+              groupByProject ? (
+                <div className="flex flex-col gap-4">
+                  {groupByProjectKey(filteredSegments).map((group) => {
+                    const collapsed = collapsedProjects.has(`seg-${group.key}`)
+                    return (
+                      <div key={group.key} className="flex flex-col gap-2">
+                        <button
+                          type="button"
+                          className="flex items-center gap-2 text-left text-xs font-semibold text-muted-foreground hover:text-foreground"
+                          onClick={() => toggleProjectCollapsed(`seg-${group.key}`)}
                         >
-
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1">
-                        <p className="text-xs">{seg.text}</p>
-                        <p className="mt-1 text-[10px] text-muted-foreground">
-                          {formatSegmentMeta(seg)}
-                        </p>
+                          <ChevronDown className={cn('size-3.5 transition-transform', collapsed && '-rotate-90')} />
+                          <Folder className="size-3.5" />
+                          {group.name} ({group.items.length})
+                        </button>
+                        {!collapsed && (
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            {group.items.map((seg, i) => renderSegmentCard(seg, i))}
+                          </div>
+                        )}
                       </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="self-start"
-                        aria-label="Delete segment"
-                        title="Delete segment"
-                        disabled={busySegmentId === seg.segment_id}
-                        onClick={() => removeSegment(seg.segment_id)}
-                      >
-                        <Trash2 className="size-3.5 text-muted-foreground" />
-                      </Button>
-                    </div>
-
-                     <div className="flex flex-col gap-2">
-                       <div>
-                         <ClipPlayerUrl
-                           segmentId={seg.segment_id}
-                           className="w-full"
-                         />
-                       </div>
-                       <Button
-                         size="sm"
-                         className="gap-1 w-full"
-                         onClick={() => insertSegmentIntoStitchEditor(seg)}
-                       >
-                         <Plus className="size-3.5" />
-                         Insert into stitch editor
-                       </Button>
-                     </div>
-
-                  </motion.div>
-                ))}
-              </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {filteredSegments.map((seg, i) => renderSegmentCard(seg, i))}
+                </div>
+              )
             ) : segSearch.trim() ? (
               <p className="text-xs text-muted-foreground">
                 No segments match your search.

@@ -201,6 +201,10 @@ interface StoreState {
   ovStitchedUrl: string | null
   ovStitchedBlob: Blob | null
   ovSavedVoiceId: string | null
+  // Set right after a Stitch Studio save; the Voice Library reads this on mount to
+  // auto-open that voice's Adjust Prosody popover, then clears it so it doesn't
+  // reopen on a later, unrelated visit to the library.
+  deepLinkProsodyVoiceId: string | null
   ovProgress: OmniVoiceProgress | null
    ovCurrentJobId: string | null
    ovJobTotalSegments: number
@@ -253,6 +257,7 @@ interface StoreState {
   setOvStitchedUrl: (v: string | null) => void
   setOvStitchedBlob: (v: Blob | null) => void
   setOvSavedVoiceId: (v: string | null) => void
+  setDeepLinkProsodyVoiceId: (v: string | null) => void
   setOvProgress: (v: OmniVoiceProgress | null) => void
    setOvCurrentJobId: (v: string | null) => void
    setOvJobTotalSegments: (v: number) => void
@@ -441,6 +446,7 @@ export const useAppStore = create<StoreState>((set) => ({
   ovStitchedUrl: null,
   ovStitchedBlob: null,
   ovSavedVoiceId: null,
+  deepLinkProsodyVoiceId: null,
   ovProgress: null,
   ovCurrentJobId: null,
   ovJobTotalSegments: 0,
@@ -530,6 +536,7 @@ export const useAppStore = create<StoreState>((set) => ({
   setOvStitchedUrl: (v) => set({ ovStitchedUrl: v }),
   setOvStitchedBlob: (v) => set({ ovStitchedBlob: v }),
   setOvSavedVoiceId: (v) => set({ ovSavedVoiceId: v }),
+  setDeepLinkProsodyVoiceId: (v) => set({ deepLinkProsodyVoiceId: v }),
   setOvProgress: (v) => set({ ovProgress: v }),
   setOvCurrentJobId: (v) => set({ ovCurrentJobId: v }),
   setOvJobTotalSegments: (v) => set({ ovJobTotalSegments: v }),

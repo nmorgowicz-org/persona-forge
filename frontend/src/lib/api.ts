@@ -2,6 +2,8 @@
 // as the rest of the service (see SECURITY.md); this UI is meant to run on the same
 // trusted network as the container.
 
+import type { AccentFeature } from './accentBank'
+
 export function classifyGenerateError(
   message: string | null,
   status: number | null,
@@ -137,6 +139,13 @@ export interface VoiceMeta {
   // True when this voice is the runtime default the OpenAI endpoint clones from (pocket_tts only).
   api_active?: boolean
   undo_available?: boolean
+  // True when original.wav is a symlink resolving outside the voice library tree (e.g. a
+  // container bind-mount) — in-place edits are blocked server-side and should be routed
+  // through "edit on a copy" instead.
+  mounted_reference?: boolean
+  // Accent Design Project this voice is grouped under (§4) — null/absent means "Ungrouped".
+  project_id?: string | null
+  project_name?: string | null
   asr?: {
     ok?: boolean
     severity?: 'ok' | 'warn' | 'fail' | 'no_speech' | 'error' | string
@@ -398,10 +407,28 @@ export async function deleteVoice(voiceId: string): Promise<void> {
   if (!res.ok) throw new Error(await readError(res))
 }
 
-export async function duplicateVoice(voiceId: string): Promise<VoiceMeta> {
-  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/duplicate`, { method: 'POST' })
+// Forks `voiceId` into a brand-new, independent voice_id. Omitting `variantFilename` forks
+// whichever audio is currently active; passing one forks that specific variant without
+// disturbing which variant is active on the source voice.
+export async function duplicateVoice(voiceId: string, variantFilename?: string): Promise<VoiceMeta> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/duplicate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ variant_filename: variantFilename ?? null }),
+  })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
+}
+
+export async function getVoiceVariantAudio(voiceId: string, variantFilename: string): Promise<{ audio_base64: string }> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/variants/${encodeURIComponent(variantFilename)}/audio`)
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function deleteVoiceVariant(voiceId: string, variantFilename: string): Promise<void> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/variants/${encodeURIComponent(variantFilename)}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(await readError(res))
 }
 
 export async function analyzeVoiceReference(voiceId: string): Promise<VoiceMeta> {
@@ -956,6 +983,8 @@ export interface OmniVoiceSaveParams {
   variantKind?: string | null
   /** Optional stitch_plan for full control (docs/dev/features/stitch_editor.md). */
   stitchPlan?: StitchPlanPayload | null
+  projectId?: string | null
+  projectName?: string | null
 }
 
 export interface OmniVoiceSaveResult {
@@ -981,6 +1010,8 @@ export async function saveOmniVoice(params: OmniVoiceSaveParams): Promise<OmniVo
       stitch_plan: params.stitchPlan
         ? serializeStitchPlan(params.stitchPlan)
         : undefined,
+      project_id: params.projectId ?? undefined,
+      project_name: params.projectName ?? undefined,
     }),
   })
   if (!res.ok) throw new Error(await readError(res))
@@ -1010,6 +1041,9 @@ export interface SegmentMeta {
   job_id?: string | null
   whisper_transcript?: string | null
   match_score?: number | null
+  feature_tags?: AccentFeature[]
+  project_id?: string | null
+  project_name?: string | null
 }
 
 export async function lockInOmniVoiceSegment(params: {
@@ -1017,6 +1051,9 @@ export async function lockInOmniVoiceSegment(params: {
   text: string
   instruct: string
   accentId?: string | null
+  featureTags?: AccentFeature[]
+  projectId?: string | null
+  projectName?: string | null
 }): Promise<SegmentMeta> {
   const res = await fetch('/omnivoice/segments', {
     method: 'POST',
@@ -1026,6 +1063,9 @@ export async function lockInOmniVoiceSegment(params: {
       text: params.text,
       instruct: params.instruct,
       accent_id: params.accentId ?? undefined,
+      feature_tags: params.featureTags?.length ? params.featureTags : undefined,
+      project_id: params.projectId ?? undefined,
+      project_name: params.projectName ?? undefined,
     }),
   })
   if (!res.ok) throw new Error(await readError(res))
@@ -1172,4 +1212,75 @@ export async function cancelOmniVoiceAudition(jobId: string): Promise<void> {
     { method: 'POST' },
   )
   if (!res.ok) throw new Error(await readError(res))
+}
+
+// ── Accent Design Projects (§4) — lightweight grouping tag for voices/segments ────────────
+
+export interface Project {
+  project_id: string
+  name: string
+  description?: string | null
+  created_at: number
+}
+
+export async function listProjects(): Promise<Project[]> {
+  const res = await fetch('/projects')
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function createProject(name: string, description?: string): Promise<Project> {
+  const res = await fetch('/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function renameProject(
+  projectId: string,
+  updates: { name?: string; description?: string },
+): Promise<Project> {
+  const res = await fetch(`/projects/${encodeURIComponent(projectId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  const res = await fetch(`/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(await readError(res))
+}
+
+export async function setVoiceProject(
+  voiceId: string,
+  projectId: string | null,
+  projectName?: string | null,
+): Promise<VoiceMeta> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/project`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, project_name: projectName }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function setSegmentProject(
+  segmentId: string,
+  projectId: string | null,
+  projectName?: string | null,
+): Promise<SegmentMeta> {
+  const res = await fetch(`/omnivoice/segments/${encodeURIComponent(segmentId)}/project`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectId, project_name: projectName }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
 }
