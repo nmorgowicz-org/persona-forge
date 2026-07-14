@@ -639,6 +639,42 @@ def voices_activate(voice_id: str):
     return jsonify({**meta, "api_active": True})
 
 
+@app.post("/voices/<voice_id>/warm")
+def voices_warm(voice_id: str):
+    """Ensure a specific voice's clone state is loaded and cached before generation.
+
+    The Speak tab's "Use in Speak" action and voice dropdown call this right when a
+    voice is selected, so the runtime is bounced back from an idle-unloaded state and
+    that voice's state is resolved/cached up front -- instead of deferring both the
+    reload and the first-time voice-state build to the user's first Generate click.
+    """
+    active_backend = getattr(model, "TTS_BACKEND", None)
+    if active_backend != "pocket_tts":
+        return jsonify({"warmed": False, "reason": "not pocket_tts backend"})
+    if not model._service_started and not _ensure_service_started(timeout_seconds=240):
+        return jsonify({"error": "Model not loaded"}), 503
+    meta = voice_library.get_voice(voice_id)
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+
+    from qwen3_tts import pocket_tts_runtime
+
+    def _run():
+        model._ensure_base_loaded()
+        pocket_tts_runtime.get_pocket_tts_voice_state(
+            model.model,
+            voice_id=voice_id,
+            default_voice_state=model.voice_clone_prompt,
+            ref_audio_path=model.REF_AUDIO,
+        )
+
+    try:
+        model.executor.submit(_run).result(timeout=120)
+    except Exception as exc:
+        return jsonify({"error": f"Warm-up failed: {exc}"}), 500
+    return jsonify({"warmed": True, "voice_id": voice_id})
+
+
 @app.get("/voices/<voice_id>/preview-prosody")
 def voices_preview_prosody(voice_id: str):
     """Preview prosody adjustments without saving a variant.

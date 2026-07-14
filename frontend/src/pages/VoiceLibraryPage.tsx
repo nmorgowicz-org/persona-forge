@@ -32,6 +32,7 @@ import {
 } from 'lucide-react'
 import {
   activateVoiceForApi,
+  warmVoice,
   analyzeVoiceReference,
   adjustVoiceReferencePauses,
   applyVoiceReferenceRegionEdits,
@@ -868,6 +869,12 @@ function VoiceCard({
   // Per-boundary target deltas (ms) keyed by rounded at_ms — set by dragging a manufactured
   // pause's trailing edge in the A/B view. Cleared when the preview is reset or the voice changes.
   const [targetOverrides, setTargetOverrides] = useState<Record<string, number>>({})
+  // Whether one of this card's own popovers (Adjust prosody / More actions) is open. The popover
+  // content is portaled to <body> and visually overlaps the card, which steals the pointer's
+  // hit-test target and makes framer-motion's whileHover think the card was left — collapsing the
+  // hover-lift mid-interaction. Pin the lift on while either popover is open to stop that.
+  const [prosodyPopoverOpen, setProsodyPopoverOpen] = useState(false)
+  const [moreActionsPopoverOpen, setMoreActionsPopoverOpen] = useState(false)
 
   // One place to render a prosody preview, so the Preview button and per-marker nudges
   // stay in sync. Passing an explicit overrides map avoids stale-state races on rapid drags.
@@ -1048,7 +1055,7 @@ function VoiceCard({
     <motion.div
       data-testid="voice-card"
       initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: reducedMotion ? 0 : 0 }}
+      animate={{ opacity: 1, y: reducedMotion || !(prosodyPopoverOpen || moreActionsPopoverOpen) ? 0 : -2 }}
       whileHover={reducedMotion ? {} : { y: -2 }}
       className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm transition-shadow duration-200 hover:border-border/80 hover:shadow-lg"
     >
@@ -1237,13 +1244,13 @@ function VoiceCard({
           Use in Speak
         </Button>
         <Button size="sm" variant="outline" disabled={busy} onClick={openAudioEditor}><SlidersHorizontal /> Edit audio</Button>
-         <Popover>
+         <Popover open={prosodyPopoverOpen} onOpenChange={setProsodyPopoverOpen}>
            <PopoverTrigger asChild>
              <Button size="sm" variant="outline" disabled={busy}>
                <FoldHorizontal /> Adjust prosody <ChevronDown />
              </Button>
            </PopoverTrigger>
-           <PopoverContent align="start" className="w-72">
+           <PopoverContent align="start" side="bottom" collisionPadding={16} className="w-72 max-h-[min(80vh,34rem)] overflow-y-auto">
              <p className="text-xs font-medium mb-2">Prosody Settings</p>
              <div className="space-y-3">
                 <div className="flex flex-col gap-1.5">
@@ -1430,7 +1437,7 @@ function VoiceCard({
            </PopoverContent>
          </Popover>
 
-        <Popover><PopoverTrigger asChild><Button size="icon-sm" variant="outline" aria-label="More voice actions" tooltip="More voice actions"><MoreHorizontal /></Button></PopoverTrigger><PopoverContent align="end" className="w-64 gap-1 p-1.5">
+        <Popover open={moreActionsPopoverOpen} onOpenChange={setMoreActionsPopoverOpen}><PopoverTrigger asChild><Button size="icon-sm" variant="outline" aria-label="More voice actions" tooltip="More voice actions"><MoreHorizontal /></Button></PopoverTrigger><PopoverContent align="end" className="w-64 gap-1 p-1.5">
           <label className="mb-1 flex items-center gap-2 rounded bg-muted/30 p-2 text-xs"><input type="checkbox" checked={preserveOriginal} onChange={(event) => setPreserveOriginal(event.target.checked)} /> Edit audio operations on a copy</label>
           <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onDuplicate}><Copy /> Duplicate voice</Button>
           <Button size="sm" variant="ghost" className="w-full justify-start" disabled={voice.api_active} onClick={onActivateForApi}><Radio /> Activate for API</Button>
@@ -1753,6 +1760,19 @@ export function VoiceLibraryPage() {
     }
   }
 
+  // Navigates to Speak with this voice selected, then bounces the runtime to actually
+  // load/cache that voice's clone state -- so the next Generate click is guaranteed to
+  // use the voice the user just picked, not whatever was previously active/default.
+  async function useInSpeak(voiceId: string) {
+    setVoiceId(voiceId)
+    setPage('speak')
+    try {
+      await warmVoice(voiceId)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   async function applyReferenceEdits(voiceId: string, edits: StitchPlanRegionEdit[]) {
     setBusyVoiceId(voiceId)
     setError(null)
@@ -1943,10 +1963,7 @@ export function VoiceLibraryPage() {
                   voice={voice}
                   busy={busyVoiceId === voice.voice_id}
                   layoutMode={layoutMode}
-                  onUse={() => {
-                    setVoiceId(voice.voice_id)
-                    setPage('speak')
-                  }}
+                  onUse={() => { void useInSpeak(voice.voice_id) }}
                   onDesignFrom={
                     hasChipSelections(voice.selections) ? () => designFromVoice(voice.voice_id) : null
                   }

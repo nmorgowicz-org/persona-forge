@@ -612,6 +612,11 @@ export async function activateVoiceForApi(voiceId: string): Promise<VoiceMeta> {
   return res.json()
 }
 
+export async function warmVoice(voiceId: string): Promise<void> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/warm`, { method: 'POST' })
+  if (!res.ok) throw new Error(await readError(res))
+}
+
 export interface HealthState {
   status: string
   model_loaded: boolean

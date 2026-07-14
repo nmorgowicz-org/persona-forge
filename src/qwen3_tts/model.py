@@ -446,6 +446,8 @@ def load_model(profile: ModelProfile | None = None):
             profile.ref_audio,
         )
 
+        pocket_tts_runtime.warm_up_pocket_tts(model, voice_clone_prompt)
+
         active_profile = profile
 
         _service_started = True
@@ -1525,7 +1527,11 @@ def _run_generate(
             print(f"[generate] instruct field ignored on Base checkpoint: {instruct!r}", flush=True)
         import traceback as _tb
         t0 = time.monotonic()
-        print(f"[generate] batch  lang={language!r}  chars={len(text)}  job={job_id or '-'}", flush=True)
+        print(
+            f"[generate] batch  lang={language!r}  chars={len(text)}  "
+            f"voice_id={effective_voice_id or 'default'!r}  job={job_id or '-'}",
+            flush=True,
+        )
 
         # Create or use provided job state for progress tracking + cancel.
         job: _JobState | None = None

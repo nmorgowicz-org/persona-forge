@@ -10,6 +10,7 @@ Public API:
     - build_default_voice_state(...)
     - get_pocket_tts_voice_state(...)
     - generate_pocket_tts(...)
+    - warm_up_pocket_tts(...)
     - invalidate_voice_state(...)
     - unload_pocket_tts()
 """
@@ -164,7 +165,14 @@ def build_default_voice_state(
             print(f"[pocket_tts] Using persisted active default voice {active_id!r}")
             ref_audio_path = str(active_wav)
         else:
-            print(f"[pocket_tts] Persisted active default {active_id!r} has no reference.wav; ignoring.")
+            print(
+                f"[pocket_tts] Persisted active default {active_id!r} has no reference.wav "
+                "(voice likely deleted); clearing the stale default and falling back."
+            )
+            try:
+                ACTIVE_DEFAULT_FILE.unlink(missing_ok=True)
+            except OSError as exc:
+                print(f"[pocket_tts] Could not clear stale active default file: {exc}")
 
     if not ref_audio_path:
         print("[pocket_tts] No REF_AUDIO_PATH configured; default voice_state = None.")
@@ -297,12 +305,14 @@ def get_pocket_tts_voice_state(
     # 1) No specific voice requested -> default.
     if not voice_id:
         if default_voice_state is not None:
+            print("[pocket_tts] voice_state resolution: default (in-memory)")
             return default_voice_state
         # Last-ditch: try to rebuild from ref_audio_path.
         if ref_audio_path and os.path.isfile(ref_audio_path):
             print(
                 f"[pocket_tts] No default_voice_state; falling back to ref_audio_path={ref_audio_path!r}"
             )
+            print("[pocket_tts] voice_state resolution: default (rebuilt from ref_audio_path)")
             state = model.get_state_for_audio_prompt(ref_audio_path)
             global pocket_tts_default_voice_state
             pocket_tts_default_voice_state = state
@@ -332,6 +342,7 @@ def get_pocket_tts_voice_state(
     # 2) In-memory cache.
     cached = pocket_tts_voice_state_cache.get(resolved_id)
     if cached is not None:
+        print(f"[pocket_tts] voice_state resolution: {resolved_id!r} (in-memory cache)")
         return cached
 
     # 3) Disk cache (.safetensors).
@@ -353,6 +364,7 @@ def get_pocket_tts_voice_state(
             print(f"[pocket_tts] Loading cached voice state from disk: {cache_path.name}")
             state = model.import_model_state(str(cache_path))
             pocket_tts_voice_state_cache[resolved_id] = state
+            print(f"[pocket_tts] voice_state resolution: {resolved_id!r} (disk cache import)")
             return state
         except Exception as exc:
             print(f"[pocket_tts] Failed to load cached state {cache_path.name}: {exc}. Falling back.")
@@ -365,6 +377,7 @@ def get_pocket_tts_voice_state(
             state = model.get_state_for_audio_prompt(resolved_id)
             pocket_tts_voice_state_cache[resolved_id] = state
             model.export_model_state(state, str(cache_path))
+            print(f"[pocket_tts] voice_state resolution: {resolved_id!r} (built-in preset, rebuilt)")
             return state
         except Exception as exc:
             # Not a valid preset/path, fall through to library lookup.
@@ -390,6 +403,7 @@ def get_pocket_tts_voice_state(
     state = model.get_state_for_audio_prompt(wav_path)
     pocket_tts_voice_state_cache[resolved_id] = state
     model.export_model_state(state, str(cache_path))
+    print(f"[pocket_tts] voice_state resolution: {resolved_id!r} (library, rebuilt from wav)")
     return state
 
 
@@ -499,6 +513,44 @@ def generate_pocket_tts(
     audio = _trim_post_eos_tail(audio, int(sample_rate), pocket_tts_frames_after_eos)
 
     return audio, int(sample_rate)
+
+
+def warm_up_pocket_tts(model: TTSModel, voice_state: dict[str, Any] | None) -> None:
+    """Run one throwaway generation right after load to pay the first-call cost here.
+
+    The first real inference through a freshly loaded TTSModel appears to carry a
+    one-time cost (lazy kernel/graph setup, first-run allocation spike) that has
+    shown up as a silent, untraceable crash (no Python exception, no traceback) on
+    the very first user-triggered generate call after every model load/reload —
+    never on subsequent calls against the same loaded model. Running a trivial
+    generation here, synchronously, on the same serialized executor thread that
+    loads the model, means that cost (and any resulting failure) is paid and logged
+    at load time instead of silently swallowing a user's first request.
+
+    No-ops quietly if there's no voice_state to warm up with (e.g. cloning
+    unavailable) — the warm-up isn't the source of truth for readiness, just a
+    best-effort mitigation.
+    """
+    if model is None or not voice_state:
+        return
+    import time as _time
+
+    t0 = _time.monotonic()
+    try:
+        print("[pocket_tts] Warming up model with a throwaway generation...", flush=True)
+        generate_pocket_tts(model, voice_state, "Warming up.")
+        print(f"[pocket_tts] Warm-up complete ({_time.monotonic() - t0:.1f}s).", flush=True)
+    except Exception as exc:
+        # Surface loudly but don't block boot -- a warm-up failure here is strictly
+        # more useful (visible, attributable to load) than the same failure hitting
+        # a real user's first request silently.
+        import traceback
+
+        print(
+            f"[pocket_tts] Warm-up generation failed after {_time.monotonic() - t0:.1f}s: {exc}",
+            flush=True,
+        )
+        traceback.print_exc()
 
 
 # ---------------------------------------------------------------------------

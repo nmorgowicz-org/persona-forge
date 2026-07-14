@@ -17,6 +17,7 @@ import {
   cancelGenerate,
   listBuiltInVoices,
   listVoices,
+  warmVoice,
   type BuiltInVoiceMeta,
 } from '@/lib/api'
 import { useAppStore } from '@/store'
@@ -302,6 +303,13 @@ export function SpeakPage() {
     setVoiceId(nextVoiceId)
     const builtIn = builtInVoices.find((voice) => voice.voice_id === nextVoiceId)
     if (builtIn?.language) setLanguage(builtIn.language)
+    // Bounce the runtime to actually load/cache this voice's clone state now, so the
+    // next Generate click doesn't pay a cold-load or first-time voice-state-build cost.
+    if (nextVoiceId && !nextVoiceId.startsWith('pocket:')) {
+      warmVoice(nextVoiceId).catch(() => {
+        // Best-effort; get_pocket_tts_voice_state re-resolves on generate anyway.
+      })
+    }
   }
 
   return (
