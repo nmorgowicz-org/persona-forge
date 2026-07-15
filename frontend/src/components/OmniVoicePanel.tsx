@@ -829,11 +829,19 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         p = await getOmniVoiceAuditionProgress(breadcrumb.jobId)
       } catch {
         clearActiveJobBreadcrumb()
+        setError(
+          "Your in-progress voice-design job couldn't be found — it may have been lost when the server restarted. Please generate again.",
+        )
         return
       }
       if (cancelled) return
       if (p.status !== 'running' && p.status !== 'queued') {
         clearActiveJobBreadcrumb()
+        if (p.status === 'completed') {
+          setError('Your voice-design job finished while this page was closed. Reopen the rack by generating again to see the results.')
+        } else if (p.status === 'failed') {
+          setError(p.message || 'Your voice-design job failed while this page was closed.')
+        }
         return
       }
 
