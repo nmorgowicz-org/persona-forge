@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pause, Play, Repeat, X } from 'lucide-react'
 import type { AlignmentBoundary, ProsodyPausePlanEntry } from '@/lib/api'
 import { getVoice } from '@/lib/api'
@@ -126,7 +126,10 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
 
   const words = useMemo(() => (boundaries ?? []).filter((b) => b.text), [boundaries])
 
-  const laneAudio = (lane: 'original' | 'adjusted') => (lane === 'original' ? origAudio.current : adjAudio.current)
+  const laneAudio = useCallback(
+    (lane: 'original' | 'adjusted') => (lane === 'original' ? origAudio.current : adjAudio.current),
+    [origAudio, adjAudio],
+  )
 
   // Cut positions per lane (original lane in src time, adjusted in rendered time) so a
   // drag-selection can snap its edges to the boundaries we actually cut at.
@@ -196,7 +199,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
       el.removeEventListener('ended', onEnd)
     }
-  }, [playing, origAudio, adjAudio])
+  }, [playing, laneAudio])
 
   const startPlay = (lane: 'original' | 'adjusted', fromMs: number, region: { start: number; end: number } | null) => {
     const el = laneAudio(lane)
@@ -324,7 +327,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
       type="button"
       onClick={() => togglePlay(lane)}
       className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold transition ${
-        playing === lane ? 'border-amber-400 bg-amber-400/15 text-amber-200' : 'border-border bg-background/60 text-foreground/80 hover:bg-background'
+        playing === lane ? 'border-warning bg-warning/15 text-warning' : 'border-border bg-background/60 text-foreground/80 hover:bg-background'
       }`}
       title={playing === lane ? 'Pause' : selection ? 'Play selection' : 'Play from playhead'}
     >
@@ -339,7 +342,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
       tabIndex={0}
       role="group"
       aria-label="A/B waveform comparison"
-      className="relative select-none space-y-1 rounded outline-none focus-visible:ring-1 focus-visible:ring-amber-400/50"
+      className="relative select-none space-y-1 rounded outline-none focus-visible:ring-1 focus-visible:ring-warning/50"
       onMouseMove={onStripMove}
       onMouseUp={finishDrag}
       onMouseLeave={() => { setHoverPct(null); finishDrag() }}
@@ -361,9 +364,9 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
           <Repeat className="size-3" /> Loop
         </button>
         {selection && (
-          <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-400/10 px-2 py-1 font-mono text-[10px] tabular-nums text-amber-200">
+          <span className="inline-flex items-center gap-1 rounded-full border border-warning/50 bg-warning/10 px-2 py-1 font-mono text-[10px] tabular-nums text-warning">
             {(selection.start / 1000).toFixed(2)}–{(selection.end / 1000).toFixed(2)}s
-            <button type="button" onClick={() => { setSelection(null); regionRef.current = null }} title="Clear selection" className="text-amber-200/70 hover:text-amber-100">
+            <button type="button" onClick={() => { setSelection(null); regionRef.current = null }} title="Clear selection" className="text-warning/70 hover:text-warning">
               <X className="size-3" />
             </button>
           </span>
@@ -382,7 +385,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
             <WaveformLane peaks={original?.peaks ?? null} durMs={original?.durationMs ?? null} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
           </div>
           {selection && (
-            <div className="pointer-events-none absolute inset-y-0 z-0 border-x border-amber-300/60 bg-amber-300/15" style={{ left: pct(selection.start), width: selWidth }} />
+            <div className="pointer-events-none absolute inset-y-0 z-0 border-x border-warning/60 bg-warning/15" style={{ left: pct(selection.start), width: selWidth }} />
           )}
           {/* The cut mapped back to original time (src_cut_ms) — lines up with the words. */}
           {boundaryPlan.map((marker, index) => {
@@ -426,7 +429,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
             <WaveformLane peaks={adjusted.peaks} durMs={adjusted.durationMs} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
           </div>
           {selection && (
-            <div className="pointer-events-none absolute inset-y-0 z-0 border-x border-amber-300/60 bg-amber-300/15" style={{ left: pct(selection.start), width: selWidth }} />
+            <div className="pointer-events-none absolute inset-y-0 z-0 border-x border-warning/60 bg-warning/15" style={{ left: pct(selection.start), width: selWidth }} />
           )}
           {boundaryPlan.map((marker, index) => {
             const start = cutMs(marker.cut_sample)
@@ -440,7 +443,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
             return (
               <span key={`${marker.cut_sample}-${index}`}>
                 {manufactured && (
-                  <span className={`pointer-events-none absolute inset-y-0 z-0 ${overridden || liveNudge?.key === key ? 'bg-amber-400/20' : 'bg-cyan-400/15'}`} style={{ left: pct(start), width: pct(insertMs) }} />
+                  <span className={`pointer-events-none absolute inset-y-0 z-0 ${overridden || liveNudge?.key === key ? 'bg-warning/20' : 'bg-cyan-400/15'}`} style={{ left: pct(start), width: pct(insertMs) }} />
                 )}
                 <span className={`pointer-events-none absolute inset-y-0 z-10 -translate-x-1/2 border-l-2 ${manufactured ? 'border-solid' : 'border-dashed'} ${color}`} style={{ left: pct(start) }} title={title} aria-label={title}>
                   <span className={`absolute left-1/2 top-1 -translate-x-1/2 border-current bg-background ${manufactured ? 'size-2 rotate-45 border' : 'size-2 rounded-full border-2'}`} />
@@ -454,7 +457,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
                     onDoubleClick={(e) => { e.stopPropagation(); if (overridden) onResetTarget?.(key) }}
                     title={title}
                   >
-                    <span className={`h-2/3 w-0.5 rounded ${overridden || liveNudge?.key === key ? 'bg-amber-300' : 'bg-cyan-300/70 group-hover:bg-cyan-200'}`} />
+                    <span className={`h-2/3 w-0.5 rounded ${overridden || liveNudge?.key === key ? 'bg-warning' : 'bg-cyan-300/70 group-hover:bg-cyan-200'}`} />
                   </span>
                 )}
               </span>

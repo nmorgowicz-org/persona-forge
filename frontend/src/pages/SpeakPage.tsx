@@ -527,6 +527,7 @@ export function SpeakPage() {
               seed={speakLastSeed}
               rtf={resultMeta?.rtf ?? null}
               metrics={resultMeta?.audioSeconds ? { duration_seconds: resultMeta.audioSeconds } : null}
+              showSpectralAccent={false}
             />
             {speakLastSeed !== null && (
               <div className="flex items-center justify-between">

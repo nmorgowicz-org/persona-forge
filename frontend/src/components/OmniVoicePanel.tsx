@@ -169,8 +169,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
   const jobCurrentSegmentIndex = useAppStore(
     (s) => s.ovJobCurrentSegmentIndex,
   )
-  // Intentionally subscribed (Zustand batching); used in this component.
-  useAppStore((s) => s.ovJobMessage)
+  const jobMessage = useAppStore((s) => s.ovJobMessage)
   const jobEtaSeconds = useAppStore((s) => s.ovJobEtaSeconds)
   const jobCandidatesTotal = useAppStore((s) => s.ovJobCandidatesTotal)
   const jobCandidatesCompleted = useAppStore((s) => s.ovJobCandidatesCompleted)
@@ -374,6 +373,16 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
   const [segmentDurations, setSegmentDurations] = useState<
     Record<string, number | null>
   >({})
+  // Per-candidate tempo choice from each take's SpeedStepper — carried into the Stitch/Save
+  // plan as a real time-stretch (audio_post.stitch_segments' `tempos` kwarg), not just the
+  // discardable local playbackRate preview AudioDeck used before this.
+  const [candidateSpeeds, setCandidateSpeeds] = useState<Record<string, number>>({})
+  const onCandidateSpeedChange = useCallback((candidateId: string, speed: number) => {
+    setCandidateSpeeds((prev) => ({ ...prev, [candidateId]: speed }))
+  }, [])
+  // Rolling avg_seconds-per-candidate from the most recent job, used to give Regen a rough
+  // "~Ns" cost estimate up front rather than only ever showing progress after the fact.
+  const [lastAvgCandidateSeconds, setLastAvgCandidateSeconds] = useState<number | null>(null)
   const [postProcess, setPostProcess] = useState(true)
   const [deliveryVariantKind, setDeliveryVariantKind] =
     useState<DeliveryVariantKind>('natural')
@@ -660,6 +669,8 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
           setJobCandidatesCompleted(p.completed_candidates)
         if (typeof p.current_candidate_index === 'number')
           setJobCurrentCandidateIndex(p.current_candidate_index)
+        if (typeof p.avg_seconds === 'number' && p.avg_seconds > 0)
+          setLastAvgCandidateSeconds(p.avg_seconds)
 
         onSegments(p.segments_completed || [])
 
@@ -918,12 +929,63 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     [setSegmentRack],
   )
 
+  // Flips back to a previously-regenerated candidate batch instead of losing it — swaps the
+  // active batch into previousBatches so it stays reachable in both directions.
+  const selectCandidateBatch = useCallback(
+    (segmentId: string, batchIndex: number) => {
+      setSegmentRack((prev) =>
+        prev.map((r) => {
+          if (r.segmentId !== segmentId) return r
+          const batches = r.previousBatches ?? []
+          const target = batches[batchIndex]
+          if (!target) return r
+          const currentDuration =
+            segmentDurations[r.segmentId] ??
+            r.candidates[r.selectedTakeIndex]?.duration_sec ??
+            0
+          return {
+            ...r,
+            candidates: target.candidates,
+            selectedTakeIndex: target.candidates.length > 0 ? 0 : -1,
+            previousBatches: [
+              { durationSec: currentDuration, candidates: r.candidates },
+              ...batches.filter((_, i) => i !== batchIndex),
+            ].slice(0, 4),
+          }
+        }),
+      )
+    },
+    [setSegmentRack, segmentDurations],
+  )
+
   const regenerateSegment = useCallback(
     async (segmentId: string) => {
       const row = segmentRack.find(
         (r) => r.segmentId === segmentId,
       )
       if (!row || isRackAuditioning) return
+
+      // Snapshot the outgoing batch (tagged with the duration it was generated at) before
+      // the streaming merge below overwrites row.candidates with fresh takes.
+      if (row.candidates.length > 0) {
+        const priorDurationSec =
+          segmentDurations[row.segmentId] ??
+          row.candidates[row.selectedTakeIndex]?.duration_sec ??
+          0
+        setSegmentRack((prev) =>
+          prev.map((r) =>
+            r.segmentId === segmentId
+              ? {
+                  ...r,
+                  previousBatches: [
+                    { durationSec: priorDurationSec, candidates: r.candidates },
+                    ...(r.previousBatches ?? []),
+                  ].slice(0, 4),
+                }
+              : r,
+          ),
+        )
+      }
 
       setIsRackAuditioning(true)
       setError(null)
@@ -1108,6 +1170,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
             trimEndMs: 0,
             fadeInMs: 0,
             fadeOutMs: 0,
+            tempoFactor: candidateSpeeds[candidate.candidate_id] ?? 1,
             text: row.text,
             prosodyMode: 'auto',
           }
@@ -1142,6 +1205,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     setSavedVoiceId,
     setStitchedUrl,
     setStitchedBlob,
+    candidateSpeeds,
   ])
 
   const handleSave = useCallback(async () => {
@@ -1172,6 +1236,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
             trimEndMs: 0,
             fadeInMs: 0,
             fadeOutMs: 0,
+            tempoFactor: candidateSpeeds[candidate.candidate_id] ?? 1,
             text: row.text,
             prosodyMode: 'auto',
           }
@@ -1218,6 +1283,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     setError,
     setSavedVoiceId,
     deliveryVariant,
+    candidateSpeeds,
   ])
 
   const openStitchEditor = useCallback(async () => {
@@ -2279,6 +2345,11 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
                     onSegmentDurationChange={
                       onSegmentDurationChange
                     }
+                    candidateSpeeds={candidateSpeeds}
+                    onCandidateSpeedChange={onCandidateSpeedChange}
+                    candidatesPerSegment={candidatesPerSegment}
+                    avgCandidateSeconds={lastAvgCandidateSeconds}
+                    onSelectBatch={selectCandidateBatch}
                     onSaveToLibrary={(meta) => {
                       setLibrary(
                         library.some((m) => m.segment_id === meta.segment_id)
@@ -2610,7 +2681,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     setActivityStatus({
       active: true,
       title: 'Generating speech',
-      message: '',
+      message: jobMessage || '',
       detail,
       progress: progressFraction,
       etaSeconds: jobEtaSeconds,
@@ -2626,6 +2697,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     jobCandidatesCompleted,
     jobCandidatesTotal,
     jobEtaSeconds,
+    jobMessage,
     progressFraction,
     setActivityStatus,
   ])

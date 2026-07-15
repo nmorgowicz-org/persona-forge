@@ -236,10 +236,31 @@ correction tools expert users expect from waveform editing.
 
 ---
 
-## 9. Suggested Sequencing (Post-Foundation)
+## 9. Theme 9: Guided Experience & Teaching Layer
+
+**Vision**: Elaborates the §1 Dual-Audience UX invariant into a concrete, consistent
+mechanism — one progressive-disclosure seam (not per-panel simplification), plain-language
+metric surfacing, automated artifact diagnostics, a guided persona-creation wizard, and an
+in-app glossary/troubleshooting KB. Overlaps with and should reuse §4.2's Accent DNA Panel
+and §7.1's UX Cohesion work rather than duplicating them.
+
+- **Status**: Scoped, deferred out of `feature/voice-style-foundation` (2026-07-15) to avoid
+  growing that branch further; not started.
+- **Full spec**: `docs/plans/20260715-guided_experience_teaching_layer.md` — five sub-items
+  (progressive disclosure mode, contextual tooltips, automated diagnostics, guided wizard,
+  glossary/troubleshooting KB) with a suggested pickup order.
+- **Why here**: This is the most direct lever on the "persona forge for users with no/limited
+  audio knowledge, without stripping power-user control" product goal — it's an app-wide
+  concern like Themes 4/5/7, not a single feature.
+
+---
+
+## 10. Suggested Sequencing (Post-Foundation)
 
 1. **Security Hardening**: Auth + Rate Limiting (Theme 4).
 2. **The "App" Leap**: Generation History (Theme 1) + Pronunciation Lexicon (Theme 2).
 3. **The Workbench**: Accent DNA Surfacing (Theme 3).
 4. **Ops Safety**: Status Dashboard (Theme 5).
 5. **Production Scale**: Long-form Orchestration (Theme 2).
+6. **Teaching Layer**: Guided Experience & Teaching Layer (Theme 9) — see linked doc for
+   internal sequencing.

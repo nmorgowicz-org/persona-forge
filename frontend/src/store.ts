@@ -39,11 +39,19 @@ export interface EditingVoice {
   selections: ChipSelections | null
 }
 
+export interface CandidateBatch {
+  durationSec: number
+  candidates: OmniVoiceCandidate[]
+}
+
 export interface SegmentRackRow {
   segmentId: string
   text: string
   candidates: OmniVoiceCandidate[]
   selectedTakeIndex: number
+  // Batches replaced by a Regen at a different target duration, most-recent first — lets
+  // the user flip back to a prior batch for A/B comparison instead of losing it outright.
+  previousBatches?: CandidateBatch[]
 }
 
 // Stitch editor (docs/dev/features/stitch_editor.md §5)

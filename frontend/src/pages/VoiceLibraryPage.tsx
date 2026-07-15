@@ -1903,7 +1903,7 @@ export function VoiceLibraryPage() {
   // Navigates to Speak with this voice selected, then bounces the runtime to actually
   // load/cache that voice's clone state -- so the next Generate click is guaranteed to
   // use the voice the user just picked, not whatever was previously active/default.
-  async function useInSpeak(voiceId: string) {
+  async function applyVoiceForSpeak(voiceId: string) {
     setVoiceId(voiceId)
     setPage('speak')
     try {
@@ -2063,7 +2063,7 @@ export function VoiceLibraryPage() {
       voice={voice}
       busy={busyVoiceId === voice.voice_id}
       layoutMode={layoutMode}
-      onUse={() => { void useInSpeak(voice.voice_id) }}
+      onUse={() => { void applyVoiceForSpeak(voice.voice_id) }}
       onDesignFrom={
         hasChipSelections(voice.selections) ? () => designFromVoice(voice.voice_id) : null
       }

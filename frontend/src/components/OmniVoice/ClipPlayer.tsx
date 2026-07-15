@@ -9,6 +9,8 @@ export function ClipPlayer({
   autoPlay = false,
   layout,
   showSpectralAccent,
+  initialSpeed,
+  onSpeedChange,
 }: {
   audioBase64?: string
   audioUrl?: string
@@ -16,6 +18,8 @@ export function ClipPlayer({
   autoPlay?: boolean
   layout?: 'inline' | 'stacked'
   showSpectralAccent?: boolean
+  initialSpeed?: number
+  onSpeedChange?: (speed: number) => void
 }) {
   const [blob, setBlob] = useState<Blob | null>(null)
   const [src, setSrc] = useState<string | null>(null)
@@ -66,6 +70,8 @@ export function ClipPlayer({
       className={className}
       layout={layout}
       showSpectralAccent={showSpectralAccent}
+      initialSpeed={initialSpeed}
+      onSpeedChange={onSpeedChange}
     />
   )
 }

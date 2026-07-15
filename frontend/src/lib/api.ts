@@ -879,6 +879,7 @@ export interface StitchPlanPayload {
     trimEndMs: number
     fadeInMs: number
     fadeOutMs: number
+    tempoFactor?: number
     text?: string
     prosodyMode?: 'off' | 'auto' | 'precise'
     edits?: StitchPlanRegionEdit[]
@@ -907,6 +908,7 @@ function serializeStitchPlan(plan: StitchPlanPayload) {
       trim_end_ms: c.trimEndMs,
       fade_in_ms: c.fadeInMs,
       fade_out_ms: c.fadeOutMs,
+      tempo_factor: c.tempoFactor,
       text: c.text,
       prosody_mode: c.prosodyMode,
       edits: c.edits?.length

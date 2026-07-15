@@ -14,13 +14,24 @@ import { TakeDebugButton } from './TakeDebugButton'
 export const SEGMENT_DURATION_MIN_SEC = 0.5
 export const SEGMENT_DURATION_MAX_SEC = 7.0
 
+type RackCandidate = {
+  candidate_id: string
+  audio_base64: string
+  flagged: boolean
+  flag_reason: string | null
+  duration_sec: number | null | undefined
+  whisper_transcript: string | null
+  match_score: number | null
+}
+
 interface SegmentRackRowProps {
   segIndex: number
   row: {
     segmentId: string
     text: string
-    candidates: { candidate_id: string; audio_base64: string; flagged: boolean; flag_reason: string | null; duration_sec: number | null | undefined; whisper_transcript: string | null; match_score: number | null }[]
+    candidates: RackCandidate[]
     selectedTakeIndex: number
+    previousBatches?: { durationSec: number; candidates: RackCandidate[] }[]
   }
   isRackAuditioning: boolean
   jobStatus: 'queued' | 'running' | 'completed' | 'failed' | null
@@ -35,7 +46,16 @@ interface SegmentRackRowProps {
   isMissingTake: boolean
   instruct: string
   accentId?: string | null
+  // Per-candidate tempo choice from each take's SpeedStepper, keyed by candidate_id — lifted
+  // up to OmniVoicePanel since Stitch/Save need it, not just this row's own preview.
+  candidateSpeeds: Record<string, number>
+  onCandidateSpeedChange: (candidateId: string, speed: number) => void
+  candidatesPerSegment: number
+  avgCandidateSeconds: number | null
+  onSelectBatch: (segmentId: string, batchIndex: number) => void
 }
+
+const NATURAL_WORDS_PER_SEC = 3
 
 export function SegmentRackRow({
   segIndex,
@@ -53,6 +73,11 @@ export function SegmentRackRow({
   isMissingTake,
   instruct,
   accentId,
+  candidateSpeeds,
+  onCandidateSpeedChange,
+  candidatesPerSegment,
+  avgCandidateSeconds,
+  onSelectBatch,
 }: SegmentRackRowProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(row.text)
@@ -73,6 +98,22 @@ export function SegmentRackRow({
     segmentDuration != null &&
     actualDurationSec != null &&
     Math.abs(segmentDuration - actualDurationSec) > 0.05
+
+  // Pre-regen pacing risk: same speech_rate_proxy formula as audio_style.py (word_count /
+  // duration), computed client-side against the *target* duration since this is meant to warn
+  // before generation, not just report after it.
+  const wordCount = row.text.trim().split(/\s+/).filter(Boolean).length
+  const projectedWps =
+    displayDuration && displayDuration > 0 ? wordCount / displayDuration : null
+  const pacingWarning =
+    projectedWps != null && projectedWps > NATURAL_WORDS_PER_SEC
+      ? `~${Math.round(((projectedWps - NATURAL_WORDS_PER_SEC) / NATURAL_WORDS_PER_SEC) * 100)}% faster than natural pace — may reduce intelligibility.`
+      : null
+
+  const regenCostEstimate =
+    avgCandidateSeconds && avgCandidateSeconds > 0
+      ? `~${candidatesPerSegment} take${candidatesPerSegment === 1 ? '' : 's'}, ~${Math.round(avgCandidateSeconds * candidatesPerSegment)}s`
+      : null
 
   const handleDurChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = Number(e.target.value)
@@ -188,14 +229,24 @@ export function SegmentRackRow({
                 {isDirty && (
                   <span className="absolute -top-1 -right-1 size-1.5 rounded-full bg-warning" />
                 )}
+                {pacingWarning && (
+                  <span className="absolute -top-1 -left-1 size-1.5 rounded-full bg-destructive" />
+                )}
               </div>
             </Tooltip.Trigger>
             <Tooltip.Content side="top">
-              {isDirty
-                ? `Currently ${actualDurationSec?.toFixed(1)}s — hit Regen to retarget at ${displayDuration?.toFixed(1)}s.`
-                : 'Target duration for this segment (0.5–7s). Change it, then hit Regen to apply.'}
+              {pacingWarning
+                ? pacingWarning
+                : isDirty
+                  ? `Currently ${actualDurationSec?.toFixed(1)}s — hit Regen to retarget at ${displayDuration?.toFixed(1)}s.`
+                  : 'Target duration for this segment (0.5–7s). Change it, then hit Regen to apply.'}
             </Tooltip.Content>
           </Tooltip.Root>
+          {pacingWarning && (
+            <span className="shrink-0 text-[9px] text-destructive/80" title={pacingWarning}>
+              ⚠
+            </span>
+          )}
 
           <button
             type="button"
@@ -235,13 +286,44 @@ export function SegmentRackRow({
             <Tooltip.Content side="left">
               {isRackAuditioning
                 ? 'Regenerate this segment after current job finishes.'
-                : isDirty
-                  ? 'Duration changed — regenerate to apply the new target length.'
-                  : 'Regenerate this segment with current settings.'}
+                : [
+                    isDirty
+                      ? 'Duration changed — regenerate to apply the new target length.'
+                      : 'Regenerate this segment with current settings.',
+                    regenCostEstimate,
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
             </Tooltip.Content>
           </Tooltip.Root>
+          {regenCostEstimate && (
+            <span className="shrink-0 text-[9px] text-muted-foreground/70">
+              {regenCostEstimate}
+            </span>
+          )}
         </div>
       </div>
+
+      {/* Batch selector — one pill per duration a Regen was run at, most recent first;
+          lets the user flip back to a prior batch instead of it being silently discarded. */}
+      {row.previousBatches != null && row.previousBatches.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="shrink-0 text-[9px] text-muted-foreground/70">Batches:</span>
+          <span className="shrink-0 rounded-full border border-[hsl(190,90%,50%)]/50 bg-[hsl(190,90%,50%)]/10 px-1.5 py-0.5 text-[9px] font-medium text-[hsl(190,90%,50%)]">
+            current{actualDurationSec != null ? ` (${actualDurationSec.toFixed(1)}s)` : ''}
+          </span>
+          {row.previousBatches.map((batch, bi) => (
+            <button
+              key={bi}
+              type="button"
+              onClick={() => onSelectBatch(row.segmentId, bi)}
+              className="shrink-0 rounded-full border border-border/70 bg-muted/50 px-1.5 py-0.5 text-[9px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              {batch.durationSec.toFixed(1)}s
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Takes */}
       {row.candidates.length > 0 && (() => {
@@ -401,6 +483,8 @@ export function SegmentRackRow({
                     autoPlay={selected && autoplayTakes && Boolean(c.audio_base64)}
                     layout="stacked"
                     showSpectralAccent={false}
+                    initialSpeed={candidateSpeeds[c.candidate_id] ?? 1}
+                    onSpeedChange={(speed) => onCandidateSpeedChange(c.candidate_id, speed)}
                   />
                 </div>
               )

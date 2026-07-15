@@ -626,6 +626,22 @@ def analyze_take(audio: np.ndarray, sr: int) -> tuple[bool, str]:
     return False, "ok"
 
 
+def apply_tempo_stretch(audio: np.ndarray, sr: int, factor: float) -> np.ndarray:
+    """Pitch-preserving tempo change for a user-selected playback speed (0.5-2.0x).
+
+    Wider range than the internal style-preset pacing nudges (audio_style._apply_time_stretch,
+    clamped +-10%) since this reflects a deliberate speed choice the user landed on via the
+    SpeedStepper control, not a subtle pause-matching correction.
+    """
+    import librosa
+
+    factor = float(np.clip(factor, 0.5, 2.0))
+    if abs(factor - 1.0) < 1e-3:
+        return audio
+    rate = 1.0 / factor
+    return librosa.effects.time_stretch(np.asarray(audio, dtype=np.float32), rate=rate).astype(np.float32)
+
+
 def stitch_segments(
     segments: list[np.ndarray],
     sr: int,
@@ -639,6 +655,7 @@ def stitch_segments(
     fades: list[tuple[float, float]] | None = None,
     compress_params: dict | None = None,
     edits: list[list[dict]] | None = None,
+    tempos: list[float] | None = None,
 ) -> np.ndarray:
     """Full pipeline: trim, compress+normalize, fade each segment, then join and final limit+normalize.
 
@@ -653,18 +670,26 @@ def stitch_segments(
       - edits: per-segment RegionEdit lists (gain/mute/fade/delete/insert_silence), applied
         right after trim and before compress/normalize — see apply_region_edits(). This is the
         durable counterpart to StitchTimeline.tsx's client-side preview-only region edits.
+      - tempos: per-segment tempo factor (0.5-2.0), the durable counterpart to AudioDeck's
+        preview-only SpeedStepper. Applied right after trim/edits, before compress/normalize,
+        same position trims/edits already occupy.
     """
     n = len(segments)
     trims = trims or [(0.0, 0.0)] * n
     fades = fades or [(0.0, 0.0)] * n
     edits = edits or [[] for _ in range(n)]
+    tempos = tempos or [1.0] * n
     compress_kwargs = compress_params or {}
 
     processed = []
-    for seg, (start_ms, end_ms), (fade_in_ms, fade_out_ms), seg_edits in zip(segments, trims, fades, edits):
+    for seg, (start_ms, end_ms), (fade_in_ms, fade_out_ms), seg_edits, tempo in zip(
+        segments, trims, fades, edits, tempos
+    ):
         clip = trim(seg, sr, start_ms, end_ms) if (start_ms or end_ms) else seg
         if seg_edits:
             clip = apply_region_edits(clip, sr, seg_edits)
+        if tempo and abs(tempo - 1.0) > 1e-3:
+            clip = apply_tempo_stretch(clip, sr, tempo)
         clip = normalize_rms(compress(clip, sr, **compress_kwargs), segment_target_dbfs)
         if fade_in_ms or fade_out_ms:
             clip = apply_fades(clip, sr, fade_in_ms, fade_out_ms)

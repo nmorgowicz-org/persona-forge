@@ -23,13 +23,13 @@ export const LevelMeter = memo(function LevelMeter({
   const peakPct = clamp01(peak ?? level) * 100
 
   return (
-    <div className={cn('flex min-w-24 flex-col gap-1', className)}>
+    <div className={cn('flex min-w-28 flex-col gap-1', className)}>
       <div className="flex items-center justify-between text-[10px] font-medium uppercase text-muted-foreground">
         <span>{label}</span>
         <span className="font-mono">{Math.round(levelPct)}%</span>
       </div>
       <div
-        className="relative h-2 overflow-hidden rounded bg-background/80 shadow-inner ring-1 ring-border/70"
+        className="relative h-2.5 overflow-hidden rounded bg-background/80 shadow-inner ring-1 ring-border/70"
         role="meter"
         aria-label={label}
         aria-valuemin={0}

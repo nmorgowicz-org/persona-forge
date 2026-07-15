@@ -1410,6 +1410,14 @@ def omnivoice_audition_progress():
     if job is None:
         return jsonify({"error": "Unknown or expired job_id"}), 404
     prog = omnivoice_engine.get_progress()
+    message = job.get("message")
+    cancel_event = job.get("cancel_event")
+    if job["status"] == "running" and cancel_event is not None and cancel_event.is_set():
+        remaining = prog.get("estimated_remaining_seconds")
+        if isinstance(remaining, (int, float)):
+            message = f"Cancelling — finishing current take (~{int(remaining)}s)"
+        else:
+            message = "Cancelling — finishing current take…"
     return jsonify(
         {
             "status": job["status"],
@@ -1417,7 +1425,7 @@ def omnivoice_audition_progress():
             "total_segments": job["total_segments"],
             "current_segment_index": job["current_segment_index"],
             "segments_completed": job["segments_completed"],
-            "message": job.get("message"),
+            "message": message,
             "eta": prog.get("estimated_remaining_seconds"),
             "total_candidates": prog.get("total"),
             "completed_candidates": prog.get("completed"),
@@ -1606,6 +1614,7 @@ def _resolve_stitch_plan(
     trims: list[tuple[float, float]] = []
     fades: list[tuple[float, float]] = []
     edits: list[list[dict[str, Any]]] = []
+    tempos: list[float] = []
     repair_requests: list[tuple[str, str]] = []
     for clip in clips:
         if not isinstance(clip, dict):
@@ -1625,8 +1634,12 @@ def _resolve_stitch_plan(
             fades.append(
                 (float(clip.get("fade_in_ms") or 0.0), float(clip.get("fade_out_ms") or 0.0))
             )
+            tempo_factor = float(clip.get("tempo_factor") or 1.0)
         except (TypeError, ValueError):
             return None
+        if not 0.5 <= tempo_factor <= 2.0:
+            return None
+        tempos.append(tempo_factor)
         clip_edits = _validate_region_edits(clip.get("edits"))
         if clip_edits is None:
             return None
@@ -1649,6 +1662,8 @@ def _resolve_stitch_plan(
         kwargs["fades"] = fades
     if any(edits):
         kwargs["edits"] = edits
+    if any(abs(t - 1.0) > 1e-3 for t in tempos):
+        kwargs["tempos"] = tempos
 
     padding_ms = stitch_plan.get("padding_ms")
     if padding_ms is not None:

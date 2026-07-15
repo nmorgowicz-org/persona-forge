@@ -11,6 +11,8 @@ interface AudioPlayerProps {
   downloadName?: string
   layout?: 'inline' | 'stacked'
   showSpectralAccent?: boolean
+  initialSpeed?: number
+  onSpeedChange?: (speed: number) => void
 }
 
 export function AudioPlayer({
@@ -24,6 +26,8 @@ export function AudioPlayer({
   downloadName,
   layout,
   showSpectralAccent,
+  initialSpeed,
+  onSpeedChange,
 }: AudioPlayerProps) {
   return (
     <AudioDeck
@@ -37,6 +41,8 @@ export function AudioPlayer({
       downloadName={downloadName}
       layout={layout}
       showSpectralAccent={showSpectralAccent}
+      initialSpeed={initialSpeed}
+      onSpeedChange={onSpeedChange}
     />
   )
 }

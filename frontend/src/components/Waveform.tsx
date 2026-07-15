@@ -167,7 +167,7 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
       {/* drag/loop selection band */}
       {band && band.end > band.start && (
         <div
-          className="pointer-events-none absolute inset-y-0 z-10 border-x border-amber-300/60 bg-amber-300/15"
+          className="pointer-events-none absolute inset-y-0 z-10 border-x border-warning/60 bg-warning/15"
           style={{ left: `${band.start * 100}%`, width: `${(band.end - band.start) * 100}%` }}
         />
       )}

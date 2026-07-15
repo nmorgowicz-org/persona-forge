@@ -54,6 +54,11 @@ interface AudioDeckProps {
   metrics?: ComponentProps<typeof AudioStatsStrip>['metrics']
   rtf?: number | null
   downloadName?: string
+  // Initial value for the SpeedStepper (e.g. a previously persisted tempo choice for this
+  // clip). Uncontrolled beyond that — onSpeedChange is how the caller finds out about
+  // further nudges to persist as a real time-stretch, not just local preview.
+  initialSpeed?: number
+  onSpeedChange?: (speed: number) => void
 }
 
 export function AudioDeck({
@@ -69,6 +74,8 @@ export function AudioDeck({
   metrics = null,
   rtf = null,
   downloadName,
+  initialSpeed = 1,
+  onSpeedChange,
 }: AudioDeckProps) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const [peaks, setPeaks] = useState<number[] | null>(null)
@@ -76,7 +83,12 @@ export function AudioDeck({
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState<number | null>(null)
   const [isLooping, setIsLooping] = useState(false)
-  const [playbackRate, setPlaybackRate] = useState(1)
+  const [playbackRate, setPlaybackRate] = useState(initialSpeed)
+
+  function changeSpeed(v: number) {
+    setPlaybackRate(v)
+    onSpeedChange?.(v)
+  }
   // A drag-selected slice (0..1 fractions) to audition on repeat; overrides whole-clip loop.
   const [region, setRegion] = useState<{ start: number; end: number } | null>(null)
 
@@ -239,7 +251,7 @@ export function AudioDeck({
               <Repeat className={cn('size-3.5', isLooping ? 'text-primary' : 'text-muted-foreground')} />
             </Button>
             <LevelMeter level={currentLevel} peak={peakLevel} />
-            <SpeedStepper value={playbackRate} onChange={setPlaybackRate} />
+            <SpeedStepper value={playbackRate} onChange={changeSpeed} />
             <Button type="button" size="icon-sm" variant="ghost" onClick={download} tooltip="Download" aria-label="Download audio">
               <Download className="size-3.5 text-muted-foreground" />
             </Button>
@@ -302,7 +314,7 @@ export function AudioDeck({
                 <Repeat className={cn('size-3.5', isLooping ? 'text-primary' : 'text-muted-foreground')} />
               </Button>
               {!compact && (
-                <SpeedStepper value={playbackRate} onChange={setPlaybackRate} />
+                <SpeedStepper value={playbackRate} onChange={changeSpeed} />
               )}
               <Button type="button" size="icon-sm" variant="ghost" onClick={download} tooltip="Download" aria-label="Download audio">
                 <Download className="size-3.5 text-muted-foreground" />
@@ -314,7 +326,7 @@ export function AudioDeck({
 
       {!compact && (metrics || seed != null || typeof rtf === 'number') && (
         <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/70 pt-2">
-          {metrics && <AudioStatsStrip metrics={metrics} className="min-h-7 flex-1 rounded border border-border/70" />}
+          {metrics && <AudioStatsStrip metrics={metrics} className="flex-1 rounded border border-border/70" />}
           {seed != null && <span className="rounded border border-border px-2 py-1 text-[10px] font-mono text-muted-foreground">seed {seed}</span>}
           {typeof rtf === 'number' && <span className="rounded border border-border px-2 py-1 text-[10px] font-mono text-muted-foreground">RTF {rtf.toFixed(2)}x</span>}
         </div>
