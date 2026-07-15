@@ -722,7 +722,7 @@ export interface OmniVoiceStreamingJobResult {
 }
 
 export interface OmniVoiceAuditionProgressResult {
-  status: 'running' | 'completed' | 'failed'
+  status: 'queued' | 'running' | 'completed' | 'failed'
   job_id: string
   total_segments: number
   current_segment_index: number | null

@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Loader2, Timer } from 'lucide-react'
+import { Loader2, StopCircle, Timer } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { useSidebar } from '@/components/ui/sidebar-context'
 import { cn } from '@/lib/utils'
@@ -117,9 +117,20 @@ export function ActivityStatusBar() {
             )}
 
             {detail && (
-              <span className="ml-auto shrink-0">
+              <span className={cn(!status.onCancel && 'ml-auto', 'shrink-0')}>
                 {detail}
               </span>
+            )}
+
+            {status.onCancel && (
+              <button
+                type="button"
+                onClick={status.onCancel}
+                className="ml-auto flex shrink-0 items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive transition-colors hover:bg-destructive/20"
+              >
+                <StopCircle className="size-3" />
+                Stop
+              </button>
             )}
           </div>
 

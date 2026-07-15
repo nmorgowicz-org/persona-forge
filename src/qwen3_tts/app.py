@@ -69,19 +69,23 @@ def _evict_old_audition_jobs() -> None:
     with _OV_AUDITION_JOBS_LOCK:
         if len(_OV_AUDITION_JOBS) <= _OV_AUDITION_MAX_JOBS:
             return
+        # CPU-bound OmniVoice jobs can legitimately run 20-30+ min, well past the TTL —
+        # never evict a still-running/queued job out from under a resume-after-refresh.
         to_remove = []
         for jid, job in _OV_AUDITION_JOBS.items():
+            if job.get("status") in ("running", "queued"):
+                continue
             if now - job.get("created_at", now) >= _OV_AUDITION_TTL_SECONDS:
                 to_remove.append(jid)
         for jid in to_remove:
             _OV_AUDITION_JOBS.pop(jid, None)
         if len(_OV_AUDITION_JOBS) > _OV_AUDITION_MAX_JOBS:
-            sorted_ids = sorted(
-                _OV_AUDITION_JOBS.keys(),
+            evictable_ids = sorted(
+                (jid for jid, job in _OV_AUDITION_JOBS.items() if job.get("status") not in ("running", "queued")),
                 key=lambda k: _OV_AUDITION_JOBS[k].get("created_at", 0),
             )
-            excess = len(sorted_ids) - _OV_AUDITION_MAX_JOBS
-            for jid in sorted_ids[:excess]:
+            excess = len(_OV_AUDITION_JOBS) - _OV_AUDITION_MAX_JOBS
+            for jid in evictable_ids[:excess]:
                 _OV_AUDITION_JOBS.pop(jid, None)
 
 app = Flask(__name__)
@@ -1042,6 +1046,12 @@ def _dispatch_audition_jobs():
             if job is None:
                 continue
 
+            if job.get("cancel_event") is not None and job["cancel_event"].is_set():
+                with _OV_AUDITION_JOBS_LOCK:
+                    job["status"] = "failed"
+                    job["message"] = "Cancelled by user."
+                continue
+
             # Ensure the base service is started (if not, wait)
             if not _ensure_service_started(timeout_seconds=900):
                 with _OV_AUDITION_JOBS_LOCK:
@@ -1077,6 +1087,8 @@ def _dispatch_audition_jobs():
                 min_match_score,
             ) = params
 
+            cancel_event = job["cancel_event"]
+
             def _run_job(job_id):
                 try:
                     model.executor.submit(
@@ -1094,11 +1106,16 @@ def _dispatch_audition_jobs():
                         postprocess_output=postprocess_output,
                         min_match_score=min_match_score,
                         on_candidate_complete=_candidate_callback_factory(job_id),
+                        cancel_event=cancel_event,
                     ).result(timeout=1800)
                     with _OV_AUDITION_JOBS_LOCK:
                         job = _OV_AUDITION_JOBS.get(job_id)
                         if job is not None:
-                            job["status"] = "completed"
+                            if cancel_event.is_set():
+                                job["status"] = "failed"
+                                job["message"] = "Cancelled by user."
+                            else:
+                                job["status"] = "completed"
                             job["current_segment_index"] = None
                 except Exception as exc:
                     with _OV_AUDITION_JOBS_LOCK:
@@ -1299,6 +1316,7 @@ def omnivoice_audition():
             "current_segment_index": None,
             "message": initial_message,
             "created_at": time.time(),
+            "cancel_event": threading.Event(),
             "_params": (
                 segments,
                 instruct,
@@ -1317,6 +1335,8 @@ def omnivoice_audition():
 
     if initial_status == "running":
         # Start immediately on the executor
+        cancel_event = _OV_AUDITION_JOBS[job_id]["cancel_event"]
+
         def _run_job():
             try:
                 model.executor.submit(
@@ -1334,11 +1354,16 @@ def omnivoice_audition():
                     postprocess_output=postprocess_output,
                     min_match_score=min_match_score,
                     on_candidate_complete=_candidate_callback_factory(job_id),
+                    cancel_event=cancel_event,
                 ).result(timeout=1800)
                 with _OV_AUDITION_JOBS_LOCK:
                     job = _OV_AUDITION_JOBS.get(job_id)
                     if job is not None:
-                        job["status"] = "completed"
+                        if cancel_event.is_set():
+                            job["status"] = "failed"
+                            job["message"] = "Cancelled by user."
+                        else:
+                            job["status"] = "completed"
                         job["current_segment_index"] = None
             except Exception as exc:
                 with _OV_AUDITION_JOBS_LOCK:
@@ -1419,15 +1444,17 @@ def omnivoice_audition_cancel():
         job = _OV_AUDITION_JOBS.get(job_id)
         if job is None:
             return jsonify({"error": "Unknown or expired job_id"}), 404
-        if job["status"] != "running":
+        if job["status"] not in ("running", "queued"):
             return jsonify({"error": "Job is not currently running"}), 400
 
-        job["status"] = "failed"
-        job["message"] = "Cancelled by user."
-        job["current_segment_index"] = None
-
-    # Clear swap pending so other operations aren't blocked.
-    omnivoice_engine.clear_swap_pending()
+        job["cancel_event"].set()
+        if job["status"] == "queued":
+            # Never got picked up by the executor at all — safe to finalize immediately.
+            job["status"] = "failed"
+            job["message"] = "Cancelled by user."
+            job["current_segment_index"] = None
+        else:
+            job["message"] = "Cancelling…"
 
     return jsonify({"cancelled": True, "job_id": job_id})
 

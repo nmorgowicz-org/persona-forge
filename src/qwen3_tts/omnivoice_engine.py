@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import threading
 import time
 from typing import Any
 
@@ -168,6 +169,7 @@ def run_omnivoice_job(
     postprocess_output: bool | None = None,
     min_match_score: float | None = None,
     on_candidate_complete=None,
+    cancel_event: threading.Event | None = None,
 ) -> list[list[tuple[Any, int, bool, str, str, float | None]]]:
     """Swap to OmniVoice and generate every segment x candidate. Leaves OmniVoice loaded on
     success (see this module's docstring for why). On failure, the checkpoint is unloaded
@@ -314,8 +316,18 @@ def run_omnivoice_job(
 
         results: list[list[tuple[Any, int, bool, str, str, float | None]]] = []
         for seg_idx, text in enumerate(segments):
+            if cancel_event is not None and cancel_event.is_set():
+                print("[omnivoice] cancelled before segment %d, stopping." % seg_idx, flush=True)
+                break
             candidates: list[tuple[Any, int, bool, str, str, float | None]] = []
             for cand_idx in range(candidates_per_segment):
+                if cancel_event is not None and cancel_event.is_set():
+                    print(
+                        f"[omnivoice] cancelled mid-segment {seg_idx}, stopping "
+                        f"before candidate {cand_idx}.",
+                        flush=True,
+                    )
+                    break
                 _progress["current_segment_index"] = seg_idx
                 _progress["current_candidate_index"] = cand_idx
                 print(
@@ -356,6 +368,8 @@ def run_omnivoice_job(
                 last_transcript = ""
                 last_match_score: float | None = None
                 for attempt in range(1, MAX_ATTEMPTS_PER_CANDIDATE + 1):
+                    if cancel_event is not None and cancel_event.is_set():
+                        break
                     audio = _omnivoice_model.generate(
                         text=text,
                         instruct=instruct,

@@ -164,8 +164,13 @@ export function SegmentRackRow({
           {/* Per-segment Duration */}
           <Tooltip.Root>
             <Tooltip.Trigger asChild>
-              <div className="relative flex items-center gap-0.5">
-                <span className="text-[9px] text-muted-foreground">
+              <div
+                className={cn(
+                  'relative flex items-center gap-1 rounded-md border px-1.5 py-0.5 transition-colors',
+                  isDirty ? 'border-warning/70 bg-warning/10' : 'border-primary/30 bg-primary/5',
+                )}
+              >
+                <span className="text-[9px] font-medium text-primary/80">
                   Duration
                 </span>
                 <input
@@ -177,11 +182,9 @@ export function SegmentRackRow({
                   onChange={handleDurChange}
                   onBlur={handleDurBlur}
                   onKeyDown={handleDurKeyDown}
-                  className={cn(
-                    'w-14 rounded-md border bg-transparent px-1 py-0.5 text-[9px] outline-none transition-colors focus-visible:border-ring',
-                    isDirty ? 'border-warning/70' : 'border-input',
-                  )}
+                  className="w-12 rounded border border-transparent bg-transparent px-1 py-0.5 text-[9px] outline-none transition-colors focus-visible:border-ring"
                 />
+                <span className="text-[9px] text-muted-foreground">s</span>
                 {isDirty && (
                   <span className="absolute -top-1 -right-1 size-1.5 rounded-full bg-warning" />
                 )}
@@ -319,26 +322,73 @@ export function SegmentRackRow({
                 <div
                   key={c.candidate_id}
                   className={cn(
-                    'flex min-w-0 items-center gap-1 rounded-md border px-1.5 py-1 transition-all',
+                    'flex min-w-0 flex-col gap-1.5 rounded-md border px-1.5 py-1.5 transition-all',
                     selected
                       ? 'border-[hsl(190,90%,50%)] bg-[hsl(190,90%,50%)]/5 shadow-[0_0_10px_rgba(34,211,238,0.12)]'
                       : 'border-border/60 bg-background',
                   )}
                 >
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onSelectTake(row.segmentId, ci)
-                    }
-                    className={cn(
-                      'shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium transition-colors',
-                      selected
-                        ? 'bg-[hsl(190,90%,50%)] text-background'
-                        : 'bg-muted text-muted-foreground hover:bg-muted/80',
-                    )}
-                  >
-                    T{ci + 1}
-                  </button>
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onSelectTake(row.segmentId, ci)
+                      }
+                      className={cn(
+                        'shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium transition-colors',
+                        selected
+                          ? 'bg-[hsl(190,90%,50%)] text-background'
+                          : 'bg-muted text-muted-foreground hover:bg-muted/80',
+                      )}
+                    >
+                      T{ci + 1}
+                    </button>
+
+                    <TakeDebugButton lines={debugLines} matchScore={c.match_score} />
+
+                    <Tooltip.Root>
+                      <Tooltip.Trigger asChild>
+                        <button
+                          type="button"
+                          disabled={savedIds.has(c.candidate_id)}
+                          onClick={async () => {
+                            try {
+                              const meta = await lockInOmniVoiceSegment({
+                                candidateId: c.candidate_id,
+                                text: row.text,
+                                instruct,
+                                accentId,
+                                featureTags: lookupFeatureTags(accentId, row.text),
+                              })
+                              setSavedIds((prev) => {
+                                const next = new Set(prev)
+                                next.add(c.candidate_id)
+                                return next
+                              })
+                              onSaveToLibrary(meta)
+                            } catch {
+                              // Non-fatal: API will show its own error at global level
+                            }
+                          }}
+                          className={cn(
+                            'ml-auto shrink-0 inline-flex h-5 w-5 items-center justify-center rounded-full border border-border bg-muted/60 text-[9px] text-muted-foreground transition-colors',
+                            savedIds.has(c.candidate_id)
+                              ? 'border-success/60 bg-success/10 text-success'
+                              : 'hover:bg-muted hover:text-foreground disabled:opacity-60',
+                          )}
+                        >
+                          {savedIds.has(c.candidate_id)
+                            ? <Check className="size-3" />
+                            : '🔖'}
+                        </button>
+                      </Tooltip.Trigger>
+                      <Tooltip.Content side="top" align="end">
+                        {savedIds.has(c.candidate_id)
+                          ? 'Saved to segment library'
+                          : 'Save this take to segment library'}
+                      </Tooltip.Content>
+                    </Tooltip.Root>
+                  </div>
 
                   <ClipPlayer
                     audioBase64={c.audio_base64 || undefined}
@@ -347,54 +397,11 @@ export function SegmentRackRow({
                         ? `/omnivoice/segments/${encodeURIComponent(row.segmentId)}/audio`
                         : undefined
                     }
-                    className="min-w-0 flex-1"
+                    className="min-w-0"
                     autoPlay={selected && autoplayTakes && Boolean(c.audio_base64)}
+                    layout="stacked"
+                    showSpectralAccent={false}
                   />
-
-                  <TakeDebugButton lines={debugLines} matchScore={c.match_score} />
-
-                  <Tooltip.Root>
-                    <Tooltip.Trigger asChild>
-                      <button
-                        type="button"
-                        disabled={savedIds.has(c.candidate_id)}
-                        onClick={async () => {
-                          try {
-                            const meta = await lockInOmniVoiceSegment({
-                              candidateId: c.candidate_id,
-                              text: row.text,
-                              instruct,
-                              accentId,
-                              featureTags: lookupFeatureTags(accentId, row.text),
-                            })
-                            setSavedIds((prev) => {
-                              const next = new Set(prev)
-                              next.add(c.candidate_id)
-                              return next
-                            })
-                            onSaveToLibrary(meta)
-                          } catch {
-                            // Non-fatal: API will show its own error at global level
-                          }
-                        }}
-                        className={cn(
-                          'ml-0.5 shrink-0 inline-flex h-5 w-5 items-center justify-center rounded-full border border-border bg-muted/60 text-[9px] text-muted-foreground transition-colors',
-                          savedIds.has(c.candidate_id)
-                            ? 'border-success/60 bg-success/10 text-success'
-                            : 'hover:bg-muted hover:text-foreground disabled:opacity-60',
-                        )}
-                      >
-                        {savedIds.has(c.candidate_id)
-                          ? <Check className="size-3" />
-                          : '🔖'}
-                      </button>
-                    </Tooltip.Trigger>
-                    <Tooltip.Content side="top" align="end">
-                      {savedIds.has(c.candidate_id)
-                        ? 'Saved to segment library'
-                        : 'Save this take to segment library'}
-                    </Tooltip.Content>
-                  </Tooltip.Root>
                 </div>
               )
             })}

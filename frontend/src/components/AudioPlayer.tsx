@@ -9,6 +9,8 @@ interface AudioPlayerProps {
   metrics?: Parameters<typeof AudioDeck>[0]['metrics']
   rtf?: number | null
   downloadName?: string
+  layout?: 'inline' | 'stacked'
+  showSpectralAccent?: boolean
 }
 
 export function AudioPlayer({
@@ -20,6 +22,8 @@ export function AudioPlayer({
   metrics = null,
   rtf = null,
   downloadName,
+  layout,
+  showSpectralAccent,
 }: AudioPlayerProps) {
   return (
     <AudioDeck
@@ -31,6 +35,8 @@ export function AudioPlayer({
       metrics={metrics}
       rtf={rtf}
       downloadName={downloadName}
+      layout={layout}
+      showSpectralAccent={showSpectralAccent}
     />
   )
 }

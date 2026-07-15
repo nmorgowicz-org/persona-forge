@@ -15,6 +15,7 @@ import {
   listOmniVoiceSegments,
   renderStitchPlan,
   saveOmniVoice,
+  type OmniVoiceCandidateSegment,
   type StitchPlanPayload,
   type SegmentMeta,
   type VoiceMeta,
@@ -76,6 +77,45 @@ const NON_VERBAL_TAGS = [
   '[surprise-yo]',
   '[dissatisfaction-hnn]',
 ]
+
+// Breadcrumb so a hard refresh mid-run can reconnect to the still-generating server-side
+// job instead of losing all trace of it (the job itself keeps running independently).
+const OV_ACTIVE_JOB_KEY = 'ov_active_job'
+
+interface OvActiveJobBreadcrumb {
+  jobId: string
+  instruct: string
+  scriptText: string
+  totalSegments: number
+}
+
+function saveActiveJobBreadcrumb(breadcrumb: OvActiveJobBreadcrumb) {
+  try {
+    localStorage.setItem(OV_ACTIVE_JOB_KEY, JSON.stringify(breadcrumb))
+  } catch {
+    // Resume-after-refresh is a nice-to-have; don't fail the job over it.
+  }
+}
+
+function clearActiveJobBreadcrumb() {
+  try {
+    localStorage.removeItem(OV_ACTIVE_JOB_KEY)
+  } catch {
+    // ignore
+  }
+}
+
+function readActiveJobBreadcrumb(): OvActiveJobBreadcrumb | null {
+  try {
+    const raw = localStorage.getItem(OV_ACTIVE_JOB_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed.jobId !== 'string') return null
+    return parsed as OvActiveJobBreadcrumb
+  } catch {
+    return null
+  }
+}
 
 function formatEta(seconds: number | null): string {
   if (seconds == null) return 'estimating…'
@@ -540,6 +580,114 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     [],
   )
 
+  // Merge in-place: a segment's candidates list grows as each candidate finishes, so
+  // update existing rows instead of only appending new ones — this is what lets a take's
+  // waveform/player show up as soon as it's done, without waiting for the rest of the
+  // segment (or job) to finish. Shared by a fresh batch run and a resumed-after-refresh one.
+  const mergeBatchSegments = useCallback(
+    (segments: OmniVoiceCandidateSegment[]) => {
+      setSegmentRack((prev) => {
+        const next = [...prev]
+        const indexBySegId = new Map(
+          next.map((r, i) => [r.segmentId, i]),
+        )
+        for (const s of segments) {
+          const segId = `seg-${s.segment_index}`
+          const candidates = Array.isArray(s.candidates)
+            ? s.candidates
+            : []
+          const existingIndex = indexBySegId.get(segId)
+          if (existingIndex == null) {
+            next.push({
+              segmentId: segId,
+              text: s.text || '',
+              candidates,
+              selectedTakeIndex:
+                candidates.length > 0 ? 0 : -1,
+            })
+          } else {
+            next[existingIndex] = {
+              ...next[existingIndex],
+              candidates,
+            }
+          }
+        }
+        return next
+      })
+    },
+    [setSegmentRack],
+  )
+
+  // Shared poll loop: fetches progress, mirrors it into the store, forwards the segment
+  // list to the caller's merge logic, and resolves once the job reaches a terminal state.
+  // Used by both a freshly-started job and one resumed from a hard-refresh breadcrumb.
+  const pollOmniVoiceJob = useCallback(
+    async (
+      jobId: string,
+      onSegments: (segments: OmniVoiceCandidateSegment[]) => void,
+    ): Promise<
+      | { status: 'completed' }
+      | { status: 'cancelled' }
+      | { status: 'failed'; message: string }
+    > => {
+      let consecutivePollFailures = 0
+      while (true) {
+        let p
+        try {
+          p = await getOmniVoiceAuditionProgress(jobId)
+          consecutivePollFailures = 0
+        } catch (pollErr) {
+          // A single missed poll (e.g. the server is momentarily busy servicing
+          // the heavy generation request itself) doesn't mean the job died — it's
+          // running as an independent background thread server-side. Only give up
+          // after several consecutive misses so a transient blip can't strand the
+          // UI on "Failed to fetch" while the container keeps generating fine.
+          consecutivePollFailures += 1
+          if (consecutivePollFailures >= 6) throw pollErr
+          await new Promise((r) => setTimeout(r, 500))
+          continue
+        }
+        setJobStatus(p.status)
+        setJobCurrentSegmentIndex(p.current_segment_index)
+        setJobSegmentsCompleted(p.segments_completed)
+        setJobMessage(p.message || null)
+        setJobEtaSeconds(
+          p.eta ?? p.estimated_remaining_seconds ?? null,
+        )
+        if (typeof p.total_candidates === 'number')
+          setJobCandidatesTotal(p.total_candidates)
+        if (typeof p.completed_candidates === 'number')
+          setJobCandidatesCompleted(p.completed_candidates)
+        if (typeof p.current_candidate_index === 'number')
+          setJobCurrentCandidateIndex(p.current_candidate_index)
+
+        onSegments(p.segments_completed || [])
+
+        if (p.status === 'completed') return { status: 'completed' }
+        if (p.status === 'failed') {
+          if ((p.message || '').toLowerCase().includes('cancel')) {
+            return { status: 'cancelled' }
+          }
+          return {
+            status: 'failed',
+            message: p.message || 'OmniVoice job failed.',
+          }
+        }
+        await new Promise((r) => setTimeout(r, 500))
+      }
+    },
+    [
+      setJobStatus,
+      setJobCurrentSegmentIndex,
+      setJobSegmentsCompleted,
+      setJobMessage,
+      setJobEtaSeconds,
+      setJobCandidatesTotal,
+      setJobCandidatesCompleted,
+      setJobCurrentCandidateIndex,
+    ],
+  )
+
   const handleBatchAudition = useCallback(async () => {
     const text = scriptText.trim()
     if (!text || !instruct || isRackAuditioning) return
@@ -586,91 +734,17 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         setJobStatus('running')
         setExamplesOpen(false)
         setTagsOpen(false)
+        saveActiveJobBreadcrumb({
+          jobId: job_id,
+          instruct,
+          scriptText: text,
+          totalSegments: total_segments,
+        })
 
-        const jobDone = false
-        let lastHandledCount = 0
-        let consecutivePollFailures = 0
+        const outcome = await pollOmniVoiceJob(job_id, mergeBatchSegments)
+        clearActiveJobBreadcrumb()
 
-        while (!jobDone) {
-          let p
-          try {
-            p = await getOmniVoiceAuditionProgress(job_id)
-            consecutivePollFailures = 0
-          } catch (pollErr) {
-            // A single missed poll (e.g. the server is momentarily busy servicing
-            // the heavy generation request itself) doesn't mean the job died — it's
-            // running as an independent background thread server-side. Only give up
-            // after several consecutive misses so a transient blip can't strand the
-            // UI on "Failed to fetch" while the container keeps generating fine.
-            consecutivePollFailures += 1
-            if (consecutivePollFailures >= 6) throw pollErr
-            await new Promise((r) => setTimeout(r, 500))
-            continue
-          }
-          setJobStatus(p.status)
-          setJobCurrentSegmentIndex(
-            p.current_segment_index,
-          )
-          setJobSegmentsCompleted(p.segments_completed)
-          setJobMessage(p.message || null)
-          setJobEtaSeconds(
-            p.eta ?? p.estimated_remaining_seconds ?? null,
-          )
-          if (typeof p.total_candidates === 'number')
-            setJobCandidatesTotal(p.total_candidates)
-          if (typeof p.completed_candidates === 'number')
-            setJobCandidatesCompleted(p.completed_candidates)
-          if (typeof p.current_candidate_index === 'number')
-            setJobCurrentCandidateIndex(p.current_candidate_index)
-
-          const totalCandidatesSoFar = (
-            p.segments_completed || []
-          ).reduce(
-            (acc, s) =>
-              acc +
-              (Array.isArray(s.candidates)
-                ? s.candidates.length
-                : 0),
-            0,
-          )
-
-          if (totalCandidatesSoFar > lastHandledCount) {
-            // Merge in-place: a segment's candidates list grows as each candidate
-            // finishes, so update existing rows instead of only appending new ones —
-            // this is what lets a take's waveform/player show up as soon as it's
-            // done, without waiting for the rest of the segment (or job) to finish.
-            setSegmentRack((prev) => {
-              const next = [...prev]
-              const indexBySegId = new Map(
-                next.map((r, i) => [r.segmentId, i]),
-              )
-              for (const s of p.segments_completed || []) {
-                const segId = `seg-${s.segment_index}`
-                const candidates = Array.isArray(s.candidates)
-                  ? s.candidates
-                  : []
-                const existingIndex = indexBySegId.get(segId)
-                if (existingIndex == null) {
-                  next.push({
-                    segmentId: segId,
-                    text: s.text || '',
-                    candidates,
-                    selectedTakeIndex:
-                      candidates.length > 0 ? 0 : -1,
-                  })
-                } else {
-                  next[existingIndex] = {
-                    ...next[existingIndex],
-                    candidates,
-                  }
-                }
-              }
-              return next
-            })
-            lastHandledCount = totalCandidatesSoFar
-          }
-
-        if (p.status === 'completed') {
+        if (outcome.status === 'completed') {
           // Finalize: keep segment rack + completed list intact
           setIsRackAuditioning(false)
           setProgress(null)
@@ -678,36 +752,23 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
           setJobStatus('completed')
           setJobCurrentSegmentIndex(null)
           setJobMessage('All segments generated.')
-          break
+        } else if (outcome.status === 'cancelled') {
+          setJobMessage('Cancelled.')
+          setIsRackAuditioning(false)
+          setProgress(null)
+          setCurrentJobId(null)
+          setJobCurrentSegmentIndex(null)
+          setJobEtaSeconds(null)
+        } else {
+          setError(outcome.message)
         }
-        if (p.status === 'failed') {
-          if (
-            (p.message || '').toLowerCase().includes('cancel')
-          ) {
-            setJobMessage('Cancelled.')
-            setIsRackAuditioning(false)
-            setProgress(null)
-            setCurrentJobId(null)
-            setJobCurrentSegmentIndex(null)
-            setJobEtaSeconds(null)
-          } else {
-            setError(
-              p.message ||
-                'OmniVoice job failed.',
-            )
-          }
-          break
-        }
-        await new Promise(
-          (r) => setTimeout(r, 500),
-        )
-      }
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
           : String(err),
       )
+      clearActiveJobBreadcrumb()
       // On error: fully reset
       setIsRackAuditioning(false)
       setProgress(null)
@@ -735,6 +796,8 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     minMatchScore,
     segmentDurations,
     postProcess,
+    pollOmniVoiceJob,
+    mergeBatchSegments,
     setIsRackAuditioning,
     setError,
     setSegmentRack,
@@ -750,6 +813,75 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     setJobCandidatesCompleted,
     setJobCurrentCandidateIndex,
   ])
+
+  // Resume-after-refresh: on mount, check for a breadcrumb left by a job that was still
+  // running/queued when the page unloaded. Only batch runs are resumable — regen jobs are
+  // short-lived and the rest of the rack is unrecoverable client-side after a hard refresh
+  // anyway, so a lost regen just finishes server-side unobserved (same as before this fix).
+  useEffect(() => {
+    const breadcrumb = readActiveJobBreadcrumb()
+    if (!breadcrumb) return
+
+    let cancelled = false
+    ;(async () => {
+      let p
+      try {
+        p = await getOmniVoiceAuditionProgress(breadcrumb.jobId)
+      } catch {
+        clearActiveJobBreadcrumb()
+        return
+      }
+      if (cancelled) return
+      if (p.status !== 'running' && p.status !== 'queued') {
+        clearActiveJobBreadcrumb()
+        return
+      }
+
+      setScriptText(breadcrumb.scriptText)
+      setSelections(selectionsFromInstruct(breadcrumb.instruct))
+      setSegmentRack(
+        (p.segments_completed || []).map((s) => ({
+          segmentId: `seg-${s.segment_index}`,
+          text: s.text || '',
+          candidates: Array.isArray(s.candidates) ? s.candidates : [],
+          selectedTakeIndex:
+            Array.isArray(s.candidates) && s.candidates.length > 0 ? 0 : -1,
+        })),
+      )
+      setCurrentJobId(breadcrumb.jobId)
+      setJobTotalSegments(breadcrumb.totalSegments)
+      setJobStatus(p.status)
+      setIsRackAuditioning(true)
+      setError(null)
+
+      const outcome = await pollOmniVoiceJob(breadcrumb.jobId, mergeBatchSegments)
+      clearActiveJobBreadcrumb()
+
+      if (outcome.status === 'completed') {
+        setIsRackAuditioning(false)
+        setProgress(null)
+        setCurrentJobId(null)
+        setJobStatus('completed')
+        setJobCurrentSegmentIndex(null)
+        setJobMessage('All segments generated.')
+      } else if (outcome.status === 'cancelled') {
+        setJobMessage('Cancelled.')
+        setIsRackAuditioning(false)
+        setProgress(null)
+        setCurrentJobId(null)
+        setJobCurrentSegmentIndex(null)
+        setJobEtaSeconds(null)
+      } else {
+        setError(outcome.message)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+    // Only ever check for a resumable job once, right after mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const selectTake = useCallback(
     (segmentId: string, index: number) => {
@@ -823,34 +955,8 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         setExamplesOpen(false)
         setTagsOpen(false)
 
-        let consecutivePollFailures = 0
-        while (true) {
-          let p
-          try {
-            p = await getOmniVoiceAuditionProgress(job_id)
-            consecutivePollFailures = 0
-          } catch (pollErr) {
-            consecutivePollFailures += 1
-            if (consecutivePollFailures >= 6) throw pollErr
-            await new Promise((r) => setTimeout(r, 500))
-            continue
-          }
-          setJobStatus(p.status)
-          setJobCurrentSegmentIndex(
-            p.current_segment_index,
-          )
-          setJobSegmentsCompleted(p.segments_completed)
-          setJobEtaSeconds(
-            p.eta ?? p.estimated_remaining_seconds ?? null,
-          )
-          if (typeof p.total_candidates === 'number')
-            setJobCandidatesTotal(p.total_candidates)
-          if (typeof p.completed_candidates === 'number')
-            setJobCandidatesCompleted(p.completed_candidates)
-          if (typeof p.current_candidate_index === 'number')
-            setJobCurrentCandidateIndex(p.current_candidate_index)
-
-          const regenSeg = p.segments_completed[0]
+        const outcome = await pollOmniVoiceJob(job_id, (segments) => {
+          const regenSeg = segments[0]
           if (regenSeg && Array.isArray(regenSeg.candidates)) {
             // Merge candidates in as they stream in, so a take's waveform/player
             // appears as soon as it's rendered rather than waiting for the whole
@@ -870,51 +976,37 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
               ),
             )
           }
+        })
 
-          if (p.status === 'completed') {
-            // Clean up for single-seg regen
-            setIsRackAuditioning(false)
-            setProgress(null)
-            setCurrentJobId(null)
-            setJobStatus(null)
-            setJobTotalSegments(0)
-            setJobSegmentsCompleted([])
-            setJobCurrentSegmentIndex(null)
-            setJobMessage(null)
-            setJobEtaSeconds(null)
-            setJobCandidatesTotal(0)
-            setJobCandidatesCompleted(0)
-            setJobCurrentCandidateIndex(null)
-            break
-          }
-          if (p.status === 'failed') {
-            if (
-              (p.message || '').toLowerCase().includes('cancel')
-            ) {
-              setJobMessage('Cancelled.')
-              setIsRackAuditioning(false)
-              setProgress(null)
-              setCurrentJobId(null)
-              setJobStatus(null)
-              setJobTotalSegments(0)
-              setJobSegmentsCompleted([])
-              setJobCurrentSegmentIndex(null)
-              setJobMessage('Cancelled.')
-              setJobEtaSeconds(null)
-              setJobCandidatesTotal(0)
-              setJobCandidatesCompleted(0)
-              setJobCurrentCandidateIndex(null)
-            } else {
-              setError(
-                p.message ||
-                  'OmniVoice job failed.',
-              )
-            }
-            break
-          }
-          await new Promise(
-            (r) => setTimeout(r, 500),
-          )
+        if (outcome.status === 'completed') {
+          // Clean up for single-seg regen
+          setIsRackAuditioning(false)
+          setProgress(null)
+          setCurrentJobId(null)
+          setJobStatus(null)
+          setJobTotalSegments(0)
+          setJobSegmentsCompleted([])
+          setJobCurrentSegmentIndex(null)
+          setJobMessage(null)
+          setJobEtaSeconds(null)
+          setJobCandidatesTotal(0)
+          setJobCandidatesCompleted(0)
+          setJobCurrentCandidateIndex(null)
+        } else if (outcome.status === 'cancelled') {
+          setIsRackAuditioning(false)
+          setProgress(null)
+          setCurrentJobId(null)
+          setJobStatus(null)
+          setJobTotalSegments(0)
+          setJobSegmentsCompleted([])
+          setJobCurrentSegmentIndex(null)
+          setJobMessage('Cancelled.')
+          setJobEtaSeconds(null)
+          setJobCandidatesTotal(0)
+          setJobCandidatesCompleted(0)
+          setJobCurrentCandidateIndex(null)
+        } else {
+          setError(outcome.message)
         }
       } catch (err) {
         setError(
@@ -948,6 +1040,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
       minMatchScore,
       segmentDurations,
       postProcess,
+      pollOmniVoiceJob,
       setIsRackAuditioning,
       setError,
       setSegmentRack,
@@ -2513,6 +2606,10 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
       detail,
       progress: progressFraction,
       etaSeconds: jobEtaSeconds,
+      onCancel: () => {
+        const jobId = useAppStore.getState().ovCurrentJobId
+        if (jobId) cancelOmniVoiceAudition(jobId).catch(() => {})
+      },
     })
   }, [
     showLiveStatus,

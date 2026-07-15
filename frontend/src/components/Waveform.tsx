@@ -106,8 +106,10 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
     ? (() => {
         const dur = duration as number
         const isShort = dur < 5
-        // Decide target number of ticks
-        const targetTicks = isShort ? 5 : 4
+        const isVeryShort = dur < 3
+        // Decide target number of ticks — very short clips get fewer, wider-spaced labels
+        // so they don't overlap in a narrow card.
+        const targetTicks = isVeryShort ? 3 : isShort ? 5 : 4
         // Compute ideal step
         const idealStep = dur / targetTicks
 

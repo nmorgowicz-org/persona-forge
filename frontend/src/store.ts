@@ -22,6 +22,9 @@ export interface ActivityStatus {
   detail: string | null
   progress: number
   etaSeconds: number | null
+  // When set, the status bar renders a Stop button that invokes this — lets a long-running
+  // job be cancelled from anywhere on the page, not just from controls above the fold.
+  onCancel?: (() => void) | null
 }
 
 // A voice queued up from the Voice Library's "Edit" action, to be consumed once by
@@ -261,7 +264,7 @@ interface StoreState {
   setOvProgress: (v: OmniVoiceProgress | null) => void
    setOvCurrentJobId: (v: string | null) => void
    setOvJobTotalSegments: (v: number) => void
-   setOvJobStatus: (v: 'running' | 'completed' | 'failed' | null) => void
+   setOvJobStatus: (v: 'queued' | 'running' | 'completed' | 'failed' | null) => void
    setOvJobSegmentsCompleted: (v: OmniVoiceAuditionProgressResult['segments_completed']) => void
     setOvJobCurrentSegmentIndex: (v: number | null) => void
     setOvJobMessage: (v: string | null) => void
