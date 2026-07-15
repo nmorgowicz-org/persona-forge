@@ -128,6 +128,7 @@ type VoiceWithReferenceMeta = VoiceMeta & {
   source_use_case?: string | null
   use_case?: string | null
   use_cases?: string[] | null
+  duplicated_from?: string | null
 }
 
 // Helper for reduced motion
@@ -390,6 +391,7 @@ function getSourceBadges(voice: VoiceMeta): string[] {
     sourceLabel(v.source_model ?? undefined),
     isMountedRef(voice) ? 'Mounted reference' : null,
     voice.auto_fixed ? 'Auto peak-limited' : null,
+    v.duplicated_from ? `Forked from ${v.duplicated_from}` : null,
   ].filter((value): value is string => Boolean(value))
 
   const seen = new Set<string>()
@@ -778,6 +780,7 @@ function VoiceCard({
   onApplyReferenceEdits,
   onAnalyze,
   onUndo,
+  onRefresh,
   autoOpenProsody,
   onAutoOpenProsodyConsumed,
   projects,
@@ -804,6 +807,10 @@ function VoiceCard({
   onApplyReferenceEdits: (voiceId: string, edits: StitchPlanRegionEdit[]) => Promise<void>
   onAnalyze: () => void
   onUndo: () => void
+  // Re-fetches the voices list from the parent so this card's `voice`/`metrics` props
+  // reflect whichever variant is now active — variant promotion swaps audio in place
+  // without changing voice_id, so nothing else would otherwise trigger a refetch.
+  onRefresh: () => Promise<void>
   // True right after this voice was created via a Stitch Studio save — pops its Adjust
   // Prosody popover open and scrolls it into view so the user lands straight in the
   // prosody workflow instead of having to find the new voice manually.
@@ -1070,6 +1077,7 @@ function VoiceCard({
     try {
       await setActiveVoiceVariant(voice.voice_id, v)
       setActiveVariant(v)
+      await onRefresh()
     } catch (err) {
       console.error(err)
     } finally {
@@ -1120,6 +1128,7 @@ function VoiceCard({
       const data = await getVoiceVariants(voice.voice_id)
       setVariants(data.variants)
       setActiveVariant(data.active_variant)
+      await onRefresh()
     } catch (err) {
       console.error(err)
     } finally {
@@ -1148,19 +1157,30 @@ function VoiceCard({
          <div className="max-h-24 overflow-y-auto space-y-1 px-1">
            {variants.map(v => (
              <div key={v} className="flex items-center justify-between gap-1 group">
-               <button
-                 onClick={() => promoteVariant(v)}
-                 disabled={variantBusy === v}
-                 title="Click to promote this variant to the API reference for this voice_id"
+               <span
                  className={cn(
-                   "min-w-0 flex-1 text-left truncate text-[11px] py-0.5 px-1 rounded transition-colors",
-                   activeVariant === v ? "bg-cyan-500/20 text-cyan-300" : "text-muted-foreground hover:bg-muted/40"
+                   "min-w-0 flex-1 truncate text-[11px] py-0.5 px-1 rounded",
+                   activeVariant === v ? "bg-cyan-500/20 text-cyan-300" : "text-muted-foreground"
                  )}
                >
                  {v}
-               </button>
-               {activeVariant === v && <Check className="size-3 shrink-0 text-cyan-400" />}
+               </span>
+               {activeVariant === v && (
+                 <span className="flex shrink-0 items-center gap-0.5 text-[9px] font-medium uppercase tracking-wide text-cyan-400">
+                   <Check className="size-3" /> Primary
+                 </span>
+               )}
                <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                 {activeVariant !== v && (
+                   <button
+                     onClick={() => promoteVariant(v)}
+                     disabled={variantBusy === v}
+                     title="Make this the primary variant — served by the API and shown as the main waveform for this voice_id"
+                     className="rounded p-0.5 text-muted-foreground hover:bg-cyan-500/20 hover:text-cyan-300"
+                   >
+                     <Star className="size-3" />
+                   </button>
+                 )}
                  <button
                    onClick={() => previewVariant(v)}
                    disabled={variantBusy === v && previewingVariant !== v}
@@ -1294,6 +1314,7 @@ function VoiceCard({
         <div className="relative group space-y-1">
           <div className="rounded border border-border/60 bg-muted/10 p-2 pt-3">
             <AlignmentCompare
+              key={activeVariant ?? 'original'}
               voiceId={voice.voice_id}
               adjustedBase64={previewAudio?.audioBase64}
               adjustedSampleCount={previewAudio?.sampleCount}
@@ -2067,6 +2088,7 @@ export function VoiceLibraryPage() {
       onApplyReferenceEdits={(voiceId, edits) => applyReferenceEdits(voiceId, edits)}
       onAnalyze={() => analyze(voice.voice_id)}
       onUndo={() => undoAudioEdit(voice.voice_id)}
+      onRefresh={refresh}
       projects={projects}
       onSetProject={moveVoiceToProject}
     />

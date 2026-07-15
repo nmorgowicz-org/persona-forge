@@ -593,7 +593,7 @@ export async function cancelVoiceAlignment(voiceId: string, jobId: string): Prom
   return res.json()
 }
 
-export async function setActiveVoiceVariant(voiceId: string, variantFilename: string | null): Promise<{ status: string; active_variant: string }> {
+export async function setActiveVoiceVariant(voiceId: string, variantFilename: string | null): Promise<VoiceMeta & { status: string; active_variant: string }> {
   const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/set-active-variant`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -539,7 +539,24 @@ def _invalidate_voice_clone_state(voice_id: str) -> None:
         from qwen3_tts import pocket_tts_runtime
         pocket_tts_runtime.invalidate_voice_state(voice_id)
     except ImportError:
-        pass  # pocket-tts package not installed (non-pocket_tts deployment); nothing to invalidate.
+        return  # pocket-tts package not installed (non-pocket_tts deployment); nothing to invalidate.
+
+    # This voice_id's per-id cache entry is gone, but no-voice_id requests read a
+    # separate module-level default_voice_state that isn't keyed by voice_id at all —
+    # if voice_id is the persisted API default, that global state is now stale and
+    # must be rebuilt from the (just-changed) current.wav, or default requests keep
+    # serving pre-mutation audio until the next idle-unload/reload.
+    if (
+        getattr(model, "TTS_BACKEND", None) == "pocket_tts"
+        and model._service_started
+        and pocket_tts_runtime.get_active_default_voice_id() == voice_id
+    ):
+        try:
+            model.executor.submit(
+                pocket_tts_runtime.set_default_voice_state_from_library, voice_id
+            ).result(timeout=30)
+        except Exception:
+            logger.exception("Failed to rebuild API default voice_state after mutating %s", voice_id)
 
 
 @app.post("/voices/<voice_id>/normalize")
@@ -605,7 +622,12 @@ def voices_set_active_variant(voice_id: str):
     if not success:
         return jsonify({"error": "Could not set active variant (invalid voice or file)"}), 400
     _invalidate_voice_clone_state(voice_id)
-    return jsonify({"status": "active variant updated", "active_variant": variant_filename or "original"})
+    meta = voice_library.get_voice(voice_id) or {}
+    return jsonify({
+        **meta,
+        "status": "active variant updated",
+        "active_variant": variant_filename or "original",
+    })
 
 
 @app.get("/voices/<voice_id>/variants")

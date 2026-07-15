@@ -1,7 +1,11 @@
 # Voice Lifecycle, Library Architecture & Diagnostics — Implementation Plan
 
 Date: 2026-07-14
-Status: Approved direction, not yet implemented
+Status: Implemented and verified against the codebase (2026-07-14). §§1-6, 6.1
+confirmed complete; the only gap found during verification (global API-default
+voice_state not rebuilt on in-place mutation of the persisted default voice_id) was
+fixed in `_invalidate_voice_clone_state()` (`src/qwen3_tts/app.py`). `duplicated_from`
+provenance is now surfaced as a "Forked from ..." badge in `VoiceLibraryPage.tsx`.
 Branch: `feature/voice-style-foundation`
 
 ## How to use this document

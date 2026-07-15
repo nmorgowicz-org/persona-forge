@@ -60,7 +60,9 @@ def _is_valid_voice_id(voice_id: str) -> bool:
 
 
 def set_active_variant(voice_id: str, variant_filename: str | None = None) -> bool:
-    """Set the active reference audio for a voice.
+    """Set the active reference audio for a voice — this is what the API (and every
+    other reader of this voice_id) will serve going forward, so it's a "promote to
+    primary" operation, not just a UI preview toggle.
     If variant_filename is None, reset to original.wav.
     """
     if not _is_valid_voice_id(voice_id):
@@ -80,9 +82,17 @@ def set_active_variant(voice_id: str, variant_filename: str | None = None) -> bo
             current_wav.symlink_to(target)
         else:
             current_wav.symlink_to(original_wav)
-        return True
     except OSError:
         return False
+
+    try:
+        # Refresh persisted metrics/quality fields to describe whichever audio is now
+        # active, so the fingerprint/waveform UI reflects the promoted variant instead
+        # of stale numbers from the master reference.
+        analyze_reference(voice_id)
+    except Exception:
+        logger.exception("Failed to refresh metrics after activating variant for %s", voice_id)
+    return True
 
 
 def _load_master_wav(voice_id: str) -> tuple[np.ndarray, int, bytes] | None:
