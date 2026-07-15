@@ -111,11 +111,16 @@ def _patch_omnivoice_run_job(app_module):
         postprocess_output=None,
         min_match_score=None,
         on_candidate_complete=None,
+        cancel_event=None,
     ):
         time.sleep(0.15)
  
         for seg_idx, text in enumerate(segments):
+            if cancel_event is not None and cancel_event.is_set():
+                break
             for cand_idx in range(candidates_per_segment):
+                if cancel_event is not None and cancel_event.is_set():
+                    break
                 wav = np.zeros(int(_SAMPLE_RATE * 0.3), dtype=np.float32)
                 candidate = (
                     wav,

@@ -31,7 +31,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await expect(page.locator('body')).toHaveJSProperty('scrollWidth', viewport.width)
 
     await card.getByRole('button', { name: 'More voice actions' }).click()
-    await expect(page.getByRole('button', { name: /Duplicate voice/i })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Fork to independent voice_id/i })).toBeVisible()
     await expect(page.getByText('Edit audio operations on a copy')).toBeVisible()
 
     await page.screenshot({ path: `test-results/voice-library-${viewport.width}.png`, fullPage: true })
