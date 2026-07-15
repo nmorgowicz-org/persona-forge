@@ -47,16 +47,30 @@ VOICE_LIBRARY_DIR = Path(os.getenv("VOICE_LIBRARY_DIR", "/voices"))
 logger = logging.getLogger(__name__)
 
 _VOICE_ID_RE = re.compile(r"^vd_[0-9a-f]{12}$")
+# Lineage-preserving variant sub-ID: vd_<parent_hex>.<slug>. Slug is a strict allowlist
+# (no '.', '/', or leading dash/dot) so it can never contain a path separator or traversal
+# sequence, and cannot itself contain another '.' (no nested sub-IDs).
+_VARIANT_ID_RE = re.compile(r"^vd_([0-9a-f]{12})\.([a-z0-9][a-z0-9_-]{0,63})$")
 
 
 def new_voice_id() -> str:
     return f"vd_{secrets.token_hex(6)}"
 
 
+def parse_voice_id(voice_id: str) -> tuple[str, str | None]:
+    """Split a voice_id into (parent_voice_id, slug). slug is None for a plain vd_<hex> id."""
+    match = _VARIANT_ID_RE.match(voice_id or "")
+    if match:
+        return f"vd_{match.group(1)}", match.group(2)
+    return voice_id, None
+
+
 def _is_valid_voice_id(voice_id: str) -> bool:
     # Endpoint input travels straight into a filesystem path (get_voice/_voice_dir), so this
     # doubles as path-traversal defense, not just a format check.
-    return bool(voice_id) and bool(_VOICE_ID_RE.match(voice_id))
+    if not voice_id:
+        return False
+    return bool(_VOICE_ID_RE.match(voice_id)) or bool(_VARIANT_ID_RE.match(voice_id))
 
 
 def set_active_variant(voice_id: str, variant_filename: str | None = None) -> bool:
@@ -384,29 +398,71 @@ def get_prosody_adjusted_wav(
 
 def create_prosody_variant(
     voice_id: str, style_preset: str, pace_multiplier: float, pause_offset_ms: float = 0.0,
-    mode: str = "natural",
-) -> str | None:
-    """Create a prosody-adjusted variant of the master reference.
-    Returns the filename of the created variant.
+    mode: str = "natural", target_overrides: dict[str, float] | None = None,
+    source: str = "preset",
+) -> tuple[str, str] | None:
+    """Create a prosody-adjusted variant of the master reference and register it in
+    variants.json under a unique slug (lineage-preserving vd_<parent_hex>.<slug> sub-ID).
+    Returns (variant_filename, slug), or None on error.
     """
-    result = get_prosody_adjusted_wav(voice_id, style_preset, pace_multiplier, pause_offset_ms, mode)
+    result = get_prosody_adjusted_wav(
+        voice_id, style_preset, pace_multiplier, pause_offset_ms, mode,
+        target_overrides=target_overrides,
+    )
     if result is None:
         return None
 
     adjusted, sr = result
 
-    # If no changes were made, we can just return the original
-    # (Note: this is slightly simplified as apply_region_edits might return same wav)
-    # We'll just always save it to be sure it's a distinct file if the user expects a variant.
-    # Actually, if adjusted is identical to original, we can return "original.wav".
-    # But for simplicity, let's always save the variant.
-
-    variant_filename = f"prosody_{style_preset}_{pace_multiplier}x.wav"
+    slug = _slugify_variant(style_preset, pace_multiplier, voice_id)
+    variant_filename = f"prosody_{slug}.wav"
     voice_dir = _voice_dir(voice_id)
     buf = io.BytesIO()
     sf.write(buf, adjusted, sr, format="WAV", subtype="PCM_16")
     (voice_dir / variant_filename).write_bytes(buf.getvalue())
-    return variant_filename
+
+    variants = _load_variants_meta(voice_id)
+    variants[slug] = {
+        "filename": variant_filename,
+        "label": f"{style_preset} {pace_multiplier}x",
+        "created_at": time.time(),
+        "source": source,
+        "style_preset": style_preset,
+        "pace_multiplier": pace_multiplier,
+        "pause_offset_ms": pause_offset_ms,
+        "target_overrides": target_overrides,
+    }
+    _save_variants_meta(voice_id, variants)
+
+    return variant_filename, slug
+
+
+def save_prosody_variant(
+    voice_id: str, style_preset: str, pace_multiplier: float, pause_offset_ms: float = 0.0,
+    mode: str = "natural", target_overrides: dict[str, float] | None = None,
+) -> dict[str, Any] | None:
+    """Bake and save a prosody variant WITHOUT promoting it to active/served audio.
+
+    Distinct from adjust_reference_pauses (save + promote, atomic) — this is the
+    save-only half of the split, so a variant can be created and independently
+    addressed (vd_<parent_hex>.<slug>) without changing what's currently served.
+    Returns the voice metadata plus the new variant's slug/id.
+    """
+    source = "precise-edit" if target_overrides else "preset"
+    created = create_prosody_variant(
+        voice_id, style_preset, pace_multiplier, pause_offset_ms, mode,
+        target_overrides=target_overrides, source=source,
+    )
+    if created is None:
+        return None
+    _variant_filename, slug = created
+
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    meta["variant_id"] = f"{voice_id}.{slug}"
+    meta["variant_slug"] = slug
+    return meta
 
 def preview_prosody_variant(
     voice_id: str, style_preset: str, pace_multiplier: float, pause_offset_ms: float = 0.0
@@ -425,7 +481,36 @@ def preview_prosody_variant(
 
 
 def _voice_dir(voice_id: str) -> Path:
-    return VOICE_LIBRARY_DIR / voice_id
+    parent_id, _slug = parse_voice_id(voice_id)
+    return VOICE_LIBRARY_DIR / parent_id
+
+
+def _load_variants_meta(voice_id: str) -> dict[str, dict[str, Any]]:
+    """Load <voice_dir>/variants.json: {slug: {filename, label, created_at, source, ...}}."""
+    path = _voice_dir(voice_id) / "variants.json"
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_variants_meta(voice_id: str, variants: dict[str, dict[str, Any]]) -> None:
+    path = _voice_dir(voice_id) / "variants.json"
+    path.write_text(json.dumps(variants, indent=2), encoding="utf-8")
+
+
+def _slugify_variant(style_preset: str, pace_multiplier: float, voice_id: str) -> str:
+    """Derive a unique, filesystem/URL-safe slug for a new variant of voice_id."""
+    base = re.sub(r"[^a-z0-9]+", "-", f"{style_preset}-{pace_multiplier}x".lower()).strip("-") or "variant"
+    existing = _load_variants_meta(voice_id)
+    slug = base
+    suffix = 2
+    while slug in existing:
+        slug = f"{base}-{suffix}"
+        suffix += 1
+    return slug
 
 
 def _has_clipping_failure(quality_warnings: list[str], metrics: dict[str, Any]) -> bool:
@@ -561,9 +646,15 @@ def is_mounted_or_readonly_reference(voice_id: str) -> bool:
 
 
 def get_voice(voice_id: str) -> dict[str, Any] | None:
-    """Return metadata + wav_path for voice_id, or None if it doesn't exist."""
+    """Return metadata + wav_path for voice_id, or None if it doesn't exist.
+
+    A dotted sub-ID (vd_<parent_hex>.<slug>) resolves directly to that specific saved
+    variant file via variants.json, bypassing the current.wav promotion chain entirely —
+    a sub-ID always means "this exact take," independent of whatever is currently promoted.
+    """
     if not _is_valid_voice_id(voice_id):
         return None
+    parent_id, slug = parse_voice_id(voice_id)
     voice_dir = _voice_dir(voice_id)
     meta_path = voice_dir / "meta.json"
     if not meta_path.is_file():
@@ -572,6 +663,21 @@ def get_voice(voice_id: str) -> dict[str, Any] | None:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+
+    if slug is not None:
+        variants = _load_variants_meta(parent_id)
+        entry = variants.get(slug)
+        if entry is None:
+            return None
+        variant_wav = voice_dir / entry["filename"]
+        if not variant_wav.is_file():
+            return None
+        meta["wav_path"] = str(variant_wav)
+        meta["voice_id"] = voice_id
+        meta["parent_voice_id"] = parent_id
+        meta["undo_available"] = False
+        meta["mounted_reference"] = False
+        return meta
 
     # Resolution Priority Chain: current -> original -> legacy (reference)
     current_wav = voice_dir / "current.wav"
@@ -900,17 +1006,61 @@ def delete_variant(voice_id: str, variant_filename: str) -> bool:
     if current_wav.is_symlink() and current_wav.resolve().name == variant_filename:
         set_active_variant(voice_id, None)
     variant_path.unlink()
+
+    variants = _load_variants_meta(voice_id)
+    stale_slugs = [slug for slug, entry in variants.items() if entry.get("filename") == variant_filename]
+    if stale_slugs:
+        for slug in stale_slugs:
+            del variants[slug]
+        _save_variants_meta(voice_id, variants)
+
     return True
 
 
 def get_variant_wav_bytes(voice_id: str, variant_filename: str) -> bytes | None:
-    """Read a specific variant's audio bytes, for per-variant preview."""
-    if not _is_valid_voice_id(voice_id) or not variant_filename.startswith("prosody_") or not variant_filename.endswith(".wav"):
+    """Read a specific variant's audio bytes, for per-variant preview.
+
+    Also allows the literal "original.wav" (an exact-match allowlist entry, not a pattern
+    loosening) so the master reference can be previewed directly regardless of whichever
+    variant is currently promoted to current.wav.
+    """
+    is_original = variant_filename == "original.wav"
+    if not _is_valid_voice_id(voice_id) or not (
+        is_original or (variant_filename.startswith("prosody_") and variant_filename.endswith(".wav"))
+    ):
         return None
     variant_path = _voice_dir(voice_id) / variant_filename
     if not variant_path.is_file():
         return None
     return variant_path.read_bytes()
+
+
+def compute_variant_metrics(voice_id: str, variant_filename: str) -> dict[str, Any] | None:
+    """Compute quality metrics for a specific variant file without persisting to meta.json.
+
+    Unlike ``analyze_reference`` (which writes into the parent voice's ``meta.json``), this is
+    safe to call on every preview click for any variant/Original file, since previewing a
+    non-promoted variant must never mutate the parent's canonical stored metrics.
+    """
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    is_original = variant_filename == "original.wav"
+    if not _is_valid_voice_id(voice_id) or not (
+        is_original or (variant_filename.startswith("prosody_") and variant_filename.endswith(".wav"))
+    ):
+        return None
+    variant_path = _voice_dir(voice_id) / variant_filename
+    if not variant_path.is_file():
+        return None
+    quality_score, quality_warnings, metrics = calculate_quality_score(
+        variant_path, transcript=meta.get("sample_text")
+    )
+    return {
+        "metrics": metrics,
+        "quality_score": quality_score,
+        "quality_warnings": quality_warnings,
+    }
 
 
 def ensure_mounted_ref_voice(
@@ -1073,9 +1223,10 @@ def adjust_reference_pauses(
     """Create a prosody variant and set it as active.
     Returns the voice metadata.
     """
-    variant_filename = create_prosody_variant(voice_id, style_preset, pace_multiplier, pause_offset_ms, mode)
-    if not variant_filename:
+    created = create_prosody_variant(voice_id, style_preset, pace_multiplier, pause_offset_ms, mode)
+    if not created:
         return None
+    variant_filename, _slug = created
 
     if not set_active_variant(voice_id, variant_filename):
         return None

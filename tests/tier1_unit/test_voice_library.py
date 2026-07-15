@@ -304,6 +304,147 @@ class TestAdjustReferencePauses:
         assert voice_library.adjust_reference_pauses("vd_000000000000") is None
 
 
+class TestVariantSubIds:
+    """Lineage-preserving vd_<parent_hex>.<slug> sub-IDs (§1/§2/§3 of the prosody-variants
+    redesign): validation stays a strict path-traversal-safe allowlist, a dotted ID resolves
+    straight to its saved take regardless of current.wav, and save/promote are independent."""
+
+    def _save(self):
+        return voice_library.save_voice(
+            _paused_sine_wav_bytes(0.8),
+            description="desc",
+            sample_text="hello there friend",
+            language="English",
+        )
+
+    @pytest.mark.parametrize(
+        "candidate",
+        [
+            "vd_abcdef012345.clean-1x",
+            "vd_abcdef012345.Clean-1x",  # uppercase not allowed
+            "vd_abcdef012345..clean-1x",  # nested dot
+            "vd_abcdef012345/../etc",
+            "vd_abcdef012345.../../etc",
+            "vd_abcdef012345.-leading-dash",
+            "vd_abcdef012345.",
+            "vd_abcdef012345",
+        ],
+    )
+    def test_dotted_id_validation_allowlist(self, candidate):
+        expected = candidate in ("vd_abcdef012345.clean-1x", "vd_abcdef012345")
+        assert voice_library._is_valid_voice_id(candidate) is expected
+
+    def test_parse_voice_id_splits_parent_and_slug(self):
+        assert voice_library.parse_voice_id("vd_abcdef012345.clean-1x") == (
+            "vd_abcdef012345",
+            "clean-1x",
+        )
+        assert voice_library.parse_voice_id("vd_abcdef012345") == ("vd_abcdef012345", None)
+
+    def test_dotted_id_resolves_to_saved_variant_regardless_of_promotion(self):
+        voice_id = self._save()["voice_id"]
+        saved = voice_library.save_prosody_variant(voice_id, style_preset="Neutral", pace_multiplier=2.0)
+        assert saved is not None
+        variant_id = saved["variant_id"]
+        variant_filename = voice_library._load_variants_meta(voice_id)[saved["variant_slug"]]["filename"]
+
+        # Promote a *different* variant to active — the dotted sub-ID must still resolve to
+        # its own saved take, not whatever current.wav points at.
+        other_saved = voice_library.save_prosody_variant(voice_id, style_preset="Storyteller", pace_multiplier=0.5)
+        assert other_saved is not None
+        other_filename = voice_library._load_variants_meta(voice_id)[other_saved["variant_slug"]]["filename"]
+        assert other_filename != variant_filename
+        assert voice_library.set_active_variant(voice_id, other_filename) is True
+
+        variant_meta = voice_library.get_voice(variant_id)
+        assert variant_meta is not None
+        assert variant_meta["parent_voice_id"] == voice_id
+        assert variant_meta["voice_id"] == variant_id
+        assert variant_meta["undo_available"] is False
+
+        active_wav = voice_library.get_voice_wav_bytes(voice_id)
+        variant_wav = voice_library.get_voice_wav_bytes(variant_id)
+        assert active_wav != variant_wav
+
+    def test_unknown_slug_returns_none(self):
+        voice_id = self._save()["voice_id"]
+        assert voice_library.get_voice(f"{voice_id}.does-not-exist") is None
+
+
+class TestSaveVsPromoteSplit:
+    """save_prosody_variant (bake-only) must never change what's served; promoting via
+    set_active_variant/adjust_reference_pauses is a separate, explicit step."""
+
+    def _save(self):
+        return voice_library.save_voice(
+            _paused_sine_wav_bytes(0.8),
+            description="desc",
+            sample_text="hello there friend",
+            language="English",
+        )
+
+    def test_save_prosody_variant_does_not_change_served_audio(self):
+        voice_id = self._save()["voice_id"]
+        before = voice_library.get_voice_wav_bytes(voice_id)
+
+        saved = voice_library.save_prosody_variant(voice_id, style_preset="Neutral", pace_multiplier=2.0)
+        assert saved is not None
+        assert saved["variant_id"].startswith(f"{voice_id}.")
+
+        after = voice_library.get_voice_wav_bytes(voice_id)
+        assert after == before  # unchanged — save-only, no promotion
+
+    def test_adjust_reference_pauses_still_saves_and_promotes_atomically(self):
+        voice_id = self._save()["voice_id"]
+        before = voice_library.get_voice_wav_bytes(voice_id)
+
+        updated = voice_library.adjust_reference_pauses(voice_id, style_preset="Neutral", pace_multiplier=2.0)
+        assert updated is not None
+
+        after = voice_library.get_voice_wav_bytes(voice_id)
+        assert after != before  # promoted — current.wav now serves the new variant
+
+
+class TestVariantMetricsNonPersisting:
+    """compute_variant_metrics must never mutate the parent's meta.json, unlike analyze_reference."""
+
+    def _save(self):
+        return voice_library.save_voice(
+            _paused_sine_wav_bytes(0.8),
+            description="desc",
+            sample_text="hello there friend",
+            language="English",
+        )
+
+    def test_does_not_persist_metrics_to_parent_meta(self):
+        voice_id = self._save()["voice_id"]
+        meta_path = voice_library._voice_dir(voice_id) / "meta.json"
+        before = meta_path.read_text(encoding="utf-8")
+
+        result = voice_library.compute_variant_metrics(voice_id, "original.wav")
+        assert result is not None
+        assert "metrics" in result and "quality_score" in result
+
+        assert meta_path.read_text(encoding="utf-8") == before
+
+    def test_computes_metrics_for_saved_variant_file(self):
+        voice_id = self._save()["voice_id"]
+        saved = voice_library.save_prosody_variant(voice_id, style_preset="Neutral", pace_multiplier=2.0)
+        assert saved is not None
+        variant_filename = voice_library._load_variants_meta(voice_id)[saved["variant_slug"]]["filename"]
+
+        result = voice_library.compute_variant_metrics(voice_id, variant_filename)
+        assert result is not None
+        assert "metrics" in result
+
+    def test_unknown_voice_returns_none(self):
+        assert voice_library.compute_variant_metrics("vd_000000000000", "original.wav") is None
+
+    def test_rejects_disallowed_filename(self):
+        voice_id = self._save()["voice_id"]
+        assert voice_library.compute_variant_metrics(voice_id, "../meta.json") is None
+
+
 class TestSetDefaultVariant:
     def test_marks_default_and_unmarks_siblings(self):
         first = voice_library.save_voice(

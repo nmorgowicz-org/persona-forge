@@ -426,6 +426,18 @@ export async function getVoiceVariantAudio(voiceId: string, variantFilename: str
   return res.json()
 }
 
+// Computes quality metrics for a specific variant/Original file without persisting them —
+// safe to call on every preview click, unlike analyzeVoiceReference which writes into meta.json.
+export async function getVoiceVariantMetrics(voiceId: string, variantFilename: string): Promise<{
+  metrics: ReferenceMetrics
+  quality_score: number
+  quality_warnings: string[]
+}> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/variants/${encodeURIComponent(variantFilename)}/metrics`)
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
 export async function deleteVoiceVariant(voiceId: string, variantFilename: string): Promise<void> {
   const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/variants/${encodeURIComponent(variantFilename)}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(await readError(res))
@@ -603,8 +615,52 @@ export async function setActiveVoiceVariant(voiceId: string, variantFilename: st
   return res.json()
 }
 
-export async function getVoiceVariants(voiceId: string): Promise<{ variants: string[]; active_variant: string | null }> {
+// One row in the Prosody Variants list — includes the synthetic "Original" entry
+// (is_original: true, id === the plain voice_id) alongside saved variants, each
+// independently addressable via its dotted `vd_<parent_hex>.<slug>` id.
+export interface VoiceVariantEntry {
+  id: string
+  filename: string
+  label: string
+  is_original: boolean
+  slug?: string
+  source?: string
+  created_at?: number
+}
+
+export async function getVoiceVariants(voiceId: string): Promise<{
+  entries: VoiceVariantEntry[]
+  variants: string[]
+  active_variant: string | null
+  active_filename: string
+}> {
   const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/variants`)
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+// Bake and save a prosody variant WITHOUT promoting it to active/served audio — the
+// save-only half of the split (adjustVoiceReferencePauses remains the atomic save+promote
+// path). Returns the parent voice's metadata plus the new variant's dotted id/slug.
+export async function saveVoiceProsodyVariant(
+  voiceId: string,
+  stylePreset: string,
+  paceMultiplier: number,
+  pauseOffset: number,
+  mode: ProsodyMode = 'auto',
+  targetOverrides?: Record<string, number>,
+): Promise<VoiceMeta & { variant_id: string; variant_slug: string }> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/prosody-variants`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      style_preset: stylePreset,
+      pace_multiplier: paceMultiplier,
+      pause_offset: pauseOffset,
+      mode,
+      target_overrides: targetOverrides && Object.keys(targetOverrides).length > 0 ? targetOverrides : undefined,
+    }),
+  })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
 }

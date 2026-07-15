@@ -165,6 +165,85 @@ class TestVoices:
             resp = client.post("/voices/vd_doesnotexist/set-default")
         assert resp.status_code == 404
 
+    def test_get_variants_lists_original_plus_saved_variants(self, client, app_module, tmp_path):
+        voice_dir = tmp_path / "vd_aabbccddeeff"
+        voice_dir.mkdir(parents=True)
+        (voice_dir / "original.wav").write_bytes(b"orig")
+        (voice_dir / "prosody_clean-1x.wav").write_bytes(b"var")
+        (voice_dir / "variants.json").write_text(
+            '{"clean-1x": {"filename": "prosody_clean-1x.wav", "label": "Neutral 1.0x", '
+            '"created_at": 1.0, "source": "preset"}}'
+        )
+        with patch.object(app_module.voice_library, "VOICE_LIBRARY_DIR", tmp_path):
+            resp = client.get("/voices/vd_aabbccddeeff/variants")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["entries"][0] == {
+            "id": "vd_aabbccddeeff",
+            "filename": "original.wav",
+            "label": "Original",
+            "is_original": True,
+        }
+        assert body["entries"][1]["id"] == "vd_aabbccddeeff.clean-1x"
+        assert body["active_filename"] == "original.wav"
+        assert body["active_variant"] is None
+
+    def test_get_variants_not_found(self, client, app_module, tmp_path):
+        with patch.object(app_module.voice_library, "VOICE_LIBRARY_DIR", tmp_path):
+            resp = client.get("/voices/vd_000000000000/variants")
+        assert resp.status_code == 404
+
+    def test_save_prosody_variant_ok_does_not_promote(self, client, app_module):
+        with patch.object(
+            app_module.voice_library,
+            "save_prosody_variant",
+            return_value={
+                "voice_id": "vd_aabbccddeeff",
+                "variant_id": "vd_aabbccddeeff.neutral-2x",
+                "variant_slug": "neutral-2x",
+            },
+        ) as mocked:
+            resp = client.post(
+                "/voices/vd_aabbccddeeff/prosody-variants",
+                json={"style_preset": "Neutral", "pace_multiplier": 2.0},
+            )
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["variant_id"] == "vd_aabbccddeeff.neutral-2x"
+        mocked.assert_called_once()
+        _args, kwargs = mocked.call_args
+        assert kwargs["style_preset"] == "Neutral"
+        assert kwargs["pace_multiplier"] == 2.0
+
+    def test_get_variant_metrics_ok(self, client, app_module):
+        with patch.object(
+            app_module.voice_library,
+            "compute_variant_metrics",
+            return_value={"metrics": {"duration_seconds": 1.0}, "quality_score": 90.0, "quality_warnings": []},
+        ) as mocked:
+            resp = client.get("/voices/vd_aabbccddeeff/variants/original.wav/metrics")
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["metrics"]["duration_seconds"] == 1.0
+        mocked.assert_called_once_with("vd_aabbccddeeff", "original.wav")
+
+    def test_get_variant_metrics_not_found(self, client, app_module):
+        with patch.object(app_module.voice_library, "compute_variant_metrics", return_value=None):
+            resp = client.get("/voices/vd_doesnotexist/variants/original.wav/metrics")
+        assert resp.status_code == 404
+
+    def test_save_prosody_variant_not_found(self, client, app_module):
+        with patch.object(app_module.voice_library, "save_prosody_variant", return_value=None):
+            resp = client.post("/voices/vd_doesnotexist/prosody-variants", json={})
+        assert resp.status_code == 404
+
+    def test_save_prosody_variant_rejects_bad_pace(self, client, app_module):
+        resp = client.post(
+            "/voices/vd_aabbccddeeff/prosody-variants",
+            json={"pace_multiplier": "not-a-number"},
+        )
+        assert resp.status_code == 400
+
     def test_path_traversal_rejected(self, client, app_module):
         with patch.object(app_module.voice_library, "get_voice", return_value=None):
             resp = client.get("/voices/../../etc/passwd")

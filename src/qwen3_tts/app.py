@@ -636,26 +636,43 @@ def voices_set_active_variant(voice_id: str):
 
 @app.get("/voices/<voice_id>/variants")
 def voices_get_variants(voice_id: str):
-    """List all available prosody variants for a saved voice."""
+    """List the original reference plus all saved prosody variants for a voice."""
     if not voice_library._is_valid_voice_id(voice_id):
         return jsonify({"error": "invalid voice_id"}), 400
     voice_dir = voice_library._voice_dir(voice_id)
     if not voice_dir.is_dir():
         return jsonify({"error": "voice not found"}), 404
 
-    variants = [f.name for f in voice_dir.iterdir() if f.name.startswith("prosody_") and f.name.endswith(".wav")]
-
-    # Find which one is currently active
+    # Find which filename is currently active/served.
     current_wav = voice_dir / "current.wav"
-    active_variant = None
-    if current_wav.is_symlink():
-        target = current_wav.resolve().name
-        if target in variants:
-            active_variant = target
+    active_filename = current_wav.resolve().name if current_wav.is_symlink() else "original.wav"
+
+    entries = [{
+        "id": voice_id,
+        "filename": "original.wav",
+        "label": "Original",
+        "is_original": True,
+    }]
+    variants_meta = voice_library._load_variants_meta(voice_id)
+    for slug, entry in sorted(variants_meta.items(), key=lambda kv: kv[1].get("created_at", 0)):
+        entries.append({
+            "id": f"{voice_id}.{slug}",
+            "slug": slug,
+            "filename": entry.get("filename"),
+            "label": entry.get("label", slug),
+            "source": entry.get("source"),
+            "created_at": entry.get("created_at"),
+            "is_original": False,
+        })
+
+    variants = [e["filename"] for e in entries if not e["is_original"]]
+    active_variant = active_filename if active_filename in variants else None
 
     return jsonify({
+        "entries": entries,
         "variants": sorted(variants),
-        "active_variant": active_variant
+        "active_variant": active_variant,
+        "active_filename": active_filename,
     })
 
 
@@ -666,6 +683,15 @@ def voices_get_variant_audio(voice_id: str, variant_filename: str):
     if wav_bytes is None:
         return jsonify({"error": "variant not found"}), 404
     return jsonify({"audio_base64": base64.b64encode(wav_bytes).decode("ascii")})
+
+
+@app.get("/voices/<voice_id>/variants/<variant_filename>/metrics")
+def voices_get_variant_metrics(voice_id: str, variant_filename: str):
+    """Compute a single variant's quality metrics without persisting them (preview-only)."""
+    metrics = voice_library.compute_variant_metrics(voice_id, variant_filename)
+    if metrics is None:
+        return jsonify({"error": "variant not found"}), 404
+    return jsonify(metrics)
 
 
 @app.delete("/voices/<voice_id>/variants/<variant_filename>")
@@ -834,6 +860,50 @@ def voices_adjust_pauses(voice_id: str):
     if meta is None:
         return jsonify({"error": "voice_id not found"}), 404
     _invalidate_voice_clone_state(voice_id)
+    return jsonify(meta)
+
+
+@app.post("/voices/<voice_id>/prosody-variants")
+def voices_save_prosody_variant(voice_id: str):
+    """Bake and save a prosody variant WITHOUT promoting it to active/served audio.
+
+    Split half of adjust-pauses: lets a take (including a precise per-boundary
+    correction via target_overrides) be saved and independently addressed as
+    vd_<parent_hex>.<slug> without changing what /voices/<id> currently serves.
+    """
+    data = request.get_json(silent=True) or {}
+    style_preset = (data.get("style_preset") or "Neutral").strip()
+    try:
+        pace_multiplier = float(data.get("pace_multiplier", 1.0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "pace_multiplier must be a number"}), 400
+    try:
+        pause_offset = float(data.get("pause_offset", 0.0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "pause_offset must be a number"}), 400
+    mode = (data.get("mode") or "auto").strip().lower()
+    if mode not in ("natural", "precise", "auto"):
+        return jsonify({"error": "mode must be natural, precise, or auto"}), 400
+
+    target_overrides: dict[str, float] | None = None
+    raw_overrides = data.get("target_overrides")
+    if raw_overrides:
+        try:
+            target_overrides = {str(k): float(v) for k, v in dict(raw_overrides).items()}
+        except (ValueError, TypeError):
+            return jsonify({"error": "target_overrides must be an object of numbers"}), 400
+
+    try:
+        meta = voice_library.save_prosody_variant(
+            voice_id, style_preset=style_preset, pace_multiplier=pace_multiplier,
+            pause_offset_ms=pause_offset, mode=mode, target_overrides=target_overrides,
+        )
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception as exc:
+        return jsonify({"error": f"Save variant failed: {exc}"}), 500
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
     return jsonify(meta)
 
 

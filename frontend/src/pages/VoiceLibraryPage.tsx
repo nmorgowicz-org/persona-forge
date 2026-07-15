@@ -49,7 +49,9 @@ import {
   duplicateVoice,
   getVoice,
   getVoiceVariantAudio,
+  getVoiceVariantMetrics,
   getVoiceVariants,
+  saveVoiceProsodyVariant,
   listOmniVoiceSegments,
   listVoices,
   normalizeVoiceReference,
@@ -66,6 +68,7 @@ import {
   type StitchPlanRegionEdit,
   type VoiceMeta,
   type ProsodyMode,
+  type VoiceVariantEntry,
   type AlignmentBoundary,
   type ProsodyPausePlanEntry,
   type Project,
@@ -841,14 +844,17 @@ function VoiceCard({
   const [alignError, setAlignError] = useState<string | null>(null)
   const [alignWarning, setAlignWarning] = useState<string | null>(null)
   const alignJobRef = useRef<{ jobId: string; cancelled: boolean } | null>(null)
-  const [variants, setVariants] = useState<string[]>([])
-  const [activeVariant, setActiveVariant] = useState<string | null>(null)
+  // Original + every saved prosody variant, in one selectable list (§4/§5: the master
+  // reference is a first-class, always-visible row, not hidden behind a separate action).
+  const [entries, setEntries] = useState<VoiceVariantEntry[]>([])
+  const [activeFilename, setActiveFilename] = useState<string>('original.wav')
   // Which variant is playing a Preview clip right now, plus the Audio element itself so a
   // second click on the same variant stops it instead of overlapping playback.
   const [previewingVariant, setPreviewingVariant] = useState<string | null>(null)
   const variantPreviewAudioRef = useRef<HTMLAudioElement | null>(null)
   const [variantBusy, setVariantBusy] = useState<string | null>(null)
   const [prosodyBusy, setProsodyBusy] = useState(false)
+  const [savingVariantBusy, setSavingVariantBusy] = useState(false)
   const [previewBusy, setPreviewBusy] = useState(false)
   const [previewAudio, setPreviewAudio] = useState<{
     url: string
@@ -1009,8 +1015,8 @@ function VoiceCard({
     async function loadVariants() {
       try {
         const data = await getVoiceVariants(voice.voice_id)
-        setVariants(data.variants)
-        setActiveVariant(data.active_variant)
+        setEntries(data.entries)
+        setActiveFilename(data.active_filename)
       } catch (err) {
         console.error(`Failed to load variants for ${voice.voice_id}:`, err)
       }
@@ -1065,7 +1071,7 @@ function VoiceCard({
   // "click the pill" interaction (§2.1). Confirms first when this voice_id is also the
   // persisted global API default, since the swap changes what the live default sounds
   // like immediately.
-  const promoteVariant = async (v: string) => {
+  const promoteVariant = async (entry: VoiceVariantEntry) => {
     if (voice.api_active) {
       const ok = window.confirm(
         'This voice is the live API default. Promoting this variant will change what the ' +
@@ -1073,10 +1079,12 @@ function VoiceCard({
       )
       if (!ok) return
     }
-    setVariantBusy(v)
+    setVariantBusy(entry.filename)
     try {
-      await setActiveVoiceVariant(voice.voice_id, v)
-      setActiveVariant(v)
+      // set-active-variant treats a null filename as "reset to original.wav" — pass the
+      // literal filename either way, both resolve correctly.
+      await setActiveVoiceVariant(voice.voice_id, entry.filename)
+      setActiveFilename(entry.filename)
       await onRefresh()
     } catch (err) {
       console.error(err)
@@ -1085,22 +1093,32 @@ function VoiceCard({
     }
   }
 
-  const previewVariant = async (v: string) => {
-    if (previewingVariant === v) {
+  // Also reflects the previewed take's stats into the large card via previewMetrics, so
+  // clicking a variant/Original compares against whatever is currently active (§5).
+  const previewVariant = async (entry: VoiceVariantEntry) => {
+    if (previewingVariant === entry.filename) {
       variantPreviewAudioRef.current?.pause()
       variantPreviewAudioRef.current = null
       setPreviewingVariant(null)
+      setPreviewMetrics(null)
       return
     }
     variantPreviewAudioRef.current?.pause()
-    setVariantBusy(v)
+    setVariantBusy(entry.filename)
     try {
-      const { audio_base64 } = await getVoiceVariantAudio(voice.voice_id, v)
+      const [{ audio_base64 }, metricsResult] = await Promise.all([
+        getVoiceVariantAudio(voice.voice_id, entry.filename),
+        getVoiceVariantMetrics(voice.voice_id, entry.filename).catch((err) => {
+          console.error('Variant metrics fetch failed:', err)
+          return null
+        }),
+      ])
       const bytes = Uint8Array.from(atob(audio_base64), (c) => c.charCodeAt(0))
       const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }))
       const el = new Audio(url)
       variantPreviewAudioRef.current = el
-      setPreviewingVariant(v)
+      setPreviewingVariant(entry.filename)
+      if (metricsResult) setPreviewMetrics(metricsResult.metrics)
       el.addEventListener('ended', () => setPreviewingVariant(null))
       await el.play()
     } catch (err) {
@@ -1111,23 +1129,23 @@ function VoiceCard({
     }
   }
 
-  const forkVariant = async (v: string) => {
-    setVariantBusy(v)
+  const forkVariant = async (entry: VoiceVariantEntry) => {
+    setVariantBusy(entry.filename)
     try {
-      await onDuplicate(v)
+      await onDuplicate(entry.is_original ? undefined : entry.filename)
     } finally {
       setVariantBusy(null)
     }
   }
 
-  const deleteVariant = async (v: string) => {
-    if (!window.confirm(`Delete variant "${v}"? This cannot be undone.`)) return
-    setVariantBusy(v)
+  const deleteVariant = async (entry: VoiceVariantEntry) => {
+    if (!window.confirm(`Delete variant "${entry.label}"? This cannot be undone.`)) return
+    setVariantBusy(entry.filename)
     try {
-      await deleteVoiceVariant(voice.voice_id, v)
+      await deleteVoiceVariant(voice.voice_id, entry.filename)
       const data = await getVoiceVariants(voice.voice_id)
-      setVariants(data.variants)
-      setActiveVariant(data.active_variant)
+      setEntries(data.entries)
+      setActiveFilename(data.active_filename)
       await onRefresh()
     } catch (err) {
       console.error(err)
@@ -1151,30 +1169,33 @@ function VoiceCard({
          <div className="flex items-center justify-between px-1">
            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Prosody Variants</p>
            <div className="flex items-center gap-1">
-             {variants.length === 0 ? <span className="text-[10px] text-muted-foreground/50">None</span> : <span className="text-[10px] text-muted-foreground">{variants.length} total</span>}
+             <span className="text-[10px] text-muted-foreground">
+               {entries.length} total{entries.length > 1 ? ` (${entries.length - 1} variant${entries.length - 1 === 1 ? '' : 's'})` : ''}
+             </span>
            </div>
          </div>
-         <div className="max-h-24 overflow-y-auto space-y-1 px-1">
-           {variants.map(v => (
-             <div key={v} className="flex items-center justify-between gap-1 group">
+         <div className="max-h-28 overflow-y-auto space-y-1 px-1">
+           {entries.map(entry => (
+             <div key={entry.id} className="flex items-center justify-between gap-1">
                <span
                  className={cn(
                    "min-w-0 flex-1 truncate text-[11px] py-0.5 px-1 rounded",
-                   activeVariant === v ? "bg-cyan-500/20 text-cyan-300" : "text-muted-foreground"
+                   activeFilename === entry.filename ? "bg-cyan-500/20 text-cyan-300" : "text-muted-foreground"
                  )}
+                 title={entry.id}
                >
-                 {v}
+                 {entry.label}
                </span>
-               {activeVariant === v && (
+               {activeFilename === entry.filename && (
                  <span className="flex shrink-0 items-center gap-0.5 text-[9px] font-medium uppercase tracking-wide text-cyan-400">
                    <Check className="size-3" /> Primary
                  </span>
                )}
-               <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                 {activeVariant !== v && (
+               <div className="flex shrink-0 items-center gap-0.5">
+                 {activeFilename !== entry.filename && (
                    <button
-                     onClick={() => promoteVariant(v)}
-                     disabled={variantBusy === v}
+                     onClick={() => promoteVariant(entry)}
+                     disabled={variantBusy === entry.filename}
                      title="Make this the primary variant — served by the API and shown as the main waveform for this voice_id"
                      className="rounded p-0.5 text-muted-foreground hover:bg-cyan-500/20 hover:text-cyan-300"
                    >
@@ -1182,29 +1203,33 @@ function VoiceCard({
                    </button>
                  )}
                  <button
-                   onClick={() => previewVariant(v)}
-                   disabled={variantBusy === v && previewingVariant !== v}
-                   title={previewingVariant === v ? 'Stop preview' : 'Preview this variant'}
+                   onClick={() => previewVariant(entry)}
+                   disabled={variantBusy === entry.filename && previewingVariant !== entry.filename}
+                   title={previewingVariant === entry.filename ? 'Stop preview' : 'Preview this variant'}
                    className="rounded p-0.5 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
                  >
-                   {previewingVariant === v ? <Pause className="size-3" /> : <Play className="size-3" />}
+                   {previewingVariant === entry.filename ? <Pause className="size-3" /> : <Play className="size-3" />}
                  </button>
-                 <button
-                   onClick={() => forkVariant(v)}
-                   disabled={variantBusy === v}
-                   title="Fork this variant to an independent voice_id"
-                   className="rounded p-0.5 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-                 >
-                   <GitFork className="size-3" />
-                 </button>
-                 <button
-                   onClick={() => deleteVariant(v)}
-                   disabled={variantBusy === v}
-                   title="Delete this variant"
-                   className="rounded p-0.5 text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
-                 >
-                   <Trash2 className="size-3" />
-                 </button>
+                 {!entry.is_original && (
+                   <>
+                     <button
+                       onClick={() => forkVariant(entry)}
+                       disabled={variantBusy === entry.filename}
+                       title="Fork this variant to an independent voice_id"
+                       className="rounded p-0.5 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                     >
+                       <GitFork className="size-3" />
+                     </button>
+                     <button
+                       onClick={() => deleteVariant(entry)}
+                       disabled={variantBusy === entry.filename}
+                       title="Delete this variant"
+                       className="rounded p-0.5 text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
+                     >
+                       <Trash2 className="size-3" />
+                     </button>
+                   </>
+                 )}
                </div>
              </div>
            ))}
@@ -1314,7 +1339,7 @@ function VoiceCard({
         <div className="relative group space-y-1">
           <div className="rounded border border-border/60 bg-muted/10 p-2 pt-3">
             <AlignmentCompare
-              key={activeVariant ?? 'original'}
+              key={activeFilename}
               voiceId={voice.voice_id}
               adjustedBase64={previewAudio?.audioBase64}
               adjustedSampleCount={previewAudio?.sampleCount}
@@ -1516,20 +1541,44 @@ function VoiceCard({
                    <Button
                      size="sm"
                      variant="outline"
+                     disabled={busy || savingVariantBusy || prosodyBusy || previewBusy}
+                     title="Bake and save this take as a new, independently-addressable variant — does not change what's currently served"
+                     onClick={async () => {
+                       setSavingVariantBusy(true)
+                       try {
+                         await saveVoiceProsodyVariant(
+                           voice.voice_id, stylePreset, paceMultiplier, pauseOffset, processingMode, targetOverrides,
+                         )
+                         const data = await getVoiceVariants(voice.voice_id)
+                         setEntries(data.entries)
+                         setActiveFilename(data.active_filename)
+                       } catch (err) {
+                         console.error(err)
+                       } finally {
+                         setSavingVariantBusy(false)
+                       }
+                     }}
+                   >
+                     <Wand2 className="size-3.5" /> Save as Variant
+                   </Button>
+                   <Button
+                     size="sm"
+                     variant="outline"
                      disabled={busy || prosodyBusy || previewBusy}
+                     title="Bake this take and immediately promote it to the primary variant served by the API"
                      onClick={async () => {
                        setProsodyBusy(true)
                        try {
                          await onAdjustPauses(voice.voice_id, stylePreset, paceMultiplier, pauseOffset, processingMode)
                          const data = await getVoiceVariants(voice.voice_id)
-                         setVariants(data.variants)
-                         setActiveVariant(data.active_variant)
+                         setEntries(data.entries)
+                         setActiveFilename(data.active_filename)
                        } finally {
                          setProsodyBusy(false)
                        }
                      }}
                    >
-                     <Wand2 className="size-3.5" /> Save as Variant
+                     <Star className="size-3.5" /> Save &amp; Promote
                    </Button>
                  </div>
 

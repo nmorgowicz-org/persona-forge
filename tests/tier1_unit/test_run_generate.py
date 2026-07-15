@@ -301,10 +301,8 @@ class TestRunGenerateSuccessPath:
             24000,
         )
         monkeypatch.setitem(sys.modules, "qwen3_tts.pocket_tts_runtime", fake_runtime)
-        # Fix isolation: monkeypatch the attribute on the package to prevent leak
-        # Only if the package is actually imported and we can set the attribute
         import qwen3_tts
-        setattr(qwen3_tts, "pocket_tts_runtime", fake_runtime)
+        monkeypatch.setattr(qwen3_tts, "pocket_tts_runtime", fake_runtime)
 
         polished, _sr, polished_job_id = m._run_generate("hello", "English")
         bypassed, _sr, bypassed_job_id = m._run_generate(

@@ -193,10 +193,11 @@ class TestAlignmentDirectedWav:
         assert plan[0]["cut_sample"] < preview_wav.size
 
         # The saved variant reuses the same cached alignment and canonical renderer.
-        variant = voice_library.create_prosody_variant(
+        created = voice_library.create_prosody_variant(
             vid, "Storyteller", 1.0, 0.0, mode="precise"
         )
-        assert variant is not None
+        assert created is not None
+        variant, _slug = created
         saved, saved_sr = sf.read(voice_library._voice_dir(vid) / variant, dtype="float32")
         preview_buf = io.BytesIO()
         sf.write(preview_buf, preview_wav, preview_sr, format="WAV", subtype="PCM_16")
