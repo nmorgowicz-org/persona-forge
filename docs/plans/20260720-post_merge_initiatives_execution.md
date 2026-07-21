@@ -72,36 +72,50 @@ whose dependencies (comprehensive §5) are green.
 
 ## 3. Navigation map (comprehensive plan)
 
-Line hints captured 2026-07-20 — use the heading, not the number.
+Line hints refreshed 2026-07-21 (A6/A7 decomposition) — use the heading, not the number.
 
 | Section / Phase | Line | Why it exists |
 |---|---:|---|
 | §1 Purpose & scope | 21 | The three initiatives, why bundled, ordering |
 | §2 Research baseline | 49 | Current-state facts (deps, backend, capture, guided) — the source of truth for every phase |
-| §3 Decision register | 149 | D1–D10 frozen decisions — do not reopen |
-| §4 Global rules & invariants | 212 | Privacy, additive/no-CI, **§4.3 gate taxonomy**, context mgmt |
-| §5 Dependency & sequencing index | 256 | Phase order + what each depends on |
-| §6 Initiative A (uv) | 280 | |
-| — Phase A1 (pyproject/uv config) | 282 | |
-| — Phase A2 (uv sync proves real venv) | 359 | |
-| — Phase A3 (docs + rewire, keep CI) | 397 | |
-| — Phase A4 (TTS_DEVICE + OPENVINO_DEVICE seams) | 433 | |
-| — Phase A5 (accelerator guide + deferred paths) | 484 | |
-| §7 Initiative B (capture harness) | 536 | |
-| — Phase B1 (real-server spawn) | 542 | |
-| — Phase B2 (fixtures + seeding) | 599 | |
-| — Phase B3 (capture.mjs --real) | 639 | |
-| — Phase B4 (GIF helpers) | 666 | |
-| — Phase B5 (testids) | 695 | |
-| — Phase B6 (scenario catalog) | 724 | |
-| — Phase B7 (coverage doc + workflow) | 770 | |
-| §8 Initiative C (guided experience) | 793 | |
-| — Phase C1 (metric tooltips) | 800 | |
-| — Phase C2 (progressive disclosure) | 837 | |
-| — Phase C3 (glossary/KB) | 875 | |
-| — Phase C4 (take diagnostics) | 909 | |
-| — Phase C5 (persona wizard) | 945 | |
-| §9 Completion ledger | 985 | |
+| §3 Decision register | 149 | D1–D11 frozen decisions — do not reopen |
+| §4 Global rules & invariants | 234 | Privacy, additive/no-CI, **§4.3 gate taxonomy**, **§4.4 task budget 60–80k**, context mgmt |
+| §5 Dependency & sequencing index | 284 | Phase order + what each depends on |
+| §6 Initiative A (uv + accel) | 320 | |
+| — Phase A1 (pyproject/uv config) | 322 | |
+| — Phase A2 (uv sync proves real venv) | 399 | |
+| — Phase A3 (docs + rewire, keep CI) | 437 | |
+| — Phase A4 (TTS_DEVICE + OPENVINO_DEVICE seams) | 473 | |
+| — Phase A5 (accelerator guide + deferred paths) | 524 | |
+| — Phase A6 (OmniVoice-iGPU **validated** findings + packaging design) | 576 | reference for A6a–A6g; not itself a task |
+| — **A6.4a Detection model** (capability vs presence; torch-independent family selection) | 700 | **read before A6c/A6d/A7c** |
+| — Phase A6a (OmniVoice device seam + auto fp64-emu) | 749 | |
+| — Phase A6b (honest OMP=4 CPU baseline; measurement) | 776 | |
+| — Phase A6c (gpu_family detection + describe_accelerator) | 785 | |
+| — Phase A6d (accel-aware entrypoint: family + runtime env) | 815 | |
+| — Phase A6e (first-boot per-family torch install) | 834 | |
+| — Phase A6f (base-image libs + /dev/dri compose + A5 reconcile) | 856 | |
+| — Phase A6g (int8 PTQ; deferred) | 877 | |
+| — Phase A7 (persisted runtime config — header + D11 context) | 891 | reference for A7a–A7d |
+| — Phase A7a (persistence backend: runtime.json + startup layering) | 912 | |
+| — Phase A7b (API: source/lock/restart + reset/dry-run) | 939 | |
+| — Phase A7c (container coach: copy + card) | 956 | |
+| — Phase A7d (premium Runtime control surface; may split A7d/A7e) | 979 | |
+| §7 Initiative B (capture harness) | 1004 | |
+| — Phase B1 (real-server spawn) | 1010 | |
+| — Phase B2 (fixtures + seeding) | 1067 | |
+| — Phase B3 (capture.mjs --real) | 1107 | |
+| — Phase B4 (GIF helpers) | 1134 | |
+| — Phase B5 (testids) | 1163 | |
+| — Phase B6 (scenario catalog) | 1192 | |
+| — Phase B7 (coverage doc + workflow) | 1238 | |
+| §8 Initiative C (guided experience) | 1261 | |
+| — Phase C1 (metric tooltips) | 1268 | |
+| — Phase C2 (progressive disclosure) | 1305 | |
+| — Phase C3 (glossary/KB) | 1343 | |
+| — Phase C4 (take diagnostics) | 1377 | |
+| — Phase C5 (persona wizard) | 1413 | |
+| §9 Completion ledger | 1453 | |
 
 Refresh hints with:
 ```bash
@@ -167,6 +181,79 @@ Nick settles once then it's local; `[escalate→device]` = real Mac/model/browse
   enumeration on real hardware `[escalate→device]` (deferred; plexxie has the runtime).
 - Completion proof: dev doc has matrix + 5.5 GB caveat + iGPU note + deferred map; no pyproject
   extras; no CI/Dockerfile diff.
+
+### Initiative A — accelerator packaging (A6a–A6g) + runtime config (A7a–A7d)
+
+Phase A6 (comprehensive §6, "OmniVoice iGPU acceleration") is **validated findings + design**, not a
+task — read A6.1–A6.4 as reference before A6a–A6f. Each card below is one task, sized to the §4.4
+budget (60–80k). Sequencing: A6a←A4; A6c independent; A6d←A6a,A6c; A6e←A6d; A6f←A6d; A6b/A6g
+independent; A7a first (no new deps), A7b←A7a, A7c←A6c,A7b, A7d←A7b,A6c(,C1/C2).
+
+**A6a — OmniVoice device seam + auto fp64-emu env** `[code]`
+- Depends on: A4 · Read: comprehensive Phase A6a, A6.2, D10/D11; `omnivoice_engine.py:296/298`, `device.py`.
+- Deliverable: `xpu_needs_fp64_emulation()` + `apply_fp64_emulation_env()` in `device.py`; OmniVoice
+  `.to(device)` at :296 with emu-env-before-load for fp64-less xpu; CPU fallback warns; device in health.
+- Gates: import + no-xpu cpu default + emu-env unit `[local-verifiable]`; plexxie load+generate with auto-emu `[escalate→device]`.
+- Completion proof: helpers import; cpu path unchanged; unit green; plexxie generates without manual export.
+
+**A6b — honest CPU baseline (OMP=4) + dtype re-confirm** `[measure]`
+- Depends on: A6a (device) · Read: comprehensive Phase A6b, A6.3.
+- Deliverable: `OMP_NUM_THREADS=4` CPU RTF on plexxie; A6.3 ratio corrected.
+- Gates: all `[escalate→device]`. · Completion proof: A6.3 shows OMP=4 RTF + honest ratio; seed/text recorded.
+
+**A6c — gpu_family detection module** `[code]`
+- Depends on: — · Read: comprehensive **A6.4a (detection model — read first)**, Phase A6c, A6.4, D9/D11.
+- Deliverable: `gpu_family.py::resolve_gpu_family()` (**torch-independent** probes — device nodes +
+  PCI vendor + CPU model; `GPU_FAMILY` override) + `describe_accelerator()` returning `present`/`capable`.
+- Gates: unit table (5 branches) + forced `GPU_FAMILY=cpu` + **present∧¬capable** (torch-independent) `[local-verifiable]`; plexxie→intel-xpu/has_fp64=False `[escalate→device]`.
+- Completion proof: module + unit table green; override works; family selection ignores torch.is_available; plexxie detection.
+
+**A6d — accel-aware entrypoint: family + runtime env** `[infra]`
+- Depends on: A6a, A6c · Read: comprehensive Phase A6d, A6.4(ii), D3/D9/D11; `Dockerfile`.
+- Deliverable: `docker/entrypoint.sh` resolves family, exports per-family env (emu vars / `OPENVINO_DEVICE`), execs CMD; ENTRYPOINT wired; no torch install here.
+- Gates: dry-run cpu (no emu) + xpu (emu+OV) `[local-verifiable]`; cpu container boots healthy `[escalate→device]`.
+- Completion proof: entrypoint; cpu dry-run empty; xpu dry-run sets env; cpu boots healthy.
+
+**A6e — first-boot per-family torch install (named volume)** `[infra]`
+- Depends on: A6d · Read: comprehensive Phase A6e, A6.1, D3/D11; `Dockerfile` pip flow.
+- Deliverable: entrypoint installs the family torch (+OmniVoice `--no-deps`) into a volume on first boot, marker-gated; cpu uses baked torch.
+- Gates: cpu no-install + install idempotency `[local-verifiable]`; plexxie first-boot populates + generates `[escalate→device]`.
+- Completion proof: cpu boots without install; second xpu boot skips; plexxie first-boot works.
+
+**A6f — base-image libs + /dev/dri compose docs + A5 reconcile** `[infra+docs]`
+- Depends on: A6d · Read: comprehensive Phase A6f, A6.1, A6.4, Phase A5 matrix; compose file.
+- Deliverable: Intel compute-runtime + `libze1` layered in base; compose `/dev/dri`+`GPU_FAMILY` example; A5 matrix row corrected (OmniVoice-on-iGPU via torch-xpu, not "CPU only").
+- Gates: `docker compose config` parses + A5 grep `[local-verifiable]`; base image builds `[escalate→device]`.
+- Completion proof: compose parses; A5 corrected; base image builds.
+
+**A6g — int8 PTQ exploration (deferred)** `[research]`
+- Depends on: A6b · Read: comprehensive Phase A6g, A6.3.
+- Gates: worth-it `[escalate→frontier]` + probe `[escalate→device]`. · Completion proof: written go/no-go with artifact + RTF deltas.
+
+**A7a — persistence backend (runtime.json + startup layering)** `[code]`
+- Depends on: — · Read: comprehensive Phase A7a, D11; `config.py::apply_preset_env`, `model.py:896/:968`, `app.py` `/runtime/config`.
+- Deliverable: `runtime_store.py` (atomic, schema-versioned, corrupt-safe); `apply_persisted_config()` layering file>default after preset seed, skipping locked keys; env-lock registry; `apply_runtime_config(persist=True)` write-on-success.
+- Gates: round-trip + corrupt-ignore + lock-respected + failed-reload-no-persist units `[local-verifiable]`; restart-survival `[escalate→device]`.
+- Completion proof: store + unit suite; lock respected; non-persist on failure; restart survives.
+
+**A7b — API: source/lock/restart + reset/dry-run** `[code]`
+- Depends on: A7a · Read: comprehensive Phase A7b, D11; `model.py:896`, `app.py` `/runtime/config`, `api.ts:1162–1207`.
+- Deliverable: per-key `{value,source,locked,restart_required}`; `/runtime/config/reset` + `dry_run`; `api.ts` types.
+- Gates: state shape + reset revert + `npm run build` `[local-verifiable]`.
+- Completion proof: state shape; reset behavior; build green.
+
+**A7c — container coach: copy + card** `[decide-once]+frontend`
+- Depends on: A6c, A7b · Read: comprehensive **A6.4a (present∧¬capable trigger)**, Phase A7c, A6.4, D8/D11; `RuntimeConfigPage.tsx`.
+- Deliverable: markdown coach copy (D8, per-family passthrough snippets) + coach card shown on the
+  **present∧¬capable** gap with compose snippet + re-detect (`describe_accelerator`); quiet on native.
+- Gates: build + card-from-markdown + present∧¬capable-only render `[local-verifiable]`; copy `[decide-once]`; reads-clearly on iGPU-LXC `[escalate→device]`.
+- Completion proof: markdown keys; card wiring; build; copy approved; screenshot.
+
+**A7d — premium Runtime control surface (UX)** `[frontend]` (may split A7d/A7e)
+- Depends on: A7b, A6c, (C1/C2) · Read: comprehensive Phase A7d, D7/D8/D11; `RuntimeConfigPage.tsx`.
+- Deliverable: per-key source/lock badges + env-locked disable; live-vs-restart affordance; detected-accelerator panel; Basic/Expert disclosure (never unmount), tooltips via C1.
+- Gates: build + wiring greps `[local-verifiable]`; Basic boundary `[decide-once]`; env-lock disable + never-unmount + panel in-browser `[escalate→device]`.
+- Completion proof: badge/panel/disclosure wiring; build; boundary decided; in-browser confirmed.
 
 ### Initiative B — real-model capture harness
 

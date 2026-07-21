@@ -207,15 +207,29 @@ per §4.4 before relying on them; prefer the cited file/line over this summary i
     would be a Stable-Diffusion-pipeline-scale port (multiple submodels + a Python sampling loop).
   - **torch-xpu / Intel Extension for PyTorch — the promising path.** Keeps the OmniVoice model
     as-is and moves it to `device="xpu"` (the A4 `TTS_DEVICE=xpu` seam). Far less work than a port.
-    **Open questions to resolve next session (all `[escalate→device]`, need the real iGPU):** (1) does
-    Iris Xe support the ops OmniVoice calls under IPEX/xpu, and at what dtype; (2) can an xpu torch
-    wheel resolve past OmniVoice's cu128 git-source (same install-layer problem as D9 → the
-    OmniVoice-source escape hatch, or an `xpu` extra); (3) perf vs CPU on this iGPU. plexxie already
-    has `intel-opencl-icd` + `intel-level-zero-gpu` + `/dev/dri`; a temporary iGPU LXC (or plexxie)
-    can host the validation.
+    **✅ VALIDATED 2026-07-21 on plexxie (Iris Xe / Raptor Lake `8086:a7a0`): OmniVoice generates
+    end-to-end on the iGPU, ~2.4× faster than the box's CPU (RTF 5.36 vs 12.74 @ 4 vCPU).** Answers
+    to the three questions: (1) all OmniVoice ops run on **torch 2.8.0+xpu** (2.8 == OmniVoice's own
+    pin) — once fp64 emulation is enabled (root-cause fix below); (2) install is `--no-deps` on top
+    of torch-xpu, exactly like the Dockerfile, so cu128 is sidestepped; (3) perf is ~2.4× CPU even
+    carrying the emulation tax. **Full findings + the single-image productionization design → §6
+    Phase A6.**
   - Separately, the Qwen3-TTS `openvino` backend + `OPENVINO_DEVICE=GPU` (A4) remains the *easy*
     iGPU win for the base model, and pre-shipping the Qwen3-TTS IRs would fix the "export was too
-    hard" pain. (§6 A4/A5) **← resume here next session.**
+    hard" pain. (§6 A4/A5) **OmniVoice-on-iGPU is now VALIDATED end-to-end — see §6 Phase A6.**
+- **D11 — Runtime config is persisted app-side and layers over container env with a "lock" model
+  (user, 2026-07-21).** Goal: **as bare a container as possible** (ideally just the data volume +
+  `/dev/dri`), with performance/runtime tuning **elevated into the app**, persisted to the data dir,
+  and re-applied on start. Today `apply_runtime_config` mutates `os.environ` in-process only and is
+  **lost on restart** (§2.2); `apply_preset_env` derives low-level OV vars via `setdefault` (expert
+  env wins). The new model: a persisted `runtime.json` (data dir) is read at startup and **wins by
+  default** over image defaults, but the UI **surfaces which keys are pinned by an explicit container
+  env** and lets an operator mark specific keys **env-locked** (ops/IaC escape hatch). Precedence:
+  `env-locked container var` > `persisted runtime.json` > `image/compose default (setdefault seed)`.
+  The app also **coaches** container-level settings it cannot self-apply (device passthrough,
+  `GPU_FAMILY` when auto-detect is wrong). Reconciles the A6.4 "env-first" framing with the
+  minimal-container goal: `GPU_FAMILY=auto` + persisted overrides mean the common user sets nothing.
+  Built in **Phase A7**; the premium UX for it dovetails with Initiative C. (§2.2, §6 A6/A7, §8)
 
 ## 4. Global execution rules & invariants
 
@@ -255,6 +269,12 @@ decided, is treated as `[local-verifiable]` with its value inlined — do not re
 
 - Hand an implementing agent **one phase section**, not the whole plan. Each phase below is
   self-contained: preconditions, exact reads (with file/line hints), steps, invariants, gate.
+- **Task budget: target 60–80k tokens per agent task** (instructions + the code the phase makes it
+  read + the work/diff + gate runs — summed). The llama-monitor experience showed 100–150k was too
+  conservative once those three were added together for the local 27B. Phases that would exceed this
+  are decomposed into **letter-suffixed sub-phases** (A6a, A7b, …), each individually shippable with
+  its own gate. If a sub-phase's Read-first set plus expected diff would still blow past ~80k, split
+  it further before handing it off — a bounded file set and a bounded diff are the sizing levers.
 - Line hints drift. Prefer the named function/heading over the number; re-grep if a hint looks
   stale (e.g. `grep -n "def analyze_reference" src/qwen3_tts/audio_style.py`).
 - Before relying on a route list, testid count, or schema, re-verify it against the live source
@@ -270,6 +290,18 @@ decided, is treated as `[local-verifiable]` with its value inlined — do not re
 | A3 | uv | dev docs updated; B1 precondition rewired to `uv sync`; CI untouched | A2 |
 | A4 | uv | runtime device seams: `TTS_DEVICE` (torch) + `OPENVINO_DEVICE` (iGPU), auto-detect+force | A2 |
 | A5 | uv | accelerator install guide (docs) + deferred slim/ROCm/XPU + iGPU-via-OpenVINO note | A2 |
+| A6 | accel | OmniVoice-on-iGPU **validated** (findings/design; §6 A6.1–A6.4) — reference, not a task | — |
+| A6a | accel | OmniVoice device seam + auto fp64-emu env | A4 |
+| A6b | accel | honest `OMP_NUM_THREADS=4` CPU baseline + dtype re-confirm (measurement) | A6a (device) |
+| A6c | accel | `gpu_family.py` family detection + `describe_accelerator()` | — |
+| A6d | accel | accel-aware entrypoint: family resolution + per-family runtime env | A6a, A6c |
+| A6e | accel | first-boot per-family torch install into a named volume | A6d |
+| A6f | accel | base-image system-lib layering + `/dev/dri` compose docs + A5 reconcile | A6d |
+| A6g | accel | int8 PTQ exploration (deferred follow-up) | A6b |
+| A7a | runtime-cfg | persistence backend: `runtime.json` + startup layering (D11) | — |
+| A7b | runtime-cfg | API: per-key source/lock/restart_required + reset/dry-run | A7a |
+| A7c | runtime-cfg | container coach: markdown copy + card | A6c, A7b |
+| A7d | runtime-cfg | premium Runtime control surface (UX; may split A7d/A7e) | A7b, A6c, (C1/C2) |
 | B1 | capture | `run-real-server.mjs` spawns real backend (Flask dev server) on temp dirs | (A2 preferred, works on current venv) |
 | B2 | capture | synthetic fixtures + `seedCaptureFixtures()` | B1 |
 | B3 | capture | `capture.mjs --real`; one existing scenario runs real | B1, B2 |
@@ -540,6 +572,434 @@ deferred (plexxie has the compute runtime for a future validation).
 deferred-path map; no pyproject extras added; no CI/Dockerfile diff.
 
 ---
+
+### Phase A6 — OmniVoice iGPU acceleration (VALIDATED) + unified accelerator packaging
+
+**Status: end-to-end validated on real hardware 2026-07-21** (plexxie: Ubuntu 22.04 LXC on Proxmox,
+Intel Iris Xe / Raptor Lake `8086:a7a0`, 96 EU, `/dev/dri` passthrough, 8 GB RAM). This phase records
+what works and specifies the productization the user requires. This is axis-(a)+(b) of D9 converging
+for the OmniVoice/xpu case (D10).
+
+#### A6.1 — What was proven (repro recipe)
+
+The **working stack** (native venv, no container yet):
+1. Level-Zero **loader**: `libze1` (from `oneapi-src/level-zero` GitHub `.deb`; **not** in Ubuntu
+   repos). Provides `libze_loader.so.1` which torch's xpu runtime dlopens.
+2. **torch 2.8.0+xpu + torchaudio 2.8.0+xpu** from `https://download.pytorch.org/whl/xpu`. Version
+   matters: **2.13+xpu FAILS** (its oneDNN 2026 needs a newer driver than shipped → "could not make
+   an engine with allocator" on GEMM); **2.8 and 2.6 work** for compute. 2.8.0 is also OmniVoice's own
+   pin (`constraint-dependencies = torch==2.8.0`), so no version tug-of-war.
+3. Intel **compute runtime** on the host/LXC: `intel-opencl-icd`, `libze-intel-gpu1` (the L0 GPU
+   driver; new name — replaces `intel-level-zero-gpu`), `libigc2`, `libigdgmm12`. On plexxie these
+   were upgraded to the current build (opencl **25.18.33578**, libigc2 **2.11.12**) via Intel's apt
+   repo (`repositories.intel.com/gpu/ubuntu jammy unified`); **Plex's `intel-media-va-driver` is a
+   different package and was untouched** (verified via `apt-get install -s`). NOTE: the upgrade turned
+   out NOT to be what fixed generation (fp64 emulation was) — but a current runtime is clean and
+   recommended anyway.
+4. OmniVoice installed `--no-deps` on top of torch-xpu (mirrors the Dockerfile), plus runtime deps
+   (`transformers==5.12.1`, accelerate, einops, librosa, soundfile, pydub, pyloudnorm). The `--no-deps`
+   is what keeps cu128 out of the resolution (D9 escape hatch, no fork needed).
+
+Load + device move is trivial (the **A4 seam**): `OmniVoice.from_pretrained("k2-fsa/OmniVoice",
+dtype=…)` returns an `nn.Module`; a single `m.to("xpu")` moves the whole model (submodules registered
+via `_modules`). `instruct` is a **controlled vocabulary** (comma-separated), not prose — valid English
+items: american/australian/british/canadian/chinese/indian/japanese/korean/portuguese/russian accent,
+male/female, child/teenager/young adult/middle-aged/elderly, {very }low/moderate/high pitch, whisper.
+
+#### A6.2 — Root-cause blocker + THE FIX (must be reproduced in any deployment)
+
+Generation initially failed with an opaque `RuntimeError: UR error` deep in the forward. Isolated to:
+**this Xe-LP iGPU has NO native fp64** (`torch.xpu.get_device_properties(0).has_fp64 == False`), and
+torch/oneAPI **int↔float conversion (cast) kernels require fp64**, so the kernel module won't build →
+UR error. (Confirmed by op-isolation: int/float *arithmetic* works; *every* dtype cast — int64→int32,
+int→float, etc. — fails together. Falsified: not a torch-version issue [2.13/2.8/2.6 all fail casts],
+not the IGC version [upgrading to libigc2 2.11 didn't fix it].)
+
+**THE FIX — enable NEO's fp64 software emulation via three env vars:**
+```
+NEOReadDebugKeys=1
+OverrideDefaultFP64Settings=1
+IGC_EnableDPEmulation=1
+```
+**CRITICAL GOTCHA:** `OverrideDefaultFP64Settings=1` is a NEO *debug key* that NEO **ignores unless
+`NEOReadDebugKeys=1` is also set.** With all three, `has_fp64` reports True, casts pass, and OmniVoice
+generates. These vars MUST be present in the service's runtime environment on any fp64-less Intel GPU
+(all Xe-LP iGPUs; Arc discretes have native fp64 and won't need them). The `zebin minor version 53 >
+decoder 39` log lines are harmless warnings.
+
+#### A6.3 — Perf (why it's worth it)
+
+Same box, ~3.9 s of audio, `num_step=32`:
+
+| config | warm-up (1-time compile) | timed | RTF |
+| --- | --- | --- | --- |
+| **iGPU fp32 + fp64-emu** | ~349 s | 21.0 s | **5.36** |
+| CPU fp32 (4 vCPU) | — | 50.2 s | 12.74 |
+
+→ **iGPU ~2.4× faster than this box's CPU**, despite the emulation tax on cast kernels (native fp32
+GEMM/conv is ~6× CPU and dominates). Caveats to firm up: the CPU run oversubscribed threads
+(`nproc`=16 vs 4-vCPU cap) so 12.74 is a *soft lower bound* — **redo with `OMP_NUM_THREADS=4`**; and
+plexxie's 4-vCPU cap is not representative of dockermisc1's CPU. The ~349 s warm-up is a **per-process
+cold-compile** — a resident service loads once and amortizes it (persist the SYCL cache to speed cold
+starts: `SYCL_CACHE_PERSISTENT=1`).
+
+**dtype ladder A/B (done — fp32 wins):** seeded (seed 42) iGPU runs, same text/instruct/steps:
+
+| dtype | RTF | note |
+| --- | --- | --- |
+| **fp32** | **5.26** | fastest **and** the quality baseline → **the pick** |
+| bf16 | 6.49 | *slower* than fp32 — no benefit |
+| fp16 | — | inconclusive: test-harness OOM (3 sequential model loads on 8 GB; XPU allocs not freed between dtypes). Likely runnable in a clean process, but the pattern below says it won't beat fp32 anyway |
+
+**Why lower precision doesn't help on this iGPU:** it's launch/memory-bound at these sizes (raw
+benchmark: fp16≈fp32 GFLOP/s), and the **fp64-emulation cast tax is incurred regardless of dtype** —
+lower precision just adds *more* conversion traffic. So **ship fp32** on Xe-LP. (On an Arc discrete
+with native fp64, revisit — no emulation tax there, and fp16 could win.) Seeded wavs for ear-check:
+`audio/omni_xpu_{fp32,bf16}_seed42.wav` (+ `omni_{xpu,cpu}_fp32.wav`). **Eval criterion (user):**
+OmniVoice outputs are *segment candidates* for the downstream stitch-studio (VST-level DSP —
+normalize/compress/EQ/fx), so tonal/level deltas are **recoverable → not disqualifying**; only
+**artifacts** disqualify. int8 (PTQ, not a dtype flip) is a follow-up if ever needed — but given fp32
+is already fastest, low priority.
+
+#### A6.4 — Productization requirement: ONE image, auto-or-specify GPU family (user directive)
+
+**Hard requirement (user, 2026-07-21): do NOT ship two containers.** One image; the user either
+lets it **auto-detect** their accelerator family or **explicitly specifies** it (cpu / cuda / rocm /
+intel-xpu), and gets the right functionality — **including running in an LXC with an iGPU** (the
+user's own case: `/dev/dri` passthrough + the fp64-emu env). This spans both D9 axes:
+
+- **Runtime axis (a) — device selection.** Already the A4 design: `resolve_device()` auto-detects
+  (`cuda > xpu > mps > cpu`) with a `TTS_DEVICE` override, plus **family-specific runtime env** the
+  entrypoint must set — for Intel fp64-less GPUs, the three NEO emu vars above; for the Qwen3-TTS OV
+  backend, `OPENVINO_DEVICE`. Cheap, and works on an already-installed build.
+- **Install axis (b) — which torch wheel.** The real packaging problem: torch **cpu / cu12x / rocm /
+  xpu are different, mutually exclusive wheels** (+ different system libs: CUDA vs ROCm vs Intel
+  compute-runtime). "One image, any family" therefore needs a strategy — three candidates:
+  - **(i) Build-time family arg.** Single `Dockerfile` with `ARG ACCEL={auto,cpu,cuda,rocm,xpu}`
+    selecting the torch index + apt libs. *One Dockerfile, but still N image tags* — arguably violates
+    "one image." Cheapest to build/maintain; good stopgap.
+  - **(ii) Runtime install-on-first-boot.** Ship a thin CPU base; the **entrypoint detects the GPU
+    family** (`lspci`/vendor, or `GPU_FAMILY` env override) and `pip install`s the matching torch
+    variant into a **named volume** on first start, then sets the family env. Truly one image; cost =
+    slow first boot + needs network at runtime (or a bundled wheel cache). **Recommended default** —
+    it directly satisfies "auto or specify, one artifact," and the iGPU-LXC path is just
+    `GPU_FAMILY=intel-xpu` → installs torch-xpu + sets the emu vars.
+  - **(iii) Fat multi-venv image.** Bake cpu+cuda+xpu(+rocm) torch into separate venvs; entrypoint
+    picks the venv by detected/`GPU_FAMILY`. One artifact, instant switch, **no runtime network** —
+    but very large (~15–20 GB) and rebuilds on every torch bump. Reserve for an offline/air-gapped
+    variant.
+  - System libs (Intel compute-runtime; the `libze1` loader; `/dev/dri`+`render` group; CUDA/ROCm
+    userspace) must be present for the chosen family. For (ii)/(iii) the Intel + CUDA + ROCm userspace
+    can be layered in the base image (they don't conflict) so only the torch wheel varies at runtime.
+
+**Recommended shape:** entrypoint-driven family resolution (approach **ii**), `GPU_FAMILY=auto`
+default with explicit override; auto-detect maps Intel iGPU → `intel-xpu` and sets the three NEO emu
+vars automatically when `has_fp64==False`; CPU is always the safe fallback (D9 CPU-first-class). This
+keeps the CPU/canonical Dockerfile (D3) intact and adds an accel-aware entrypoint rather than a fork.
+
+#### A6.4a — Detection model (capability vs presence; torch-independent family selection)
+
+Auto-discovery is **two separate probes**, and the distinction is load-bearing:
+
+- **Capability probe — "can I run on it right now?"** Decides the actual *runtime device* (A4).
+  `torch.<accel>.is_available()` **plus** the device node being present and openable
+  (`/dev/dri/renderD128` for Intel/ROCm, `/dev/nvidia*` for CUDA).
+- **Presence probe — "does the host have hardware I could use if it were mapped?"** Drives the A7c
+  **coach**, and survives *without* passthrough: the **CPU model** (`/proc/cpuinfo`) and the **PCI
+  vendor/device in sysfs/`lspci`** (`8086` Intel, `10de` NVIDIA, `1002` AMD).
+
+The gap between them is where coaching lives: **presence=true, capability=false → "you have the
+hardware but haven't mapped it; here's the compose snippet."**
+
+**The container chicken-and-egg (why probe ordering matters).** Inside the CPU-base image,
+`torch.cuda/xpu.is_available()` is **always False** — not because there's no GPU, but because the CPU
+torch wheel has no CUDA/XPU support compiled in, and A6e only installs the accel wheel *after* the
+family is chosen. Therefore **family selection (which wheel to install) must NOT depend on torch.** It
+runs off the torch-independent presence signals; `torch.<accel>.is_available()` is a **post-install
+confirmation**, never the selector. Ordering:
+
+1. **Entrypoint (A6d)** resolves family via torch-independent probes: `GPU_FAMILY` override → else
+   device-node + PCI-vendor presence → else `cpu`.
+2. **A6e** installs the matching wheel into the volume.
+3. **Post-install**, `torch.<accel>.is_available()` + `resolve_device()` (A4) confirm and pick the
+   device; a *forced* family whose device won't init **warns and falls back to cpu** (never silent).
+
+**Per environment:**
+- **Native (bare metal / GPU VM):** no mapping step. Accel-capable wheel + host driver present →
+  `is_available()` True → `resolve_device()` picks the GPU immediately; the coach stays quiet
+  (presence and capability agree). The whole mapping dance is **container-only**.
+- **Container + iGPU (best inference case):** CPU model *and* the `8086` GPU PCI device in sysfs are
+  usually visible **even when `/dev/dri` is unmapped** (sysfs is the host's). PCI present +
+  `/dev/dri/renderD128` absent → high-confidence coach: map `/dev/dri` + `render` group +
+  `GPU_FAMILY=intel-xpu`.
+- **Container + CUDA/ROCm:** defaults to `cpu` until passthrough is set up (`--gpus all` /
+  nvidia-container-runtime; `/dev/kfd`+`/dev/dri` for ROCm). Without it there are no device nodes and
+  no injected driver libs, so capability is false and torch **cannot** confirm — the only presence
+  hint is the PCI vendor (`10de`/`1002`) in sysfs, which lets the coach say "host shows an NVIDIA/AMD
+  GPU; add the runtime + passthrough + `GPU_FAMILY=cuda`/`rocm`." You cannot borrow a host GPU the
+  runtime didn't inject.
+
+#### A6.5 — Implementation sub-phases (packaging → single-image, auto-or-specify GPU family)
+
+These are the ordered, **task-sized** phases that realize the A6.4 design, each sized to the §4.4
+budget (~60–80k). **A6a depends on A4** (`resolve_device`); A6c→A6f build the single-image entrypoint
+in sequence; A6b/A6g are independent (measurement / deferred research). The canonical CPU Dockerfile
+(D3) stays intact throughout — this adds an accel-aware entrypoint, never a fork.
+
+##### Phase A6a — OmniVoice device seam + auto fp64-emu env `[code]`
+**Mission:** move the OmniVoice model onto the resolved device and, when that device is an fp64-less
+Intel xpu, set the three NEO emulation vars automatically **before load**; CPU fallback with a warning.
+Runtime axis (a) for OmniVoice specifically, on top of A4.
+**Read first:** `omnivoice_engine.py:296` (from_pretrained `dtype=float32`, no device) + `:298`
+(generate); `qwen3_tts/device.py::resolve_device()` (A4); A6.2 (the three vars + `NEOReadDebugKeys`
+gate); D10, D11.
+**Do this:**
+1. `device.py::xpu_needs_fp64_emulation()` — `torch.xpu.get_device_properties(...).has_fp64 == False`,
+   guarded by xpu availability (import-safe on non-xpu).
+2. `device.py::apply_fp64_emulation_env(environ=os.environ)` — `setdefault`s `NEOReadDebugKeys=1`,
+   `OverrideDefaultFP64Settings=1`, `IGC_EnableDPEmulation=1`. Idempotent; **must run before any xpu
+   context/alloc** (i.e. before OmniVoice `from_pretrained`).
+3. At `omnivoice_engine.py:296`: resolve device; if xpu+needs-emu, call the emu helper first; then
+   `.to(device)` (or `device=` kwarg iff the `398b6113` API accepts it — the A4 finding). CPU fallback
+   **logs a warning**, never silent.
+4. Report the resolved OmniVoice device in health/omnivoice status.
+**Invariants:** no dep change; CPU path byte-identical; emu vars only for fp64-less xpu; `setdefault`
+never clobbers an explicitly-set emu var.
+**Gate:**
+- `python -c "from qwen3_tts.device import xpu_needs_fp64_emulation, apply_fp64_emulation_env"` — imports `[local-verifiable]`
+- no-xpu box: `resolve_device()`→`cpu`, no emu vars set `[local-verifiable]`
+- unit: `apply_fp64_emulation_env({})` sets all 3 keys incl. `NEOReadDebugKeys` `[local-verifiable]`
+- plexxie iGPU load+generate with auto-emu (no manual `export`) `[escalate→device]`
+
+**Completion proof:** helpers importable; CPU path unchanged; unit green; plexxie generates without a manual emu `export`.
+
+##### Phase A6b — Honest CPU baseline + dtype re-confirm (measurement) `[measure]`
+**Mission:** replace the oversubscribed RTF 12.74 (ran `OMP_NUM_THREADS=16` on a 4-vCPU LXC) with an
+honest `OMP_NUM_THREADS=4` baseline and re-confirm the fp32 pick; correct the A6.3 ratio.
+**Read first:** A6.3 table; the A6.5 env-footprint note (plexxie gen scripts `/root/*.py`).
+**Do this:** on plexxie, rerun CPU baseline at `OMP_NUM_THREADS=4` (same seed/text), re-confirm fp32 vs
+bf16 seeded pair, update A6.3 with the corrected iGPU:CPU multiplier.
+**Invariants:** measurement only, no code; plexxie is the device.
+**Gate:** entirely `[escalate→device]`. **Completion proof:** A6.3 shows the `OMP=4` CPU RTF + honest ratio; seed/text recorded.
+
+##### Phase A6c — GPU-family detection module `[code]`
+**Mission:** a pure module resolving the accelerator **family** (`cpu`/`cuda`/`rocm`/`intel-xpu`) from
+`GPU_FAMILY` override else torch-independent auto-probe (per **A6.4a**), plus a `has_fp64` probe and a
+presence-vs-capability split for the coach. Consumed by the entrypoint (A6d) and the app (A7). Family
+(which wheel) is distinct from device (runtime target, A4).
+**Read first:** **A6.4a (detection model — read this first)**; A6.4 install-axis; D9, D11;
+`device.py::resolve_device()` (keep family≠device clear).
+**Do this:**
+1. `qwen3_tts/gpu_family.py::resolve_gpu_family(environ, probes) -> 'cpu'|'cuda'|'rocm'|'intel-xpu'`.
+   `GPU_FAMILY` = `auto|cpu|cuda|rocm|intel-xpu`; `auto` = `cuda>rocm>intel-xpu>cpu` via **injectable
+   probes** (unit-testable without hardware).
+2. **Family-selection probes are torch-INDEPENDENT** (A6.4a chicken-and-egg — the CPU-base wheel makes
+   `torch.<accel>.is_available()` False even on a passed-through GPU): device nodes (`/dev/nvidia*`,
+   `/dev/dri/renderD128`) + PCI vendor (`10de`/`1002`/`8086`+Xe) via `/sys`/`lspci` + CPU model. All
+   guarded so import is safe on any platform. `torch.<accel>.is_available()` is only a **post-install
+   confirmation** probe, never the selector.
+3. `describe_accelerator() -> {family, device, has_fp64, emu_active, present, capable}` — `present`
+   (host hardware seen) vs `capable` (usable now) is exactly the A7c coach trigger (present ∧ ¬capable
+   → "map it"). Also feeds health + the A7 panel.
+**Invariants:** pure (no installs, no env mutation); import-safe everywhere; family≠device; **family
+selection never depends on `torch.<accel>.is_available()`** (A6.4a).
+**Gate:**
+- unit table drives all 5 branches via mocked probes `[local-verifiable]`
+- `GPU_FAMILY=cpu` forces `cpu` regardless of probes `[local-verifiable]`
+- unit: **PCI-present + device-node-absent** yields `present=True, capable=False` (the A7c trigger),
+  and family selection ignores `torch.<accel>.is_available()` `[local-verifiable]`
+- real detection on plexxie → `intel-xpu`, `has_fp64=False` `[escalate→device]`
+
+**Completion proof:** module + unit table green; forced override works; plexxie detects `intel-xpu`/`has_fp64=False`.
+
+##### Phase A6d — Accel-aware entrypoint: family resolution + runtime env `[infra]`
+**Mission:** an entrypoint that resolves the family (A6c), applies the **per-family runtime env**
+(Intel NEO emu vars when fp64-less via the A6a helper; `OPENVINO_DEVICE`; CUDA/ROCm visibility), then
+`exec`s the existing server CMD — **assuming the correct torch wheel is already present** (install is
+A6e). Approach (ii) skeleton.
+**Read first:** `Dockerfile` (ENTRYPOINT/CMD, gunicorn); A6.4 (ii); A6a emu helper; A6c family module; D3, D9, D11.
+**Do this:**
+1. `docker/entrypoint.sh` (or py): resolve family, export per-family env, log family+device, `exec`
+   the current CMD. CPU exports nothing new.
+2. Wire `Dockerfile` `ENTRYPOINT` to it; `CMD` unchanged.
+3. `GPU_FAMILY=auto` default; explicit override honored.
+**Invariants:** canonical Dockerfile stays (D3); CPU image identical to today when `GPU_FAMILY` unset/→cpu; **no torch install here** (A6e).
+**Gate:**
+- dry-run/echo mode, `GPU_FAMILY=cpu`: execs server, sets no emu vars `[local-verifiable]`
+- dry-run, `GPU_FAMILY=intel-xpu` (mocked family): exports the 3 emu vars + `OPENVINO_DEVICE` `[local-verifiable]`
+- container build boots to healthy on cpu `[escalate→device]`
+
+**Completion proof:** entrypoint script; cpu dry-run sets nothing; xpu dry-run sets emu+OV env; cpu container boots healthy.
+
+##### Phase A6e — First-boot torch install-on-demand (per family, into a named volume) `[infra]`
+**Mission:** on first boot, if the resolved family's torch wheel isn't in the persisted accel venv,
+install it (torch **2.8.0+xpu** for `intel-xpu` + OmniVoice `--no-deps`, per A6.1; cuda/rocm/cpu
+variants) into a named volume and reuse it thereafter. Truly one image; cost = slow first boot +
+runtime network (or a bundled wheel cache).
+**Read first:** A6.4 (ii); A6.1 repro recipe (torch 2.8.0+xpu + torchaudio + OmniVoice `--no-deps @398b6113`); `Dockerfile` pip flow; D3, D11.
+**Do this:**
+1. Entrypoint step **before** A6d env/exec: resolve family → check a per-family marker in a named
+   volume (e.g. `/opt/accel-venv`); if absent, `pip install` the family torch (+torchaudio), then
+   OmniVoice `--no-deps` on top (mirrors the Dockerfile), write the marker.
+2. Point the server's Python at the volume venv when populated; `GPU_FAMILY=cpu` uses the **baked** CPU
+   torch (no install).
+3. Optional bundled wheel-cache dir to avoid runtime network (documented, off by default).
+**Invariants:** cpu needs no install; install idempotent (marker); a **failed install must not leave a
+marker**; OmniVoice pin/rev matches A6.1.
+**Gate:**
+- cpu family: no-install path, boots on baked torch (marker/log assert) `[local-verifiable]`
+- idempotency: second boot with marker present skips install `[local-verifiable]`
+- intel-xpu first boot on plexxie populates the volume + OmniVoice generates `[escalate→device]`
+
+**Completion proof:** cpu boots without install; second xpu boot skips; plexxie first-boot populates volume and generates.
+
+##### Phase A6f — Base-image system-lib layering + passthrough docs/compose `[infra+docs]`
+**Mission:** layer the non-conflicting userspace libs (Intel compute-runtime + `libze1`; CUDA/ROCm
+userspace) into the base image so **only the torch wheel varies at runtime** (A6.4 note); document
+`/dev/dri` + render-group + `GPU_FAMILY` in a compose example; reconcile the A5 matrix.
+**Read first:** A6.1 (`libze1`, Intel compute-runtime apt); A6.4 system-libs bullet; Phase A5 matrix
+(the "OmniVoice stays CPU (D10)" row); compose file; D3, D11.
+**Do this:**
+1. Layer Intel compute-runtime + `libze1` (+ optionally CUDA/ROCm userspace — they coexist) into the
+   base image; note the size cost.
+2. Compose example: `/dev/dri` devices + render group + `GPU_FAMILY` + the data volume (ties to A7's
+   minimal-container goal).
+3. Update the A5 matrix row: **OmniVoice runs on the Intel iGPU via torch-xpu + fp64 emu** (distinct
+   from the rejected OmniVoice→OpenVINO port); keep the OpenVINO-backend iGPU note for the base model.
+**Invariants:** canonical CPU Dockerfile still builds/runs when `GPU_FAMILY=cpu`; no CI change; A5 stays docs.
+**Gate:**
+- `docker compose config` parses the example (`/dev/dri` + `GPU_FAMILY`) `[local-verifiable]`
+- A5 matrix corrected, grep confirms `[local-verifiable]`
+- base image builds with the layered libs `[escalate→device]`
+
+**Completion proof:** compose config parses; A5 row corrected; base image builds.
+
+##### Phase A6g — int8 PTQ exploration (deferred follow-up) `[research]`
+**Mission:** only if bf16/fp16 didn't buy headroom (they didn't) and memory pressure demands it —
+explore int8 PTQ for OmniVoice on Xe-LP. Low priority; fp32 is already fastest.
+**Read first:** A6.3 verdict; the DSP-vs-artifact eval criterion (artifacts disqualify, tonal/level
+diffs don't); D11.
+**Do this:** scope a PTQ probe (which submodules quantize cleanly; artifact check); do **not** integrate
+without an A/B pass.
+**Gate:** `[escalate→frontier]` (is it worth it?) + `[escalate→device]` (the probe). **Completion proof:** a written go/no-go with measured artifact + RTF deltas.
+
+**Env footprint left on plexxie** (restorable; daily backups): `/root/xpu28` venv (torch 2.8+xpu +
+OmniVoice), `libze1` loader, upgraded Intel compute-runtime (apt), OmniVoice checkpoint in HF cache,
+probe/gen scripts under `/root/*.py`, output wavs `/root/omni_*.wav`. Full detail in the
+`omnivoice-igpu-goal` memory.
+
+### Phase A7 — Persisted runtime config + layered precedence + container coach (premium Runtime page)
+
+**Goal (user, 2026-07-21):** shrink the container's required config to near-zero (data volume +
+`/dev/dri`), **elevate performance/runtime tuning into the app**, persist it to the data dir, and
+re-apply it on start — with a premium, guided UX. Implements **D11**.
+
+**Current state (verified):**
+- `RuntimeConfigPage.tsx` + `GET/POST /runtime/config` → `model.apply_runtime_config()` already let a
+  user hot-change backend / dtype / silence-trim etc. with a **live in-process model reload**.
+- **Gap:** `apply_runtime_config` writes `os.environ` **in-process only — not to disk** — so every
+  change is lost on restart and reverts to compose/`.env`. `config.py::apply_preset_env` seeds
+  low-level OV vars via `setdefault` (explicit env wins).
+
+**Precedence model (D11):** `env-locked container var` > `persisted runtime.json` > `image default`.
+On startup the app reads `runtime.json` and layers it **over** the image/compose defaults, **except**
+keys an operator has marked env-locked (or that arrive as an explicitly-flagged container override).
+
+**Implementation sub-phases** (task-sized per §4.4). A7a→A7b are pure backend and depend on **nothing
+new** — do them first, immediately useful for native runs. A7c/A7d are frontend and build on A6c
+(`describe_accelerator`) + Initiative C's C1/C2 seams; schedule after A6c and alongside C1/C2.
+
+##### Phase A7a — Persistence backend (runtime.json + startup layering) `[code]`
+**Mission:** persist runtime config to `${DATA_DIR}/runtime.json` and layer it over image defaults at
+startup (D11 precedence: `env-locked > file > default`), keeping `apply_preset_env`'s `setdefault`
+seam underneath.
+**Read first:** `config.py::apply_preset_env` (setdefault seam + "call once before torch/OV import"
+ordering); `model.py::apply_runtime_config` (:968, mutates `os.environ` in-process) + `runtime_config_state` (:896);
+`app.py` `/runtime/config` GET/POST (~2096); D11.
+**Do this:**
+1. `qwen3_tts/runtime_store.py`: `load_persisted_config()` / `save_persisted_config()` on
+   `${DATA_DIR}/runtime.json` — atomic temp+rename, schema-versioned, unknown keys ignored, a corrupt
+   file **warns and is ignored** (never crashes boot).
+2. `apply_persisted_config(environ)` runs **after** `apply_preset_env`, **before** torch/OV import
+   (same import-time site `model.py` uses), layering file values **over** the setdefault seed,
+   **skipping env-locked keys**.
+3. Env-lock registry: `RUNTIME_LOCKED_KEYS` (csv) and/or `RUNTIME_LOCK_<KEY>=1`; `is_locked(key)` helper.
+4. `apply_runtime_config` gains `persist=True`: on a **successful** reload, write through to
+   `runtime.json`; a **failed reload must not persist**.
+**Invariants:** setdefault expert seam preserved; corrupt/missing file never crashes; cpu default
+behavior unchanged with no `runtime.json`; reuse the existing voices/segments data root.
+**Gate:**
+- unit: save→load round-trips; corrupt file → ignored+warn `[local-verifiable]`
+- unit: env-locked key not overridden by file `[local-verifiable]`
+- unit: failed reload does not persist `[local-verifiable]`
+- integration: POST a backend change, restart the process, value survives `[escalate→device]`
+
+**Completion proof:** store module + unit suite; lock respected; failed-reload non-persist; restart-survival demo.
+
+##### Phase A7b — API surface: source/lock/restart metadata + reset/dry-run `[code]`
+**Mission:** report per-key provenance so the UI can render it, and add reset + dry-run.
+**Read first:** `model.py::runtime_config_state` (:896); `app.py` `/runtime/config` (~2096);
+`frontend/src/lib/api.ts` `RuntimeConfigState` + `getRuntimeConfig`/`updateRuntimeConfig` (~1162–1207); A7a store; D11.
+**Do this:**
+1. `runtime_config_state()` returns, per exposed key: `{value, source: file|env|default, locked,
+   restart_required}` — `restart_required` flags entrypoint-only keys (`GPU_FAMILY`, torch wheel, `/dev/dri`).
+2. `POST /runtime/config/reset` (drop `runtime.json` → revert) + a `dry_run` preview on POST.
+3. Update `api.ts` types (no UX yet).
+**Invariants:** existing POST live-reload contract unchanged; additive fields only; no UX change here.
+**Gate:**
+- state returns `source`/`locked`/`restart_required` per key `[local-verifiable]`
+- reset drops file + reverts (integration on a temp `DATA_DIR`) `[local-verifiable]`
+- `npm run build` typechecks the new `api.ts` shape `[local-verifiable]`
+
+**Completion proof:** state shape; reset behavior; build green.
+
+##### Phase A7c — Container coach: copy + card `[decide-once]+frontend`
+**Mission:** surface the container-level settings the app **can't** self-apply (device passthrough,
+`GPU_FAMILY` override, data volume) as an in-app coach card with copy-paste compose snippets + re-detect.
+**The card's trigger is the A6.4a present∧¬capable gap** — host hardware seen but not usable yet.
+**Read first:** **A6.4a (detection model — the present vs capable split drives this card)**; A6.4
+packaging knobs; A6c `describe_accelerator` (`present`/`capable`/family/device); D8 (copy in markdown),
+D11; `RuntimeConfigPage.tsx`.
+**Do this:**
+1. Markdown coach copy (`frontend/src/content/help/…` per D8): per family, what to add to
+   compose/`docker run` — Intel iGPU `/dev/dri`+`render` group, NVIDIA `--gpus all`+nvidia-runtime,
+   ROCm `/dev/kfd`+`/dev/dri` — when to override `GPU_FAMILY`.
+2. Coach card in `RuntimeConfigPage`, shown when `describe_accelerator()` reports **`present ∧
+   ¬capable`** (or a forced family that fell back to cpu), rendering the family-specific snippet + a
+   re-detect button. Stays quiet on native/already-mapped (present ∧ capable agree).
+**Invariants:** copy lives in markdown (D8); card shows only what the app can't self-apply, and only on
+the present∧¬capable gap (never on native where it'd be noise); no power-user control unmounted.
+**Gate:**
+- build + card renders the snippet from markdown `[local-verifiable]`
+- coach copy strings `[decide-once]`
+- reads-clearly in a real iGPU-LXC scenario `[escalate→device]`
+
+**Completion proof:** markdown keys; card wiring; build; screenshot/description; copy approved.
+
+##### Phase A7d — Premium Runtime control surface (UX) `[frontend]`
+**Mission:** reframe `RuntimeConfigPage` as the premium control surface — per-key source/lock badges,
+live-vs-restart affordances, detected-accelerator panel, Basic/Expert disclosure (D7 never-unmount).
+*If the Read-first + diff approaches ~80k, split into A7d (badges + live/restart + lock-disable) and
+A7e (accelerator panel + Basic/Expert disclosure).*
+**Read first:** `RuntimeConfigPage.tsx` (current `apply()`/draft/diff); A7b state fields; A6c
+`describe_accelerator`; Initiative C C1 (`MetricExplainer`) + C2 (`Disclose` seam) if landed; D7, D8, D11.
+**Do this:**
+1. Add per-key badges (file / env-locked / default) from A7b `source`/`locked`; **disable + explain**
+   env-locked keys (the existing draft/diff stays).
+2. "Applies live" vs "Needs restart" affordance from `restart_required`.
+3. Detected-accelerator panel (family, device, fp64-emu state) from `describe_accelerator`.
+4. Basic surfaces high-impact knobs; Expert reveals full env via the C2 `Disclose` seam (reuse if
+   present; else a local disclosure that never unmounts). Tooltips reuse C1.
+**Invariants:** no power-user control removed (D7); works even if C1/C2 haven't landed (graceful local
+fallback); build passes.
+**Gate:**
+- build + badges/panel/disclosure greps `[local-verifiable]`
+- disclosure boundary + which knobs are "Basic" `[decide-once]`
+- env-locked disables + never-unmount + accelerator panel in-browser `[escalate→device]`
+
+**Completion proof:** badge/panel/disclosure wiring; build; decide-once boundary; in-browser confirmation.
+
+Do **not** commit the plan doc without user OK.
 
 ## 7. Initiative B — real-model capture harness
 
@@ -999,6 +1459,18 @@ per C2), skip works at each step = `[escalate→device]`.
 | A3 | not started | | |
 | A4 | not started | | |
 | A5 | not started | | |
+| A6 (findings/design) | validated | user (plexxie) | RTF 5.26 xpu vs 12.74 cpu; audio/omni_*.wav |
+| A6a | not started | | |
+| A6b | not started | | |
+| A6c | not started | | |
+| A6d | not started | | |
+| A6e | not started | | |
+| A6f | not started | | |
+| A6g | deferred | | |
+| A7a | not started | | |
+| A7b | not started | | |
+| A7c | not started | | |
+| A7d | not started | | |
 | B1 | not started | | |
 | B2 | not started | | |
 | B3 | not started | | |
