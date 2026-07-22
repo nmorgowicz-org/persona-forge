@@ -1191,6 +1191,36 @@ export interface RuntimeConfigState {
     compression: string | null
     reason: string
   }
+  // Additive (Phase A7b) — per-key provenance for everything in `live`.
+  live_metadata?: Record<
+    string,
+    {
+      value: unknown
+      source: 'file' | 'env' | 'default'
+      locked: boolean
+      restart_required: boolean
+    }
+  >
+  // Additive (Phase A7b) — entrypoint-only knobs visible but not live-adjustable.
+  restart_required?: Record<string, { value: unknown; reason: string }>
+  // Additive (Phase A7c) — accelerator presence/capability for the container coach card.
+  accelerator?: {
+    family: 'cpu' | 'cuda' | 'rocm' | 'intel-xpu'
+    detected_family: 'cpu' | 'cuda' | 'rocm' | 'intel-xpu'
+    device: string
+    has_fp64: boolean | null
+    emu_active: boolean
+    present: boolean
+    capable: boolean
+  }
+}
+
+export interface RuntimeConfigPreview {
+  dry_run: true
+  would_apply: Partial<RuntimeConfigState['live']>
+  would_skip_locked: string[]
+  reload_required: boolean
+  predicted_live: RuntimeConfigState['live']
 }
 
 export async function getRuntimeConfig(): Promise<RuntimeConfigState> {
@@ -1207,6 +1237,24 @@ export async function updateRuntimeConfig(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
   })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function previewRuntimeConfig(
+  updates: Partial<RuntimeConfigState['live']>,
+): Promise<RuntimeConfigPreview> {
+  const res = await fetch('/runtime/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...updates, dry_run: true }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function resetRuntimeConfig(): Promise<RuntimeConfigState> {
+  const res = await fetch('/runtime/config/reset', { method: 'POST' })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
 }

@@ -36,6 +36,9 @@ Steps:
 
 For advanced configuration, environment variables, and tuning, see [docs/ENV_REFERENCE.md](docs/ENV_REFERENCE.md).
 
+Working on the backend directly (not via Docker)? See [docs/dev/LOCAL_SETUP.md](docs/dev/LOCAL_SETUP.md)
+for the `uv`-managed local dev environment.
+
 ## Model profiles
 
 | Profile | Quality | Steady serving memory | Max request length | Recommendation |

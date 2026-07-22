@@ -69,6 +69,10 @@ def get_ov_config() -> dict[str, object]:
     if cache_dir:
         cfg["CACHE_DIR"] = cache_dir
 
+    # OPENVINO_DEVICE (Phase A4, D9 axis a) — the talker/main/predictor cores' compile target.
+    # CPU/GPU/AUTO; GPU targets an Intel iGPU. Separate from the vocoder's own device knob below.
+    cfg["device"] = (os.getenv("OPENVINO_DEVICE", "AUTO") or "AUTO").strip().upper()
+
     # Vocoder runtime config (FP32-only; INT8 vocoder rejected).
     vocoder_enabled = os.getenv("OPENVINO_VOCODER_ENABLED", "0").strip() == "1"
     vocoder_dir = (os.getenv("OPENVINO_VOCODER_DIR") or "").strip() or None

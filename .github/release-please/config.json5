@@ -23,7 +23,13 @@
   "packages": {
     ".": {
       "package-name": "qwen3-tts-openvino",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "pyproject.toml"
+        }
+      ]
     }
   }
 }

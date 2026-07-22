@@ -1,0 +1,71 @@
+[project]
+name = "qwen3-tts-openvino"
+version = "0.23.0"  # x-release-please-version
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "flask==3.1.3",
+  "gunicorn==26.0.0",
+  "soundfile==0.14.0",
+  # Shared by OmniVoice and pocket-tts (our two main accent-design/cloning levers) as well as
+  # the optional qwen3-tts engine below; override-dependencies also pins the transformers/torch
+  # versions here (CVE-2026-1839) so they must stay declared at this level.
+  "accelerate",
+  "librosa",
+  "transformers==5.12.1",
+  "torch==2.12.1",
+  "torchaudio==2.11.0",
+  # OmniVoice (Persona Forge accent-design engine) — declared deps already match the pins
+  # above, so it's a git source installed without re-resolving its own dependency set.
+  "omnivoice",
+  # pocket-tts (Persona Forge cloning/generation engine) — a main lever alongside OmniVoice,
+  # not optional; see D12/Persona Forge pivot.
+  "pocket-tts==2.1.0",
+  "pydub",
+  "pyloudnorm",
+  "faster-whisper",
+]
+
+[project.optional-dependencies]
+# Qwen3-TTS is now the opt-in engine (OpenVINO acceleration is a further opt-in on top of
+# this) — Persona Forge's main levers are OmniVoice + pocket-tts above. qwen-tts==0.1.1 hard-pins
+# transformers==4.57.3; override-dependencies above beats that pin, so einops/onnxruntime/sox
+# (qwen-tts-exclusive transitive deps) are declared explicitly here.
+qwen-tts = [
+  "einops",
+  "onnxruntime",
+  "sox",
+  "qwen-tts==0.1.1",
+]
+
+[dependency-groups]
+dev = [
+  "Flask==3.1.3",
+  "httpx==0.28.1",
+  "numpy==2.4.6",
+  "pytest==9.1.1",
+  "pytest-xdist==3.8.0",
+  "PyYAML==6.0.3",
+  "requests==2.34.2",
+  "soundfile==0.14.0",
+  "librosa",
+  "pyloudnorm",
+]
+openvino = [
+  "openvino==2026.2.1",
+]
+export = [
+  "openvino==2026.2.1",
+  "nncf==3.2.0",
+]
+
+[tool.uv]
+package = false
+environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
+override-dependencies = [
+  "transformers==5.12.1",
+  "torch==2.12.1",
+  "torchaudio==2.11.0",
+]
+
+[tool.uv.sources]
+omnivoice = { git = "https://github.com/k2-fsa/OmniVoice.git", rev = "398b6113" }

@@ -67,6 +67,7 @@ MAX_ATTEMPTS_PER_CANDIDATE = 3
 
 _swap_in_progress = False
 _omnivoice_model = None
+_omnivoice_device: str | None = None
 
 # OmniVoice's own fixed output rate (k2-fsa/OmniVoice), independent of this repo's Base
 # model's vocoder rate.
@@ -129,7 +130,9 @@ def omnivoice_loaded() -> bool:
 
 
 def get_progress() -> dict[str, Any]:
-    return dict(_progress)
+    progress = dict(_progress)
+    progress["device"] = _omnivoice_device
+    return progress
 
 
 def _malloc_trim() -> None:
@@ -142,10 +145,11 @@ def _malloc_trim() -> None:
 
 
 def _unload_omnivoice() -> None:
-    global _omnivoice_model
+    global _omnivoice_model, _omnivoice_device
     if _omnivoice_model is None:
         return
     _omnivoice_model = None
+    _omnivoice_device = None
     gc.collect()
     gc.collect()
     _malloc_trim()
@@ -289,14 +293,39 @@ def run_omnivoice_job(
         import torch
         from omnivoice import OmniVoice
 
+        from qwen3_tts.device import (
+            apply_fp64_emulation_env,
+            resolve_device,
+            xpu_needs_fp64_emulation,
+        )
+
         if seed is not None:
             model._apply_optional_seed(seed)
 
         # float32 for stable CPU performance (float16 can be slower on many CPUs)
-        _omnivoice_model = OmniVoice.from_pretrained(
-            "k2-fsa/OmniVoice",
-            dtype=torch.float32,
-        )
+        omnivoice_device = resolve_device()
+        # Xe-LP iGPUs lack native fp64; NEO's software emulation must be enabled before any
+        # xpu context/alloc, i.e. before from_pretrained (Phase A6a, A6.2).
+        if omnivoice_device == "xpu" and xpu_needs_fp64_emulation():
+            apply_fp64_emulation_env()
+        try:
+            _omnivoice_model = OmniVoice.from_pretrained(
+                "k2-fsa/OmniVoice",
+                dtype=torch.float32,
+                device_map=omnivoice_device,
+            )
+        except TypeError:
+            logging.getLogger(__name__).warning(
+                "OmniVoice.from_pretrained does not accept device_map=%r; loading on CPU.",
+                omnivoice_device,
+            )
+            _omnivoice_model = OmniVoice.from_pretrained(
+                "k2-fsa/OmniVoice",
+                dtype=torch.float32,
+            )
+            omnivoice_device = "cpu"
+        global _omnivoice_device
+        _omnivoice_device = omnivoice_device
         _progress["phase"] = "generating"
 
         # Base gen_kwargs shared by all candidates

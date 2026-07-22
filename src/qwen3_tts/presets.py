@@ -11,6 +11,8 @@ the runtime config.
 
 from __future__ import annotations
 
+import os
+
 # The main stateful graph's codec runs at 12 Hz — one frame per 1/12 second of audio.
 # This is what turns a human "max speech seconds" knob into an OpenVINO static-capacity
 # frame count. See docs/dev/benchmarks/OPENVINO_RESULTS.md ("768 ~= 64s of 12 Hz context").
@@ -46,7 +48,9 @@ def _ir_paths(size: str, capacity: int) -> dict[str, str]:
 PRESETS: dict[str, dict[str, object]] = {
     "0.6B": {
         "model_repo": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
-        "backend": "openvino",
+        # pocket_tts is a separate engine/checkpoint and cannot run a Qwen3-TTS model — this
+        # preset's backend must be pytorch (cpu/cuda/mps/rocm/xpu) or openvino only.
+        "backend": "pytorch",
         "main_compression": "int8",
         "predictor_compression": "int8",
         "vocoder_enabled": True,
@@ -58,7 +62,7 @@ PRESETS: dict[str, dict[str, object]] = {
     },
     "1.7B": {
         "model_repo": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
-        "backend": "openvino",
+        "backend": "pytorch",
         "main_compression": "int4",
         "predictor_compression": "int8",
         "vocoder_enabled": True,
@@ -92,6 +96,8 @@ def _voice_design_ir_paths(size: str, capacity: int) -> dict[str, str]:
 VOICE_DESIGN_PRESETS: dict[str, dict[str, object]] = {
     "1.7B": {
         "model_repo": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+        # Unused by apply_preset_env (only PRESETS' "backend" feeds that) — VoiceDesign always
+        # runs the Qwen3TTSModel path (openvino/pytorch), never pocket_tts (app.py guards this).
         "backend": "openvino",
         "main_compression": "int4",
         "predictor_compression": "int8",
@@ -141,6 +147,22 @@ def get_voice_design_preset(
         preset["main_compression"] = main_compression
     preset.update(_voice_design_ir_paths(key, capacity))
     return preset
+
+
+def has_valid_export(preset: dict[str, object]) -> bool:
+    """Return True iff a real OpenVINO IR export already exists on disk for ``preset``.
+
+    Phase A4b (D9 addendum, D15): checks the filesystem, not env — this must reflect the
+    actual export state, never trigger ``scripts/export.py`` itself. A preset with no
+    ``predictor_stateful_model`` (e.g. 1.7B) only requires the main graph to be present.
+    """
+    main_path = preset.get("main_stateful_model")
+    if not main_path or not os.path.isfile(str(main_path)):
+        return False
+    predictor_path = preset.get("predictor_stateful_model")
+    if predictor_path and not os.path.isfile(str(predictor_path)):
+        return False
+    return True
 
 
 def normalize_size(model_size: str | None) -> str:

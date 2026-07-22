@@ -2132,12 +2132,37 @@ def runtime_config_post():
     data = _json_body()
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
+    dry_run = bool(data.pop("dry_run", False))
+    if dry_run:
+        # Read-only preview: no mutation, so no executor serialization needed.
+        try:
+            preview = model.preview_runtime_config(data)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(preview)
     try:
         state = model.executor.submit(model.apply_runtime_config, data).result(timeout=300)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"error": f"Runtime config error: {exc}"}), 500
+    return jsonify(state)
+
+
+@app.post("/runtime/config/reset")
+def runtime_config_reset():
+    # Phase A7b: drop runtime.json (keeping locked keys) and revert unlocked persisted
+    # keys to their hardcoded defaults. Same no-auth-gate rationale as the POST above.
+    if (
+        model.reconfig_in_progress()
+        or voice_design.swap_in_progress()
+        or omnivoice_engine.swap_in_progress()
+    ):
+        return jsonify({"error": "Another runtime reconfiguration or swap is already in progress"}), 503
+    try:
+        state = model.executor.submit(model.reset_runtime_config).result(timeout=300)
+    except Exception as exc:
+        return jsonify({"error": f"Runtime config reset error: {exc}"}), 500
     return jsonify(state)
 
 

@@ -198,6 +198,14 @@ per §4.4 before relying on them; prefer the cited file/line over this summary i
   ~5.5 GB) and the ROCm/XPU wheels are an **advanced, deferred path** — reachable only by patching
   OmniVoice's source (mirroring the container's pip `--no-deps`) or an extras+cu128-absorber setup,
   and not worth the maintenance now. Documented, not built (A5). (§2.1, §6 A4/A5)
+  **Addendum (user, 2026-07-22, D15):** a *third*, engine-internal axis exists once qwen-tts is
+  opt-in (D14) — **which Qwen3-TTS execution mode** (`pytorch` vs `openvino`) a user gets when they
+  opt into that engine without an explicit `TTS_BACKEND`. This must also auto-detect, not hardcode
+  `pytorch` — **but only select `openvino` if a valid IR export already exists** on disk
+  (`OV_MODEL_DIR`/`main_stateful_model` present); OpenVINO export is a slow, deliberate, disk-heavy
+  step (`scripts/export.py`) that must never be auto-triggered at request/import time. New **Phase
+  A4b**, sequenced right after A4 (needs `resolve_device()`) and before A5 (whose docs describe this
+  auto behavior instead of a manual `TTS_BACKEND=openvino` instruction). (§6 A4b)
 - **D10 — OmniVoice on the Intel iGPU IS an in-scope goal (Persona Forge accent design), but via
   torch-xpu, not OpenVINO — investigation deferred to a future session (quota).** User's actual
   target: run **OmniVoice accent design on the Iris Xe iGPU** (base cloning is fine on pocket-tts /
@@ -230,6 +238,44 @@ per §4.4 before relying on them; prefer the cited file/line over this summary i
   `GPU_FAMILY` when auto-detect is wrong). Reconciles the A6.4 "env-first" framing with the
   minimal-container goal: `GPU_FAMILY=auto` + persisted overrides mean the common user sets nothing.
   Built in **Phase A7**; the premium UX for it dovetails with Initiative C. (§2.2, §6 A6/A7, §8)
+- **D12 — OpenVINO is being demoted from default to opt-in; a post-plan rebrand to "Persona
+  Forge" is on the horizon (user, 2026-07-22).** After this plan lands, the project/code/container
+  rename to **Persona Forge** reflects where development time has actually gone (OmniVoice +
+  pocket-tts, not the OpenVINO path). OpenVINO stays supported as a speed option for Intel-CPU-only
+  users, but **`presets.py`'s hardcoded `"backend": "openvino"` default (all three presets, lines
+  ~49/61/95) is stale intent, not a decision to preserve.** Do not re-entrench it in A4/A6/A7 work.
+  The rebrand itself and the default-backend swap are **out of scope for this plan** (do not action
+  them here) but any phase touching backend selection (A4, A6a/c/d, A7a-d) must not assume
+  `openvino` is or should remain the default — prefer auto-detected/backend-agnostic framing
+  (ties into D9's device-axis auto-detect). Discovered while validating A2 locally: a plain `python
+  -c "from qwen3_tts.app import app"` on this Mac resolved `TTS_BACKEND=openvino` (via
+  `apply_preset_env`'s preset default) and failed on a missing OV IR — expected given the
+  stale default, not a uv-migration bug. (§2.2, `config.py::apply_preset_env`, `presets.py`)
+- **D13 — Documentation is a per-phase deliverable, not a dedicated phase (user, 2026-07-22).**
+  Every phase (A/B/C, not just A3/A5/B7/C3) must add/update docs where its change makes existing
+  docs stale or a new capability undocumented: new/updated markdown under `docs/`, and the root
+  `README.md` when the change affects what a user sees getting started (e.g. a default-backend
+  change, a new setup step). This augments §4.4 (task budget) — doc updates count toward a phase's
+  diff, not a separate task. (§4 Global rules)
+- **D14 — pocket-tts + OmniVoice are main (always-installed) deps; `qwen-tts` is the opt-in one
+  (user, 2026-07-22).** Sharpens D12: Persona Forge's two real levers — OmniVoice (accent design)
+  and pocket-tts (cloning/generation) — must be installed by a bare `uv sync`, no group/extra flag.
+  Qwen3-TTS (`qwen-tts`, plus `einops`/`onnxruntime`/`sox`, its exclusive transitive deps) moves to
+  `[project.optional-dependencies] qwen-tts`, installed via `uv sync --extra qwen-tts`. Shared
+  transitive deps (`torch`, `torchaudio`, `transformers`, `accelerate`, `librosa` — needed by
+  OmniVoice too) **stay main**, not just qwen-tts's. **Consequence:** `model.py`'s
+  `from qwen_tts import Qwen3TTSModel` must be a **lazy import inside the pytorch/openvino load
+  branch**, not a module-level import — a bare `uv sync` (pocket_tts-only) must import
+  `qwen3_tts.app` cleanly. Implemented + validated 2026-07-22 (A1 re-lock: `pocket-tts` resolves
+  main, `qwen-tts`/`sox` drop out of a plain `uv sync`; 343/343 tier1_unit green; app import proven
+  in a pocket_tts-only venv). (§6 A1)
+- **D15 — `PRESETS["backend"]`'s fallback must stay `pytorch`/`openvino` only — never
+  `pocket_tts` (user, 2026-07-22).** `PRESETS` (`presets.py`) is keyed by `model_repo` pointing at a
+  Qwen3-TTS checkpoint; `pocket_tts` is a wholly separate engine/checkpoint and cannot run it. The
+  actual product default (`TTS_BACKEND=pocket_tts`) is set **explicitly** in `.env.example`, which
+  wins over the preset fallback via `config.py`'s explicit-wins `setdefault` rule — the two facts
+  don't conflict. This sets up **A4b**: today the preset fallback is hardcoded to `"pytorch"`; A4b
+  replaces that hardcode with an auto-detect between `pytorch` and `openvino` (§6 A4b). (§6 A1, A4b)
 
 ## 4. Global execution rules & invariants
 
@@ -281,6 +327,16 @@ decided, is treated as `[local-verifiable]` with its value inlined — do not re
   (the facts in §2 were true 2026-07-20).
 - `npm run build` in `frontend/` must pass at the end of every frontend-touching phase.
 
+### 4.5 Documentation is per-phase, not a dedicated phase (D13)
+
+Before closing any phase's gate, check whether the change makes an existing doc stale or leaves a
+new capability undocumented, and fix it in the same phase: `docs/dev/**`, `docs/HOW_TO_RUN.md`,
+`docs/ENV_REFERENCE.md`, or the root `README.md` (only when the change affects what a user sees
+getting started — a new default, a new setup step, a new prerequisite binary). This is not optional
+busywork reserved for A3/A5/B7/C3 — those phases cover *setup-flow* docs specifically; every other
+phase still owns its own docs. Doc edits count toward the phase's diff/task budget (§4.4), not a
+separate task.
+
 ## 5. Dependency & sequencing index
 
 | Phase | Initiative | Deliverable (one line) | Depends on |
@@ -289,7 +345,8 @@ decided, is treated as `[local-verifiable]` with its value inlined — do not re
 | A2 | uv | `uv sync` reproduces a working real-model venv; tests green | A1 |
 | A3 | uv | dev docs updated; B1 precondition rewired to `uv sync`; CI untouched | A2 |
 | A4 | uv | runtime device seams: `TTS_DEVICE` (torch) + `OPENVINO_DEVICE` (iGPU), auto-detect+force | A2 |
-| A5 | uv | accelerator install guide (docs) + deferred slim/ROCm/XPU + iGPU-via-OpenVINO note | A2 |
+| A4b | uv | Qwen3-TTS engine-mode auto-select: `pytorch` vs `openvino`, IR-presence-gated (D15) | A4 |
+| A5 | uv | accelerator install guide (docs) + deferred slim/ROCm/XPU + iGPU-via-OpenVINO note | A2, A4b |
 | A6 | accel | OmniVoice-on-iGPU **validated** (findings/design; §6 A6.1–A6.4) — reference, not a task | — |
 | A6a | accel | OmniVoice device seam + auto fp64-emu env | A4 |
 | A6b | accel | honest `OMP_NUM_THREADS=4` CPU baseline + dtype re-confirm (measurement) | A6a (device) |
@@ -521,6 +578,61 @@ grep -q 'OPENVINO_DEVICE' src/qwen3_tts/*.py && grep -q 'TTS_DEVICE' src/qwen3_t
 per-backend device; the OV `OPENVINO_DEVICE` seam is wired (iGPU run itself deferred to a device
 gate); no `pyproject.toml` diff.
 
+### Phase A4b — Qwen3-TTS engine-mode auto-selection (`pytorch` vs `openvino`)
+
+**Mission:** when a user opts into the Qwen3-TTS engine (`qwen-tts` extra installed) without an
+explicit `TTS_BACKEND`, auto-select `pytorch` or `openvino` instead of the current hardcoded
+`pytorch` fallback in `PRESETS["backend"]` — but **only** select `openvino` if a valid IR export
+already exists on disk. This is D9's addendum axis (D15); does not touch the overall product
+default (`TTS_BACKEND=pocket_tts`, set explicitly in `.env.example`, which still wins per
+`config.py`'s explicit-wins rule — this phase only changes the *preset fallback* used when someone
+sets `MODEL_SIZE`/opts into Qwen3-TTS without picking a backend).
+
+**Read first:**
+- `src/qwen3_tts/presets.py` — `PRESETS["0.6B"/"1.7B"]["backend"]`, currently hardcoded `"pytorch"`
+  (D15); `_ir_paths()` computes the exact `main_stateful_model` path a real export would write to.
+- `src/qwen3_tts/config.py::apply_preset_env` — where `preset["backend"]` feeds `TTS_BACKEND` via
+  `_setdefault` (explicit-wins).
+- §3 D9 addendum, D15; §6 A4 (`resolve_device()` — this phase runs after it, no new device logic).
+
+**Do this:**
+1. Add an IR-presence check (e.g. `qwen3_tts/presets.py::has_valid_export(preset) -> bool` —
+   checks `main_stateful_model` file exists, and `predictor_stateful_model` if the preset declares
+   one) that reads the filesystem, not env, so it reflects the real export state.
+2. In `apply_preset_env`, replace the hardcoded `preset["backend"]` fallback with: `"openvino"` if
+   `has_valid_export(preset)` else `"pytorch"` — only when `TTS_BACKEND` is not already set upstream
+   (still `.env.example`'s `pocket_tts` in the product default path; explicit env always wins).
+3. **Never** trigger `scripts/export.py` from this code path — export stays a deliberate, separate,
+   opt-in operation (compose profile / manual script run).
+4. `/health` (or equivalent) reports whether the fallback picked `openvino` because an export was
+   found, so a user isn't surprised by which mode is active.
+5. Docs (D13): update A5's accelerator guide (and `docs/dev/LOCAL_SETUP.md`/`docs/ENV_REFERENCE.md`
+   if their current wording implies a manual-only `TTS_BACKEND=openvino` selection) to describe the
+   auto-detect-if-exported behavior.
+
+**Invariants:** no `pyproject.toml` change; never auto-runs export; never overrides an explicit
+`TTS_BACKEND` (including the `.env.example` product default of `pocket_tts`); CPU-only/no-export
+hosts see identical behavior to today (`pytorch` fallback).
+
+**Gate — done when ALL pass:**
+```bash
+cd /Users/nick/SCRIPTS/CLAUDE/qwen3-tts-openvino
+PYTHONPATH=src:. uv run python -c "
+from qwen3_tts.config import apply_preset_env
+environ = {'MODEL_SIZE': '1.7B'}
+apply_preset_env(environ)
+assert environ['TTS_BACKEND'] == 'pytorch'  # no IR on disk -> pytorch fallback
+print('no-export fallback OK')
+"   # [local-verifiable]
+PYTHONPATH=src:. uv run pytest tests/tier1_unit/test_config.py -q   # [local-verifiable]
+```
+- Fallback correctly flips to `openvino` against a real exported IR (needs an actual export run) →
+  `[escalate→device]`.
+
+**Completion proof:** no-export hosts still fall back to `pytorch`; a real export flips the fallback
+to `openvino`; explicit `TTS_BACKEND` (including `.env.example`'s `pocket_tts`) always wins; docs
+updated; no `pyproject.toml` diff; `tests/tier1_unit/test_config.py` green.
+
 ### Phase A5 — Accelerator install guide + deferred paths (docs, not code)
 
 **Mission:** document how a user installs natively for their accelerator, given the *validated*
@@ -536,7 +648,7 @@ docs deliverable + a decision record, **not** an extras matrix (that approach is
 | macOS (Apple Silicon) | `uv sync` | arm64 **cpu+mps**; runtime auto-detects mps (A4) |
 | linux + NVIDIA | `uv sync` | CUDA-enabled wheel; runtime auto-detects **cuda** (A4) |
 | linux CPU-only | `uv sync` | works, runs on **cpu** — but ~**5.5 GB** venv (unused NVIDIA libs) |
-| Intel iGPU | `uv sync` + `TTS_BACKEND=openvino` + `OPENVINO_DEVICE=GPU` (A4) | Qwen3-TTS on the iGPU; needs `intel-opencl-icd` + `intel-level-zero-gpu` + `/dev/dri` passthrough. **Qwen3-TTS backend only; OmniVoice stays CPU (D10)** |
+| Intel iGPU | `uv sync --extra qwen-tts`, export once, `OPENVINO_DEVICE=GPU` (A4) — backend auto-selects `openvino` once the export exists (A4b) | Qwen3-TTS on the iGPU; needs `intel-opencl-icd` + `intel-level-zero-gpu` + `/dev/dri` passthrough. **Qwen3-TTS backend only; OmniVoice stays CPU (D10)** |
 
 **Deferred / advanced — record, do NOT build:**
 - **Slim CPU (no NVIDIA), ROCm, Intel XPU torch wheels.** Blocked by OmniVoice's cu128 git-source
@@ -634,14 +746,21 @@ Same box, ~3.9 s of audio, `num_step=32`:
 | config | warm-up (1-time compile) | timed | RTF |
 | --- | --- | --- | --- |
 | **iGPU fp32 + fp64-emu** | ~349 s | 21.0 s | **5.36** |
-| CPU fp32 (4 vCPU) | — | 50.2 s | 12.74 |
+| CPU fp32 (4 vCPU, `OMP_NUM_THREADS=16`, oversubscribed) | — | 50.2 s | 12.74 (superseded, see below) |
 
-→ **iGPU ~2.4× faster than this box's CPU**, despite the emulation tax on cast kernels (native fp32
-GEMM/conv is ~6× CPU and dominates). Caveats to firm up: the CPU run oversubscribed threads
-(`nproc`=16 vs 4-vCPU cap) so 12.74 is a *soft lower bound* — **redo with `OMP_NUM_THREADS=4`**; and
-plexxie's 4-vCPU cap is not representative of dockermisc1's CPU. The ~349 s warm-up is a **per-process
-cold-compile** — a resident service loads once and amortizes it (persist the SYCL cache to speed cold
-starts: `SYCL_CACHE_PERSISTENT=1`).
+→ **iGPU ~2.4× faster than this box's CPU** on the original (oversubscribed) number. The ~349 s
+warm-up is a **per-process cold-compile** — a resident service loads once and amortizes it (persist
+the SYCL cache to speed cold starts: `SYCL_CACHE_PERSISTENT=1`).
+
+**A6b — honest CPU baseline (redone 2026-07-22, `OMP_NUM_THREADS=4`, plexxie, same
+text/instruct/steps as above):** RTF **9.86** (warm) / **10.68** (timed). Re-ran the iGPU fp32 pick
+under the same clean-box conditions for an apples-to-apples pair: **5.07** (vs. the original 5.26 —
+consistent). **Corrected ratio: iGPU ~2.1× faster than the honest CPU baseline** (down from the
+2.4× estimate, which used an oversubscribed CPU run). Note: the first attempt at this re-measurement
+came back *worse* than the original (RTF 17.73) — root-caused to a stray, unrelated `casterr.py`
+process from a prior session that had been hung/deadlocked on plexxie for ~18h, pegging one core;
+killed before re-measuring. bf16 in the same re-run session hit the same known harness OOM (LXC
+cgroup limit, 3 sequential model loads on 8 GB) documented below — expected, not a regression.
 
 **dtype ladder A/B (done — fp32 wins):** seeded (seed 42) iGPU runs, same text/instruct/steps:
 
@@ -660,6 +779,16 @@ OmniVoice outputs are *segment candidates* for the downstream stitch-studio (VST
 normalize/compress/EQ/fx), so tonal/level deltas are **recoverable → not disqualifying**; only
 **artifacts** disqualify. int8 (PTQ, not a dtype flip) is a follow-up if ever needed — but given fp32
 is already fastest, low priority.
+
+**A6g — int8 PTQ feasibility probe (done 2026-07-22, plexxie) — verdict: no-go, not worth
+pursuing.** Probed `torch.ao.quantization.quantize_dynamic` (weight-only int8) on a `Linear(4096,
+4096)` on xpu: it runs without error, but `torch.backends.quantized.supported_engines` lists no
+xpu-targeting engine (`qnnpack`/`onednn`/`x86`/`fbgemm` only) — there's no dedicated int8 GEMM kernel
+for this backend, so it's quantized weight storage with compute still effectively fp32-equivalent via
+on-the-fly dequant. Measured: fp32 linear 2.77 ms vs. qint8 linear 2.55 ms (~8%, within noise for a
+memory/launch-bound op — consistent with the A6.3 finding above). A real int8 win would need
+IPEX-level or OpenVINO-int8-style kernels — out of scope for this deferred/low-priority item. No
+further PTQ work planned unless the underlying torch-xpu tooling changes.
 
 #### A6.4 — Productization requirement: ONE image, auto-or-specify GPU family (user directive)
 
@@ -851,7 +980,23 @@ marker**; OmniVoice pin/rev matches A6.1.
 - idempotency: second boot with marker present skips install `[local-verifiable]`
 - intel-xpu first boot on plexxie populates the volume + OmniVoice generates `[escalate→device]`
 
-**Completion proof:** cpu boots without install; second xpu boot skips; plexxie first-boot populates volume and generates.
+**Completion proof (done 2026-07-22):** implemented in `scripts/entrypoint.sh` — resolves
+`ACCEL_VENV_DIR` (default `/opt/accel-venv`), installs the per-family torch (+torchaudio) and
+OmniVoice `--no-deps @398b6113` into `$ACCEL_VENV_DIR/<family>/site-packages` only when
+`.installed` is absent, then prepends that dir to `PYTHONPATH`; `set -e` means a failed `pip
+install` exits before the marker is written (invariant satisfied by construction, not a separate
+check). Verified locally with `GPU_FAMILY` forced + a mocked `ACCEL_VENV_DIR`: **cpu family
+installs nothing** (no `$ACCEL_VENV_DIR` contents created) and **intel-xpu with a pre-seeded
+marker skips the pip install** (logs "cached torch install found, skipping install"). torch/index
+values match the A6.1-proven recipe exactly for `intel-xpu` (`torch==2.8.0`+torchaudio from
+`download.pytorch.org/whl/xpu`); `cuda`/`rocm` index URLs and versions are **plausible but
+unvalidated** (override via `ACCEL_TORCH_INDEX_URL`/`ACCEL_TORCH_VERSION` if wrong when a CUDA/ROCm
+box becomes available). The `[escalate→device]` gate — **a real container first-boot on plexxie's
+iGPU** — could not be run: plexxie has no Docker installed (see plexxie-hardware-test-host memory).
+Not a gap in the *install recipe* itself (that's the same one A6.1 already proved end-to-end in a
+native venv on this exact hardware) — only the container-wrapper script's marker/PYTHONPATH logic
+is unverified on real xpu hardware specifically. Flagging as a known, expected limitation rather
+than a silent pass; revisit if/when Docker is ever set up on plexxie.
 
 ##### Phase A6f — Base-image system-lib layering + passthrough docs/compose `[infra+docs]`
 **Mission:** layer the non-conflicting userspace libs (Intel compute-runtime + `libze1`; CUDA/ROCm
@@ -872,7 +1017,25 @@ userspace) into the base image so **only the torch wheel varies at runtime** (A6
 - A5 matrix corrected, grep confirms `[local-verifiable]`
 - base image builds with the layered libs `[escalate→device]`
 
-**Completion proof:** compose config parses; A5 row corrected; base image builds.
+**Completion proof (done 2026-07-22):** `Dockerfile` gained a build-arg-gated
+(`INSTALL_ACCEL_SYSLIBS=0` default) layer for Intel compute-runtime + Level-Zero via Intel's
+official GPU apt repo (`repositories.intel.com/gpu/ubuntu jammy unified` — same package/version
+set proven on plexxie in A6.1); default-off keeps the canonical CPU build byte-for-byte unchanged
+(D3), confirmed by a real local rebuild that succeeded identically. `compose.yml` documents the
+full opt-in path: commented `build.args.INSTALL_ACCEL_SYSLIBS`, `/dev/dri` + `group_add` (render
+group) device passthrough, a live (uncommented, default `auto`) `GPU_FAMILY` env var, and a new
+named volume `accel-venv:/opt/accel-venv` for A6e's first-boot install persistence.
+`docker compose config` parses the whole file cleanly (verified: `GPU_FAMILY: auto` and the
+`accel-venv` volume both resolve correctly in the rendered config). `docs/dev/LOCAL_SETUP.md`'s
+Intel-iGPU matrix row is corrected — it no longer says "OmniVoice stays CPU (D10)" (stale,
+pre-A6) and now states OmniVoice runs on the same iGPU via torch-xpu, distinct from the
+OpenVINO/Qwen3-TTS path. The one **`[escalate→device]`** gate — a real accel-lib image build
+verified against actual Intel iGPU hardware — was **not** run: pulling Debian trixie's own apt
+archive confirmed (via `apt-cache search`) it carries none of these packages, so this relies on
+Intel's apt repo, which has historically targeted Ubuntu, not Debian; compatibility is plausible
+but genuinely unverified until built + exercised on real hardware (plexxie has no Docker, so
+this can't happen there yet either). Documented as a known, flagged gap rather than a silent
+pass.
 
 ##### Phase A6g — int8 PTQ exploration (deferred follow-up) `[research]`
 **Mission:** only if bf16/fp16 didn't buy headroom (they didn't) and memory pressure demands it —
@@ -934,7 +1097,25 @@ behavior unchanged with no `runtime.json`; reuse the existing voices/segments da
 - unit: failed reload does not persist `[local-verifiable]`
 - integration: POST a backend change, restart the process, value survives `[escalate→device]`
 
-**Completion proof:** store module + unit suite; lock respected; failed-reload non-persist; restart-survival demo.
+**Completion proof:** `qwen3_tts/runtime_store.py` implements `load_persisted_config()`/
+`save_persisted_config()` (atomic temp+`os.replace`, schema-versioned `{"schema_version": 1,
+"values": {...}}`, corrupt/malformed files warn-and-ignore rather than crash), `locked_keys()`/
+`is_locked()` (`RUNTIME_LOCKED_KEYS` csv + `RUNTIME_LOCK_<KEY>=1`), and `apply_persisted_config()`,
+wired into `model.py` immediately after `apply_thread_env()` and before `import torch`.
+`apply_runtime_config()` gained `persist: bool = True`, writing through to `runtime.json` only after
+the existing try/finally block completes without raising (mirrors A6e's "failed op never leaves
+evidence" pattern by construction, not an extra check). `DATA_DIR` defaults to
+`VOICE_LIBRARY_DIR`/`VOICE_LIBRARY_PATH_CONTAINER` (falling back to `/voices`) so no new compose
+volume is required. Unit suite (`tests/tier1_unit/test_runtime_store.py`, 10 cases) covers all three
+`[local-verifiable]` gates: save→load round-trip, corrupt/malformed file → ignored+warn, env-locked
+key not overridden by file, and failed-reload-does-not-persist (the last one runs in a subprocess —
+`qwen3_tts.model` spawns a real background self-load thread at import time, which would otherwise
+leak into other tests' shared `sys.modules` state if imported in-process). Full suite (506 tests)
+passes clean, run 3x to rule out flakiness. The `[escalate→device]` restart-survival gate turned out
+to be locally verifiable (it's process-restart persistence, not GPU-specific): confirmed manually
+that a value written by one process (`save_persisted_config`) is read back correctly by a completely
+fresh `python` process importing `qwen3_tts.model`, via `os.environ` after `apply_persisted_config`
+runs at import time.
 
 ##### Phase A7b — API surface: source/lock/restart metadata + reset/dry-run `[code]`
 **Mission:** report per-key provenance so the UI can render it, and add reset + dry-run.
@@ -951,7 +1132,31 @@ behavior unchanged with no `runtime.json`; reuse the existing voices/segments da
 - reset drops file + reverts (integration on a temp `DATA_DIR`) `[local-verifiable]`
 - `npm run build` typechecks the new `api.ts` shape `[local-verifiable]`
 
-**Completion proof:** state shape; reset behavior; build green.
+**Completion proof:** `model.py::runtime_config_state()` now returns `live_metadata` (additive dict,
+per exposed `LIVE_RUNTIME_KEYS` key: `{value, source: file|env|default, locked, restart_required}`,
+`source` computed from a fresh `load_persisted_config()` read vs. `os.environ`) and a top-level
+`restart_required` dict (currently `GPU_FAMILY` only, entrypoint-only). `preview_runtime_config(updates)`
+added as a pure dry-run (no `os.environ`/global/file mutation) returning
+`{dry_run, would_apply, would_skip_locked, reload_required, predicted_live}`; wired into
+`POST /runtime/config` via a `dry_run` body flag (checked before the executor-serialized mutation
+path, so no concurrency guard needed for previews). `reset_runtime_config()` added: drops
+`runtime.json` entries for unlocked keys (keeping locked keys' persisted values, since a lock is an
+explicit operator override that should survive a reset), removes those unlocked keys from
+`os.environ` so the existing `os.getenv(key, <default>)` fallbacks take over, triggers the same
+reload logic as `apply_runtime_config` when a reverted key needs it, and re-persists only the locked
+subset; wired to new `POST /runtime/config/reset` with the same concurrency guard
+(`reconfig_in_progress`/`swap_in_progress`) as the existing POST. `frontend/src/lib/api.ts`'s
+`RuntimeConfigState` interface extended additively with optional `live_metadata`/`restart_required`
+fields (existing `live`/`read_only`/`not_live` shapes untouched — no consumer changes needed), plus a
+new `RuntimeConfigPreview` type, `previewRuntimeConfig()`, and `resetRuntimeConfig()` client
+functions. All three gates verified locally: (1) `tests/tier1_unit/test_runtime_config_a7b.py` (4
+new cases, subprocess-isolated per the A7a precedent since real `model.py` self-loads a background
+thread at import time) confirms `live_metadata`/`restart_required` shape and per-key
+`source`/`locked` values, including a `RUNTIME_LOCKED_KEYS`-locked case; (2) a reset case on a temp
+`DATA_DIR` confirms locked keys survive in `runtime.json` while unlocked keys are dropped and their
+live values revert to hardcoded defaults; (3) a dry-run case confirms `preview_runtime_config`
+touches neither live state nor `runtime.json`. Full suite green 3x consecutively (510 passed each
+run, no flakiness). `npx tsc --noEmit` in `frontend/` compiles clean with the new types.
 
 ##### Phase A7c — Container coach: copy + card `[decide-once]+frontend`
 **Mission:** surface the container-level settings the app **can't** self-apply (device passthrough,
@@ -974,7 +1179,30 @@ the present∧¬capable gap (never on native where it'd be noise); no power-user
 - coach copy strings `[decide-once]`
 - reads-clearly in a real iGPU-LXC scenario `[escalate→device]`
 
-**Completion proof:** markdown keys; card wiring; build; screenshot/description; copy approved.
+**Completion proof:** Fixed a real gap in `gpu_family.py::describe_accelerator()` — it computed the
+actually-detected vendor via `_detect_best(probes)` but discarded it, returning only the
+override-aware `family` (which reads `"cpu"` in the present∧¬capable case even when a real GPU is
+present). Added `detected_family` as an additive dict field so the coach can pick the right
+per-vendor snippet; covered by 2 new/extended cases in `test_gpu_family.py`
+(`test_present_true_capable_false_is_the_coach_trigger` extended,
+`test_detected_family_differs_from_family_under_forced_override` added) — 14 passed (was 13).
+Wired `describe_accelerator()`'s output into `model.py::runtime_config_state()` as an additive
+`accelerator` field (import-safe, pure). Added three D8-compliant markdown coach-copy files under
+`frontend/src/content/help/` (`accelerator-cuda.md`, `accelerator-rocm.md`,
+`accelerator-intel-xpu.md`) with per-family compose/`docker run` snippets and a re-detect
+instruction. Built `AcceleratorCoachCard.tsx` — a dependency-free `MarkdownLite` renderer (no new
+npm markdown package, per the project's anti-over-engineering stance) plus the card itself, which
+renders only when `present ∧ ¬capable ∧ detected_family !== 'cpu'` and stays quiet otherwise
+(dismissed/no-hardware/already-mapped/bare-cpu). Wired into `RuntimeConfigPage.tsx` with a
+"Re-detect" button that re-calls the existing `refresh()`/`getRuntimeConfig()` flow. Extended
+`api.ts`'s `RuntimeConfigState` with the additive `accelerator` field. Verified: `npx tsc --noEmit`
+clean; `npm run build` succeeds; full backend suite green (511 passed); manual dev-server check —
+Flask (port 8318) + Vite (port 5183, proxying `/runtime` to Flask) both started, `curl
+/runtime/config` confirmed the `accelerator` field shape, and a Puppeteer screenshot of
+`RuntimeConfigPage` (via system Chrome, no console/pageerror output) confirmed the page renders
+correctly with the coach card correctly absent on this no-GPU dev Mac (`present: false`). The
+`reads-clearly in a real iGPU-LXC scenario [escalate→device]` gate requires plexxie hardware and is
+deferred to a future on-device check, consistent with how A7a's device-gated gate was handled.
 
 ##### Phase A7d — Premium Runtime control surface (UX) `[frontend]`
 **Mission:** reframe `RuntimeConfigPage` as the premium control surface — per-key source/lock badges,
@@ -997,7 +1225,34 @@ fallback); build passes.
 - disclosure boundary + which knobs are "Basic" `[decide-once]`
 - env-locked disables + never-unmount + accelerator panel in-browser `[escalate→device]`
 
-**Completion proof:** badge/panel/disclosure wiring; build; decide-once boundary; in-browser confirmation.
+**Completion proof:** Initiative C's `MetricExplainer`/`Disclose` seam (C1/C2) was not landed at the
+time of this phase (confirmed via grep — no matches for either symbol under `frontend/src/`), so
+per the invariant this used a local disclosure fallback: a `KeyBadges` helper renders per-key
+`source`/`env-locked`/`applies live`|`needs restart` badges from A7b's `live_metadata`, and each
+live-adjustable input is `disabled` (with an explanatory `title`) when its `locked` flag is set.
+A "Show advanced"/"Hide advanced" toggle (`expertMode` state) reveals these badges plus the two
+lower-impact silence-trim fine-tuning fields (threshold, pad) and a new fp64/emulation detail on
+the accelerator panel — implemented via a CSS `hidden` class toggle, never a conditional unmount,
+satisfying D7. Basic/Expert boundary (decide-once): Backend, Idle unload, OV quant group size,
+Model dtype, and the Silence trim on/off toggle stay in Basic (high-impact, always visible);
+per-key provenance badges, fp64/emulation detail, and the two silence-trim fine-tuning fields are
+Expert-only. Added an always-visible "Detected accelerator" panel (family/device/capable, plus
+has_fp64/fp64_emulation under Expert) sourced from `describe_accelerator()` — distinct from the
+A7c coach card, which only appears on the present∧¬capable gap. Added a "Requires container
+restart" panel surfacing the top-level `restart_required` dict (e.g. `GPU_FAMILY`), gated behind
+Expert. Verified: `npx tsc --noEmit` clean; `npm run build` succeeds; full backend suite green
+(388 tier1 unit tests, unaffected since this was a frontend-only change); Puppeteer screenshots
+(via system Chrome) of both Basic and Expert states with no console/pageerror output, confirming
+badges, lock-disabling, the accelerator panel, and the restart-required panel all render correctly
+on this no-GPU dev Mac. The `env-locked disables + never-unmount + accelerator panel in-browser
+[escalate→device]` gate's env-locked-disable behavior was exercised via code review (the `disabled`
+prop is wired to `live_metadata[key].locked` for every live field) but not against a real
+env-locked container; full confirmation is deferred to plexxie, consistent with how A7a/A7c's
+device-gated gates were handled.
+
+This closes out Initiative A (A1–A7d). Per the standing batching instruction, ledger status tables
+in this plan (§9) and the execution companion (§4/§5) are updated together now that all of
+Initiative A is complete.
 
 Do **not** commit the plan doc without user OK.
 
@@ -1454,23 +1709,24 @@ per C2), skip works at each step = `[escalate→device]`.
 
 | Phase | State | Verified by | Evidence |
 |---|---|---|---|
-| A1 | not started | | |
-| A2 | not started | | |
-| A3 | not started | | |
-| A4 | not started | | |
-| A5 | not started | | |
+| A1 | verified | agent (local) | `uv.lock` + `[tool.uv]` env markers + D14 extra wiring; 343/343 tier1 green |
+| A2 | verified | agent (local) | `uv run` imports succeed; pytest subset green |
+| A3 | verified | agent (local) | setup doc references `uv sync`; no CI/requirements-dev diff |
+| A4 | verified | agent (local) | `resolve_device()` in `device.py`; auto-default + env override; OV seam wired |
+| A4b | verified | agent (local) | `has_valid_export()` in `presets.py`; no-export→pytorch, explicit `TTS_BACKEND` wins |
+| A5 | verified | agent (local) | dev doc matrix + deferred-path map (`docs/ENV_REFERENCE.md`) |
 | A6 (findings/design) | validated | user (plexxie) | RTF 5.26 xpu vs 12.74 cpu; audio/omni_*.wav |
-| A6a | not started | | |
-| A6b | not started | | |
-| A6c | not started | | |
-| A6d | not started | | |
-| A6e | not started | | |
-| A6f | not started | | |
-| A6g | deferred | | |
-| A7a | not started | | |
-| A7b | not started | | |
-| A7c | not started | | |
-| A7d | not started | | |
+| A6a | verified | agent (local) + plexxie | `device.py` fp64-emu helpers; plexxie generated without manual export |
+| A6b | verified | user (plexxie) | A6.3 OMP=4 CPU RTF + honest ratio recorded |
+| A6c | verified | agent (local) + plexxie | `gpu_family.py`; unit table green (14/14); plexxie detected intel-xpu |
+| A6d | verified | agent (local) | `scripts/entrypoint.sh` resolves family via `resolve_gpu_family()`, exports per-family env |
+| A6e | verified | agent (local) | entrypoint first-boot torch install into named volume, marker-gated |
+| A6f | verified | agent (local) | `compose.yml` `/dev/dri` + `GPU_FAMILY` example; A5 matrix reconciled |
+| A6g | deferred | | int8 PTQ exploration explicitly deferred, not pursued |
+| A7a | verified | agent (local) | `runtime_store.py`; round-trip/corrupt-ignore/lock/no-persist-on-failure units green |
+| A7b | verified | agent (local) | `live_metadata`/`restart_required`/`preview_runtime_config`/`reset_runtime_config`; 3x full-suite green (510 passed); `tsc --noEmit` clean |
+| A7c | verified | agent (local) | `describe_accelerator()` `detected_family` fix; `AcceleratorCoachCard`; build + Puppeteer screenshot, no console errors |
+| A7d | verified | agent (local) | per-key badges/lock-disable, accelerator panel, Expert disclosure (never-unmount); build + Puppeteer screenshots (Basic/Expert), no console errors |
 | B1 | not started | | |
 | B2 | not started | | |
 | B3 | not started | | |

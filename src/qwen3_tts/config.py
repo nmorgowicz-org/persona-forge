@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 from collections.abc import MutableMapping
 
-from qwen3_tts.presets import get_preset, normalize_size
+from qwen3_tts.presets import get_preset, has_valid_export, normalize_size
 
 # The reference WAV is always mounted at this fixed path (see compose.yml / .env.example).
 REF_AUDIO_PATH = "/voice/reference.wav"
@@ -49,11 +49,21 @@ def apply_preset_env(environ: MutableMapping[str, str] = os.environ) -> dict[str
     _setdefault(environ, "TTS_MAX_SPEECH_SECONDS", preset["max_speech_seconds"])
 
     # Backend (MODEL_REPO is resolved from MODEL_SIZE by model_config.resolve_model_repo).
-    # An explicit TTS_BACKEND wins; otherwise the preset default (openvino).
-    _setdefault(environ, "TTS_BACKEND", preset["backend"])
-    backend = normalize_backend(environ.get("TTS_BACKEND") or preset["backend"])
+    # An explicit TTS_BACKEND wins (this is how .env.example's TTS_BACKEND=pocket_tts becomes
+    # the actual product default). The preset's own backend fallback must stay pytorch/openvino
+    # — this preset's model_repo is a Qwen3-TTS checkpoint, which pocket_tts (a separate engine)
+    # cannot run. Phase A4b (D9 addendum, D15): auto-select openvino only if a real IR export
+    # already exists on disk for this preset — never trigger the export itself; pytorch remains
+    # the safe zero-setup fallback everywhere else.
+    explicit_backend_was_set = "TTS_BACKEND" in environ
+    engine_fallback = "openvino" if has_valid_export(preset) else "pytorch"
+    _setdefault(environ, "TTS_BACKEND", engine_fallback)
+    backend = normalize_backend(environ.get("TTS_BACKEND") or engine_fallback)
     # Persist the canonical form so every downstream reader sees pocket_tts, not pocket-tts.
     environ["TTS_BACKEND"] = backend
+    # Surfaced by /health so a user isn't surprised by which engine mode auto-selected.
+    preset["backend_source"] = "explicit" if explicit_backend_was_set else "auto-fallback"
+    preset["backend_fallback_choice"] = engine_fallback
 
     # OpenVINO IR locations — the stable, size-keyed paths the export writes.
     _setdefault(environ, "OV_MODEL_DIR", preset["ov_model_dir"])

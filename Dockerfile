@@ -25,8 +25,29 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONPATH=/app/src:/app/src/export
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential curl git libjemalloc2 libgomp1 libsox-fmt-all sox ffmpeg && \
+      build-essential curl git gnupg libjemalloc2 libgomp1 libsox-fmt-all sox ffmpeg && \
       apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Phase A6f: Intel iGPU userspace (compute-runtime + Level-Zero loader), so only the torch
+# wheel varies per accelerator family at runtime (A6e installs that). Off by default —
+# `INSTALL_ACCEL_SYSLIBS=0` keeps the canonical CPU image byte-identical (D3). Debian's own
+# apt archive (this base image is Debian trixie) does not carry these packages — confirmed by
+# `apt-cache search` returning nothing for level-zero/libze/intel-opencl — so this pulls Intel's
+# official GPU apt repo, which has historically targeted Ubuntu; compatibility with a Debian
+# base is UNVALIDATED (escalate→device — needs a real build + generate check on Intel iGPU
+# hardware, e.g. plexxie, once Docker is available there). Package/version set mirrors the
+# native-venv recipe already proven on plexxie (A6.1): intel-opencl-icd, libze1,
+# libze-intel-gpu1, libigc2, libigdgmm12.
+ARG INSTALL_ACCEL_SYSLIBS=0
+RUN if [ "${INSTALL_ACCEL_SYSLIBS}" = "1" ]; then \
+      curl -fsSL https://repositories.intel.com/gpu/intel-graphics.key \
+        | gpg --dearmor -o /usr/share/keyrings/intel-graphics.gpg && \
+      echo "deb [signed-by=/usr/share/keyrings/intel-graphics.gpg arch=amd64] https://repositories.intel.com/gpu/ubuntu jammy unified" \
+        > /etc/apt/sources.list.d/intel-gpu.list && \
+      apt-get update && apt-get install -y --no-install-recommends \
+        intel-opencl-icd libze1 libze-intel-gpu1 libigc2 libigdgmm12 && \
+      apt-get clean && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 WORKDIR /app
 COPY requirements/ requirements/

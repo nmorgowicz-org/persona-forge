@@ -603,8 +603,10 @@ class OVTalkerRuntime:
         self.core = core or ov.Core()
         self.compression = (compression or self._default_compression()).lower()
 
-        # "vocoder" is internal config; OpenVINO CPU plugin doesn't understand it.
-        core_config = {k: v for k, v in self._ov_config.items() if k != "vocoder"}
+        # "vocoder" is internal config; "device" is the compile_model *target*, not a config
+        # entry — the OV plugin config dict doesn't understand either key.
+        core_config = {k: v for k, v in self._ov_config.items() if k not in ("vocoder", "device")}
+        self.device = str(self._ov_config.get("device") or "CPU")
 
         # Per-core precision override (diagnostic): localize INT8 quality loss by
         # running one core INT8 and the other FP32. Defaults to the global compression
@@ -681,7 +683,7 @@ class OVTalkerRuntime:
                 if not predictor_stateful_path.is_file():
                     raise FileNotFoundError(f"missing stateful predictor IR: {predictor_stateful_path}")
                 compiled["predictor_stateful"] = self.core.compile_model(
-                    str(predictor_stateful_path), "CPU", core_config
+                    str(predictor_stateful_path), self.device, core_config
                 )
             else:
                 for key, filename in graph_files.items():
@@ -690,7 +692,7 @@ class OVTalkerRuntime:
                     path = self.model_dir / filename
                     if not path.is_file():
                         raise FileNotFoundError(f"missing IR graph for {key}: {path}")
-                    compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
+                    compiled[key] = self.core.compile_model(str(path), self.device, core_config)
             self._log_rss("after_predictor_compile")
 
             # Phase 2: release PyTorch weights before main compile
@@ -707,14 +709,14 @@ class OVTalkerRuntime:
                     path = self.model_dir / filename
                     if not path.is_file():
                         raise FileNotFoundError(f"missing IR graph for {key}: {path}")
-                    compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
+                    compiled[key] = self.core.compile_model(str(path), self.device, core_config)
 
                 main_layers = talker.model.config.num_hidden_layers
                 if main_stateful_path is not None:
                     if not main_stateful_path.is_file():
                         raise FileNotFoundError(f"missing stateful main IR: {main_stateful_path}")
                     main_stateful_compiled = self.core.compile_model(
-                        str(main_stateful_path), "CPU", core_config
+                        str(main_stateful_path), self.device, core_config
                     )
                     self.main = _OVStatefulCore(main_stateful_compiled, main_layers)
                     self.main_comp = f"stateful-{main_comp}"
@@ -740,14 +742,14 @@ class OVTalkerRuntime:
                 path = self.model_dir / filename
                 if not path.is_file():
                     raise FileNotFoundError(f"missing IR graph for {key}: {path}")
-                compiled[key] = self.core.compile_model(str(path), "CPU", core_config)
+                compiled[key] = self.core.compile_model(str(path), self.device, core_config)
 
             main_layers = talker.model.config.num_hidden_layers
             if main_stateful_path is not None:
                 if not main_stateful_path.is_file():
                     raise FileNotFoundError(f"missing stateful main IR: {main_stateful_path}")
                 main_stateful_compiled = self.core.compile_model(
-                    str(main_stateful_path), "CPU", core_config
+                    str(main_stateful_path), self.device, core_config
                 )
                 self.main = _OVStatefulCore(main_stateful_compiled, main_layers)
                 self.main_comp = f"stateful-{main_comp}"

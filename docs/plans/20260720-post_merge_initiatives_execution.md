@@ -72,50 +72,51 @@ whose dependencies (comprehensive §5) are green.
 
 ## 3. Navigation map (comprehensive plan)
 
-Line hints refreshed 2026-07-21 (A6/A7 decomposition) — use the heading, not the number.
+Line hints refreshed 2026-07-22 (D14/D15 + A4b insertion) — use the heading, not the number.
 
 | Section / Phase | Line | Why it exists |
 |---|---:|---|
 | §1 Purpose & scope | 21 | The three initiatives, why bundled, ordering |
 | §2 Research baseline | 49 | Current-state facts (deps, backend, capture, guided) — the source of truth for every phase |
-| §3 Decision register | 149 | D1–D11 frozen decisions — do not reopen |
-| §4 Global rules & invariants | 234 | Privacy, additive/no-CI, **§4.3 gate taxonomy**, **§4.4 task budget 60–80k**, context mgmt |
-| §5 Dependency & sequencing index | 284 | Phase order + what each depends on |
-| §6 Initiative A (uv + accel) | 320 | |
-| — Phase A1 (pyproject/uv config) | 322 | |
-| — Phase A2 (uv sync proves real venv) | 399 | |
-| — Phase A3 (docs + rewire, keep CI) | 437 | |
-| — Phase A4 (TTS_DEVICE + OPENVINO_DEVICE seams) | 473 | |
-| — Phase A5 (accelerator guide + deferred paths) | 524 | |
-| — Phase A6 (OmniVoice-iGPU **validated** findings + packaging design) | 576 | reference for A6a–A6g; not itself a task |
-| — **A6.4a Detection model** (capability vs presence; torch-independent family selection) | 700 | **read before A6c/A6d/A7c** |
-| — Phase A6a (OmniVoice device seam + auto fp64-emu) | 749 | |
-| — Phase A6b (honest OMP=4 CPU baseline; measurement) | 776 | |
-| — Phase A6c (gpu_family detection + describe_accelerator) | 785 | |
-| — Phase A6d (accel-aware entrypoint: family + runtime env) | 815 | |
-| — Phase A6e (first-boot per-family torch install) | 834 | |
-| — Phase A6f (base-image libs + /dev/dri compose + A5 reconcile) | 856 | |
-| — Phase A6g (int8 PTQ; deferred) | 877 | |
-| — Phase A7 (persisted runtime config — header + D11 context) | 891 | reference for A7a–A7d |
-| — Phase A7a (persistence backend: runtime.json + startup layering) | 912 | |
-| — Phase A7b (API: source/lock/restart + reset/dry-run) | 939 | |
-| — Phase A7c (container coach: copy + card) | 956 | |
-| — Phase A7d (premium Runtime control surface; may split A7d/A7e) | 979 | |
-| §7 Initiative B (capture harness) | 1004 | |
-| — Phase B1 (real-server spawn) | 1010 | |
-| — Phase B2 (fixtures + seeding) | 1067 | |
-| — Phase B3 (capture.mjs --real) | 1107 | |
-| — Phase B4 (GIF helpers) | 1134 | |
-| — Phase B5 (testids) | 1163 | |
-| — Phase B6 (scenario catalog) | 1192 | |
-| — Phase B7 (coverage doc + workflow) | 1238 | |
-| §8 Initiative C (guided experience) | 1261 | |
-| — Phase C1 (metric tooltips) | 1268 | |
-| — Phase C2 (progressive disclosure) | 1305 | |
-| — Phase C3 (glossary/KB) | 1343 | |
-| — Phase C4 (take diagnostics) | 1377 | |
-| — Phase C5 (persona wizard) | 1413 | |
-| §9 Completion ledger | 1453 | |
+| §3 Decision register | 149 | D1–D15 frozen decisions — do not reopen |
+| §4 Global rules & invariants | 280 | Privacy, additive/no-CI, **§4.3 gate taxonomy**, **§4.4 task budget 60–80k**, context mgmt, **§4.5 docs-per-phase (D13)** |
+| §5 Dependency & sequencing index | 340 | Phase order + what each depends on |
+| §6 Initiative A (uv + accel) | 377 | |
+| — Phase A1 (pyproject/uv config) | 379 | pocket-tts+omnivoice main, qwen-tts opt-in extra (D14) |
+| — Phase A2 (uv sync proves real venv) | 456 | |
+| — Phase A3 (docs + rewire, keep CI) | 494 | |
+| — Phase A4 (TTS_DEVICE + OPENVINO_DEVICE seams) | 530 | |
+| — Phase A4b (Qwen3-TTS engine-mode auto-select: pytorch vs openvino, IR-gated) | 581 | D9 addendum / D15 |
+| — Phase A5 (accelerator guide + deferred paths) | 636 | |
+| — Phase A6 (OmniVoice-iGPU **validated** findings + packaging design) | 688 | reference for A6a–A6g; not itself a task |
+| — **A6.4a Detection model** (capability vs presence; torch-independent family selection) | 812 | **read before A6c/A6d/A7c** |
+| — Phase A6a (OmniVoice device seam + auto fp64-emu) | 861 | |
+| — Phase A6b (honest OMP=4 CPU baseline; measurement) | 888 | |
+| — Phase A6c (gpu_family detection + describe_accelerator) | 897 | |
+| — Phase A6d (accel-aware entrypoint: family + runtime env) | 927 | |
+| — Phase A6e (first-boot per-family torch install) | 946 | |
+| — Phase A6f (base-image libs + /dev/dri compose + A5 reconcile) | 968 | |
+| — Phase A6g (int8 PTQ; deferred) | 989 | |
+| — Phase A7 (persisted runtime config — header + D11 context) | 1003 | reference for A7a–A7d |
+| — Phase A7a (persistence backend: runtime.json + startup layering) | 1024 | |
+| — Phase A7b (API: source/lock/restart + reset/dry-run) | 1051 | |
+| — Phase A7c (container coach: copy + card) | 1068 | |
+| — Phase A7d (premium Runtime control surface; may split A7d/A7e) | 1091 | |
+| §7 Initiative B (capture harness) | 1116 | |
+| — Phase B1 (real-server spawn) | 1122 | |
+| — Phase B2 (fixtures + seeding) | 1179 | |
+| — Phase B3 (capture.mjs --real) | 1219 | |
+| — Phase B4 (GIF helpers) | 1246 | |
+| — Phase B5 (testids) | 1275 | |
+| — Phase B6 (scenario catalog) | 1304 | |
+| — Phase B7 (coverage doc + workflow) | 1350 | |
+| §8 Initiative C (guided experience) | 1373 | |
+| — Phase C1 (metric tooltips) | 1380 | |
+| — Phase C2 (progressive disclosure) | 1417 | |
+| — Phase C3 (glossary/KB) | 1455 | |
+| — Phase C4 (take diagnostics) | 1489 | |
+| — Phase C5 (persona wizard) | 1525 | |
+| §9 Completion ledger | 1565 | |
 
 Refresh hints with:
 ```bash
@@ -135,32 +136,38 @@ Nick settles once then it's local; `[escalate→device]` = real Mac/model/browse
 ### Initiative A — uv local-dev migration
 
 **A1 — pyproject.toml + uv config**
-- State: not started · Depends on: — · Read: comprehensive §2.1, §2.2, D2/D5, Phase A1.
+- State: verified (2026-07-22) · Depends on: — · Read: comprehensive §2.1, §2.2, D2/D5/D14, Phase A1.
 - Deliverable: `pyproject.toml` + `uv.lock` with `[tool.uv] environments = ["sys_platform ==
-  'darwin'"]` (NO pytorch-cpu index split — see D2), transformers override, OmniVoice git pin;
-  `requirements-dev.txt` + Dockerfile untouched.
-- Gates: `uv lock -p 3.13` + grep for `5.12.1` / `398b6113` + `! grep cu128` `[local-verifiable]`;
-  arm64 torch actually resolving/installing `[escalate→device]`. The resolver conflict is already
-  de-risked (frontier probe 2026-07-20: 120 pkgs green) — no open `[escalate→frontier]` here.
-- Completion proof: lock committed with the override + git rev, zero `cu128`; `git diff` shows no
-  CI/Dockerfile change.
+  'darwin'", "sys_platform == 'linux'"]`, transformers override, OmniVoice git pin;
+  `requirements-dev.txt` + Dockerfile untouched. **D14 (2026-07-22):** `pocket-tts` + `omnivoice`
+  are main deps (Persona Forge's two real levers); `qwen-tts` (+`einops`/`onnxruntime`/`sox`) moved
+  to `[project.optional-dependencies] qwen-tts` — install with `uv sync --extra qwen-tts`. Shared
+  transitive deps (torch/torchaudio/transformers/accelerate/librosa) stay main. `model.py`'s
+  `from qwen_tts import Qwen3TTSModel` is now a **lazy import** inside the pytorch/openvino load
+  branch, not module-level — required so a bare `uv sync` (pocket_tts-only) imports cleanly.
+- Gates: `uv lock -p 3.13` + grep for `5.12.1` / `398b6113` + `! grep cu128` + `pocket-tts` resolves
+  main + `qwen-tts` gated behind `extra == 'qwen-tts'` `[local-verifiable]` — all re-verified
+  2026-07-22 after the D14 restructuring; 343/343 `tests/tier1_unit/` green; app import proven in a
+  pocket_tts-only venv (no `qwen-tts` extra installed).
+- Completion proof: lock committed with the override + git rev, zero `cu128`, D14 extra wiring
+  confirmed; `git diff` shows no CI/Dockerfile change.
 
 **A2 — uv sync proves a real-model venv**
-- State: not started · Depends on: A1 · Read: comprehensive §2.2, Phase A2.
+- State: verified (2026-07-22) · Depends on: A1 · Read: comprehensive §2.2, Phase A2.
 - Deliverable: `uv sync` yields an env that imports gunicorn/torch/transformers + the app and
   passes the pytest subset.
 - Gates: import + pytest subset `[local-verifiable]`; MPS + app-import + real spawn `[escalate→device]`.
 - Completion proof: `uv run` imports succeed; pytest subset green; model loads (device).
 
 **A3 — docs + rewire capture prereq; CI intact**
-- State: not started · Depends on: A2 · Read: comprehensive Phase A3, D3/D4.
+- State: verified (2026-07-22) · Depends on: A2 · Read: comprehensive Phase A3, D3/D4.
 - Deliverable: local-setup doc references `uv sync`; B1 precondition notes `uv sync`; no CI /
   `requirements-dev.txt` edits.
 - Gates: CI-untouched + doc grep `[local-verifiable]`; clean-checkout `uv sync` reproduces `[escalate→device]`.
 - Completion proof: setup doc; `git diff` clean of CI/requirements-dev; from-scratch sync works (device).
 
 **A4 — runtime device seams (`TTS_DEVICE` + `OPENVINO_DEVICE`)** (axis a of D9)
-- State: not started · Depends on: A2 · Read: comprehensive Phase A4, D9/D10; `model.py:46` +
+- State: verified (2026-07-22) · Depends on: A2 · Read: comprehensive Phase A4, D9/D10; `model.py:46` +
   ~790/797, `omnivoice_engine.py:296`.
 - Deliverable: `resolve_device()` helper — **auto-detect** default (cuda>xpu>mps>cpu), `TTS_DEVICE`
   (fallback `DEVICE`) forces; torch backend + OmniVoice (iff API accepts) wired; **`OPENVINO_DEVICE`
@@ -171,8 +178,22 @@ Nick settles once then it's local; `[escalate→device]` = real Mac/model/browse
 - Completion proof: auto-default + env overrides work; per-backend device in `/health`; OV seam wired
   (iGPU run deferred to device gate); no pyproject diff.
 
+**A4b — Qwen3-TTS engine-mode auto-select (`pytorch` vs `openvino`)** (D9 addendum / D15)
+- State: verified (2026-07-22) · Depends on: A4 · Read: comprehensive Phase A4b, D9 addendum, D14/D15;
+  `presets.py::PRESETS[...]["backend"]`, `config.py::apply_preset_env`.
+- Deliverable: `has_valid_export(preset)` filesystem check (does the preset's `main_stateful_model`
+  IR actually exist on disk); `apply_preset_env`'s preset-backend fallback becomes
+  `"openvino" if has_valid_export(preset) else "pytorch"` — **never** auto-triggers
+  `scripts/export.py`. Does not touch the product default (`TTS_BACKEND=pocket_tts` in
+  `.env.example`, which still wins as an explicit var). `/health` reports why the fallback picked
+  what it picked.
+- Gates: no-IR-on-disk → `pytorch` fallback + `tests/tier1_unit/test_config.py` green
+  `[local-verifiable]`; fallback flips to `openvino` against a real exported IR `[escalate→device]`.
+- Completion proof: no-export hosts unchanged (`pytorch`); real export flips fallback to
+  `openvino`; explicit `TTS_BACKEND` always wins; docs updated (D13); no pyproject diff.
+
 **A5 — accelerator install guide + deferred paths (docs, not code)** (axis b of D9)
-- State: not started · Depends on: A2 · Read: comprehensive Phase A5, D2/D9/D10.
+- State: verified (2026-07-22) · Depends on: A2, A4b · Read: comprehensive Phase A5, D2/D9/D10.
 - Deliverable: dev-setup doc gains the out-of-box matrix (mac cpu+mps / linux cpu+cuda-auto / **linux
   ~5.5 GB caveat** / Intel-iGPU-via-OpenVINO) + the deferred-path map (slim-CPU/ROCm/XPU blocked by
   OmniVoice's cu128 source — `UV_TORCH_BACKEND` overruled, validated — + the OmniVoice-source escape

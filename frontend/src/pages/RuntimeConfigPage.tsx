@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Settings2 } from 'lucide-react'
+import { Settings2, Cpu } from 'lucide-react'
 import { getRuntimeConfig, updateRuntimeConfig, type RuntimeConfigState } from '@/lib/api'
+import { AcceleratorCoachCard } from '@/components/AcceleratorCoachCard'
 import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -17,15 +18,46 @@ import {
 
 type LiveDraft = RuntimeConfigState['live']
 
+// D7: "Show advanced" only hides via CSS — it must never conditionally unmount power-user
+// controls, so a collapsed Expert section still exists in the DOM.
+function expertClass(expertMode: boolean) {
+  return expertMode ? '' : 'hidden'
+}
+
+// Phase A7b's `live_metadata` is additive/optional — every consumer must degrade gracefully
+// when it's absent (e.g. talking to a backend that predates A7b).
+type LiveKeyMeta = { source: 'file' | 'env' | 'default'; locked: boolean; restart_required: boolean }
+
+function KeyBadges({ meta }: { meta: LiveKeyMeta | undefined }) {
+  if (!meta) return null
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <Badge variant="outline" className="text-[9px] px-1 py-0 font-mono">
+        {meta.source}
+      </Badge>
+      {meta.locked && (
+        <Badge variant="secondary" className="text-[9px] px-1 py-0">
+          env-locked
+        </Badge>
+      )}
+      <Badge variant="outline" className="text-[9px] px-1 py-0">
+        {meta.restart_required ? 'needs restart' : 'applies live'}
+      </Badge>
+    </div>
+  )
+}
+
 export function RuntimeConfigPage() {
   const [state, setState] = useState<RuntimeConfigState | null>(null)
   const [draft, setDraft] = useState<LiveDraft | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [applying, setApplying] = useState(false)
+  const [redetecting, setRedetecting] = useState(false)
+  const [expertMode, setExpertMode] = useState(false)
   const setRuntimeConfig = useAppStore((s) => s.setRuntimeConfig)
 
   const refresh = useCallback(() => {
-    getRuntimeConfig()
+    return getRuntimeConfig()
       .then((s) => {
         setState(s)
         setDraft(s.live)
@@ -37,6 +69,15 @@ export function RuntimeConfigPage() {
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
   }, [setRuntimeConfig])
+
+  async function redetect() {
+    setRedetecting(true)
+    try {
+      await refresh()
+    } finally {
+      setRedetecting(false)
+    }
+  }
 
   useEffect(() => {
     refresh()
@@ -77,13 +118,58 @@ export function RuntimeConfigPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-2xl font-semibold tracking-tight">Runtime</h1>
-        <p className="text-sm text-muted-foreground">
-          Live knobs for how this container is running right now. Changes to backend or
-          quantization briefly reload the model — in-flight requests wait, they don't fail.
-        </p>
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex items-start justify-between gap-4"
+      >
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Runtime</h1>
+          <p className="text-sm text-muted-foreground">
+            Live knobs for how this container is running right now. Changes to backend or
+            quantization briefly reload the model — in-flight requests wait, they don't fail.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setExpertMode((v) => !v)}>
+          {expertMode ? 'Hide advanced' : 'Show advanced'}
+        </Button>
       </motion.div>
+
+      {state?.accelerator && (
+        <AcceleratorCoachCard
+          accelerator={state.accelerator}
+          onRedetect={redetect}
+          redetecting={redetecting}
+        />
+      )}
+
+      {state?.accelerator && (
+        <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm">
+          <div className="flex items-center gap-2">
+            <Cpu className="size-4 text-primary" />
+            <p className="text-sm font-semibold">Detected accelerator</p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <Badge variant="outline" className="font-mono text-[11px]">
+              family: {state.accelerator.detected_family}
+            </Badge>
+            <Badge variant="outline" className="font-mono text-[11px]">
+              device: {state.accelerator.device}
+            </Badge>
+            <Badge variant="outline" className="font-mono text-[11px]">
+              capable: {state.accelerator.capable ? 'yes' : 'no'}
+            </Badge>
+            <span className={expertClass(expertMode)}>
+              <Badge variant="outline" className="font-mono text-[11px]">
+                has_fp64: {state.accelerator.has_fp64 == null ? 'n/a' : String(state.accelerator.has_fp64)}
+              </Badge>
+              <Badge variant="outline" className="ml-1.5 font-mono text-[11px]">
+                fp64_emulation: {state.accelerator.emu_active ? 'active' : 'off'}
+              </Badge>
+            </span>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
@@ -110,11 +196,17 @@ export function RuntimeConfigPage() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground">
-                Backend (reloads model)
-              </label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Backend (reloads model)
+                </label>
+                <span className={expertClass(expertMode)}>
+                  <KeyBadges meta={state?.live_metadata?.TTS_BACKEND} />
+                </span>
+              </div>
               <Select
                 value={draft.TTS_BACKEND}
+                disabled={state?.live_metadata?.TTS_BACKEND?.locked}
                 onValueChange={(v) => {
                   const nextBackend = v as string
                   const prevBackend = draft.TTS_BACKEND
@@ -128,7 +220,10 @@ export function RuntimeConfigPage() {
                   setDraft({ ...draft, TTS_BACKEND: nextBackend, MODEL_DTYPE: dtype })
                 }}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger
+                  className="w-full"
+                  title={state?.live_metadata?.TTS_BACKEND?.locked ? 'Locked by container env var' : undefined}
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -142,13 +237,24 @@ export function RuntimeConfigPage() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground">
-                Idle unload (seconds, 0 = disabled)
-              </label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Idle unload (seconds, 0 = disabled)
+                </label>
+                <span className={expertClass(expertMode)}>
+                  <KeyBadges meta={state?.live_metadata?.IDLE_UNLOAD_SECONDS} />
+                </span>
+              </div>
               <Input
                 type="number"
                 min={0}
                 value={draft.IDLE_UNLOAD_SECONDS}
+                disabled={state?.live_metadata?.IDLE_UNLOAD_SECONDS?.locked}
+                title={
+                  state?.live_metadata?.IDLE_UNLOAD_SECONDS?.locked
+                    ? 'Locked by container env var'
+                    : undefined
+                }
                 onChange={(e) =>
                   setDraft({ ...draft, IDLE_UNLOAD_SECONDS: Number(e.target.value) })
                 }
@@ -156,13 +262,24 @@ export function RuntimeConfigPage() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground">
-                OV dynamic quant group size (reloads model)
-              </label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-muted-foreground">
+                  OV dynamic quant group size (reloads model)
+                </label>
+                <span className={expertClass(expertMode)}>
+                  <KeyBadges meta={state?.live_metadata?.OV_DYNAMIC_QUANT_GROUP_SIZE} />
+                </span>
+              </div>
               <Input
                 type="number"
                 min={0}
                 value={draft.OV_DYNAMIC_QUANT_GROUP_SIZE}
+                disabled={state?.live_metadata?.OV_DYNAMIC_QUANT_GROUP_SIZE?.locked}
+                title={
+                  state?.live_metadata?.OV_DYNAMIC_QUANT_GROUP_SIZE?.locked
+                    ? 'Locked by container env var'
+                    : undefined
+                }
                 onChange={(e) =>
                   setDraft({ ...draft, OV_DYNAMIC_QUANT_GROUP_SIZE: Number(e.target.value) })
                 }
@@ -170,9 +287,14 @@ export function RuntimeConfigPage() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground">
-                Model dtype (reloads model)
-              </label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Model dtype (reloads model)
+                </label>
+                <span className={expertClass(expertMode)}>
+                  <KeyBadges meta={state?.live_metadata?.MODEL_DTYPE} />
+                </span>
+              </div>
               {draft.TTS_BACKEND === 'openvino' ? (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span>bf16</span>
@@ -183,9 +305,13 @@ export function RuntimeConfigPage() {
               ) : (
                 <Select
                   value={draft.MODEL_DTYPE}
+                  disabled={state?.live_metadata?.MODEL_DTYPE?.locked}
                   onValueChange={(v) => setDraft({ ...draft, MODEL_DTYPE: v })}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger
+                    className="w-full"
+                    title={state?.live_metadata?.MODEL_DTYPE?.locked ? 'Locked by container env var' : undefined}
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -201,10 +327,16 @@ export function RuntimeConfigPage() {
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Silence trim</label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-muted-foreground">Silence trim</label>
+                <span className={expertClass(expertMode)}>
+                  <KeyBadges meta={state?.live_metadata?.SILENCE_TRIM} />
+                </span>
+              </div>
               <Toggle
                 variant="outline"
                 pressed={draft.SILENCE_TRIM}
+                disabled={state?.live_metadata?.SILENCE_TRIM?.locked}
                 onPressedChange={(v) => setDraft({ ...draft, SILENCE_TRIM: v })}
                 className="w-fit"
               >
@@ -212,30 +344,38 @@ export function RuntimeConfigPage() {
               </Toggle>
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground">
-                Silence trim threshold (fraction of peak)
-              </label>
+            <div className={`flex flex-col gap-1.5 ${expertClass(expertMode)}`}>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Silence trim threshold (fraction of peak)
+                </label>
+                <KeyBadges meta={state?.live_metadata?.SILENCE_TRIM_THRESH} />
+              </div>
               <Input
                 type="number"
                 step="0.001"
                 min={0}
                 max={1}
                 value={draft.SILENCE_TRIM_THRESH}
+                disabled={state?.live_metadata?.SILENCE_TRIM_THRESH?.locked}
                 onChange={(e) =>
                   setDraft({ ...draft, SILENCE_TRIM_THRESH: Number(e.target.value) })
                 }
               />
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted-foreground">
-                Silence trim pad (ms)
-              </label>
+            <div className={`flex flex-col gap-1.5 ${expertClass(expertMode)}`}>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Silence trim pad (ms)
+                </label>
+                <KeyBadges meta={state?.live_metadata?.SILENCE_TRIM_PAD_MS} />
+              </div>
               <Input
                 type="number"
                 min={0}
                 value={draft.SILENCE_TRIM_PAD_MS}
+                disabled={state?.live_metadata?.SILENCE_TRIM_PAD_MS?.locked}
                 onChange={(e) =>
                   setDraft({ ...draft, SILENCE_TRIM_PAD_MS: Number(e.target.value) })
                 }
@@ -454,6 +594,27 @@ export function RuntimeConfigPage() {
             <Badge variant="outline" className="font-mono text-[11px] opacity-60">
               compression: {state.not_live.compression ?? 'n/a'}
             </Badge>
+          </div>
+        </motion.div>
+      )}
+
+      {state?.restart_required && Object.keys(state.restart_required).length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          className={`flex flex-col gap-3 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm ${expertClass(expertMode)}`}
+        >
+          <p className="text-sm font-semibold">Requires container restart</p>
+          <p className="text-xs text-muted-foreground">
+            Set via env var at container start — this app can't change these live.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {Object.entries(state.restart_required).map(([name, info]) => (
+              <Badge key={name} variant="outline" className="font-mono text-[11px]" title={info.reason}>
+                {name}: {String(info.value)}
+              </Badge>
+            ))}
           </div>
         </motion.div>
       )}

@@ -17,13 +17,20 @@ from qwen3_tts.config import REF_AUDIO_PATH, apply_preset_env, normalize_backend
 from qwen3_tts.openvino.runtime_config import apply_thread_env, resolve_inference_threads
 from qwen3_tts.presets import get_voice_design_preset, seconds_for_capacity
 from qwen3_tts.audio_style import apply_style_preset
+from qwen3_tts.runtime_store import apply_persisted_config
 
-apply_preset_env()
+_ACTIVE_PRESET = apply_preset_env()
 
 apply_thread_env()
 
+# Phase A7a: persisted runtime.json overrides preset/env defaults (D11: env-locked > file >
+# default), except for keys an operator has explicitly locked via RUNTIME_LOCKED_KEYS/
+# RUNTIME_LOCK_<KEY>. Must run before torch/OV import since it can affect e.g. MODEL_DTYPE.
+apply_persisted_config(os.environ)
+
 import torch
 
+from qwen3_tts.device import resolve_device
 from qwen3_tts.model_config import (
     configure_hf_token,
     resolve_model_repo,
@@ -39,11 +46,10 @@ from qwen3_tts.transformers_compat import (
 
 configure_hf_token()
 
-from qwen_tts import Qwen3TTSModel
-
 MODEL_ID = resolve_model_repo()
 MODEL_REVISION = os.getenv("MODEL_REVISION") or None
-DEVICE = os.getenv("DEVICE", "cpu")
+DEVICE = resolve_device()
+OPENVINO_DEVICE = (os.getenv("OPENVINO_DEVICE") or "AUTO").strip().upper()
 TTS_BACKEND = normalize_backend(os.getenv("TTS_BACKEND") or "pytorch")
 REF_AUDIO = (os.getenv("REF_AUDIO") or REF_AUDIO_PATH).strip() or None
 REF_TEXT = (os.getenv("REF_TEXT") or "").strip()
@@ -477,6 +483,10 @@ def load_model(profile: ModelProfile | None = None):
             f"(low_cpu_mem_usage={OPENVINO_LOW_CPU_MEM_USAGE})...",
             flush=True,
         )
+        # Lazy import: qwen-tts is an opt-in extra (uv sync --extra qwen-tts), not installed by
+        # a bare uv sync — pocket_tts-only environments must never require it at module import time.
+        from qwen_tts import Qwen3TTSModel
+
         wrapped = Qwen3TTSModel.from_pretrained(
             profile.model_repo,
             revision=profile.revision,
@@ -769,6 +779,8 @@ def health_state() -> dict[str, Any]:
         "idle_unload_seconds": idle_unload_seconds,
         "backend": TTS_BACKEND,
         "resolved_backend": TTS_BACKEND,
+        "backend_source": _ACTIVE_PRESET.get("backend_source"),
+        "backend_fallback_choice": _ACTIVE_PRESET.get("backend_fallback_choice"),
         "model": MODEL_ID,
         "model_revision": MODEL_REVISION,
         "device": DEVICE,
@@ -787,14 +799,14 @@ def health_state() -> dict[str, Any]:
             vr = ov_runtime.vocoder_runtime
             vocoder_info = {
                 "enabled": bool(vr and vr.enabled),
-                "device": "CPU",
+                "device": (ov_config or {}).get("vocoder", {}).get("device", "CPU"),
             }
 
         base.update(
             {
                 "openvino": {
                     "version": ov_metadata.get("openvino_version"),
-                    "device": "CPU",
+                    "device": getattr(ov_runtime, "device", None) or OPENVINO_DEVICE,
                     "ir_directory": Path(OV_MODEL_DIR or "").name,
                     "ir_metadata_hash": ov_metadata.get("source_hash"),
                     "compression": ov_metadata.get("compression"),
@@ -945,9 +957,31 @@ def runtime_config_state() -> dict[str, Any]:
 
     hf_token_set = bool(os.getenv("HF_TOKEN"))
 
+    # Phase A7b: additive per-key provenance, alongside the existing bare `live` values
+    # (the existing POST live-reload contract/shape is unchanged).
+    from qwen3_tts.runtime_store import is_locked, load_persisted_config
+
+    persisted = load_persisted_config()
+    live_metadata = {
+        key: {
+            "value": value,
+            "source": "file" if key in persisted else ("env" if key in os.environ else "default"),
+            "locked": is_locked(key),
+            "restart_required": False,
+        }
+        for key, value in live.items()
+        if key in LIVE_RUNTIME_KEYS
+    }
+
+    # Phase A7c: expose the present∧¬capable detection gap so the container coach card knows
+    # when (and for which vendor) to show its snippet. Pure/import-safe (qwen3_tts.gpu_family).
+    from qwen3_tts.gpu_family import describe_accelerator
+
     return {
         "reconfig_in_progress": _reconfig_in_progress,
         "live": live,
+        "live_metadata": live_metadata,
+        "accelerator": describe_accelerator(),
         "read_only": {
             "mounts": mount_access,
             "ref_audio_path_set": bool(REF_AUDIO),
@@ -962,10 +996,22 @@ def runtime_config_state() -> dict[str, Any]:
             "compression": ov_metadata.get("compression") if ov_metadata else None,
             "reason": "Baked into the OpenVINO IR at export time; requires re-export (see docs/HOW_TO_RUN.md).",
         },
+        # Entrypoint-only knobs the app can see but cannot change live — container
+        # recreation is required (Phase A6/A6d-e).
+        "restart_required": {
+            "GPU_FAMILY": {
+                "value": os.getenv("GPU_FAMILY", "auto"),
+                "reason": (
+                    "Accelerator family is resolved once at container entrypoint "
+                    "(torch wheel install + /dev/dri passthrough); changing it requires "
+                    "recreating the container, not just this API. See GPU_FAMILY in compose.yml."
+                ),
+            },
+        },
     }
 
 
-def apply_runtime_config(updates: dict[str, Any]) -> dict[str, Any]:
+def apply_runtime_config(updates: dict[str, Any], persist: bool = True) -> dict[str, Any]:
     """Apply a partial set of live-adjustable runtime knobs.
 
     Must run inside model.executor (same serialization discipline as load_model()/
@@ -973,6 +1019,10 @@ def apply_runtime_config(updates: dict[str, Any]) -> dict[str, Any]:
     ``model.executor.submit(apply_runtime_config, updates)``, never call directly
     off-thread. Unknown keys are rejected up front (before mutating anything) so a
     partially-applied bad request can't leave the service in a half-updated state.
+
+    ``persist=True`` (default) writes the successfully-applied, non-locked keys through
+    to ``runtime.json`` (Phase A7a) so they survive a restart. Persistence only happens
+    after the reload below completes without raising — a failed reload never persists.
     """
     unknown = set(updates) - LIVE_RUNTIME_KEYS
     if unknown:
@@ -1034,6 +1084,88 @@ def apply_runtime_config(updates: dict[str, Any]) -> dict[str, Any]:
             _voice_clone_prompt_cache.clear()
     finally:
         _reconfig_in_progress = False
+
+    if persist:
+        from qwen3_tts.runtime_store import is_locked, load_persisted_config, save_persisted_config
+
+        to_persist = {k: v for k, v in updates.items() if not is_locked(k)}
+        if to_persist:
+            persisted = load_persisted_config()
+            persisted.update(to_persist)
+            save_persisted_config(persisted)
+
+    return runtime_config_state()
+
+
+def preview_runtime_config(updates: dict[str, Any]) -> dict[str, Any]:
+    """Phase A7b dry-run: report what apply_runtime_config(updates) *would* do, without
+    mutating os.environ, the in-memory globals, runtime.json, or triggering a reload."""
+    from qwen3_tts.runtime_store import is_locked
+
+    unknown = set(updates) - LIVE_RUNTIME_KEYS
+    if unknown:
+        raise ValueError(f"Not a live-adjustable key: {sorted(unknown)}")
+
+    locked_in_updates = sorted(k for k in updates if is_locked(k))
+    would_apply = {k: v for k, v in updates.items() if k not in locked_in_updates}
+
+    ptts_changed = bool(set(updates) & _POCKET_TTS_RUNTIME_KEYS)
+    backend_after = str(updates.get("TTS_BACKEND", TTS_BACKEND)).strip().lower()
+    needs_reload = (
+        bool(set(updates) & _RELOAD_ENV_KEYS)
+        or "TTS_BACKEND" in updates
+        or (ptts_changed and backend_after == "pocket_tts")
+    )
+
+    predicted_live = dict(runtime_config_state()["live"])
+    predicted_live.update(would_apply)
+
+    return {
+        "dry_run": True,
+        "would_apply": would_apply,
+        "would_skip_locked": locked_in_updates,
+        "reload_required": needs_reload,
+        "predicted_live": predicted_live,
+    }
+
+
+def reset_runtime_config() -> dict[str, Any]:
+    """Phase A7b: drop persisted runtime.json (keeping locked keys, since a lock is an
+    operator override that should survive a reset) and revert every other persisted key
+    back to its hardcoded default by removing it from os.environ — the same
+    ``os.getenv(key, <default>)`` fallbacks already in runtime_config_state() then take
+    over, mirroring apply_runtime_config's reload/persist discipline."""
+    from qwen3_tts.runtime_store import is_locked, load_persisted_config, save_persisted_config
+
+    global TTS_BACKEND, IDLE_UNLOAD_SECONDS, _reconfig_in_progress
+
+    persisted = load_persisted_config()
+    to_revert = {k for k in persisted if not is_locked(k)}
+    if not to_revert:
+        return runtime_config_state()
+
+    needs_reload = bool(to_revert & _RELOAD_ENV_KEYS) or "TTS_BACKEND" in to_revert
+
+    _reconfig_in_progress = True
+    try:
+        for key in to_revert:
+            os.environ.pop(key, None)
+
+        if "TTS_BACKEND" in to_revert:
+            TTS_BACKEND = normalize_backend(os.getenv("TTS_BACKEND") or "pytorch")
+        if "IDLE_UNLOAD_SECONDS" in to_revert:
+            IDLE_UNLOAD_SECONDS = int(os.environ.get("IDLE_UNLOAD_SECONDS", "0") or "0")
+
+        if needs_reload:
+            print(f"[app_worker] Runtime config reset requires reload: {sorted(to_revert)}", flush=True)
+            force_unload()
+            load_model(active_profile)
+            _voice_clone_prompt_cache.clear()
+    finally:
+        _reconfig_in_progress = False
+
+    remaining = {k: v for k, v in persisted.items() if is_locked(k)}
+    save_persisted_config(remaining)
 
     return runtime_config_state()
 
