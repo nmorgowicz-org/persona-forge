@@ -1812,6 +1812,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
 
           <button
             type="button"
+            data-testid="omnivoice-advanced-toggle"
             onClick={() =>
               setShowAdvanced(!showAdvanced)
             }
@@ -2155,6 +2156,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
                 </label>
                 <input
                   type="number"
+                  data-testid="omnivoice-candidates-per-segment"
                   min={1}
                   max={6}
                   value={candidatesPerSegment}

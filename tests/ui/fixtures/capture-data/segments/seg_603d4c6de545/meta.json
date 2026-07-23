@@ -1,0 +1,32 @@
+{
+  "segment_id": "seg_603d4c6de545",
+  "text": "The quick brown fox jumps over the lazy dog.",
+  "instruct": "australian accent, female",
+  "tags": [
+    "australian accent",
+    "female"
+  ],
+  "engine": "omnivoice",
+  "accent_id": null,
+  "sample_rate": 24000,
+  "language": "english",
+  "seed": null,
+  "num_step": null,
+  "speed": null,
+  "guidance_scale": null,
+  "diverse_candidates": false,
+  "postprocess_output": null,
+  "duration_target": null,
+  "candidate_id": "18e7bf0fb5544a9081195f2eb0aedc08",
+  "job_id": "5dcf7b8ebe77450498141bc8f5c29bae",
+  "whisper_transcript": "The quick brown fox jumps over the lazy dog.",
+  "match_score": 1.0,
+  "duration_sec": 2.63,
+  "feature_tags": [
+    "australian accent",
+    "upbeat"
+  ],
+  "project_id": "proj_fixture01",
+  "project_name": "Fixture Project",
+  "created_at": 1784754129.223069
+}

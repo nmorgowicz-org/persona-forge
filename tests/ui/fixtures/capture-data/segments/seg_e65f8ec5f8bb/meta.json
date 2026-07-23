@@ -1,0 +1,32 @@
+{
+  "segment_id": "seg_e65f8ec5f8bb",
+  "text": "Please hold while we connect your call.",
+  "instruct": "australian accent, male",
+  "tags": [
+    "australian accent",
+    "male"
+  ],
+  "engine": "omnivoice",
+  "accent_id": null,
+  "sample_rate": 24000,
+  "language": "english",
+  "seed": null,
+  "num_step": null,
+  "speed": null,
+  "guidance_scale": null,
+  "diverse_candidates": false,
+  "postprocess_output": null,
+  "duration_target": null,
+  "candidate_id": "3ce6fcae0a264b2a91753ffda10b27de",
+  "job_id": "cac30afeb64946ae9fec0ae8be962338",
+  "whisper_transcript": "Please hold while we connect your call.",
+  "match_score": 1.0,
+  "duration_sec": 1.87,
+  "feature_tags": [
+    "australian accent",
+    "calm"
+  ],
+  "project_id": "proj_fixture01",
+  "project_name": "Fixture Project",
+  "created_at": 1784754137.2490299
+}

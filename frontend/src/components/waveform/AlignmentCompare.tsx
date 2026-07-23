@@ -342,6 +342,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
       tabIndex={0}
       role="group"
       aria-label="A/B waveform comparison"
+      data-testid="alignment-compare"
       className="relative select-none space-y-1 rounded outline-none focus-visible:ring-1 focus-visible:ring-warning/50"
       onMouseMove={onStripMove}
       onMouseUp={finishDrag}

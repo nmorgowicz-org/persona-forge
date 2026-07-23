@@ -1,0 +1,58 @@
+{
+  "voice_id": "vd_c66abd9c8eb0",
+  "description": "a calm, neutral narrator voice, slightly warmer tone",
+  "sample_text": "This is a sample line used to preview the generated voice.",
+  "language": "English",
+  "seed": 3553055739,
+  "selections": null,
+  "created_at": 1784754119.18296,
+  "family_id": "vd_dd6c86850fc0",
+  "variant_name": "warmer take",
+  "variant_kind": null,
+  "source": "VoiceDesign",
+  "metrics": {
+    "duration_seconds": 3.3056666666666668,
+    "sample_rate": 24000,
+    "lufs_integrated": -20.656476764768904,
+    "peak_dbfs": -5.961952209472656,
+    "true_peak_dbfs": -5.961952209472656,
+    "speech_rate_proxy": 3.327619239689422,
+    "pause_count": 0,
+    "pause_total_seconds": 0.020333333333333314,
+    "pause_ratio": 0.006151053746092563,
+    "median_pause_ms": 0.0,
+    "longest_pause_ms": 0.0,
+    "pause_intervals": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        3.2853333333333334,
+        3.3056666666666668
+      ]
+    ],
+    "triage": {
+      "mode": "natural",
+      "coverage": null,
+      "boundaries_expected": 0.0,
+      "gaps_detected": 0,
+      "reasons": [
+        "No sentence-ending punctuation \u2014 nothing to segment; using Natural."
+      ],
+      "median_gap_ms": 0.0,
+      "speech_rate_cv": 0.0,
+      "snr_db": null,
+      "schema_version": 1
+    }
+  },
+  "quality_score": 100.0,
+  "quality_warnings": [],
+  "needs_review": false,
+  "auto_fixed": false,
+  "project_id": null,
+  "project_name": null,
+  "undo_available": false,
+  "mounted_reference": false,
+  "is_default": true
+}

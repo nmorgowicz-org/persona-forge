@@ -1316,8 +1316,25 @@ curl -s http://127.0.0.1:8893/health | grep -q '"model_loaded": *true' && echo "
 node tests/ui/run-server.mjs 8894   # [local-verifiable] fake tier still healthy; Ctrl-C both.
 ```
 
-**Completion proof:** `lib/python.mjs`, `run-real-server.mjs`, small `run-server.mjs` import edit;
-device gate shows MODEL LOADED + temp paths; observed first-load time recorded.
+**Completion proof (done 2026-07-22):** extracted `resolvePython()` into `tests/ui/lib/python.mjs`
+and re-imported it into `run-server.mjs` unchanged otherwise; added `run-real-server.mjs` exporting
+`startRealServer({ port, voiceLibraryDir, segmentLibraryDir, modelSize, device, timeoutMs })`,
+spawning the Flask dev server (D1) via `python -c "from qwen3_tts.app import app; app.run(...)"`
+with temp `mkdtempSync` voice/segment dirs (never `data/voices`/`data/segments`), `TTS_BACKEND=pytorch`,
+and `waitUntilHealthy()` polling `/health` every 500ms for `model_loaded === true` (throwing the
+last `/health` body on timeout). Hit a real local blocker en route: this dev venv only had
+`pocket-tts` installed, not the `qwen-tts` extra the `pytorch` backend needs — user approved
+installing it locally for dev testing (1.7B). Installing `qwen-tts==0.1.1` alone wasn't enough —
+its API predates this repo's pinned `transformers==5.12.1` (CVE-2026-1839 override), so import
+failed until `scripts/patch_local_compat.py` (the same patch set the Dockerfile bakes into the
+container image) was run against the local `.venv`'s site-packages; also needed the `sox` CLI
+binary (`brew install sox`) beyond the `sox` Python wheel. After both fixes, `node
+tests/ui/run-real-server.mjs 8893` downloaded and loaded the 1.7B base + voice-design checkpoints
+from HF, then printed `[run-real-server] healthy at http://127.0.0.1:8893` with both printed dirs
+confirmed under `$TMPDIR` (privacy gate) — satisfying the `[escalate→device]` gate locally rather
+than needing plexxie, since this Mac can run the real pytorch backend directly. `node
+tests/ui/run-server.mjs 8894` confirmed the fake tier is unaffected by the `lib/python.mjs`
+refactor (`fake tier http status: 200`). Both processes cleanly stopped afterward.
 
 ### Phase B2 — Fixture data + seeding
 
@@ -1357,7 +1374,38 @@ node tests/ui/run-real-server.mjs 8895 & sleep-until-healthy; \
 ```
 Fixture **privacy review** (every clip synthetic) is `[decide-once]` — confirmed once at generation.
 
-**Completion proof:** committed fixture counts; total KB; endpoint counts match; privacy confirmed.
+**Completion proof (done 2026-07-22):** `generate-capture-fixtures.mjs` spawns a real server
+(`seedFixtures: false`, since a from-scratch generator must not seed stale fixtures into its own
+throwaway dirs first) and drives the real HTTP API: `voice_design` create+save for a base voice,
+a second variant sharing its `family_id`, promoted to default via `/voices/:id/set-default`
+(not `/voices/:id/active` — an earlier attempt conflated "active" with "default" and was
+corrected), plus `/voices/:id/duplicate` for a `duplicated_from` voice; three
+`/omnivoice/segments` round-trips (audition → poll job → save), two sharing
+`project_id: 'proj_fixture01'`, one standalone, each with distinct `instruct`/`feature_tags`. Hit
+a real blocker mid-generation: several `instruct` strings used invented tone/mood words that
+OmniVoice's installed `omnivoice.utils.voice_design` constants module rejected as "Unsupported
+instruct items" — fixed by reading the actual enumerated English vocabulary (23 valid items,
+enforcing mutually-exclusive accent/gender groups) out of the installed package rather than
+guessing, and rewriting the fixture `instruct` strings to only use valid entries (e.g. `'australian
+accent, female'`, `'british accent, elderly'`). Generated dirs are copied into
+`tests/ui/fixtures/capture-data/{voices,segments}/`. `tests/ui/lib/seed.mjs` exports
+`seedCaptureFixtures(voiceLibraryDir, segmentLibraryDir)`, copying every entry under
+`capture-data/{voices,segments}/` into the given dirs (guarded by `existsSync`, never reading from
+real `data/voices`/`data/segments`); wired into `startRealServer()` via a `seedFixtures = true`
+option, called immediately after temp dirs are created and before the Python subprocess spawns.
+Gate results: `du -sk tests/ui/fixtures/capture-data` → 856 KB — over the "low hundreds of KB"
+estimate, but confirmed non-blocking: per-directory sizes (92–168 KB each) are dominated by real
+synthesized WAV audio across 6 fixture items, not accidental bloat. A real server on port 8897
+with default seeding confirmed `GET /voices` returns exactly 3 voices (base, promoted variant with
+`is_default: true` and matching `family_id`, duplicate with `source: 'duplicate'` and
+`duplicated_from` set) and `GET /omnivoice/segments` returns exactly 3 segments (2 sharing
+`project_id`, 1 standalone) with the expected metadata shape. All of the above was additionally
+re-validated end-to-end after bumping the OmniVoice git pin from `398b6113` (v0.1.5) to `468e927b`
+(v0.2.1) per explicit user request ("fold it in now please") rather than deferring the bump: `uv
+lock` + `uv sync --extra qwen-tts` showed the bump was isolated to the `omnivoice` package only,
+`scripts/patch_local_compat.py` reapplied cleanly against the new venv (patches target
+`qwen_tts`/`transformers`, not `omnivoice`, so were unaffected), and the fixture generator was
+re-run in full against v0.2.1 with zero errors, producing a fresh fixture set with new UUIDs.
 
 ### Phase B3 — `capture.mjs` real-mode wiring
 
@@ -1384,7 +1432,30 @@ node tests/ui/capture.mjs --real --scenario scenarioHome     # [escalate→devic
 ls -la docs/screenshots/artifacts/core/home.png              # [local-verifiable] recent, non-zero
 ```
 
-**Completion proof:** `parseArgs`/`main()` diff; both runs pass; real-run wall-clock recorded.
+**Completion proof (done 2026-07-22):** `parseArgs` gained `--real`, `--model-size`, `--device`
+(defaults `0.6B`/`cpu`), throwing if combined with `--target`; `main()` branches to
+`startRealServer({ port, modelSize, device })` when `args.real`, passing a 120s
+`waitUntilHealthy` wait (vs. the fake tier's unchanged default), otherwise using `startFakeServer`
+byte-for-byte as before. Hit a real, unrelated local blocker en route: `node
+tests/ui/capture.mjs --scenario scenarioHome` hung silently for minutes with zero output — root
+cause was `puppeteer.launch()` failing to find/load Chrome. Two separate issues stacked here: (1)
+the pinned `puppeteer@^24.0.0` expected Chrome v148.0.7778.97, but only a stray v150.0.7871.24
+build (installed for `llama-monitor`) was in the shared `~/.cache/puppeteer` cache — confirmed the
+shared cache is additive (new `puppeteer browsers install` calls add versions alongside existing
+ones, never removing them, so `llama-monitor`'s v150 was never at risk); (2) every attempt to
+download v148 via `puppeteer browsers install chrome` silently produced a truncated, unusable
+install (448 KB total, missing the entire `Contents/Frameworks/` dir and a 67 KB stub binary where
+a real ~300 MB one belongs) — while the pre-existing v150 build downloaded earlier was confirmed
+fully intact (346 MB, real framework present). Rather than keep fighting the v148 download,
+checked `puppeteer-core@25.3.0`'s `revisions.js` directly (`chrome: '150.0.7871.24'`) and bumped
+`tests/ui/package.json`'s pin from `^24.0.0` to `^25.3.0` — an exact match for the already-working
+v150 cache — and corrected the stale `allowScripts` entry (`puppeteer@24.43.1` → `puppeteer@25.3.0`)
+so it still matches the resolved version. After the bump, both gate commands passed cleanly:
+`node tests/ui/capture.mjs --scenario scenarioHome` (fake tier, unaffected by the real-mode diff)
+and `node tests/ui/capture.mjs --real --scenario scenarioHome` (real tier: spawn → seed → 0.6B
+model load → screenshot → clean teardown, 20s wall-clock — fast since the 0.6B checkpoint was
+already HF-cached from B1/B2) both wrote `core/home.png` with no errors, and no server/browser
+processes were left running afterward.
 
 ### Phase B4 — GIF capture helpers
 
@@ -1413,7 +1484,15 @@ find docs/screenshots/artifacts tests/ui -type d -name frames                   
 rm tests/ui/lib/_gif_smoke.mjs
 ```
 
-**Completion proof:** `lib/gif.mjs` with three exports; a valid GIF; cleanup confirmed; smoke removed.
+**Completion proof (done 2026-07-22):** `tests/ui/lib/gif.mjs` ports `captureFrames`/
+`framesToGif`/`cleanupFrames` from `../llama-monitor/tests/ui/capture.mjs` unchanged in logic —
+frames go to a temp `tests/ui/frames/` dir, `ffmpeg` invoked via `execFileSync` with an argument
+array (palettegen/paletteuse two-pass GIF encode, never a shell string), not wired into any
+scenario yet. Smoke test (`tests/ui/lib/_gif_smoke.mjs`, written then removed): fake server + 3
+frames of the home page at 3fps → `core/_smoke.gif`. `file` confirmed a real `GIF image data,
+version 89a, 900 x 563`; `find ... -type d -name frames` returned nothing both before and after
+(confirming `cleanupFrames()` removes the temp dir). Smoke file and script both deleted after the
+gate passed.
 
 ### Phase B5 — `data-testid` additions (demand-driven)
 
@@ -1461,19 +1540,36 @@ add any missing testid per B5 in the same change; `screenshot(...)` or a GIF via
 in the categorized `--list-scenarios`.
 
 **Catalog (adjust + document here if a feature differs from this description):**
-- *Voice Library:* `scenarioVoiceVariantList`, `scenarioVoicePromoteVariant` (before/after — also
-  regression visibility for the promotion-refresh fix), `scenarioVoiceForkBadge`,
-  `scenarioVoiceMountedWarning` (only if a mounted-ref fixture is feasible — confirm `isMountedRef`
-  in `VoiceLibraryPage.tsx`).
-- *Prosody:* `scenarioAlignmentCompare` (build now — UI review, not a demo);
-  `scenarioAlignmentCompareGif` (**hold** until the trough-biased safe-cut fix lands — current
-  alignment makes a poor GIF).
-- *Stitch Studio:* `scenarioSegmentLibraryBrowse`, `scenarioStitchAssembly`.
-- *Accent Design / OmniVoice:* `scenarioOmniVoiceAudition` (`omnivoice-result` exists),
-  `scenarioOmniVoiceAuditionGif` (~3s live), `scenarioPersonaForgeCandidates` (only if a
-  multi-candidate grid renders — confirm first), `scenarioAccentProjectGrouping`.
-- *Wizard GIF (highest value):* `scenarioDesignToStitchWizardGif` — pick text → instruct/accent →
-  OmniVoice generate → lock as segment → stitch into a voice; single continuous GIF.
+- *Voice Library:* `scenarioVoiceVariantList` (done), `scenarioVoicePromoteVariant` (done),
+  `scenarioVoiceForkBadge` — **skipped as redundant** (done 2026-07-22): `variant-list.png` from
+  `scenarioVoiceVariantList` already shows the `DUPLICATE`/`FORKED FROM VD_...` badges clearly; a
+  dedicated scenario would produce a near-duplicate artifact for no added coverage.
+  `scenarioVoiceMountedWarning` — feasibility confirmed 2026-07-22:
+  `is_mounted_or_readonly_reference()` (`voice_library.py:626`) requires `original.wav` to be a
+  symlink resolving outside `VOICE_LIBRARY_DIR`; a fixture could simulate this by having
+  `seed.mjs` replace one seeded voice's `original.wav` with such a symlink post-copy. Not yet
+  built — **tracked follow-up, own change**: deferred since it requires touching the shared
+  `seed.mjs` (affects every scenario), a bigger unit of work than "one scenario per change"
+  intends. Do this as its own dedicated change: (1) add an opt-in `symlinkMountedVoice` param to
+  `seedCaptureFixtures()` that replaces one seeded voice's `original.wav` with a symlink pointing
+  outside `VOICE_LIBRARY_DIR` post-copy, defaulting to off so no existing scenario's fixture state
+  changes; (2) add the scenario driving to that voice's card and screenshotting the mounted/
+  readonly warning badge.
+- *Prosody:* `scenarioAlignmentCompare` (done 2026-07-22);
+  `scenarioAlignmentCompareGif` (**hold** — tracked as
+  `docs/plans/20260709-app_roadmap_backlog.md` §8.4b "Verify Safe-Cut Quality Under a Real
+  Adjustment": a Jul 13 fix (`c5f75c8`) already reworked `resolve_safe_cut`'s cut-point selection,
+  but it's never been checked against a real "Adjust prosody" pass with visual confirmation of the
+  ADJUSTED lane — build that verification scenario first; lift this hold only once it confirms
+  clean cuts).
+- *Stitch Studio:* `scenarioSegmentLibraryBrowse` (done 2026-07-22), `scenarioStitchAssembly`
+  (done 2026-07-22).
+- *Accent Design / OmniVoice:* `scenarioOmniVoiceAudition` (done 2026-07-22),
+  `scenarioPersonaForgeCandidates` (done 2026-07-22 — multi-candidate grid confirmed),
+  `scenarioAccentProjectGrouping` (done 2026-07-22), `scenarioOmniVoiceAuditionGif`
+  (done 2026-07-23).
+- *Wizard GIF (highest value):* `scenarioDesignToStitchWizardGif` (done 2026-07-23) — pick text →
+  instruct/accent → OmniVoice generate → lock as segment → stitch into a voice; single continuous GIF.
 
 **Invariants:** real waits only; each scenario standalone; registered in `--list-scenarios`; never
 weaken the fake tier.
@@ -1490,7 +1586,111 @@ only where judgment is needed; the rest is device/local.
 **Completion proof (phase):** `--list-scenarios` spans Voice Library, Prosody, Stitch Studio,
 Accent Design/OmniVoice, GIFs (minus deferred `scenarioAlignmentCompareGif`).
 
-### Phase B7 — Coverage doc + operator workflow
+**Progress log (incremental, one entry per scenario landed):**
+- `scenarioVoiceVariantList` (done 2026-07-22): navigates to Voice Library, waits on the
+  pre-existing `nav-voice-library`/`voice-card` testids (zero new testids needed — B5's
+  demand-driven rule satisfied trivially here), screenshots the seeded family/variant/duplicate
+  state from B2's fixtures. Gate run against `--real`: `docs/screenshots/artifacts/voice-library/
+  variant-list.png` confirmed as a valid 1440x900 PNG, visually verified to show the duplicate
+  voice card with `DUPLICATE`/`FORKED FROM` badges and prosody-variant selector correctly
+  rendered; registered in `--list-scenarios` (automatic — it's a `SCENARIOS` object key, no
+  separate registration step exists).
+- `scenarioVoicePromoteVariant` (done 2026-07-22): added two B5 testids
+  (`voice-actions-trigger` on the "More voice actions" popover trigger, `voice-set-default` on
+  the "Set family default" button) and rebuilt `frontend/dist` so the real server picks them up.
+  Fixtures only ship one family (base + one already-promoted variant), leaving nothing left to
+  promote, so the scenario first duplicates the promoted family member via a direct
+  `POST /voices/{id}/duplicate` call (confirmed this copies `family_id` but drops `is_default`,
+  producing a promotable sibling) before driving the UI. Captures `promote-before.png`, clicks
+  "Set family default" on the new sibling, waits for the `/set-default` response plus the
+  `DEFAULT` badge to render, then captures `promote-after.png`. Both screenshots visually
+  confirmed: the after-shot shows the new `DEFAULT` badge on the promoted voice. Gate run
+  against `--real` three times while iterating on wait/timing (first attempt raced ahead of the
+  async promote before the badge rendered); final version is stable. Confirmed pre-existing,
+  unrelated fake-tier failure in `scenarioVoicesList` (reproduces identically with this session's
+  changes stashed) — not a regression from this work.
+- `scenarioAlignmentCompare` (done 2026-07-22): added one B5 testid
+  (`data-testid="alignment-compare"` on `AlignmentCompare.tsx`'s root `<div role="group">`) and
+  rebuilt `frontend/dist`. `AlignmentCompare` renders inline on every Voice Library card (not
+  gated behind a popover), so the scenario just navigates to Voice Library and waits on
+  `voice-card` then `alignment-compare`, no fixture setup needed. Gate run against `--real`
+  succeeded first try; `prosody/alignment-compare.png` visually confirmed as a valid 1440x900 PNG
+  showing the ORIGINAL waveform lane, transport controls, time ruler, and legend rendering
+  correctly (no ADJUSTED lane since no preview/prosody-adjust action was taken — expected for a
+  UI-review-not-a-demo scenario).
+- `scenarioSegmentLibraryBrowse` / `scenarioStitchAssembly` (done 2026-07-22): `LibraryPickerButton`
+  (the "Add saved segments"/"Add voice library" component in `StitchTimeline.tsx`, used both in
+  the empty-timeline state and the post-insert library bar) had zero testids and is generic over
+  item type, so added a required `testidPrefix` prop (`"segments"`/`"voices"`) threaded through to
+  the toggle button, each item's checkbox, and the "Insert selected" button
+  (`stitch-picker-toggle-<prefix>`, `stitch-picker-item-<prefix>`, `stitch-picker-insert-<prefix>`)
+  at all four call sites; also added `stitch-clip` on each `Reorder.Item` timeline clip. Rebuilt
+  `frontend/dist`. Browse opens the picker and screenshots the 3 seeded segments (B2 fixtures);
+  Assembly selects 2 of them, inserts, and screenshots the resulting 2-clip timeline. Both required
+  an extra `page.waitForFunction` gate on the picker panel's `getComputedStyle(...).opacity === '1'`
+  — the framer-motion fade-in was still mid-transition when `waitForSelector` resolved (DOM node
+  exists before the animation finishes), producing a washed-out first screenshot; fixed by waiting
+  for full opacity before screenshotting/clicking. Both gate runs against `--real` succeeded;
+  `stitch-studio/segment-library-browse.png` and `stitch-studio/assembly.png` visually confirmed —
+  the latter shows two waveform clips with trim/fade/gain controls and a running total duration.
+- `scenarioOmniVoiceAudition` / `scenarioPersonaForgeCandidates` / `scenarioAccentProjectGrouping`
+  (done 2026-07-22): added testids for `omnivoice-advanced-toggle`, `omnivoice-candidates-per-segment`
+  (`OmniVoicePanel.tsx`), `omnivoice-candidate-take` (`SegmentRackRow.tsx`),
+  `voice-library-group-by-project` and `segment-project-group` (`VoiceLibraryPage.tsx`); rebuilt
+  `frontend/dist`. All three scenarios required live `--real` model inference (real OmniVoice
+  generation, ~20s for 3 candidates). Audition selects the `accent-bank-au` preset (confirmed via
+  code reading that a single chip selection produces a valid `composeInstruct` string), types a
+  script, generates, and stitches; had to add a `waitForFunction` gating on
+  `omnivoice-candidate-take` count reaching the full candidate total before clicking stitch — the
+  initial version raced ahead and clicked stitch mid-generation (candidate 1/3), producing an
+  incomplete/empty result screenshot. The stitched result panel also renders below the fold, so
+  added a `scrollIntoView` + viewport-visibility wait before the final screenshot;
+  `omnivoice/audition-candidates.png` and `audition-result.png` visually confirmed (three
+  candidate waveforms, then a populated "STITCHED PREVIEW" with delivery-variant controls).
+  Persona-Forge sets `candidatesPerSegment` to 2 via the advanced panel's number input; the
+  standard triple-click-then-type approach failed twice — first because the advanced panel's
+  `framer-motion` `height: 'auto'` expand animation was still resizing the layout when the click
+  landed (fixed with a `requestAnimationFrame`-based layout-stability wait), second because
+  triple-click selection didn't clear the field's existing text before typing, appending "2" onto
+  "3" to produce "32" candidates instead of 2 (confirmed by the generation log showing "candidate
+  3/32"). Fixed by setting `.value` directly via the native input value setter and dispatching an
+  `input` event so React's controlled `onChange` fires, bypassing selection entirely. Also needed
+  a scroll-to-last-candidate wait since the segment rack renders below the fold.
+  `omnivoice/persona-forge-candidates.png` visually confirmed: a genuine T1/T2 multi-candidate
+  grid (T1 fully rendered, T2 still loading), satisfying the catalog's "confirm a multi-candidate
+  grid renders first" caveat. `scenarioAccentProjectGrouping`'s first run passed its gate but the
+  screenshot only showed the ungrouped Voices section — the `scrollIntoView` had fired before a
+  CSS smooth-scroll animation completed; fixed with the same viewport-visibility
+  `waitForFunction` pattern used elsewhere, then re-confirmed: `voice-library/project-grouping.png`
+  now clearly shows "Fixture Project (2)" as a distinct segment group above "Ungrouped (1)".
+- `scenarioDesignToStitchWizardGif` (done 2026-07-23): a concurrent fixed-cadence capture loop
+  (background `captureFrames` running via `Promise.all` alongside the driving clicks/typing) was
+  tried first, matching the harness's pre-existing pattern for other GIF scenarios. It failed under
+  real `--real` OmniVoice inference: `page.screenshot()` was starved on Chrome's main thread for the
+  *entire* ~24–40s duration of live candidate generation (not just briefly during navigation),
+  confirmed by testing three mitigations in turn — an unbounded `while(!isDone())` loop (180s hang
+  on frame 0, zero frames), a global `protocolTimeout: 15000` at `puppeteer.launch()` (fixed frame 0
+  but broke the unrelated `waitForFunction` polling for 3 candidates, since a shortened
+  protocolTimeout bounds *all* CDP calls uniformly), and a per-screenshot 20s `Promise.race` timeout
+  on the still-concurrent loop (screenshot never resolved even once across a full run). Checked
+  llama-monitor's `tests/ui/capture.mjs` (`../llama-monitor/tests/ui/capture.mjs`, the file this
+  repo's `gif.mjs` was originally ported from) for its actual working pattern: llama-monitor's
+  `scenarioSpawnWizardGif` never captures concurrently with driven actions at all — it's a purely
+  sequential `capture(durationMs)` dwell-loop (N screenshots + sleep, blocking, one call at a time),
+  and its wizard scenario has no real backend inference in the middle to contend with, only
+  synthetic/instant state changes. That confirmed the fix: rewrote `gif.mjs` around a
+  `createRecorder(prefix)` helper whose `snap(page)` is called synchronously between driveActions
+  steps (never concurrently with an in-flight action, including during the live audition — snaps
+  happen between polls of `/omnivoice/audition/progress`, not during the poll itself), eliminating
+  the contention by construction instead of tuning timeouts against it. Rerun against `--real`
+  produced 29 real frames over the full flow (Speak → Voice Design accent/script → OmniVoice
+  audition candidates generating live with progress bar → segment locked → Stitch Studio named
+  "Wizard Demo Voice" → saved → Voice Library showing the saved voice card);
+  `docs/screenshots/artifacts/wizard/design-to-stitch.gif` visually confirmed frame-by-frame
+  (frames 1, 5, 15, 24, 27, 29 inspected) to be a genuinely progressive walkthrough, not a frozen
+  end-state.
+
+### Phase B7 — Coverage doc + operator workflow (done 2026-07-23)
 
 **Mission:** make the tool discoverable — a coverage list + a proven point-and-shoot loop.
 
@@ -1506,6 +1706,24 @@ tests/ui/capture.mjs --real --scenario <name>` → inspect `docs/screenshots/art
 confirm the screenshot reflects it, `git checkout -- <file>`.
 
 **Completion proof:** README coverage list; dry-run screenshot showed the tweak.
+
+Done 2026-07-23: `tests/ui/README.md` added — categorized scenario catalog (Core, Voice Design,
+Voice Library, Prosody, Stitch Studio, Accent Design/OmniVoice, Wizard), the operator loop
+(change frontend → `npm run build` → `node tests/ui/capture.mjs --real --scenario <name>` →
+inspect `docs/screenshots/artifacts/<feature>/`), a "Deferred" line pointing at
+`scenarioVoiceMountedWarning` and `scenarioAlignmentCompareGif`'s tracked follow-ups, and a
+troubleshooting section. Dry-run gate executed: tweaked `SpeakPage.tsx`'s `<h1>` to
+`Speak [B7 dry-run]`, rebuilt, re-ran `scenarioHome` (fake tier), confirmed the tweak rendered in
+`docs/screenshots/artifacts/core/home.png`, then `git checkout -- frontend/src/pages/SpeakPage.tsx`
+and rebuilt again to restore `frontend/dist/` to its pre-tweak state.
+
+**Phase B (B1–B7) complete as of 2026-07-23.** Two B6 catalog items remain intentionally
+deferred with concrete tracked follow-ups rather than left open-ended:
+`scenarioVoiceMountedWarning` (needs an opt-in `symlinkMountedVoice` param on `seedCaptureFixtures()`,
+scoped inline above) and `scenarioAlignmentCompareGif` (blocked on
+`docs/plans/20260709-app_roadmap_backlog.md` §8.4b — real end-to-end visual verification of the
+Jul 13 safe-cut fix, since the "Adjust prosody" trigger has no `data-testid` yet). Neither blocks
+considering Phase B done; both are scoped for pickup in a future change.
 
 **B risks:** gated model downloads (B1's readiness error must surface `_startup_error`);
 first-run latency (minutes cold — timeouts generous/configurable); never weaken the fake/CI tier;

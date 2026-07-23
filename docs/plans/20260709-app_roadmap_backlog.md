@@ -218,6 +218,33 @@ correction tools expert users expect from waveform editing.
 - **Why**: Fixed fade length/intensity can't cover every cut; audible clicks or
   overly-soft transitions both become uncorrectable without this.
 
+### 8.4b Verify Safe-Cut Quality Under a Real Adjustment (P1)
+- **Status**: Not verified. `resolve_safe_cut` (`src/qwen3_tts/audio_post.py:289`) was
+  reworked on 2026-07-13 (`c5f75c8`) to search asymmetrically from a word's aligned
+  *end* and snap to the nearest sustained low-energy region (`trough =
+  np.argmin(env)` over a smoothed short-time energy envelope) rather than the
+  globally deepest trough or a naive symmetric window — intended to stop cuts from
+  severing a word from its own trailing gap.
+- **Current State**: That fix has never been checked against a real "Adjust
+  prosody" pass end-to-end with visual confirmation of the resulting ADJUSTED lane
+  in `AlignmentCompare`. The UI capture harness's `scenarioAlignmentCompare`
+  (`tests/ui/capture.mjs`, done 2026-07-22) only screenshots the ORIGINAL lane —
+  it never drives an actual prosody-adjust action, since `VoiceLibraryPage.tsx`'s
+  "Adjust prosody" button (line ~1376) has no `data-testid` yet. The GIF variant,
+  `scenarioAlignmentCompareGif`, is on hold in `docs/plans/20260720-post_merge_
+  initiatives.md` §Phase B6 pending exactly this verification.
+- **Technical Implementation Path**: add a `data-testid` to the "Adjust prosody"
+  trigger + its apply action (B5-style, demand-driven); drive a real adjustment in
+  a capture scenario against `--real`; visually inspect the ADJUSTED lane's cut
+  markers against the audio to confirm the Jul 13 fix actually produces clean,
+  word-boundary-respecting cuts on real generated audio. If it does, lift the GIF
+  hold and build `scenarioAlignmentCompareGif`; if it doesn't, this becomes the
+  concrete bug report (with a real captured example) needed to fix
+  `resolve_safe_cut` further.
+- **Why**: this is the one piece of the Jul 13 prosody fix that was never closed
+  the loop on with a real visual check — flagged as important to verify, not just
+  assumed fixed from the commit message alone.
+
 ### 8.5 Vertical/Gain Zoom (P2)
 - **Status**: Not Implemented.
 - **Technical Implementation Path**: A vertical scale control on `WaveformLane`

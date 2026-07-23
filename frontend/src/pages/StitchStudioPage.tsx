@@ -101,6 +101,7 @@ export function StitchStudioPage() {
         <label className="text-xs font-medium text-muted-foreground">Name this voice</label>
         <input
           type="text"
+          data-testid="stitch-voice-name"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Narrator — warm AU accent"

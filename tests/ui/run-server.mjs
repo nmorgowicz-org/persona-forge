@@ -2,28 +2,14 @@
 // healthy. Used by playwright.config.js's webServer block and by capture.mjs's default mode.
 // See docs/dev/resolved/E2E_AND_SCREENSHOTTING.md §3.1/§4.3.
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync } from 'node:fs'
+import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolvePython } from './lib/python.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(__dirname, '..', '..')
-
-// Prefer: repo's .venv python, then pythonLocation (GitHub Actions), then python/python3.
-function resolvePython() {
-  const venvPython = join(REPO_ROOT, '.venv', 'bin', 'python')
-  if (existsSync(venvPython)) return venvPython
-
-  // GitHub Actions sets pythonLocation to the tool path; derive python executable from it.
-  const pythonLocation = process.env.pythonLocation
-  if (pythonLocation) {
-    const candidate = join(pythonLocation, 'bin', 'python')
-    if (existsSync(candidate)) return candidate
-  }
-
-  return 'python'
-}
 
 export function startFakeServer({ port = 8319 } = {}) {
   const voiceLibraryDir = mkdtempSync(join(tmpdir(), 'qwen3-tts-e2e-voices-'))

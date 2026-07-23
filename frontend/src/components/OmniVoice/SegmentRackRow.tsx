@@ -403,6 +403,7 @@ export function SegmentRackRow({
               return (
                 <div
                   key={c.candidate_id}
+                  data-testid="omnivoice-candidate-take"
                   className={cn(
                     'flex min-w-0 flex-col gap-1.5 rounded-md border px-1.5 py-1.5 transition-all',
                     selected
@@ -432,6 +433,7 @@ export function SegmentRackRow({
                       <Tooltip.Trigger asChild>
                         <button
                           type="button"
+                          data-testid="omnivoice-lock-segment"
                           disabled={savedIds.has(c.candidate_id)}
                           onClick={async () => {
                             try {

@@ -990,8 +990,8 @@ wheels = [
 
 [[package]]
 name = "omnivoice"
-version = "0.1.5"
-source = { git = "https://github.com/k2-fsa/OmniVoice.git?rev=398b6113#398b61135c8dec788369b4c133c09ee9cf27847a" }
+version = "0.2.1"
+source = { git = "https://github.com/k2-fsa/OmniVoice.git?rev=468e927b#468e927ba3716cd8dd86421148dfb3046e9f9d7b" }
 dependencies = [
     { name = "accelerate", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "gradio", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
@@ -1455,7 +1455,7 @@ requires-dist = [
     { name = "flask", specifier = "==3.1.3" },
     { name = "gunicorn", specifier = "==26.0.0" },
     { name = "librosa" },
-    { name = "omnivoice", git = "https://github.com/k2-fsa/OmniVoice.git?rev=398b6113" },
+    { name = "omnivoice", git = "https://github.com/k2-fsa/OmniVoice.git?rev=468e927b" },
     { name = "onnxruntime", marker = "extra == 'qwen-tts'" },
     { name = "pocket-tts", specifier = "==2.1.0" },
     { name = "pydub" },

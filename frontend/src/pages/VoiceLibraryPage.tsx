@@ -1587,7 +1587,7 @@ function VoiceCard({
            </PopoverContent>
          </Popover>
 
-        <Popover open={moreActionsPopoverOpen} onOpenChange={setMoreActionsPopoverOpen}><PopoverTrigger asChild><Button size="icon-sm" variant="outline" aria-label="More voice actions" tooltip="More voice actions"><MoreHorizontal /></Button></PopoverTrigger><PopoverContent align="end" className="w-64 gap-1 p-1.5">
+        <Popover open={moreActionsPopoverOpen} onOpenChange={setMoreActionsPopoverOpen}><PopoverTrigger asChild><Button data-testid="voice-actions-trigger" size="icon-sm" variant="outline" aria-label="More voice actions" tooltip="More voice actions"><MoreHorizontal /></Button></PopoverTrigger><PopoverContent align="end" className="w-64 gap-1 p-1.5">
           {voice.mounted_reference ? (
             <div className="mb-1 rounded border border-warning/30 bg-warning/10 p-2 text-xs">
               <label className="flex items-center gap-2 font-medium text-warning">
@@ -1610,7 +1610,7 @@ function VoiceCard({
           <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => setEditing(true)}><Pencil /> Edit transcript</Button>
           <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => runMutation(onNormalize)}><Wand2 /> Normalize loudness</Button>
           <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => runMutation(onTrimSilence)}><Scissors /> Trim boundary silence</Button>
-          {onSetDefault && <Button size="sm" variant="ghost" className="w-full justify-start" disabled={voice.is_default} onClick={onSetDefault}><Star /> Set family default</Button>}
+          {onSetDefault && <Button data-testid="voice-set-default" size="sm" variant="ghost" className="w-full justify-start" disabled={voice.is_default} onClick={onSetDefault}><Star /> Set family default</Button>}
           {voice.undo_available && <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onUndo}><Undo2 /> Undo last audio edit</Button>}
            <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onAnalyze}><RefreshCcw className="size-3.5" /> Refresh analysis</Button>
            <div className="my-1 border-t border-border" />
@@ -2290,6 +2290,7 @@ export function VoiceLibraryPage() {
                      <FolderPlus className="size-3.5" /> New project
                    </Button>
                    <Button
+                     data-testid="voice-library-group-by-project"
                      variant={groupByProject ? 'secondary' : 'ghost'}
                      size="icon-sm"
                      onClick={() => setGroupByProject((v) => !v)}
@@ -2416,7 +2417,7 @@ export function VoiceLibraryPage() {
                   {groupByProjectKey(filteredSegments).map((group) => {
                     const collapsed = collapsedProjects.has(`seg-${group.key}`)
                     return (
-                      <div key={group.key} className="flex flex-col gap-2">
+                      <div key={group.key} data-testid="segment-project-group" className="flex flex-col gap-2">
                         <button
                           type="button"
                           className="flex items-center gap-2 text-left text-xs font-semibold text-muted-foreground hover:text-foreground"

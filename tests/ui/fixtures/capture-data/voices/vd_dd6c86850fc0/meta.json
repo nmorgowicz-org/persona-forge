@@ -1,0 +1,63 @@
+{
+  "voice_id": "vd_dd6c86850fc0",
+  "description": "a calm, neutral narrator voice",
+  "sample_text": "This is a sample line used to preview the generated voice.",
+  "language": "English",
+  "seed": 1251423235,
+  "selections": null,
+  "created_at": 1784754109.446638,
+  "family_id": null,
+  "variant_name": null,
+  "variant_kind": null,
+  "source": "VoiceDesign",
+  "metrics": {
+    "duration_seconds": 3.493916666666667,
+    "sample_rate": 24000,
+    "lufs_integrated": -19.12035782393177,
+    "peak_dbfs": -3.3374500274658203,
+    "true_peak_dbfs": -3.3374500274658203,
+    "speech_rate_proxy": 3.1483292389152573,
+    "pause_count": 2,
+    "pause_total_seconds": 0.0805833333333339,
+    "pause_ratio": 0.02306389677296269,
+    "median_pause_ms": 32.00000000000014,
+    "longest_pause_ms": 42.666666666666856,
+    "pause_intervals": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        1.7706666666666666,
+        1.792
+      ],
+      [
+        2.944,
+        2.986666666666667
+      ],
+      [
+        3.477333333333333,
+        3.493916666666667
+      ]
+    ],
+    "triage": {
+      "mode": "natural",
+      "coverage": null,
+      "boundaries_expected": 0.0,
+      "gaps_detected": 0,
+      "reasons": [
+        "No sentence-ending punctuation \u2014 nothing to segment; using Natural."
+      ],
+      "median_gap_ms": 0.0,
+      "speech_rate_cv": 0.459364370625324,
+      "snr_db": null,
+      "schema_version": 1
+    }
+  },
+  "quality_score": 100.0,
+  "quality_warnings": [],
+  "needs_review": false,
+  "auto_fixed": false,
+  "project_id": null,
+  "project_name": null
+}

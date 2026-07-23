@@ -762,6 +762,7 @@ function MsStepper({
 // voice library (each saved voice inserts as one whole clip, same shape as a segment clip).
 function LibraryPickerButton<T>({
   label,
+  testidPrefix,
   items,
   getId,
   getLabel,
@@ -771,6 +772,8 @@ function LibraryPickerButton<T>({
   onInsertMany,
 }: {
   label: string
+  /** Distinguishes the "Saved segments" vs "Voice library" instances for capture-harness testids. */
+  testidPrefix: string
   items: T[]
   getId: (item: T) => string
   getLabel: (item: T) => string
@@ -863,6 +866,7 @@ function LibraryPickerButton<T>({
     <div className="relative">
       <button
         type="button"
+        data-testid={`stitch-picker-toggle-${testidPrefix}`}
         onClick={() => setOpen((v) => !v)}
         className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted"
       >
@@ -915,6 +919,7 @@ function LibraryPickerButton<T>({
                     <label className="flex cursor-pointer items-center gap-2 px-2 py-1 text-xs text-foreground">
                       <input
                         type="checkbox"
+                        data-testid={`stitch-picker-item-${testidPrefix}`}
                         checked={checked}
                         onChange={() => toggle(id)}
                         className="size-3.5 shrink-0 accent-cyan-500"
@@ -964,6 +969,7 @@ function LibraryPickerButton<T>({
             </div>
             <button
               type="button"
+              data-testid={`stitch-picker-insert-${testidPrefix}`}
               onClick={handleInsert}
               disabled={selected.size === 0}
               className="mt-1 rounded-md bg-cyan-500/90 px-2 py-1 text-xs font-medium text-background hover:bg-cyan-500 disabled:opacity-40"
@@ -1114,6 +1120,7 @@ export const StitchTimeline = memo(function StitchTimeline({
           {library.length > 0 && (
             <LibraryPickerButton
               label="Saved segments"
+              testidPrefix="segments"
               items={library}
               getId={(seg) => seg.segment_id}
               getLabel={(seg) => seg.text}
@@ -1126,6 +1133,7 @@ export const StitchTimeline = memo(function StitchTimeline({
           {hasVoiceLibrary && (
             <LibraryPickerButton
               label="Voice library"
+              testidPrefix="voices"
               items={voiceLibrary!}
               getId={(v) => v.voice_id}
               getLabel={(v) => v.description || v.voice_id}
@@ -1158,6 +1166,7 @@ export const StitchTimeline = memo(function StitchTimeline({
             {library.length > 0 && (
               <LibraryPickerButton
                 label="Saved segments"
+                testidPrefix="segments"
                 items={library}
                 getId={(seg) => seg.segment_id}
                 getLabel={(seg) => seg.text}
@@ -1167,6 +1176,7 @@ export const StitchTimeline = memo(function StitchTimeline({
             {hasVoiceLibrary && (
               <LibraryPickerButton
                 label="Voice library"
+                testidPrefix="voices"
                 items={voiceLibrary!}
                 getId={(v) => v.voice_id}
                 getLabel={(v) => v.description || v.voice_id}
@@ -1210,6 +1220,7 @@ export const StitchTimeline = memo(function StitchTimeline({
               )}
               <Reorder.Item
                 value={clip}
+                data-testid="stitch-clip"
                 className="group relative flex flex-col"
                 style={{ flex: `${Math.max(300, clipEffectiveDurationMs(clip))} 0 auto`, minWidth: 320 }}
               >
@@ -1631,6 +1642,7 @@ function StitchEditorBody({
         <div className="flex items-center gap-2.5">
           <button
             type="button"
+            data-testid="stitch-save-voice"
             onClick={handleSave}
             disabled={isRendering || clips.length === 0}
             className="btn-brand inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-medium"
