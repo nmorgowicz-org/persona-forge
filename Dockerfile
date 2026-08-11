@@ -117,7 +117,7 @@ EXPOSE 8318
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10m --retries=3 \
     CMD curl --fail --silent --show-error http://127.0.0.1:8318/health >/dev/null || exit 1
 
-LABEL org.opencontainers.image.source="https://github.com/nmorgowicz-org/qwen3-tts-openvino"
+LABEL org.opencontainers.image.source="https://github.com/nmorgowicz-org/persona-forge"
 
 # Default command serves the API. The compose `export` service overrides this with
 # `python scripts/export.py` to build IR and quantize using the same image.

@@ -3,7 +3,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-// Static export served by Flask at / (see src/qwen3_tts/app.py, FRONTEND_ENABLED).
+// Static export served by Flask at / (see src/persona_forge/app.py, FRONTEND_ENABLED).
 // The dev server proxies API calls to the Flask container so `npm run dev` works
 // against a real backend without CORS/env-base-url plumbing.
 export default defineConfig({

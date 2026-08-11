@@ -1,4 +1,4 @@
-name: qwen3-tts-openvino
+name: persona-forge
 
 # Minimal setup:
 # - Create .env if you need to override defaults:
@@ -6,14 +6,14 @@ name: qwen3-tts-openvino
 #   REF_AUDIO_PATH=/path/to/reference.wav  # optional default voice
 #   REF_TEXT="exact transcript reference audio"  # optional override; Whisper drafts by default
 # - Then:
-#     docker compose up --build qwen3-tts
+#     docker compose up --build persona-forge
 # The default backend (pocket_tts) needs no export step. Only run the export
 # below if you switch TTS_BACKEND=openvino for the accelerated Qwen path:
 #     docker compose run --rm --profile export export   (once, to generate IR)
 
 # All other knobs are optional and should be left at defaults.
 
-# Common model/volume settings (used by both qwen3-tts and export)
+# Common model/volume settings (used by both persona-forge and export)
 x-model-environment: &model-environment
   MODEL_SIZE: ${MODEL_SIZE:-1.7B}
   REF_TEXT: ${REF_TEXT:-}

@@ -22,7 +22,7 @@
   "initial-version": "0.2.0",
   "packages": {
     ".": {
-      "package-name": "qwen3-tts-openvino",
+      "package-name": "persona-forge",
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         {
