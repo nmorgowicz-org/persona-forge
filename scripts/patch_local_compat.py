@@ -84,7 +84,7 @@ def main() -> int:
 
     # Dockerfile:51-64
     replace_all(
-        sp / "qwen_tts/core/models/modeling_persona_forge.py",
+        sp / "qwen_tts/core/models/modeling_qwen3_tts.py",
         [
             (
                 "from transformers.activations import ACT2FN",
@@ -116,7 +116,7 @@ def main() -> int:
 
     # Dockerfile:65-70
     replace_all(
-        sp / "qwen_tts/core/models/configuration_persona_forge.py",
+        sp / "qwen_tts/core/models/configuration_qwen3_tts.py",
         [
             (
                 "from transformers.configuration_utils import PretrainedConfig, layer_type_validation",
