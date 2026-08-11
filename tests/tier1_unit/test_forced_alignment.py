@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import qwen3_tts.forced_alignment as fa
+import persona_forge.forced_alignment as fa
 
 SR = 16000
 HIGH = 8.0  # logit favoring a character

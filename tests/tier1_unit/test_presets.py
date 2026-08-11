@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from qwen3_tts.config import apply_preset_env
-from qwen3_tts.presets import (
+from persona_forge.config import apply_preset_env
+from persona_forge.presets import (
     capacity_for_seconds,
     get_preset,
     get_voice_design_preset,

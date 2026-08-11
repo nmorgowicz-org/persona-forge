@@ -10,7 +10,7 @@ import pytest
 import soundfile as sf
 from unittest.mock import patch
 
-from qwen3_tts.forced_alignment import Boundary
+from persona_forge.forced_alignment import Boundary
 
 
 def _seed_audition_candidates(client, app_module):

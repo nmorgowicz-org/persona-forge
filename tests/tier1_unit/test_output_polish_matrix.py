@@ -15,7 +15,7 @@ import numpy as np
 import pyloudnorm as pyln
 import pytest
 
-from qwen3_tts.audio_style import PEAK_CEILING_DB, STYLE_PRESETS, apply_style_preset
+from persona_forge.audio_style import PEAK_CEILING_DB, STYLE_PRESETS, apply_style_preset
 
 SR = 24000
 

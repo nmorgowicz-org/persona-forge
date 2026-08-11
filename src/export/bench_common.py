@@ -26,7 +26,7 @@ import statistics
 from dataclasses import dataclass
 from pathlib import Path
 
-from qwen3_tts.model_config import configure_hf_token, resolve_model_repo, resolve_torch_load_config
+from persona_forge.model_config import configure_hf_token, resolve_model_repo, resolve_torch_load_config
 
 
 # Reference voice defaults mirror app_worker.py so a benchmark run reproduces the

@@ -4,8 +4,8 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from qwen3_tts.forced_alignment import Boundary
-from qwen3_tts.prosody_repair import (
+from persona_forge.forced_alignment import Boundary
+from persona_forge.prosody_repair import (
     build_alignment_pause_edits,
     repair_segment_audio,
     suggest_stitch_gap_targets,
@@ -88,7 +88,7 @@ def test_auto_clean_segment_stays_sample_equivalent():
     first = _voiced(0.4, sr)
     gap = np.zeros(int(0.6 * sr), dtype=np.float32)
     wav = np.concatenate([first, gap, first])
-    with patch("qwen3_tts.prosody_repair.forced_alignment.align") as align:
+    with patch("persona_forge.prosody_repair.forced_alignment.align") as align:
         repaired, plan, metadata = repair_segment_audio(
             wav, sr, "First sentence. Second sentence.", mode="auto"
         )
@@ -105,7 +105,7 @@ def test_precise_segment_repairs_internal_boundary_with_shared_plan():
         Boundary("first", 0.1, 0.8, 0.99, "sentence_split"),
         Boundary("second", 0.8, 1.8, 0.99, "word"),
     ]
-    with patch("qwen3_tts.prosody_repair.forced_alignment.align", return_value=boundaries):
+    with patch("persona_forge.prosody_repair.forced_alignment.align", return_value=boundaries):
         repaired, plan, metadata = repair_segment_audio(
             wav,
             sr,
@@ -122,7 +122,7 @@ def test_precise_segment_repairs_internal_boundary_with_shared_plan():
 def test_alignment_failure_falls_back_to_vad_safe_cut():
     wav = _voiced(2.0, 1000)
     with patch(
-        "qwen3_tts.prosody_repair.forced_alignment.align",
+        "persona_forge.prosody_repair.forced_alignment.align",
         side_effect=RuntimeError("unavailable"),
     ):
         repaired, plan, metadata = repair_segment_audio(
@@ -146,7 +146,7 @@ def test_cancelled_alignment_never_renders_late_result():
         return boundaries
 
     with patch(
-        "qwen3_tts.prosody_repair.forced_alignment.align",
+        "persona_forge.prosody_repair.forced_alignment.align",
         side_effect=finish_after_deadline,
     ):
         repaired, plan, metadata = repair_segment_audio(

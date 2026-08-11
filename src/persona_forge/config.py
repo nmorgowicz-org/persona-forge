@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 from collections.abc import MutableMapping
 
-from qwen3_tts.presets import get_preset, has_valid_export, normalize_size
+from persona_forge.presets import get_preset, has_valid_export, normalize_size
 
 # The reference WAV is always mounted at this fixed path (see compose.yml / .env.example).
 REF_AUDIO_PATH = "/voice/reference.wav"

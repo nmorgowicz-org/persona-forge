@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 import soundfile as sf
 from flask import Flask, Response, jsonify, request, send_from_directory, send_file
 
-from qwen3_tts import (
+from persona_forge import (
     audio_style,
     model,
     omnivoice_engine,
@@ -31,8 +31,8 @@ from qwen3_tts import (
     voice_design,
     voice_library,
 )
-from qwen3_tts.asr_check import validate_reference_text
-from qwen3_tts.alignment_jobs import AlignmentJobManager
+from persona_forge.asr_check import validate_reference_text
+from persona_forge.alignment_jobs import AlignmentJobManager
 
 # candidate_id -> (wav, sample_rate). In-memory only, single-user local tool (locked decision,
 # docs/dev/features/persona_forge_studio.md §5): cleared at the start of every /omnivoice/audition call, so
@@ -103,9 +103,9 @@ def _test_shutdown():
 
 # Static frontend export (frontend/, built by `npm run build`; see docs/dev/architecture/voice_design.md
 # §8.1). The Dockerfile copies the build output to /app/frontend/dist; app.py lives at
-# /app/src/qwen3_tts/app.py, so parent.parent.parent is /app in the container by construction.
+# /app/src/persona_forge/app.py, so parent.parent.parent is /app in the container by construction.
 # Auto-disables (falls back to a bare API service) if the dist directory isn't present, e.g. a
-# local `python -m qwen3_tts.app` run without ever building the frontend.
+# local `python -m persona_forge.app` run without ever building the frontend.
 _FRONTEND_DIR = Path(
     os.getenv("FRONTEND_DIST_DIR", str(Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"))
 )
@@ -250,7 +250,7 @@ def health():
 def health_validate_ref_text():
     if not model._service_started:
         return jsonify({"error": "Model not loaded"}), 503
-    from qwen3_tts.config import REF_AUDIO_PATH
+    from persona_forge.config import REF_AUDIO_PATH
     ref_audio = (os.getenv("REF_AUDIO") or REF_AUDIO_PATH or "").strip() or None
     ref_text = (os.getenv("REF_TEXT") or "").strip() or None
     if not ref_audio or not ref_text:
@@ -431,7 +431,7 @@ def voices_list():
     active_id = None
     if getattr(model, "TTS_BACKEND", None) == "pocket_tts":
         try:
-            from qwen3_tts import pocket_tts_runtime
+            from persona_forge import pocket_tts_runtime
 
             active_id = pocket_tts_runtime.get_active_default_voice_id()
         except Exception:
@@ -549,7 +549,7 @@ def voices_delete(voice_id: str):
         return jsonify({"error": "voice_id not found"}), 404
     model.invalidate_voice_clone_prompt(voice_id)
     try:
-        from qwen3_tts import pocket_tts_runtime
+        from persona_forge import pocket_tts_runtime
         pocket_tts_runtime.invalidate_voice_state(voice_id)
     except ImportError:
         pass  # pocket-tts package not installed (non-pocket_tts deployment); nothing to invalidate.
@@ -559,7 +559,7 @@ def voices_delete(voice_id: str):
 def _invalidate_voice_clone_state(voice_id: str) -> None:
     model.invalidate_voice_clone_prompt(voice_id)
     try:
-        from qwen3_tts import pocket_tts_runtime
+        from persona_forge import pocket_tts_runtime
         pocket_tts_runtime.invalidate_voice_state(voice_id)
     except ImportError:
         return  # pocket-tts package not installed (non-pocket_tts deployment); nothing to invalidate.
@@ -738,7 +738,7 @@ def voices_activate(voice_id: str):
     if meta is None:
         return jsonify({"error": "voice_id not found"}), 404
 
-    from qwen3_tts import pocket_tts_runtime
+    from persona_forge import pocket_tts_runtime
 
     def _run():
         pocket_tts_runtime.set_default_voice_state_from_library(voice_id)
@@ -769,7 +769,7 @@ def voices_warm(voice_id: str):
     if meta is None:
         return jsonify({"error": "voice_id not found"}), 404
 
-    from qwen3_tts import pocket_tts_runtime
+    from persona_forge import pocket_tts_runtime
 
     def _run():
         model._ensure_base_loaded()
@@ -952,7 +952,7 @@ def voices_region_edits(voice_id: str):
 # computes only on a miss.
 
 def _alignment_unload() -> None:
-    from qwen3_tts import forced_alignment
+    from persona_forge import forced_alignment
     forced_alignment.unload_session()
 
 
@@ -1000,7 +1000,7 @@ def voices_triage(voice_id: str):
         return jsonify({"error": "reference audio missing"}), 404
     try:
         wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32", always_2d=False)
-        from qwen3_tts.prosody_triage import triage as _triage
+        from persona_forge.prosody_triage import triage as _triage
         result = _triage(wav, int(sr), meta.get("sample_text"))
     except Exception as exc:
         return jsonify({"error": f"triage failed: {exc}"}), 500

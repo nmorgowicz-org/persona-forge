@@ -7,7 +7,7 @@ import inspect
 import numpy as np
 import pytest
 
-from qwen3_tts.streaming import StreamingVocoderSession
+from persona_forge.streaming import StreamingVocoderSession
 from types import SimpleNamespace
 
 

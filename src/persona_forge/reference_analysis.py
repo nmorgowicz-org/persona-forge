@@ -11,7 +11,7 @@ import librosa
 from pathlib import Path
 from typing import Any
 
-from qwen3_tts.audio_style import analyze_reference
+from persona_forge.audio_style import analyze_reference
 
 logger = logging.getLogger(__name__)
 

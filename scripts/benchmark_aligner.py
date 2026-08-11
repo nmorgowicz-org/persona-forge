@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from qwen3_tts import forced_alignment
+from persona_forge import forced_alignment
 
 
 def _percentile(samples: list[float], percentile: float) -> float:

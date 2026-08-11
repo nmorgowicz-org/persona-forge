@@ -1,13 +1,13 @@
 """Regression test for _run_generate's default (non-TTS_DIAG) success path.
 
-qwen3_tts.model imports `from qwen_tts import Qwen3TTSModel` at module scope, but the real
+persona_forge.model imports `from qwen_tts import Qwen3TTSModel` at module scope, but the real
 `qwen-tts` package pulls in librosa which isn't installed in the dev/test environment. We
-install a fake `qwen_tts` module into sys.modules before importing qwen3_tts.model so the
+install a fake `qwen_tts` module into sys.modules before importing persona_forge.model so the
 module under test can be exercised without the real dependency (same pattern as
 test_pocket_tts_runtime.py's fake `pocket_tts` module).
 
-This exists because tier2_backend fully replaces qwen3_tts.model with FakeModelRuntime
-before importing qwen3_tts.app, so nothing in that tier ever calls the real _run_generate.
+This exists because tier2_backend fully replaces persona_forge.model with FakeModelRuntime
+before importing persona_forge.app, so nothing in that tier ever calls the real _run_generate.
 That's exactly how a regression like the _watchdog_stop UnboundLocalError (fixed here) went
 undetected: every test exercising _run_generate's success path was hitting a hand-written
 fake, not this function's actual watchdog/timeout bookkeeping.
@@ -28,7 +28,7 @@ np = pytest.importorskip("numpy")
 
 pytestmark = pytest.mark.requires_torch
 
-_MODEL_PY = Path(__file__).resolve().parents[2] / "src" / "qwen3_tts" / "model.py"
+_MODEL_PY = Path(__file__).resolve().parents[2] / "src" / "persona_forge" / "model.py"
 
 
 @pytest.fixture
@@ -65,10 +65,10 @@ def model_module(monkeypatch, tmp_path):
     monkeypatch.setenv("TTS_BACKEND", "pytorch")
     monkeypatch.delenv("TTS_DIAG", raising=False)
 
-    # Load model.py under a private module name (rather than "qwen3_tts.model") so this
+    # Load model.py under a private module name (rather than "persona_forge.model") so this
     # test is hermetic regardless of what other test files have already done to the shared
-    # sys.modules["qwen3_tts.model"]/"qwen3_tts" package cache (e.g. tier2_backend/conftest.py
-    # permanently replaces sys.modules["qwen3_tts.model"] with FakeModelRuntime at collection
+    # sys.modules["persona_forge.model"] package cache (e.g. tier2_backend/conftest.py
+    # permanently replaces sys.modules["persona_forge.model"] with FakeModelRuntime at collection
     # time). model.py has no relative imports, so executing it under an unrelated name is safe.
     class _NoStartThread:
         def __init__(self, *args, **kwargs):
@@ -162,7 +162,7 @@ class TestRunGenerateSuccessPath:
     ):
         m = model_module
         self._configure_model(monkeypatch, m)
-        from qwen3_tts import prosody_repair
+        from persona_forge import prosody_repair
 
         def unexpected(*args, **kwargs):
             raise AssertionError("unflagged generation invoked repair")
@@ -180,7 +180,7 @@ class TestRunGenerateSuccessPath:
     ):
         m = model_module
         self._configure_model(monkeypatch, m)
-        from qwen3_tts import prosody_repair
+        from persona_forge import prosody_repair
 
         calls = []
 
@@ -214,7 +214,7 @@ class TestRunGenerateSuccessPath:
     def test_repair_failure_returns_original_audio(self, monkeypatch, model_module):
         m = model_module
         self._configure_model(monkeypatch, m)
-        from qwen3_tts import prosody_repair
+        from persona_forge import prosody_repair
 
         monkeypatch.setattr(
             prosody_repair,
@@ -238,7 +238,7 @@ class TestRunGenerateSuccessPath:
     def test_repair_budget_abort_returns_original_audio(self, monkeypatch, model_module):
         m = model_module
         self._configure_model(monkeypatch, m)
-        from qwen3_tts import prosody_repair
+        from persona_forge import prosody_repair
 
         release = threading.Event()
 
@@ -294,15 +294,15 @@ class TestRunGenerateSuccessPath:
         monkeypatch.setattr(m, "TTS_BACKEND", "pocket_tts")
         t = np.linspace(0.0, 3.0, 72000, endpoint=False, dtype=np.float32)
         source = (0.05 * np.sin(2 * np.pi * 180.0 * t)).astype(np.float32)
-        fake_runtime = types.ModuleType("qwen3_tts.pocket_tts_runtime")
+        fake_runtime = types.ModuleType("persona_forge.pocket_tts_runtime")
         fake_runtime.get_pocket_tts_voice_state = lambda *args, **kwargs: "voice-state"
         fake_runtime.generate_pocket_tts = lambda *args, **kwargs: (
             _FakeAudioTensor(source.copy()),
             24000,
         )
-        monkeypatch.setitem(sys.modules, "qwen3_tts.pocket_tts_runtime", fake_runtime)
-        import qwen3_tts
-        monkeypatch.setattr(qwen3_tts, "pocket_tts_runtime", fake_runtime)
+        monkeypatch.setitem(sys.modules, "persona_forge.pocket_tts_runtime", fake_runtime)
+        import persona_forge
+        monkeypatch.setattr(persona_forge, "pocket_tts_runtime", fake_runtime)
 
         polished, _sr, polished_job_id = m._run_generate("hello", "English")
         bypassed, _sr, bypassed_job_id = m._run_generate(

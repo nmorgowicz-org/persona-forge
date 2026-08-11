@@ -33,7 +33,7 @@ os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 import numpy as np
 
 # Sets thread env before torch/openvino import (import side effect).
-import qwen3_tts.openvino.runtime_config as ov_runtime_config  # noqa: F401
+import persona_forge.openvino.runtime_config as ov_runtime_config  # noqa: F401
 from bench_common import (
     fmt_mib,
     load_model,
@@ -537,7 +537,7 @@ def run() -> int:
     talker = hf_model.talker
     speech_tokenizer = hf_model.speech_tokenizer
 
-    from qwen3_tts.openvino.talker import OVTalkerRuntime
+    from persona_forge.openvino.talker import OVTalkerRuntime
 
     runtime = OVTalkerRuntime(
         args.model_dir, talker, compression=args.compression,

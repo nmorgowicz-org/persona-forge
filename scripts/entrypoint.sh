@@ -26,10 +26,10 @@ if [ -d "/app/.git" ]; then
     git config --global --add safe.directory /app || true
 fi
 
-# Phase A6d: resolve the accelerator family (torch-independent, see qwen3_tts/gpu_family.py)
+# Phase A6d: resolve the accelerator family (torch-independent, see persona_forge/gpu_family.py)
 # and export the per-family runtime env before handing off. Assumes the correct torch wheel is
 # already present (installing it on demand is Phase A6e) — this step only sets env vars.
-_gpu_family="$(python -c 'from qwen3_tts.gpu_family import resolve_gpu_family; print(resolve_gpu_family())' 2>/dev/null || echo cpu)"
+_gpu_family="$(python -c 'from persona_forge.gpu_family import resolve_gpu_family; print(resolve_gpu_family())' 2>/dev/null || echo cpu)"
 echo "[entrypoint] accelerator family resolved: ${_gpu_family}"
 
 # Phase A6e: first-boot per-family torch install into a persisted volume. The baked image only

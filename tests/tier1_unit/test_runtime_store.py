@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from qwen3_tts import runtime_store
+from persona_forge import runtime_store
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -96,7 +96,7 @@ def test_failed_reload_does_not_persist(tmp_path):
     """apply_runtime_config's persist step is unreachable when the reload raises,
     since it sits after the existing try/finally block completes.
 
-    Runs in a subprocess: qwen3_tts.model spawns a real background self-load thread
+    Runs in a subprocess: persona_forge.model spawns a real background self-load thread
     at import time, which other tests' fake-runtime installs into sys.modules with no
     teardown; importing the real module in-process here would leak that thread's
     global state into later tests regardless of any restore bookkeeping.
@@ -107,8 +107,8 @@ import sys
 sys.path.insert(0, {str(_REPO_ROOT / "src")!r})
 sys.path.insert(0, {str(_REPO_ROOT)!r})
 
-from qwen3_tts import model
-from qwen3_tts import runtime_store
+from persona_forge import model
+from persona_forge import runtime_store
 
 model.force_unload = lambda: (_ for _ in ()).throw(RuntimeError("boom"))
 runtime_store.save_persisted_config = lambda values, path=None: open({str(marker)!r}, "w").write("called")

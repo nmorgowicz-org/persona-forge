@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from qwen3_tts.model_config import (
+from persona_forge.model_config import (
     configure_hf_token,
     resolve_model_repo,
     resolve_torch_load_config,

@@ -1,11 +1,11 @@
-"""Test qwen3_tts.device.resolve_device (Phase A4, D9 axis a)."""
+"""Test persona_forge.device.resolve_device (Phase A4, D9 axis a)."""
 
 from __future__ import annotations
 
 import warnings
 
-from qwen3_tts import device as device_mod
-from qwen3_tts.device import apply_fp64_emulation_env, resolve_device, xpu_needs_fp64_emulation
+from persona_forge import device as device_mod
+from persona_forge.device import apply_fp64_emulation_env, resolve_device, xpu_needs_fp64_emulation
 
 
 class TestResolveDevice:

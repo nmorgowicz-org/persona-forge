@@ -148,7 +148,7 @@ def validate_dockerfile() -> None:
     # default serve command with scripts/export.py.
     for marker in (
         "HEALTHCHECK ",
-        "qwen3_tts.app:app",
+        "persona_forge.app:app",
         "EXPOSE 8318",
         "requirements/requirements-openvino.txt",
         "requirements/requirements-export.txt",

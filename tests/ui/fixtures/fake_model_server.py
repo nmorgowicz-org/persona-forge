@@ -1,4 +1,4 @@
-"""Runs the real qwen3_tts Flask app with the model layer faked out via FakeModelRuntime.
+"""Runs the real persona_forge Flask app with the model layer faked out via FakeModelRuntime.
 
 For Playwright E2E and Tier 3 API integration tests. No model weights, no OpenVINO, no Docker.
 
@@ -78,14 +78,14 @@ def _patch_generate_for_slow_async(rt):
     if not rt._slow_async:
         return
 
-    original_run_generate = _get_module_attr("qwen3_tts.model", "_run_generate")
+    original_run_generate = _get_module_attr("persona_forge.model", "_run_generate")
 
     def _wrapped(text, language, **kwargs):
         if kwargs.get("job_id"):
             time.sleep(random.uniform(3, 5))
         return original_run_generate(text, language, **kwargs)
 
-    _set_module_attr("qwen3_tts.model", "_run_generate", _wrapped)
+    _set_module_attr("persona_forge.model", "_run_generate", _wrapped)
 
 
 def _get_module_attr(module_name, attr):
@@ -173,7 +173,7 @@ def main() -> None:
     rt = _install_fake_runtime()
     _patch_generate_for_slow_async(rt)
 
-    from qwen3_tts import app as app_module  # noqa: E402
+    from persona_forge import app as app_module  # noqa: E402
 
     _install_fake_voice_design(app_module)
     _patch_omnivoice_run_job(app_module)
@@ -212,7 +212,7 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     rt = _install_fake_runtime()
     _patch_generate_for_slow_async(rt)
 
-    from qwen3_tts import app as app_module  # noqa: E402
+    from persona_forge import app as app_module  # noqa: E402
     from werkzeug.serving import make_server  # noqa: E402
 
     _install_fake_voice_design(app_module)

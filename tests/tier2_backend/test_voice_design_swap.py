@@ -11,7 +11,7 @@ class TestVoiceDesignSwap:
         vd = app_module.voice_design
         vd._swap_in_progress = False
 
-        from qwen3_tts import model
+        from persona_forge import model
 
         # voice_design.py calls model.load_model(model.VOICE_DESIGN_PROFILE)
         # where model.VOICE_DESIGN_PROFILE is the real ModelProfile object.
@@ -55,7 +55,7 @@ class TestVoiceDesignSwap:
         vd = app_module.voice_design
         vd._swap_in_progress = False
 
-        from qwen3_tts import model
+        from persona_forge import model
         original_force_unload = model.force_unload
         original_load_model = model.load_model
 

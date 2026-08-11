@@ -10,11 +10,11 @@ from pathlib import Path
 import pytest
 
 # Ensure VOICE_LIBRARY_DIR and SEGMENT_LIBRARY_DIR are set before
-# any qwen3_tts module imports, so they don't fall back to "/segments"
+# any persona_forge module imports, so they don't fall back to "/segments"
 # (which can be on a read-only root filesystem).
 if "VOICE_LIBRARY_DIR" not in os.environ:
     os.environ["VOICE_LIBRARY_DIR"] = tempfile.mkdtemp(
-        prefix="qwen3-tts-test-voices-"
+        prefix="persona-forge-test-voices-"
     )
 if "SEGMENT_LIBRARY_DIR" not in os.environ:
     os.environ["SEGMENT_LIBRARY_DIR"] = tempfile.mkdtemp(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from qwen3_tts.config import apply_preset_env
+from persona_forge.config import apply_preset_env
 
 
 class TestApplyPresetEnv:

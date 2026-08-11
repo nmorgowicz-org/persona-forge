@@ -6,7 +6,7 @@ on:
       - .github/workflows/ci-ui.yml
       - "frontend/**"
       - "tests/ui/**"
-      - "src/qwen3_tts/**"
+      - "src/persona_forge/**"
       - requirements-dev.txt
   workflow_dispatch:
 
@@ -68,8 +68,8 @@ jobs:
           try_import('flask')
           try_import('soundfile')
           try_import('numpy')
-          try_import('qwen3_tts')
-          try_import('qwen3_tts.app')
+          try_import('persona_forge')
+          try_import('persona_forge.app')
 
           if errors:
               print('IMPORT ERRORS:')

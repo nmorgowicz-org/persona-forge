@@ -31,9 +31,9 @@ from pathlib import Path
 import numpy as np
 
 # Sets thread env before torch/openvino import (import side effect).
-import qwen3_tts.openvino.runtime_config as ov_runtime_config  # noqa: F401
+import persona_forge.openvino.runtime_config as ov_runtime_config  # noqa: F401
 from bench_common import load_model
-from qwen3_tts.openvino.talker import _to_numpy
+from persona_forge.openvino.talker import _to_numpy
 
 GRAPHS = ("main_prefill", "main_decode", "predictor_prefill", "predictor_decode")
 

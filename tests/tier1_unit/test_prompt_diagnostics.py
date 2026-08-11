@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from qwen3_tts.prompt_diagnostics import (
+from persona_forge.prompt_diagnostics import (
     dump_reference_prompt,
     dump_talker_parameter_manifest,
     reference_codes,

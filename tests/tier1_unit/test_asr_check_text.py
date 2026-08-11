@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from qwen3_tts.asr_check import (
+from persona_forge.asr_check import (
     _normalize_for_match,
     compute_transcript_match_score,
 )

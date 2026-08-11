@@ -16,13 +16,13 @@ from typing import Any
 
 import numpy as np
 
-from qwen3_tts import forced_alignment
-from qwen3_tts.audio_post import (
+from persona_forge import forced_alignment
+from persona_forge.audio_post import (
     apply_resolved_boundary_pause_plan,
     plan_boundary_pauses,
 )
-from qwen3_tts.audio_style import PROSODY_MAPS, detect_pause_intervals
-from qwen3_tts.prosody_triage import MODE_PRECISE, triage
+from persona_forge.audio_style import PROSODY_MAPS, detect_pause_intervals
+from persona_forge.prosody_triage import MODE_PRECISE, triage
 
 logger = logging.getLogger(__name__)
 

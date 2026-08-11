@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 
-from qwen3_tts.alignment_jobs import AlignmentJobManager
+from persona_forge.alignment_jobs import AlignmentJobManager
 
 
 def _wait_status(mgr, job_id, status, timeout=2.0):

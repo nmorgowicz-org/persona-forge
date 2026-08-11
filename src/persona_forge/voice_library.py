@@ -25,22 +25,22 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 
-from qwen3_tts.audio_post import (
+from persona_forge.audio_post import (
     apply_region_edits,
     apply_resolved_boundary_pause_plan,
     plan_boundary_pauses,
 )
-from qwen3_tts.audio_style import (
+from persona_forge.audio_style import (
     analyze_reference,
     apply_style_preset,
     detect_pause_intervals,
     get_pause_targets,
     PROSODY_MAPS,
 )
-from qwen3_tts.reference_analysis import calculate_quality_score
+from persona_forge.reference_analysis import calculate_quality_score
 
 
-# Fixed container-side mount point, same pattern as qwen3_tts.config.REF_AUDIO_PATH.
+# Fixed container-side mount point, same pattern as persona_forge.config.REF_AUDIO_PATH.
 # compose.yml binds ${VOICE_LIBRARY_PATH:-./data/voices} (host) -> this path (container).
 VOICE_LIBRARY_DIR = Path(os.getenv("VOICE_LIBRARY_DIR", "/voices"))
 
@@ -146,7 +146,7 @@ def build_vad_pause_edits(
     the model. Less precise than alignment (proportional, not acoustic), but strictly
     better than the energy path on a zero-gap clip, which has no interior gap to edit.
     """
-    from qwen3_tts.prosody_repair import build_vad_pause_edits as shared_builder
+    from persona_forge.prosody_repair import build_vad_pause_edits as shared_builder
 
     return shared_builder(
         wav, sr, transcript, style_preset, pace_multiplier, pause_offset_ms, target_overrides
@@ -178,7 +178,7 @@ def get_vad_directed_wav(
     wav, sr, _ = loaded
 
     if mode == "auto":
-        from qwen3_tts.prosody_triage import MODE_PRECISE, triage
+        from persona_forge.prosody_triage import MODE_PRECISE, triage
         if triage(wav, sr, transcript).mode != MODE_PRECISE:
             return None
 
@@ -209,7 +209,7 @@ def build_alignment_pause_edits(
     next word, so a partially-blended boundary is resized rather than double-padded; a
     boundary that already has enough silence yields a net no-op insert.
     """
-    from qwen3_tts.prosody_repair import build_alignment_pause_edits as shared_builder
+    from persona_forge.prosody_repair import build_alignment_pause_edits as shared_builder
 
     return shared_builder(
         boundaries, style_preset, pace_multiplier, pause_offset_ms, target_overrides
@@ -237,7 +237,7 @@ def get_alignment_directed_wav(
     owned boundaries, or any alignment error. This keeps the chain "never worse than status
     quo" (plan §5.5 step 4).
     """
-    from qwen3_tts import forced_alignment as _fa
+    from persona_forge import forced_alignment as _fa
 
     meta = get_voice(voice_id)
     if meta is None:
@@ -253,7 +253,7 @@ def get_alignment_directed_wav(
 
     # auto escalates to alignment only when triage classifies the clip as blended.
     if mode == "auto":
-        from qwen3_tts.prosody_triage import MODE_PRECISE, triage
+        from persona_forge.prosody_triage import MODE_PRECISE, triage
         if triage(wav, sr, transcript).mode != MODE_PRECISE:
             return None
 
@@ -834,7 +834,7 @@ def get_or_compute_alignment(
     not an assumed ``original.wav``. Raises ``ValueError`` if there is no
     transcript, since alignment needs text.
     """
-    from qwen3_tts import forced_alignment as _fa
+    from persona_forge import forced_alignment as _fa
 
     meta = get_voice(voice_id)
     if meta is None:

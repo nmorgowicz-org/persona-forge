@@ -1,6 +1,6 @@
 """
 Orchestration layer for voice style and reference analysis.
-Delegates low-level DSP to src/qwen3_tts/audio_post.py.
+Delegates low-level DSP to src/persona_forge/audio_post.py.
 """
 
 from __future__ import annotations

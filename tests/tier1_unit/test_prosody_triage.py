@@ -16,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from qwen3_tts.prosody_triage import (
+from persona_forge.prosody_triage import (
     MODE_NATURAL,
     MODE_PRECISE,
     count_expected_boundaries,

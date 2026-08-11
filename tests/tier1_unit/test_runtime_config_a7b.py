@@ -3,7 +3,7 @@ key) and reset behavior (drops file for unlocked keys, keeps locked, reverts env
 temp DATA_DIR.
 
 Each case runs in a subprocess (same rationale as test_runtime_store.py's
-test_failed_reload_does_not_persist): qwen3_tts.model spawns a real background
+test_failed_reload_does_not_persist): persona_forge.model spawns a real background
 self-load thread at import time, so importing it in-process would leak global state
 into other tests regardless of restore bookkeeping.
 """
@@ -34,7 +34,7 @@ def _run(script: str, env_extra: dict) -> subprocess.CompletedProcess:
 def test_state_shape_reports_source_locked_restart_required(tmp_path):
     script = """
 import json
-from qwen3_tts import model
+from persona_forge import model
 
 state = model.runtime_config_state()
 meta = state["live_metadata"]
@@ -56,7 +56,7 @@ print("OK")
 
 def test_state_shape_marks_locked_key(tmp_path):
     script = """
-from qwen3_tts import model
+from persona_forge import model
 
 state = model.runtime_config_state()
 assert state["live_metadata"]["TTS_BACKEND"]["locked"] is True
@@ -81,7 +81,7 @@ def test_reset_drops_unlocked_keeps_locked_and_reverts_env(tmp_path):
     script = f"""
 import json
 from pathlib import Path
-from qwen3_tts import model
+from persona_forge import model
 
 state = model.reset_runtime_config()
 
@@ -109,7 +109,7 @@ def test_preview_runtime_config_does_not_mutate(tmp_path):
     runtime_json = tmp_path / "runtime.json"
     script = f"""
 from pathlib import Path
-from qwen3_tts import model
+from persona_forge import model
 
 before = model.runtime_config_state()["live"]["SILENCE_TRIM"]
 preview = model.preview_runtime_config({{"SILENCE_TRIM": False}})

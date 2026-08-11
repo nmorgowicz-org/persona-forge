@@ -23,7 +23,7 @@ import os
 import re
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
-from qwen3_tts.voice_library import VOICE_LIBRARY_DIR, get_voice
+from persona_forge.voice_library import VOICE_LIBRARY_DIR, get_voice
 
 # Cache directory for persisted voice states (.safetensors)
 STATE_CACHE_DIR = VOICE_LIBRARY_DIR / ".state_cache"
@@ -332,7 +332,7 @@ def get_pocket_tts_voice_state(
     is_library_voice = resolved_id.startswith("vd_")
     library_meta = None
     if is_library_voice:
-        from qwen3_tts import voice_library
+        from persona_forge import voice_library
 
         library_meta = voice_library.get_voice(resolved_id)
         if library_meta is None:
@@ -386,7 +386,7 @@ def get_pocket_tts_voice_state(
 
     # 4) Look up in voice_library.
     if library_meta is None:
-        from qwen3_tts import voice_library
+        from persona_forge import voice_library
 
         library_meta = voice_library.get_voice(resolved_id)
     if library_meta is None:

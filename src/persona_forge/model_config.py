@@ -14,7 +14,7 @@ MODEL_PRESETS = {
 
 # VoiceDesign is a separate checkpoint (see docs/dev/architecture/voice_design.md) that
 # generate_voice_design() requires; it is never the primary MODEL_SIZE selection, only
-# ever loaded via the lazy model-swap path (qwen3_tts.voice_design).
+# ever loaded via the lazy model-swap path (persona_forge.voice_design).
 VOICE_DESIGN_MODEL_PRESETS = {
     "1.7B": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
 }

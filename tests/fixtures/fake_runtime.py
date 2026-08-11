@@ -184,10 +184,10 @@ class _FakeModule(types.ModuleType):
 
 
 class FakeModelRuntime:
-    """Central fake for qwen3_tts.model.
+    """Central fake for persona_forge.model.
     
     install() creates a _FakeModelModule proxy and puts it into
-    sys.modules["qwen3_tts.model"] so imports of qwen3_tts.model resolve here.
+    sys.modules["persona_forge.model"] so imports of persona_forge.model resolve here.
     All attribute access on model.* is live-delegated to this instance.
     """
  
@@ -323,7 +323,7 @@ class FakeModelRuntime:
         rt = self
 
         # Use proxy module so all model.* attribute access is live-delegated to rt.
-        fake_module = _FakeModule(rt, "qwen3_tts.model")
+        fake_module = _FakeModule(rt, "persona_forge.model")
 
         def health_state() -> Dict[str, Any]:
             if rt._startup_failed:
@@ -588,11 +588,11 @@ class FakeModelRuntime:
             for k, v in overrides.items():
                 setattr(fake_module, k, v)
 
-        sys.modules["qwen3_tts.model"] = fake_module
+        sys.modules["persona_forge.model"] = fake_module
 
-        qwen3_tts_pkg = sys.modules.get("qwen3_tts")
-        if qwen3_tts_pkg is not None:
-            setattr(qwen3_tts_pkg, "model", fake_module)
+        persona_forge_pkg = sys.modules.get("persona_forge")
+        if persona_forge_pkg is not None:
+            setattr(persona_forge_pkg, "model", fake_module)
 
         return self
 

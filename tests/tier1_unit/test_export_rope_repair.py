@@ -11,7 +11,7 @@ for p in (SRC, SRC / "export"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-from qwen3_tts.transformers_compat import repair_rotary_buffers
+from persona_forge.transformers_compat import repair_rotary_buffers
 
 torch = None
 pytestmark = [pytest.mark.requires_torch, pytest.mark.slow]

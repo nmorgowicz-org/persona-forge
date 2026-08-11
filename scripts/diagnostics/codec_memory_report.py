@@ -9,7 +9,7 @@ Run inside the runtime image on the box (needs torch + qwen_tts + the model + IR
 
     docker compose run --rm --entrypoint python qwen3-tts scripts/codec_memory_report.py
 
-Importing ``qwen3_tts.model`` loads the model and, on the OpenVINO backend, installs the OV runtime
+Importing ``persona_forge.model`` loads the model and, on the OpenVINO backend, installs the OV runtime
 and releases the talker ``.layers`` — so this reports the POST-release resident state, which is
 exactly what dominates steady RSS. ``speech_tokenizer`` is a wrapper object (not an ``nn.Module``),
 so we introspect it for nested modules to quantify the codec decoder vs encoder split before
@@ -25,7 +25,7 @@ import sys
 def main() -> int:
     import torch.nn as nn
 
-    from qwen3_tts import model as m  # triggers load + (openvino) OV install + release
+    from persona_forge import model as m  # triggers load + (openvino) OV install + release
 
     inner = getattr(m.model, "model", None)
     if inner is None:

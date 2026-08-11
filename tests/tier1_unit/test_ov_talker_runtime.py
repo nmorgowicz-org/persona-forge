@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from qwen3_tts.openvino.talker import (
+from persona_forge.openvino.talker import (
     _cache_position_or_default,
     _dynamic_cache_from_kv,
     _dynamic_cache_kv,

@@ -8,7 +8,7 @@ import numpy as np
 import pyloudnorm as pyln
 import pytest
 
-from qwen3_tts.audio_style import analyze_reference, apply_style_preset, detect_pause_intervals
+from persona_forge.audio_style import analyze_reference, apply_style_preset, detect_pause_intervals
 
 
 def _speech_like(sr: int = 24000) -> np.ndarray:

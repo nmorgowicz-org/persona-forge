@@ -20,7 +20,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from qwen3_tts import model
+from persona_forge import model
 
 # Mirrors omnivoice_engine._progress (GET /omnivoice/progress) — nick's feedback, 2026-07-03:
 # "you did not add that [progress/ETA] in for the qwen3-tts voice design". This checkpoint's

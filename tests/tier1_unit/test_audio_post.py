@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from qwen3_tts.audio_post import (
+from persona_forge.audio_post import (
     analyze_take,
     apply_boundary_pause_plan,
     apply_fades,

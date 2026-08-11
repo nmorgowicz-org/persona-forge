@@ -44,7 +44,7 @@ from pathlib import Path
 
 import numpy as np
 
-from qwen3_tts.presets import seconds_for_capacity
+from persona_forge.presets import seconds_for_capacity
 
 # IR filenames produced by export_openvino.py.
 _GRAPH_FILES = {
@@ -595,7 +595,7 @@ class OVTalkerRuntime:
                  core=None, speech_tokenizer=None):
         import openvino as ov
 
-        from qwen3_tts.openvino.runtime_config import get_ov_config
+        from persona_forge.openvino.runtime_config import get_ov_config
 
         self.model_dir = Path(model_dir)
         self._talker = talker
@@ -778,7 +778,7 @@ class OVTalkerRuntime:
         self.vocoder_runtime = None
         vocoder_cfg = (self._ov_config or {}).get("vocoder")
         if vocoder_cfg and self._speech_tokenizer is not None:
-            from qwen3_tts.openvino.vocoder import OpenVinoVocoderRuntime
+            from persona_forge.openvino.vocoder import OpenVinoVocoderRuntime
             self.vocoder_runtime = OpenVinoVocoderRuntime(self._speech_tokenizer, vocoder_cfg)
         elif vocoder_cfg and vocoder_cfg.get("enabled"):
             print(

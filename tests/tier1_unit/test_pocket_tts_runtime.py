@@ -3,7 +3,7 @@
 pocket_tts_runtime.py imports `from pocket_tts import TTSModel` at module scope, but the
 real `pocket-tts` PyPI package isn't installed in the dev/test environment (it's only
 pulled in the Docker image). We install a fake `pocket_tts` module into sys.modules before
-importing qwen3_tts.pocket_tts_runtime so the module under test can be exercised without
+importing persona_forge.pocket_tts_runtime so the module under test can be exercised without
 the real dependency.
 """
 
@@ -57,15 +57,15 @@ class FakeTTSModel:
 
 @pytest.fixture
 def pocket_tts_runtime(monkeypatch):
-    """Import (or reuse) qwen3_tts.pocket_tts_runtime with a fake `pocket_tts` backing it,
+    """Import (or reuse) persona_forge.pocket_tts_runtime with a fake `pocket_tts` backing it,
     and reset all of its module-level state before and after each test.
     """
     fake_module = types.ModuleType("pocket_tts")
     fake_module.TTSModel = FakeTTSModel
     monkeypatch.setitem(sys.modules, "pocket_tts", fake_module)
 
-    sys.modules.pop("qwen3_tts.pocket_tts_runtime", None)
-    from qwen3_tts import pocket_tts_runtime as rt
+    sys.modules.pop("persona_forge.pocket_tts_runtime", None)
+    from persona_forge import pocket_tts_runtime as rt
 
     rt.unload_pocket_tts()
     rt.pocket_tts_cloning_available = False
@@ -190,7 +190,7 @@ class TestGetPocketTtsVoiceState:
         wav = tmp_path / "reference.wav"
         wav.write_bytes(b"RIFF....")
 
-        from qwen3_tts import voice_library
+        from persona_forge import voice_library
 
         monkeypatch.setattr(
             voice_library, "get_voice", lambda vid: {"voice_id": vid, "wav_path": str(wav)}
@@ -204,7 +204,7 @@ class TestGetPocketTtsVoiceState:
         rt = pocket_tts_runtime
         model = FakeTTSModel()
 
-        from qwen3_tts import voice_library
+        from persona_forge import voice_library
 
         monkeypatch.setattr(voice_library, "get_voice", lambda vid: None)
 
@@ -232,7 +232,7 @@ class TestInvalidateVoiceState:
         wav = tmp_path / "reference.wav"
         wav.write_bytes(b"RIFF....")
 
-        from qwen3_tts import voice_library
+        from persona_forge import voice_library
 
         monkeypatch.setattr(
             voice_library, "get_voice", lambda vid: {"voice_id": vid, "wav_path": str(wav)}
@@ -257,7 +257,7 @@ class TestInvalidateVoiceState:
         meta_path = voice_dir / "meta.json"
         meta_path.write_text("{}", encoding="utf-8")
 
-        from qwen3_tts import voice_library
+        from persona_forge import voice_library
 
         monkeypatch.setattr(voice_library, "VOICE_LIBRARY_DIR", tmp_path)
         monkeypatch.setattr(rt, "VOICE_LIBRARY_DIR", tmp_path)

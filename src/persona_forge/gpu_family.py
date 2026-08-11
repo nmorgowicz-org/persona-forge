@@ -144,7 +144,7 @@ def describe_accelerator(
     torch wheel; it can differ from ``detected_family`` when an override is forced or the detected
     vendor isn't capable yet (auto falls back to ``cpu``).
     """
-    from qwen3_tts.device import resolve_device, xpu_needs_fp64_emulation
+    from persona_forge.device import resolve_device, xpu_needs_fp64_emulation
 
     probes = probes or default_probes()
     family = resolve_gpu_family(environ, probes)

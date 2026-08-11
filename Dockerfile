@@ -3,7 +3,7 @@ ARG PYTHON_IMAGE=python:3.13-slim@sha256:eb43ff125d8d58d7449dcba7d336c23bcac412f
 # image) — override via --build-arg if you need reproducibility guarantees for CI.
 ARG NODE_IMAGE=node:24-slim@sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5
 
-# Static export, served by Flask at / (see src/qwen3_tts/app.py). Independent stage so the
+# Static export, served by Flask at / (see src/persona_forge/app.py). Independent stage so the
 # final image never needs a Node toolchain.
 FROM ${NODE_IMAGE} AS frontend-build
 WORKDIR /frontend
@@ -66,11 +66,11 @@ RUN python -m pip install \
 RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/' \
     /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_25hz/vq/speech_vq.py || true && \
     sed -i '/@check_model_inputs/d' \
-    /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_12hz/modeling_qwen3_tts_tokenizer_v2.py || true && \
+    /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_12hz/modeling_persona_forge_tokenizer_v2.py || true && \
     sed -i 's/create_sliding_window_causal_mask/create_causal_mask/g' \
     /usr/local/lib/python3.13/site-packages/transformers/models/mimi/modeling_mimi.py && \
     python -c "\
-p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/modeling_qwen3_tts.py'; \
+p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/modeling_persona_forge.py'; \
 t = open(p).read(); \
 t = t.replace('from transformers.activations import ACT2FN', 'from transformers import initialization as init\nfrom transformers.activations import ACT2FN'); \
 t = t.replace('module.weight.data.normal_(mean=0.0, std=std)', 'init.normal_(module.weight, mean=0.0, std=std)'); \
@@ -84,7 +84,7 @@ t = t.replace('\n                \"cache_position\": cache_position,\n', '\n'); 
 t = t.replace('\n            cache_position=cache_position,\n', ''); \
 open(p, 'w').write(t)" && \
     python -c "\
-p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/configuration_qwen3_tts.py'; \
+p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/configuration_persona_forge.py'; \
 t = open(p).read(); \
 t = t.replace('from transformers.configuration_utils import PretrainedConfig, layer_type_validation', 'from transformers.configuration_utils import PretrainedConfig'); \
 t = t.replace('layer_type_validation(self.layer_types)', 'self.validate_layer_type()'); \
@@ -121,4 +121,4 @@ LABEL org.opencontainers.image.source="https://github.com/nmorgowicz-org/qwen3-t
 
 # Default command serves the API. The compose `export` service overrides this with
 # `python scripts/export.py` to build IR and quantize using the same image.
-CMD ["gunicorn","qwen3_tts.app:app","-w","1","-k","gthread","--threads","4","--timeout","300","--bind","0.0.0.0:8318","--log-level","info"]
+CMD ["gunicorn","persona_forge.app:app","-w","1","-k","gthread","--threads","4","--timeout","300","--bind","0.0.0.0:8318","--log-level","info"]

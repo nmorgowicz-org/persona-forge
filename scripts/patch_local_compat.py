@@ -5,7 +5,7 @@ container image (Dockerfile:45-78), but to a local uv-managed .venv's site-packa
 The Docker image patches installed site-packages after `pip install` because qwen_tts==0.1.1
 was written against an older transformers API; the container's own comments explain each
 patch. `uv sync` alone does not apply them, so a plain local venv fails to import
-qwen3_tts.app. Run this once after `uv sync` (idempotent — safe to re-run).
+persona_forge.app. Run this once after `uv sync` (idempotent — safe to re-run).
 """
 import sysconfig
 import pathlib
@@ -84,7 +84,7 @@ def main() -> int:
 
     # Dockerfile:51-64
     replace_all(
-        sp / "qwen_tts/core/models/modeling_qwen3_tts.py",
+        sp / "qwen_tts/core/models/modeling_persona_forge.py",
         [
             (
                 "from transformers.activations import ACT2FN",
@@ -116,7 +116,7 @@ def main() -> int:
 
     # Dockerfile:65-70
     replace_all(
-        sp / "qwen_tts/core/models/configuration_qwen3_tts.py",
+        sp / "qwen_tts/core/models/configuration_persona_forge.py",
         [
             (
                 "from transformers.configuration_utils import PretrainedConfig, layer_type_validation",

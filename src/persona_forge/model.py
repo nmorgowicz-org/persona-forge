@@ -9,15 +9,15 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
-from qwen3_tts import __version__
+from persona_forge import __version__
 
 # Apply thread and runtime envs before heavy imports
-from qwen3_tts.asr_check import transcribe_reference_audio, validate_reference_text
-from qwen3_tts.config import REF_AUDIO_PATH, apply_preset_env, normalize_backend
-from qwen3_tts.openvino.runtime_config import apply_thread_env, resolve_inference_threads
-from qwen3_tts.presets import get_voice_design_preset, seconds_for_capacity
-from qwen3_tts.audio_style import apply_style_preset
-from qwen3_tts.runtime_store import apply_persisted_config
+from persona_forge.asr_check import transcribe_reference_audio, validate_reference_text
+from persona_forge.config import REF_AUDIO_PATH, apply_preset_env, normalize_backend
+from persona_forge.openvino.runtime_config import apply_thread_env, resolve_inference_threads
+from persona_forge.presets import get_voice_design_preset, seconds_for_capacity
+from persona_forge.audio_style import apply_style_preset
+from persona_forge.runtime_store import apply_persisted_config
 
 _ACTIVE_PRESET = apply_preset_env()
 
@@ -30,15 +30,15 @@ apply_persisted_config(os.environ)
 
 import torch
 
-from qwen3_tts.device import resolve_device
-from qwen3_tts.model_config import (
+from persona_forge.device import resolve_device
+from persona_forge.model_config import (
     configure_hf_token,
     resolve_model_repo,
     resolve_torch_load_config,
     resolve_voice_design_model_repo,
 )
-from qwen3_tts.streaming import StreamingVocoderSession
-from qwen3_tts.transformers_compat import (
+from persona_forge.streaming import StreamingVocoderSession
+from persona_forge.transformers_compat import (
     patch_eager_attention_mask_broadcast,
     patch_talker_prepare_inputs,
     repair_rotary_buffers,
@@ -114,7 +114,7 @@ _voice_design_preset = get_voice_design_preset(
 )
 
 # VoiceDesign is never the model loaded at startup — it is only ever installed via the
-# lazy model-swap path in qwen3_tts.voice_design (docs/dev/architecture/voice_design.md §3/§4.2).
+# lazy model-swap path in persona_forge.voice_design (docs/dev/architecture/voice_design.md §3/§4.2).
 # generate_voice_design() synthesizes the sample_text directly from the description; there
 # is no reference audio/transcript to build a voice_clone_prompt from.
 VOICE_DESIGN_PROFILE = ModelProfile(
@@ -169,7 +169,7 @@ def force_unload():
 
     Runs inside the executor thread; serialized with inference. Used by the idle-unload
     watcher (via ``_do_unload``, which adds the idle-timeout gate) and by the VoiceDesign
-    model-swap manager (``qwen3_tts.voice_design``), which must unload unconditionally
+    model-swap manager (``persona_forge.voice_design``), which must unload unconditionally
     regardless of how recently a request came in.
     """
     global model, voice_clone_prompt, ov_runtime
@@ -180,7 +180,7 @@ def force_unload():
     ov_runtime = None
     # Unload Pocket TTS model/runtime if loaded (safe no-op if not).
     try:
-        from qwen3_tts import pocket_tts_runtime
+        from persona_forge import pocket_tts_runtime
         pocket_tts_runtime.unload_pocket_tts()
     except Exception:
         pass
@@ -202,7 +202,7 @@ _foreign_engines: list[tuple[Callable[[], bool], Callable[[], None]]] = []
 def register_foreign_engine(is_loaded: Callable[[], bool], unload: Callable[[], None]) -> None:
     """Let a bespoke swap-manager participate in idle-unload and Base-priority swap-back.
 
-    OmniVoice (qwen3_tts.omnivoice_engine) is the only current user: unlike VoiceDesign,
+    OmniVoice (persona_forge.omnivoice_engine) is the only current user: unlike VoiceDesign,
     it's a third-party checkpoint that never goes through load_model()/active_profile (it
     isn't wired through OVTalkerRuntime), so this module has no visibility into it unless
     the engine registers itself.
@@ -255,7 +255,7 @@ def _validate_ov_metadata(model_dir: str, model_repo: str, revision: str | None)
         raise RuntimeError(f"OV_MODEL_DIR missing metadata.json: {meta_path}")
 
     ov_metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-    from qwen3_tts.openvino.runtime_config import get_ov_config, resolve_inference_threads
+    from persona_forge.openvino.runtime_config import get_ov_config, resolve_inference_threads
     ov_config = get_ov_config()
 
     # Validate metadata matches loaded model
@@ -423,7 +423,7 @@ def load_model(profile: ModelProfile | None = None):
 
     # ── Pocket TTS backend branch ──────────────────────────────────────────────
     if TTS_BACKEND == "pocket_tts":
-        from qwen3_tts import pocket_tts_runtime
+        from persona_forge import pocket_tts_runtime
 
         language = (os.getenv("POCKET_TTS_LANGUAGE") or "english").strip() or "english"
         temp = float(os.getenv("POCKET_TTS_TEMP", "1.2"))
@@ -531,7 +531,7 @@ def load_model(profile: ModelProfile | None = None):
                 if not _prompt_dump_dir and os.path.exists("/tmp/tts_prompt_dump"):
                     _prompt_dump_dir = "/tmp/tts-prompt-dump"
                 if _prompt_dump_dir:
-                    from qwen3_tts.prompt_diagnostics import (
+                    from persona_forge.prompt_diagnostics import (
                         dump_reference_prompt,
                         dump_talker_parameter_manifest,
                     )
@@ -580,7 +580,7 @@ def load_model(profile: ModelProfile | None = None):
         if TTS_BACKEND == "openvino":
             # Milestone 4: install the OpenVINO talker runtime by swapping the two inner
             # transformer core forwards. All other generation glue stays in PyTorch.
-            from qwen3_tts.openvino.talker import OVTalkerRuntime
+            from persona_forge.openvino.talker import OVTalkerRuntime
 
             talker = model.model.talker
             # speech_tokenizer is a sibling of talker on the parent model, not a child of it;
@@ -642,7 +642,7 @@ def load_model(profile: ModelProfile | None = None):
 
     # ── Backend-agnostic: register mounted REF_AUDIO as a first-class voice ────
     if profile.ref_audio:
-        from qwen3_tts import voice_library
+        from persona_forge import voice_library
         try:
             vid = voice_library.ensure_mounted_ref_voice(
                 profile.ref_audio,
@@ -843,7 +843,7 @@ def health_state() -> dict[str, Any]:
 
     # Pocket TTS health metadata
     if TTS_BACKEND == "pocket_tts":
-        from qwen3_tts import pocket_tts_runtime
+        from persona_forge import pocket_tts_runtime
         voice_cloning_available = pocket_tts_runtime.pocket_tts_default_voice_state is not None
         base["pocket_tts"] = {
             "backend": "pocket_tts",
@@ -932,7 +932,7 @@ def runtime_config_state() -> dict[str, Any]:
 
     # Pocket TTS knobs only shown/active when TTS_BACKEND == "pocket_tts"
     if TTS_BACKEND == "pocket_tts":
-        from qwen3_tts import pocket_tts_runtime
+        from persona_forge import pocket_tts_runtime
 
         _ptts_noise = os.getenv("POCKET_TTS_NOISE_CLAMP", "").strip()
         _ptts_frames = os.getenv("POCKET_TTS_FRAMES_AFTER_EOS", "4").strip()
@@ -959,7 +959,7 @@ def runtime_config_state() -> dict[str, Any]:
 
     # Phase A7b: additive per-key provenance, alongside the existing bare `live` values
     # (the existing POST live-reload contract/shape is unchanged).
-    from qwen3_tts.runtime_store import is_locked, load_persisted_config
+    from persona_forge.runtime_store import is_locked, load_persisted_config
 
     persisted = load_persisted_config()
     live_metadata = {
@@ -974,8 +974,8 @@ def runtime_config_state() -> dict[str, Any]:
     }
 
     # Phase A7c: expose the present∧¬capable detection gap so the container coach card knows
-    # when (and for which vendor) to show its snippet. Pure/import-safe (qwen3_tts.gpu_family).
-    from qwen3_tts.gpu_family import describe_accelerator
+    # when (and for which vendor) to show its snippet. Pure/import-safe (persona_forge.gpu_family).
+    from persona_forge.gpu_family import describe_accelerator
 
     return {
         "reconfig_in_progress": _reconfig_in_progress,
@@ -1086,7 +1086,7 @@ def apply_runtime_config(updates: dict[str, Any], persist: bool = True) -> dict[
         _reconfig_in_progress = False
 
     if persist:
-        from qwen3_tts.runtime_store import is_locked, load_persisted_config, save_persisted_config
+        from persona_forge.runtime_store import is_locked, load_persisted_config, save_persisted_config
 
         to_persist = {k: v for k, v in updates.items() if not is_locked(k)}
         if to_persist:
@@ -1100,7 +1100,7 @@ def apply_runtime_config(updates: dict[str, Any], persist: bool = True) -> dict[
 def preview_runtime_config(updates: dict[str, Any]) -> dict[str, Any]:
     """Phase A7b dry-run: report what apply_runtime_config(updates) *would* do, without
     mutating os.environ, the in-memory globals, runtime.json, or triggering a reload."""
-    from qwen3_tts.runtime_store import is_locked
+    from persona_forge.runtime_store import is_locked
 
     unknown = set(updates) - LIVE_RUNTIME_KEYS
     if unknown:
@@ -1135,7 +1135,7 @@ def reset_runtime_config() -> dict[str, Any]:
     back to its hardcoded default by removing it from os.environ — the same
     ``os.getenv(key, <default>)`` fallbacks already in runtime_config_state() then take
     over, mirroring apply_runtime_config's reload/persist discipline."""
-    from qwen3_tts.runtime_store import is_locked, load_persisted_config, save_persisted_config
+    from persona_forge.runtime_store import is_locked, load_persisted_config, save_persisted_config
 
     global TTS_BACKEND, IDLE_UNLOAD_SECONDS, _reconfig_in_progress
 
@@ -1453,7 +1453,7 @@ def get_voice_clone_prompt(voice_id: str | None = None):
         return voice_clone_prompt
     if voice_id in _voice_clone_prompt_cache:
         return _voice_clone_prompt_cache[voice_id]
-    from qwen3_tts import voice_library
+    from persona_forge import voice_library
 
     meta = voice_library.get_voice(voice_id)
     if meta is None:
@@ -1565,7 +1565,7 @@ def _apply_generation_prosody_repair(
 
     import queue as _queue
     import numpy as np
-    from qwen3_tts import prosody_repair as _prosody_repair
+    from persona_forge import prosody_repair as _prosody_repair
 
     original = np.asarray(wav, dtype=np.float32).ravel().copy()
     budget = float(metadata["budget_seconds"])
@@ -1653,7 +1653,7 @@ def _run_generate(
 
     # ── Pocket TTS backend branch ──────────────────────────────────────────────
     if TTS_BACKEND == "pocket_tts":
-        from qwen3_tts import pocket_tts_runtime
+        from persona_forge import pocket_tts_runtime
 
         if instruct:
             print(f"[generate] instruct field ignored on Base checkpoint: {instruct!r}", flush=True)
@@ -1768,7 +1768,7 @@ def _run_generate(
         job.style_preset = resolved_style_preset
         job.postprocess_applied = False
         job.metadata["prosody_repair"] = _initial_generation_repair_metadata(prosody_repair)
-        from qwen3_tts import voice_library
+        from persona_forge import voice_library
         meta = voice_library.get_voice(effective_voice_id)
         if meta:
             job.voice_family_id = meta.get("family_id")
@@ -1817,7 +1817,7 @@ def _run_generate(
     system_limit = int(os.getenv("TTS_SYSTEM_MAX_NEW_TOKENS", "800"))
     max_speech_secs_str = os.getenv("TTS_MAX_SPEECH_SECONDS", "64")
     max_speech_secs = float(max_speech_secs_str) if max_speech_secs_str else 64.0
-    from qwen3_tts.presets import capacity_for_seconds
+    from persona_forge.presets import capacity_for_seconds
     safe_capacity = capacity_for_seconds(max_speech_secs)
     hard_cap_frames = int(safe_capacity * 0.8)
     expected_frames = job.expected_total_frames if job else 40
@@ -2148,7 +2148,7 @@ def _run_generate_with_streaming(
     system_limit_stream = int(os.getenv("TTS_SYSTEM_MAX_NEW_TOKENS", "800"))
     max_speech_secs_str_stream = os.getenv("TTS_MAX_SPEECH_SECONDS", "64")
     max_speech_secs_stream = float(max_speech_secs_str_stream) if max_speech_secs_str_stream else 64.0
-    from qwen3_tts.presets import capacity_for_seconds as capacity_for_seconds_stream
+    from persona_forge.presets import capacity_for_seconds as capacity_for_seconds_stream
     safe_capacity_stream = capacity_for_seconds_stream(max_speech_secs_stream)
     hard_cap_frames_stream = int(safe_capacity_stream * 0.8)
     expected_frames_stream = max(40, int(len(text) / 9.3 * 12))
@@ -2204,8 +2204,8 @@ def _run_generate_pocket_tts_stream(
     Note: This is a generator; the Pocket-TTS model must be loaded before calling.
     """
     import numpy as np
-    from qwen3_tts import pocket_tts_runtime
-    from qwen3_tts.audio_style import _apply_telepresence_eq
+    from persona_forge import pocket_tts_runtime
+    from persona_forge.audio_style import _apply_telepresence_eq
 
     _touch_last_request()
     _apply_optional_seed(seed_value)

@@ -1,8 +1,8 @@
-"""Test qwen3_tts.gpu_family: family resolution + presence/capability split (Phase A6c)."""
+"""Test persona_forge.gpu_family: family resolution + presence/capability split (Phase A6c)."""
 
 from __future__ import annotations
 
-from qwen3_tts.gpu_family import Probes, describe_accelerator, resolve_gpu_family
+from persona_forge.gpu_family import Probes, describe_accelerator, resolve_gpu_family
 
 
 def _probes(

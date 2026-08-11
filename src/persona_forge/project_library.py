@@ -20,7 +20,7 @@ import secrets
 import time
 from typing import Any
 
-from qwen3_tts.voice_library import VOICE_LIBRARY_DIR
+from persona_forge.voice_library import VOICE_LIBRARY_DIR
 
 _PROJECTS_FILE = VOICE_LIBRARY_DIR / "projects.json"
 _PROJECT_ID_RE = re.compile(r"^proj_[0-9a-f]{12}$")

@@ -1,7 +1,7 @@
 """OmniVoice checkpoint model-swap manager (Persona Forge accent-design engine).
 
 See docs/dev/features/persona_forge_studio.md §1. OmniVoice reuses the same one-model-at-a-time
-swap discipline VoiceDesign already established (qwen3_tts.voice_design): unload Base, load
+swap discipline VoiceDesign already established (persona_forge.voice_design): unload Base, load
 OmniVoice, run a whole *job* (every reference segment, every candidate take) in one swap
 window. All of that must run serialized inside model.executor (the service's single
 inference thread), same as every other model operation, so no in-flight /generate call can
@@ -34,9 +34,9 @@ import threading
 import time
 from typing import Any
 
-from qwen3_tts import model
-from qwen3_tts.asr_check import has_speech, compute_transcript_match_score, _MIN_MATCH_SCORE_SHORT, _MIN_MATCH_SCORE_LONG, _MAX_WORDS_SHORT, _MAX_SOFT_MATCH_SCORE, _SOFT_REJECT_IF_LOGPROB_BELOW
-from qwen3_tts.audio_post import analyze_take, stitch_segments
+from persona_forge import model
+from persona_forge.asr_check import has_speech, compute_transcript_match_score, _MIN_MATCH_SCORE_SHORT, _MIN_MATCH_SCORE_LONG, _MAX_WORDS_SHORT, _MAX_SOFT_MATCH_SCORE, _SOFT_REJECT_IF_LOGPROB_BELOW
+from persona_forge.audio_post import analyze_take, stitch_segments
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +293,7 @@ def run_omnivoice_job(
         import torch
         from omnivoice import OmniVoice
 
-        from qwen3_tts.device import (
+        from persona_forge.device import (
             apply_fp64_emulation_env,
             resolve_device,
             xpu_needs_fp64_emulation,

@@ -30,8 +30,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from qwen3_tts.model_config import configure_hf_token, resolve_model_repo
-from qwen3_tts.transformers_compat import repair_rotary_buffers
+from persona_forge.model_config import configure_hf_token, resolve_model_repo
+from persona_forge.transformers_compat import repair_rotary_buffers
 
 COMPRESSION_CHOICES = ("fp32", "int8", "both")
 
@@ -206,7 +206,7 @@ def _source_hash() -> str:
     paths = (
         Path(__file__).resolve().parent / "ov_export_wrappers.py",
         Path(__file__).resolve(),
-        Path(__file__).resolve().parents[1] / "qwen3_tts" / "model_config.py",
+        Path(__file__).resolve().parents[1] / "persona_forge" / "model_config.py",
     )
     for path in paths:
         h.update(path.read_bytes())

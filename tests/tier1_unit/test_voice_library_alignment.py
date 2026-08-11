@@ -9,8 +9,8 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from qwen3_tts import forced_alignment as fa
-from qwen3_tts import voice_library
+from persona_forge import forced_alignment as fa
+from persona_forge import voice_library
 
 
 @pytest.fixture(autouse=True)
