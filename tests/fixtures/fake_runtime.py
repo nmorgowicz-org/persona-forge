@@ -316,6 +316,16 @@ class FakeModelRuntime:
         }
         self._reconfig_in_progress = False
 
+    # Real model.py exposes TTS_BACKEND as an uppercase module-level constant
+    # (app.py reads model.TTS_BACKEND directly) — mirror that here so the fake
+    # stays in sync with self.tts_backend rather than needing two writes.
+    @property
+    def TTS_BACKEND(self) -> str:
+        return self.tts_backend
+
+    @TTS_BACKEND.setter
+    def TTS_BACKEND(self, value: str) -> None:
+        self.tts_backend = value
 
     # ── install ──
 

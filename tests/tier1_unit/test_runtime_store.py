@@ -92,6 +92,7 @@ def test_apply_persisted_config_skips_locked_keys(monkeypatch, runtime_json):
     assert applied == {}
 
 
+@pytest.mark.requires_torch
 def test_failed_reload_does_not_persist(tmp_path):
     """apply_runtime_config's persist step is unreachable when the reload raises,
     since it sits after the existing try/finally block completes.

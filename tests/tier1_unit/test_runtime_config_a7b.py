@@ -14,6 +14,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+# Every case spawns a subprocess that imports persona_forge.model, which does a
+# real `import torch` at module level.
+pytestmark = pytest.mark.requires_torch
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
