@@ -1,7 +1,7 @@
 export const THEMES = ['violet', 'teal', 'amber', 'rose'] as const
 export type Theme = (typeof THEMES)[number]
 
-const STORAGE_KEY = 'qwen3-tts-theme'
+const STORAGE_KEY = 'persona-forge-theme'
 const DEFAULT_THEME: Theme = 'violet'
 
 export function loadStoredTheme(): Theme {

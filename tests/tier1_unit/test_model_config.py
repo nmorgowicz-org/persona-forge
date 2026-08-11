@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from qwen3_tts.model_config import (
+from persona_forge.model_config import (
     configure_hf_token,
     resolve_model_repo,
     resolve_torch_load_config,
@@ -16,8 +16,8 @@ from qwen3_tts.model_config import (
 
 
 class TestResolveModelRepo:
-    def test_defaults_to_06b_base(self):
-        assert resolve_model_repo({}) == "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+    def test_defaults_to_17b_base(self):
+        assert resolve_model_repo({}) == "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 
     def test_selects_17b_base(self):
         assert resolve_model_repo({"MODEL_SIZE": "1.7b"}) == "Qwen/Qwen3-TTS-12Hz-1.7B-Base"

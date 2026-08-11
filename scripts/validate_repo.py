@@ -126,12 +126,12 @@ def validate_repository_metadata() -> None:
 def validate_compose() -> None:
     document = yaml.safe_load((ROOT / "compose.yml").read_text(encoding="utf-8"))
     services = document.get("services", {}) if isinstance(document, dict) else {}
-    for service in ("qwen3-tts", "export"):
+    for service in ("persona-forge", "export"):
         if service not in services:
             raise RuntimeError(f"compose.yml is missing service {service!r}")
-    if services["qwen3-tts"].get("image") != services["export"].get("image"):
+    if services["persona-forge"].get("image") != services["export"].get("image"):
         raise RuntimeError("compose.yml serving and export services must use the same image")
-    if "target" in services["qwen3-tts"].get("build", {}):
+    if "target" in services["persona-forge"].get("build", {}):
         raise RuntimeError("compose.yml must not select a serving-only Docker target")
     if "target" in services["export"].get("build", {}):
         raise RuntimeError("compose.yml must not select an exporter-only Docker target")
@@ -148,7 +148,7 @@ def validate_dockerfile() -> None:
     # default serve command with scripts/export.py.
     for marker in (
         "HEALTHCHECK ",
-        "qwen3_tts.app:app",
+        "persona_forge.app:app",
         "EXPOSE 8318",
         "requirements/requirements-openvino.txt",
         "requirements/requirements-export.txt",

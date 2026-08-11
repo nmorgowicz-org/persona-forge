@@ -22,6 +22,9 @@ export interface ActivityStatus {
   detail: string | null
   progress: number
   etaSeconds: number | null
+  // When set, the status bar renders a Stop button that invokes this — lets a long-running
+  // job be cancelled from anywhere on the page, not just from controls above the fold.
+  onCancel?: (() => void) | null
 }
 
 // A voice queued up from the Voice Library's "Edit" action, to be consumed once by
@@ -36,11 +39,19 @@ export interface EditingVoice {
   selections: ChipSelections | null
 }
 
+export interface CandidateBatch {
+  durationSec: number
+  candidates: OmniVoiceCandidate[]
+}
+
 export interface SegmentRackRow {
   segmentId: string
   text: string
   candidates: OmniVoiceCandidate[]
   selectedTakeIndex: number
+  // Batches replaced by a Regen at a different target duration, most-recent first — lets
+  // the user flip back to a prior batch for A/B comparison instead of losing it outright.
+  previousBatches?: CandidateBatch[]
 }
 
 // Stitch editor (docs/dev/features/stitch_editor.md §5)
@@ -60,6 +71,7 @@ export interface StitchPlanClip {
   trimEndMs: number
   fadeInMs: number
   fadeOutMs: number
+  prosodyMode?: 'off' | 'auto' | 'precise'
 }
 
 export interface StitchPlanDsp {
@@ -70,6 +82,9 @@ export interface StitchPlanDsp {
   compressEnabled: boolean
   compressThresholdDb: number
   compressRatio: number
+  prosodyStylePreset: 'Neutral' | 'Storyteller' | 'Calm' | 'Energetic' | 'Broadcast' | 'Clean'
+  paceMultiplier: number
+  pauseOffsetMs: number
 }
 
 interface StoreState {
@@ -130,7 +145,11 @@ interface StoreState {
   setSpeakAudioBlob: (v: Blob | null) => void
   setEditingVoice: (voice: EditingVoice | null) => void
   setDesignEngine: (engine: DesignEngine) => void
+  targetFamilyId: string | null
+  setTargetFamilyId: (familyId: string | null) => void
   setActivityStatus: (v: ActivityStatus | null) => void
+  glossaryOpen: boolean
+  setGlossaryOpen: (v: boolean) => void
 
   // ---- VoiceDesign (Qwen) ----
   vdSelections: ChipSelections
@@ -193,6 +212,10 @@ interface StoreState {
   ovStitchedUrl: string | null
   ovStitchedBlob: Blob | null
   ovSavedVoiceId: string | null
+  // Set right after a Stitch Studio save; the Voice Library reads this on mount to
+  // auto-open that voice's Adjust Prosody popover, then clears it so it doesn't
+  // reopen on a later, unrelated visit to the library.
+  deepLinkProsodyVoiceId: string | null
   ovProgress: OmniVoiceProgress | null
    ovCurrentJobId: string | null
    ovJobTotalSegments: number
@@ -245,10 +268,11 @@ interface StoreState {
   setOvStitchedUrl: (v: string | null) => void
   setOvStitchedBlob: (v: Blob | null) => void
   setOvSavedVoiceId: (v: string | null) => void
+  setDeepLinkProsodyVoiceId: (v: string | null) => void
   setOvProgress: (v: OmniVoiceProgress | null) => void
    setOvCurrentJobId: (v: string | null) => void
    setOvJobTotalSegments: (v: number) => void
-   setOvJobStatus: (v: 'running' | 'completed' | 'failed' | null) => void
+   setOvJobStatus: (v: 'queued' | 'running' | 'completed' | 'failed' | null) => void
    setOvJobSegmentsCompleted: (v: OmniVoiceAuditionProgressResult['segments_completed']) => void
     setOvJobCurrentSegmentIndex: (v: number | null) => void
     setOvJobMessage: (v: string | null) => void
@@ -311,11 +335,12 @@ export const useAppStore = create<StoreState>((set) => ({
    speakJobId: null,
    speakJobProgress: null,
    speakLastSeed: null,
-   speakAudioBlob: null,
-   editingVoice: null,
-    designEngine: 'qwen',
+  speakAudioBlob: null,
+  editingVoice: null,
+  designEngine: 'qwen',
+  targetFamilyId: null,
     activityStatus: null,
-    runtimeTtsBackend: null,
+    runtimeTtsBackend: 'pocket_tts',
     pocketTtsVoiceCloningAvailable: null,
     swapInProgress: false,
     healthBackend: null,
@@ -343,8 +368,12 @@ export const useAppStore = create<StoreState>((set) => ({
   setSpeakAudioBlob: (v) => set({ speakAudioBlob: v }),
   setEditingVoice: (editingVoice) => set({ editingVoice }),
   setDesignEngine: (engine) => set({ designEngine: engine }),
-   setActivityStatus: (activityStatus) => set({ activityStatus }),
-   setRuntimeConfig: (patch) => set(patch),
+  setTargetFamilyId: (targetFamilyId) => set({ targetFamilyId }),
+  setActivityStatus: (activityStatus) => set({ activityStatus }),
+  setGlossaryOpen: (v: boolean) => set({ glossaryOpen: v }),
+  glossaryOpen: false,
+  setRuntimeConfig: (patch) => set(patch),
+
    setRefTextValidation: (refTextValidation) => set({ refTextValidation }),
 
   // -- VoiceDesign --
@@ -428,6 +457,7 @@ export const useAppStore = create<StoreState>((set) => ({
   ovStitchedUrl: null,
   ovStitchedBlob: null,
   ovSavedVoiceId: null,
+  deepLinkProsodyVoiceId: null,
   ovProgress: null,
   ovCurrentJobId: null,
   ovJobTotalSegments: 0,
@@ -456,6 +486,9 @@ export const useAppStore = create<StoreState>((set) => ({
       compressEnabled: true,
       compressThresholdDb: -24,
       compressRatio: 2.5,
+      prosodyStylePreset: 'Neutral',
+      paceMultiplier: 1,
+      pauseOffsetMs: 0,
     },
     ovStitchEditorOpen: false,
     ovStitchPreviewUrl: null,
@@ -514,6 +547,7 @@ export const useAppStore = create<StoreState>((set) => ({
   setOvStitchedUrl: (v) => set({ ovStitchedUrl: v }),
   setOvStitchedBlob: (v) => set({ ovStitchedBlob: v }),
   setOvSavedVoiceId: (v) => set({ ovSavedVoiceId: v }),
+  setDeepLinkProsodyVoiceId: (v) => set({ deepLinkProsodyVoiceId: v }),
   setOvProgress: (v) => set({ ovProgress: v }),
   setOvCurrentJobId: (v) => set({ ovCurrentJobId: v }),
   setOvJobTotalSegments: (v) => set({ ovJobTotalSegments: v }),
@@ -621,16 +655,17 @@ const PROGRESS_POLL_MS = 700
       if (data.swap_in_progress !== store.swapInProgress) {
         useAppStore.setState({ swapInProgress: Boolean(data.swap_in_progress) })
       }
-      if (data.backend !== store.healthBackend) {
+      const resolvedBackend = data.resolved_backend || data.backend
+      if (resolvedBackend !== store.healthBackend) {
         useAppStore.setState({
-          healthBackend: data.backend || null,
-          runtimeTtsBackend: data.backend || null,
+          healthBackend: resolvedBackend || null,
+          runtimeTtsBackend: resolvedBackend || null,
         })
       }
       // Sync Pocket TTS voice-cloning status into the store whenever /health
       // indicates the backend is pocket_tts — this is the single source of truth
       // for PocketTTSWarningBanner and survives page navigations / refreshes.
-      if (data.backend === 'pocket_tts') {
+      if (resolvedBackend === 'pocket_tts') {
         const pt = (data as any).pocket_tts as
           | { voice_cloning_available?: boolean; message?: string }
           | null

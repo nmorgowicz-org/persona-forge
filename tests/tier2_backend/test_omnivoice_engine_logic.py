@@ -28,7 +28,7 @@ def _prepare_engine(model_draws, sr=24000):
     )
     sys.modules["omnivoice"] = fake_omnivoice
 
-    from qwen3_tts import omnivoice_engine as eng
+    from persona_forge import omnivoice_engine as eng
 
     patcher1 = pytest.importorskip(
         "unittest.mock", reason="mock needed"

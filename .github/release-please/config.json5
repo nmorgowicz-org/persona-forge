@@ -22,8 +22,14 @@
   "initial-version": "0.2.0",
   "packages": {
     ".": {
-      "package-name": "qwen3-tts-openvino",
-      "changelog-path": "CHANGELOG.md"
+      "package-name": "persona-forge",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "pyproject.toml"
+        }
+      ]
     }
   }
 }

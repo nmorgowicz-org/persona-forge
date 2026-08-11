@@ -34,26 +34,26 @@ High-level component diagram:
 
 Key components:
 
-- Flask app (src/qwen3_tts/app.py):
+- Flask app (src/persona_forge/app.py):
   - Single Gunicorn worker, -w 1 -k gthread --threads 4.
   - Provides all REST endpoints and optional SPA.
   - Never spawns a second inference worker; all heavy operations are submitted through model.executor.
 
-- Model runtime (src/qwen3_tts/model.py):
+- Model runtime (src/persona_forge/model.py):
   - Owns the single shared ThreadPoolExecutor(max_workers=1) that serializes all inference and swaps.
   - Manages loading/unloading Base and VoiceDesign checkpoints, idle unload, and Base-priority swap-back via _ensure_base_loaded().
   - Forwards to OpenVINO adapters when TTS_BACKEND=openvino.
 
-- OpenVINO adapters (src/qwen3_tts/openvino/):
+- OpenVINO adapters (src/persona_forge/openvino/):
   - OVTalkerRuntime swaps the two transformer core forwards (main talker, code predictor) for OpenVINO IRs.
   - Uses persistent InferRequest objects; no per-token / per-request creation.
   - FP32 vocoder acceleration is wired via vocoder_runtime if an OV vocoder is exported.
 
-- VoiceDesign engine (src/qwen3_tts/voice_design.py):
+- VoiceDesign engine (src/persona_forge/voice_design.py):
   - Swaps to a second checkpoint (VoiceDesign) to synthesize a sample from a textual description.
   - Leaves VoiceDesign loaded after success; next /generate reloads Base lazily.
 
-- OmniVoice engine (src/qwen3_tts/omnivoice_engine.py):
+- OmniVoice engine (src/persona_forge/omnivoice_engine.py):
   - Swaps in the OmniVoice checkpoint (k2-fsa/OmniVoice) to generate multiple candidates per segment.
   - Left loaded after success; unloaded only when Base is required, another engine is swapped in, or idle-unload fires.
 
@@ -62,11 +62,11 @@ Key components:
   - Persona Forge Studio (VoiceDesign + OmniVoice accent design + stitch editor).
   - Auto-disables if FRONTEND_ENABLED=0 or dist directory is missing; app remains a pure API service.
 
-- Voice library (src/qwen3_tts/voice_library.py):
+- Voice library (src/persona_forge/voice_library.py):
   - Persists reference voices as WAV+JSON on disk (VOICE_LIBRARY_PATH_CONTAINER).
   - Used by /generate, /v1/audio/speech, and Persona Forge.
 
-- Segment library (src/qwen3_tts/segment_library.py):
+- Segment library (src/persona_forge/segment_library.py):
   - Persists individual OmniVoice audition candidates that were “locked in.”
   - Used by the stitch editor to mix takes across sessions.
 

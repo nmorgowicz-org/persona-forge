@@ -20,7 +20,7 @@ import statistics
 import time
 from pathlib import Path
 
-import qwen3_tts.openvino.runtime_config as ov_runtime_config  # noqa: F401
+import persona_forge.openvino.runtime_config as ov_runtime_config  # noqa: F401
 from bench_common import load_model
 
 
@@ -60,7 +60,7 @@ def main() -> None:
     if args.backend == "ov":
         if args.model_dir is None:
             p.error("--model-dir is required for --backend ov")
-        from qwen3_tts.openvino.talker import OVTalkerRuntime
+        from persona_forge.openvino.talker import OVTalkerRuntime
 
         runtime = OVTalkerRuntime(
             args.model_dir, talker, compression=args.compression,

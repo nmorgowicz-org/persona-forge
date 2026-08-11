@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from qwen3_tts.prompt_diagnostics import (
+from persona_forge.prompt_diagnostics import (
     dump_reference_prompt,
     dump_talker_parameter_manifest,
     reference_codes,
@@ -40,6 +40,7 @@ class TestDumpReferencePrompt:
         assert set(manifest["versions"]) == {"qwen-tts", "torch", "transformers"}
 
 
+@pytest.mark.requires_torch
 @pytest.mark.slow
 class TestDumpTalkerParameterManifest:
     def test_selects_conditioning_parameters(self, tmp_path):

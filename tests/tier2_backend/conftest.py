@@ -1,7 +1,7 @@
 """Tier 2 backend shared fixtures.
 
-Install FakeModelRuntime into sys.modules["qwen3_tts.model"] BEFORE importing
-qwen3_tts.app so that model-heavy imports see the fake, not the real runtime.
+Install FakeModelRuntime into sys.modules["persona_forge.model"] BEFORE importing
+persona_forge.app so that model-heavy imports see the fake, not the real runtime.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ _rt_instance = FakeModelRuntime(
 _rt_instance.install()
 
 # Now safe to import app — it will get our fake model.
-from qwen3_tts import app as _app_module  # noqa: E402
+from persona_forge import app as _app_module  # noqa: E402
 
 # Alias _runtime_live for runtime_config tests.
 _rt_instance.live_config = _rt_instance._runtime_live
@@ -42,7 +42,7 @@ def rt():
 
 @pytest.fixture(scope="session")
 def app_module():
-    """qwen3_tts.app module using FakeModelRuntime."""
+    """persona_forge.app module using FakeModelRuntime."""
     return _app_module
 
 

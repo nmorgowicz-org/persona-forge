@@ -18,8 +18,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from qwen3_tts.model_config import resolve_voice_design_model_repo
-from qwen3_tts.presets import FRAME_RATE_HZ, get_preset, get_voice_design_preset, normalize_size
+from persona_forge.model_config import resolve_voice_design_model_repo
+from persona_forge.presets import FRAME_RATE_HZ, get_preset, get_voice_design_preset, normalize_size
 
 
 OV_ROOT = Path(os.environ.get("OV_OUTPUT_ROOT", "/ov"))
@@ -171,7 +171,7 @@ def main() -> int:
             float(max_speech_seconds_env) if max_speech_seconds_env else None,
             os.environ.get("VOICE_DESIGN_MAIN_COMPRESSION") or None,
         )
-        # export_openvino.py resolves its checkpoint via qwen3_tts.model_config.resolve_model_repo(),
+        # export_openvino.py resolves its checkpoint via persona_forge.model_config.resolve_model_repo(),
         # which honors an explicit MODEL_REPO override — set it so the subprocess below (which
         # inherits this environment) loads the VoiceDesign checkpoint instead of a Base one.
         os.environ["MODEL_REPO"] = resolve_voice_design_model_repo()

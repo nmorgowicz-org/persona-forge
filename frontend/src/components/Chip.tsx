@@ -28,7 +28,7 @@ export function ChipButton({ label, selected, onClick, experimental }: ChipButto
       >
         {label}
         {experimental && (
-          <Badge variant="outline" className="h-4 px-1 text-[9px] text-amber-500">
+          <Badge variant="outline" className="h-4 px-1 text-[9px] text-warning">
             experimental
           </Badge>
         )}

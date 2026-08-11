@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from qwen3_tts.config import apply_preset_env
-from qwen3_tts.presets import (
+from persona_forge.config import apply_preset_env
+from persona_forge.presets import (
     capacity_for_seconds,
     get_preset,
     get_voice_design_preset,
+    has_valid_export,
     seconds_for_capacity,
 )
 
@@ -64,6 +65,54 @@ class TestGetPreset:
         short_preset = get_preset("1.7B", max_speech_seconds=15)
         assert default_preset["main_stateful_model"] != short_preset["main_stateful_model"]
         assert short_preset["stateful_capacity"] == 180
+
+
+class TestHasValidExport:
+    def test_no_files_on_disk_is_false(self, tmp_path):
+        preset = get_preset("1.7B")
+        preset["main_stateful_model"] = str(tmp_path / "missing.xml")
+        assert has_valid_export(preset) is False
+
+    def test_main_present_no_predictor_declared_is_true(self, tmp_path):
+        preset = get_preset("1.7B")
+        main = tmp_path / "main.xml"
+        main.touch()
+        preset["main_stateful_model"] = str(main)
+        assert preset["predictor_stateful_model"] is None
+        assert has_valid_export(preset) is True
+
+    def test_predictor_declared_but_missing_is_false(self, tmp_path):
+        preset = get_preset("0.6B")
+        main = tmp_path / "main.xml"
+        main.touch()
+        preset["main_stateful_model"] = str(main)
+        preset["predictor_stateful_model"] = str(tmp_path / "missing_predictor.xml")
+        assert has_valid_export(preset) is False
+
+    def test_main_and_predictor_present_is_true(self, tmp_path):
+        preset = get_preset("0.6B")
+        main = tmp_path / "main.xml"
+        predictor = tmp_path / "predictor.xml"
+        main.touch()
+        predictor.touch()
+        preset["main_stateful_model"] = str(main)
+        preset["predictor_stateful_model"] = str(predictor)
+        assert has_valid_export(preset) is True
+
+
+class TestBackendFallbackAutoSelect:
+    def test_no_export_falls_back_to_pytorch(self):
+        environ = {"MODEL_SIZE": "1.7B"}
+        preset = apply_preset_env(environ)
+        assert environ["TTS_BACKEND"] == "pytorch"
+        assert preset["backend_source"] == "auto-fallback"
+        assert preset["backend_fallback_choice"] == "pytorch"
+
+    def test_explicit_backend_wins_and_is_reported(self):
+        environ = {"MODEL_SIZE": "1.7B", "TTS_BACKEND": "pocket_tts"}
+        preset = apply_preset_env(environ)
+        assert environ["TTS_BACKEND"] == "pocket_tts"
+        assert preset["backend_source"] == "explicit"
 
 
 class TestVoiceDesignPreset:

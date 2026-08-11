@@ -24,6 +24,23 @@ class TestGenerateAsync:
         assert audio.status_code == 200
         assert "audio" in audio.content_type
 
+    def test_async_prosody_repair_is_reported_in_progress_and_audio(self, client, rt):
+        resp = client.post(
+            "/generate/async",
+            json={"text": "First. Second.", "prosody_repair": True},
+        )
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["prosody_repair"] == {"requested": True, "outcome": "pending"}
+
+        progress = rt.wait_for_job_completion(body["job_id"])
+        assert progress["prosody_repair"]["outcome"] == "unnecessary"
+        assert rt.generate_calls[-1]["kwargs"]["prosody_repair"] is True
+
+        audio = client.get(f"/generate/job/{body['job_id']}/audio")
+        assert audio.status_code == 200
+        assert audio.headers["X-Prosody-Repair-Outcome"] == "unnecessary"
+
     def test_cancel_running_job(self, client, rt):
         # Temporarily disable immediate completion so the job stays "running".
         orig = rt.async_jobs_complete_immediately

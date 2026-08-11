@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Milestone 0 latency / RTF / memory benchmark for the PyTorch baseline.
 
-Run with the prod qwen3-tts container stopped so the model load does not contend for
+Run with the prod persona-forge container stopped so the model load does not contend for
 memory. Reports warm median and p95 latency, real-time factor, peak RSS, and swap
 activity per prompt. Defaults to production sampling; use --deterministic for the
 greedy settings used by parity tests.

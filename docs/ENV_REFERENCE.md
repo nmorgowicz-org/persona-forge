@@ -28,7 +28,7 @@ Recommended (simple knobs):
 | Var | Default | Description |
 |-----|---------|-------------|
 | `MODEL_SIZE` | `1.7B` | Base checkpoint size. Leave at 1.7B unless you specifically need 0.6B. |
-| `TTS_BACKEND` | `openvino` | Inference backend. Use `openvino` (default) or `pytorch` as rollback. |
+| `TTS_BACKEND` | `pocket_tts` | Inference backend. `pocket_tts` is the product default (self-contained, no export step); switch to `openvino` for the accelerated Qwen path on Intel CPUs (requires export), or `pytorch` as a portable rollback. |
 | `LOW_RAM_MODE` | `1` | Enables idle unload + malloc tuning; recommended on 10–15 GiB hosts. |
 | `FRONTEND_ENABLED` | `1` | Serves the web UI at `/`. Set `0` for API-only deployments. |
 
@@ -38,10 +38,16 @@ Recommended (simple knobs):
 
 | Var | Default | Description |
 |-----|---------|-------------|
-| `TTS_BACKEND` | `openvino` | `openvino` (default, accelerated), `pytorch` (rollback, slower), or `pocket_tts` (audio-only Pocket TTS backend). |
-| `DEVICE` | `cpu` | Torch/OpenVINO device; always `cpu` in current deployments. |
+| `TTS_BACKEND` | `pocket_tts` | `pocket_tts` (default, self-contained, no export needed), `openvino` (opt-in accelerated Qwen path on Intel CPUs, requires export), or `pytorch` (portable rollback, slower). When the Qwen3-TTS engine is invoked without an explicit value, the preset fallback auto-selects `openvino` if a valid IR export already exists on disk, else `pytorch` — it never triggers the export itself. `/health` reports `backend_source`/`backend_fallback_choice`. |
+| `TTS_DEVICE` | auto-detect | Forces the torch device the Qwen3-TTS PyTorch backend and OmniVoice load onto: `cuda`, `xpu`, `mps`, or `cpu`. Unset auto-detects the best available (`cuda` > `xpu` > `mps` > `cpu`). A forced-but-unavailable device warns and falls back to `cpu` rather than failing. `DEVICE` is accepted as a legacy alias. |
+| `OPENVINO_DEVICE` | `AUTO` | OpenVINO compile target for the talker/main/predictor cores (`CPU`/`GPU`/`AUTO`); `GPU` targets an Intel iGPU. Separate from the vocoder's own `OPENVINO_VOCODER_DEVICE`. |
 | `TTS_MAX_SPEECH_SECONDS` | Preset-specific (e.g. 64) | Max speech duration per request. Baked into IR at export time; changing it requires re-export. |
 | `IDLE_UNLOAD_SECONDS` | `0` | Seconds after last request to unload model and free RAM; reload is transparent but adds latency. Set by LOW_RAM_MODE. |
+| `ALIGNER_MODEL_PATH` | (unset) | Optional override path to the MMS-300M forced-aligner ONNX model used by Precise prosody. When unset (the default) the model auto-downloads from Hugging Face on first alignment (pinned to an immutable revision, cached like the base checkpoints) — no manual placement needed. Set this only to point at a locally-provisioned copy on air-gapped hosts. Lazily loaded on first alignment and idle-unloaded. |
+| `ALIGNER_PROVIDERS` | `CPUExecutionProvider` | Comma-separated onnxruntime execution providers for the aligner (portable CPU baseline; add OpenVINO/CoreML where available). |
+| `ALIGNER_LATENCY_BUDGET_SECONDS` | `5` | Fail-closed warm p95 budget for Precise alignment. Job responses and `GET /alignment/performance` expose observed duration and budget status. |
+| `ALIGNER_IDLE_UNLOAD_SECONDS` | `120` | Seconds after the serialized alignment queue drains before releasing the ONNX session. |
+| `GENERATION_REPAIR_BUDGET_SECONDS` | `5` | Hard per-request deadline for explicit `prosody_repair` on complete-file generation routes. Timeout returns the original un-repaired output with a `budget_fallback` outcome. |
 
 ## Memory / OpenVINO (advanced)
 
@@ -126,6 +132,7 @@ Leave at defaults unless you know what you're doing.
 | `SILENCE_TRIM` | `1` | Trim leading/trailing silence from generated audio. Set `0` to disable. |
 | `SILENCE_TRIM_THRESH` | `0.01` | Silence threshold as fraction of peak amplitude. |
 | `SILENCE_TRIM_PAD_MS` | `30` | Padding (ms) after detected silence to avoid clipping consonants. |
+| `TTS_DEFAULT_DSP` | `on` | Applies the transparent `default` house preset (-16 LUFS normalization and -1 dBFS sample-peak limiting) when `style_preset` is omitted. Set `off` to restore trim-only output by default; explicit presets still apply. |
 
 ## Pocket TTS backend
 

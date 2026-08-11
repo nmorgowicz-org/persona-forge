@@ -1,4 +1,4 @@
-"""Runs the real qwen3_tts Flask app with the model layer faked out via FakeModelRuntime.
+"""Runs the real persona_forge Flask app with the model layer faked out via FakeModelRuntime.
 
 For Playwright E2E and Tier 3 API integration tests. No model weights, no OpenVINO, no Docker.
 
@@ -6,7 +6,7 @@ Uses tests/fixtures/fake_runtime.py as the single source of truth for the fake m
 then layers UI-specific behaviors (delays, OmniVoice, error profiles) on top.
 
 Usage:
-    QWEN3_TTS_TEST_PORT=8319 \\
+    PERSONA_FORGE_TEST_PORT=8319 \\
     TEST_PROFILE= \\
     python tests/ui/fixtures/fake_model_server.py
 
@@ -78,14 +78,14 @@ def _patch_generate_for_slow_async(rt):
     if not rt._slow_async:
         return
 
-    original_run_generate = _get_module_attr("qwen3_tts.model", "_run_generate")
+    original_run_generate = _get_module_attr("persona_forge.model", "_run_generate")
 
     def _wrapped(text, language, **kwargs):
         if kwargs.get("job_id"):
             time.sleep(random.uniform(3, 5))
         return original_run_generate(text, language, **kwargs)
 
-    _set_module_attr("qwen3_tts.model", "_run_generate", _wrapped)
+    _set_module_attr("persona_forge.model", "_run_generate", _wrapped)
 
 
 def _get_module_attr(module_name, attr):
@@ -111,11 +111,16 @@ def _patch_omnivoice_run_job(app_module):
         postprocess_output=None,
         min_match_score=None,
         on_candidate_complete=None,
+        cancel_event=None,
     ):
         time.sleep(0.15)
-
+ 
         for seg_idx, text in enumerate(segments):
+            if cancel_event is not None and cancel_event.is_set():
+                break
             for cand_idx in range(candidates_per_segment):
+                if cancel_event is not None and cancel_event.is_set():
+                    break
                 wav = np.zeros(int(_SAMPLE_RATE * 0.3), dtype=np.float32)
                 candidate = (
                     wav,
@@ -128,10 +133,21 @@ def _patch_omnivoice_run_job(app_module):
                 if on_candidate_complete is not None:
                     on_candidate_complete(seg_idx, cand_idx, text, candidate)
                 time.sleep(0.03)
-
+ 
     app_module.omnivoice_engine.run_omnivoice_job = fake_run_omnivoice_job
     app_module.omnivoice_engine.swap_in_progress = lambda: False
     app_module.omnivoice_engine.mark_swap_pending = lambda: None
+
+def _patch_save_voice(app_module, rt):
+    """Route app-level voice library calls to the in-memory fake library."""
+    fake_library = rt.voice_library
+    app_module.voice_library.save_voice = fake_library.save_voice
+    app_module.voice_library.get_voice = fake_library.get_voice
+    app_module.voice_library.get_voice_wav_bytes = fake_library.get_voice_wav_bytes
+    app_module.voice_library.update_voice = fake_library.update_voice
+    app_module.voice_library.delete_voice = fake_library.delete_voice
+    app_module.voice_library.list_voices = fake_library.list_voices
+
 
 
 def _install_fake_voice_design(app_module):
@@ -147,20 +163,21 @@ def _install_fake_voice_design(app_module):
 def main() -> None:
     _setup_pythonpath()
 
-    port = int(os.getenv("QWEN3_TTS_TEST_PORT", "8319"))
+    port = int(os.getenv("PERSONA_FORGE_TEST_PORT", "8319"))
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
     # Ensure library dirs before importing app (uses segment_library which defaults to /segments).
-    os.environ.setdefault("VOICE_LIBRARY_DIR", tempfile.mkdtemp(prefix="qwen3-tts-e2e-voices-"))
-    os.environ.setdefault("SEGMENT_LIBRARY_DIR", tempfile.mkdtemp(prefix="qwen3-tts-e2e-segments-"))
+    os.environ.setdefault("VOICE_LIBRARY_DIR", tempfile.mkdtemp(prefix="persona-forge-e2e-voices-"))
+    os.environ.setdefault("SEGMENT_LIBRARY_DIR", tempfile.mkdtemp(prefix="persona-forge-e2e-segments-"))
 
     rt = _install_fake_runtime()
     _patch_generate_for_slow_async(rt)
 
-    from qwen3_tts import app as app_module  # noqa: E402
+    from persona_forge import app as app_module  # noqa: E402
 
     _install_fake_voice_design(app_module)
     _patch_omnivoice_run_job(app_module)
+    _patch_save_voice(app_module, rt)
 
     from werkzeug.serving import make_server  # noqa: E402
 
@@ -187,19 +204,20 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     Intended for Tier 3 API integration tests and Playwright E2E.
     """
     _setup_pythonpath()
-    lib_dir = tempfile.mkdtemp(prefix="qwen3-tts-e2e-voices-")
-    seg_dir = tempfile.mkdtemp(prefix="qwen3-tts-e2e-segments-")
+    lib_dir = tempfile.mkdtemp(prefix="persona-forge-e2e-voices-")
+    seg_dir = tempfile.mkdtemp(prefix="persona-forge-e2e-segments-")
     os.environ.setdefault("VOICE_LIBRARY_DIR", lib_dir)
     os.environ.setdefault("SEGMENT_LIBRARY_DIR", seg_dir)
 
     rt = _install_fake_runtime()
     _patch_generate_for_slow_async(rt)
 
-    from qwen3_tts import app as app_module  # noqa: E402
+    from persona_forge import app as app_module  # noqa: E402
     from werkzeug.serving import make_server  # noqa: E402
 
     _install_fake_voice_design(app_module)
     _patch_omnivoice_run_job(app_module)
+    _patch_save_voice(app_module, rt)
 
     shutdown_event = threading.Event()
     app_module._shutdown_hook = shutdown_event.set

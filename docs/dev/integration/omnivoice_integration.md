@@ -175,7 +175,7 @@ containers that must not be starved (`dockermisc1-shared-host-caution.md`).
   different enough architecture that reusing that exporter is not realistic without significant
   new work, and nothing upstream suggests anyone has done an OpenVINO port. The
   `omnivoice.cpp` GGUF/llama.cpp-style path was a separate runtime and toolchain from this repo's
-  OpenVINO-only design — it did not slot into `src/qwen3_tts/openvino/` at all.
+  OpenVINO-only design — it did not slot into `src/persona_forge/openvino/` at all.
 
 **Feasibility verdict (post-testing): plausible as a separate, occasional-use CPU process, not as
 a third "profile" inside the existing OpenVINO runtime.** The plain `pip install omnivoice` package
@@ -209,7 +209,7 @@ with a different voice-design engine behind it.**
 
 ```
 ┌────────────────────────────┐        ┌─────────────────────────────────────┐
-│ omnivoice-design (separate │        │ qwen3-tts container (unchanged Base  │
+│ omnivoice-design (separate │        │ persona-forge container (unchanged Base  │
 │ container/process, started │  WAV   │ model always resident; VoiceDesign   │
 │ on demand, stopped after)  │───────▶│ swap path unchanged, both still work)│
 │ plain pip install          │        │                                       │
@@ -240,7 +240,7 @@ Why this shape:
    "shared-host caution" (other unrelated containers on dockermisc1) small.
 4. It also sidestepped the CC-BY-NC weight license question living *inside* this repo's own served
    model tree — OmniVoice stayed an external, clearly-separated component that a deployer could
-   choose to enable or not, rather than baked into the qwen3-tts-openvino image's default IR set.
+   choose to enable or not, rather than baked into the persona-forge image's default IR set.
 
 **Only a `/voices/import` endpoint was added to this repo** (accepts a WAV + a
 `sample_text` string that is exactly what's spoken in the WAV, same constraint the existing

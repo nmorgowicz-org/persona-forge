@@ -26,7 +26,7 @@ import statistics
 from dataclasses import dataclass
 from pathlib import Path
 
-from qwen3_tts.model_config import configure_hf_token, resolve_model_repo, resolve_torch_load_config
+from persona_forge.model_config import configure_hf_token, resolve_model_repo, resolve_torch_load_config
 
 
 # Reference voice defaults mirror app_worker.py so a benchmark run reproduces the
@@ -118,7 +118,7 @@ def load_model() -> LoadedModel:
     """Load the configured checkpoint at float32 and build the voice-clone prompt.
 
     WARNING: loads a full model (~4.7 GiB for 0.6B). On dockermisc1 stop the prod
-    qwen3-tts container first so this does not contend for memory and swap-thrash.
+    persona-forge container first so this does not contend for memory and swap-thrash.
     """
 
     configure_hf_token()

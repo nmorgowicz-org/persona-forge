@@ -1,19 +1,55 @@
-# How to run Qwen3-TTS OpenVINO
+# How to run Persona Forge
 
 This document is for anyone deploying or operating this container. Internal host-specific
 procedures are in [INTERNAL_OPERATIONS.md](docs/dev/INTERNAL_OPERATIONS.md).
 
-## Quick start
+## Quick start (pocket-tts, no export required)
 
-Requirements: Linux AMD64, Docker with Compose, Intel CPU, at least 10 GiB for the service, a
-reference WAV, and its exact transcript.
+Persona Forge's default backend is pocket-tts (self-contained, no export step). This section covers
+the zero-friction path. For optional Qwen3-TTS with OpenVINO acceleration, see the "Export
+(optional)" section below.
+
+Requirements: Linux AMD64, Docker with Compose, at least 10 GiB for the service.
 
 1. Copy and edit the environment:
 
    ```bash
    cp .env.example .env
    # Optional: set REF_AUDIO_PATH for a default voice. REF_TEXT is optional; Whisper drafts it by default.
-   # MODEL_SIZE=1.7B is recommended and is the default.
+   # MODEL_SIZE and TTS_BACKEND default to 1.7B and pocket_tts respectively.
+   ```
+
+2. Start the service:
+
+   ```bash
+   docker compose up -d persona-forge
+   docker compose logs -f persona-forge
+   ```
+
+   First boot loads the model; subsequent boots are fast.
+   Health will report `status: "starting"` until ready.
+
+3. Verify:
+
+   ```bash
+   curl -fsS http://localhost:8318/health
+
+   curl -sS http://localhost:8318/v1/audio/speech \
+     -H 'Content-Type: application/json' \
+     -d '{"input":"This is a test.","response_format":"mp3"}' \
+     -o test.mp3
+   ```
+
+## Export (optional: Qwen3-TTS engine)
+
+Only run this section if you want to use the Qwen3-TTS engine (available in PyTorch or OpenVINO).
+The default pocket-tts backend needs no export. If using Qwen3-TTS with OpenVINO acceleration,
+the export is memory-intensive; refer to the instructions below.
+
+1. Stop the serving container (export is memory-intensive):
+
+   ```bash
+   docker compose down persona-forge
    ```
 
 2. Export IR (one time per model size / config change; uses 13–14 GiB):
@@ -22,20 +58,14 @@ reference WAV, and its exact transcript.
    docker compose run --rm export
    ```
 
-   On a constrained host (10–15 GiB), stop the serving container first:
-   ```bash
-   docker compose down qwen3-tts
-   ```
-
-3. Start the service:
+3. Start the service with OpenVINO backend:
 
    ```bash
-   docker compose up -d qwen3-tts
-   docker compose logs -f qwen3-tts
+   TTS_BACKEND=openvino docker compose up -d persona-forge
+   docker compose logs -f persona-forge
    ```
 
-   First boot is slow: it loads the model and warms the OpenVINO kernel cache.
-   Health will report `status: "starting"` until it finishes.
+   First boot warms the OpenVINO kernel cache (60–120s).
 
 4. Verify:
 
@@ -116,7 +146,7 @@ Normal users only need to choose a model size and optionally add or generate a v
 
 - `LOW_RAM_MODE=1` — enables aggressive glibc memory tuning + idle unload. Recommended on
   hosts with < 20 GiB free RAM.
-- `QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<sha>` — pin your production image.
+- `PERSONA_FORGE_IMAGE=ghcr.io/nmorgowicz-org/persona-forge:<sha>` — pin your production image.
 - `TTS_MEMORY_LIMIT`, `TTS_MEMORY_SWAP_LIMIT` — adjust for your host (defaults 10G/11G).
 - For all other knobs (threading, quantization, silence trim, codec behavior, etc.), see
   Advanced settings reference below and the .env.example comments.
@@ -142,7 +172,7 @@ No jemalloc / tcmalloc: allocator replacement caused SIGABRT/SIGSEGV under trans
 - Controls max audio duration per request. Baked into IR at export time.
 - Is a latency/safety cap, not a memory lever. Changing it from 64s to 15s saves ~200 MiB,
   not gigabytes.
-- Must match between `export` and `qwen3-tts`; changing it requires re-exporting.
+- Must match between `export` and `persona-forge`; changing it requires re-exporting.
 
 ### Runtime control (no restart needed)
 
@@ -204,7 +234,7 @@ Use these only if you have a reason. All other internals are preset-derived and 
 - Is a latency/safety cap, not a memory lever. Changing it from 64s to 15s saves
   ~200 MiB, not gigabytes. Use it to bound worst-case latency and fail fast on
   runaway or misbehaving requests.
-- Must match between `export` and `qwen3-tts`. Changing it requires re-exporting.
+- Must match between `export` and `persona-forge`. Changing it requires re-exporting.
 - Leave at `64` unless you have a specific reason to change it.
 
 **`SILENCE_TRIM` / `SILENCE_TRIM_THRESH` / `SILENCE_TRIM_PAD_MS`**
@@ -227,7 +257,7 @@ Use these only if you have a reason. All other internals are preset-derived and 
 
 **`VOICE_DESIGN_MAX_SPEECH_SECONDS`** (default `20`)
 - Capacity baked into the VoiceDesign IR at export time. Must match between
-  `export-voice-design` and `qwen3-tts`. Change only if you need longer VoiceDesign samples.
+  `export-voice-design` and `persona-forge`. Change only if you need longer VoiceDesign samples.
 
 ## HTTP API reference
 
@@ -235,8 +265,10 @@ Use these only if you have a reason. All other internals are preset-derived and 
   - Health, readiness, OpenVINO status, and `swap_in_progress`.
 
 - `POST /v1/audio/speech` (OpenAI-compatible)
-  - `{ "input": "text", "language": "English", "response_format": "mp3|wav", "voice_id": "vd_...", "instruct": "..." }`
+  - `{ "input": "text", "language": "English", "response_format": "mp3|wav", "voice_id": "vd_...", "instruct": "...", "prosody_repair": true }`
   - `voice_id` selects a saved voice from the library.
+  - `prosody_repair` is an explicit batch/offline opt-in. It uses the input text and returns
+    `X-Prosody-Repair-Outcome`; timeout preserves the original output.
 
 - `POST /generate` (native)
   - Same fields as above but `text` instead of `input`.

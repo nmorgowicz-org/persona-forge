@@ -23,12 +23,19 @@ Request body (JSON):
 - `instruct` (string, optional) — optional instruction/steering prompt.
 - `response_format` (string, optional, default "mp3") — "mp3" or "wav".
 - `seed` (integer, optional) — RNG seed for reproducibility; if present must be an integer.
+- `prosody_repair` (boolean, optional, default false) — batch/offline output repair using
+  the input text. The server-enforced deadline defaults to five seconds.
 
 Response:
 
 - 200:
   - Body: raw audio bytes (MP3 or WAV, based on `response_format`).
   - Header: `X-Seed`: the resolved integer seed used.
+  - Header: `X-Prosody-Repair-Outcome`: `not_requested`, `repaired`, `unnecessary`,
+    `failed`, or `budget_fallback`.
+  - Repair requests also report budget, duration, and repaired-boundary count through
+    `X-Prosody-Repair-Budget-Seconds`, `X-Prosody-Repair-Duration-Seconds`, and
+    `X-Prosody-Repair-Boundaries`.
 - 503:
   - If model not loaded or a runtime reconfiguration is in progress.
 - 400:
@@ -55,12 +62,15 @@ Request body (JSON):
 - `instruct` (string, optional) — instruction/steering prompt.
 - `response_format` (string, optional, default "mp3") — "mp3" or "wav".
 - `seed` (integer, optional) — RNG seed.
+- `prosody_repair` (boolean, optional, default false) — same bounded complete-file repair
+  contract as `/generate`.
 
 Response:
 
 - 200:
   - Body: raw audio bytes (MP3 or WAV).
   - Header: `X-Seed`: resolved integer seed.
+  - Headers: the same `X-Prosody-Repair-*` outcome metadata as `/generate`.
 - 503:
   - If model not loaded or a runtime reconfiguration is in progress.
 - 400:
@@ -76,6 +86,16 @@ Important notes:
 
 - Same FIFO queueing behind swaps as `/generate`.
 
+### POST /generate/with_metrics and POST /generate/async
+
+- Both accept the same boolean `prosody_repair` opt-in as `/generate`.
+- `/generate/with_metrics` returns a `prosody_repair` object alongside metrics.
+- `/generate/async` returns the requested/pending state immediately; `GET /generate/progress`
+  reports the final structured outcome, and `GET /generate/job/<job_id>/audio` carries the
+  same `X-Prosody-Repair-*` headers as the synchronous routes.
+- `failed` and `budget_fallback` are successful generation outcomes: audio remains available
+  and is the clean pre-repair waveform (with ordinary configured output DSP still applied).
+
 ### POST /generate/stream
 
 - Purpose: Streaming TTS (raw PCM over a persistent connection).
@@ -86,6 +106,8 @@ Request body (JSON):
 - `language` (string, optional, default "English").
 - `voice_id` (string, optional) — voice to clone.
 - `seed` (any, optional) — seed; passed through to generation.
+- `prosody_repair` must remain false/omitted. Repair requires a completed waveform, so true
+  is rejected with HTTP 400; use `/generate` or `/generate/async` instead.
 
 Response:
 

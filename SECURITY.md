@@ -14,8 +14,8 @@ report.
 
 Use one of these private channels:
 
-- Open a [private GitHub security advisory](https://github.com/nmorgowicz-org/qwen3-tts-openvino/security/advisories/new).
-- Email `nick@morgowicz.com` with the subject `qwen3-tts-openvino security report`.
+- Open a [private GitHub security advisory](https://github.com/nmorgowicz-org/persona-forge/security/advisories/new).
+- Email `nick@morgowicz.com` with the subject `persona-forge security report`.
 
 Include the affected commit or image digest, reproduction steps, expected impact, and any
 known mitigations. Redact Hugging Face tokens and other credentials.

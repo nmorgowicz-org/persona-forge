@@ -1,4 +1,4 @@
-import { TooltipProvider } from '@/components/ui/tooltip'
+import { TitleTooltipBridge, TooltipProvider } from '@/components/ui/tooltip'
 import { AppShell } from '@/components/AppShell'
 import { useAppStore } from '@/store'
 import { SpeakPage } from '@/pages/SpeakPage'
@@ -7,12 +7,16 @@ import { VoiceLibraryPage } from '@/pages/VoiceLibraryPage'
 import { StitchStudioPage } from '@/pages/StitchStudioPage'
 import { IntegrationsPage } from '@/pages/IntegrationsPage'
 import { RuntimeConfigPage } from '@/pages/RuntimeConfigPage'
+import { Glossary } from '@/components/audio/Glossary'
 
 export default function App() {
   const page = useAppStore((s) => s.page)
+  const glossaryOpen = useAppStore((s) => s.glossaryOpen)
+  const setGlossaryOpen = useAppStore((s) => s.setGlossaryOpen)
 
   return (
     <TooltipProvider>
+      <TitleTooltipBridge />
       <div className="relative flex min-h-screen w-full flex-col">
         <AppShell>
           {page === 'speak' && <SpeakPage />}
@@ -22,6 +26,7 @@ export default function App() {
           {page === 'integrations' && <IntegrationsPage />}
           {page === 'runtime' && <RuntimeConfigPage />}
         </AppShell>
+        <Glossary isOpen={glossaryOpen} onClose={() => setGlossaryOpen(false)} />
       </div>
     </TooltipProvider>
   )

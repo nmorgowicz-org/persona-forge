@@ -5,7 +5,9 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronUp,
+  Dice5,
   Loader2,
+  Settings2,
   Square,
 } from 'lucide-react'
 import {
@@ -13,13 +15,16 @@ import {
   generateAsync,
   getGenerateJobProgress,
   cancelGenerate,
+  listBuiltInVoices,
   listVoices,
+  warmVoice,
+  type BuiltInVoiceMeta,
 } from '@/lib/api'
-import { TONE_OPTIONS } from '@/lib/voiceDesignChips'
 import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
 import { VoiceSelector } from '@/components/VoiceSelector'
 import { AudioPlayer } from '@/components/AudioPlayer'
+import { InfoIcon } from '@/components/InfoIcon'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -29,26 +34,22 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Info, Dices } from 'lucide-react'
+import { AdvancedDrawer } from '@/components/audio/AdvancedDrawer'
 
-function formatEta(seconds: number | null): string {
-  if (seconds == null) return 'estimating remaining time…'
-  if (seconds < 1) return 'almost done'
-  if (seconds < 60) return `~${Math.round(seconds)}s remaining`
-  const m = Math.floor(seconds / 60)
-  const s = Math.round(seconds % 60)
-  return `~${m}m ${s > 0 ? s + 's' : ''} remaining`
-}
 
-function estimateInitialEta(text: string): string {
-  const words = text.trim() ? text.trim().split(/\s+/).length : 0
-  if (words === 0) return ''
-  if (words <= 5) return 'About 15–25 seconds'
-  if (words <= 15) return 'About 25–40 seconds'
-  if (words <= 30) return 'About 40–90 seconds'
-  if (words <= 60) return 'About 1–3 minutes'
-  if (words <= 100) return 'About 3–6 minutes'
-  return 'Very long — expect 6+ minutes'
+
+
+// Helper for reduced motion
+const useReducedMotion = () => {
+  const [reduced, setReduced] = useState(false)
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    if (media.matches) setReduced(true)
+    const listener = (e: MediaQueryListEvent) => setReduced(e.matches)
+    media.addEventListener('change', listener)
+    return () => media.removeEventListener('change', listener)
+  }, [])
+  return reduced
 }
 
 function StructuredError({ error }: { error: string }) {
@@ -56,13 +57,14 @@ function StructuredError({ error }: { error: string }) {
   const [expanded, setExpanded] = useState(false)
   const isStrong = info.type === 'TOO_LONG' || info.type === 'TIMEOUT'
 
+
   return (
     <div
       data-testid="speak-error"
       className={
         'flex flex-col gap-1 rounded-lg border px-3 py-2 text-xs ' +
         (isStrong
-          ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+          ? 'border-warning/40 bg-warning/10 text-warning'
           : 'border-destructive/40 bg-destructive/10 text-destructive')
       }
     >
@@ -97,7 +99,34 @@ function StructuredError({ error }: { error: string }) {
   )
 }
 
+function formatEta(seconds: number | null): string {
+  if (seconds == null) return 'Estimating…'
+  if (seconds <= 0) return 'Finishing…'
+  if (seconds < 60) return `About ${Math.ceil(seconds)}s remaining`
+  return `About ${Math.ceil(seconds / 60)}m remaining`
+}
+
+const POLISH_OPTIONS = [
+  { id: 'off', label: 'Off' },
+  { id: 'Neutral', label: 'Neutral' },
+  { id: 'Clean', label: 'Clean' },
+  { id: 'Broadcast', label: 'Broadcast' },
+  { id: 'Calm', label: 'Calm' },
+  { id: 'Energetic', label: 'Energetic' },
+  { id: 'Storyteller', label: 'Storyteller' },
+] as const
+
+interface SpeakResultMeta {
+  jobId: string | null
+  backend: string | null
+  stylePreset: string | null
+  appliedSteps: string[]
+  rtf: number | null
+  audioSeconds: number | null
+}
+
 export function SpeakPage() {
+  const reducedMotion = useReducedMotion()
   const {
     text,
     setText,
@@ -122,9 +151,14 @@ export function SpeakPage() {
     modelLoaded,
   } = useAppStore()
   const [language, setLanguage] = useState('English')
-  const [tone, setTone] = useState('neutral')
+  const [stylePreset, setStylePreset] = useState<(typeof POLISH_OPTIONS)[number]['id']>('off')
   const [seedInput, setSeedInput] = useState('')
+  const [builtInVoices, setBuiltInVoices] = useState<BuiltInVoiceMeta[]>([])
+  const [resultMeta, setResultMeta] = useState<SpeakResultMeta | null>(null)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const runtimeTtsBackend = useAppStore((s) => s.runtimeTtsBackend)
+  const isPocketBackend = runtimeTtsBackend === 'pocket_tts'
+
 
   async function refreshVoices() {
     try {
@@ -138,6 +172,17 @@ export function SpeakPage() {
     refreshVoices()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (!isPocketBackend) {
+      setBuiltInVoices([])
+      if (voiceId?.startsWith('pocket:')) setVoiceId(null)
+      return
+    }
+    listBuiltInVoices()
+      .then(setBuiltInVoices)
+      .catch(() => setBuiltInVoices([]))
+  }, [isPocketBackend, setVoiceId, voiceId])
 
   // Cleanup poll timer on unmount
   useEffect(() => {
@@ -169,6 +214,19 @@ export function SpeakPage() {
             setSpeakAudioUrl(URL.createObjectURL(blob))
             const seedHeader = audioRes.headers.get('X-Seed')
             if (seedHeader) setSpeakLastSeed(Number(seedHeader))
+            const rtfHeader = audioRes.headers.get('X-RTF')
+            const audioSecondsHeader = audioRes.headers.get('X-Audio-Seconds')
+            const appliedStepsHeader = audioRes.headers.get('X-Applied-Steps')
+            setResultMeta({
+              jobId,
+              backend: runtimeTtsBackend,
+              stylePreset: audioRes.headers.get('X-Style-Preset'),
+              appliedSteps: appliedStepsHeader
+                ? appliedStepsHeader.split(',').map((step) => step.trim()).filter(Boolean)
+                : [],
+              rtf: rtfHeader ? Number(rtfHeader) : p.rtf ?? null,
+              audioSeconds: audioSecondsHeader ? Number(audioSecondsHeader) : p.audio_seconds ?? null,
+            })
           } catch {
             setSpeakError('Failed to download generated audio')
           }
@@ -212,15 +270,14 @@ export function SpeakPage() {
     setSpeakIsGenerating(true)
     setSpeakError(null)
     setSpeakJobProgress(null)
+    setResultMeta(null)
     try {
-      const toneLabel = TONE_OPTIONS.find((t) => t.id === tone)?.label
-      const instruct = tone !== 'neutral' && toneLabel ? toneLabel : undefined
       const seed = seedInput.trim() ? Number(seedInput) : undefined
       const { job_id } = await generateAsync({
         text,
         language,
         voiceId,
-        instruct,
+        stylePreset: stylePreset === 'off' ? undefined : stylePreset,
         seed,
         responseFormat: 'mp3',
       })
@@ -242,31 +299,46 @@ export function SpeakPage() {
     // Let the poller detect cancelled status
   }
 
-  const hasText = text.trim().length > 0
-  const initialEta = hasText && !speakIsGenerating ? estimateInitialEta(text) : ''
+  function handleVoiceChange(nextVoiceId: string | null) {
+    setVoiceId(nextVoiceId)
+    const builtIn = builtInVoices.find((voice) => voice.voice_id === nextVoiceId)
+    if (builtIn?.language) setLanguage(builtIn.language)
+    // Bounce the runtime to actually load/cache this voice's clone state now, so the
+    // next Generate click doesn't pay a cold-load or first-time voice-state-build cost.
+    if (nextVoiceId && !nextVoiceId.startsWith('pocket:')) {
+      warmVoice(nextVoiceId).catch(() => {
+        // Best-effort; get_pocket_tts_voice_state re-resolves on generate anyway.
+      })
+    }
+  }
 
   return (
     <div className="flex flex-col gap-6">
-      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
+      <motion.div 
+        initial={{ opacity: 0, y: reducedMotion ? 0 : -8 }} 
+        animate={{ opacity: 1, y: 0 }}
+      >
         <h1 className="text-2xl font-semibold tracking-tight">Speak</h1>
-        <p className="text-sm text-muted-foreground">
-          Type text, pick a voice, and hear it spoken.
-        </p>
+         <p className="text-sm text-muted-foreground">
+           Type text, pick a curated Pocket voice or clone your own, and hear it spoken.
+         </p>
       </motion.div>
 
       <motion.div
         className="flex flex-col gap-5 rounded-xl border border-border bg-card p-6 text-card-foreground shadow-sm"
-        initial={{ opacity: 0, y: 12 }}
+        initial={{ opacity: 0, y: reducedMotion ? 0 : 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05 }}
       >
-        <textarea
-          data-testid="speak-text-input"
-          className="min-h-48 resize-y rounded-lg border border-input bg-transparent p-4 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-          placeholder="Say something..."
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-        />
+         <textarea
+           data-testid="speak-text-input"
+           aria-label="Text to synthesize"
+           className="min-h-48 resize-y rounded-lg border border-input bg-transparent p-4 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+           placeholder="Say something..."
+           value={text}
+           onChange={(e) => setText(e.target.value)}
+         />
+
 
         {/* Character count + length hint */}
         {text.length > 0 && (
@@ -275,22 +347,20 @@ export function SpeakPage() {
               {text.length} / 2000
             </p>
             {text.length > 1500 && (
-              <p className="text-[10px] text-amber-500">
+              <p className="text-[10px] text-warning">
                 Very long texts may fail or time out. Consider breaking into shorter pieces.
               </p>
             )}
           </div>
         )}
 
-        {/* Initial ETA hint (before generation starts) */}
-        {initialEta && (
-          <p className="text-[11px] text-muted-foreground">
-            Estimated time to generate: {initialEta}. This is approximate — actual time depends on text complexity and system load.
-          </p>
-        )}
-
         <div className="flex flex-wrap items-center gap-3">
-          <VoiceSelector voices={voices} voiceId={voiceId} onChange={setVoiceId} />
+          <VoiceSelector
+            voices={voices}
+            builtInVoices={isPocketBackend ? builtInVoices : []}
+            voiceId={voiceId}
+            onChange={handleVoiceChange}
+          />
 
           <Select value={language} onValueChange={setLanguage}>
             <SelectTrigger>
@@ -299,32 +369,32 @@ export function SpeakPage() {
             <SelectContent>
               <SelectItem value="English">English</SelectItem>
               <SelectItem value="Chinese">Chinese</SelectItem>
+              <SelectItem value="French">French</SelectItem>
+              <SelectItem value="German">German</SelectItem>
+              <SelectItem value="Italian">Italian</SelectItem>
+              <SelectItem value="Portuguese">Portuguese</SelectItem>
+              <SelectItem value="Spanish">Spanish</SelectItem>
             </SelectContent>
           </Select>
 
-          <Select value={tone} onValueChange={setTone}>
+          <Select value={stylePreset} onValueChange={(value) => setStylePreset(value as typeof stylePreset)}>
             <SelectTrigger className="w-44">
-              <SelectValue placeholder="Tone" />
+              <SelectValue placeholder="Tone / polish" />
             </SelectTrigger>
             <SelectContent>
-              {TONE_OPTIONS.map((t) => (
-                <SelectItem key={t.id} value={t.id}>
-                  {t.label}
+              {POLISH_OPTIONS.map((option) => (
+                <SelectItem key={option.id} value={option.id}>
+                  {option.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Info className="size-3.5 shrink-0 text-muted-foreground" />
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-56">
-              Voice is what it sounds like. Tone is how it delivers this line. Tone currently
-              has no effect on the base voice-clone model — it's forwarded for
-              forward-compatibility with CustomVoice.
-            </TooltipContent>
-          </Tooltip>
+           <InfoIcon 
+             text="Tone / polish applies real post-processing after generation. Voice variants still control the performance; polish only finishes the rendered audio." 
+             className="size-3.5 shrink-0 text-muted-foreground" 
+           />
+
 
           <div className="flex items-center gap-1">
             <input
@@ -343,7 +413,7 @@ export function SpeakPage() {
                   onClick={() => setSeedInput('')}
                   className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                 >
-                  <Dices className="size-4" />
+                  <Dice5 className="size-4" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="top">
@@ -411,9 +481,19 @@ export function SpeakPage() {
               )}
             </div>
             <p className="text-[11px] text-muted-foreground">
-               {speakJobProgress.status === 'cancelled'
-                 ? 'Cancelling…'
-                 : formatEta(speakJobProgress.eta_seconds)}
+              {speakJobProgress.status === 'cancelled'
+                ? 'Cancelling…'
+                : formatEta(speakJobProgress.eta_seconds)}
+              {typeof speakJobProgress.audio_seconds_generated === 'number' && speakJobProgress.audio_seconds_generated > 0 && (
+                <span className="ml-2 text-[10px] text-muted-foreground/70">
+                  · {speakJobProgress.audio_seconds_generated.toFixed(1)}s generated
+                </span>
+              )}
+              {typeof speakJobProgress.live_rtf_estimate === 'number' && (
+                <span className="ml-2 text-[10px] text-primary/80 font-mono">
+                  · RTF: {speakJobProgress.live_rtf_estimate.toFixed(2)}x
+                </span>
+              )}
                {speakJobProgress.elapsed_seconds > 0 && (
                  <span className="ml-2 text-[10px] text-muted-foreground/70">
                    · {Math.round(speakJobProgress.elapsed_seconds)}s elapsed
@@ -422,13 +502,13 @@ export function SpeakPage() {
                {speakJobProgress.elapsed_seconds >= 30 &&
                  speakJobProgress.elapsed_seconds < 60 &&
                  speakJobProgress.status !== 'cancelled' && (
-                   <span className="ml-2 text-[10px] text-amber-500">
+                   <span className="ml-2 text-[10px] text-warning">
                      This is taking longer than usual.
                    </span>
                  )}
                {speakJobProgress.elapsed_seconds >= 60 &&
                  speakJobProgress.status !== 'cancelled' && (
-                   <span className="ml-2 text-[10px] text-amber-500">
+                   <span className="ml-2 text-[10px] text-warning">
                      Generation is in progress; this may take several minutes for longer texts.
                    </span>
                  )}
@@ -441,23 +521,75 @@ export function SpeakPage() {
 
         {speakAudioUrl && (
           <div data-testid="speak-result" className="flex flex-col gap-2">
-            <AudioPlayer src={speakAudioUrl} blob={speakAudioBlob} />
+            <AudioPlayer
+              src={speakAudioUrl}
+              blob={speakAudioBlob}
+              seed={speakLastSeed}
+              rtf={resultMeta?.rtf ?? null}
+              metrics={resultMeta?.audioSeconds ? { duration_seconds: resultMeta.audioSeconds } : null}
+              showSpectralAccent={false}
+            />
             {speakLastSeed !== null && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <span>
-                  Seed: <span className="font-mono text-foreground">{speakLastSeed}</span>
-                </span>
-                {seedInput !== String(speakLastSeed) && (
-                  <button
-                    type="button"
-                    onClick={() => setSeedInput(String(speakLastSeed))}
-                    className="underline decoration-dotted hover:text-foreground"
-                  >
-                    Lock this seed
-                  </button>
-                )}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>
+                    Seed: <span className="font-mono text-foreground">{speakLastSeed}</span>
+                  </span>
+                  {seedInput !== String(speakLastSeed) && (
+                    <button
+                      type="button"
+                      onClick={() => setSeedInput(String(speakLastSeed))}
+                      className="underline decoration-dotted hover:text-foreground"
+                    >
+                      Lock this seed
+                    </button>
+                  )}
+                </div>
+
+
               </div>
             )}
+
+            <AdvancedDrawer
+              title="Advanced Diagnostics"
+              description="Detailed backend metadata for debugging and consistency checks."
+              trigger={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 gap-1 px-2 text-[10px]"
+                >
+                  <Settings2 className="size-3" />
+                  Advanced
+                </Button>
+              }
+            >
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] font-mono">
+                <div className="flex justify-between items-center gap-2">
+                  <span className="opacity-60">Job ID:</span>
+                  <span className="max-w-[120px] truncate">{speakJobId || 'n/a'}</span>
+                  <InfoIcon text="Unique backend identifier for this generation job." className="size-3 shrink-0 text-muted-foreground" />
+                </div>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="opacity-60">Backend:</span>
+                   <span className="capitalize">{runtimeTtsBackend?.replace('_', ' ') ?? 'unknown'}</span>
+                  <InfoIcon text="Accelerated by Intel OpenVINO for faster CPU inference." className="size-3 shrink-0 text-muted-foreground" />
+                </div>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="opacity-60">Seed:</span>
+                  <span className="tabular-nums">{speakLastSeed ?? 'N/A'}</span>
+                  <InfoIcon text="Symmetric seed used to control randomness." className="size-3 shrink-0 text-muted-foreground" />
+                </div>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="opacity-60">Status:</span>
+                  <span className="text-success">Completed</span>
+                  <InfoIcon text="Audio successfully generated and downloaded." className="size-3 shrink-0 text-muted-foreground" />
+                </div>
+              </div>
+            </AdvancedDrawer>
+
+
           </div>
         )}
       </motion.div>

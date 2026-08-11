@@ -245,7 +245,7 @@ Design rules:
   omnivoice_engine.py, and voice_library.py to function.
 - No threads by default. Async-job behavior is synchronous but hookable.
 - All controllable behaviors via constructor kwargs.
-- Provide an `install()` method that monkeypatches `sys.modules["qwen3_tts.model"]`
+- Provide an `install()` method that monkeypatches `sys.modules["persona_forge.model"]`
   and related symbols.
 
 Public interface (minimum):
@@ -274,9 +274,9 @@ class FakeModelRuntime:
 
     # Methods:
     def install(self, overrides: Dict[str, Any] | None = None):
-        # - Ensure sys.modules has qwen3_tts.model.
+        # - Ensure sys.modules has persona_forge.model.
         # - Attach all attributes from this instance as module attributes
-        #   so that qwen3_tts.app.model.<attr> and model.<fn> work.
+        #   so that persona_forge.app.model.<attr> and model.<fn> work.
         # - Apply any 'overrides' onto the fake module object.
 
     def health_state(self) -> Dict[str, Any]:
@@ -447,7 +447,7 @@ Run:
 File: tests/tier1_unit/test_audio_post.py
 
 Purpose:
-- Validate all DSP functions in src/qwen3_tts/audio_post.py.
+- Validate all DSP functions in src/persona_forge/audio_post.py.
 - Prevent regressions that silently degrade audio quality.
 
 Tests (at minimum):
@@ -584,7 +584,7 @@ Tests:
 File: tests/tier1_unit/test_ov_talker_runtime.py
 
 Purpose:
-- Test helpers inside src/qwen3_tts/openvino/talker.py that are safe to unit-test
+- Test helpers inside src/persona_forge/openvino/talker.py that are safe to unit-test
   without a real OpenVINO runtime.
 
 Tests:

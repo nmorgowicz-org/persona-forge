@@ -8,25 +8,25 @@ Internal, host-specific notes. Not intended as public deployment documentation.
 - Docker Compose lives at `~/docker/docker-compose.yml`.
 - Qwen3-TTS data lives under:
 
-  - `/var/data/autopirate/qwen3-tts/model`        → HF cache (MODEL_CACHE_PATH)
-  - `/var/data/autopirate/qwen3-tts/openvino`     → OpenVINO IR (OV_DATA_PATH)
-  - `/var/data/autopirate/qwen3-tts/voices`       → VoiceDesign voices (VOICE_LIBRARY_PATH)
-  - `/var/data/autopirate/qwen3-tts/voice/`       → Reference audio (e.g. voice_A.wav)
+  - `/var/data/autopirate/persona-forge/model`        → HF cache (MODEL_CACHE_PATH)
+  - `/var/data/autopirate/persona-forge/openvino`     → OpenVINO IR (OV_DATA_PATH)
+  - `/var/data/autopirate/persona-forge/voices`       → VoiceDesign voices (VOICE_LIBRARY_PATH)
+  - `/var/data/autopirate/persona-forge/voice/`       → Reference audio (e.g. voice_A.wav)
 
 ## Basic operations
 
 - Start:
-  - `docker compose -f ~/docker/docker-compose.yml up -d qwen3-tts`
+  - `docker compose -f ~/docker/docker-compose.yml up -d persona-forge`
 - Stop (don’t touch unrelated services):
-  - `docker compose -f ~/docker/docker-compose.yml down qwen3-tts`
+  - `docker compose -f ~/docker/docker-compose.yml down persona-forge`
 - Pull new image (example):
-  - `export QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<sha>`
-  - `docker compose -f ~/docker/docker-compose.yml pull qwen3-tts`
-  - `docker compose -f ~/docker/docker-compose.yml up -d qwen3-tts`
+  - `export QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/persona-forge:<sha>`
+  - `docker compose -f ~/docker/docker-compose.yml pull persona-forge`
+  - `docker compose -f ~/docker/docker-compose.yml up -d persona-forge`
 - Export (stop service first if constrained):
-  - `docker compose -f ~/docker/docker-compose.yml down qwen3-tts`
+  - `docker compose -f ~/docker/docker-compose.yml down persona-forge`
   - `docker compose -f ~/docker/docker-compose.yml run --rm export`
-  - `docker compose -f ~/docker/docker-compose.yml up -d qwen3-tts`
+  - `docker compose -f ~/docker/docker-compose.yml up -d persona-forge`
 
 Never run a 13 GiB export alongside a 10 GiB serve on this box (OOM).
 
@@ -35,10 +35,10 @@ Never run a 13 GiB export alongside a 10 GiB serve on this box (OOM).
 After image, model, IR, or runtime-setting changes:
 
 - `curl -fsS http://localhost:8318/health | python -m json.tool`
-- `docker inspect --format '{{.Image}}' qwen3-tts`
-- `docker exec qwen3-tts cat /sys/fs/cgroup/memory.current`
-- `docker exec qwen3-tts cat /sys/fs/cgroup/memory.peak`
-- `docker stats --no-stream qwen3-tts`
+- `docker inspect --format '{{.Image}}' persona-forge`
+- `docker exec persona-forge cat /sys/fs/cgroup/memory.current`
+- `docker exec persona-forge cat /sys/fs/cgroup/memory.peak`
+- `docker stats --no-stream persona-forge`
 
 Record:
 - Image tag/digest
@@ -60,6 +60,6 @@ final listening and performance decisions.
 
 ## Notes
 
-- Only touch `qwen3-tts`; other services (`litellm*`, `headroom-proxy`, `crowdsec`,
+- Only touch `persona-forge`; other services (`litellm*`, `headroom-proxy`, `crowdsec`,
   `hermes-*`, `*arr`, `searxng`) must not be affected.
 - Keep port 8318 trusted-network-only or behind an authenticated reverse proxy.

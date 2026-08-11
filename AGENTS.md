@@ -1,5 +1,22 @@
 # Qwen3-TTS OpenVINO — Agent Guide
 
+## Agent Operational Guidelines
+
+To ensure code integrity and prevent accidental deletions:
+- **Post-Edit Diffing**: Run `git diff` after non-trivial edits to verify exactly what changed.
+- **Precise Anchoring**: Insert new code above or below existing blocks rather than replacing function signatures.
+- **Context Verification**: Re-read the surrounding block before editing to ensure the `oldString` is unique and non-destructive.
+- **Verification**: Always run provided lint/typecheck commands after implementation.
+
+## Shell command policy
+
+- `rtk` may be used for routine commands when its compressed output remains complete and
+  trustworthy for the task.
+- Switch to the raw command whenever compression hides, truncates, rewrites, or otherwise
+  complicates evidence needed for debugging, validation, exact-text review, or handoff.
+- If an `rtk`-wrapped command produces ambiguous or problematic output, rerun it raw before
+  drawing conclusions or making changes.
+
 ## How to use this guide
 
 - This is your single source of truth for working on this repo.
@@ -14,22 +31,32 @@
   - `docs/agent-reference/EXPORT_SYSTEM.md`
 - For VoiceDesign and frontend work, follow:
   - `docs/dev/architecture/voice_design.md`
+- For local validation commands, see:
+  - `docs/dev/validation_checks.md`
 
 If a change conflicts with any of these, stop and propose alternatives explicitly.
 
 ## Quick orientation
 
 ```
-src/qwen3_tts/     Flask app, model runtime, model config, OpenVINO runtime adapters
+src/persona_forge/     Flask app, model runtime, model config, OpenVINO runtime adapters
 src/export/        OpenVINO export/quantization, parity tests, benchmark tooling
 scripts/           entrypoint.sh (container entrypoint), export.py, download_model.py, run-*.sh
 tests/             Unit and integration tests; no model weights needed
 requirements/      runtime.txt  openvino.txt  export.txt
 Dockerfile         Single image: ENTRYPOINT=entrypoint.sh, default CMD = gunicorn serving
-compose.yml        Services (qwen3-tts, export, export-voice-design) sharing one image
+compose.yml        Services (persona-forge, export, export-voice-design) sharing one image
 ```
 
-`PYTHONPATH=/app/src:/app/src/export` — both `qwen3_tts.*` and export modules are importable inside the container.
+`PYTHONPATH=/app/src:/app/src/export` — both `persona_forge.*` and export modules are importable inside the container.
+
+### Runtime Architecture
+The system supports three primary runtime backends for inference:
+- **Pocket-TTS**: The primary high-performance engine.
+- **OpenVINO**: Provides Intel CPU acceleration for Qwen3-TTS (Base, VoiceDesign, and custom voices).
+- **PyTorch**: The baseline and fallback path for Qwen3-TTS (Base, VoiceDesign, and custom voices).
+
+For **VoiceDesign**, additional generation and synthesis options are available to refine voice characteristics before saving.
 
 **One image, two behaviors.** `scripts/entrypoint.sh` is the container ENTRYPOINT; it applies
 `LOW_RAM_MODE` tuning before exec-ing the CMD. The serving container runs the image's default CMD (gunicorn). The export service overrides CMD with `python scripts/export.py`. There are no multi-stage build targets.
@@ -43,15 +70,14 @@ in `model_config.py` maps it to the checkpoint and IR paths. 1.7B is the recomme
 
 ## Project objective
 
-Reproducible Linux AMD64 container that accelerates 0.6B or 1.7B Qwen3-TTS Base voice-cloning
-checkpoints on Intel CPUs with OpenVINO while preserving a tested PyTorch rollback path.
+Reproducible Linux AMD64 container for Qwen3-TTS voice-cloning. Supports multiple runtime backends: Pocket-TTS (primary engine), OpenVINO (Intel CPU acceleration), and PyTorch (baseline/rollback).
 
 Read `docs/dev/architecture/OPENVINO_IMPLEMENTATION.md` before changing model export, cache handling,
 generation, quantization, memory loading, Docker packaging, or deployment behavior.
 
 ## Current state
 
-- Single image ships serving and export tooling. CI publishes it as `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<sha>`.
+- Single image ships serving and export tooling. CI publishes it as `ghcr.io/nmorgowicz-org/persona-forge:<sha>`.
 - `TTS_BACKEND=pytorch` is the tested rollback baseline.
 - OpenVINO accelerates both transformer cores and the FP32 vocoder.
 - 0.6B ships INT8 with stateful main (cap 768) + stateful predictor (cap 32).
@@ -83,8 +109,8 @@ Never commit to Git or bake into the image:
 
 Persistent host paths on `dockermisc1`:
 ```text
-/var/data/autopirate/qwen3-tts/model      ← HF cache (MODEL_CACHE_PATH)
-/var/data/autopirate/qwen3-tts/openvino   ← OpenVINO IR  (OV_DATA_PATH)
+/var/data/autopirate/persona-forge/model      ← HF cache (MODEL_CACHE_PATH)
+/var/data/autopirate/persona-forge/openvino   ← OpenVINO IR  (OV_DATA_PATH)
 ```
 
 ## Dependency rules
@@ -110,7 +136,25 @@ Persistent host paths on `dockermisc1`:
 
 GHCR pulls on `dockermisc1` need a `read:packages` token. Pass via `docker login --password-stdin` only; never echo or embed in Compose.
 
+## Development Iteration (dockermisc1)
+
+To iterate on code and see changes live on the development VM:
+
+### Rapid Debugging (Preferred for UI/small fixes)
+1. Sync specific files: `scp frontend/src/components/AppShell.tsx nick@dockermisc1:~/projects/persona-forge/frontend/src/components/AppShell.tsx`
+2. Build frontend: `ssh dockermisc1 "cd ~/projects/persona-forge/frontend && npm run build"`
+3. Restart the container: `ssh dockermisc1 "docker compose -f ~/docker/docker-compose.yml -f ~/docker/docker-compose.persona-forge-dev.yml restart persona-forge"`
+
+### Permanent Changes
+1. Commit and push changes to the working branch.
+2. Sync the codebase: `ssh dockermisc1 "cd ~/projects/persona-forge && git pull origin <branch>"`
+3. Build frontend (if applicable): `ssh dockermisc1 "cd ~/projects/persona-forge/frontend && npm run build"`
+4. Restart the container: `ssh dockermisc1 "docker compose -f ~/docker/docker-compose.yml -f ~/docker/docker-compose.persona-forge-dev.yml restart persona-forge"`
+
+The dev compose file (`~/docker/docker-compose.persona-forge-dev.yml`) enables bind-mounts for source code synchronization.
+
 ## Required validation
+
 
 Repository-only changes:
 ```bash
@@ -162,7 +206,7 @@ Record: audio duration, end-to-end latency, RTF, warm median/p95, container peak
 Inspect the CPU wheel index directly. Keep TORCH_VERSION and TORCHAUDIO_VERSION as independent Dockerfile ARGs. After changing a pin, rebuild and smoke-test.
 
 ### Why Optimum Intel is absent
-`qwen3_tts_talker` has no registered exporter in `TasksManager`. Use `openvino.convert_model()` + `nncf.compress_weights()` instead.
+`persona_forge_talker` has no registered exporter in `TasksManager`. Use `openvino.convert_model()` + `nncf.compress_weights()` instead.
 
 ### Export expects input_ids
 The generation path supplies `inputs_embeds`. Wrappers must expose embeddings as the primary input. An `input_ids`-only IR is incompatible with the current generator.
@@ -183,7 +227,7 @@ The first hybrid implementation keeps both PyTorch and OpenVINO weights resident
 Confirm both cores use OpenVINO; confirm IR weights are compressed; check MatMul activation quantization; benchmark group sizes 0/32/64; profile main vs. predictor; check for per-token array copies; verify host isn't swapping.
 
 ### Export killed / VM swaps heavily
-Stop `qwen3-tts` before exporting (13G export + 10G serve = OOM on 15 GiB host). Never load a second model inside the existing container. Keep IR on the persistent OV volume.
+Stop `persona-forge` before exporting (13G export + 10G serve = OOM on 15 GiB host). Never load a second model inside the existing container. Keep IR on the persistent OV volume.
 
 ### ARC job queued
 Confirm `arc-general` or `arc-general-docker` label; confirm ARC GitHub App is installed; check scale set, ephemeral pod, and listener logs.
@@ -205,7 +249,7 @@ Every handoff must state:
 ## Production VM safety (dockermisc1)
 
 - Shared live host — prefer read-only inspection unless the user explicitly authorizes changes.
-- Stop only `qwen3-tts` during export; never touch unrelated containers (`litellm*`, `headroom-proxy`, `crowdsec`, `hermes-*`, `*arr`, `searxng`).
+- Stop only `persona-forge` during export; never touch unrelated containers (`litellm*`, `headroom-proxy`, `crowdsec`, `hermes-*`, `*arr`, `searxng`).
 - Never run two large model jobs at once (export + serve will OOM a 15 GiB box).
 - Record host load, available RAM, and swap alongside performance results.
 - On failure, restore the previous immutable image or switch to `TTS_BACKEND=pytorch`.
@@ -257,3 +301,18 @@ END_COMMIT_OVERRIDE
 One Conventional Commit line per entry; separate multiple entries with a blank line; one
 supported type per entry; no composite headers. Release Please version PRs are exempt.
 Keep model artifacts and benchmark audio out of PRs.
+
+
+<!-- headroom:memory-instructions -->
+## Memory
+
+Use the `headroom_memory` MCP server for persistent cross-session knowledge.
+
+**Before** answering questions about prior decisions, conventions, project context,
+architecture, user preferences, org info, codenames, debugging history, or anything
+from past sessions — call `memory_search` first.
+
+**After** making durable decisions, discovering conventions, or learning important
+facts — call `memory_save` to persist them for future sessions.
+
+Memory is your first source of truth for anything not visible in the current conversation.

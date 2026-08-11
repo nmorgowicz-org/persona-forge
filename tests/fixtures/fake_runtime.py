@@ -24,6 +24,94 @@ def _make_silent_wav(num_samples: int = 2400, sr: int = 24000) -> bytes:
     return buf.getvalue()
 
 
+
+
+
+
+
+
+
+class FakeOmniVoiceEngine:
+    """Fake OmniVoice engine for mocking audio stitching."""
+    def stitch_selected(self, selected, plan=None):
+        return np.zeros(2400, dtype=np.float32), 24000
+
+
+class FakeVoiceLibrary:
+    """Fake voice library for mocking voice saving/loading.
+
+    It maintains a simple in-memory dictionary of 'saved' voices.
+    """
+    def __init__(self):
+        self.voices = {}
+        self.wav_bytes = {}
+        self._voice_counter = 0
+
+    def save_voice(
+        self,
+        wav_bytes,
+        *,
+        description,
+        sample_text,
+        language,
+        seed=None,
+        selections=None,
+        family_id=None,
+        variant_name=None,
+        variant_kind=None,
+        source=None,
+        **_kwargs,
+    ):
+        voice_id = f"fake_voice_{len(self.voices)}"
+        meta = {
+            "voice_id": voice_id,
+            "description": description,
+            "sample_text": sample_text,
+            "language": language,
+            "seed": seed,
+            "selections": selections,
+            "family_id": family_id,
+            "variant_name": variant_name,
+            "variant_kind": variant_kind,
+            "source": source,
+            "quality_score": 100.0,
+            "quality_warnings": [],
+            "needs_review": False,
+            "auto_fixed": False,
+            "metrics": {},
+        }
+        self.voices[voice_id] = meta
+        self.wav_bytes[voice_id] = wav_bytes
+        return meta
+
+    def get_voice(self, voice_id):
+        return self.voices.get(voice_id)
+
+    def get_voice_wav_bytes(self, voice_id):
+        return self.wav_bytes.get(voice_id)
+
+    def update_voice(self, voice_id, *, sample_text):
+        meta = self.voices.get(voice_id)
+        if meta is None:
+            return None
+        meta["sample_text"] = sample_text
+        meta["sample_text_source"] = "user"
+        meta["needs_review"] = False
+        return meta
+
+    def delete_voice(self, voice_id):
+        if voice_id in self.voices:
+            del self.voices[voice_id]
+            self.wav_bytes.pop(voice_id, None)
+        return True
+
+    def list_voices(self):
+        return list(self.voices.values())
+
+    def __len__(self):
+        return len(self.voices)
+
+
 class _FakeLoadedModel:
     """Stands in for model.model — matches real shape: model.model.model.tts_model_type."""
 
@@ -56,7 +144,7 @@ class _FakeJobState:
         self.frames_generated = 0
         self.reference_frames = 0
         self.text_length = len(text)
-        self.message = None
+        self.message: str | None = None
         # Small fake waveform so /generate/job/<id>/audio can return 200.
         self.wav: Any = np.zeros(480, dtype=np.float32)
         self.sr = 24000
@@ -65,20 +153,23 @@ class _FakeJobState:
         self.started_at = time.monotonic()
         self.expected_total_frames = 60
         self._watchdog_limit = 120.0
+        self.voice_family_id: str | None = None
+        self.variant_kind: str | None = None
+        self.style_preset: str | None = None
+        self.postprocess_applied = False
+        self.metadata: Dict[str, Any] = {}
 
 
-class _FakeModelModule(types.ModuleType):
+class _FakeModule(types.ModuleType):
     """Proxy module that delegates attribute access to FakeModelRuntime instance.
-
+    
     This ensures model.X and rt.X are always in sync; patching one immediately
     affects the other, which is critical when tests manipulate rt.model,
     rt.generate_should_fail, etc. and then the app code reads from model.*.
     """
-
     _rt: Any  # reference to FakeModelRuntime
-
-    def __init__(self, rt: Any) -> None:
-        super().__init__("qwen3_tts.model")
+    def __init__(self, rt: Any, name: str) -> None:
+        super().__init__(name)
         self._rt = rt
 
     def __getattr__(self, name: str) -> Any:
@@ -91,29 +182,34 @@ class _FakeModelModule(types.ModuleType):
             setattr(self._rt, name, value)
 
 
-class FakeModelRuntime:
-    """Central fake for qwen3_tts.model.
 
+class FakeModelRuntime:
+    """Central fake for persona_forge.model.
+    
     install() creates a _FakeModelModule proxy and puts it into
-    sys.modules["qwen3_tts.model"] so imports of qwen3_tts.model resolve here.
+    sys.modules["persona_forge.model"] so imports of persona_forge.model resolve here.
     All attribute access on model.* is live-delegated to this instance.
     """
-
+ 
     # Basic flags
     _service_started: bool
     _model_loaded: bool
     startup_failed: bool
     tts_backend: str
     initial_service_started: bool
-
+    model: Any
+    omnivoice_engine: Any
+    voice_library: Any
+    _startup_error: Optional[str]
+    
     # Call tracking
     load_model_calls: List[Dict[str, Any]]
     force_unload_calls: List[Dict[str, Any]]
     generate_calls: List[Dict[str, Any]]
-
+ 
     # Async-job store
     jobs: Dict[str, Dict[str, Any]]
-
+ 
     # Configurable behaviors
     generate_should_fail: bool
     generate_error_code: int
@@ -121,7 +217,12 @@ class FakeModelRuntime:
     swap_in_progress: bool
     stream_vocoder_enabled: bool
     async_jobs_complete_immediately: bool
-
+ 
+    _job_counter: int
+    _active_jobs: Dict[str, _FakeJobState]
+    _active_jobs_lock: threading.Lock
+    executor: ThreadPoolExecutor
+ 
     def __init__(
         self,
         initial_service_started: bool = True,
@@ -144,32 +245,35 @@ class FakeModelRuntime:
         self._startup_error: Optional[str] = (
             "fake startup error" if startup_failed else None
         )
-
+        self.omnivoice_engine = FakeOmniVoiceEngine()
+        self.voice_library = FakeVoiceLibrary()
+ 
         self.load_model_calls: List[Dict[str, Any]] = []
         self.force_unload_calls: List[Dict[str, Any]] = []
         self.generate_calls: List[Dict[str, Any]] = []
-
+ 
         self.jobs: Dict[str, Dict[str, Any]] = {}
         self._job_counter: int = 0
         self._jobs_lock = threading.Lock()
-
+ 
         self.generate_should_fail = generate_should_fail
         self.generate_error_code = generate_error_code
         self.generate_delay_ms = generate_delay_ms
         self.swap_in_progress = swap_in_progress
         self.stream_vocoder_enabled = stream_vocoder_enabled
+        self._slow_async = False
         self.async_jobs_complete_immediately = async_jobs_complete_immediately
-
+ 
         # Async-job lock: app.py accesses model._active_jobs_lock directly.
         self._active_jobs: Dict[str, _FakeJobState] = {}
         self._active_jobs_lock = threading.Lock()
-
+ 
         # Executor: app.py uses model.executor.submit(...).
         self.executor = ThreadPoolExecutor(max_workers=1)
-
+ 
         # model.model: loaded checkpoint wrapper.
         self.model: Any = _FakeLoadedModel("BASE")
-
+ 
         # ov_runtime: used by app.py to gate streaming.
         self.ov_runtime = types.SimpleNamespace(
             vocoder_runtime=types.SimpleNamespace(
@@ -177,17 +281,17 @@ class FakeModelRuntime:
                 sample_rate=24000,
             )
         )
-
+ 
         # voice_clone_prompt: app.py / model.py usage.
         self.voice_clone_prompt = object()
-
+ 
         # Profiles: used by voice_design.py.
         self.BASE_PROFILE = "BASE"
         self.VOICE_DESIGN_PROFILE = "VOICE_DESIGN"
-
+ 
         # active_profile
         self.active_profile = self.BASE_PROFILE
-
+ 
         # Runtime config internals: /runtime/config endpoints.
         self._runtime_live: Dict[str, Any] = {
             "TTS_BACKEND": self.tts_backend,
@@ -212,13 +316,14 @@ class FakeModelRuntime:
         }
         self._reconfig_in_progress = False
 
+
     # ── install ──
 
     def install(self, overrides: Optional[Dict[str, Any]] = None) -> "FakeModelRuntime":
         rt = self
 
         # Use proxy module so all model.* attribute access is live-delegated to rt.
-        fake_module = _FakeModelModule(rt)
+        fake_module = _FakeModule(rt, "persona_forge.model")
 
         def health_state() -> Dict[str, Any]:
             if rt._startup_failed:
@@ -291,9 +396,29 @@ class FakeModelRuntime:
             if rt.generate_should_fail:
                 raise RuntimeError("fake generate error")
             wav = np.zeros(480, dtype=np.float32)
-            job_id = kwargs.get("job_id") or (
-                "fake-job-" + str(int(time.time() * 1000))
-            )
+            job_id = kwargs.get("job_id")
+            created_here = job_id is None
+            if created_here:
+                with rt._jobs_lock:
+                    rt._job_counter += 1
+                    job_id = f"fake-job-{rt._job_counter}"
+                job = _FakeJobState(job_id=job_id, text=text, seed=kwargs.get("seed_value"))
+                job.status = "completed"
+                job.wav = wav
+                job.sr = 24000
+                with rt._active_jobs_lock:
+                    rt._active_jobs[job_id] = job
+            else:
+                job = rt._active_jobs.get(job_id)
+            if job is not None:
+                requested = bool(kwargs.get("prosody_repair", False))
+                job.metadata["prosody_repair"] = {
+                    "requested": requested,
+                    "outcome": "unnecessary" if requested else "not_requested",
+                    "budget_seconds": 5.0 if requested else None,
+                    "duration_seconds": 0.001 if requested else None,
+                    "boundary_count": 0,
+                }
             return wav, 24000, job_id
 
         def _run_generate_with_streaming(
@@ -370,8 +495,18 @@ class FakeModelRuntime:
                 "expected_total_frames": 60,
                 "progress_pct": 100.0 if job.status == "completed" else 25.0,
                 "elapsed_seconds": round(elapsed, 1),
+                "audio_seconds_generated": round(job.frames_generated / 12, 2),
+                "live_rtf_estimate": round(elapsed / max(1, job.frames_generated / 12), 2)
+                if job.frames_generated > 0
+                else None,
                 "eta_seconds": None,
                 "message": job.message,
+                "voice_family_id": job.voice_family_id,
+                "variant_kind": job.variant_kind,
+                "style_preset": job.style_preset,
+                "postprocess_applied": job.postprocess_applied,
+                "applied_steps": job.metadata.get("applied_steps"),
+                "prosody_repair": job.metadata.get("prosody_repair"),
             }
 
         def cancel_job(job_id: str) -> bool:
@@ -453,11 +588,11 @@ class FakeModelRuntime:
             for k, v in overrides.items():
                 setattr(fake_module, k, v)
 
-        sys.modules["qwen3_tts.model"] = fake_module
+        sys.modules["persona_forge.model"] = fake_module
 
-        qwen3_tts_pkg = sys.modules.get("qwen3_tts")
-        if qwen3_tts_pkg is not None:
-            qwen3_tts_pkg.model = fake_module
+        persona_forge_pkg = sys.modules.get("persona_forge")
+        if persona_forge_pkg is not None:
+            setattr(persona_forge_pkg, "model", fake_module)
 
         return self
 
@@ -477,10 +612,18 @@ class FakeModelRuntime:
     def wait_for_job_completion(
         self, job_id: str, timeout: float = 2.0
     ) -> Dict[str, Any]:
-        job = self.jobs.get(job_id)
-        if job is None:
-            return {"status": "not_found"}
-        return dict(job)
+        deadline = time.monotonic() + timeout
+        progress: Dict[str, Any] | None = None
+        while time.monotonic() < deadline:
+            progress = self.get_job_progress(job_id)
+            if progress is None:
+                return {"status": "not_found"}
+            repair = progress.get("prosody_repair")
+            repair_done = not isinstance(repair, dict) or repair.get("outcome") != "pending"
+            if progress.get("status") in ("completed", "failed", "cancelled") and repair_done:
+                return progress
+            time.sleep(0.01)
+        return progress or {"status": "not_found"}
 
     def ensure_job_status(self, job_id: str, status: str) -> bool:
         job = self._active_jobs.get(job_id)

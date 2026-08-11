@@ -11,9 +11,10 @@ for p in (SRC, SRC / "export"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-from qwen3_tts.transformers_compat import repair_rotary_buffers
+from persona_forge.transformers_compat import repair_rotary_buffers
 
-torch = pytest.importorskip("torch")
+torch = None
+pytestmark = [pytest.mark.requires_torch, pytest.mark.slow]
 
 
 class _Rotary:
@@ -46,6 +47,8 @@ def _default_initializer(config, device):
 @pytest.mark.slow
 class TestRopeRepair:
     def test_repair_rotary_buffers_replaces_finite_uninitialized_extrema(self):
+        global torch
+        torch = pytest.importorskip("torch")
         rotary = _Rotary(_default_initializer)
         report = repair_rotary_buffers(_Root(rotary), torch)
 
@@ -62,6 +65,8 @@ class TestRopeRepair:
         assert rotary.attention_scaling == 1.0
 
     def test_repair_rotary_buffers_rejects_non_monotonic_default_values(self):
+        global torch
+        torch = pytest.importorskip("torch")
         def invalid_initializer(config, device):
             del config
             return torch.tensor([1.0, 0.5, 0.75], device=device), 1.0

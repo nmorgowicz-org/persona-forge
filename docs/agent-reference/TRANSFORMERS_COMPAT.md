@@ -23,7 +23,7 @@ with these patches in place.
 - speech_vq.py:
   - Overrides `intra_op_num_threads` from 1 to 6 for ONNX Runtime.
   - Fragile: depends on exact string; future qwen-tts releases may break this.
-- modeling_qwen3_tts_tokenizer_v2.py:
+- modeling_persona_forge_tokenizer_v2.py:
   - Strips `@check_model_inputs` decorator that breaks under T5.
 - modeling_mimi.py:
   - Renames `create_sliding_window_causal_mask` → `create_causal_mask` due to T5 symbol changes.
@@ -31,7 +31,7 @@ with these patches in place.
   - Injects custom `_compute_default_rope_parameters` and sets `"default"` as init function
     because T5 changed how RoPE is wired.
 
-## Python patches in modeling_qwen3_tts.py (via Dockerfile)
+## Python patches in modeling_persona_forge.py (via Dockerfile)
 
 - Replaces direct use of initialization helpers with explicit imports (`from transformers import initialization as init`).
 - Replaces `module.weight.data.normal_` / `zero_` / `fill_` calls with `init.normal_`, `init.zeros_`, `init.ones_`.
@@ -39,7 +39,7 @@ with these patches in place.
 - Replaces `input_embeds` / `"input_embeds"` with `inputs_embeds` / `"inputs_embeds"`.
 - Removes incompatible `cache_position` passes in new signatures.
 
-## Configuration patch in configuration_qwen3_tts.py
+## Configuration patch in configuration_persona_forge.py
 
 - Removes `layer_type_validation` import from T4; substitutes `self.validate_layer_type()`.
 
@@ -90,7 +90,7 @@ Applied at model-load time via `patch_eager_attention_mask_broadcast()`.
 - **create_causal_mask / create_sliding_window_causal_mask decode-mode bypass:**
   In decode mode (single-token input with existing cache), return `None` instead
   of building a mask. This avoids stale prefill-length masks being used to create
-  incorrect causal masks. Patches `transformers.masking_utils`, `modeling_qwen3_tts`,
+  incorrect causal masks. Patches `transformers.masking_utils`, `modeling_persona_forge`,
   and the tokenizer module which has its own imports.
 
 ## Agent rule

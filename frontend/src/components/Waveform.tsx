@@ -1,5 +1,12 @@
+import { useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { cn } from '@/lib/utils'
+
+// A highlighted region of the waveform, expressed as 0..1 fractions of the clip.
+export interface WaveformRegion {
+  start: number
+  end: number
+}
 
 interface WaveformProps {
   peaks: number[]
@@ -7,6 +14,12 @@ interface WaveformProps {
   isActive?: boolean // pulses idle bars gently while audio is loading/generating
   duration?: number | null // total audio duration in seconds, drives time axis
   className?: string
+  onClick?: (progress: number) => void
+  // Opt-in drag-to-select scrubbing: a click still seeks (onClick), but a click-and-drag
+  // reports a region (0..1 fractions) the caller can loop. `selection` is the controlled
+  // highlight; while dragging, the live band is shown regardless.
+  selection?: WaveformRegion | null
+  onSelectRegion?: (region: WaveformRegion | null) => void
 }
 
 function formatTime(sec: number): string {
@@ -39,9 +52,52 @@ function barColor(peak: number, played: boolean) {
 
 const PLAYHEAD_COLOR = 'hsl(38 95% 62%)' // warm amber cursor, pops against the cool waveform
 
-export function Waveform({ peaks, progress = 0, isActive = false, duration = null, className }: WaveformProps) {
+export function Waveform({ peaks, progress = 0, isActive = false, duration = null, className, onClick, selection = null, onSelectRegion }: WaveformProps) {
   const playheadPct = Math.min(100, Math.max(0, progress * 100))
   const hasTimeAxis = duration != null && duration > 0 && isFinite(duration)
+
+  const fracAt = (clientX: number, el: Element) => {
+    const rect = el.getBoundingClientRect()
+    return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width))
+  }
+
+  const handleWaveformClick = (e: React.MouseEvent) => {
+    if (!onClick) return
+    onClick(fracAt(e.clientX, e.currentTarget))
+  }
+
+  // Drag-to-select: track the gesture in a ref (no re-render churn) and mirror the live band
+  // into `dragBand` state so it paints while dragging. A gesture that barely moves is a click.
+  const dragRef = useRef<{ start: number; end: number; moved: boolean } | null>(null)
+  const [dragBand, setDragBand] = useState<WaveformRegion | null>(null)
+
+  const onDown = (e: React.MouseEvent) => {
+    const start = fracAt(e.clientX, e.currentTarget)
+    dragRef.current = { start, end: start, moved: false }
+  }
+  const onMove = (e: React.MouseEvent) => {
+    const d = dragRef.current
+    if (!d) return
+    d.end = fracAt(e.clientX, e.currentTarget)
+    if (Math.abs(d.end - d.start) > 0.01) d.moved = true
+    setDragBand({ start: Math.min(d.start, d.end), end: Math.max(d.start, d.end) })
+  }
+  const finishDrag = () => {
+    const d = dragRef.current
+    dragRef.current = null
+    setDragBand(null)
+    if (!d) return
+    if (!d.moved) {
+      onSelectRegion?.(null)
+      onClick?.(d.start)
+      return
+    }
+    onSelectRegion?.({ start: Math.min(d.start, d.end), end: Math.max(d.start, d.end) })
+  }
+
+  const interactive = onSelectRegion != null
+  const band = dragBand ?? selection
+
 
   // Compute time ticks: simple, evenly spaced, 3-7 labels.
   // For short clips (< 5s) use small step (0.2–1s) and decimal labels.
@@ -50,8 +106,10 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
     ? (() => {
         const dur = duration as number
         const isShort = dur < 5
-        // Decide target number of ticks
-        const targetTicks = isShort ? 5 : 4
+        const isVeryShort = dur < 3
+        // Decide target number of ticks — very short clips get fewer, wider-spaced labels
+        // so they don't overlap in a narrow card.
+        const targetTicks = isVeryShort ? 3 : isShort ? 5 : 4
         // Compute ideal step
         const idealStep = dur / targetTicks
 
@@ -92,13 +150,27 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
   return (
     <div
       className={cn(
-        'relative overflow-hidden rounded-md bg-gradient-to-b from-black/30 to-transparent px-0.5',
+        'relative overflow-hidden rounded-md bg-gradient-to-b from-black/30 to-transparent px-0.5 select-none',
+        interactive ? 'cursor-ew-resize' : onClick ? 'cursor-pointer' : '',
         hasTimeAxis ? 'h-20' : 'h-16',
         className,
       )}
+      onClick={interactive ? undefined : handleWaveformClick}
+      onMouseDown={interactive ? onDown : undefined}
+      onMouseMove={interactive ? onMove : undefined}
+      onMouseUp={interactive ? finishDrag : undefined}
+      onMouseLeave={interactive ? finishDrag : undefined}
     >
       {/* center track line, like a DAW lane */}
       <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-border/60" />
+
+      {/* drag/loop selection band */}
+      {band && band.end > band.start && (
+        <div
+          className="pointer-events-none absolute inset-y-0 z-10 border-x border-warning/60 bg-warning/15"
+          style={{ left: `${band.start * 100}%`, width: `${(band.end - band.start) * 100}%` }}
+        />
+      )}
 
       {/* time grid lines */}
       {ticks != null &&
@@ -172,8 +244,4 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
       )}
     </div>
   )
-}
-
-export function idlePeaks(buckets = 64): number[] {
-  return Array.from({ length: buckets }, (_, i) => 0.15 + 0.1 * Math.sin(i / 3))
 }

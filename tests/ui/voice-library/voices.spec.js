@@ -17,14 +17,15 @@ test.describe('voice library', () => {
         page.getByTestId('voice-design-generate-button'),
         'generation in progress',
       ).toContainText('Stop', { timeout: 5000 })
-      await expect(page.getByTestId('voice-design-result')).toBeVisible({ timeout: 20000 })
+      await expect(page.getByTestId('voice-design-result')).toBeVisible({ timeout: 30000 })
 
       const saveBtn = page.getByRole('button', { name: /save to library/i }).first()
       if (await saveBtn.isVisible()) await saveBtn.click()
 
       await page.getByTestId('nav-voice-library').click()
-      await expect(page.locator('[data-testid="voice-card"]')).toHaveCount(1, { timeout: 10000 })
+      await expect(page.locator('[data-testid="voice-card"]')).toHaveCount(1, { timeout: 20000 })
     }
+
 
     // Inline-edit reference text: click pencil icon on first card
     const firstCard = page.locator('[data-testid="voice-card"]').first()

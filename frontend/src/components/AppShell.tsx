@@ -26,13 +26,13 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
-  useSidebar,
 } from '@/components/ui/sidebar'
+import { useSidebar } from '@/components/ui/sidebar-context'
 import { ActivityStatusBar } from '@/components/ui/ActivityStatusBar'
 import { Separator } from '@/components/ui/separator'
 import { SwapBanner } from '@/components/SwapBanner'
 import { HealthStatusBanner } from '@/components/HealthStatusBanner'
-import { getRuntimeConfig } from '@/lib/api'
+import { getRuntimeConfig, getHealth } from '@/lib/api'
 import { type Page, useAppStore } from '@/store'
 import { THEMES, type Theme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
@@ -60,6 +60,20 @@ const NAV_ITEMS: { page: Page; label: string; icon: typeof Mic2; description: st
   { page: 'runtime', label: 'Runtime', icon: Settings2, description: 'Live server config' },
 ]
 
+function StudioNav({ page, setPage }: { page: Page; setPage: (page: Page) => void }) {
+  const { isMobile, setOpenMobile } = useSidebar()
+  return <SidebarMenu>{NAV_ITEMS.map((item) => {
+    const isActive = page === item.page
+    return <SidebarMenuItem key={item.page}><SidebarMenuButton
+      data-testid={`nav-${item.page}`}
+      isActive={isActive}
+      tooltip={item.label}
+      onClick={() => { setPage(item.page); if (isMobile) setOpenMobile(false) }}
+      className={cn('relative transition-all', isActive && 'before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-primary group-data-[collapsible=icon]:before:hidden')}
+    ><item.icon /><span className="group-data-[collapsible=icon]:hidden">{item.label}</span></SidebarMenuButton></SidebarMenuItem>
+  })}</SidebarMenu>
+}
+
 function PocketTTSWarningBanner() {
   const backend = useAppStore((s) => s.runtimeTtsBackend)
   const cloningAvailable = useAppStore((s) => s.pocketTtsVoiceCloningAvailable)
@@ -69,9 +83,9 @@ function PocketTTSWarningBanner() {
   if (!isPocketTTS || cloningOk) return null
 
   return (
-    <div className="flex flex-col border-b border-amber-400/50 bg-amber-500/10 px-4 py-2 text-amber-600">
+    <div className="flex flex-col border-b border-warning/50 bg-warning/10 px-4 py-2 text-warning">
       <div className="flex items-center gap-2 text-[11px]">
-        <span className="inline-flex size-2 shrink-0 items-center justify-center rounded-full bg-amber-400 animate-pulse" />
+        <span className="inline-flex size-2 shrink-0 items-center justify-center rounded-full bg-warning animate-pulse" />
         <span className="flex-1">
           Pocket TTS is active, but voice cloning is unavailable until you accept the license on Hugging Face:{' '}
           <a
@@ -198,6 +212,34 @@ function ThemePaletteButton() {
   )
 }
 
+function SidebarVersionDisplay() {
+  const [version, setVersion] = useState<string | null>(null)
+  const [error, setError] = useState<boolean>(false)
+
+  useEffect(() => {
+    getHealth()
+      .then((state) => {
+        // Health check response removed from logs
+        const s = state as any
+        const v = s.version || s.openvino?.version
+        setVersion(v as string | null)
+      })
+      .catch((err) => {
+        console.error('Failed to fetch version:', err)
+        setError(true)
+      })
+  }, [])
+
+  if (error) return <div className="text-center text-[11px] text-destructive">vError</div>
+  if (!version) return <div className="text-center text-[11px] text-muted-foreground">vLoading...</div>
+
+  return (
+    <div className="text-center text-[11px] font-bold text-primary">
+      v{version}
+    </div>
+  )
+}
+
 function SidebarCollapseButton() {
   const { open, toggleSidebar } = useSidebar()
 
@@ -260,29 +302,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <SidebarGroup>
             <SidebarGroupLabel>Studio</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
-                {NAV_ITEMS.map((item) => {
-                  const isActive = page === item.page
-                  return (
-                    <SidebarMenuItem key={item.page}>
-                      <SidebarMenuButton
-                        data-testid={`nav-${item.page}`}
-                        isActive={isActive}
-                        tooltip={item.label}
-                        onClick={() => setPage(item.page)}
-                        className={cn(
-                          'relative transition-all',
-                          isActive &&
-                            'before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-primary group-data-[collapsible=icon]:before:hidden',
-                        )}
-                      >
-                        <item.icon />
-                        <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )
-                })}
-              </SidebarMenu>
+              <StudioNav page={page} setPage={setPage} />
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
@@ -296,11 +316,15 @@ export function AppShell({ children }: { children: ReactNode }) {
             </p>
           </div>
           {/* Collapsed: theme button (same size as expand button) */}
-          <div className="hidden group-data-[collapsible=icon]:flex justify-center">
-            <ThemePaletteButton />
-          </div>
-          <SidebarCollapseButton />
-        </SidebarFooter>
+           <div className="hidden group-data-[collapsible=icon]:flex justify-center">
+             <ThemePaletteButton />
+           </div>
+             <SidebarCollapseButton />
+             <SidebarVersionDisplay />
+           </SidebarFooter>
+
+
+
       </Sidebar>
       <SidebarInset>
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/80 bg-background/80 px-4 backdrop-blur-sm">

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from qwen3_tts import segment_library
+from persona_forge import segment_library
 
 
 @pytest.fixture(autouse=True)

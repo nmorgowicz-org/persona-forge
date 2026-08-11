@@ -1,4 +1,4 @@
-name: qwen3-tts-openvino
+name: persona-forge
 
 # Minimal setup:
 # - Create .env if you need to override defaults:
@@ -6,12 +6,14 @@ name: qwen3-tts-openvino
 #   REF_AUDIO_PATH=/path/to/reference.wav  # optional default voice
 #   REF_TEXT="exact transcript reference audio"  # optional override; Whisper drafts by default
 # - Then:
-#     docker compose up --build qwen3-tts
+#     docker compose up --build persona-forge
+# The default backend (pocket_tts) needs no export step. Only run the export
+# below if you switch TTS_BACKEND=openvino for the accelerated Qwen path:
 #     docker compose run --rm --profile export export   (once, to generate IR)
 
 # All other knobs are optional and should be left at defaults.
 
-# Common model/volume settings (used by both qwen3-tts and export)
+# Common model/volume settings (used by both persona-forge and export)
 x-model-environment: &model-environment
   MODEL_SIZE: ${MODEL_SIZE:-1.7B}
   REF_TEXT: ${REF_TEXT:-}
@@ -26,21 +28,44 @@ x-model-volumes: &model-volumes
   - ${OV_DATA_PATH:-./data/ov}:/ov:rw
 
 services:
-  qwen3-tts:
+  persona-forge:
     # Local builds: docker compose up --build creates :local.
-    # Production: set QWEN3_TTS_IMAGE to a pinned GHCR SHA or version tag.
-    image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:local}
+    # Production: set PERSONA_FORGE_IMAGE to a pinned GHCR SHA or version tag.
+    image: ${PERSONA_FORGE_IMAGE:-persona-forge:local}
     build:
       context: .
-    container_name: qwen3-tts
+      # Phase A6f: uncomment to layer Intel iGPU userspace (compute-runtime + Level-Zero) into
+      # the image. Off by default so the canonical CPU image is unaffected (D3).
+      # args:
+      #   INSTALL_ACCEL_SYSLIBS: "1"
+    container_name: persona-forge
     restart: unless-stopped
+    # Phase A6f: Intel iGPU passthrough example (uncomment to enable). Also requires:
+    #   - build.args.INSTALL_ACCEL_SYSLIBS=1 above (system libs)
+    #   - environment.GPU_FAMILY=intel-xpu below (triggers A6e's first-boot torch-xpu install
+    #     into the accel-venv volume + A6d's fp64-emu env)
+    #   - the container's user in the host's `render` group (or run privileged) so
+    #     /dev/dri/renderD128 is actually openable, not just visible
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - "44"   # render group GID — check `getent group render` on the host, it varies
     ports:
-      - "${QWEN3_TTS_PORT:-8318}:8318"
+      - "${PERSONA_FORGE_PORT:-8318}:8318"
     environment:
       <<: *model-environment
-      # Core behavior
-      TTS_BACKEND: ${TTS_BACKEND:-openvino}
+      # Core behavior. pocket_tts is the product default: it is self-contained
+      # (no IR export needed) and drives the built-in voice catalog + voice
+      # cloning the UI is built around. Set TTS_BACKEND=openvino for the
+      # accelerated Qwen path once you have run the export (see below).
+      TTS_BACKEND: ${TTS_BACKEND:-pocket_tts}
       TZ: ${TZ:-America/Detroit}
+
+      # Phase A6/A6d-e: which torch wheel family the entrypoint resolves/installs. `auto`
+      # (default) detects via torch-independent PCI/device-node probes; only meaningful
+      # combined with the Intel iGPU passthrough example above. `cpu` (explicit or detected)
+      # never installs anything extra.
+      GPU_FAMILY: ${GPU_FAMILY:-auto}
 
       # LOW_RAM_MODE=1 is recommended on typical 10-15 GiB hosts:
       # enables idle unload + malloc tuning so the container can coexist
@@ -55,11 +80,22 @@ services:
       VOICE_DESIGN_MODEL_SIZE: ${VOICE_DESIGN_MODEL_SIZE:-1.7B}
       VOICE_DESIGN_MODEL_REPO: ${VOICE_DESIGN_MODEL_REPO:-}
       VOICE_DESIGN_MAX_SPEECH_SECONDS: ${VOICE_DESIGN_MAX_SPEECH_SECONDS:-}
+
+      # Forced-aligner hardening (Precise/Auto prosody). The portable CPU provider and
+      # five-second warm p95 budget are the load-bearing defaults.
+      ALIGNER_MODEL_PATH: ${ALIGNER_MODEL_PATH:-}
+      ALIGNER_PROVIDERS: ${ALIGNER_PROVIDERS:-CPUExecutionProvider}
+      ALIGNER_LATENCY_BUDGET_SECONDS: ${ALIGNER_LATENCY_BUDGET_SECONDS:-5}
+      ALIGNER_IDLE_UNLOAD_SECONDS: ${ALIGNER_IDLE_UNLOAD_SECONDS:-120}
+      GENERATION_REPAIR_BUDGET_SECONDS: ${GENERATION_REPAIR_BUDGET_SECONDS:-5}
     volumes:
       - ${MODEL_CACHE_PATH:-./data/model}:/root/.cache/huggingface/hub:rw
       - ${OV_DATA_PATH:-./data/ov}:/ov:rw
       - ${REF_AUDIO_PATH:-./data/reference.wav}:/voice/reference.wav:ro
       - ${VOICE_LIBRARY_PATH:-./data/voices}:/voices:rw
+      # Phase A6e: persists the first-boot per-family torch install (e.g. torch-xpu) across
+      # container recreation. Harmless/unused when GPU_FAMILY resolves to cpu.
+      - accel-venv:/opt/accel-venv
       - ${SEGMENT_LIBRARY_PATH:-./data/segments}:/segments:rw
     mem_limit: ${TTS_MEMORY_LIMIT:-10G}
     memswap_limit: ${TTS_MEMORY_SWAP_LIMIT:-11G}
@@ -73,7 +109,7 @@ services:
 
   # Unified export service: exports both Base and VoiceDesign IR in one run.
   export:
-    image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:local}
+    image: ${PERSONA_FORGE_IMAGE:-persona-forge:local}
     build:
       context: .
     command: ["python", "scripts/export.py"]
@@ -83,12 +119,15 @@ services:
       # Tell export.py to run both targets (Base + VoiceDesign) in one shot.
       EXPORT_TARGET: both
       OV_OUTPUT_ROOT: /ov
-      # VoiceDesign settings (must match qwen3-tts service)
+      # VoiceDesign settings (must match persona-forge service)
       VOICE_DESIGN_MODEL_SIZE: ${VOICE_DESIGN_MODEL_SIZE:-1.7B}
       VOICE_DESIGN_MODEL_REPO: ${VOICE_DESIGN_MODEL_REPO:-}
       VOICE_DESIGN_MAX_SPEECH_SECONDS: ${VOICE_DESIGN_MAX_SPEECH_SECONDS:-}
     volumes: *model-volumes
     # FP32 export + INT4/INT8 quantization is memory-intensive.
-    # On a 15 GiB box, stop qwen3-tts before running this to avoid OOM.
+    # On a 15 GiB box, stop persona-forge before running this to avoid OOM.
     mem_limit: ${EXPORT_MEMORY_LIMIT:-13G}
     memswap_limit: ${EXPORT_MEMORY_SWAP_LIMIT:-14G}
+
+volumes:
+  accel-venv:

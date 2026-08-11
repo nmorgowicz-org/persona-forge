@@ -6,7 +6,7 @@ on:
       - .github/workflows/ci-ui.yml
       - "frontend/**"
       - "tests/ui/**"
-      - "src/qwen3_tts/**"
+      - "src/persona_forge/**"
       - requirements-dev.txt
   workflow_dispatch:
 
@@ -68,8 +68,8 @@ jobs:
           try_import('flask')
           try_import('soundfile')
           try_import('numpy')
-          try_import('qwen3_tts')
-          try_import('qwen3_tts.app')
+          try_import('persona_forge')
+          try_import('persona_forge.app')
 
           if errors:
               print('IMPORT ERRORS:')
@@ -83,6 +83,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci
+
+      - name: Lint frontend
+        working-directory: frontend
+        run: npm run lint
 
       - name: Build frontend
         working-directory: frontend
@@ -147,7 +151,7 @@ jobs:
         working-directory: tests/ui
         env:
           PYTHONPATH: src:src/export
-          QWEN3_TTS_UI_URL: http://127.0.0.1:8319
+          PERSONA_FORGE_UI_URL: http://127.0.0.1:8319
         run: npm run test:ci
 
       - name: Upload Playwright report

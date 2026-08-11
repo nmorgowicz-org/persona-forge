@@ -1,0 +1,611 @@
+"""Pocket TTS runtime adapter (kyutai-labs/pocket-tts).
+
+Provides a thin, self-contained interface for loading Pocket TTS models, building
+voice states from reference audio, and generating speech. Designed to plug into
+the repo's existing hotswap/executor infrastructure without pulling in heavy Qwen3-TTS
+or OpenVINO symbols at import time.
+
+Public API:
+    - load_pocket_tts_model(...)
+    - build_default_voice_state(...)
+    - get_pocket_tts_voice_state(...)
+    - generate_pocket_tts(...)
+    - generate_pocket_tts_stream(...)
+    - warm_up_pocket_tts(...)
+    - invalidate_voice_state(...)
+    - unload_pocket_tts()
+"""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import re
+from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from persona_forge.voice_library import VOICE_LIBRARY_DIR, get_voice
+
+# Cache directory for persisted voice states (.safetensors)
+STATE_CACHE_DIR = VOICE_LIBRARY_DIR / ".state_cache"
+STATE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+_SAFE_CACHE_KEY_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def _state_cache_path(resolved_id: str) -> Path:
+    safe_stem = _SAFE_CACHE_KEY_RE.sub("_", resolved_id).strip("._")
+    if not safe_stem or safe_stem != resolved_id:
+        digest = hashlib.sha256(resolved_id.encode("utf-8")).hexdigest()[:16]
+        safe_stem = f"{safe_stem[:80] or 'voice'}-{digest}"
+    return STATE_CACHE_DIR / f"{safe_stem}.safetensors"
+
+from pocket_tts import TTSModel
+
+if TYPE_CHECKING:
+    # Imported inside functions at runtime to avoid drag-in.
+    import torch
+
+
+# ---------------------------------------------------------------------------
+# Module-level state
+# ---------------------------------------------------------------------------
+
+pocket_tts_model: TTSModel | None = None
+pocket_tts_default_voice_state: dict[str, Any] | None = None
+pocket_tts_voice_state_cache: dict[str, Any] = {}
+
+pocket_tts_cloning_available: bool = False
+pocket_tts_cloning_status_message: str = ""
+
+# Extra audio frames to keep after the last speech frame (post-EOS tail control).
+# 1 frame ≈ 1/12 s of audio at 24 kHz (~2000 samples).
+# Controlled by POCKET_TTS_FRAMES_AFTER_EOS env var (default 4).
+pocket_tts_frames_after_eos: int = 4
+
+
+# ---------------------------------------------------------------------------
+# Model loading
+# ---------------------------------------------------------------------------
+
+def load_pocket_tts_model(
+    language: str,
+    temp: float,
+    lsd_decode_steps: int,
+    eos_threshold: float,
+    *,
+    quantize: bool = False,
+    noise_clamp: float | None = None,
+    frames_after_eos: int | None = None,
+) -> TTSModel:
+    """Load (or reload) the Pocket TTS model into the global handle.
+
+    Args:
+        language: Pocket TTS language config (e.g. "english", "french_24l").
+        temp: Sampling temperature.
+        lsd_decode_steps: Number of LSD refinement steps per audio frame.
+        eos_threshold: Logits-based EOS threshold.
+        quantize: Whether to enable int8 quantization.
+        noise_clamp: Optional noise magnitude cap.
+        frames_after_eos: Optional extra frames to keep after EOS.
+
+    Returns:
+        The loaded TTSModel instance.
+
+    Raises:
+        RuntimeError: If the model fails to load.
+    """
+    global pocket_tts_model
+
+    # Unload any previous instance first (hotswap-safe).
+    unload_pocket_tts()
+
+    print(
+        f"[pocket_tts] Loading model — language={language!r}, "
+        f"temp={temp}, lsd_decode_steps={lsd_decode_steps}, "
+        f"eos_threshold={eos_threshold}, quantize={quantize}, noise_clamp={noise_clamp}"
+    )
+
+    load_kwargs: dict[str, Any] = dict(
+        language=language,
+        temp=temp,
+        lsd_decode_steps=lsd_decode_steps,
+        eos_threshold=eos_threshold,
+        quantize=quantize,
+    )
+    # noise_clamp defaults to TTSModel's own DEFAULT_NOISE_CLAMP when omitted; only override
+    # it when the caller explicitly set one.
+    if noise_clamp is not None:
+        load_kwargs["noise_clamp"] = noise_clamp
+
+    try:
+        pocket_tts_model = TTSModel.load_model(**load_kwargs)
+    except Exception as exc:
+        pocket_tts_model = None
+        raise RuntimeError(f"[pocket_tts] Failed to load TTSModel: {exc}") from exc
+
+    # Store advanced knobs for use during generation.
+    global pocket_tts_frames_after_eos
+    if frames_after_eos is not None:
+        pocket_tts_frames_after_eos = max(0, frames_after_eos)
+        print(f"[pocket_tts] frames_after_eos set to {pocket_tts_frames_after_eos}")
+    else:
+        pocket_tts_frames_after_eos = 4
+        print(f"[pocket_tts] frames_after_eos defaulted to {pocket_tts_frames_after_eos}")
+
+    print("[pocket_tts] Model loaded and ready.")
+    return pocket_tts_model
+
+
+# ---------------------------------------------------------------------------
+# Default voice state from REF_AUDIO
+# ---------------------------------------------------------------------------
+
+def build_default_voice_state(
+    model: TTSModel,
+    ref_audio_path: str | None,
+) -> dict[str, Any] | None:
+    """Build a Pocket TTS voice_state from the configured reference audio.
+
+    This voice_state becomes the default when no voice_id is requested.
+
+    Args:
+        model: Loaded Pocket TTS TTSModel.
+        ref_audio_path: Absolute path to a reference WAV.
+
+    Returns:
+        voice_state dict, or None if no valid ref_audio_path.
+    """
+    global pocket_tts_default_voice_state, pocket_tts_cloning_available, pocket_tts_cloning_status_message
+
+    # A saved voice "Activated for API" persists across restarts: prefer it over REF_AUDIO so the
+    # OpenAI endpoint keeps cloning from the user's chosen default instead of the mounted reference.
+    active_id = get_active_default_voice_id()
+    if active_id:
+        active_wav = _library_reference_wav(active_id)
+        if active_wav is not None:
+            print(f"[pocket_tts] Using persisted active default voice {active_id!r}")
+            ref_audio_path = str(active_wav)
+        else:
+            print(
+                f"[pocket_tts] Persisted active default {active_id!r} has no reference.wav "
+                "(voice likely deleted); clearing the stale default and falling back."
+            )
+            try:
+                ACTIVE_DEFAULT_FILE.unlink(missing_ok=True)
+            except OSError as exc:
+                print(f"[pocket_tts] Could not clear stale active default file: {exc}")
+
+    if not ref_audio_path:
+        print("[pocket_tts] No REF_AUDIO_PATH configured; default voice_state = None.")
+        pocket_tts_default_voice_state = None
+        return None
+
+    if not os.path.isfile(ref_audio_path):
+        print(
+            f"[pocket_tts] REF_AUDIO_PATH exists but is not a file: {ref_audio_path!r}; "
+            "default voice_state = None."
+        )
+        pocket_tts_default_voice_state = None
+        return None
+
+    print(f"[pocket_tts] Building default voice_state from {ref_audio_path!r}")
+    try:
+        pocket_tts_default_voice_state = model.get_state_for_audio_prompt(ref_audio_path)
+        pocket_tts_cloning_available = True
+        pocket_tts_cloning_status_message = ""
+        print("[pocket_tts] Default voice_state built successfully.")
+        return pocket_tts_default_voice_state
+    except Exception as exc:
+        pocket_tts_default_voice_state = None
+        msg = str(exc)
+
+        if "We could not download the weights for the model with voice cloning" in msg:
+            pocket_tts_cloning_available = False
+            pocket_tts_cloning_status_message = (
+                "Voice cloning model unavailable. "
+                "Accept the terms at https://huggingface.co/kyutai/pocket-tts with the account "
+                "used for HF_TOKEN, then restart the container."
+            )
+        else:
+            pocket_tts_cloning_available = False
+            pocket_tts_cloning_status_message = f"Voice cloning unavailable: {msg}"
+
+        print(
+            f"[pocket_tts] Failed to build default voice_state: {exc}. "
+            "Continuing without a default voice_state."
+        )
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Runtime "Activate for API" default (hot-swap, persisted)
+# ---------------------------------------------------------------------------
+
+# Records which library voice the OpenAI endpoint should clone from when no voice is passed.
+ACTIVE_DEFAULT_FILE = VOICE_LIBRARY_DIR / ".active_default"
+
+
+def get_active_default_voice_id() -> str | None:
+    """Return the persisted "Activated for API" voice_id, or None if unset."""
+    try:
+        vid = ACTIVE_DEFAULT_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return vid or None
+
+
+def _library_reference_wav(voice_id: str) -> Path | None:
+    meta = get_voice(voice_id)
+    if meta is None:
+        return None
+    wav_path = Path(meta["wav_path"])
+    if wav_path.is_symlink():
+        wav_path = wav_path.resolve()
+    return wav_path if wav_path.is_file() else None
+    return wav_path if wav_path.is_file() else None
+
+
+def set_default_voice_state_from_library(
+    voice_id: str, model: TTSModel | None = None
+) -> dict[str, Any]:
+    """Hot-swap the API default voice_state to a saved library voice and persist the choice.
+
+    Rebuilds the module-level ``pocket_tts_default_voice_state`` from the voice's reference.wav so
+    subsequent no-voice requests (incl. the OpenAI endpoint) clone from it immediately -- no restart
+    -- and writes the id to ACTIVE_DEFAULT_FILE so build_default_voice_state() restores it on boot.
+    """
+    global pocket_tts_default_voice_state, pocket_tts_cloning_available, pocket_tts_cloning_status_message
+    model = model or pocket_tts_model
+    if model is None:
+        raise RuntimeError("[pocket_tts] Model is not loaded; cannot activate a voice.")
+    wav_path = _library_reference_wav(voice_id)
+    if wav_path is None:
+        raise FileNotFoundError(f"No reference.wav for voice_id {voice_id!r}")
+    pocket_tts_default_voice_state = model.get_state_for_audio_prompt(str(wav_path))
+    pocket_tts_cloning_available = True
+    pocket_tts_cloning_status_message = ""
+    try:
+        ACTIVE_DEFAULT_FILE.write_text(voice_id, encoding="utf-8")
+    except OSError as exc:
+        print(f"[pocket_tts] Could not persist active default {voice_id!r}: {exc}")
+    print(f"[pocket_tts] Activated library voice {voice_id!r} as the API default.")
+    return pocket_tts_default_voice_state
+
+
+# ---------------------------------------------------------------------------
+# Voice selection (default, library, or custom)
+# ---------------------------------------------------------------------------
+
+def get_pocket_tts_voice_state(
+    model: TTSModel,
+    voice_id: str | None,
+    default_voice_state: dict[str, Any] | None,
+    ref_audio_path: str | None,
+) -> dict[str, Any]:
+    """Resolve the Pocket TTS voice_state for a generation request.
+
+    Priority:
+        1. If voice_id is None or empty -> use default_voice_state.
+        2. If voice_id is in cache -> use cached state.
+        3. If voice_id is a built-in preset or hf:// path -> load and cache.
+        4. If voice_id matches a library voice -> load from its WAV, cache it.
+        5. If none of the above -> raise RuntimeError.
+
+    Args:
+        model: Loaded Pocket TTS TTSModel.
+        voice_id: Optional voice identifier (preset name, hf:// path, or library ID).
+        default_voice_state: The default state derived from REF_AUDIO.
+        ref_audio_path: Fallback reference audio path.
+
+    Returns:
+        A voice_state dict for use with generate_audio.
+
+    Raises:
+        RuntimeError: If no valid voice_state can be resolved.
+    """
+    # 1) No specific voice requested -> default.
+    if not voice_id:
+        if default_voice_state is not None:
+            print("[pocket_tts] voice_state resolution: default (in-memory)")
+            return default_voice_state
+        # Last-ditch: try to rebuild from ref_audio_path.
+        if ref_audio_path and os.path.isfile(ref_audio_path):
+            print(
+                f"[pocket_tts] No default_voice_state; falling back to ref_audio_path={ref_audio_path!r}"
+            )
+            print("[pocket_tts] voice_state resolution: default (rebuilt from ref_audio_path)")
+            state = model.get_state_for_audio_prompt(ref_audio_path)
+            global pocket_tts_default_voice_state
+            pocket_tts_default_voice_state = state
+            return state
+        raise RuntimeError(
+            "[pocket_tts] Voice cloning model not available (likely missing or gated HF token). "
+            "Set an HF_TOKEN with access to kyutai/pocket-tts via Runtime → HF_TOKEN "
+            "or in your startup config."
+        )
+
+    # Normalize "pocket:name" to "name"
+    resolved_id = voice_id
+    if voice_id.startswith("pocket:"):
+        resolved_id = voice_id[7:]
+
+    is_library_voice = resolved_id.startswith("vd_")
+    library_meta = None
+    if is_library_voice:
+        from persona_forge import voice_library
+
+        library_meta = voice_library.get_voice(resolved_id)
+        if library_meta is None:
+            raise ValueError(
+                f"[pocket_tts] voice_id {resolved_id!r} not found in voice_library"
+            )
+
+    # 2) In-memory cache.
+    cached = pocket_tts_voice_state_cache.get(resolved_id)
+    if cached is not None:
+        print(f"[pocket_tts] voice_state resolution: {resolved_id!r} (in-memory cache)")
+        return cached
+
+    # 3) Disk cache (.safetensors).
+    cache_path = _state_cache_path(resolved_id)
+    cache_is_current = True
+    if cache_path.is_file() and library_meta is not None:
+        dependency_mtimes = []
+        wav_path = library_meta.get("wav_path")
+        if wav_path and os.path.isfile(wav_path):
+            dependency_mtimes.append(os.path.getmtime(wav_path))
+        meta_path = VOICE_LIBRARY_DIR / resolved_id / "meta.json"
+        if meta_path.is_file():
+            dependency_mtimes.append(meta_path.stat().st_mtime)
+        if dependency_mtimes and cache_path.stat().st_mtime < max(dependency_mtimes):
+            cache_is_current = False
+
+    if cache_path.is_file() and cache_is_current:
+        try:
+            print(f"[pocket_tts] Loading cached voice state from disk: {cache_path.name}")
+            state = model.import_model_state(str(cache_path))
+            pocket_tts_voice_state_cache[resolved_id] = state
+            print(f"[pocket_tts] voice_state resolution: {resolved_id!r} (disk cache import)")
+            return state
+        except Exception as exc:
+            print(f"[pocket_tts] Failed to load cached state {cache_path.name}: {exc}. Falling back.")
+
+    # 3) Try built-in preset or hf:// path.
+    # If it doesn't look like a library ID (starts with 'vd_'), try treating it as a preset/path.
+    if not resolved_id.startswith("vd_"):
+        try:
+            print(f"[pocket_tts] Attempting to load built-in voice: {resolved_id!r}")
+            state = model.get_state_for_audio_prompt(resolved_id)
+            pocket_tts_voice_state_cache[resolved_id] = state
+            model.export_model_state(state, str(cache_path))
+            print(f"[pocket_tts] voice_state resolution: {resolved_id!r} (built-in preset, rebuilt)")
+            return state
+        except Exception as exc:
+            # Not a valid preset/path, fall through to library lookup.
+            print(f"[pocket_tts] {resolved_id!r} is not a built-in preset: {exc}")
+
+    # 4) Look up in voice_library.
+    if library_meta is None:
+        from persona_forge import voice_library
+
+        library_meta = voice_library.get_voice(resolved_id)
+    if library_meta is None:
+        raise ValueError(
+            f"[pocket_tts] voice_id {resolved_id!r} not found in voice_library"
+        )
+
+    wav_path = library_meta.get("wav_path")
+    if not wav_path or not os.path.isfile(wav_path):
+        raise RuntimeError(
+            f"[pocket_tts] voice_id={resolved_id!r} exists but wav_path is invalid: "
+            f"{wav_path!r}"
+        )
+
+    state = model.get_state_for_audio_prompt(wav_path)
+    pocket_tts_voice_state_cache[resolved_id] = state
+    model.export_model_state(state, str(cache_path))
+    print(f"[pocket_tts] voice_state resolution: {resolved_id!r} (library, rebuilt from wav)")
+    return state
+
+
+def invalidate_voice_state(voice_id: str) -> None:
+    """Drop a cached voice_state so the next request rebuilds it from the voice library.
+
+    Must be called whenever a voice's reference audio changes or is deleted on disk (see
+    voice_library.delete_voice) — the cache in get_pocket_tts_voice_state is keyed by
+    voice_id only and never re-checks the library once built, so a deleted voice would
+    otherwise stay generatable from the stale cached state.
+    """
+    pocket_tts_voice_state_cache.pop(voice_id, None)
+
+
+# ---------------------------------------------------------------------------
+# Audio generation
+# ---------------------------------------------------------------------------
+
+def _trim_post_eos_tail(audio: torch.Tensor, sr: int, frames_after_eos: int) -> torch.Tensor:
+    """Trim trailing dead air after the last speech frame, respecting frames_after_eos.
+
+    Uses a per-frame energy heuristic:
+    - 1 frame ≈ 2000 samples at 24 kHz (12 fps codec).
+    - Finds the last frame where energy exceeds a fraction of the peak frame energy.
+    - Keeps up to frames_after_eos extra frames after that point.
+    - On any error, returns the original audio unchanged.
+    """
+    try:
+        import torch.nn.functional as F
+
+        if frames_after_eos < 0 or audio.numel() == 0:
+            return audio
+
+        # Work on CPU float
+        x = audio.float().cpu().flatten()
+        frame_samples = max(1, sr // 12)
+        if len(x) <= frame_samples:
+            return audio
+
+        # Per-frame energy (L2 norm) via unfold
+        frames = x.unfold(0, frame_samples, frame_samples)
+        energies = (frames * frames).sum(dim=1).sqrt()
+        peak = energies.max().item()
+        if peak <= 1e-9:
+            return audio
+
+        # Speech threshold: 3% of peak frame energy
+        thresh = peak * 0.03
+        # Last speech frame index (energy above threshold)
+        speech_mask = (energies >= thresh).nonzero(as_tuple=True)[0]
+        if speech_mask.numel() == 0:
+            return audio
+        last_speech_frame = int(speech_mask[-1])
+
+        # Effective endpoint: allow extra frames_after_eos beyond last speech frame
+        limit_frame = last_speech_frame + frames_after_eos
+        limit_sample = min(len(x), (limit_frame + 1) * frame_samples)
+
+        if limit_sample < len(x):
+            return x[:limit_sample]
+        return audio
+    except Exception:
+        # Defensive: never break generation on trimming issues
+        return audio
+
+
+def generate_pocket_tts(
+    model: TTSModel,
+    voice_state: dict[str, Any],
+    text: str,
+) -> tuple[Any, int]:
+    """Generate speech audio from text using the loaded Pocket TTS model.
+
+    Args:
+        model: Loaded Pocket TTS TTSModel.
+        voice_state: Voice state dict (from get_state_for_audio_prompt).
+        text: Input text to synthesize.
+
+    Returns:
+        (audio_tensor, sample_rate)
+            - audio_tensor: 1D torch.Tensor (PCM float, 24 kHz).
+            - sample_rate: int (24000).
+    """
+    import torch
+
+    if not model:
+        raise RuntimeError("[pocket_tts] Model is not loaded; call load_pocket_tts_model first.")
+    if not voice_state:
+        raise RuntimeError("[pocket_tts] voice_state is missing; cannot generate.")
+    if not text:
+        raise ValueError("[pocket_tts] Input text is empty.")
+
+    audio = model.generate_audio(voice_state, text)
+
+    # Normalize to expected shape.
+    if isinstance(audio, torch.Tensor):
+        if audio.dim() == 1:
+            audio = audio  # already mono 1D
+        else:
+            audio = audio.squeeze()
+    else:
+        audio = torch.tensor(audio, dtype=torch.float32)
+
+    sample_rate = getattr(model, "sample_rate", 24000)
+
+    # Apply post-EOS tail trim if configured
+    audio = _trim_post_eos_tail(audio, int(sample_rate), pocket_tts_frames_after_eos)
+
+    return audio, int(sample_rate)
+
+
+def generate_pocket_tts_stream(
+    model: TTSModel,
+    voice_state: dict[str, Any],
+    text: str,
+) -> Any:
+    """Generate speech audio incrementally, yielding float32 PCM chunks.
+
+    Used for HTTP streaming endpoints (Hermes TTS streaming integration).
+    Each yielded chunk is a 1D array of float32 samples at 24 kHz.
+
+    Note: Post-EOS tail trimming is skipped in streaming mode since it requires
+    seeing the complete audio first. Streaming trades latency for quality.
+
+    Args:
+        model: Loaded Pocket TTS TTSModel.
+        voice_state: Voice state dict.
+        text: Input text to synthesize.
+
+    Yields:
+        1D float32 arrays (PCM samples).
+    """
+    import numpy as np
+
+    if not model:
+        raise RuntimeError("[pocket_tts] Model is not loaded; call load_pocket_tts_model first.")
+    if not voice_state:
+        raise RuntimeError("[pocket_tts] voice_state is missing; cannot generate.")
+    if not text:
+        raise ValueError("[pocket_tts] Input text is empty.")
+
+    for audio_chunk in model.generate_audio_stream(voice_state, text):
+        arr = np.asarray(audio_chunk, dtype=np.float32)
+        if arr.ndim > 1:
+            arr = arr.squeeze()
+        yield arr
+
+
+def warm_up_pocket_tts(model: TTSModel, voice_state: dict[str, Any] | None) -> None:
+    """Run one throwaway generation right after load to pay the first-call cost here.
+
+    The first real inference through a freshly loaded TTSModel appears to carry a
+    one-time cost (lazy kernel/graph setup, first-run allocation spike) that has
+    shown up as a silent, untraceable crash (no Python exception, no traceback) on
+    the very first user-triggered generate call after every model load/reload —
+    never on subsequent calls against the same loaded model. Running a trivial
+    generation here, synchronously, on the same serialized executor thread that
+    loads the model, means that cost (and any resulting failure) is paid and logged
+    at load time instead of silently swallowing a user's first request.
+
+    No-ops quietly if there's no voice_state to warm up with (e.g. cloning
+    unavailable) — the warm-up isn't the source of truth for readiness, just a
+    best-effort mitigation.
+    """
+    if model is None or not voice_state:
+        return
+    import time as _time
+
+    t0 = _time.monotonic()
+    try:
+        print("[pocket_tts] Warming up model with a throwaway generation...", flush=True)
+        generate_pocket_tts(model, voice_state, "Warming up.")
+        print(f"[pocket_tts] Warm-up complete ({_time.monotonic() - t0:.1f}s).", flush=True)
+    except Exception as exc:
+        # Surface loudly but don't block boot -- a warm-up failure here is strictly
+        # more useful (visible, attributable to load) than the same failure hitting
+        # a real user's first request silently.
+        import traceback
+
+        print(
+            f"[pocket_tts] Warm-up generation failed after {_time.monotonic() - t0:.1f}s: {exc}",
+            flush=True,
+        )
+        traceback.print_exc()
+
+
+# ---------------------------------------------------------------------------
+# Cleanup
+# ---------------------------------------------------------------------------
+
+def unload_pocket_tts() -> None:
+    """Unload Pocket TTS model and clear all cached voice states."""
+    global pocket_tts_model, pocket_tts_default_voice_state, pocket_tts_voice_state_cache
+
+    if pocket_tts_model is None and not pocket_tts_voice_state_cache:
+        return
+
+    print("[pocket_tts] Unloading Pocket TTS model and clearing cache...")
+
+    pocket_tts_model = None
+    pocket_tts_default_voice_state = None
+    pocket_tts_voice_state_cache.clear()
+
+    print("[pocket_tts] Unloaded.")

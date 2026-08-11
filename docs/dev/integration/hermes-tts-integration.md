@@ -7,7 +7,7 @@ the real integration work is a batch OpenAI-compatible endpoint.
 
 ## The question this answers
 
-Should qwen3-tts-openvino invest in streaming (Deliverable A already shipped) and pipelined overlap
+Should persona-forge invest in streaming (Deliverable A already shipped) and pipelined overlap
 (Deliverable B, gated on the Task 3 measurement)? The deciding factor is what the actual consumer —
 the **hermes-agent** ("Iris") gateway on dockermisc1 — can consume.
 
@@ -28,7 +28,7 @@ the **hermes-agent** ("Iris") gateway on dockermisc1 — can consume.
 - **Custom command providers** write the input text to a temp file and run a shell command that
   **"must produce the audio file at the expected path."** Strictly batch, file-output.
 
-## How qwen3-tts is currently wired into hermes (verified 2026-06-30)
+## How persona-forge is currently wired into hermes (verified 2026-06-30)
 
 Active config: `~/.hermes-gateway/config.yaml`, `tts.provider: iris-mlx`. `iris-mlx` is a
 `type: command` provider (`output_format: mp3`, `timeout: 300`) whose shell command does:
@@ -36,11 +36,11 @@ Active config: `~/.hermes-gateway/config.yaml`, `tts.provider: iris-mlx`. `iris-
 1. **Primary** — `POST http://192.168.2.126:8317/v1/audio/speech` (MLX `Qwen3-TTS-12Hz-1.7B-Base-8bit`
    on Nick's Mac), OpenAI-compatible payload `{model, input, ref_audio, ref_text, response_format,
    temperature, top_p, top_k}`, `-o {output_path}`, 10 s fail-fast.
-2. **Fallback** — `POST http://qwen3-tts:8318/generate` (this repo's CPU OpenVINO service, **batch**),
+2. **Fallback** — `POST http://persona-forge:8318/generate` (this repo's CPU OpenVINO service, **batch**),
    payload `{text, language}`, `-o {output_path}`, 270 s.
 3. Both arms produce a complete **MP3 file**. Both fail → `FATAL: BOTH_TTS_PROVIDERS_FAILED`.
 
-So today hermes consumes qwen3-tts **only in batch mode**, via `/generate`, and the fallback is the one
+So today hermes consumes persona-forge **only in batch mode**, via `/generate`, and the fallback is the one
 remaining arm that does not match the primary's OpenAI schema.
 
 ### Reference-voice reality (verified 2026-06-30) — why `ref_audio`/`ref_text` stay server-side
@@ -110,9 +110,9 @@ Tests (`tests/test_app_api.py`): valid request returns audio + correct Content-T
 ## Hermes-side change (out of this repo, document only)
 
 Once the endpoint exists, simplify the `iris-mlx` command's fallback arm to call
-`POST http://qwen3-tts:8318/v1/audio/speech` with the **same payload as the primary** (model/input/
+`POST http://persona-forge:8318/v1/audio/speech` with the **same payload as the primary** (model/input/
 ref_*/response_format/sampling), so primary and fallback are schema-identical. Optionally migrate to a
-native `openai` provider with `base_url: http://qwen3-tts:8318/v1` if hermes provider-fallback chaining
+native `openai` provider with `base_url: http://persona-forge:8318/v1` if hermes provider-fallback chaining
 is desired (currently the failover lives inside the custom command, which is fine to keep).
 
 ## Next steps

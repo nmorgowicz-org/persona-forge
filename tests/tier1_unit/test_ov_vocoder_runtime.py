@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from qwen3_tts.openvino.vocoder import OpenVinoVocoderRuntime
+from persona_forge.openvino.vocoder import OpenVinoVocoderRuntime
 
 
 @pytest.fixture

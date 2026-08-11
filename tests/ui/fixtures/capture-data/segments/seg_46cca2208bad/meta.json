@@ -1,0 +1,32 @@
+{
+  "segment_id": "seg_46cca2208bad",
+  "text": "Thank you for your patience during this process.",
+  "instruct": "british accent, elderly",
+  "tags": [
+    "british accent",
+    "elderly"
+  ],
+  "engine": "omnivoice",
+  "accent_id": null,
+  "sample_rate": 24000,
+  "language": "english",
+  "seed": null,
+  "num_step": null,
+  "speed": null,
+  "guidance_scale": null,
+  "diverse_candidates": false,
+  "postprocess_output": null,
+  "duration_target": null,
+  "candidate_id": "e0eff2f4ecb143d583f90f0d19557e56",
+  "job_id": "17916d7675784c03a2816b4765755b09",
+  "whisper_transcript": "Thank you for your patience during this process.",
+  "match_score": 1.0,
+  "duration_sec": 2.89,
+  "feature_tags": [
+    "british accent",
+    "formal"
+  ],
+  "project_id": null,
+  "project_name": null,
+  "created_at": 1784754146.277934
+}

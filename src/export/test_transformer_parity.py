@@ -428,7 +428,7 @@ def run() -> int:
         raise SystemExit("metadata requires INT8 parity but no complete INT8 artifact set exists")
 
     from export_openvino import _resolve_vocoder_decoder, _set_eager_attention
-    from qwen3_tts.model_config import configure_hf_token
+    from persona_forge.model_config import configure_hf_token
     configure_hf_token()
 
     import openvino as ov

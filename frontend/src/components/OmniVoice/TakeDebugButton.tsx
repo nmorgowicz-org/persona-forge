@@ -16,10 +16,10 @@ export function TakeDebugButton({
     matchScore == null
       ? 'text-muted-foreground'
       : matchScore >= 0.9
-        ? 'text-emerald-400'
+        ? 'text-success'
         : matchScore >= 0.7
-          ? 'text-amber-400'
-          : 'text-red-400'
+          ? 'text-warning'
+          : 'text-destructive'
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>

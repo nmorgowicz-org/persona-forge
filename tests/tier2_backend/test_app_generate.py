@@ -65,6 +65,38 @@ class TestGenerate:
             for c in rt.generate_calls
         )
 
+    def test_generate_prosody_repair_is_explicit_and_reported(self, client, rt):
+        unflagged = client.post("/generate", json={"text": "First. Second."})
+        flagged = client.post(
+            "/generate",
+            json={"text": "First. Second.", "prosody_repair": True},
+        )
+
+        assert unflagged.status_code == 200
+        assert unflagged.headers["X-Prosody-Repair-Outcome"] == "not_requested"
+        assert flagged.status_code == 200
+        assert flagged.headers["X-Prosody-Repair-Outcome"] == "unnecessary"
+        assert flagged.headers["X-Prosody-Repair-Budget-Seconds"] == "5.0"
+        assert rt.generate_calls[-2]["kwargs"]["prosody_repair"] is False
+        assert rt.generate_calls[-1]["kwargs"]["prosody_repair"] is True
+
+    def test_generate_rejects_non_boolean_prosody_repair(self, client):
+        resp = client.post(
+            "/generate",
+            json={"text": "hello", "prosody_repair": "true"},
+        )
+        assert resp.status_code == 400
+        assert resp.get_json()["error"] == "prosody_repair must be a boolean"
+
+    def test_generate_with_metrics_passes_repair_and_returns_metadata(self, client, rt):
+        resp = client.post(
+            "/generate/with_metrics",
+            json={"text": "First. Second.", "prosody_repair": True},
+        )
+        assert resp.status_code == 200
+        assert rt.generate_calls[-1]["kwargs"]["prosody_repair"] is True
+        assert resp.get_json()["prosody_repair"]["outcome"] == "unnecessary"
+
 
 @pytest.mark.integration
 class TestOpenaiCompat:
@@ -100,6 +132,15 @@ class TestOpenaiCompat:
         assert resp.status_code == 200
         assert "audio/wav" in resp.content_type
 
+    def test_v1_audio_speech_passes_and_reports_prosody_repair(self, client, rt):
+        resp = client.post(
+            "/v1/audio/speech",
+            json={"input": "First. Second.", "prosody_repair": True},
+        )
+        assert resp.status_code == 200
+        assert rt.generate_calls[-1]["kwargs"]["prosody_repair"] is True
+        assert resp.headers["X-Prosody-Repair-Outcome"] == "unnecessary"
+
 
 @pytest.mark.integration
 class TestStream:
@@ -127,3 +168,11 @@ class TestStream:
         finally:
             rt.stream_vocoder_enabled = orig
             rt.ov_runtime.vocoder_runtime.enabled = orig
+
+    def test_stream_rejects_complete_file_prosody_repair(self, client):
+        resp = client.post(
+            "/generate/stream",
+            json={"text": "hello", "prosody_repair": True},
+        )
+        assert resp.status_code == 400
+        assert "not supported" in resp.get_json()["error"]

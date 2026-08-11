@@ -12,7 +12,7 @@ on:
       - requirements/**
       - "scripts/**"
   push:
-    tags: ["qwen3-tts-openvino-v*"]
+    tags: ["persona-forge-v*"]
   workflow_dispatch:
     inputs:
       no-cache:
@@ -22,7 +22,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: nmorgowicz-org/qwen3-tts-openvino
+  IMAGE_NAME: nmorgowicz-org/persona-forge
 
 concurrency:
   group: images-${{ github.ref }}
@@ -71,8 +71,8 @@ jobs:
           {
             echo 'value<<EOF'
             echo "${image}:${GITHUB_SHA}"
-            if [[ "${GITHUB_REF}" == refs/tags/qwen3-tts-openvino-v* ]]; then
-              release_tag="${GITHUB_REF_NAME#qwen3-tts-openvino-}"
+            if [[ "${GITHUB_REF}" == refs/tags/persona-forge-v* ]]; then
+              release_tag="${GITHUB_REF_NAME#persona-forge-}"
               echo "${image}:${release_tag}"
               echo "${image}:latest"
             fi
@@ -115,12 +115,12 @@ jobs:
         run: |
           image="${REGISTRY}/${IMAGE_NAME}:${GITHUB_SHA}"
           docker run --rm --entrypoint python "${image}" -c \
-            'import benchmark_vocoder, export_openvino, nncf, openvino, ov_export_wrappers, parity_contract, qwen_tts, test_transformer_parity, test_vocoder_parity, torch; from qwen3_tts.model_config import resolve_model_repo; import scripts.download_model; assert resolve_model_repo({"MODEL_SIZE": "0.6B"}).endswith("0.6B-Base"); assert resolve_model_repo({"MODEL_SIZE": "1.7B"}).endswith("1.7B-Base"); print("image imports passed")'
+            'import benchmark_vocoder, export_openvino, nncf, openvino, ov_export_wrappers, parity_contract, qwen_tts, test_transformer_parity, test_vocoder_parity, torch; from persona_forge.model_config import resolve_model_repo; import scripts.download_model; assert resolve_model_repo({"MODEL_SIZE": "0.6B"}).endswith("0.6B-Base"); assert resolve_model_repo({"MODEL_SIZE": "1.7B"}).endswith("1.7B-Base"); print("image imports passed")'
 
   cleanup:
     if: >-
       github.event_name == 'push' &&
-      startsWith(github.ref, 'refs/tags/qwen3-tts-openvino-v')
+      startsWith(github.ref, 'refs/tags/persona-forge-v')
     needs: build
     runs-on: arc-general
     permissions:
@@ -130,7 +130,7 @@ jobs:
         uses: actions/delete-package-versions@v5
         with:
           min-versions-to-keep: 15
-          package-name: qwen3-tts-openvino
+          package-name: persona-forge
           package-type: container
           token: ${{ secrets.GITHUB_TOKEN }}
           ignore-versions: |

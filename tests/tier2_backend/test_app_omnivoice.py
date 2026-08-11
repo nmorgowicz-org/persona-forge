@@ -2,11 +2,15 @@
 
 import shutil
 import tempfile
+import io
 from pathlib import Path
 
 import numpy as np
 import pytest
+import soundfile as sf
 from unittest.mock import patch
+
+from persona_forge.forced_alignment import Boundary
 
 
 def _seed_audition_candidates(client, app_module):
@@ -75,7 +79,104 @@ class TestOmniVoiceAudition:
 
 
 @pytest.mark.integration
+def test_alignment_performance_endpoint_exposes_budget(client):
+    response = client.get("/alignment/performance")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["budget_seconds"] > 0
+    assert payload["sample_count"] >= 0
+    assert isinstance(payload["within_budget"], bool)
+
+
+@pytest.mark.integration
 class TestOmniVoiceStitch:
+
+    def test_pacing_targets_uses_shared_storyteller_targets(self, client):
+        resp = client.post(
+            "/omnivoice/stitch/pacing-targets",
+            json={
+                "transcripts": ["First.", "Wait…", "Last."],
+                "style_preset": "Storyteller",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.get_json()["padding_ms"] == [1000.0, 1500.0]
+
+    def test_pacing_targets_rejects_bad_transcripts(self, client):
+        resp = client.post(
+            "/omnivoice/stitch/pacing-targets", json={"transcripts": "not-a-list"}
+        )
+        assert resp.status_code == 400
+
+    def test_stitch_plan_repairs_each_enabled_segment_before_join(self, app_module):
+        candidate_id = "phase4-candidate"
+        source = np.ones(240, dtype=np.float32) * 0.1
+        repaired = np.concatenate([source[:120], np.zeros(120, dtype=np.float32), source[120:]])
+        app_module._omnivoice_candidates[candidate_id] = (source, 24000)
+        try:
+            with patch.object(
+                app_module.prosody_repair,
+                "repair_segment_audio",
+                return_value=(repaired, [{"insert_ms": 5.0}], {"resolved_mode": "precise"}),
+            ) as repair:
+                resolved = app_module._resolve_stitch_plan(
+                    {
+                        "clips": [
+                            {
+                                "candidate_id": candidate_id,
+                                "text": "First. Second.",
+                                "prosody_mode": "auto",
+                            }
+                        ],
+                        "style_preset": "Storyteller",
+                    }
+                )
+            assert resolved is not None
+            selected, _kwargs = resolved
+            np.testing.assert_array_equal(selected[0][0], repaired)
+            repair.assert_called_once()
+            assert repair.call_args.kwargs["mode"] == "auto"
+            assert repair.call_args.kwargs["style_preset"] == "Storyteller"
+        finally:
+            app_module._omnivoice_candidates.pop(candidate_id, None)
+
+    def test_blended_segment_is_repaired_in_stitched_audio(self, client, app_module):
+        candidate_id = "phase4-gate"
+        sr = 24000
+        time_axis = np.arange(sr * 2, dtype=np.float32) / sr
+        source = (0.2 * np.sin(2 * np.pi * 110 * time_axis)).astype(np.float32)
+        app_module._omnivoice_candidates[candidate_id] = (source, sr)
+        boundaries = [
+            Boundary("first", 0.1, 0.8, 0.99, "sentence_split"),
+            Boundary("second", 0.8, 1.8, 0.99, "word"),
+        ]
+        try:
+            with patch.object(
+                app_module.prosody_repair.forced_alignment,
+                "align",
+                return_value=boundaries,
+            ):
+                response = client.post(
+                    "/omnivoice/stitch",
+                    json={
+                        "stitch_plan": {
+                            "clips": [
+                                {
+                                    "candidate_id": candidate_id,
+                                    "text": "First. Second.",
+                                    "prosody_mode": "precise",
+                                }
+                            ],
+                            "style_preset": "Storyteller",
+                        }
+                    },
+                )
+            assert response.status_code == 200
+            stitched, stitched_sr = sf.read(io.BytesIO(response.data), dtype="float32")
+            assert stitched_sr == sr
+            assert stitched.size == source.size + sr  # Storyteller sentence target = 1 s.
+        finally:
+            app_module._omnivoice_candidates.pop(candidate_id, None)
 
     def test_stitch_rejects_empty_selections(self, client):
         resp = client.post("/omnivoice/stitch", json={})
