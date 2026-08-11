@@ -17,11 +17,12 @@ test.describe('runtime config', () => {
     // Confirm runtime page loaded
     await expect(page.getByText(/live-adjustable/i, { ignoreCase: true })).toBeVisible()
 
-    // Toggle Silence Trim: locate its label then the toggle within that row
+    // Toggle Silence Trim: the label sits in its own row div; the toggle <button> is a
+    // sibling of that row (not a descendant), so the button lives under the row's parent.
     const toggleLabel = page.locator('label:has-text("Silence trim")').first()
     if (await toggleLabel.isVisible()) {
-      const row = toggleLabel.locator('..').first()
-      const toggleBtn = row.locator('button').first()
+      const group = toggleLabel.locator('../..').first()
+      const toggleBtn = group.locator('button').first()
       if (await toggleBtn.isVisible()) {
         await toggleBtn.click()
       }
