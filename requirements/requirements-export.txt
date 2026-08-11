@@ -2,4 +2,4 @@
 # Optimum Intel is intentionally excluded; see docs/dev/architecture/OPENVINO_IMPLEMENTATION.md
 # ("Export library: openvino + nncf only") for the rationale.
 -r requirements-openvino.txt
-nncf==3.2.0
+nncf==3.3.0
