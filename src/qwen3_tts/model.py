@@ -2055,3 +2055,60 @@ def _run_generate_with_streaming(
         "reference_frames": session.reference_frames,
         "decode_boundaries": session.decode_boundaries,
     }
+
+
+def _run_generate_pocket_tts_stream(
+    text: str,
+    language: str,
+    *,
+    voice_id: str | None = None,
+    seed_value=None,
+):
+    """Stream Pocket-TTS audio as raw int16 PCM chunks for Hermes TTS streaming.
+
+    Each yielded chunk is bytes of int16 LE mono PCM at 24 kHz.
+    Post-processing (silence trim, prosody repair) is skipped for low latency.
+
+    Note: This is a generator; the Pocket-TTS model must be loaded before calling.
+    """
+    import numpy as np
+    from qwen3_tts import pocket_tts_runtime
+    from qwen3_tts.audio_style import _apply_telepresence_eq
+
+    _touch_last_request()
+    _apply_optional_seed(seed_value)
+
+    if pocket_tts_runtime.pocket_tts_model is None:
+        raise RuntimeError("Pocket-TTS model not loaded")
+
+    t0 = time.monotonic()
+    print(
+        f"[generate] stream lang={language!r}  chars={len(text)}  "
+        f"voice_id={voice_id or 'default'!r}",
+        flush=True,
+    )
+
+    voice_state = pocket_tts_runtime.get_pocket_tts_voice_state(
+        pocket_tts_runtime.pocket_tts_model,
+        voice_id=voice_id,
+        default_voice_state=voice_clone_prompt,
+        ref_audio_path=REF_AUDIO,
+    )
+
+    try:
+        for float_chunk in pocket_tts_runtime.generate_pocket_tts_stream(
+            pocket_tts_runtime.pocket_tts_model,
+            voice_state,
+            text,
+        ):
+            # Apply lightweight EQ: high-pass 80Hz + mild presence boost
+            chunk = _apply_telepresence_eq(float_chunk, 24000)
+            # float32 [-1,1] -> int16 LE
+            pcm = np.clip(chunk, -1.0, 1.0)
+            yield (pcm * 32767).astype(np.int16).tobytes()
+    except Exception:
+        print(f"[generate] stream failed: {sys.exc_info()[1]}", flush=True)
+        raise
+    finally:
+        elapsed = time.monotonic() - t0
+        print(f"[generate] stream done   elapsed={elapsed:.1f}s", flush=True)

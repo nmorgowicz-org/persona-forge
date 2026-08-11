@@ -307,6 +307,27 @@ def _apply_presence_boost(wav: np.ndarray, sr: int) -> np.ndarray:
         logger.warning(f"Presence boost failed: {e}")
         return wav
 
+def _apply_telepresence_eq(wav: np.ndarray, sr: int) -> np.ndarray:
+    """Lightweight EQ for voice mode: remove rumble + mild presence boost.
+
+    Designed for both streaming (per-chunk) and batch use. Safe to call on small
+    segments; falls back to input on any error. Used as the default house EQ for
+    Hermes voice mode and general consumption playback.
+    """
+    x = np.asarray(wav, dtype=np.float32).ravel()
+    if x.size == 0:
+        return x
+    try:
+        # High-pass at 80Hz: remove sub-bass rumble typical speakers can't reproduce.
+        b_hp, a_hp = signal.butter(2, 80 / (sr / 2), btype='high')
+        x = signal.lfilter(b_hp, a_hp, x).astype(np.float32)
+        # Mild presence boost: +1dB-ish shelf above 3kHz for intelligibility.
+        b_pr, a_pr = signal.butter(1, 3000 / (sr / 2), btype='high')
+        x = (x + 0.2 * signal.lfilter(b_pr, a_pr, x)).astype(np.float32)
+    except Exception as e:
+        logger.warning(f"Telepresence EQ failed: {e}")
+    return x
+
 
 PROSODY_DESCRIPTIONS: dict[str, str] = {
     "Neutral": "Standard natural pacing and pauses.",
@@ -345,6 +366,7 @@ STYLE_PIPELINES: dict[str, dict[str, Any]] = {
         "peak": PEAK_CEILING_DB,
         "compress": None,
         "steps": _steps(
+            ("telepresence_eq", _apply_telepresence_eq, {}),
             ("normalize_lufs", _normalize_lufs, {"target_lufs": DEFAULT_TARGET_LUFS}),
             ("limit_peak", limit_peak, {"ceiling_db": PEAK_CEILING_DB}),
         ),
@@ -354,6 +376,7 @@ STYLE_PIPELINES: dict[str, dict[str, Any]] = {
         "peak": PEAK_CEILING_DB,
         "compress": None,
         "steps": _steps(
+            ("telepresence_eq", _apply_telepresence_eq, {}),
             ("normalize_lufs", _normalize_lufs, {"target_lufs": TARGET_LUFS}),
             ("limit_peak", limit_peak, {"ceiling_db": PEAK_CEILING_DB}),
         ),

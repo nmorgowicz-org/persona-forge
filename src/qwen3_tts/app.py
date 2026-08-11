@@ -134,8 +134,13 @@ def _openai_error(message: str, status: int, err_type: str = "invalid_request_er
 
 
 # Encodings we can actually produce. Anything else is rejected with 400 rather than
-# silently returned as mislabeled WAV. (opus/aac/flac are future work — see docs/plans.)
-_SUPPORTED_FORMATS = {"mp3": ("MP3", "audio/mpeg"), "wav": ("WAV", "audio/wav")}
+# silently returned as mislabeled WAV. (opus/aac are future work — see docs/plans.)
+# pcm = raw int16 LE mono at 24kHz (Hermes streaming expectation).
+_SUPPORTED_FORMATS = {
+    "mp3": ("MP3", "audio/mpeg"),
+    "wav": ("WAV", "audio/wav"),
+    "pcm": ("RAW", "audio/pcm"),
+}
 
 
 def _canonical_format(response_format: str | None) -> str:
@@ -151,6 +156,16 @@ def _encode(wav: Any, sr: int, response_format: str) -> tuple[bytes, str]:
             f"unsupported response_format {fmt!r}; supported: "
             f"{', '.join(sorted(_SUPPORTED_FORMATS))}"
         ) from exc
+
+    if fmt == "pcm":
+        # Hermes expects int16 LE mono PCM at 24kHz.
+        import numpy as np
+        # Normalize float32 [-1,1] to int16 range
+        if wav.dtype != np.int16:
+            wav = np.clip(wav, -1.0, 1.0)
+            wav = (wav * 32767).astype(np.int16)
+        return wav.tobytes(), media_type
+
     output = io.BytesIO()
     sf.write(output, wav, sr, format=sf_format)
     return output.getvalue(), media_type
@@ -450,6 +465,10 @@ def voices_builtin():
 def _resolve_builtin_voice(data: dict, voice_id: str | None) -> tuple[str | None, str | None]:
     builtin_voice = (data.get("builtin_voice") or "").strip()
     if not builtin_voice:
+        # Also check voice parameter for pocket: prefixed builtins
+        voice_val = (data.get("voice") or "").strip()
+        if voice_val.startswith("pocket:"):
+            return voice_val, None
         return voice_id, None
     active_backend = getattr(model, "TTS_BACKEND", getattr(model, "tts_backend", None))
     if active_backend != "pocket_tts":
@@ -2294,7 +2313,8 @@ def openai_audio_speech():
             400,
         )
     language = (data.get("language") or "English").strip()
-    voice_id = (data.get("voice_id") or "").strip() or None
+    # OpenAI SDK sends "voice", our internal convention uses "voice_id" — accept both.
+    voice_id = (data.get("voice_id") or data.get("voice") or "").strip() or None
     voice_id, builtin_error = _resolve_builtin_voice(data, voice_id)
     if builtin_error:
         return _openai_error(builtin_error, 400)
@@ -2303,6 +2323,20 @@ def openai_audio_speech():
     if seed is not None and not isinstance(seed, int):
         return _openai_error("seed must be an integer", 400)
     resolved_seed = model.resolve_seed(seed)
+
+    # Pocket-TTS streaming path: Hermes TTS streaming via OpenAI SDK with_streaming_response.
+    # Returns chunked PCM (int16 LE, 24kHz) — no post-processing for low latency.
+    # Only activates for PCM format (Hermes requirement); mp3/wav use batch for compatibility.
+    if (
+        model.TTS_BACKEND == "pocket_tts"
+        and fmt == "pcm"
+        and not repair_requested
+    ):
+        return _openai_audio_speech_stream_pocket_tts(
+            text, language, voice_id, resolved_seed, instruct, data
+        )
+
+    # Batch path: all other backends/formats, plus repair-enabled requests.
     try:
         wav, sr, job_id = model.executor.submit(
             model._run_generate,
@@ -2355,6 +2389,61 @@ def openai_audio_speech():
                 steps = prog["applied_steps"]
                 response.headers["X-Applied-Steps"] = ", ".join(steps) if isinstance(steps, list) else str(steps)
     return response
+
+
+def _openai_audio_speech_stream_pocket_tts(
+    text: str,
+    language: str,
+    voice_id: str | None,
+    resolved_seed: int | None,
+    instruct: str | None,
+    data: dict,
+):
+    """Stream Pocket-TTS audio as raw PCM for Hermes TTS streaming integration."""
+    if instruct:
+        print(f"[audio/stream] instruct field ignored on Pocket-TTS: {instruct!r}", flush=True)
+
+    events: "queue.Queue[tuple[str, Any]]" = queue.Queue()
+
+    def produce() -> None:
+        try:
+            for pcm_chunk in model._run_generate_pocket_tts_stream(
+                text,
+                language,
+                voice_id=voice_id,
+                seed_value=resolved_seed,
+            ):
+                events.put(("audio", pcm_chunk))
+        except Exception as exc:
+            events.put(("error", exc))
+        finally:
+            events.put(("done", None))
+
+    future = model.executor.submit(produce)
+
+    def body():
+        while True:
+            kind, payload = events.get()
+            if kind == "audio":
+                yield payload
+            elif kind == "error":
+                print(f"[audio/stream] error: {payload}", flush=True)
+                raise RuntimeError(f"streaming inference failed: {payload}") from payload
+            else:
+                future.result()
+                return
+
+    return Response(
+        body(),
+        content_type="audio/pcm",
+        headers={
+            "X-Seed": str(resolved_seed) if resolved_seed is not None else "",
+            "X-Audio-Sample-Rate": "24000",
+            "X-Audio-Channels": "1",
+            "X-Audio-Bits": "16",
+        },
+        direct_passthrough=True,
+    )
 
 @app.post("/generate/async")
 def generate_async():

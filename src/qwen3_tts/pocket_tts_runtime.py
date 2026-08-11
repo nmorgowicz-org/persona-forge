@@ -10,6 +10,7 @@ Public API:
     - build_default_voice_state(...)
     - get_pocket_tts_voice_state(...)
     - generate_pocket_tts(...)
+    - generate_pocket_tts_stream(...)
     - warm_up_pocket_tts(...)
     - invalidate_voice_state(...)
     - unload_pocket_tts()
@@ -513,6 +514,43 @@ def generate_pocket_tts(
     audio = _trim_post_eos_tail(audio, int(sample_rate), pocket_tts_frames_after_eos)
 
     return audio, int(sample_rate)
+
+
+def generate_pocket_tts_stream(
+    model: TTSModel,
+    voice_state: dict[str, Any],
+    text: str,
+) -> Any:
+    """Generate speech audio incrementally, yielding float32 PCM chunks.
+
+    Used for HTTP streaming endpoints (Hermes TTS streaming integration).
+    Each yielded chunk is a 1D array of float32 samples at 24 kHz.
+
+    Note: Post-EOS tail trimming is skipped in streaming mode since it requires
+    seeing the complete audio first. Streaming trades latency for quality.
+
+    Args:
+        model: Loaded Pocket TTS TTSModel.
+        voice_state: Voice state dict.
+        text: Input text to synthesize.
+
+    Yields:
+        1D float32 arrays (PCM samples).
+    """
+    import numpy as np
+
+    if not model:
+        raise RuntimeError("[pocket_tts] Model is not loaded; call load_pocket_tts_model first.")
+    if not voice_state:
+        raise RuntimeError("[pocket_tts] voice_state is missing; cannot generate.")
+    if not text:
+        raise ValueError("[pocket_tts] Input text is empty.")
+
+    for audio_chunk in model.generate_audio_stream(voice_state, text):
+        arr = np.asarray(audio_chunk, dtype=np.float32)
+        if arr.ndim > 1:
+            arr = arr.squeeze()
+        yield arr
 
 
 def warm_up_pocket_tts(model: TTSModel, voice_state: dict[str, Any] | None) -> None:
