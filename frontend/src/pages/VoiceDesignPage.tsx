@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import { VoiceDesignPanel } from '@/components/VoiceDesignPanel'
 import { OmniVoicePanel } from '@/components/OmniVoicePanel'
 import { EngineSelector } from '@/components/EngineSelector'

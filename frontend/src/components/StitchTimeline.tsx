@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { AnimatePresence, motion, Reorder } from 'framer-motion'
+import { AnimatePresence, motion, Reorder } from 'motion/react'
 import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play, Pause, Scissors, Trash2, Volume2, VolumeX, Gauge } from 'lucide-react'
 import { useAppStore, type StitchPlanClip } from '@/store'
 import { base64ToBlob, cn } from '@/lib/utils'

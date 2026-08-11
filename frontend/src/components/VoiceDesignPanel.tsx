@@ -1,5 +1,5 @@
 import { useMemo, useRef, useCallback, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'motion/react'
 import { createVoiceDesign, saveVoiceDesign } from '../lib/api'
 import type { EditingVoice } from '../store'
 import {
