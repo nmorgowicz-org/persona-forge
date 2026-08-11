@@ -1,6 +1,6 @@
 # FRONTEND_OVERVIEW
 
-Architecture and usage overview of the qwen3-tts-openvino frontend.
+Architecture and usage overview of the persona-forge frontend.
 
 This is the reference for how the UI is structured, how it talks to the backend, how global state flows, and how it reacts to model-load / swap status.
 

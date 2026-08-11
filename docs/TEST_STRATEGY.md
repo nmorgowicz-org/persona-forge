@@ -1,6 +1,6 @@
 # TEST_STRATEGY
 
-You-changed-X → run-Y reference for qwen3-tts-openvino.
+You-changed-X → run-Y reference for persona-forge.
 
 This is the single, unambiguous mapping from code changes to the tests you must run and the gates that must pass.
 
@@ -15,9 +15,9 @@ Non-negotiable:
 ### 1.1 Model runtime / generation (model.py, generation, sampling, cache logic)
 
 Affected:
-- src/qwen3_tts/model.py
-- src/qwen3_tts/model_config.py
-- src/qwen3_tts/generation.py (or similar generation/sampling code)
+- src/persona_forge/model.py
+- src/persona_forge/model_config.py
+- src/persona_forge/generation.py (or similar generation/sampling code)
 - Cache/position/mask logic
 
 Run:
@@ -33,9 +33,9 @@ Run:
 ### 1.2 OpenVINO adapters and runtime (ov_talker, ov_predictor, ov_vocoder, stateful cache)
 
 Affected:
-- src/qwen3_tts/ov_talker_runtime.py
-- src/qwen3_tts/ov_predictor_runtime.py
-- src/qwen3_tts/ov_vocoder_runtime.py
+- src/persona_forge/ov_talker_runtime.py
+- src/persona_forge/ov_predictor_runtime.py
+- src/persona_forge/ov_vocoder_runtime.py
 - src/export/ov_stateful_cache.py
 - Any stateful/explicit cache wiring
 
@@ -66,7 +66,7 @@ Run:
 ### 1.4 Queueing / model swap / serving (app.py, runtime behavior)
 
 Affected:
-- src/qwen3_tts/app.py
+- src/persona_forge/app.py
 - /generate, /v1/audio/speech, /health, /runtime/config
 - Queueing, model swap, idle-unload, backend switching
 - /voice_design, /omnivoice endpoints
@@ -87,7 +87,7 @@ Run:
 ### 1.5 OmniVoice engine
 
 Affected:
-- src/qwen3_tts/omnivoice_*.py
+- src/persona_forge/omnivoice_*.py
 - /omnivoice/* endpoints (audition, progress, segments, stitch, save)
 
 Run:

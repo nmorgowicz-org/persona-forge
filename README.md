@@ -31,7 +31,7 @@ Prerequisites:
 Steps:
 
 1. Copy `.env.example` to `.env`; set `HF_TOKEN` only if your selected models are gated. Optional: set `REF_AUDIO_PATH` for a default voice; Whisper drafts its transcript automatically.
-2. `docker compose up --build qwen3-tts`
+2. `docker compose up --build persona-forge`
 3. Run once to generate model artifacts: `docker compose run --rm --profile export export`
 4. Open `http://localhost:8318`
 
@@ -64,5 +64,5 @@ Full API details, streaming, and runtime/config semantics are in
 
 ## Images
 
-Published as `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>` plus release-version and
+Published as `ghcr.io/nmorgowicz-org/persona-forge:<git-sha>` plus release-version and
 `latest` tags. Production must use a SHA tag or digest; never `latest`.

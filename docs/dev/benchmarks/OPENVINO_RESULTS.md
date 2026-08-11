@@ -20,7 +20,7 @@ Model `Qwen/Qwen3-TTS-12Hz-0.6B-Base`, revision
 `abec65a5d2f2dcf07382d707513cb2a9f5c2a4c5872728069b169d9601e3da7f`, source hash
 `dd8e1a75b4ef2174`; OpenVINO 2026.2.1. Runtime used the capacity-768 main and capacity-32
 predictor stateful graphs, FP32 OpenVINO vocoder, 6 threads, an 8 GiB cgroup, and production
-sampling. Production `qwen3-tts` remained stopped; only temporary `qwen-stream-test` was used.
+sampling. Production `persona-forge` remained stopped; only temporary `qwen-stream-test` was used.
 
 The inspected Qwen seam is the outer `Qwen3TTSTalkerForConditionalGeneration.forward` result:
 `hidden_states[-1]` is the completed 16-codebook frame. The inner `talker.model.forward` result is
@@ -132,7 +132,7 @@ Both profiles pass Task 1 (baked-image smoke) on v0.13.0.
 
 ### Task 2 — identical-seed latency comparison (2026-06-30, dockermisc1)
 
-Container `qwen3-tts-candidate`, `runtime-v0.13.0`, 0.6B INT8 (stateful main cap-768, stateful
+Container `persona-forge-candidate`, `runtime-v0.13.0`, 0.6B INT8 (stateful main cap-768, stateful
 predictor cap-32, BF16 glue, FP32 OV vocoder), 10 GiB cgroup, 6 threads. Seed 42,
 `do_sample=False`, same paragraph text across all runs. The `/batch_internal` and
 `/stream_internal` endpoints each apply the seed before generation via `_apply_optional_seed()`.
@@ -192,7 +192,7 @@ or 10 GiB+ headroom is required to avoid OOM.
 
 ### Task 2 — 1.7B identical-seed latency comparison (2026-06-30, dockermisc1)
 
-Container `qwen3-tts-candidate`, `runtime-v0.13.0`, 1.7B INT4 asymmetric g32 (stateful main cap-768,
+Container `persona-forge-candidate`, `runtime-v0.13.0`, 1.7B INT4 asymmetric g32 (stateful main cap-768,
 explicit INT4 predictor, BF16 glue, FP32 OV vocoder), **12 GiB cgroup / 13 GiB swap**, 6 threads.
 Seed 42, `do_sample=False`. The same "short" prompt text generates 195 frames (15.6 s audio) on 1.7B
 (equivalent to paragraph-length), so these are paragraph-scale runs.
@@ -365,7 +365,7 @@ another ~313 MiB. The short request fits under 7 GiB, but only with ~533 MiB (7.
   **18.429 s** (RTF 5.485) vs stateful **19.138 s** (RTF 5.696), a **3.8% regression**. Stateful KV
   is accepted as a footprint feature, not a latency optimization.
 - Protected `litellm`, `litellm-postgres`, and `headroom-proxy` remained healthy; production
-  `qwen3-tts` remained stopped. Post-run host available memory was ~13 GiB; swap remained 2.9 GiB used.
+  `persona-forge` remained stopped. Post-run host available memory was ~13 GiB; swap remained 2.9 GiB used.
 
 **Decision:** the stateful 0.6B profile is ship-capable after its IRs and runtime are baked into a
 versioned image/artifact set. Keep explicit cache as opt-out rollback. Do not advertise 20% headroom
@@ -666,7 +666,7 @@ short, ~2.6 s, so RTF is overhead-dominated and absolute medians are the fairer 
 
 **Run provenance.** Same as the memory runs above: image `exporter-v0.9.1`, runtime mounted from
 working tree, rev `fd4b25438912…`, OV 2026.2.1, NNCF 3.2.0, 6 threads, `--memory 13g`. Protected
-containers (`litellm*`/`headroom-proxy`) stayed up; prod `qwen3-tts` was already stopped.
+containers (`litellm*`/`headroom-proxy`) stayed up; prod `persona-forge` was already stopped.
 
 ### M9 generation-peak attribution — measured 2026-06-29
 
@@ -709,7 +709,7 @@ inputs/outputs and the separate main prefill/decode compiled-model pair. Apply t
 predictor only after the main-core spike proves parity and memory reduction. The 50 ms sampler misses
 the ~1.27 GiB short-lived difference between sampled RSS and `ru_maxrss`, so the stateful comparison
 must retain both metrics. Host swap remained 1.8 GiB before and after; protected containers remained
-healthy and production `qwen3-tts` stayed stopped.
+healthy and production `persona-forge` stayed stopped.
 
 ### M9 stateful main-core spike — measured 2026-06-29
 
@@ -1010,7 +1010,7 @@ images, not published artifacts.
 
 - Model revision: `5d83992436eae1d760afd27aff78a71d676296fc`.
 - IR metadata source hash: `a6f9dc107cc69a2b`.
-- Fresh export path: `/var/data/autopirate/qwen3-tts/openvino-simplify-v2/0.6B`.
+- Fresh export path: `/var/data/autopirate/persona-forge/openvino-simplify-v2/0.6B`.
 - Main: INT8 stateful cap768; transform compiled with 56 states shaped `[1,8,768,128]`.
 - Predictor: INT8 stateful cap32; transform compiled with 10 states shaped `[1,8,32,128]`.
 - Vocoder: FP32 OpenVINO enabled. Torch glue: BF16 low-memory load.
@@ -1024,7 +1024,7 @@ images, not published artifacts.
   not the final performance gate.
 - Non-Git outputs: `/tmp/simplify-06.mp3`, `/tmp/simplify-06-openai.wav`,
   `/tmp/simplify-06-native.wav`, and `/tmp/simplify-06-stream.f32le` on `dockermisc1`.
-- Rollback: prior `qwen3-tts-candidate` container remains present but stopped; the rollback image is
+- Rollback: prior `persona-forge-candidate` container remains present but stopped; the rollback image is
   `runtime-v0.13.0`. Rollback was not restarted during this run.
 
 Remaining gates: deterministic batch/stream parity, listening, warm median/p95/RTF and peak-RSS
@@ -1183,7 +1183,7 @@ small and parity-gated. Weight-quantizing the FP32 vocoder is **not** a memory l
 ### PyTorch rollback timeout — root cause found and fixed in config (2026-06-30)
 
 The failed `TTS_BACKEND=pytorch` rollback gate (generation exceeding the 300 s HTTP timeout) was a
-simplify-v2 regression, now fixed in `src/qwen3_tts/config.py`. `apply_preset_env()` was setting
+simplify-v2 regression, now fixed in `src/persona_forge/config.py`. `apply_preset_env()` was setting
 `OPENVINO_TORCH_DTYPE=bfloat16` **unconditionally**, for every backend. On the OpenVINO path that is
 harmless — the talker cores run on OpenVINO and the bf16 Torch weights are just load-time glue that is
 released after compile. But on the pure-PyTorch fallback the transformer forward **actually runs in

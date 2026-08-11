@@ -34,7 +34,7 @@ Runtime alignment:
 
 ## 1. Backend: OmniVoice engine module
 
-### 1.1 Core module: `src/qwen3_tts/omnivoice_engine.py`
+### 1.1 Core module: `src/persona_forge/omnivoice_engine.py`
 
 Modeled on `voice_design.py` with a swap guard and an executor-based entry point,
 but adapted for multi-segment, multi-candidate cherry-pick workflows.

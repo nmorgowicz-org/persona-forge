@@ -56,14 +56,14 @@ audio + known text*, which is lighter, faster, and more accurate than WhisperX.
 
 The old path was *gap-dependent* end to end. Two functions embodied it:
 
-- **`get_prosody_adjusted_wav`** (`src/qwen3_tts/voice_library.py:81`) — loads the master,
+- **`get_prosody_adjusted_wav`** (`src/persona_forge/voice_library.py:81`) — loads the master,
   calls `detect_pause_intervals`, filters to `interior` gaps, and at
   `voice_library.py:115`:
   ```python
   if not interior:
       return wav, sr        # ← blended speech exits here, UNCHANGED
   ```
-- **`_shape_pauses`** (`src/qwen3_tts/audio_style.py:218`) — same dependency:
+- **`_shape_pauses`** (`src/persona_forge/audio_style.py:218`) — same dependency:
   ```python
   non_silent = librosa.effects.split(wav, top_db=30)
   if len(non_silent) <= 1:
@@ -84,7 +84,7 @@ This is the "pause drift" — it is real and it is structural, not a tuning bug.
 
 ### 2.3 What is solid and should be reused
 
-- **`src/qwen3_tts/audio_post.py`** — clean, numpy-only DSP. Equal-power crossfades,
+- **`src/persona_forge/audio_post.py`** — clean, numpy-only DSP. Equal-power crossfades,
   ordered region-edit application (`apply_region_edits`, `audio_post.py:233`) that mirrors
   the frontend, compressor/limiter/normalize. **This is our surgical-insertion toolkit.**
 - **Region-edit engine** — `insert_silence` / `remove_range` / `apply_region_fade` already
@@ -177,7 +177,7 @@ blast radius small while making Precise mapping deterministic.
 
 ### 5.1 Triage — "does this clip need the heavy pass?"
 
-Implemented in `src/qwen3_tts/prosody_triage.py`.
+Implemented in `src/persona_forge/prosody_triage.py`.
 
 **Signal:** compare *acoustic evidence* to *linguistic expectation* as a cheap heuristic.
 
@@ -210,7 +210,7 @@ Precise remain available as deterministic manual overrides.
 
 ### 5.2 Forced alignment engine
 
-Implemented in `src/qwen3_tts/forced_alignment.py`.
+Implemented in `src/persona_forge/forced_alignment.py`.
 
 - **Model:** immutable-pinned MMS-300M INT8 ONNX from
   `onnx-community/mms-300m-1130-forced-aligner-ONNX`.

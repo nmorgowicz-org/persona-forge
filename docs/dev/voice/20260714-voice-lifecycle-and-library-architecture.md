@@ -4,7 +4,7 @@ Date: 2026-07-14
 Status: Implemented and verified against the codebase (2026-07-14). §§1-6, 6.1
 confirmed complete; the only gap found during verification (global API-default
 voice_state not rebuilt on in-place mutation of the persisted default voice_id) was
-fixed in `_invalidate_voice_clone_state()` (`src/qwen3_tts/app.py`). `duplicated_from`
+fixed in `_invalidate_voice_clone_state()` (`src/persona_forge/app.py`). `duplicated_from`
 provenance is now surfaced as a "Forked from ..." badge in `VoiceLibraryPage.tsx`.
 Branch: `feature/voice-style-foundation`
 
@@ -88,7 +88,7 @@ UI (they all live around the "PROSODY VARIANTS" pill and the voice-card "..." me
 
 ### 2.0 Background / existing mechanics (read this first)
 
-**Filesystem model** (`src/qwen3_tts/voice_library.py`): no database. Each voice is a
+**Filesystem model** (`src/persona_forge/voice_library.py`): no database. Each voice is a
 directory `VOICE_LIBRARY_DIR / <voice_id> / {original.wav, current.wav, meta.json,
 .history/}`. `voice_id` format is `vd_<12-hex>` (`_VOICE_ID_RE`).
 
@@ -288,7 +288,7 @@ implementation:
 - Manual: attempt an in-place edit (normalize/trim) on the mounted reference voice
   with "edit on a copy" unchecked; confirm either a clear pre-flight block or a clear
   error message, never a raw stack trace or silent corruption/no-op.
-- `PYTHONPATH=src python -m py_compile src/qwen3_tts/app.py src/qwen3_tts/voice_library.py`.
+- `PYTHONPATH=src python -m py_compile src/persona_forge/app.py src/persona_forge/voice_library.py`.
 
 ---
 
@@ -301,7 +301,7 @@ Full detail now lives in `docs/plans/20260709-app_roadmap_backlog.md` §4.3 (ins
   `features: AccentFeature[]` array (from `frontend/src/lib/accentBank.ts`) as a new
   `feature_tags` field in the segment's `meta.json`, threaded through
   `POST /omnivoice/segments` and `segment_library.save_segment()`
-  (`src/qwen3_tts/segment_library.py`).
+  (`src/persona_forge/segment_library.py`).
 - **Option B (explicit follow-up)**: a lexical-set text classifier for arbitrary,
   free-typed sentences (not just curated showcase sentences), enabling the user's
   stated goal of "a full featured, easy to use, easy to execute accented voice design
@@ -476,10 +476,10 @@ respective "first call") as the driver.
 
 **Why this points at a first-inference-only cost, not a race or wrong-voice bug**:
 - The generation executor is a single-worker `ThreadPoolExecutor(max_workers=1)`
-  (`src/qwen3_tts/model.py:133`) — model load and every generate call are strictly
+  (`src/persona_forge/model.py:133`) — model load and every generate call are strictly
   serialized on one thread, so this is not a race between "model finished loading"
   and "first request arrived."
-- `load_model()`'s pocket_tts branch (`src/qwen3_tts/model.py`, ~lines 410–460) loads
+- `load_model()`'s pocket_tts branch (`src/persona_forge/model.py`, ~lines 410–460) loads
   the model and builds the *default voice_state* (`get_state_for_audio_prompt`, which
   only encodes a conditioning prompt — it does not run the model's actual generation/
   decode path), then immediately prints "Pocket TTS loaded and ready." **The real
@@ -494,7 +494,7 @@ respective "first call") as the driver.
   the process/worker dies at a lower level than Python's `try/except` in
   `_run_generate` can catch.
 - The absence of `traceback.print_exc()` output specifically (the pocket_tts branch
-  of `_run_generate`, `src/qwen3_tts/model.py` ~lines 1520–1580, already wraps
+  of `_run_generate`, `src/persona_forge/model.py` ~lines 1520–1580, already wraps
   `generate_pocket_tts()` in a `try/except` that prints a traceback on any catchable
   Python exception) reinforces that this is not a normal Python-level error.
 
@@ -507,9 +507,9 @@ but repeating the same silent fallback on every future load/reload forever since
 nothing ever cleared the stale pointer.
 
 ### What was implemented
-1. **Warm-up generation at load time** (`src/qwen3_tts/pocket_tts_runtime.py`, new
+1. **Warm-up generation at load time** (`src/persona_forge/pocket_tts_runtime.py`, new
    `warm_up_pocket_tts(model, voice_state)`; wired into
-   `src/qwen3_tts/model.py`'s pocket_tts branch of `load_model()`, immediately after
+   `src/persona_forge/model.py`'s pocket_tts branch of `load_model()`, immediately after
    `build_default_voice_state()`). Runs one throwaway generation ("Warming up.")
    against the default voice_state, synchronously, on the same serialized executor
    thread that performs the load — so whatever one-time first-call cost exists is
@@ -559,8 +559,8 @@ nothing ever cleared the stale pointer.
    Revisit if the warm-up mitigation doesn't fully resolve the crash in practice.
 
 ### Verification
-- `PYTHONPATH=src python -m py_compile src/qwen3_tts/model.py
-  src/qwen3_tts/pocket_tts_runtime.py` — passes.
+- `PYTHONPATH=src python -m py_compile src/persona_forge/model.py
+  src/persona_forge/pocket_tts_runtime.py` — passes.
 - **Still needed (live container)**: rebuild and deploy, then exercise the original
   repro path (cold boot → immediately "Use in Speak" on a short word; separately,
   let idle-unload fire then immediately "Use in Speak" again) and confirm generation
@@ -585,7 +585,7 @@ voice's state actually resolvable" and "is the runtime even loaded" undiscovered
 until the user's own Generate click, which is exactly when a cold-load + first-time
 voice-state-build could compound and fail.
 
-**Fix**: a new `POST /voices/<voice_id>/warm` endpoint (`src/qwen3_tts/app.py`) runs
+**Fix**: a new `POST /voices/<voice_id>/warm` endpoint (`src/persona_forge/app.py`) runs
 on the same serialized `model.executor` used by generation: it calls
 `model._ensure_base_loaded()` (bounces the runtime back from an idle-unloaded state
 if needed) and then `pocket_tts_runtime.get_pocket_tts_voice_state(...)` for that

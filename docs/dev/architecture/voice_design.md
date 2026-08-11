@@ -7,12 +7,12 @@
 
 ## 0. Orientation
 
-This is `qwen3-tts-openvino`: a CPU-only Docker image that serves the Qwen3-TTS voice-cloning
+This is `persona-forge`: a CPU-only Docker image that serves the Qwen3-TTS voice-cloning
 model over HTTP (Flask + Gunicorn, single worker, single model in memory, port 8318), using
 OpenVINO for the two transformer cores (talker "main" model + "predictor") and an FP32 OpenVINO
 vocoder. PyTorch is kept only for glue code (prompt construction, sampling loop, tokenizer).
 
-Key source files (`src/qwen3_tts/`):
+Key source files (`src/persona_forge/`):
 - `app.py` — Flask routes: `/health`, `/generate`, `/v1/audio/speech`, `/generate/stream`,
   `/stream_internal`, `/batch_internal`, `/voice_design`, `/voices`, frontend serving.
 - `model.py` — model load/lifecycle, `ModelProfile`, `_run_generate`, `_run_generate_with_streaming`,
@@ -30,7 +30,7 @@ Key source files (`src/qwen3_tts/`):
 - `model_config.py` — `MODEL_PRESETS` (MODEL_SIZE → HF repo), HF token/auth helpers,
   `resolve_voice_design_model_repo()`.
 
-Deployment surface: `compose.yml` (`qwen3-tts` service + `export` + `export-voice-design` services,
+Deployment surface: `compose.yml` (`persona-forge` service + `export` + `export-voice-design` services,
 same image, different command), `.env.example`, `README.md`, `docs/HOW_TO_RUN.md`.
 
 The current production deployment (dockermisc1) runs `MODEL_SIZE=1.7B`.
@@ -101,7 +101,7 @@ We adopted the alexandria_ideas.md lazy-model-swap design:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ qwen3-tts container (single process, single executor thread) │
+│ persona-forge container (single process, single executor thread) │
 │                                                              │
 │  Base 1.7B (always resident, serves /v1/audio/speech,       │
 │             /generate, /generate/stream)                     │
@@ -167,7 +167,7 @@ We added support for exporting the VoiceDesign checkpoint:
 
 ### 4.2 Runtime: model-swap manager
 
-We added `src/qwen3_tts/voice_design.py`, responsible for:
+We added `src/persona_forge/voice_design.py`, responsible for:
 
 - **`run_voice_design_request()`** — called via `model.executor.submit(...)`. Swaps to VoiceDesign
   checkpoint, runs `generate_voice_design()`, saves the WAV, swaps back to Base. All work runs

@@ -4,7 +4,7 @@ Objective, measurable invariants delivered audio must satisfy after a style
 preset is applied. The executable half is
 `tests/tier1_unit/test_output_polish_matrix.py`; keep the two in sync.
 
-`src/qwen3_tts/audio_style.py` owns one preset table. `STYLE_PRESETS` display
+`src/persona_forge/audio_style.py` owns one preset table. `STYLE_PRESETS` display
 metadata and `apply_style_preset` execution are derived from that table, so
 advertised LUFS/peak values must match delivered behavior.
 

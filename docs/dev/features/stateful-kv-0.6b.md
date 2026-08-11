@@ -75,7 +75,7 @@ catch: **0.6B is already small, so the absolute savings are smaller in GiB** tha
 ## Step-by-step
 
 0.6B INT8 IR on the box:
-`/var/data/autopirate/qwen3-tts/openvino/qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1/`
+`/var/data/autopirate/persona-forge/openvino/qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1/`
 (INT4 graphs are named `*_int8.xml` by convention — for 0.6B these are genuinely INT8).
 
 0. **COMPLETE — measure the 0.6B baseline footprint first.** The explicit fp32-load peak was
@@ -146,7 +146,7 @@ catch: **0.6B is already small, so the absolute savings are smaller in GiB** tha
 ## Guardrails (carried from M9)
 
 - **Box hygiene:** never blanket `docker kill`/`prune` (it took down `litellm*`/`headroom-proxy`); touch
-  only `qwen3-tts`. Never two `--memory 13g` jobs at once. See `dockermisc1-ops` memory.
+  only `persona-forge`. Never two `--memory 13g` jobs at once. See `dockermisc1-ops` memory.
 - INT8/INT4 graphs are both named `*_int8.xml`; the suffix on the dir is the only precision marker.
 - Measure one backend per process. RTF is overhead-dominated → compare absolute median seconds.
 - Preserve the 4D-mask workaround under any rewrite.

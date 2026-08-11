@@ -39,7 +39,7 @@ the same command before they are recommended.
 
 ### Validated generation result (2026-07-13)
 
-- Runtime: `dockermisc1`, Pocket TTS, `qwen3-tts-openvino:local`, development bind mounts,
+- Runtime: `dockermisc1`, Pocket TTS, `persona-forge:local`, development bind mounts,
   source candidate `88d0149`.
 - Input: `The rain stopped suddenly. Everyone stepped outside to listen. Then the city
   began to breathe again.` with seed `424242`, WAV output, and ordinary postprocessing off.
@@ -76,13 +76,13 @@ process RSS; it never contains audio or transcript text.
 On `dockermisc1`, update only the qwen project and recreate only its development service:
 
 ```bash
-cd ~/projects/qwen3-tts-openvino
+cd ~/projects/persona-forge
 git pull
 cd frontend
 npm run build
 cd ~/docker
-docker compose -f docker-compose.yml -f docker-compose.qwen3-tts-dev.yml \
-  up -d --force-recreate qwen3-tts
+docker compose -f docker-compose.yml -f docker-compose.persona-forge-dev.yml \
+  up -d --force-recreate persona-forge
 ```
 
 Verify `/health`, run a Precise alignment against a representative saved reference, poll the
@@ -96,7 +96,7 @@ recreate. No model, IR, or audio artifact is changed by Phase 5.
 ## Validated target result (2026-07-13)
 
 - Host: `dockermisc1`, Intel Core i7-1360P, 8 CPU threads allocated to the environment.
-- Runtime: development Compose bind mounts, `qwen3-tts-openvino:local`, Pocket TTS loaded;
+- Runtime: development Compose bind mounts, `persona-forge:local`, Pocket TTS loaded;
   forced aligner on `CPUExecutionProvider`.
 - Aligner: `mms-onnx-v1`, model revision
   `2100fb247d8e43962eef24491597fbeb8b469531`.

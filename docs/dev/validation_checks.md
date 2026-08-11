@@ -62,7 +62,7 @@ production code changes a model, runtime, or app surface, update the fake layer
 in the same change:
 
 - `tests/fixtures/fake_runtime.py` backs unit and backend tests that replace
-  `qwen3_tts.model`.
+  `persona_forge.model`.
 - `tests/ui/fixtures/fake_model_server.py` runs the real Flask app for API and
   UI flows.
 - Targeted tier-1 fake modules, such as

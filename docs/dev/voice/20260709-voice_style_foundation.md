@@ -18,10 +18,10 @@ on what already exists rather than create parallel modules. Key existing pieces:
 
 | Concern | Existing code | Reuse / extend, do not replace |
 | --- | --- | --- |
-| Audio DSP primitives | `src/qwen3_tts/audio_post.py` | Already ships `compress`, `normalize_rms` (RMS/dBFS), `limit_peak`, `trim`, `apply_fades`, `concat_with_padding`, `crossfade_concat`, `analyze_take`, `stitch_segments`. Already imported by `omnivoice_engine.py`. The new `audio_style.py` must call into this, not re-implement DSP. |
-| Voice storage | `src/qwen3_tts/voice_library.py` | Flat `voice_id` model with per-voice `meta.json`. Extend `meta.json` additively (family/variant/metrics); keep flat behavior working. |
-| OmniVoice knobs | `src/qwen3_tts/omnivoice_engine.py` | `speed`, `durations` (per-segment), `guidance_scale`, `num_step`, `postprocess_output`, `seed` are real and clamped (`MIN_SPEED`/`MAX_SPEED`). |
-| Pocket TTS | `src/qwen3_tts/pocket_tts_runtime.py` | `model.get_state_for_audio_prompt(x)` accepts a named preset (`"alba"`), a local wav path, or an `hf://kyutai/tts-voices/...` path (verified `pocket-tts==2.1.0`); caches voice states. Built-in voices need no custom downloader — see Workflow D. |
+| Audio DSP primitives | `src/persona_forge/audio_post.py` | Already ships `compress`, `normalize_rms` (RMS/dBFS), `limit_peak`, `trim`, `apply_fades`, `concat_with_padding`, `crossfade_concat`, `analyze_take`, `stitch_segments`. Already imported by `omnivoice_engine.py`. The new `audio_style.py` must call into this, not re-implement DSP. |
+| Voice storage | `src/persona_forge/voice_library.py` | Flat `voice_id` model with per-voice `meta.json`. Extend `meta.json` additively (family/variant/metrics); keep flat behavior working. |
+| OmniVoice knobs | `src/persona_forge/omnivoice_engine.py` | `speed`, `durations` (per-segment), `guidance_scale`, `num_step`, `postprocess_output`, `seed` are real and clamped (`MIN_SPEED`/`MAX_SPEED`). |
+| Pocket TTS | `src/persona_forge/pocket_tts_runtime.py` | `model.get_state_for_audio_prompt(x)` accepts a named preset (`"alba"`), a local wav path, or an `hf://kyutai/tts-voices/...` path (verified `pocket-tts==2.1.0`); caches voice states. Built-in voices need no custom downloader — see Workflow D. |
 | Speak page | `frontend/src/pages/SpeakPage.tsx` | Contains `estimateInitialEta` (~line 43) — the fake pre-generation ETA that Phase 1 removes. |
 
 ### Resolved DSP-dependency & loudness decisions (2026-07-09)
@@ -362,7 +362,7 @@ Required metrics:
 Recommended implementation:
 
 - Use Python audio tooling already compatible with the container.
-- Keep this in `voice_library.py` or a helper module under `src/qwen3_tts`.
+- Keep this in `voice_library.py` or a helper module under `src/persona_forge`.
 - Store metrics in each voice `meta.json`.
 - Never discard the original uploaded reference.
 
@@ -568,10 +568,10 @@ Catalog guidance:
 
 Add a small module:
 
-- `src/qwen3_tts/audio_style.py`
+- `src/persona_forge/audio_style.py`
 
 This module is a thin **orchestration layer over the existing
-`src/qwen3_tts/audio_post.py`** — it defines named presets and reference-metric
+`src/persona_forge/audio_post.py`** — it defines named presets and reference-metric
 extraction, but delegates all low-level DSP (compression, normalization, peak
 limiting, fades, trimming) to `audio_post.py`. Do not duplicate those
 primitives. Any metric or effect that `audio_post.py` cannot express with its

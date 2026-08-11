@@ -47,7 +47,7 @@ uv run python scripts/patch_local_compat.py   # one-time per fresh venv, only ne
 **`scripts/patch_local_compat.py` is required after every fresh `uv sync --extra qwen-tts`.**
 `qwen-tts==0.1.1` was written against an older `transformers` API; the Docker image patches the
 installed site-packages after `pip install` to bridge that gap (`Dockerfile` lines ~45–78). A plain
-`uv sync --extra qwen-tts` doesn't apply those patches, so `from qwen3_tts.app import app` fails
+`uv sync --extra qwen-tts` doesn't apply those patches, so `from persona_forge.app import app` fails
 without running this script once against the new `.venv`. It's idempotent — safe to re-run.
 
 Set `HF_TOKEN` in your shell (not `.env` — that's for the container) if your selected checkpoint is
@@ -76,7 +76,7 @@ export itself — running it is still a deliberate, separate step. `/health` rep
 ```bash
 uv run python -c "import gunicorn, torch, transformers; print(torch.__version__)"
 uv run python -c "import torch; print('mps', torch.backends.mps.is_available())"   # macOS only
-PYTHONPATH=src:src/export uv run python -c "from qwen3_tts.app import app; print('app import OK')"
+PYTHONPATH=src:src/export uv run python -c "from persona_forge.app import app; print('app import OK')"
 ```
 
 ## Native install & accelerators

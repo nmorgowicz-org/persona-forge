@@ -146,7 +146,7 @@ Normal users only need to choose a model size and optionally add or generate a v
 
 - `LOW_RAM_MODE=1` — enables aggressive glibc memory tuning + idle unload. Recommended on
   hosts with < 20 GiB free RAM.
-- `PERSONA_FORGE_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<sha>` — pin your production image.
+- `PERSONA_FORGE_IMAGE=ghcr.io/nmorgowicz-org/persona-forge:<sha>` — pin your production image.
 - `TTS_MEMORY_LIMIT`, `TTS_MEMORY_SWAP_LIMIT` — adjust for your host (defaults 10G/11G).
 - For all other knobs (threading, quantization, silence trim, codec behavior, etc.), see
   Advanced settings reference below and the .env.example comments.
@@ -172,7 +172,7 @@ No jemalloc / tcmalloc: allocator replacement caused SIGABRT/SIGSEGV under trans
 - Controls max audio duration per request. Baked into IR at export time.
 - Is a latency/safety cap, not a memory lever. Changing it from 64s to 15s saves ~200 MiB,
   not gigabytes.
-- Must match between `export` and `qwen3-tts`; changing it requires re-exporting.
+- Must match between `export` and `persona-forge`; changing it requires re-exporting.
 
 ### Runtime control (no restart needed)
 
@@ -234,7 +234,7 @@ Use these only if you have a reason. All other internals are preset-derived and 
 - Is a latency/safety cap, not a memory lever. Changing it from 64s to 15s saves
   ~200 MiB, not gigabytes. Use it to bound worst-case latency and fail fast on
   runaway or misbehaving requests.
-- Must match between `export` and `qwen3-tts`. Changing it requires re-exporting.
+- Must match between `export` and `persona-forge`. Changing it requires re-exporting.
 - Leave at `64` unless you have a specific reason to change it.
 
 **`SILENCE_TRIM` / `SILENCE_TRIM_THRESH` / `SILENCE_TRIM_PAD_MS`**
@@ -257,7 +257,7 @@ Use these only if you have a reason. All other internals are preset-derived and 
 
 **`VOICE_DESIGN_MAX_SPEECH_SECONDS`** (default `20`)
 - Capacity baked into the VoiceDesign IR at export time. Must match between
-  `export-voice-design` and `qwen3-tts`. Change only if you need longer VoiceDesign samples.
+  `export-voice-design` and `persona-forge`. Change only if you need longer VoiceDesign samples.
 
 ## HTTP API reference
 

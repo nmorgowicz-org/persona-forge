@@ -228,14 +228,14 @@ Validated on `dockermisc1` on 2026-06-28 (M3 characterization current):
 - Warm container usage during inspection: approximately 4.7 GiB.
 - Current stack: Python 3.13.13, `qwen-tts==0.1.1`, PyTorch 2.12.1,
   Torchaudio 2.11.0, Transformers 4.57.3, and ONNX Runtime 1.27.0.
-- Service source: `/home/nick/docker/qwen3-tts`.
+- Service source: `/home/nick/docker/persona-forge`.
 - Compose file: `/home/nick/docker/docker-compose.yml`.
-- Model cache: `/var/data/autopirate/qwen3-tts/model`.
+- Model cache: `/var/data/autopirate/persona-forge/model`.
 - OV IR artifacts:
-  `/var/data/autopirate/qwen3-tts/openvino/qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1/`
+  `/var/data/autopirate/persona-forge/openvino/qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1/`
   (main and predictor cores, FP32 plus rejected all-weight INT8_ASYM). Vocoder IR:
   `qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1_vocoder/` (M1.5 validated).
-- Exporter image: `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-v0.5.4` at
+- Exporter image: `ghcr.io/nmorgowicz-org/persona-forge:exporter-v0.5.4` at
   `sha256:cc6492e5c92aed16380da8f378fd4f6a6195efb528825f08f1a545500874b6ba`.
 
 The host runs many other containers. Record host load, CPU throttling, available RAM, and
@@ -291,7 +291,7 @@ and `tts_pad_embed`. Implement an OpenVINO-backed replacement for the talker gen
 retaining the original talker object, its embeddings, projections, configuration, and
 codebook heads.
 
-Source reference: [Qwen3-TTS model implementation](https://github.com/QwenLM/Qwen3-TTS/blob/main/qwen_tts/core/models/modeling_qwen3_tts.py).
+Source reference: [Qwen3-TTS model implementation](https://github.com/QwenLM/Qwen3-TTS/blob/main/qwen_tts/core/models/modeling_persona_forge.py).
 
 ## Design Constraints
 
@@ -329,7 +329,7 @@ benchmarking must all use the same resolved repository and revision. Every gener
 directory is checkpoint-specific, for example:
 
 ```text
-/var/data/autopirate/qwen3-tts/openvino/
+/var/data/autopirate/persona-forge/openvino/
   qwen-tts-0.1.1_0.6b_<revision>_ov-2026.2.1/
   qwen-tts-0.1.1_1.7b_<revision>_ov-2026.2.1/
 ```
@@ -361,7 +361,7 @@ The export path uses OpenVINO and NNCF directly. Optimum Intel is intentionally 
 dependency. The reasoning, which a future implementation must not silently reverse:
 
 - The talker is a custom architecture. Optimum Intel exports models through architecture
-  configs registered in its `TasksManager`; there is no registered `qwen3_tts_talker`
+  configs registered in its `TasksManager`; there is no registered `persona_forge_talker`
   exporter, so `optimum-cli export openvino` and `OVModelFor*.from_pretrained(export=True)`
   fail for this model with a "custom or unsupported architecture" error.
 - Both APIs the plan actually needs are standalone and require neither Optimum nor a
@@ -412,7 +412,7 @@ defaults to serving; Compose's `export` profile overrides the command with `scri
 Publish immutable SHA tags to private GHCR, for example:
 
 ```text
-ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>
+ghcr.io/nmorgowicz-org/persona-forge:<git-sha>
 ```
 
 Workflow placement:
@@ -666,7 +666,7 @@ published, run it on `dockermisc1` against the persistent model cache and write 
 a persistent, versioned output directory such as:
 
 ```text
-/var/data/autopirate/qwen3-tts/openvino/
+/var/data/autopirate/persona-forge/openvino/
   qwen-tts-0.1.1_<size>_<revision>_ov-2026.2.1/
     main_prefill.xml
     main_decode.xml
@@ -752,7 +752,7 @@ The exporter must:
 
 Do not run the exporter while the production PyTorch worker remains loaded. The current
 worker holds approximately 4.7 GiB, while the host already uses swap. Stop only the
-`qwen3-tts` service for the export maintenance window, run the exporter with the model and
+`persona-forge` service for the export maintenance window, run the exporter with the model and
 OpenVINO directories mounted read-write, then restart the previous service if export or
 validation fails.
 
@@ -874,7 +874,7 @@ Corrected synthetic rerun (`transformer_parity_corrected_int8_sym.json`):
 Authoritative INT8_ASYM characterization (release v0.5.4):
 
 - Source commit: `00ce55c1d0e44fb7ecc367436b2b4f4de2843d26`.
-- Exporter: `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:exporter-v0.5.4` at
+- Exporter: `ghcr.io/nmorgowicz-org/persona-forge:exporter-v0.5.4` at
   `sha256:cc6492e5c92aed16380da8f378fd4f6a6195efb528825f08f1a545500874b6ba`.
 - Model revision: `5d83992436eae1d760afd27aff78a71d676296fc`.
 - Artifact directory: `qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1/`.
@@ -1480,7 +1480,7 @@ environment:
   - OV_INFERENCE_THREADS=6
   - OMP_WAIT_POLICY=PASSIVE
 volumes:
-  - /var/data/autopirate/qwen3-tts/openvino:/ov_model:ro
+  - /var/data/autopirate/persona-forge/openvino:/ov_model:ro
 ```
 
 For bounded short 0.6B-INT8 requests, 7G/8G remains an option. The measured long 0.6B request peaked
@@ -1499,7 +1499,7 @@ available on `dockermisc1`. Before pulling a private image, authenticate with a 
 ```bash
 gh auth refresh -h github.com -s read:packages
 gh auth token | docker login ghcr.io -u nmorgowicz --password-stdin
-docker pull ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>
+docker pull ghcr.io/nmorgowicz-org/persona-forge:<git-sha>
 docker logout ghcr.io
 ```
 
@@ -1518,10 +1518,10 @@ leaving registry credentials on disk.
    then remove temporary registry credentials.
 4. Set `MODEL_SIZE` to `0.6B` or `1.7B`, with optional `HF_TOKEN_FILE`, and pre-download the
    selected checkpoint into the persistent cache.
-5. Stop the existing `qwen3-tts` container to release its model memory.
+5. Stop the existing `persona-forge` container to release its model memory.
 6. Run `<git-sha>` with the export command, the same model selection, and these mounts:
-   - `/var/data/autopirate/qwen3-tts/model:/root/.cache/huggingface/hub:rw`
-   - `/var/data/autopirate/qwen3-tts/openvino:/ov_output:rw`
+   - `/var/data/autopirate/persona-forge/model:/root/.cache/huggingface/hub:rw`
+   - `/var/data/autopirate/persona-forge/openvino:/ov_output:rw`
    If the root-owned output directory does not exist, create it with `sudo install -d` and
    assign it to the deployment user before starting the exporter.
 7. Run parity and IR metadata validation in a container from the same image.
@@ -1587,13 +1587,13 @@ Run read-only verification before modifying the service:
 
 ```bash
 ssh nick@dockermisc1
-cd /home/nick/docker/qwen3-tts
+cd /home/nick/docker/persona-forge
 
-docker exec qwen3-tts python3 - <<'PY'
+docker exec persona-forge python3 - <<'PY'
 import inspect
 import os
-from qwen_tts.core.models.configuration_qwen3_tts import Qwen3TTSConfig
-from qwen_tts.core.models.modeling_qwen3_tts import (
+from qwen_tts.core.models.configuration_persona_forge import Qwen3TTSConfig
+from qwen_tts.core.models.modeling_persona_forge import (
     Qwen3TTSTalkerCodePredictorModel,
     Qwen3TTSTalkerForConditionalGeneration,
     Qwen3TTSTalkerModel,

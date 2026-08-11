@@ -18,16 +18,16 @@ What it is NOT:
 
 Core files:
 
-- src/qwen3_tts/pocket_tts_runtime.py:
+- src/persona_forge/pocket_tts_runtime.py:
   - Loads Pocket TTS models.
   - Builds voice_state from reference audio.
   - Wraps generate_audio with post-EOS trimming.
   - Handles unload / hotswap.
-- src/qwen3_tts/model.py:
+- src/persona_forge/model.py:
   - Integrates Pocket TTS as a backend choice.
   - Wires /generate and /v1/audio/speech into Pocket TTS when TTS_BACKEND=pocket_tts.
   - Manages reload behavior for Pocket TTS-specific knobs.
-- src/qwen3_tts/app.py:
+- src/persona_forge/app.py:
   - Exposes endpoints; does not change shape for Pocket TTS.
   - Same /generate, /v1/audio/speech, /health; behavior is controlled by backend + env.
 

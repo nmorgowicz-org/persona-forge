@@ -26,7 +26,7 @@ quality, latency, and integration cost.
 
 | | Base-model cloning (current) | OmniVoice cloning (candidate) |
 |---|---|---|
-| Entry point | `create_voice_clone_prompt` → `generate_voice_clone`, wired in `src/qwen3_tts/model.py:712-745`. | `OmniVoice.generate(text, ref_audio, ref_text)` — same callable Persona Forge uses, never invoked with `ref_audio`/`ref_text` here. |
+| Entry point | `create_voice_clone_prompt` → `generate_voice_clone`, wired in `src/persona_forge/model.py:712-745`. | `OmniVoice.generate(text, ref_audio, ref_text)` — same callable Persona Forge uses, never invoked with `ref_audio`/`ref_text` here. |
 | Runtime | OpenVINO IR (talker + predictor cores) + FP32 OpenVINO vocoder; PyTorch only for glue. Exported, quantized, tuned for this repo's CPU target. | Plain PyTorch (`omnivoice==0.1.5`), CPU-only. No OpenVINO export path exists or is documented. Architecture (diffusion-style decode head) is incompatible with this repo's exporter without from-scratch work. |
 | Integration | Production default for the life of the repo. | Voice-design mode (`instruct=`) is implemented and shipped. Cloning mode (`ref_audio`/`ref_text`) is never called; zero hands-on results. |
 

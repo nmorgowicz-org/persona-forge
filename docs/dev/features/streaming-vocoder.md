@@ -154,7 +154,7 @@ Before writing any pipeline code, answer: *is there CPU headroom during talker g
 - **Streaming error semantics:** a mid-stream generation failure closes the connection after any bytes
   already sent. Clients must explicitly discard or retain truncated raw PCM; batch remains atomic.
 - **Box hygiene (carried):** never blanket `docker kill`/`prune` (took down `litellm*`/`headroom-proxy`);
-  touch only `qwen3-tts`. Never two `--memory 13g` jobs at once. One backend per process for benchmarks.
+  touch only `persona-forge`. Never two `--memory 13g` jobs at once. One backend per process for benchmarks.
 - **Don't re-litigate INT8 vocoder** — rejected at 16.3 dB (M1.5). This track keeps the FP32 IR.
 
 ## Decision gate

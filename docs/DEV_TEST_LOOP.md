@@ -22,13 +22,13 @@ Key capabilities:
 ## 2. dockermisc1: how the app runs
 
 - Machine: dockermisc1 (access via SSH as usual).
-- Container: qwen3-tts
-- Image: qwen3-tts-openvino:voice-design-accent-and-queueing
+- Container: persona-forge
+- Image: persona-forge:voice-design-accent-and-queueing
 - Port: 8318 → 8318 (HTTP)
 
 Runtime mode:
 - Command:
-  - scripts/entrypoint.sh gunicorn qwen3_tts.app:app \
+  - scripts/entrypoint.sh gunicorn persona_forge.app:app \
     -w 1 -k gthread --threads 4 --timeout 300 \
     --bind 0.0.0.0:8318 --log-level info
 - Env (important subset):
@@ -39,22 +39,22 @@ Runtime mode:
   - (REF_TEXT set to a fixed reference; confirm if it must change for your use.)
 
 Key mounts:
-- Host: /var/data/autopirate/qwen3-tts-new/voices
+- Host: /var/data/autopirate/persona-forge-new/voices
   - Container: /voices
-- Host: /var/data/autopirate/qwen3-tts-new/segments
+- Host: /var/data/autopirate/persona-forge-new/segments
   - Container: /segments
-- Host: /var/data/autopirate/qwen3-tts-new/reference/voice_A.wav
+- Host: /var/data/autopirate/persona-forge-new/reference/voice_A.wav
   - Container: /voice/reference.wav
-- Host: /var/data/autopirate/qwen3-tts-new/model
+- Host: /var/data/autopirate/persona-forge-new/model
   - Container: /root/.cache/huggingface/hub
-- Host: /var/data/autopirate/qwen3-tts-new/ov
+- Host: /var/data/autopirate/persona-forge-new/ov
   - Container: /ov
-- Host: /home/nick/projects/qwen3-tts-openvino/src
+- Host: /home/nick/projects/persona-forge/src
   - Container: /app/src
 
 Important:
 - The running container uses /app/src from:
-  - /home/nick/projects/qwen3-tts-openvino/src on dockermisc1.
+  - /home/nick/projects/persona-forge/src on dockermisc1.
 - That directory is git-tracked to the same repo as this project.
 
 ## 3. Dev-test loop (current default)
@@ -64,19 +64,19 @@ Use this when developing locally (or in Claude) and testing on dockermisc1.
 From the local repo (e.g. this CWD):
 
 1) Make changes:
-   - Edit backend/frontend in src/qwen3_tts and frontend/src as needed.
+   - Edit backend/frontend in src/persona_forge and frontend/src as needed.
 2) Commit and push:
    - git add -A
    - git commit -m "descriptive message"
    - git push origin voice-design-accent-and-queueing
 3) On dockermisc1:
-   - cd /home/nick/projects/qwen3-tts-openvino
+   - cd /home/nick/projects/persona-forge
    - git pull origin voice-design-accent-and-queueing
 4) Reload backend:
    - The container’s code mount already reflects the new src, but gunicorn has no auto-reload.
    - Choose one:
-     - Fast reload: docker exec qwen3-tts kill -HUP 1
-     - Or full restart (safer for bigger changes): docker restart qwen3-tts
+     - Fast reload: docker exec persona-forge kill -HUP 1
+     - Or full restart (safer for bigger changes): docker restart persona-forge
 5) Test:
    - Hit http://<dockermisc1-host>:8318 to verify behavior.
 
@@ -91,31 +91,31 @@ When iterating quickly (e.g., tuning OmniVoice behavior), swap gunicorn for uvic
 Example (run on dockermisc1, or script it):
 
 - Stop existing container:
-  - docker stop qwen3-tts && docker rm qwen3-tts
+  - docker stop persona-forge && docker rm persona-forge
 
 - Run in dev-reload mode (same mounts/env, uvicorn instead of gunicorn):
   - docker run -d \
-      --name qwen3-tts \
+      --name persona-forge \
       --memory=13g \
       -p 8318:8318 \
-      -v /var/data/autopirate/qwen3-tts-new/voices:/voices \
-      -v /var/data/autopirate/qwen3-tts-new/segments:/segments \
-      -v /home/nick/projects/qwen3-tts-openvino/src:/app/src \
-      -v /var/data/autopirate/qwen3-tts-new/reference/voice_A.wav:/voice/reference.wav \
-      -v /var/data/autopirate/qwen3-tts-new/model:/root/.cache/huggingface/hub \
-      -v /var/data/autopirate/qwen3-tts-new/ov:/ov \
+      -v /var/data/autopirate/persona-forge-new/voices:/voices \
+      -v /var/data/autopirate/persona-forge-new/segments:/segments \
+      -v /home/nick/projects/persona-forge/src:/app/src \
+      -v /var/data/autopirate/persona-forge-new/reference/voice_A.wav:/voice/reference.wav \
+      -v /var/data/autopirate/persona-forge-new/model:/root/.cache/huggingface/hub \
+      -v /var/data/autopirate/persona-forge-new/ov:/ov \
       -e TTS_BACKEND=openvino \
       -e MODEL_SIZE=1.7B \
       -e LOW_RAM_MODE=1 \
       -e FRONTEND_ENABLED=1 \
       -e "REF_TEXT=Welcome to Rosies. What can I get for you today? You know, Im a good girl. You want me, dont you? I am on the menu too." \
-      qwen3-tts-openvino:voice-design-accent-and-queueing \
-      python -m uvicorn qwen3_tts.app:app \
+      persona-forge:voice-design-accent-and-queueing \
+      python -m uvicorn persona_forge.app:app \
         --host 0.0.0.0 --port 8318 --reload \
         --timeout-graceful-shutdown 300
 
 Effect:
-- Any change in /home/nick/projects/qwen3-tts-openvino/src triggers auto-reload inside ~1-2 seconds.
+- Any change in /home/nick/projects/persona-forge/src triggers auto-reload inside ~1-2 seconds.
 - Combine with git pull on dockermisc1 after pushing from local.
 
 When done iterating, revert to normal gunicorn-based container command.
@@ -126,11 +126,11 @@ If you’re a new Claude session:
 
 - Assume:
   - We are developing on voice-design-accent-and-queueing.
-  - Running instance is dockermisc1:qwen3-tts (8318), using /app/src mounted from git-tracked repo.
+  - Running instance is dockermisc1:persona-forge (8318), using /app/src mounted from git-tracked repo.
 - Default workflow:
   - Implement in this repo.
   - Commit + push.
   - Instruct user to (or assist with):
-    - cd /home/nick/projects/qwen3-tts-openvino && git pull
-    - docker exec qwen3-tts kill -HUP 1 (or docker restart qwen3-tts).
+    - cd /home/nick/projects/persona-forge && git pull
+    - docker exec persona-forge kill -HUP 1 (or docker restart persona-forge).
 - Only propose heavier changes (image rebuilds, env changes) when necessary and confirm first.
