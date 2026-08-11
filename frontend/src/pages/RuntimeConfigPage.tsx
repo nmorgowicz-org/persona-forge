@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import { Settings2, Cpu } from 'lucide-react'
 import { getRuntimeConfig, updateRuntimeConfig, type RuntimeConfigState } from '@/lib/api'
 import { AcceleratorCoachCard } from '@/components/AcceleratorCoachCard'

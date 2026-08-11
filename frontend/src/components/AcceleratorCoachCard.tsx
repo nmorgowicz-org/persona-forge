@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import { RefreshCw, Zap } from 'lucide-react'
 import cudaCopy from '@/content/help/accelerator-cuda.md?raw'
 import rocmCopy from '@/content/help/accelerator-rocm.md?raw'

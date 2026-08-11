@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import { Play } from 'lucide-react'
 import { ACCENT_BANK, type AccentBankEntry } from '@/lib/accentBank'
 import { cn } from '@/lib/utils'

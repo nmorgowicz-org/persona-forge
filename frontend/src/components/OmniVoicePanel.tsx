@@ -4,7 +4,7 @@ import {
   useCallback,
   useState,
 } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'motion/react'
 import { Scissors } from 'lucide-react'
 import {
   auditionOmniVoiceStreaming,

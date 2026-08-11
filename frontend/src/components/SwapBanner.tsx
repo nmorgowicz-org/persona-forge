@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'motion/react'
 import { Loader2 } from 'lucide-react'
 import { useSwapStatus } from '@/hooks/useSwapStatus'
 import { useAppStore } from '@/store'

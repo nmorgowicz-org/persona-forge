@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import { cn } from '@/lib/utils'
 
 // A highlighted region of the waveform, expressed as 0..1 fractions of the clip.

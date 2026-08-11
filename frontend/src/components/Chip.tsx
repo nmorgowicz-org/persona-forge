@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion'
+import { motion } from 'motion/react'
 import { Toggle } from '@/components/ui/toggle'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
