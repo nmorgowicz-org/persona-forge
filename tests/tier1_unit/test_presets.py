@@ -20,9 +20,9 @@ class TestPresetsEnv:
         apply_preset_env(environ)
         assert environ["OV_MAIN_COMPRESSION"] == "int8"
         assert environ["OV_PREDICTOR_COMPRESSION"] == "int8"
-        assert environ["OPENVINO_MAIN_STATEFUL_MODEL"] == "/ov/0.6B/main_stateful_cap768.xml"
+        assert environ["OPENVINO_MAIN_STATEFUL_MODEL"] == "/ov/0.6B/main_stateful_cap3600.xml"
         assert environ["OPENVINO_PREDICTOR_STATEFUL_MODEL"] == "/ov/0.6B/predictor_stateful_cap32.xml"
-        assert environ["TTS_MAX_SPEECH_SECONDS"] == "64.0"
+        assert environ["TTS_MAX_SPEECH_SECONDS"] == "300.0"
 
     def test_17b_int4_main_explicit_predictor(self):
         environ = {"MODEL_SIZE": "1.7B"}
@@ -57,8 +57,8 @@ class TestCapacityMath:
 class TestGetPreset:
     def test_default_17b(self):
         preset = get_preset("1.7B")
-        assert preset["stateful_capacity"] == 768
-        assert preset["main_stateful_model"] == "/ov/1.7B/main_stateful_cap768.xml"
+        assert preset["stateful_capacity"] == 3600
+        assert preset["main_stateful_model"] == "/ov/1.7B/main_stateful_cap3600.xml"
 
     def test_override_capacity_no_collision(self):
         default_preset = get_preset("1.7B")

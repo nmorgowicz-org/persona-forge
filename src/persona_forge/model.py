@@ -994,7 +994,17 @@ def runtime_config_state() -> dict[str, Any]:
             "TTS_MAX_SPEECH_SECONDS": os.getenv("TTS_MAX_SPEECH_SECONDS"),
             "MODEL_SIZE": os.getenv("MODEL_SIZE"),
             "compression": ov_metadata.get("compression") if ov_metadata else None,
-            "reason": "Baked into the OpenVINO IR at export time; requires re-export (see docs/HOW_TO_RUN.md).",
+            "reason": (
+                "Baked into the OpenVINO IR at export time; requires re-export (see "
+                "docs/HOW_TO_RUN.md)."
+                if TTS_BACKEND == "openvino"
+                else (
+                    "Read at process start (pytorch/qwen3-tts engine only); requires a "
+                    "container restart."
+                    if TTS_BACKEND == "pytorch"
+                    else "Unused by the active pocket_tts backend (qwen3-tts-engine-only setting)."
+                )
+            ),
         },
         # Entrypoint-only knobs the app can see but cannot change live — container
         # recreation is required (Phase A6/A6d-e).
@@ -1814,9 +1824,11 @@ def _run_generate(
         print(f"[diag] TTS_MAX_NEW_TOKENS override -> {_max_new}", flush=True)
 
     # Safety cap: ensure max_new_tokens is within sane bounds based on speech duration.
-    system_limit = int(os.getenv("TTS_SYSTEM_MAX_NEW_TOKENS", "800"))
-    max_speech_secs_str = os.getenv("TTS_MAX_SPEECH_SECONDS", "64")
-    max_speech_secs = float(max_speech_secs_str) if max_speech_secs_str else 64.0
+    # qwen3-tts-engine-only (pytorch/openvino) — pocket_tts never reaches this code (it
+    # returns earlier in this function) and is intentionally unbounded.
+    system_limit = int(os.getenv("QWEN3_ENGINE_MAX_NEW_TOKENS", "800"))
+    max_speech_secs_str = os.getenv("TTS_MAX_SPEECH_SECONDS", "300")
+    max_speech_secs = float(max_speech_secs_str) if max_speech_secs_str else 300.0
     from persona_forge.presets import capacity_for_seconds
     safe_capacity = capacity_for_seconds(max_speech_secs)
     hard_cap_frames = int(safe_capacity * 0.8)
@@ -1824,16 +1836,17 @@ def _run_generate(
     safety_max = max(expected_frames * 2, hard_cap_frames)
     chosen = min(system_limit, safety_max)
 
-    # Use a tighter cap for non-OpenVINO backends to avoid apparent hangs:
-    # PyTorch 1.7B on CPU is extremely slow; 300 tokens is enough for most utterances.
-    if TTS_BACKEND != "openvino":
-        ptts_cap = int(os.getenv("TTS_SYSTEM_MAX_NEW_TOKENS_PURE_TORCH", "300"))
-        chosen = min(chosen, ptts_cap)
+    # Both pytorch and openvino run the same qwen3-tts engine on CPU here (no iGPU
+    # deployment has been validated yet) and both are too slow to safely decode without a
+    # tight hang-avoidance cap — unlike the export-time TTS_MAX_SPEECH_SECONDS above, this
+    # is a runtime guard against apparent hangs on CPU, not a length preference.
+    engine_cpu_cap = int(os.getenv("QWEN3_ENGINE_CPU_MAX_NEW_TOKENS", "300"))
+    chosen = min(chosen, engine_cpu_cap)
 
     # Extra guard for pytorch + bfloat16 (known to hang or diverge on many CPUs):
     # keep generation short so a broken dtype fails fast instead of stalling the service.
     if TTS_BACKEND == "pytorch" and TORCH_DTYPE_NAME == "bfloat16":
-        bf16_cap = int(os.getenv("TTS_SYSTEM_MAX_NEW_TOKENS_PYTORCH_BF16", "160"))
+        bf16_cap = int(os.getenv("QWEN3_ENGINE_CPU_BF16_MAX_NEW_TOKENS", "160"))
         if chosen > bf16_cap:
             print(
                 f"[generate] pytorch+bfloat16: enforcing tighter max_new_tokens cap {bf16_cap} "
@@ -2144,16 +2157,21 @@ def _run_generate_with_streaming(
 
     started = time.monotonic()
 
-    # Safety cap for streaming: same logic as _run_generate.
-    system_limit_stream = int(os.getenv("TTS_SYSTEM_MAX_NEW_TOKENS", "800"))
-    max_speech_secs_str_stream = os.getenv("TTS_MAX_SPEECH_SECONDS", "64")
-    max_speech_secs_stream = float(max_speech_secs_str_stream) if max_speech_secs_str_stream else 64.0
+    # Safety cap for streaming: same logic as _run_generate (qwen3-tts-engine-only;
+    # pocket_tts streaming uses _run_generate_pocket_tts_stream and never reaches here).
+    system_limit_stream = int(os.getenv("QWEN3_ENGINE_MAX_NEW_TOKENS", "800"))
+    max_speech_secs_str_stream = os.getenv("TTS_MAX_SPEECH_SECONDS", "300")
+    max_speech_secs_stream = float(max_speech_secs_str_stream) if max_speech_secs_str_stream else 300.0
     from persona_forge.presets import capacity_for_seconds as capacity_for_seconds_stream
     safe_capacity_stream = capacity_for_seconds_stream(max_speech_secs_stream)
     hard_cap_frames_stream = int(safe_capacity_stream * 0.8)
     expected_frames_stream = max(40, int(len(text) / 9.3 * 12))
     safety_max_stream = max(expected_frames_stream * 2, hard_cap_frames_stream)
     chosen_stream = min(system_limit_stream, safety_max_stream)
+    # Same CPU hang-avoidance clamp as the batch path (pytorch and openvino both run the
+    # qwen3-tts engine on CPU here; no iGPU deployment has been validated yet).
+    engine_cpu_cap_stream = int(os.getenv("QWEN3_ENGINE_CPU_MAX_NEW_TOKENS", "300"))
+    chosen_stream = min(chosen_stream, engine_cpu_cap_stream)
     if "max_new_tokens" not in gen_kwargs:
         gen_kwargs["max_new_tokens"] = chosen_stream
     else:

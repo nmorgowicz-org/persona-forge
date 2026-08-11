@@ -53,4 +53,4 @@ class TestApplyPresetEnv:
     def test_preset_max_speech_seconds_when_not_set(self):
         environ = {"MODEL_SIZE": "0.6B"}
         apply_preset_env(environ)
-        assert environ["TTS_MAX_SPEECH_SECONDS"] == "64.0"
+        assert environ["TTS_MAX_SPEECH_SECONDS"] == "300.0"

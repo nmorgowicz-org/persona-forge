@@ -582,7 +582,13 @@ export function RuntimeConfigPage() {
           transition={{ delay: 0.1 }}
           className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm"
         >
-          <p className="text-sm font-semibold">Requires re-export</p>
+          <p className="text-sm font-semibold">
+            {state.live.TTS_BACKEND === 'openvino'
+              ? 'Requires re-export'
+              : state.live.TTS_BACKEND === 'pytorch'
+                ? 'Requires restart'
+                : 'Not used by this backend'}
+          </p>
           <p className="text-xs text-muted-foreground">{state.not_live.reason}</p>
           <div className="flex flex-wrap gap-1.5">
             <Badge variant="outline" className="font-mono text-[11px] opacity-60">
