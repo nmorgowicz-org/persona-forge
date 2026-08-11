@@ -1,19 +1,55 @@
-# How to run Qwen3-TTS OpenVINO
+# How to run Persona Forge
 
 This document is for anyone deploying or operating this container. Internal host-specific
 procedures are in [INTERNAL_OPERATIONS.md](docs/dev/INTERNAL_OPERATIONS.md).
 
-## Quick start
+## Quick start (pocket-tts, no export required)
 
-Requirements: Linux AMD64, Docker with Compose, Intel CPU, at least 10 GiB for the service, a
-reference WAV, and its exact transcript.
+Persona Forge's default backend is pocket-tts (self-contained, no export step). This section covers
+the zero-friction path. For optional Qwen3-TTS with OpenVINO acceleration, see the "Export
+(optional)" section below.
+
+Requirements: Linux AMD64, Docker with Compose, at least 10 GiB for the service.
 
 1. Copy and edit the environment:
 
    ```bash
    cp .env.example .env
    # Optional: set REF_AUDIO_PATH for a default voice. REF_TEXT is optional; Whisper drafts it by default.
-   # MODEL_SIZE=1.7B is recommended and is the default.
+   # MODEL_SIZE and TTS_BACKEND default to 1.7B and pocket_tts respectively.
+   ```
+
+2. Start the service:
+
+   ```bash
+   docker compose up -d persona-forge
+   docker compose logs -f persona-forge
+   ```
+
+   First boot loads the model; subsequent boots are fast.
+   Health will report `status: "starting"` until ready.
+
+3. Verify:
+
+   ```bash
+   curl -fsS http://localhost:8318/health
+
+   curl -sS http://localhost:8318/v1/audio/speech \
+     -H 'Content-Type: application/json' \
+     -d '{"input":"This is a test.","response_format":"mp3"}' \
+     -o test.mp3
+   ```
+
+## Export (optional: Qwen3-TTS engine)
+
+Only run this section if you want to use the Qwen3-TTS engine (available in PyTorch or OpenVINO).
+The default pocket-tts backend needs no export. If using Qwen3-TTS with OpenVINO acceleration,
+the export is memory-intensive; refer to the instructions below.
+
+1. Stop the serving container (export is memory-intensive):
+
+   ```bash
+   docker compose down persona-forge
    ```
 
 2. Export IR (one time per model size / config change; uses 13–14 GiB):
@@ -22,20 +58,14 @@ reference WAV, and its exact transcript.
    docker compose run --rm export
    ```
 
-   On a constrained host (10–15 GiB), stop the serving container first:
-   ```bash
-   docker compose down qwen3-tts
-   ```
-
-3. Start the service:
+3. Start the service with OpenVINO backend:
 
    ```bash
-   docker compose up -d qwen3-tts
-   docker compose logs -f qwen3-tts
+   TTS_BACKEND=openvino docker compose up -d persona-forge
+   docker compose logs -f persona-forge
    ```
 
-   First boot is slow: it loads the model and warms the OpenVINO kernel cache.
-   Health will report `status: "starting"` until it finishes.
+   First boot warms the OpenVINO kernel cache (60–120s).
 
 4. Verify:
 
