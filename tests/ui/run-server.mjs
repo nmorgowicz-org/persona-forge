@@ -20,7 +20,7 @@ export function startFakeServer({ port = 8319 } = {}) {
     ),
     VOICE_LIBRARY_DIR: voiceLibraryDir,
     FRONTEND_DIST_DIR: join(REPO_ROOT, 'frontend', 'dist'),
-    QWEN3_TTS_TEST_PORT: String(port),
+    PERSONA_FORGE_TEST_PORT: String(port),
   }
 
   const python = resolvePython()

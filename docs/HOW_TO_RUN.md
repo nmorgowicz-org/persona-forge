@@ -146,7 +146,7 @@ Normal users only need to choose a model size and optionally add or generate a v
 
 - `LOW_RAM_MODE=1` — enables aggressive glibc memory tuning + idle unload. Recommended on
   hosts with < 20 GiB free RAM.
-- `QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<sha>` — pin your production image.
+- `PERSONA_FORGE_IMAGE=ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<sha>` — pin your production image.
 - `TTS_MEMORY_LIMIT`, `TTS_MEMORY_SWAP_LIMIT` — adjust for your host (defaults 10G/11G).
 - For all other knobs (threading, quantization, silence trim, codec behavior, etc.), see
   Advanced settings reference below and the .env.example comments.

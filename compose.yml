@@ -30,8 +30,8 @@ x-model-volumes: &model-volumes
 services:
   qwen3-tts:
     # Local builds: docker compose up --build creates :local.
-    # Production: set QWEN3_TTS_IMAGE to a pinned GHCR SHA or version tag.
-    image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:local}
+    # Production: set PERSONA_FORGE_IMAGE to a pinned GHCR SHA or version tag.
+    image: ${PERSONA_FORGE_IMAGE:-qwen3-tts-openvino:local}
     build:
       context: .
       # Phase A6f: uncomment to layer Intel iGPU userspace (compute-runtime + Level-Zero) into
@@ -51,7 +51,7 @@ services:
     # group_add:
     #   - "44"   # render group GID — check `getent group render` on the host, it varies
     ports:
-      - "${QWEN3_TTS_PORT:-8318}:8318"
+      - "${PERSONA_FORGE_PORT:-8318}:8318"
     environment:
       <<: *model-environment
       # Core behavior. pocket_tts is the product default: it is self-contained
@@ -109,7 +109,7 @@ services:
 
   # Unified export service: exports both Base and VoiceDesign IR in one run.
   export:
-    image: ${QWEN3_TTS_IMAGE:-qwen3-tts-openvino:local}
+    image: ${PERSONA_FORGE_IMAGE:-qwen3-tts-openvino:local}
     build:
       context: .
     command: ["python", "scripts/export.py"]

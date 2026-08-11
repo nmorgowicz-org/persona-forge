@@ -4,7 +4,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
 const PORT = 8319
-const explicitUrl = process.env.QWEN3_TTS_UI_URL
+const explicitUrl = process.env.PERSONA_FORGE_UI_URL
 const baseURL = explicitUrl || `http://127.0.0.1:${PORT}`
 
 export default defineConfig({
@@ -23,7 +23,7 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   // Only spin up the fake-model server ourselves when no explicit target was given (§7 points
-  // QWEN3_TTS_UI_URL at a real, already-running instance instead, e.g. over an SSH tunnel to
+  // PERSONA_FORGE_UI_URL at a real, already-running instance instead, e.g. over an SSH tunnel to
   // dockermisc1 — Playwright must not try to also start a fake server in that case).
   webServer: explicitUrl
     ? undefined

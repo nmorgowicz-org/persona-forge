@@ -151,7 +151,7 @@ jobs:
         working-directory: tests/ui
         env:
           PYTHONPATH: src:src/export
-          QWEN3_TTS_UI_URL: http://127.0.0.1:8319
+          PERSONA_FORGE_UI_URL: http://127.0.0.1:8319
         run: npm run test:ci
 
       - name: Upload Playwright report

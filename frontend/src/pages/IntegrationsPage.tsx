@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
-const CURL_SNIPPET = (voiceId: string) => `curl -X POST "$QWEN3_TTS_BASE_URL/v1/audio/speech" \\
+const CURL_SNIPPET = (voiceId: string) => `curl -X POST "$PERSONA_FORGE_BASE_URL/v1/audio/speech" \\
   -H "Content-Type: application/json" \\
   -d '{
     "input": "Hello from Hermes.",
@@ -17,7 +17,7 @@ const CURL_SNIPPET = (voiceId: string) => `curl -X POST "$QWEN3_TTS_BASE_URL/v1/
 
 const PYTHON_SNIPPET = (voiceId: string) => `from openai import OpenAI
 
-client = OpenAI(base_url="$QWEN3_TTS_BASE_URL", api_key="not-needed")
+client = OpenAI(base_url="$PERSONA_FORGE_BASE_URL", api_key="not-needed")
 
 response = client.audio.speech.create(
     model="qwen3-tts",

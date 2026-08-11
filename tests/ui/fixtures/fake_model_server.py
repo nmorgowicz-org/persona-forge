@@ -6,7 +6,7 @@ Uses tests/fixtures/fake_runtime.py as the single source of truth for the fake m
 then layers UI-specific behaviors (delays, OmniVoice, error profiles) on top.
 
 Usage:
-    QWEN3_TTS_TEST_PORT=8319 \\
+    PERSONA_FORGE_TEST_PORT=8319 \\
     TEST_PROFILE= \\
     python tests/ui/fixtures/fake_model_server.py
 
@@ -163,12 +163,12 @@ def _install_fake_voice_design(app_module):
 def main() -> None:
     _setup_pythonpath()
 
-    port = int(os.getenv("QWEN3_TTS_TEST_PORT", "8319"))
+    port = int(os.getenv("PERSONA_FORGE_TEST_PORT", "8319"))
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
     # Ensure library dirs before importing app (uses segment_library which defaults to /segments).
-    os.environ.setdefault("VOICE_LIBRARY_DIR", tempfile.mkdtemp(prefix="qwen3-tts-e2e-voices-"))
-    os.environ.setdefault("SEGMENT_LIBRARY_DIR", tempfile.mkdtemp(prefix="qwen3-tts-e2e-segments-"))
+    os.environ.setdefault("VOICE_LIBRARY_DIR", tempfile.mkdtemp(prefix="persona-forge-e2e-voices-"))
+    os.environ.setdefault("SEGMENT_LIBRARY_DIR", tempfile.mkdtemp(prefix="persona-forge-e2e-segments-"))
 
     rt = _install_fake_runtime()
     _patch_generate_for_slow_async(rt)
@@ -204,8 +204,8 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     Intended for Tier 3 API integration tests and Playwright E2E.
     """
     _setup_pythonpath()
-    lib_dir = tempfile.mkdtemp(prefix="qwen3-tts-e2e-voices-")
-    seg_dir = tempfile.mkdtemp(prefix="qwen3-tts-e2e-segments-")
+    lib_dir = tempfile.mkdtemp(prefix="persona-forge-e2e-voices-")
+    seg_dir = tempfile.mkdtemp(prefix="persona-forge-e2e-segments-")
     os.environ.setdefault("VOICE_LIBRARY_DIR", lib_dir)
     os.environ.setdefault("SEGMENT_LIBRARY_DIR", seg_dir)
 
