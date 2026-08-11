@@ -7,7 +7,7 @@
 | Companion | [`20260720-post_merge_initiatives_execution.md`](./20260720-post_merge_initiatives_execution.md) (execution router — do not implement from it alone) |
 | Intended reader | An implementing agent (Sonnet sub-agent or local Qwen3.6-27B) briefed on one phase at a time |
 | Supersedes | `20260715-capture_screenshot_harness.md` and `20260715-guided_experience_teaching_layer.md` (both folded in here; delete after this lands) |
-| Status | Ready for implementation. Not started. |
+| Status | Initiatives A and B complete and merged to main (2026-07-22/23). Initiative C (C1-C5) not started. |
 
 > **How to read this document.** This is the *authoritative specification*: requirements,
 > source-code detail, decisions, invariants, and exact gates live here. The companion doc is a
@@ -1945,13 +1945,13 @@ per C2), skip works at each step = `[escalate→device]`.
 | A7b | verified | agent (local) | `live_metadata`/`restart_required`/`preview_runtime_config`/`reset_runtime_config`; 3x full-suite green (510 passed); `tsc --noEmit` clean |
 | A7c | verified | agent (local) | `describe_accelerator()` `detected_family` fix; `AcceleratorCoachCard`; build + Puppeteer screenshot, no console errors |
 | A7d | verified | agent (local) | per-key badges/lock-disable, accelerator panel, Expert disclosure (never-unmount); build + Puppeteer screenshots (Basic/Expert), no console errors |
-| B1 | not started | | |
-| B2 | not started | | |
-| B3 | not started | | |
-| B4 | not started | | |
-| B5 | not started | | |
-| B6 | not started | | |
-| B7 | not started | | |
+| B1 | verified | agent (local) | real-server harness spawns Flask app via `run-real-server.mjs`; `capture.mjs --real` wired |
+| B2 | verified | agent (local) | `seedCaptureFixtures()` deterministic voice/segment seeding for real-mode capture |
+| B3 | verified | agent (local) | core/voice-design/voice-library/prosody scenarios captured against real server |
+| B4 | verified | agent (local) | Stitch Studio + Accent Design/OmniVoice scenarios captured against real server |
+| B5 | verified | agent (local) | Wizard scenarios captured; `OmniVoiceAuditionGif` full-inference workflow verified |
+| B6 | verified (2 items deferred) | agent (local) | 17 scenarios registered; `scenarioVoiceMountedWarning` + `scenarioAlignmentCompareGif` deferred with tracked follow-ups (see Phase B7 note) |
+| B7 | verified | agent (local) | `tests/ui/README.md` scenario catalog + operator workflow; dry-run gate executed 2026-07-23 |
 | C1 | not started | | |
 | C2 | not started | | |
 | C3 | not started | | |

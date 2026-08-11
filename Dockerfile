@@ -66,11 +66,11 @@ RUN python -m pip install \
 RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/' \
     /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_25hz/vq/speech_vq.py || true && \
     sed -i '/@check_model_inputs/d' \
-    /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_12hz/modeling_persona_forge_tokenizer_v2.py || true && \
+    /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_12hz/modeling_qwen3_tts_tokenizer_v2.py || true && \
     sed -i 's/create_sliding_window_causal_mask/create_causal_mask/g' \
     /usr/local/lib/python3.13/site-packages/transformers/models/mimi/modeling_mimi.py && \
     python -c "\
-p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/modeling_persona_forge.py'; \
+p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/modeling_qwen3_tts.py'; \
 t = open(p).read(); \
 t = t.replace('from transformers.activations import ACT2FN', 'from transformers import initialization as init\nfrom transformers.activations import ACT2FN'); \
 t = t.replace('module.weight.data.normal_(mean=0.0, std=std)', 'init.normal_(module.weight, mean=0.0, std=std)'); \
@@ -84,7 +84,7 @@ t = t.replace('\n                \"cache_position\": cache_position,\n', '\n'); 
 t = t.replace('\n            cache_position=cache_position,\n', ''); \
 open(p, 'w').write(t)" && \
     python -c "\
-p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/configuration_persona_forge.py'; \
+p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/configuration_qwen3_tts.py'; \
 t = open(p).read(); \
 t = t.replace('from transformers.configuration_utils import PretrainedConfig, layer_type_validation', 'from transformers.configuration_utils import PretrainedConfig'); \
 t = t.replace('layer_type_validation(self.layer_types)', 'self.validate_layer_type()'); \

@@ -18,10 +18,10 @@ import os
 # frame count. See docs/dev/benchmarks/OPENVINO_RESULTS.md ("768 ~= 64s of 12 Hz context").
 FRAME_RATE_HZ = 12
 
-# The historical fixed capacity (768 frames) was chosen as exactly 64s at 12 Hz, so this
-# stays the default and reproduces the exact IR filename/capacity every existing deployment
-# (including dockermisc1) already has on disk.
-DEFAULT_MAX_SPEECH_SECONDS = 64.0
+# qwen3-tts-engine-only (pytorch/openvino) knob — pocket_tts is unbounded and never reads
+# this. 300s gives long-form/roleplay generations real headroom; changing it re-sizes the
+# OpenVINO IR's stateful K/V capacity, so it requires re-export (docs/HOW_TO_RUN.md).
+DEFAULT_MAX_SPEECH_SECONDS = 300.0
 
 
 def capacity_for_seconds(seconds: float) -> int:

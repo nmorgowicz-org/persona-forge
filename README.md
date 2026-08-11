@@ -44,11 +44,13 @@ for the `uv`-managed local dev environment.
 
 | Profile | Quality | Steady serving memory | Max request length | Recommendation |
 |---|---|---|---|---|
-| `0.6B` | Good | ~5.4–5.8 GiB | ~64 seconds | Only if you specifically need it |
-| `1.7B` | Better | ~5.4–5.8 GiB | ~64 seconds | **Default — same memory, better output** |
+| `0.6B` | Good | ~5.4–5.8 GiB | ~300 seconds | Only if you specifically need it |
+| `1.7B` | Better | ~5.4–5.8 GiB | ~300 seconds | **Default — same memory, better output** |
 
-Max request length is an export-time setting (`TTS_MAX_SPEECH_SECONDS`), primarily a
-latency/safety cap, not a memory lever.
+Max request length is a qwen3-tts-engine-only (pytorch/openvino) setting
+(`TTS_MAX_SPEECH_SECONDS`), primarily a latency/safety cap, not a memory lever;
+`pocket_tts` is unbounded and doesn't use it. On CPU, `QWEN3_ENGINE_CPU_MAX_NEW_TOKENS`
+applies a much tighter hang-avoidance clamp (~25s) to both `pytorch` and `openvino`.
 
 ## HTTP API (summary)
 

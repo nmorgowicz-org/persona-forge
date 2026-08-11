@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from persona_forge.gpu_family import Probes, describe_accelerator, resolve_gpu_family
 
 
@@ -65,6 +67,11 @@ class TestResolveGpuFamily:
 
 
 class TestDescribeAccelerator:
+    # describe_accelerator() always calls resolve_device(), which does real
+    # torch-based accelerator probing regardless of the injected Probes.
+    pytestmark = pytest.mark.requires_torch
+
+
     def test_present_true_capable_false_is_the_coach_trigger(self):
         # PCI-present + device-node-absent: this is exactly what should nudge the A7c coach.
         probes = _probes(intel_pci=True)

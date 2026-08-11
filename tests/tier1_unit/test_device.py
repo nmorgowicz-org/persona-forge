@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import warnings
 
+import pytest
+
 from persona_forge import device as device_mod
 from persona_forge.device import apply_fp64_emulation_env, resolve_device, xpu_needs_fp64_emulation
 
@@ -61,6 +63,7 @@ class TestXpuFp64Emulation:
         monkeypatch.setattr(device_mod, "_xpu_available", lambda: False)
         assert xpu_needs_fp64_emulation() is False
 
+    @pytest.mark.requires_torch
     def test_xpu_with_native_fp64_is_false(self, monkeypatch):
         monkeypatch.setattr(device_mod, "_xpu_available", lambda: True)
         fake_props = type("Props", (), {"has_fp64": True})()
@@ -72,6 +75,7 @@ class TestXpuFp64Emulation:
         monkeypatch.setattr("torch.xpu", fake_torch, raising=False)
         assert xpu_needs_fp64_emulation() is False
 
+    @pytest.mark.requires_torch
     def test_xpu_without_native_fp64_is_true(self, monkeypatch):
         monkeypatch.setattr(device_mod, "_xpu_available", lambda: True)
         fake_props = type("Props", (), {"has_fp64": False})()

@@ -279,7 +279,7 @@ independent; A7a first (no new deps), A7b←A7a, A7c←A6c,A7b, A7d←A7b,A6c(,C
 ### Initiative B — real-model capture harness
 
 **B1 — real-server spawn** (Flask dev server, D1)
-- State: not started · Depends on: A2 preferred (works on current venv) · Read: comprehensive §2.2,
+- State: verified (2026-07-23) · Depends on: A2 preferred (works on current venv) · Read: comprehensive §2.2,
   §2.3, D1, D6, §4.1, Phase B1.
 - Deliverable: `tests/ui/run-real-server.mjs` (+ `lib/python.mjs`) spawns real backend on temp dirs,
   waits for `model_loaded: true`, prints URL + temp paths; fake tier untouched.
@@ -287,7 +287,7 @@ independent; A7a first (no new deps), A7b←A7a, A7c←A6c,A7b, A7d←A7b,A6c(,C
 - Completion proof: files + device-gate output (MODEL LOADED, temp paths) + first-load time.
 
 **B2 — fixtures + seeding**
-- State: not started · Depends on: B1 · Read: comprehensive §2.3, §4.1, Phase B2.
+- State: verified (2026-07-23) · Depends on: B1 · Read: comprehensive §2.3, §4.1, Phase B2.
 - Deliverable: `generate-capture-fixtures.mjs` (one-time) → committed synthetic
   `tests/ui/fixtures/capture-data/`; `seedCaptureFixtures()` wired into `startRealServer`.
 - Gates: fixtures present + size `[local-verifiable]`; endpoint counts match `[escalate→device]`;
@@ -295,27 +295,27 @@ independent; A7a first (no new deps), A7b←A7a, A7c←A6c,A7b, A7d←A7b,A6c(,C
 - Completion proof: fixture counts; KB; matching counts; privacy confirmed.
 
 **B3 — capture.mjs --real**
-- State: not started · Depends on: B1, B2 · Read: comprehensive §2.3, Phase B3.
+- State: verified (2026-07-23) · Depends on: B1, B2 · Read: comprehensive §2.3, Phase B3.
 - Deliverable: `--real`/`--model-size`/`--device` flags; `scenarioHome` runs real in one command;
   fake path byte-for-byte unchanged.
 - Gates: fake path + artifact `[local-verifiable]`; real end-to-end run `[escalate→device]`.
 - Completion proof: parseArgs/main diff; both runs pass; real wall-clock.
 
 **B4 — GIF helpers**
-- State: not started · Depends on: B3 · Read: comprehensive §2.3, Phase B4.
+- State: verified (2026-07-23) · Depends on: B3 · Read: comprehensive §2.3, Phase B4.
 - Deliverable: `tests/ui/lib/gif.mjs` (captureFrames/framesToGif/cleanupFrames, array-arg ffmpeg);
   trivial GIF proven, frames cleaned up.
 - Gates: all `[local-verifiable]` (fake-server smoke GIF).
 - Completion proof: module + valid GIF + cleanup + smoke removed.
 
 **B5 — testids** (demand-driven)
-- State: not started · Depends on: B3 · Read: comprehensive §2.3, Phase B5.
+- State: verified (2026-07-23) · Depends on: B3 · Read: comprehensive §2.3, Phase B5.
 - Deliverable: only the testids a B6 scenario needs; build passes after each.
 - Gates: `npm run build` + grep `[local-verifiable]`.
 - Completion proof: testids + file/line; build; which scenario each served.
 
 **B6 — scenario catalog** (one scenario per agent)
-- State: not started · Depends on: B3, B4, B5 · Read: comprehensive Phase B6 (catalog).
+- State: verified, 2 items deferred (2026-07-23) · Depends on: B3, B4, B5 · Read: comprehensive Phase B6 (catalog).
 - Deliverable: incremental scenarios across Voice Library / Prosody / Stitch Studio / Accent-OmniVoice
   / GIFs; each registered in `--list-scenarios`; real waits only.
 - Gates: artifact present + registered `[local-verifiable]`; the real capture run `[escalate→device]`;
@@ -323,7 +323,7 @@ independent; A7a first (no new deps), A7b←A7a, A7c←A6c,A7b, A7d←A7b,A6c(,C
 - Completion proof (phase): `--list-scenarios` spans all categories (minus deferred AlignmentCompareGif).
 
 **B7 — coverage doc + workflow**
-- State: not started · Depends on: B6 · Read: comprehensive Phase B7.
+- State: verified (2026-07-23) · Depends on: B6 · Read: comprehensive Phase B7.
 - Deliverable: `tests/ui/README.md` scenario list + documented review loop.
 - Gates: README present `[local-verifiable]`; dry-run tweak→rebuild→recapture `[escalate→device]`.
 - Completion proof: README; dry-run screenshot reflected the tweak.

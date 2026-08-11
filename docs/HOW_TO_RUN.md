@@ -168,11 +168,15 @@ Both model sizes use ~5.4–5.8 GiB steady. Export uses 13–14 GiB.
 - Python `malloc_trim(0)` after unload.
 No jemalloc / tcmalloc: allocator replacement caused SIGABRT/SIGSEGV under transformers 5.x.
 
-`TTS_MAX_SPEECH_SECONDS` (default 64):
-- Controls max audio duration per request. Baked into IR at export time.
-- Is a latency/safety cap, not a memory lever. Changing it from 64s to 15s saves ~200 MiB,
-  not gigabytes.
-- Must match between `export` and `persona-forge`; changing it requires re-exporting.
+`TTS_MAX_SPEECH_SECONDS` (default 300):
+- qwen3-tts-engine-only (pytorch/openvino); `pocket_tts` never reads this and is unbounded.
+- Controls max audio duration per request. For `openvino`, baked into IR at export time.
+- Is a latency/safety cap, not a memory lever. Changing it saves/costs on the order of
+  hundreds of MiB, not gigabytes.
+- Must match between `export` and `persona-forge` for `openvino`; changing it requires re-exporting.
+- On CPU, `QWEN3_ENGINE_CPU_MAX_NEW_TOKENS` (default 300 tokens, ~25s) is a separate,
+  tighter hang-avoidance clamp applied to both `pytorch` and `openvino` — raising
+  `TTS_MAX_SPEECH_SECONDS` alone won't get you longer CPU generations past that.
 
 ### Runtime control (no restart needed)
 
@@ -185,8 +189,8 @@ No jemalloc / tcmalloc: allocator replacement caused SIGABRT/SIGSEGV under trans
   - `OV_DYNAMIC_QUANT_GROUP_SIZE`
 - Read-only:
   - Mount modes, optional `REF_AUDIO_PATH` status, `HF_TOKEN` set?, device, dtype, reference-text/Whisper review state.
-- Requires re-export:
-  - `TTS_MAX_SPEECH_SECONDS`, quantization.
+- Requires re-export (openvino only) / restart (pytorch):
+  - `TTS_MAX_SPEECH_SECONDS`, quantization. (`pocket_tts` never reads this setting.)
 
 Changing `TTS_BACKEND` or `OV_DYNAMIC_QUANT_GROUP_SIZE` briefly reloads the model (serialized,
 no dropped requests).
@@ -229,13 +233,27 @@ Use these only if you have a reason. All other internals are preset-derived and 
 - `LOW_RAM_MODE=1` sets this to 1800 automatically.
 - Useful on shared hosts where RAM is needed for other workloads.
 
-**`TTS_MAX_SPEECH_SECONDS`** (default `64`)
-- Maximum duration for a single request. Baked into the OpenVINO IR at export time.
-- Is a latency/safety cap, not a memory lever. Changing it from 64s to 15s saves
-  ~200 MiB, not gigabytes. Use it to bound worst-case latency and fail fast on
-  runaway or misbehaving requests.
-- Must match between `export` and `persona-forge`. Changing it requires re-exporting.
-- Leave at `64` unless you have a specific reason to change it.
+**`TTS_MAX_SPEECH_SECONDS`** (default `300`)
+- qwen3-tts-engine-only (pytorch/openvino); `pocket_tts` never reads this and is unbounded.
+- Maximum duration for a single request. For `openvino`, baked into the IR at export time.
+- Is a latency/safety cap, not a memory lever. Use it to bound worst-case latency and fail
+  fast on runaway or misbehaving requests.
+- Must match between `export` and `persona-forge` for `openvino`. Changing it requires re-exporting.
+- On CPU, see `QWEN3_ENGINE_CPU_MAX_NEW_TOKENS` below — it's a separate, tighter clamp
+  that applies regardless of this setting.
+
+**`QWEN3_ENGINE_MAX_NEW_TOKENS`** (default `800`)
+- qwen3-tts-engine-only. Base per-request token ceiling, before the CPU clamp below.
+
+**`QWEN3_ENGINE_CPU_MAX_NEW_TOKENS`** (default `300`, ~25s of audio)
+- qwen3-tts-engine-only. Hang-avoidance cap forced whenever `pytorch` or `openvino` is
+  running on CPU (no iGPU deployment has been validated yet — both backends run the same
+  qwen3-tts engine and are too slow on CPU to safely decode without this). The tighter of
+  this and `TTS_MAX_SPEECH_SECONDS`-derived capacity always wins.
+
+**`QWEN3_ENGINE_CPU_BF16_MAX_NEW_TOKENS`** (default `160`)
+- qwen3-tts-engine-only. Extra-tight cap for `pytorch` + `bfloat16` specifically — that
+  combination is known to hang or diverge on many CPUs.
 
 **`SILENCE_TRIM` / `SILENCE_TRIM_THRESH` / `SILENCE_TRIM_PAD_MS`**
 - Trim leading/trailing silence from generated audio.

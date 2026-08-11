@@ -1,4 +1,4 @@
-// Thin client for the Flask API in src/qwen3_tts/app.py. No auth — same trust boundary
+// Thin client for the Flask API in src/persona_forge/app.py. No auth — same trust boundary
 // as the rest of the service (see SECURITY.md); this UI is meant to run on the same
 // trusted network as the container.
 
