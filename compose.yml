@@ -28,17 +28,17 @@ x-model-volumes: &model-volumes
   - ${OV_DATA_PATH:-./data/ov}:/ov:rw
 
 services:
-  qwen3-tts:
+  persona-forge:
     # Local builds: docker compose up --build creates :local.
     # Production: set PERSONA_FORGE_IMAGE to a pinned GHCR SHA or version tag.
-    image: ${PERSONA_FORGE_IMAGE:-qwen3-tts-openvino:local}
+    image: ${PERSONA_FORGE_IMAGE:-persona-forge:local}
     build:
       context: .
       # Phase A6f: uncomment to layer Intel iGPU userspace (compute-runtime + Level-Zero) into
       # the image. Off by default so the canonical CPU image is unaffected (D3).
       # args:
       #   INSTALL_ACCEL_SYSLIBS: "1"
-    container_name: qwen3-tts
+    container_name: persona-forge
     restart: unless-stopped
     # Phase A6f: Intel iGPU passthrough example (uncomment to enable). Also requires:
     #   - build.args.INSTALL_ACCEL_SYSLIBS=1 above (system libs)
@@ -109,7 +109,7 @@ services:
 
   # Unified export service: exports both Base and VoiceDesign IR in one run.
   export:
-    image: ${PERSONA_FORGE_IMAGE:-qwen3-tts-openvino:local}
+    image: ${PERSONA_FORGE_IMAGE:-persona-forge:local}
     build:
       context: .
     command: ["python", "scripts/export.py"]
@@ -119,13 +119,13 @@ services:
       # Tell export.py to run both targets (Base + VoiceDesign) in one shot.
       EXPORT_TARGET: both
       OV_OUTPUT_ROOT: /ov
-      # VoiceDesign settings (must match qwen3-tts service)
+      # VoiceDesign settings (must match persona-forge service)
       VOICE_DESIGN_MODEL_SIZE: ${VOICE_DESIGN_MODEL_SIZE:-1.7B}
       VOICE_DESIGN_MODEL_REPO: ${VOICE_DESIGN_MODEL_REPO:-}
       VOICE_DESIGN_MAX_SPEECH_SECONDS: ${VOICE_DESIGN_MAX_SPEECH_SECONDS:-}
     volumes: *model-volumes
     # FP32 export + INT4/INT8 quantization is memory-intensive.
-    # On a 15 GiB box, stop qwen3-tts before running this to avoid OOM.
+    # On a 15 GiB box, stop persona-forge before running this to avoid OOM.
     mem_limit: ${EXPORT_MEMORY_LIMIT:-13G}
     memswap_limit: ${EXPORT_MEMORY_SWAP_LIMIT:-14G}
 

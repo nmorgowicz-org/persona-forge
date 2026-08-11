@@ -118,7 +118,7 @@ def load_model() -> LoadedModel:
     """Load the configured checkpoint at float32 and build the voice-clone prompt.
 
     WARNING: loads a full model (~4.7 GiB for 0.6B). On dockermisc1 stop the prod
-    qwen3-tts container first so this does not contend for memory and swap-thrash.
+    persona-forge container first so this does not contend for memory and swap-thrash.
     """
 
     configure_hf_token()

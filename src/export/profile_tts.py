@@ -5,7 +5,7 @@ Wraps the two transformer-core forwards and the speech-tokenizer decode with tim
 and call counters, then runs one generation. Establishes the main-talker vs.
 code-predictor vs. tokenizer split (the plan assumes the 5-layer code predictor, run
 15x per frame, dominates) and the per-side step counts, so optimization effort lands
-on the right core. Run with the prod qwen3-tts container stopped.
+on the right core. Run with the prod persona-forge container stopped.
 """
 
 from __future__ import annotations

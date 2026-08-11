@@ -18,7 +18,7 @@ if "VOICE_LIBRARY_DIR" not in os.environ:
     )
 if "SEGMENT_LIBRARY_DIR" not in os.environ:
     os.environ["SEGMENT_LIBRARY_DIR"] = tempfile.mkdtemp(
-        prefix="qwen3-tts-test-segments-"
+        prefix="persona-forge-test-segments-"
     )
 
 _root = Path(__file__).resolve().parent.parent

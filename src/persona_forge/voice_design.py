@@ -23,7 +23,7 @@ from typing import Any
 from persona_forge import model
 
 # Mirrors omnivoice_engine._progress (GET /omnivoice/progress) — nick's feedback, 2026-07-03:
-# "you did not add that [progress/ETA] in for the qwen3-tts voice design". This checkpoint's
+# "you did not add that [progress/ETA] in for the persona-forge voice design". This checkpoint's
 # generate_voice_design() is a single blocking autoregressive call (no per-candidate loop to
 # report mid-flight progress on, unlike OmniVoice's diffusion-style per-step model), so
 # "progress" here is phase (loading the checkpoint vs. generating) plus an ETA derived from a

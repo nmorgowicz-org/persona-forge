@@ -20,7 +20,7 @@ const PYTHON_SNIPPET = (voiceId: string) => `from openai import OpenAI
 client = OpenAI(base_url="$PERSONA_FORGE_BASE_URL", api_key="not-needed")
 
 response = client.audio.speech.create(
-    model="qwen3-tts",
+    model="persona-forge",
     voice="${voiceId}",
     input="Hello from Hermes.",
 )

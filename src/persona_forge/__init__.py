@@ -1,4 +1,4 @@
-"""qwen3-tts OpenVINO CPU TTS service package."""
+"""Persona Forge — voice cloning and design studio."""
 
 __version__ = "0.23.0"
 

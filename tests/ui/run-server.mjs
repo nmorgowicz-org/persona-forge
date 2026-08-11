@@ -12,7 +12,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(__dirname, '..', '..')
 
 export function startFakeServer({ port = 8319 } = {}) {
-  const voiceLibraryDir = mkdtempSync(join(tmpdir(), 'qwen3-tts-e2e-voices-'))
+  const voiceLibraryDir = mkdtempSync(join(tmpdir(), 'persona-forge-e2e-voices-'))
   const env = {
     ...process.env,
     PYTHONPATH: [REPO_ROOT, join(REPO_ROOT, 'src'), join(REPO_ROOT, 'src', 'export')].join(

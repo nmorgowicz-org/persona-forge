@@ -7,7 +7,7 @@ PyTorch speech-tokenizer / codec, which is the same size in both models and is n
 
 Run inside the runtime image on the box (needs torch + qwen_tts + the model + IR):
 
-    docker compose run --rm --entrypoint python qwen3-tts scripts/codec_memory_report.py
+    docker compose run --rm --entrypoint python persona-forge scripts/codec_memory_report.py
 
 Importing ``persona_forge.model`` loads the model and, on the OpenVINO backend, installs the OV runtime
 and releases the talker ``.layers`` — so this reports the POST-release resident state, which is

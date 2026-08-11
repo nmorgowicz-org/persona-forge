@@ -21,8 +21,8 @@ export function startRealServer({
   timeoutMs = 120000,
   seedFixtures = true,
 } = {}) {
-  voiceLibraryDir ??= mkdtempSync(join(tmpdir(), 'qwen3-tts-capture-voices-'))
-  segmentLibraryDir ??= mkdtempSync(join(tmpdir(), 'qwen3-tts-capture-segments-'))
+  voiceLibraryDir ??= mkdtempSync(join(tmpdir(), 'persona-forge-capture-voices-'))
+  segmentLibraryDir ??= mkdtempSync(join(tmpdir(), 'persona-forge-capture-segments-'))
 
   if (seedFixtures) seedCaptureFixtures(voiceLibraryDir, segmentLibraryDir)
 
@@ -45,7 +45,7 @@ export function startRealServer({
   const python = resolvePython()
   const child = spawn(
     python,
-    ['-c', `from qwen3_tts.app import app; app.run(host='127.0.0.1', port=${port}, threaded=True)`],
+    ['-c', `from persona_forge.app import app; app.run(host='127.0.0.1', port=${port}, threaded=True)`],
     { env, stdio: 'inherit' }
   )
 
