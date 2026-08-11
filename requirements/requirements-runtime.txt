@@ -19,7 +19,7 @@ transformers==5.12.1
 pydub
 pyloudnorm
 
-# qwen3_tts/asr_check.py: fast no-speech gate layered on top of audio_post.analyze_take for
+# persona_forge/asr_check.py: fast no-speech gate layered on top of audio_post.analyze_take for
 # OmniVoice candidate takes (nick's feedback, 2026-07-03). CTranslate2-based (not torch-based
 # openai-whisper) since this is a CPU-only box and its int8 CPU path is materially faster.
 faster-whisper

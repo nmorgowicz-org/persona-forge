@@ -25,7 +25,7 @@ to need the same kind of comparison again.
 - **`codec_memory_report.py`** — reports resident PyTorch memory by component (talker layers vs.
   speech-tokenizer/codec) to explain steady-state RSS differences between model sizes. Must run
   *inside* the runtime image (needs torch + qwen_tts + model + IR):
-  `docker compose run --rm --entrypoint python qwen3-tts scripts/diagnostics/codec_memory_report.py`.
+  `docker compose run --rm --entrypoint python persona-forge scripts/diagnostics/codec_memory_report.py`.
 
 ## One-off spikes (proof-of-concept for a specific bug, kept as reference)
 

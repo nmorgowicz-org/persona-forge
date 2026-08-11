@@ -2,7 +2,7 @@
 #
 # Run the Milestone 4 generation-parity + warm-latency harness on dockermisc1.
 #
-# Stops the prod qwen3-tts container (so the full model load does not contend for memory
+# Stops the prod persona-forge container (so the full model load does not contend for memory
 # or swap-thrash), runs test_ov_generation.py inside the project image against an exported
 # IR directory, then ALWAYS restarts the service — even if the harness fails or is
 # interrupted. The harness writes ov_generation_report.json beside the IR files.
@@ -18,14 +18,14 @@
 #
 # Override any path/image via environment:
 #   COMPOSE_FILE   /home/nick/docker/docker-compose.yml
-#   SERVICE        qwen3-tts
-#   PERSONA_FORGE_IMAGE ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>
+#   SERVICE        persona-forge
+#   PERSONA_FORGE_IMAGE ghcr.io/nmorgowicz-org/persona-forge:<git-sha>
 #                   (`EXPORTER_IMAGE` remains a deprecated compatibility alias)
-#   MODEL_CACHE    /var/data/autopirate/qwen3-tts/model
-#   OV_ROOT        /var/data/autopirate/qwen3-tts/openvino
+#   MODEL_CACHE    /var/data/autopirate/persona-forge/model
+#   OV_ROOT        /var/data/autopirate/persona-forge/openvino
 #   MODEL_SIZE     0.6B
 #   REF_AUDIO_PATH host WAV mounted as the voice-clone reference
-#                  (default: /var/data/autopirate/qwen3-tts/voice/voice_A.wav — project-owned,
+#                  (default: /var/data/autopirate/persona-forge/voice/voice_A.wav — project-owned,
 #                  persistent. Do not point at hermes-agent scratch; it gets wiped.)
 #   REF_TEXT       transcript of the reference audio. Defaults to the committed transcript of
 #                  voice_A.wav (the same default app_worker.py / bench_common.py use), so you
@@ -38,12 +38,12 @@ IR_DIR_NAME="${1:?Usage: $0 <ir-dir-name> [fp32|int8]}"
 COMPRESSION="${2:-${COMPRESSION:-}}"
 
 COMPOSE_FILE="${COMPOSE_FILE:-/home/nick/docker/docker-compose.yml}"
-SERVICE="${SERVICE:-qwen3-tts}"
-PERSONA_FORGE_IMAGE="${PERSONA_FORGE_IMAGE:-${EXPORTER_IMAGE:-ghcr.io/nmorgowicz-org/qwen3-tts-openvino:latest}}"
-MODEL_CACHE="${MODEL_CACHE:-/var/data/autopirate/qwen3-tts/model}"
-OV_ROOT="${OV_ROOT:-/var/data/autopirate/qwen3-tts/openvino}"
+SERVICE="${SERVICE:-persona-forge}"
+PERSONA_FORGE_IMAGE="${PERSONA_FORGE_IMAGE:-${EXPORTER_IMAGE:-ghcr.io/nmorgowicz-org/persona-forge:latest}}"
+MODEL_CACHE="${MODEL_CACHE:-/var/data/autopirate/persona-forge/model}"
+OV_ROOT="${OV_ROOT:-/var/data/autopirate/persona-forge/openvino}"
 MODEL_SIZE="${MODEL_SIZE:-0.6B}"
-REF_AUDIO_PATH="${REF_AUDIO_PATH:-/var/data/autopirate/qwen3-tts/voice/voice_A.wav}"
+REF_AUDIO_PATH="${REF_AUDIO_PATH:-/var/data/autopirate/persona-forge/voice/voice_A.wav}"
 REF_TEXT="${REF_TEXT:-}"
 THREADS="${THREADS:-6}"
 # The harness holds the full PyTorch model AND the OpenVINO graphs at once, so 7g OOM-kills
