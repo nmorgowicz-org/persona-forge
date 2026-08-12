@@ -28,6 +28,10 @@
         {
           "type": "generic",
           "path": "pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "src/persona_forge/__init__.py"
         }
       ]
     }

@@ -1111,10 +1111,11 @@ wheels = [
 
 [[package]]
 name = "persona-forge"
-version = "1.0.0"
+version = "1.0.3"
 source = { virtual = "." }
 dependencies = [
     { name = "accelerate" },
+    { name = "audioop-lts" },
     { name = "faster-whisper" },
     { name = "flask" },
     { name = "gunicorn" },
@@ -1161,6 +1162,7 @@ openvino = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate" },
+    { name = "audioop-lts" },
     { name = "einops", marker = "extra == 'qwen-tts'" },
     { name = "faster-whisper" },
     { name = "flask", specifier = "==3.1.3" },
