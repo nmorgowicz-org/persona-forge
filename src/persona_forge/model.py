@@ -2227,6 +2227,7 @@ def _run_generate_pocket_tts_stream(
 
     _touch_last_request()
     _apply_optional_seed(seed_value)
+    _ensure_base_loaded()
 
     if pocket_tts_runtime.pocket_tts_model is None:
         raise RuntimeError("Pocket-TTS model not loaded")

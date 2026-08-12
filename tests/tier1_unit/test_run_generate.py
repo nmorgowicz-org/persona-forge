@@ -302,7 +302,7 @@ class TestRunGenerateSuccessPath:
         )
         monkeypatch.setitem(sys.modules, "persona_forge.pocket_tts_runtime", fake_runtime)
         import persona_forge
-        monkeypatch.setattr(persona_forge, "pocket_tts_runtime", fake_runtime)
+        monkeypatch.setattr(persona_forge, "pocket_tts_runtime", fake_runtime, raising=False)
 
         polished, _sr, polished_job_id = m._run_generate("hello", "English")
         bypassed, _sr, bypassed_job_id = m._run_generate(
@@ -324,3 +324,60 @@ class TestRunGenerateSuccessPath:
         ]
         assert bypassed_job.style_preset is None
         assert bypassed_job.postprocess_applied is False
+
+    def test_stream_calls_ensure_base_loaded_before_checking_model(
+        self, monkeypatch, model_module
+    ):
+        """Regression test for the cold-start race fixed in _run_generate_pocket_tts_stream.
+
+        The streaming path used to check pocket_tts_runtime.pocket_tts_model without first
+        calling _ensure_base_loaded() (unlike the batch path, _run_generate), so the first
+        request after an idle-unload/model-swap raced against the load and raised
+        RuntimeError("Pocket-TTS model not loaded") instead of waiting for the load to finish.
+        """
+        m = model_module
+        monkeypatch.setattr(m, "TTS_BACKEND", "pocket_tts")
+
+        fake_runtime = types.ModuleType("persona_forge.pocket_tts_runtime")
+        fake_runtime.pocket_tts_model = None
+        fake_runtime.get_pocket_tts_voice_state = lambda *args, **kwargs: "voice-state"
+
+        def fake_generate_stream(*args, **kwargs):
+            yield np.zeros(240, dtype=np.float32)
+
+        fake_runtime.generate_pocket_tts_stream = fake_generate_stream
+        monkeypatch.setitem(sys.modules, "persona_forge.pocket_tts_runtime", fake_runtime)
+        import persona_forge
+
+        monkeypatch.setattr(persona_forge, "pocket_tts_runtime", fake_runtime, raising=False)
+
+        calls = []
+
+        def fake_ensure_base_loaded():
+            calls.append(True)
+            # Simulate the swap-back-to-Base load completing and populating the runtime.
+            fake_runtime.pocket_tts_model = "loaded-model"
+
+        monkeypatch.setattr(m, "_ensure_base_loaded", fake_ensure_base_loaded)
+
+        chunks = list(m._run_generate_pocket_tts_stream("hello", "English"))
+
+        assert calls == [True]
+        assert len(chunks) == 1
+
+    def test_stream_still_raises_if_model_unloaded_after_ensure(
+        self, monkeypatch, model_module
+    ):
+        m = model_module
+        monkeypatch.setattr(m, "TTS_BACKEND", "pocket_tts")
+
+        fake_runtime = types.ModuleType("persona_forge.pocket_tts_runtime")
+        fake_runtime.pocket_tts_model = None
+        monkeypatch.setitem(sys.modules, "persona_forge.pocket_tts_runtime", fake_runtime)
+        import persona_forge
+
+        monkeypatch.setattr(persona_forge, "pocket_tts_runtime", fake_runtime, raising=False)
+        monkeypatch.setattr(m, "_ensure_base_loaded", lambda: None)
+
+        with pytest.raises(RuntimeError, match="Pocket-TTS model not loaded"):
+            next(m._run_generate_pocket_tts_stream("hello", "English"))
