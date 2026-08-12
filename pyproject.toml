@@ -12,7 +12,7 @@ dependencies = [
   "accelerate",
   "librosa",
   "transformers==5.12.1",
-  "torch==2.12.1",
+  "torch==2.13.0",
   "torchaudio==2.11.0",
   # OmniVoice (Persona Forge accent-design engine) — declared deps already match the pins
   # above, so it's a git source installed without re-resolving its own dependency set.
@@ -63,7 +63,7 @@ package = false
 environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
 override-dependencies = [
   "transformers==5.12.1",
-  "torch==2.12.1",
+  "torch==2.13.0",
   "torchaudio==2.11.0",
 ]
 
