@@ -1,0 +1,12 @@
+# CodeQL configuration
+#
+# paths-ignore excludes files from ALL analysis for that language.
+# Use this only for files where every finding would be a false positive —
+# not for silencing one specific query.
+#
+# For one-off suppressions on a specific line, prefer an inline comment:
+#   # CodeQL[py/path-injection] safe: startup-time path, not user input
+
+paths-ignore:
+  - frontend/dist
+  - frontend/node_modules
