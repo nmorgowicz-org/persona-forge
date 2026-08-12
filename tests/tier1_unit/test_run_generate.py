@@ -141,7 +141,7 @@ class TestRunGenerateSuccessPath:
         assert job.status == "completed"
         assert job.style_preset == "default"
         assert job.postprocess_applied is True
-        assert job.metadata["applied_steps"] == ["normalize_lufs", "limit_peak"]
+        assert job.metadata["applied_steps"] == ["telepresence_eq", "normalize_lufs", "limit_peak"]
 
     def test_postprocess_false_preserves_trim_only_pcm(self, monkeypatch, model_module):
         m = model_module
@@ -317,6 +317,10 @@ class TestRunGenerateSuccessPath:
             bypassed_job = m._active_jobs[bypassed_job_id]
         assert polished_job.style_preset == "default"
         assert polished_job.postprocess_applied is True
-        assert polished_job.metadata["applied_steps"] == ["normalize_lufs", "limit_peak"]
+        assert polished_job.metadata["applied_steps"] == [
+            "telepresence_eq",
+            "normalize_lufs",
+            "limit_peak",
+        ]
         assert bypassed_job.style_preset is None
         assert bypassed_job.postprocess_applied is False
