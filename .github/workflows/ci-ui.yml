@@ -2,12 +2,6 @@ name: UI E2E
 
 on:
   pull_request:
-    paths:
-      - .github/workflows/ci-ui.yml
-      - "frontend/**"
-      - "tests/ui/**"
-      - "src/persona_forge/**"
-      - requirements-dev.txt
   workflow_dispatch:
 
 permissions:
@@ -18,7 +12,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  paths-filter:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4
+        id: filter
+        with:
+          filters: |
+            code:
+              - .github/workflows/ci-ui.yml
+              - "frontend/**"
+              - "tests/ui/**"
+              - "src/persona_forge/**"
+              - requirements-dev.txt
+
   e2e:
+    name: e2e
+    needs: paths-filter
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: arc-general
     timeout-minutes: 20
@@ -27,20 +40,28 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
+      - name: No relevant changes
+        if: needs.paths-filter.outputs.code != 'true'
+        run: echo "No frontend/UI-relevant changes detected, skipping E2E run"
+
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        if: needs.paths-filter.outputs.code == 'true'
         with:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: requirements-dev.txt
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        if: needs.paths-filter.outputs.code == 'true'
         with:
           node-version: "24"
 
       - name: Install Python test dependencies
+        if: needs.paths-filter.outputs.code == 'true'
         run: python -m pip install -r requirements-dev.txt
 
       - name: Environment and import smoke test
+        if: needs.paths-filter.outputs.code == 'true'
         run: |
           echo "=== Environment ==="
           python --version
@@ -81,32 +102,39 @@ jobs:
           "
 
       - name: Install frontend dependencies
+        if: needs.paths-filter.outputs.code == 'true'
         working-directory: frontend
         run: npm ci
 
       - name: Lint frontend
+        if: needs.paths-filter.outputs.code == 'true'
         working-directory: frontend
         run: npm run lint
 
       - name: Build frontend
+        if: needs.paths-filter.outputs.code == 'true'
         working-directory: frontend
         run: npm run build
 
       - name: Install Playwright test dependencies
+        if: needs.paths-filter.outputs.code == 'true'
         working-directory: tests/ui
         run: npm ci
 
       - name: Cache Playwright browsers
+        if: needs.paths-filter.outputs.code == 'true'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('tests/ui/package-lock.json') }}
 
       - name: Install Playwright browsers
+        if: needs.paths-filter.outputs.code == 'true'
         working-directory: tests/ui
         run: npx playwright install --with-deps chromium
 
       - name: Start fake_model_server
+        if: needs.paths-filter.outputs.code == 'true'
         run: |
           # Start in background; use a wrapper to ensure we get the PID and logs
           python tests/ui/fixtures/fake_model_server.py > fake_model_server.log 2>&1 &
@@ -148,6 +176,7 @@ jobs:
           exit 1
 
       - name: Run Playwright E2E tests
+        if: needs.paths-filter.outputs.code == 'true'
         working-directory: tests/ui
         env:
           PYTHONPATH: src:src/export
@@ -155,7 +184,7 @@ jobs:
         run: npm run test:ci
 
       - name: Upload Playwright report
-        if: failure()
+        if: failure() && needs.paths-filter.outputs.code == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-report
@@ -163,7 +192,7 @@ jobs:
           retention-days: 1
 
       - name: Upload fake_model_server log
-        if: failure()
+        if: failure() && needs.paths-filter.outputs.code == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: fake_model_server-log
