@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.4](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.3...persona-forge-v1.0.4) (2026-08-12)
+
+
+### Bug Fixes
+
+* restore audioop for pydub, stop version string drift ([#150](https://github.com/nmorgowicz-org/persona-forge/issues/150)) ([deb930d](https://github.com/nmorgowicz-org/persona-forge/commit/deb930d8698d4bbe3b0d96c09507eb15e4eb38a4))
+
 ## [1.0.3](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.2...persona-forge-v1.0.3) (2026-08-12)
 
 
