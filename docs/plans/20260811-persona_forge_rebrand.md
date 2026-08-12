@@ -6,7 +6,7 @@
 - Execution owner: any implementing agent, one gated phase at a time — most phases are
   Haiku-executable given this doc's file:line specificity; phases 8-9 are Sonnet+Nick only
 - Target branch: `feature/voice-style-foundation` (after Initiative A/B; before Initiative C —
-  see `docs/plans/20260720-post_merge_initiatives.md`)
+  see `docs/dev/resolved/POST_MERGE_INITIATIVES.md`)
 - Source snapshot: 2026-08-11
 
 ## Execution status
@@ -71,7 +71,7 @@ them.
 | Default TTS backend (D12) | pocket_tts as product default, OpenVINO opt-in. **Already implemented in code as of 2026-07-11 — see the correction in Phase 2.** This plan closes out the documentation gap, not a code change. |
 | dockermisc1 data directory | Rename `/var/data/autopirate/qwen3-tts-new/` → `/var/data/autopirate/persona-forge/` (full clean rename, not left as legacy cruft — confirmed with Nick despite the higher effort of moving live model/voice data) |
 | dockermisc1 host access | Nick confirmed passwordless sudo is available for Phase 9; use it carefully, one confirmed step at a time |
-| Sequencing vs. Initiative C | This rebrand executes **before** resuming `docs/plans/20260720-post_merge_initiatives.md` Initiative C (guided-experience/teaching layer) — no sense building tooltips/docs that reference the old name right before erasing it |
+| Sequencing vs. Initiative C | This rebrand executes **before** resuming `docs/dev/resolved/POST_MERGE_INITIATIVES.md` Initiative C (guided-experience/teaching layer) — no sense building tooltips/docs that reference the old name right before erasing it |
 | Dev-deploy convenience | Add `scripts/dev-deploy.sh` (Phase 6) to oneline the frontend-build + compose-merge steps Nick currently runs by hand on dockermisc1 |
 
 Nothing else in this plan requires a decision from Nick before execution — everything below has a
@@ -150,7 +150,7 @@ These match the census but are not our identity to change:
 
 ## 4. Gate taxonomy
 
-Reused from `docs/plans/20260720-post_merge_initiatives_execution.md` rather than inventing new
+Reused from `docs/dev/resolved/POST_MERGE_INITIATIVES_EXECUTION.md` rather than inventing new
 ceremony:
 
 - `[local-verifiable]` — the executing agent can prove the gate itself (tests, grep, config
@@ -447,7 +447,7 @@ directly.
 - The naming table, backend-default framing, and no-back-compat policy (§2) are frozen; they are
   not open to re-litigation mid-execution. Only in-phase execution details are a judgment call.
 - Once this plan's acceptance checklist (§8) is fully checked, resume
-  `docs/plans/20260720-post_merge_initiatives.md` Initiative C (C1-C5) — its ledger tables also
+  `docs/dev/resolved/POST_MERGE_INITIATIVES.md` Initiative C (C1-C5) — its ledger tables also
   need a correction pass first: B1-B7 are marked "not started" in both that doc and its
   `_execution.md` companion despite being complete (`f967d0d`/`8588b78`); fix that before Initiative
   C work begins, so the ledger reflects reality.

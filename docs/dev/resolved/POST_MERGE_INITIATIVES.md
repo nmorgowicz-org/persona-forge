@@ -4,10 +4,10 @@
 |---|---|
 | Created | 2026-07-20 |
 | Purpose | Single source of truth for three post-`feature/voice-style-foundation` initiatives |
-| Companion | [`20260720-post_merge_initiatives_execution.md`](./20260720-post_merge_initiatives_execution.md) (execution router — do not implement from it alone) |
+| Companion | [`POST_MERGE_INITIATIVES_EXECUTION.md`](./POST_MERGE_INITIATIVES_EXECUTION.md) (execution router — do not implement from it alone) |
 | Intended reader | An implementing agent (Sonnet sub-agent or local Qwen3.6-27B) briefed on one phase at a time |
-| Supersedes | `20260715-capture_screenshot_harness.md` and `20260715-guided_experience_teaching_layer.md` (both folded in here; delete after this lands) |
-| Status | Initiatives A and B complete and merged to main (2026-07-22/23). Initiative C (C1-C5) not started. |
+| Supersedes | `20260715-capture_screenshot_harness.md` and `20260715-guided_experience_teaching_layer.md` (both folded in here) |
+| Status | Complete. Initiatives A and B merged to main (2026-07-22/23); Initiative C (C1-C5) verified 2026-08-11. Archived here for reference. |
 
 > **How to read this document.** This is the *authoritative specification*: requirements,
 > source-code detail, decisions, invariants, and exact gates live here. The companion doc is a
@@ -1952,8 +1952,8 @@ per C2), skip works at each step = `[escalate→device]`.
 | B5 | verified | agent (local) | Wizard scenarios captured; `OmniVoiceAuditionGif` full-inference workflow verified |
 | B6 | verified (2 items deferred) | agent (local) | 17 scenarios registered; `scenarioVoiceMountedWarning` + `scenarioAlignmentCompareGif` deferred with tracked follow-ups (see Phase B7 note) |
 | B7 | verified | agent (local) | `tests/ui/README.md` scenario catalog + operator workflow; dry-run gate executed 2026-07-23 |
-| C1 | not started | | |
-| C2 | not started | | |
-| C3 | not started | | |
-| C4 | not started | | |
-| C5 | not started | | |
+| C1 | verified | agent (local) | shared `InfoIcon` metric-tooltip seam wired into metric displays, term IDs shared with C3 glossary |
+| C2 | verified | agent (local) | progressive disclosure (guided/expert) seam, one shared toggle not per-panel |
+| C3 | verified | agent (local) | glossary + troubleshooting KB (`metricExplainers.ts`/markdown entries), `openGlossaryAt()` deep-link reachable from UI |
+| C4 | verified | agent (local) | `audio_diagnostics.diagnose_take()` wired into prosody-preview, `/generate/with_metrics`, `/omnivoice/audition`; 8 unit tests green; inline diagnosis chips in `SegmentRackRow.tsx` deep-link to C3 glossary |
+| C5 | verified | agent (local) | `PersonaWizardPage.tsx` 3-step wizard reuses `selectionsFromInstruct()`/store actions from Route A/B; hands off into real Voice Design panel (Qwen or OmniVoice) with defaults prefilled, never a parallel generator; `npm run build`/`lint`/`tsc --noEmit` clean; manual click-through of both hand-off paths verified in browser |

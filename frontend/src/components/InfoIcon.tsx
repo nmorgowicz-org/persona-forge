@@ -6,7 +6,7 @@ import { useAppStore } from '@/store'
 import { GLOSSARY } from '@/lib/glossary'
 
 export function InfoIcon({ text, className }: { text: string; className?: string }) {
-  const setGlossaryOpen = useAppStore((s) => s.setGlossaryOpen)
+  const openGlossaryAt = useAppStore((s) => s.openGlossaryAt)
   const glossaryEntry = GLOSSARY[text]
 
   return (
@@ -29,7 +29,7 @@ export function InfoIcon({ text, className }: { text: string; className?: string
             {glossaryEntry && (
               <button
                 type="button"
-                onClick={() => setGlossaryOpen(true)}
+                onClick={() => openGlossaryAt(text)}
                 className="text-[10px] text-primary underline opacity-80 hover:opacity-100"
               >
                 Learn more in Glossary

@@ -4,18 +4,18 @@
 |---|---|
 | Created | 2026-07-20 |
 | Purpose | Low-context phase router + checkpoint ledger |
-| Authoritative specification | [`20260720-post_merge_initiatives.md`](./20260720-post_merge_initiatives.md) |
+| Authoritative specification | [`POST_MERGE_INITIATIVES.md`](./POST_MERGE_INITIATIVES.md) |
 | Intended reader | A context-free implementing agent (Sonnet sub-agent **or** local Qwen3.6-27B) |
 | Execution model | One phase per agent context; verify the phase gate before advancing |
-| Product implementation status | Not started |
+| Product implementation status | Complete — Initiatives A, B, and C (C1-C5) all verified and merged. Archived here for reference. |
 
 ## Bootstrap prompt for a fresh agent
 
 Give a fresh agent this document and the following instruction:
 
 > Begin with the "First 15 minutes" procedure in
-> `docs/plans/20260720-post_merge_initiatives_execution.md`. Read the referenced sections of the
-> comprehensive plan (`20260720-post_merge_initiatives.md`) for the active phase only. Implement
+> `docs/dev/resolved/POST_MERGE_INITIATIVES_EXECUTION.md`. Read the referenced sections of the
+> comprehensive plan (`POST_MERGE_INITIATIVES.md`) for the active phase only. Implement
 > exactly one phase, satisfy its gate, and record the evidence in the ledger. Do not implement
 > from this companion alone, do not skip a phase's preconditions, do not reopen a frozen decision
 > (comprehensive §3), do not modify unrelated user work, and do not proceed past an
@@ -120,7 +120,7 @@ Line hints refreshed 2026-07-22 (D14/D15 + A4b insertion) — use the heading, n
 
 Refresh hints with:
 ```bash
-grep -nE '^## |^### Phase' docs/plans/20260720-post_merge_initiatives.md
+grep -nE '^## |^### Phase' docs/dev/resolved/POST_MERGE_INITIATIVES.md
 ```
 
 ## 4. Phase router + checkpoint ledger

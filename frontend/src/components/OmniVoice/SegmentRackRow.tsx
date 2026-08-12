@@ -3,8 +3,9 @@ import { Check } from 'lucide-react'
 import * as Tooltip from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { lockInOmniVoiceSegment, type SegmentMeta } from '@/lib/api'
+import { lockInOmniVoiceSegment, type SegmentMeta, type Diagnosis } from '@/lib/api'
 import { lookupFeatureTags } from '@/lib/accentBank'
+import { useAppStore } from '@/store'
 import { ClipPlayer } from './ClipPlayer'
 import { TakeDebugButton } from './TakeDebugButton'
 
@@ -21,6 +22,7 @@ type RackCandidate = {
   flag_reason: string | null
   duration_sec: number | null | undefined
   whisper_transcript: string | null
+  diagnoses?: Diagnosis[]
   match_score: number | null
 }
 
@@ -82,6 +84,7 @@ export function SegmentRackRow({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(row.text)
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set())
+  const openGlossaryAt = useAppStore((s) => s.openGlossaryAt)
   const isCurrent =
     jobStatus === 'running' &&
     jobCurrentSegmentIndex != null &&
@@ -488,6 +491,27 @@ export function SegmentRackRow({
                     initialSpeed={candidateSpeeds[c.candidate_id] ?? 1}
                     onSpeedChange={(speed) => onCandidateSpeedChange(c.candidate_id, speed)}
                   />
+
+                  {c.diagnoses && c.diagnoses.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {c.diagnoses.map((d) => (
+                        <button
+                          key={d.id}
+                          type="button"
+                          onClick={() => openGlossaryAt(d.kb_entry_id)}
+                          className={cn(
+                            'rounded-full border px-1.5 py-0.5 text-[9px] transition-colors hover:opacity-80',
+                            d.severity === 'warning'
+                              ? 'border-warning/50 bg-warning/15 text-warning'
+                              : 'border-border/70 bg-muted/50 text-muted-foreground',
+                          )}
+                          title={d.message}
+                        >
+                          {d.message}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )
             })}

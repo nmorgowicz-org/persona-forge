@@ -6,6 +6,7 @@ import {
 } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Scissors } from 'lucide-react'
+import { Disclose } from './Disclose'
 import {
   auditionOmniVoiceStreaming,
   cancelOmniVoiceAudition,
@@ -1810,18 +1811,20 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
               </Button>
             )}
 
-          <button
-            type="button"
-            data-testid="omnivoice-advanced-toggle"
-            onClick={() =>
-              setShowAdvanced(!showAdvanced)
-            }
-            className="text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
-          >
-            {showAdvanced
-              ? 'Hide advanced'
-              : 'Advanced'}
-          </button>
+          <Disclose level="expert">
+            <button
+              type="button"
+              data-testid="omnivoice-advanced-toggle"
+              onClick={() =>
+                setShowAdvanced(!showAdvanced)
+              }
+              className="text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+            >
+              {showAdvanced
+                ? 'Hide advanced'
+                : 'Advanced'}
+            </button>
+          </Disclose>
           </div>
 
         {/* Live hint while generating */}

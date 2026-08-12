@@ -1,5 +1,6 @@
 import { useMemo, useRef, useCallback, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
+import { Disclose } from './Disclose'
 import { createVoiceDesign, saveVoiceDesign } from '../lib/api'
 import type { EditingVoice } from '../store'
 import {
@@ -509,7 +510,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
             </SelectContent>
           </Select>
 
-          <div className="flex items-center gap-1">
+          <Disclose level="expert" className="flex items-center gap-1">
             <input
               type="number"
               inputMode="numeric"
@@ -529,7 +530,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
             >
               <Dices className="size-4" />
             </button>
-          </div>
+          </Disclose>
 
           <Button
             type="button"

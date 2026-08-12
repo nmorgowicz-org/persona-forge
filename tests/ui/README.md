@@ -62,7 +62,7 @@ on every run — never your real `data/voices`/`data/segments`.
   live audition → lock segment → Stitch Studio → name + insert clips → save → Voice Library
 
 Deferred (documented, not built): `scenarioVoiceMountedWarning` (needs a `seed.mjs` change, see
-`docs/plans/20260720-post_merge_initiatives.md` §Phase B6) and `scenarioAlignmentCompareGif`
+`docs/dev/resolved/POST_MERGE_INITIATIVES.md` §Phase B6) and `scenarioAlignmentCompareGif`
 (on hold, see §8.4b above).
 
 ## Operator loop
