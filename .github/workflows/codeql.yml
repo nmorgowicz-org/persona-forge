@@ -1,0 +1,74 @@
+name: CodeQL
+
+on:
+  pull_request:
+  schedule:
+    # Weekly scan on Monday at 03:00 UTC — catches new CVEs against unchanged code
+    - cron: '0 3 * * 1'
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+  packages: read
+  pull-requests: read
+
+jobs:
+  paths-filter:
+    if: github.event_name == 'schedule' || !startsWith(github.event.pull_request.head.ref, 'release-please--')
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'frontend/src/**'
+              - 'scripts/**'
+              - '.github/codeql/**'
+              - '.github/workflows/**'
+
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    needs: paths-filter
+    if: github.event_name == 'schedule' || !startsWith(github.event.pull_request.head.ref, 'release-please--')
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: python
+            build-mode: none
+          - language: javascript-typescript
+            build-mode: none
+          - language: actions
+            build-mode: none
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: No code changes
+        if: github.event_name != 'schedule' && needs.paths-filter.outputs.code != 'true'
+        run: echo "No code changes detected, skipping CodeQL analysis"
+
+      - name: Initialize CodeQL
+        if: github.event_name == 'schedule' || needs.paths-filter.outputs.code == 'true'
+        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          config-file: .github/codeql/codeql-config.yml
+
+      - name: Perform CodeQL Analysis
+        if: github.event_name == 'schedule' || needs.paths-filter.outputs.code == 'true'
+        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
+        with:
+          category: /language:${{ matrix.language }}
