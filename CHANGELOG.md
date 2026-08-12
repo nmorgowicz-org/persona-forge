@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.0.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v0.24.0...persona-forge-v1.0.0) (2026-08-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* guided-experience teaching layer complete, force 1.0.0 ([#139](https://github.com/nmorgowicz-org/persona-forge/issues/139))
+
+### Features
+
+* **frontend:** extend glossary with a deep-linkable troubleshooting KB (Initiative C3) ([635666b](https://github.com/nmorgowicz-org/persona-forge/commit/635666bf54f484989333d0b5b7bccee2f9d95169))
+* **frontend:** guided persona-creation wizard for new-voice onboarding (Initiative C5) ([635666b](https://github.com/nmorgowicz-org/persona-forge/commit/635666bf54f484989333d0b5b7bccee2f9d95169))
+* **frontend:** inline take-diagnosis chips deep-link into the troubleshooting glossary (Initiative C4) ([635666b](https://github.com/nmorgowicz-org/persona-forge/commit/635666bf54f484989333d0b5b7bccee2f9d95169))
+* **frontend:** progressive disclosure (guided/expert) mode for power-user controls (Initiative C2) ([635666b](https://github.com/nmorgowicz-org/persona-forge/commit/635666bf54f484989333d0b5b7bccee2f9d95169))
+* **frontend:** shared metric-tooltip seam wired to glossary (Initiative C1) ([635666b](https://github.com/nmorgowicz-org/persona-forge/commit/635666bf54f484989333d0b5b7bccee2f9d95169))
+* **frontend:** update-available notification banner backed by GitHub Releases ([635666b](https://github.com/nmorgowicz-org/persona-forge/commit/635666bf54f484989333d0b5b7bccee2f9d95169))
+* guided-experience teaching layer complete, force 1.0.0 ([#139](https://github.com/nmorgowicz-org/persona-forge/issues/139)) ([238e569](https://github.com/nmorgowicz-org/persona-forge/commit/238e569bbedf8fa598c941a2620a35f5b195c208))
+* **runtime:** wire automated take diagnostics into prosody-preview, generate, and omnivoice audition endpoints (Initiative C4) ([635666b](https://github.com/nmorgowicz-org/persona-forge/commit/635666bf54f484989333d0b5b7bccee2f9d95169))
+
+
+### Tests
+
+* add audio_diagnostics unit tests ([635666b](https://github.com/nmorgowicz-org/persona-forge/commit/635666bf54f484989333d0b5b7bccee2f9d95169))
+
+
+### Documentation
+
+* archive completed post-merge initiatives plan to docs/dev/resolved ([635666b](https://github.com/nmorgowicz-org/persona-forge/commit/635666bf54f484989333d0b5b7bccee2f9d95169))
+* document Release Please version bump rules and Release-As override ([635666b](https://github.com/nmorgowicz-org/persona-forge/commit/635666bf54f484989333d0b5b7bccee2f9d95169))
+
 ## [0.24.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v0.23.0...persona-forge-v0.24.0) (2026-08-11)
 
 
