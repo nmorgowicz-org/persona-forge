@@ -117,12 +117,12 @@ class TestLoadPocketTtsModel:
         )
         assert rt.pocket_tts_model is model
 
-    def test_frames_after_eos_defaults_to_four(self, pocket_tts_runtime):
+    def test_frames_after_eos_defaults_to_eight(self, pocket_tts_runtime):
         rt = pocket_tts_runtime
         rt.load_pocket_tts_model(
             language="english", temp=1.2, lsd_decode_steps=5, eos_threshold=-4.0
         )
-        assert rt.pocket_tts_frames_after_eos == 4
+        assert rt.pocket_tts_frames_after_eos == 8
 
     def test_frames_after_eos_custom_value(self, pocket_tts_runtime):
         rt = pocket_tts_runtime
@@ -303,6 +303,48 @@ class TestGeneratePocketTts:
         model = FakeTTSModel()
         with pytest.raises(ValueError, match="Input text is empty"):
             rt.generate_pocket_tts(model, {"ref_path": "x.wav"}, "")
+
+
+class TestTrimPostEosTail:
+    """Regression coverage for the end-of-sentence clipping bug (docs/plans/20260812-*).
+
+    A global relative threshold (3% of the whole clip's peak frame energy) let one loud
+    early burst mask a genuinely quiet closing burst, causing real trailing speech to be
+    trimmed away. The fix combines an absolute floor with a trailing-window relative term.
+    """
+
+    def _two_burst_waveform(self, torch, sr):
+        frame_samples = round(sr / 12.5)
+        loud = torch.ones(frame_samples * 4) * 0.9
+        silence_gap = torch.zeros(frame_samples * 6)
+        quiet = torch.ones(frame_samples * 4) * 0.05
+        return torch.cat([loud, silence_gap, quiet])
+
+    def test_quiet_closing_burst_survives_a_loud_earlier_burst(self, pocket_tts_runtime):
+        torch = pytest.importorskip("torch")
+        rt = pocket_tts_runtime
+        sr = 24000
+        audio = self._two_burst_waveform(torch, sr)
+
+        trimmed = rt._trim_post_eos_tail(audio, sr, frames_after_eos=8)
+
+        frame_samples = round(sr / 12.5)
+        quiet_burst_end_sample = len(audio)
+        # The quiet closing burst must not have been trimmed away.
+        assert len(trimmed) >= quiet_burst_end_sample - frame_samples
+
+    def test_still_trims_true_trailing_silence(self, pocket_tts_runtime):
+        torch = pytest.importorskip("torch")
+        rt = pocket_tts_runtime
+        sr = 24000
+        frame_samples = round(sr / 12.5)
+        speech = torch.ones(frame_samples * 4) * 0.9
+        trailing_silence = torch.zeros(frame_samples * 20)
+        audio = torch.cat([speech, trailing_silence])
+
+        trimmed = rt._trim_post_eos_tail(audio, sr, frames_after_eos=8)
+
+        assert len(trimmed) < len(audio)
 
 
 class TestUnloadPocketTts:

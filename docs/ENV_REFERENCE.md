@@ -146,8 +146,8 @@ Only used when TTS_BACKEND=pocket_tts. Pocket TTS does not use or require REF_TE
 | `POCKET_TTS_TEMP` | `1.2` | Sampling temperature. |
 | `POCKET_TTS_LSD_DECODE_STEPS` | `5` | LSD refinement steps per audio frame. |
 | `POCKET_TTS_EOS_THRESHOLD` | `-4.0` | Logits-based EOS threshold. |
-| `POCKET_TTS_FRAMES_AFTER_EOS` | `4` | Extra audio frames kept after the last speech frame before truncating trailing silence. Each frame ≈ 1/12 s at 24 kHz. Higher → longer tail; lower → more aggressive trim; 0 → trim aggressively. |
-| `POCKET_TTS_NOISE_CLAMP` | unset | Noise magnitude cap (logged; wiring TBD). |
+| `POCKET_TTS_FRAMES_AFTER_EOS` | `8` | Extra audio frames kept after the last speech frame before truncating trailing silence. Each frame = 1/12.5 s at 24 kHz, matching the Mimi codec's frame rate. Higher → longer tail; lower → more aggressive trim; 0 → trim aggressively. Only affects post-generation trimming, not generation itself. |
+| `POCKET_TTS_NOISE_CLAMP` | unset | Noise magnitude cap for the flow-matching noise draw (wired through to `flow_lm`; a tight clamp can bias the model toward earlier EOS emission). |
 | `POCKET_TTS_QUANTIZE` | `0` | Enable int8 quantization (0/1). |
 
 When cloning is available, the mounted REF_AUDIO is automatically registered as a voice named "Mounted reference (Default)" in the library so it can be selected explicitly as well as used as the default.

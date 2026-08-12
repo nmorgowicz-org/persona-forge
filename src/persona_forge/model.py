@@ -431,8 +431,8 @@ def load_model(profile: ModelProfile | None = None):
         eos_threshold = float(os.getenv("POCKET_TTS_EOS_THRESHOLD", "-4.0"))
         noise_clamp_raw = os.getenv("POCKET_TTS_NOISE_CLAMP", "").strip()
         noise_clamp = float(noise_clamp_raw) if noise_clamp_raw else None
-        frames_after_eos_raw = os.getenv("POCKET_TTS_FRAMES_AFTER_EOS", "4").strip()
-        frames_after_eos = int(frames_after_eos_raw) if frames_after_eos_raw else 4
+        frames_after_eos_raw = os.getenv("POCKET_TTS_FRAMES_AFTER_EOS", "8").strip()
+        frames_after_eos = int(frames_after_eos_raw) if frames_after_eos_raw else 8
         quantize = int(os.getenv("POCKET_TTS_QUANTIZE", "0"))
 
         pocket_tts_runtime.load_pocket_tts_model(
