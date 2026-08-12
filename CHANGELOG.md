@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.3](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.2...persona-forge-v1.0.3) (2026-08-12)
+
+
+### Bug Fixes
+
+* restore audioop for pydub, stop version string drift ([#148](https://github.com/nmorgowicz-org/persona-forge/issues/148)) ([d8789e7](https://github.com/nmorgowicz-org/persona-forge/commit/d8789e7863f0b5843407796435fec58f53a44ed5))
+
+
+### Documentation
+
+* **plans:** add llama.cpp native pocket-tts evaluation and pivot plan ([d8789e7](https://github.com/nmorgowicz-org/persona-forge/commit/d8789e7863f0b5843407796435fec58f53a44ed5))
+
 ## [1.0.2](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.1...persona-forge-v1.0.2) (2026-08-12)
 
 
