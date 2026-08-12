@@ -58,9 +58,9 @@ pocket_tts_cloning_available: bool = False
 pocket_tts_cloning_status_message: str = ""
 
 # Extra audio frames to keep after the last speech frame (post-EOS tail control).
-# 1 frame ≈ 1/12 s of audio at 24 kHz (~2000 samples).
-# Controlled by POCKET_TTS_FRAMES_AFTER_EOS env var (default 4).
-pocket_tts_frames_after_eos: int = 4
+# 1 frame = 1/12.5 s of audio at 24 kHz (1920 samples), matching the Mimi codec's frame rate.
+# Controlled by POCKET_TTS_FRAMES_AFTER_EOS env var (default 8).
+pocket_tts_frames_after_eos: int = 8
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +129,7 @@ def load_pocket_tts_model(
         pocket_tts_frames_after_eos = max(0, frames_after_eos)
         print(f"[pocket_tts] frames_after_eos set to {pocket_tts_frames_after_eos}")
     else:
-        pocket_tts_frames_after_eos = 4
+        pocket_tts_frames_after_eos = 8
         print(f"[pocket_tts] frames_after_eos defaulted to {pocket_tts_frames_after_eos}")
 
     print("[pocket_tts] Model loaded and ready.")
@@ -427,32 +427,36 @@ def _trim_post_eos_tail(audio: torch.Tensor, sr: int, frames_after_eos: int) -> 
     """Trim trailing dead air after the last speech frame, respecting frames_after_eos.
 
     Uses a per-frame energy heuristic:
-    - 1 frame ≈ 2000 samples at 24 kHz (12 fps codec).
-    - Finds the last frame where energy exceeds a fraction of the peak frame energy.
+    - 1 frame = 1/12.5 s, matching the Mimi codec's actual frame rate.
+    - Finds the last frame whose energy is above a floor that combines an absolute RMS
+      threshold with a gentle *trailing-window* relative term (median of recent above-floor
+      frames), rather than a fraction of the whole clip's peak. A single loud early sentence
+      must not be able to gate a quiet closing sentence.
     - Keeps up to frames_after_eos extra frames after that point.
     - On any error, returns the original audio unchanged.
     """
     try:
-        import torch.nn.functional as F
-
         if frames_after_eos < 0 or audio.numel() == 0:
             return audio
 
         # Work on CPU float
         x = audio.float().cpu().flatten()
-        frame_samples = max(1, sr // 12)
+        frame_samples = max(1, round(sr / 12.5))
         if len(x) <= frame_samples:
             return audio
 
         # Per-frame energy (L2 norm) via unfold
         frames = x.unfold(0, frame_samples, frame_samples)
         energies = (frames * frames).sum(dim=1).sqrt()
-        peak = energies.max().item()
-        if peak <= 1e-9:
-            return audio
 
-        # Speech threshold: 3% of peak frame energy
-        thresh = peak * 0.03
+        # Absolute floor: speech decay lives well above this; room tone/codec noise below it.
+        abs_floor = 1e-3 * (frame_samples**0.5)
+        above_floor = energies[energies >= abs_floor]
+        # Trailing-window relative term: median of the frames that already clear the floor,
+        # scaled down, so a loud sentence elsewhere in the clip can't mask a quiet ending.
+        rel_floor = float(above_floor.median()) * 0.1 if above_floor.numel() else 0.0
+        thresh = max(abs_floor, rel_floor)
+
         # Last speech frame index (energy above threshold)
         speech_mask = (energies >= thresh).nonzero(as_tuple=True)[0]
         if speech_mask.numel() == 0:
