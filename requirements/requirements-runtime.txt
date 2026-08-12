@@ -17,6 +17,10 @@ transformers==5.12.1
 # its unpinned extras (gradio/tensorboardx/webdataset) are unused by the inference path this
 # service actually calls. pydub is the one genuinely new runtime dependency.
 pydub
+# pydub imports stdlib audioop, which Python 3.13 removed (PEP 594); this backport restores it.
+# Without it, any pydub codepath (e.g. OmniVoice audition trimming) raises
+# ModuleNotFoundError: No module named 'pyaudioop'.
+audioop-lts
 pyloudnorm
 
 # persona_forge/asr_check.py: fast no-speech gate layered on top of audio_post.analyze_take for
