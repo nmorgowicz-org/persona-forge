@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.5](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.4...persona-forge-v1.0.5) (2026-08-12)
+
+
+### Bug Fixes
+
+* **dev:** rebuild persona-forge:local image in dev-deploy.sh instead of only recreating the container ([659a328](https://github.com/nmorgowicz-org/persona-forge/commit/659a32831ef28cef6948f6655c25e89a021f9c8e))
+
+
+### Documentation
+
+* archive llama.cpp pocket-tts pivot plan as no-go-for-now ([659a328](https://github.com/nmorgowicz-org/persona-forge/commit/659a32831ef28cef6948f6655c25e89a021f9c8e))
+
 ## [1.0.4](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.3...persona-forge-v1.0.4) (2026-08-12)
 
 
