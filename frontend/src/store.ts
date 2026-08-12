@@ -9,10 +9,15 @@ import type {
   VoiceMeta,
 } from './lib/api'
 import { applyTheme, loadStoredTheme, type Theme } from './lib/theme'
+import {
+  loadStoredExperienceLevel,
+  storeExperienceLevel,
+  type ExperienceLevel,
+} from './lib/experienceLevel'
 import type { ChipSelections } from './lib/voiceDesignChips'
 import type { OmniVoiceSelections } from './lib/omnivoiceChips'
 
-export type Page = 'speak' | 'voice-design' | 'voice-library' | 'stitch-studio' | 'integrations' | 'runtime'
+export type Page = 'wizard' | 'speak' | 'voice-design' | 'voice-library' | 'stitch-studio' | 'integrations' | 'runtime'
 export type DesignEngine = 'qwen' | 'omnivoice'
 
 export interface ActivityStatus {
@@ -91,6 +96,9 @@ interface StoreState {
   // ---- Core ----
   page: Page
   theme: Theme
+  // Global progressive-disclosure preference: 'guided' hides power-user controls behind
+  // Disclose (see components/Disclose.tsx) without unmounting them; 'expert' shows everything.
+  uiExperienceLevel: ExperienceLevel
   modelLoaded: boolean
   serviceStarted: boolean
   loadingMessage: string | null
@@ -130,6 +138,7 @@ interface StoreState {
 
   setPage: (page: Page) => void
   setTheme: (theme: Theme) => void
+  setUiExperienceLevel: (level: ExperienceLevel) => void
   setModelLoaded: (v: boolean) => void
   setServiceStarted: (v: boolean) => void
   setLoadingMessage: (v: string | null) => void
@@ -150,6 +159,10 @@ interface StoreState {
   setActivityStatus: (v: ActivityStatus | null) => void
   glossaryOpen: boolean
   setGlossaryOpen: (v: boolean) => void
+  // Term-ID (glossary key or troubleshooting KB id) to scroll/highlight to when the
+  // glossary opens — set by InfoIcon "Learn more" links and diagnosis chips (C4).
+  glossaryFocusId: string | null
+  openGlossaryAt: (id: string | null) => void
 
   // ---- VoiceDesign (Qwen) ----
   vdSelections: ChipSelections
@@ -318,11 +331,13 @@ interface StoreState {
 
 const initialTheme = loadStoredTheme()
 applyTheme(initialTheme)
+const initialExperienceLevel = loadStoredExperienceLevel()
 
 export const useAppStore = create<StoreState>((set) => ({
   // -- Core --
   page: 'speak',
   theme: initialTheme,
+  uiExperienceLevel: initialExperienceLevel,
   modelLoaded: false,
   serviceStarted: false,
   loadingMessage: null,
@@ -353,6 +368,10 @@ export const useAppStore = create<StoreState>((set) => ({
     applyTheme(theme)
     set({ theme })
   },
+  setUiExperienceLevel: (uiExperienceLevel) => {
+    storeExperienceLevel(uiExperienceLevel)
+    set({ uiExperienceLevel })
+  },
   setModelLoaded: (modelLoaded) => set({ modelLoaded }),
   setServiceStarted: (serviceStarted) => set({ serviceStarted }),
   setLoadingMessage: (loadingMessage) => set({ loadingMessage }),
@@ -372,6 +391,8 @@ export const useAppStore = create<StoreState>((set) => ({
   setActivityStatus: (activityStatus) => set({ activityStatus }),
   setGlossaryOpen: (v: boolean) => set({ glossaryOpen: v }),
   glossaryOpen: false,
+  glossaryFocusId: null,
+  openGlossaryAt: (id) => set({ glossaryOpen: true, glossaryFocusId: id }),
   setRuntimeConfig: (patch) => set(patch),
 
    setRefTextValidation: (refTextValidation) => set({ refTextValidation }),

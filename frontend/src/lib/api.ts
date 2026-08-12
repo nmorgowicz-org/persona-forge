@@ -702,6 +702,7 @@ export async function warmVoice(voiceId: string): Promise<void> {
 
 export interface HealthState {
   status: string
+  version?: string
   model_loaded: boolean
   // True forever after the first successful load, even through later idle-unload cycles —
   // distinguishes true cold-boot loading from a transparent lazy-reload-on-next-request idle.
@@ -747,6 +748,13 @@ export interface OmniVoiceAuditionParams {
   minMatchScore?: number | null
 }
 
+export interface Diagnosis {
+  id: string
+  severity: 'info' | 'warning'
+  message: string
+  kb_entry_id: string
+}
+
 export interface OmniVoiceCandidate {
   candidate_id: string
   sample_rate: number
@@ -760,6 +768,8 @@ export interface OmniVoiceCandidate {
   /** Fuzzy match score between Whisper transcript and the reference text [0–1].
    * Higher is better; null if not computed. */
   match_score: number | null
+  /** Best-effort plain-language warnings from audio_diagnostics.diagnose_take(). */
+  diagnoses?: Diagnosis[]
 }
 
 export interface OmniVoiceAuditionResult {

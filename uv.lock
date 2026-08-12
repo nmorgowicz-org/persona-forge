@@ -1102,7 +1102,7 @@ wheels = [
 
 [[package]]
 name = "persona-forge"
-version = "0.23.0"
+version = "0.24.0"
 source = { virtual = "." }
 dependencies = [
     { name = "accelerate" },

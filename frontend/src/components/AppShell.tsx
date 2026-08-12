@@ -3,14 +3,18 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   AudioLines,
+  BookOpen,
   ChevronLeft,
   ChevronRight,
+  GraduationCap,
   Layers,
   Mic2,
   Palette,
   Plug,
   Settings2,
   Sparkles,
+  Wand2,
+  Wrench,
 } from 'lucide-react'
 import {
   Sidebar,
@@ -32,6 +36,7 @@ import { ActivityStatusBar } from '@/components/ui/ActivityStatusBar'
 import { Separator } from '@/components/ui/separator'
 import { SwapBanner } from '@/components/SwapBanner'
 import { HealthStatusBanner } from '@/components/HealthStatusBanner'
+import { UpdateAvailableBanner } from '@/components/UpdateAvailableBanner'
 import { getRuntimeConfig, getHealth } from '@/lib/api'
 import { type Page, useAppStore } from '@/store'
 import { THEMES, type Theme } from '@/lib/theme'
@@ -52,6 +57,7 @@ const SWATCH_LABEL: Record<Theme, string> = {
 }
 
 const NAV_ITEMS: { page: Page; label: string; icon: typeof Mic2; description: string }[] = [
+  { page: 'wizard', label: 'New Voice (Guided)', icon: Wand2, description: 'Answer a few questions, land in the right editor' },
   { page: 'speak', label: 'Speak', icon: AudioLines, description: 'Text to speech' },
   { page: 'voice-design', label: 'Voice Design', icon: Sparkles, description: 'Craft a new voice' },
   { page: 'voice-library', label: 'Voice Library', icon: Mic2, description: 'Saved voices' },
@@ -128,6 +134,75 @@ function ThemePaletteBar() {
         )
       })}
     </div>
+  )
+}
+
+function ExperienceLevelToggle() {
+  const level = useAppStore((s) => s.uiExperienceLevel)
+  const setLevel = useAppStore((s) => s.setUiExperienceLevel)
+  const isExpert = level === 'expert'
+
+  return (
+    <button
+      type="button"
+      data-testid="experience-level-toggle"
+      onClick={() => setLevel(isExpert ? 'guided' : 'expert')}
+      title={
+        isExpert
+          ? 'Expert mode: all power-user controls visible. Click for Guided mode.'
+          : 'Guided mode: power-user controls hidden. Click for Expert mode.'
+      }
+      className="flex items-center gap-1.5 rounded-md border border-border/70 px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+    >
+      {isExpert ? <Wrench className="size-3" /> : <GraduationCap className="size-3" />}
+      {isExpert ? 'Expert' : 'Guided'}
+    </button>
+  )
+}
+
+function ExperienceLevelButton() {
+  const level = useAppStore((s) => s.uiExperienceLevel)
+  const setLevel = useAppStore((s) => s.setUiExperienceLevel)
+  const isExpert = level === 'expert'
+
+  return (
+    <SidebarMenuButton
+      data-testid="experience-level-toggle-collapsed"
+      onClick={() => setLevel(isExpert ? 'guided' : 'expert')}
+      tooltip={isExpert ? 'Expert mode (click for Guided)' : 'Guided mode (click for Expert)'}
+    >
+      {isExpert ? <Wrench className="size-4" /> : <GraduationCap className="size-4" />}
+    </SidebarMenuButton>
+  )
+}
+
+function GlossaryLink() {
+  const openGlossaryAt = useAppStore((s) => s.openGlossaryAt)
+
+  return (
+    <button
+      type="button"
+      data-testid="glossary-open-link"
+      onClick={() => openGlossaryAt(null)}
+      className="flex items-center gap-1.5 self-start text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+    >
+      <BookOpen className="size-3" />
+      Glossary &amp; Troubleshooting
+    </button>
+  )
+}
+
+function GlossaryButton() {
+  const openGlossaryAt = useAppStore((s) => s.openGlossaryAt)
+
+  return (
+    <SidebarMenuButton
+      data-testid="glossary-open-button"
+      onClick={() => openGlossaryAt(null)}
+      tooltip="Glossary & Troubleshooting"
+    >
+      <BookOpen className="size-4" />
+    </SidebarMenuButton>
   )
 }
 
@@ -212,31 +287,64 @@ function ThemePaletteButton() {
   )
 }
 
+// Health is re-polled on this interval so the sidebar's version reflects a backend swap
+// (see SwapBanner) or redeploy without requiring a full page reload.
+const VERSION_POLL_INTERVAL_MS = 30_000
+
 function SidebarVersionDisplay() {
   const [version, setVersion] = useState<string | null>(null)
   const [error, setError] = useState<boolean>(false)
 
   useEffect(() => {
-    getHealth()
-      .then((state) => {
-        // Health check response removed from logs
-        const s = state as any
-        const v = s.version || s.openvino?.version
-        setVersion(v as string | null)
-      })
-      .catch((err) => {
-        console.error('Failed to fetch version:', err)
-        setError(true)
-      })
+    let cancelled = false
+    const poll = () => {
+      getHealth()
+        .then((state) => {
+          if (cancelled) return
+          const s = state as any
+          const v = s.version || s.openvino?.version
+          setVersion(v as string | null)
+          setError(false)
+        })
+        .catch((err) => {
+          if (cancelled) return
+          console.error('Failed to fetch version:', err)
+          setError(true)
+        })
+    }
+    poll()
+    const id = setInterval(poll, VERSION_POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
   }, [])
 
-  if (error) return <div className="text-center text-[11px] text-destructive">vError</div>
-  if (!version) return <div className="text-center text-[11px] text-muted-foreground">vLoading...</div>
+  const label = error ? 'vError' : version ? `v${version}` : 'vLoading...'
+  const colorClass = error ? 'text-destructive' : version ? 'text-primary' : 'text-muted-foreground'
 
   return (
-    <div className="text-center text-[11px] font-bold text-primary">
-      v{version}
-    </div>
+    <>
+      {/* Expanded: full "vX.Y.Z" text */}
+      <div
+        className={cn(
+          'group-data-[collapsible=icon]:hidden text-center text-[11px] font-bold',
+          colorClass,
+        )}
+      >
+        {label}
+      </div>
+      {/* Collapsed: compact badge, full version on hover */}
+      <div
+        title={label}
+        className={cn(
+          'hidden group-data-[collapsible=icon]:flex justify-center text-[9px] font-bold leading-none',
+          colorClass,
+        )}
+      >
+        {error ? '!' : version ? `v${version.split('.')[0]}` : '…'}
+      </div>
+    </>
   )
 }
 
@@ -309,15 +417,21 @@ export function AppShell({ children }: { children: ReactNode }) {
         <SidebarFooter className="flex flex-col gap-2 px-3 py-3">
           {/* Expanded: inline color palette bar + short note */}
           <div className="group-data-[collapsible=icon]:hidden flex flex-col gap-1.5">
-            <ThemePaletteBar />
+            <div className="flex items-center justify-between gap-2">
+              <ThemePaletteBar />
+              <ExperienceLevelToggle />
+            </div>
             <p className="text-[10px] leading-tight text-muted-foreground">
               Voices designed here are served over the OpenAI-compatible endpoint for Hermes and
               other apps.
             </p>
+            <GlossaryLink />
           </div>
-          {/* Collapsed: theme button (same size as expand button) */}
-           <div className="hidden group-data-[collapsible=icon]:flex justify-center">
+          {/* Collapsed: theme + experience-level + glossary buttons (same size as expand button) */}
+           <div className="hidden group-data-[collapsible=icon]:flex flex-col items-center gap-1">
              <ThemePaletteButton />
+             <ExperienceLevelButton />
+             <GlossaryButton />
            </div>
              <SidebarCollapseButton />
              <SidebarVersionDisplay />
@@ -335,6 +449,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="text-[11px] text-muted-foreground">{active?.description}</span>
           </div>
         </header>
+        <UpdateAvailableBanner />
         <HealthStatusBanner />
         <PocketTTSWarningBanner />
         <SwapBanner />

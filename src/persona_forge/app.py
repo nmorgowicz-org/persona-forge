@@ -22,6 +22,7 @@ import soundfile as sf
 from flask import Flask, Response, jsonify, request, send_from_directory, send_file
 
 from persona_forge import (
+    audio_diagnostics,
     audio_style,
     model,
     omnivoice_engine,
@@ -838,6 +839,12 @@ def voices_preview_prosody(voice_id: str):
         logger.warning(f"Preview analysis failed: {exc}")
         metrics = {"error": f"analysis failed: {exc}"}
 
+    try:
+        diagnoses = [d.to_dict() for d in audio_diagnostics.diagnose_take(metrics)]
+    except Exception as exc:
+        logger.warning(f"Take diagnostics failed: {exc}")
+        diagnoses = []
+
     # 2. Encode audio to base64
     buf = io.BytesIO()
     sf.write(buf, wav, sr, format="WAV", subtype="PCM_16")
@@ -846,6 +853,7 @@ def voices_preview_prosody(voice_id: str):
     return jsonify({
         "audio_base64": audio_base64,
         "metrics": metrics,
+        "diagnoses": diagnoses,
         "sample_rate": sr,
         "sample_count": int(wav.size),
         "plan": plan,
@@ -1194,7 +1202,7 @@ def _dispatch_audition_jobs():
                         diverse_candidates,
                         postprocess_output=postprocess_output,
                         min_match_score=min_match_score,
-                        on_candidate_complete=_candidate_callback_factory(job_id),
+                        on_candidate_complete=_candidate_callback_factory(job_id, guidance_scale),
                         cancel_event=cancel_event,
                     ).result(timeout=1800)
                     with _OV_AUDITION_JOBS_LOCK:
@@ -1222,11 +1230,20 @@ def _dispatch_audition_jobs():
             _OV_AUDITION_DISPATCH_IN_PROGRESS = False
 
 
-def _encode_omnivoice_candidate(wav, sr, flagged, flag_reason, whisper_transcript, match_score):
+def _encode_omnivoice_candidate(
+    wav, sr, flagged, flag_reason, whisper_transcript, match_score, guidance_scale=None
+):
     candidate_id = uuid.uuid4().hex
     wav_bytes, _ = _encode(wav, sr, "wav")
     _omnivoice_candidates[candidate_id] = (wav, sr)
     duration_sec = len(wav) / sr if sr > 0 else 0.0
+    try:
+        metrics = audio_style.analyze_reference(wav, sr)
+        diagnoses = [
+            d.to_dict() for d in audio_diagnostics.diagnose_take(metrics, guidance_scale=guidance_scale)
+        ]
+    except Exception:
+        diagnoses = []
     return {
         "candidate_id": candidate_id,
         "sample_rate": sr,
@@ -1236,6 +1253,7 @@ def _encode_omnivoice_candidate(wav, sr, flagged, flag_reason, whisper_transcrip
         "flag_reason": None if flag_reason == "ok" else flag_reason,
         "whisper_transcript": (whisper_transcript or "").strip() or None,
         "match_score": round(float(match_score), 2) if match_score is not None else None,
+        "diagnoses": diagnoses,
     }
 
 
@@ -1259,14 +1277,14 @@ def _find_candidate_job(candidate_id: str):
     return None, None, None, None
 
 
-def _candidate_callback_factory(job_id: str):
+def _candidate_callback_factory(job_id: str, guidance_scale=None):
     # Build per-candidate callback that updates job state as soon as each candidate is
     # ready, so the frontend can show/play a take without waiting for the rest of that
     # segment's candidates (or the whole job) to finish.
     def _cb(seg_idx, cand_idx, text, candidate):
         wav, sr, flagged, flag_reason, whisper_transcript, match_score = candidate
         cand_payload = _encode_omnivoice_candidate(
-            wav, sr, flagged, flag_reason, whisper_transcript, match_score
+            wav, sr, flagged, flag_reason, whisper_transcript, match_score, guidance_scale
         )
         with _OV_AUDITION_JOBS_LOCK:
             job = _OV_AUDITION_JOBS.get(job_id)
@@ -2299,11 +2317,21 @@ def generate_with_metrics():
     except Exception as exc:
         metrics = {"error": f"analysis failed: {exc}"}
 
+    try:
+        diagnoses = [
+            d.to_dict()
+            for d in audio_diagnostics.diagnose_take(metrics, guidance_scale=data.get("guidance_scale"))
+        ]
+    except Exception as exc:
+        logger.warning(f"Take diagnostics failed: {exc}")
+        diagnoses = []
+
     response_payload = {
         "audio_base64": base64.b64encode(audio).decode("ascii"),
         "media_type": media_type,
         "seed": resolved_seed,
         "metrics": metrics,
+        "diagnoses": diagnoses,
     }
     if job_id:
         response_payload["job_id"] = job_id

@@ -264,9 +264,20 @@ Use Conventional Commits (`feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `bu
 Requirements:
 - Must start with `type:` or `type(scope):` — no leading spaces, no emoji unless requested, no markdown in the title.
 - Must not contain prefixes, extra characters, or malformed type tokens.
-- Release Please uses a standard Conventional Commits parser (release-type: node); ensure the title parses cleanly.
+- Release Please uses a standard Conventional Commits parser (release-type: simple); ensure the title parses cleanly.
 
 So user-facing changes need a `feat:` or `fix:` title.
+
+**Version bump rules** (squash-merge, one PR = one evaluated commit):
+- `feat:` in PR title → minor
+- `fix:` in PR title → patch
+- `feat!:` in PR title OR `BREAKING CHANGE:` footer in PR body → major
+  - Example: `feat(runtime)!: drop legacy /v1/generate endpoint`
+  - Or include at the bottom of the PR body: `BREAKING CHANGE: legacy /v1/generate endpoint removed, use /v1/audio/speech`
+
+**Forcing an exact version:** add a `Release-As: X.Y.Z` trailer to a merged commit message to force
+that exact version regardless of commit type — this is checked before any breaking/feat
+heuristics, so it's the reliable way to land a specific version (e.g. `Release-As: 1.0.0`).
 
 **Scopes** (choose the one that matches your change; omit only if obvious):
 
