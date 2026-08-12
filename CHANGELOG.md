@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.0.6](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.5...persona-forge-v1.0.6) (2026-08-12)
+
+
+### Bug Fixes
+
+* **model:** ensure Base model is loaded before streaming Pocket-TTS ([80e6795](https://github.com/nmorgowicz-org/persona-forge/commit/80e67955697b78ecf75eaabc9822f639a40dae3f))
+
+
+### Documentation
+
+* archive llama.cpp pocket-tts pivot plan Phase 1 write-up ([80e6795](https://github.com/nmorgowicz-org/persona-forge/commit/80e67955697b78ecf75eaabc9822f639a40dae3f))
+
+
+### Miscellaneous Chores
+
+* **deps:** sync uv.lock self-package version with pyproject.toml ([80e6795](https://github.com/nmorgowicz-org/persona-forge/commit/80e67955697b78ecf75eaabc9822f639a40dae3f))
+
 ## [1.0.5](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.4...persona-forge-v1.0.5) (2026-08-12)
 
 
