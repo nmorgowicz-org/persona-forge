@@ -17,8 +17,8 @@
 | Phase | Status | Gate |
 |---|---|---|
 | 0 — baseline measurement on the current torch backend | **Done** (2026-08-12) | `docs/screenshots/artifacts/llamacpp-spike/baseline.md` — RTF ~0.13x on Apple M5 Max (CPU-only), real production voice `vd_32eb29256158` incl. its "Calm 1.0x" prosody variant |
-| 1 — upstream capability spike (time-boxed, 1 day) | Not started | `llama-server` synthesizes a test prompt from a converted pocket-tts GGUF |
-| 2 — voice-cloning feasibility spike + go/no-go writeup | Not started | **Nick decision.** Cloning parity answered yes/no with evidence |
+| 1 — upstream capability spike (time-boxed, 1 day) | **Stopped — no-go for now** (2026-08-12) | Source-read (not run) `b10369`'s `tools/tts`, `tools/mtmd`, `tools/server`; see write-up below. Nick's call: revisit later, not pursuing Phase 2 today |
+| 2 — voice-cloning feasibility spike + go/no-go writeup | Not started (blocked on revisiting Phase 1) | **Nick decision.** Cloning parity answered yes/no with evidence |
 | 3 — model acquisition + conversion pipeline | Not started | Reproducible `scripts/convert_pocket_tts_gguf.sh` |
 | 4 — `llama_cpp_pocket_tts_runtime.py` adapter | Not started | Adapter satisfies the §2.6 contract against a fake server |
 | 5 — backend dispatch + server lifecycle | Not started | `TTS_BACKEND=llama_pocket_tts` boots and generates end-to-end |
@@ -459,6 +459,69 @@ Work entirely in a scratch dir outside the repo (e.g. `/tmp/llamacpp-spike/`).
 
 Gate: an audible, correct WAV from `llama-server` + an RTF number comparable to Phase 0.
 **If this cannot be reached inside the time box, stop and write it up as a no-go-for-now.**
+
+#### Phase 1 write-up (2026-08-12) — stopped before Phase 2, no-go for now
+
+Step 2 (source-reading) was completed against the real `b10369` tag; steps 3-6 (actual
+conversion + generation run) were **not** attempted — Nick called a stop once step 2's findings
+were in, before spending budget on a model conversion. Prebuilt `llama-tts`/`llama-server`
+binaries for macOS arm64 were downloaded and spot-checked (`--version`, `--help`) to confirm the
+source matches what ships; nothing was compiled from source.
+
+**Q4 — server endpoint/schema: none exists.** TTS is not wired into `llama-server`'s HTTP API in
+`b10369` (`tools/server/server.cpp`'s route table has no audio-generation route; only
+`/v1/audio/transcriptions`, which is STT). The only interface to pocket-tts generation is
+`llama-tts`, a separate CLI shipped in the same release archive as `llama-server`. Its own source
+comment: *"Please note that this is NOT a production-ready binary. It is a playground for trying
+TTS support in llama.cpp."* Confirmed present in the prebuilt macOS arm64 asset alongside
+`llama-server`.
+
+**Q5 — streaming: no**, at the CLI/helper-API level. `llama-tts` buffers the full generation
+(`step_gen()` loop accumulates internally) and writes one WAV file via a single `fwrite()` at the
+end. However: generation genuinely happens frame-by-frame internally
+(`mtmd_gen_audio_process()` per frame in `mtmd-helper-gen.cpp`), and the pipeline already
+auto-chunks long text into re-primed segments (`split_chunks()`, each chunk restarts from the
+voice conditioning) — so a custom wrapper calling `mtmd_gen_audio_process()` directly (the public
+C API `mtmd.h` exposes, not a private internal) could plausibly stream per-frame/per-chunk PCM
+instead of waiting for the buffered helper's `get_output()`. This is scoped custom-engineering
+work, not a rewrite — see the "why we're stopping anyway" note below.
+
+**Q6 — output format:** WAV, mono, 16-bit PCM LE (`MTMD_HELPER_GEN_AUDIO_OUTTYPE_WAV`); sample
+rate reported dynamically per loaded model/mmproj, not hardcoded.
+
+**Q7 — settable hyperparameters:** at the public helper/CLI layer, only `top_k`, `top_p`, `seed`,
+and `-n` (frame cap). `temp`, `frames_after_eos`, and `pad_short_text` — the closest llama.cpp
+analogues to persona-forge's torch-side prosody knobs — exist as real fields
+(`pockettts_pack_settings` in `mtmd-helper-gen.cpp`) but are **not** caller-overridable; they're
+selected automatically from a hardcoded per-GGUF-variant lookup table
+(`{"english", "english_2026-01", "english_2026-04", "french_24l"}` → fixed `temp`/
+`frames_after_eos`/`pad_short_text` tuples baked into llama.cpp itself, independent of and not
+currently comparable to persona-forge's existing prosody presets, which have only ever been
+validated against the torch reference-voice path, per Nick). Overriding these from a caller would
+require a source patch, not just a wrapper — the struct fields exist (`mtmd_gen_inp.temp` is
+public in `mtmd.h`) but the plumbing from pack lookup to that field is hardcoded.
+
+**Q9 — chunking: yes, automatic.** `split_chunks()` in `mtmd-helper-gen.cpp` splits long input
+into sentence-ish chunks, each restarting from the voice embedding to keep voice consistency
+across chunks — not a gap, a real (if opaque) existing behavior.
+
+**Voice cloning (Q1-adjacent):** `mtmd_helper_gen_audio_inp.speaker_ref` (a bitmap loaded from an
+arbitrary user audio file) is a first-class, required field for pocket-tts — the README states
+the model "produces almost no audio without it." `conversion/pockettts.py`'s
+`set_gguf_parameters()` writes a full audio-encoder projector into the mmproj
+(`add_clip_has_audio_encoder(True)`, `POCKETTTS_SPKENC` type) — strong source-level evidence
+cloning is real, though not yet empirically run (that was Phase 2's job, not reached).
+
+**Why we're stopping here rather than proceeding to Phase 2:** none of the above is a hard
+architectural wall — the missing pieces (streaming, an HTTP layer, caller-settable prosody knobs)
+all look like bounded, legitimate custom-engineering work against `libmtmd`'s public C API. The
+decisive factor is that this API is explicitly labeled experimental with "breaking changes
+expected" by its own maintainers (`mtmd.h`'s own comments on the audio-gen section: *"EXPERIMENTAL
+API for audio generation, subjected to breaking changes"*). Nick's call: any custom code written
+against it today would likely need a minor-to-major overhaul within weeks to months as upstream
+iterates — not worth committing to right now. **Revisit this plan once llama.cpp's pocket-tts
+audio-gen API stabilizes** (watch for it landing in `llama-server`'s HTTP routes, or for the
+`EXPERIMENTAL` marker being dropped from `mtmd.h`) before attempting Phase 2.
 
 ### Phase 2 — Upstream capability spike, part 2: voice cloning + go/no-go (≤1 day, time-boxed)
 
