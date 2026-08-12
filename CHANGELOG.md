@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.0.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.0...persona-forge-v1.0.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **ci:** always trigger e2e workflow so it satisfies required status check ([#142](https://github.com/nmorgowicz-org/persona-forge/issues/142)) ([5edb5e9](https://github.com/nmorgowicz-org/persona-forge/commit/5edb5e9f98ce0cabc9a928cf8bfd84a932eadf71))
+* **tests:** correct stale applied_steps assertions in test_run_generate ([ece30c6](https://github.com/nmorgowicz-org/persona-forge/commit/ece30c645684ce8f2ce69856d7267f07b6592800))
+
+
+### Continuous Integration
+
+* add CodeQL analysis workflow ([#141](https://github.com/nmorgowicz-org/persona-forge/issues/141)) ([19aee43](https://github.com/nmorgowicz-org/persona-forge/commit/19aee43ecc54410080bc6096c7422b9148eb9143))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump torch from 2.12.1 to 2.13.0 ([#140](https://github.com/nmorgowicz-org/persona-forge/issues/140)) ([5cbbf61](https://github.com/nmorgowicz-org/persona-forge/commit/5cbbf61c8f2a70f5bd3e03a30e0ba5a5779e74fd))
+* **scripts:** add verify_dependency_bump.sh for torch/transformers bump verification ([ece30c6](https://github.com/nmorgowicz-org/persona-forge/commit/ece30c645684ce8f2ce69856d7267f07b6592800))
+
 ## [1.0.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v0.24.0...persona-forge-v1.0.0) (2026-08-12)
 
 
