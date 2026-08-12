@@ -16,7 +16,7 @@
 
 | Phase | Status | Gate |
 |---|---|---|
-| 0 — baseline measurement on the current torch backend | Not started | Recorded RTF + WAVs committed to the artifacts dir |
+| 0 — baseline measurement on the current torch backend | **Done** (2026-08-12) | `docs/screenshots/artifacts/llamacpp-spike/baseline.md` — RTF ~0.13x on Apple M5 Max (CPU-only), real production voice `vd_32eb29256158` incl. its "Calm 1.0x" prosody variant |
 | 1 — upstream capability spike (time-boxed, 1 day) | Not started | `llama-server` synthesizes a test prompt from a converted pocket-tts GGUF |
 | 2 — voice-cloning feasibility spike + go/no-go writeup | Not started | **Nick decision.** Cloning parity answered yes/no with evidence |
 | 3 — model acquisition + conversion pipeline | Not started | Reproducible `scripts/convert_pocket_tts_gguf.sh` |
