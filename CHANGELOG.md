@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.2](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.1...persona-forge-v1.0.2) (2026-08-12)
+
+
+### Bug Fixes
+
+* **pocket_tts:** stop trimming real trailing speech on quiet sentence endings ([#145](https://github.com/nmorgowicz-org/persona-forge/issues/145)) ([ba24a7f](https://github.com/nmorgowicz-org/persona-forge/commit/ba24a7f3514c1a9a16dab19c01512a1d40c3d2ab))
+
 ## [1.0.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.0...persona-forge-v1.0.1) (2026-08-12)
 
 
