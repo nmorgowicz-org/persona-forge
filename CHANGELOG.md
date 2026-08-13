@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.7](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.6...persona-forge-v1.0.7) (2026-08-13)
+
+
+### Documentation
+
+* **plans:** close out and archive hermes TTS + rebrand plans ([#156](https://github.com/nmorgowicz-org/persona-forge/issues/156)) ([de68c7a](https://github.com/nmorgowicz-org/persona-forge/commit/de68c7a40465ba97d165e9b8219a28cfe1f04ab8))
+
 ## [1.0.6](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.5...persona-forge-v1.0.6) (2026-08-12)
 
 
