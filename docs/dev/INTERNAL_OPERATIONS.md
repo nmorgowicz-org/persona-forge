@@ -20,7 +20,7 @@ Internal, host-specific notes. Not intended as public deployment documentation.
 - Stop (don’t touch unrelated services):
   - `docker compose -f ~/docker/docker-compose.yml down persona-forge`
 - Pull new image (example):
-  - `export QWEN3_TTS_IMAGE=ghcr.io/nmorgowicz-org/persona-forge:<sha>`
+  - `export PERSONA_FORGE_IMAGE=ghcr.io/nmorgowicz-org/persona-forge:<sha>`
   - `docker compose -f ~/docker/docker-compose.yml pull persona-forge`
   - `docker compose -f ~/docker/docker-compose.yml up -d persona-forge`
 - Export (stop service first if constrained):

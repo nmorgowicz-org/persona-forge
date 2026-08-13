@@ -11,18 +11,23 @@
 
 ## Execution status
 
+**Closed out 2026-08-12.** All phases landed — not through this plan's tracked
+phase-by-phase execution (this status table was never updated as the work
+happened across other sessions/commits), but verified complete against every
+phase's own gate on 2026-08-12:
+
 | Phase | Status | Evidence / gate |
 |---|---|---|
-| 0 — source-backed inventory | Not started | |
-| 1 — Python module + package rename | Not started | |
-| 2 — backend-default verification + doc correction (D12) | Not started | |
-| 3 — environment variable identity | Not started | |
-| 4 — this repo's Docker/Compose identity | Not started | |
-| 5 — docs/README overhaul | Not started | |
-| 6 — dev-deploy helper script | Not started | |
-| 7 — final repo-side acceptance sweep | Not started | |
-| 8 — GitHub repository rename | Not started | requires Nick, interactive |
-| 9 — dockermisc1 host migration | Not started | requires Nick, interactive, sudo |
+| 0 — source-backed inventory | Done | superseded by direct verification below |
+| 1 — Python module + package rename | Done | `src/persona_forge` exists; `pyproject.toml` name is `persona-forge`; zero non-excluded `qwen3_tts` hits in `*.py` (remaining hits are the third-party `qwen_tts` package's own module paths, excluded per §3.1) |
+| 2 — backend-default verification + doc correction (D12) | Done | `README.md` already leads with pocket-tts/OmniVoice as primary, OpenVINO framed opt-in |
+| 3 — environment variable identity | Done | `PERSONA_FORGE_*` in use repo-wide; one stale `QWEN3_TTS_IMAGE` in `docs/dev/INTERNAL_OPERATIONS.md` fixed alongside this close-out |
+| 4 — this repo's Docker/Compose identity | Done | `compose.yml` project/service/container/image all named `persona-forge` |
+| 5 — docs/README overhaul | Done | see Phase 2 evidence |
+| 6 — dev-deploy helper script | Done | `scripts/dev-deploy.sh` exists |
+| 7 — final repo-side acceptance sweep | Done | remaining repo-wide `qwen3-tts`/`qwen3_tts` hits are historical prose (`CHANGELOG.md`, other `docs/plans/*.md`, `docs/dev/resolved/*.md`) or third-party package references, both explicitly excluded per §3.1 |
+| 8 — GitHub repository rename | Done | `gh repo view` confirms `nmorgowicz-org/persona-forge` |
+| 9 — dockermisc1 host migration | Done | production `docker-compose.yml` on dockermisc1 mounts `/var/data/autopirate/persona-forge/*`; the old `/var/data/autopirate/qwen3-tts-new/` dir + tarball are unused leftovers on disk, a disk-cleanup item, not a blocker |
 
 ## 1. Purpose and execution contract
 
