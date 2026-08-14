@@ -11,7 +11,7 @@ dependencies = [
   # versions here (CVE-2026-1839) so they must stay declared at this level.
   "accelerate",
   "librosa",
-  "transformers==5.12.1",
+  "transformers==5.15.0",
   "torch==2.13.0",
   "torchaudio==2.11.0",
   # OmniVoice (Persona Forge accent-design engine) — declared deps already match the pins

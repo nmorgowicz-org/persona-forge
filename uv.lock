@@ -1111,7 +1111,7 @@ wheels = [
 
 [[package]]
 name = "persona-forge"
-version = "1.0.5"
+version = "1.0.9"
 source = { virtual = "." }
 dependencies = [
     { name = "accelerate" },
@@ -1178,7 +1178,7 @@ requires-dist = [
     { name = "sox", marker = "extra == 'qwen-tts'" },
     { name = "torch", specifier = "==2.13.0" },
     { name = "torchaudio", specifier = "==2.11.0" },
-    { name = "transformers", specifier = "==5.12.1" },
+    { name = "transformers", specifier = "==5.15.0" },
 ]
 provides-extras = ["qwen-tts"]
 
