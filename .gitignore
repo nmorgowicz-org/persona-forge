@@ -246,6 +246,9 @@ __marimo__/
 
 # Local agent notes (not tracked; reference only)
 CLAUDE.md
+CLAUDE.local.md
 .headroom/
 .tokensave/
 .claude/
+.claude.json
+.mcp.json
