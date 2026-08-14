@@ -786,7 +786,7 @@ wheels = [
 
 [[package]]
 name = "nncf"
-version = "3.2.0"
+version = "3.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "networkx" },
@@ -802,9 +802,9 @@ dependencies = [
     { name = "scipy" },
     { name = "tabulate" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/af/8a/17121c8cfa07afb56461556501919d69bf4bf76ed1c34c4f90663414a923/nncf-3.2.0.tar.gz", hash = "sha256:5dd42d80d0dd8faa316cfb7773defc70f76d9be6e9829005904580391660f4db", size = 558933, upload-time = "2026-06-01T09:20:30.91Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/7d/3749a03e3efd2dd355be985b634a3163f9a9b9e2c0495160b6362cb4be97/nncf-3.3.0.tar.gz", hash = "sha256:3dbcbc1ad4f399deed139041fae1fedd4b8aa5749e30af522fcc5a6c2af73e42", size = 556438, upload-time = "2026-08-05T13:49:34.999Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a9/ff/7dc1fa2695317bc084886d166e4e5865537dc7fa5891cf069d0ace8e6a80/nncf-3.2.0-py3-none-any.whl", hash = "sha256:53a52cb2621ed1f786848046a1d9b7fe7ebc31bc927eeeb0ef599ab5fcc98632", size = 801078, upload-time = "2026-06-01T09:20:28.871Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/b3/fe048343262827570d9e4383c90a9eb5d4b71e3378947d3f64c53d7df4f5/nncf-3.3.0-py3-none-any.whl", hash = "sha256:855f1e7099f01ff3a9868cf6d56850e1149691ab0db5ac76ab812ae8b0fba338", size = 794974, upload-time = "2026-08-05T13:49:33.587Z" },
 ]
 
 [[package]]
@@ -1111,7 +1111,7 @@ wheels = [
 
 [[package]]
 name = "persona-forge"
-version = "1.0.5"
+version = "1.0.9"
 source = { virtual = "." }
 dependencies = [
     { name = "accelerate" },
@@ -1196,7 +1196,7 @@ dev = [
     { name = "soundfile", specifier = "==0.14.0" },
 ]
 export = [
-    { name = "nncf", specifier = "==3.2.0" },
+    { name = "nncf", specifier = "==3.3.0" },
     { name = "openvino", specifier = "==2026.2.1" },
 ]
 openvino = [{ name = "openvino", specifier = "==2026.2.1" }]
