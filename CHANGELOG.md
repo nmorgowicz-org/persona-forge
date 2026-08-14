@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.8](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.7...persona-forge-v1.0.8) (2026-08-14)
+
+
+### Bug Fixes
+
+* **frontend:** unblock Generate buttons after idle-unload reloads the model ([3c70e0c](https://github.com/nmorgowicz-org/persona-forge/commit/3c70e0ce918a86e5f7cfc2c845dd140cf18ebc0b))
+
 ## [1.0.7](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.6...persona-forge-v1.0.7) (2026-08-13)
 
 
