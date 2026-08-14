@@ -69,4 +69,4 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-omnivoice = { git = "https://github.com/k2-fsa/OmniVoice.git", rev = "468e927b" }
+omnivoice = { git = "https://github.com/k2-fsa/OmniVoice.git", rev = "38e992bc60f85548faeb77e8fa70158ba71deb30" }
