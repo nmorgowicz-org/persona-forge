@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.10](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.9...persona-forge-v1.0.10) (2026-08-14)
+
+
+### Miscellaneous Chores
+
+* **ci:** use legacy-peer-deps for Renovate npm artifact updates ([c47c835](https://github.com/nmorgowicz-org/persona-forge/commit/c47c83571b0ce59166cb68d7b415b2b0def1a2b5))
+
 ## [1.0.9](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.8...persona-forge-v1.0.9) (2026-08-14)
 
 
