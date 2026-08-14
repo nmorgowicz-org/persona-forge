@@ -52,11 +52,11 @@ dev = [
   "pyloudnorm",
 ]
 openvino = [
-  "openvino==2026.2.1",
+  "openvino==2026.3.0",
 ]
 export = [
-  "openvino==2026.2.1",
-  "nncf==3.2.0",
+  "openvino==2026.3.0",
+  "nncf==3.3.0",
 ]
 
 [tool.uv]
@@ -69,4 +69,4 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-omnivoice = { git = "https://github.com/k2-fsa/OmniVoice.git", rev = "468e927b" }
+omnivoice = { git = "https://github.com/k2-fsa/OmniVoice.git", rev = "38e992bc60f85548faeb77e8fa70158ba71deb30" }
