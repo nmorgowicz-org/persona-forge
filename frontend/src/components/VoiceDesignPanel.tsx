@@ -65,7 +65,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
   const language = useAppStore((s) => s.vdLanguage)
   const seedInput = useAppStore((s) => s.vdSeedInput)
   const isGenerating = useAppStore((s) => s.vdIsGenerating)
-  const modelLoaded = useAppStore((s) => s.modelLoaded)
+  const serviceStarted = useAppStore((s) => s.serviceStarted)
   const error = useAppStore((s) => s.vdError)
   const progress = useAppStore((s) => s.vdProgress)
   const previewAudioUrl = useAppStore((s) => s.vdPreviewAudioUrl)
@@ -540,10 +540,10 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
               !isGenerating &&
               (!description.trim() ||
               !effectiveSampleText.trim() ||
-              !modelLoaded)
+              !serviceStarted)
             }
             title={
-              modelLoaded
+              serviceStarted
                 ? undefined
                 : 'Model is still loading'
             }

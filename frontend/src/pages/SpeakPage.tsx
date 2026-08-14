@@ -148,7 +148,7 @@ export function SpeakPage() {
     setSpeakLastSeed,
     speakAudioBlob,
     setSpeakAudioBlob,
-    modelLoaded,
+    serviceStarted,
   } = useAppStore()
   const [language, setLanguage] = useState('English')
   const [stylePreset, setStylePreset] = useState<(typeof POLISH_OPTIONS)[number]['id']>('off')
@@ -440,13 +440,13 @@ export function SpeakPage() {
             type="button"
             data-testid="speak-generate-button"
             onClick={handleGenerate}
-            disabled={!text.trim() || speakIsGenerating || !modelLoaded}
-            title={modelLoaded ? undefined : 'Model is still loading'}
+            disabled={!text.trim() || speakIsGenerating || !serviceStarted}
+            title={serviceStarted ? undefined : 'Model is still loading'}
             className={cn(
               'transition-all duration-200',
               !speakIsGenerating &&
                 text.trim() &&
-                modelLoaded &&
+                serviceStarted &&
                 'shadow-[0_4px_20px_-6px_color-mix(in_oklch,var(--primary),transparent_35%)] hover:shadow-[0_6px_24px_-6px_color-mix(in_oklch,var(--primary),transparent_20%)]',
             )}
           >
