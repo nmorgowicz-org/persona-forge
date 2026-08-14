@@ -1,6 +1,6 @@
 [project]
 name = "persona-forge"
-version = "1.0.8"  # x-release-please-version
+version = "1.0.9"  # x-release-please-version
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "flask==3.1.3",

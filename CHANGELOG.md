@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.9](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.8...persona-forge-v1.0.9) (2026-08-14)
+
+
+### Miscellaneous Chores
+
+* **docs:** ignore local Claude agent config files ([52f8ddb](https://github.com/nmorgowicz-org/persona-forge/commit/52f8ddb9915a609055b2bc292514093e5eb05b86))
+
 ## [1.0.8](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.7...persona-forge-v1.0.8) (2026-08-14)
 
 
