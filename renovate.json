@@ -24,33 +24,33 @@
   "packageRules": [
     {
       "description": "Keep the OpenVINO export stack together",
-      "matchManagers": ["pip_requirements"],
+      "matchManagers": ["pep621"],
       "matchPackageNames": ["openvino", "optimum-intel", "nncf"],
       "groupName": "OpenVINO stack",
       "automerge": false
     },
     {
       "description": "Track CPU Torch packages together and require compatibility review",
-      "matchManagers": ["custom.regex"],
+      "matchManagers": ["custom.regex", "pep621"],
       "matchPackageNames": ["torch", "torchaudio"],
       "groupName": "PyTorch CPU stack",
       "automerge": false
     },
     {
       "description": "Qwen package updates can change the custom generation contract",
-      "matchManagers": ["pip_requirements"],
+      "matchManagers": ["pep621"],
       "matchPackageNames": ["qwen-tts"],
       "automerge": false
     },
     {
       "description": "OpenVINO 2026.2.1 and NNCF 3.2.0 require NumPy below 2.5",
-      "matchManagers": ["pip_requirements"],
+      "matchManagers": ["pep621"],
       "matchPackageNames": ["numpy"],
       "allowedVersions": "<2.5.0"
     },
     {
       "description": "transformers is pinned to the version qwen-tts==0.1.1 was tested against; our OV export wrappers depend on specific internals (DynamicLayer, create_causal_mask). Re-enable when qwen-tts bumps its compatibility baseline.",
-      "matchManagers": ["pip_requirements"],
+      "matchManagers": ["pep621"],
       "matchPackageNames": ["transformers"],
       "enabled": false
     }
