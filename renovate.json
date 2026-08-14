@@ -2,6 +2,7 @@
   "extends": [
     "github>nmorgowicz-org/docker-compose-config//renovate"
   ],
+  "npmrc": "legacy-peer-deps=true",
   "customManagers": [
     {
       "customType": "regex",
