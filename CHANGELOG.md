@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.11](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.10...persona-forge-v1.0.11) (2026-08-15)
+
+
+### Miscellaneous Chores
+
+* **deps:** update actions/cache action to v6 ([#181](https://github.com/nmorgowicz-org/persona-forge/issues/181)) ([8ebad34](https://github.com/nmorgowicz-org/persona-forge/commit/8ebad3432abe5b91a5c1340e354dd7a393bd6caa))
+* **deps:** update actions/labeler action to v7 ([#182](https://github.com/nmorgowicz-org/persona-forge/issues/182)) ([f3f8305](https://github.com/nmorgowicz-org/persona-forge/commit/f3f83050446c85d39c73ce30f12e8a3fe3b1f527))
+* **deps:** update actions/setup-node action to v6.5.0 ([#178](https://github.com/nmorgowicz-org/persona-forge/issues/178)) ([eb09795](https://github.com/nmorgowicz-org/persona-forge/commit/eb09795e4f3e272038268e4952b8770228b5ecd6))
+* **deps:** update actions/setup-node action to v7 ([#183](https://github.com/nmorgowicz-org/persona-forge/issues/183)) ([49ae694](https://github.com/nmorgowicz-org/persona-forge/commit/49ae694e3b0c837ad38a814cbff0036f4bb71e8c))
+* **deps:** update actions/setup-python action to v7 ([#184](https://github.com/nmorgowicz-org/persona-forge/issues/184)) ([f8331d9](https://github.com/nmorgowicz-org/persona-forge/commit/f8331d98efd300b841854c1e163ebd129282b463))
+* **deps:** update docker/setup-buildx-action digest to bb05f3f ([#175](https://github.com/nmorgowicz-org/persona-forge/issues/175)) ([bdf7af7](https://github.com/nmorgowicz-org/persona-forge/commit/bdf7af790b3860f9de840232e7495ed6fa3ccec0))
+* **deps:** update dorny/paths-filter digest to ceb8a2b ([#176](https://github.com/nmorgowicz-org/persona-forge/issues/176)) ([fe36dc3](https://github.com/nmorgowicz-org/persona-forge/commit/fe36dc39afd502ee4064301beb8a510d568715df))
+* **deps:** update github/codeql-action digest to ff2f1c6 ([#177](https://github.com/nmorgowicz-org/persona-forge/issues/177)) ([1b7610c](https://github.com/nmorgowicz-org/persona-forge/commit/1b7610c7106aee25cd5253bd269714816a879c00))
+* pin Python to 3.13.x and fix transformers disabled rule scope ([#186](https://github.com/nmorgowicz-org/persona-forge/issues/186)) ([ab4b0c3](https://github.com/nmorgowicz-org/persona-forge/commit/ab4b0c3b259666446fb6f54a663573b1f53a9637))
+
 ## [1.0.10](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.9...persona-forge-v1.0.10) (2026-08-14)
 
 
