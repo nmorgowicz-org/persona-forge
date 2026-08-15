@@ -49,10 +49,14 @@
       "allowedVersions": "<2.5.0"
     },
     {
-      "description": "transformers is pinned to the version qwen-tts==0.1.1 was tested against; our OV export wrappers depend on specific internals (DynamicLayer, create_causal_mask). Re-enable when qwen-tts bumps its compatibility baseline.",
-      "matchManagers": ["pep621"],
+      "description": "transformers is pinned to the version qwen-tts==0.1.1 was tested against; our OV export wrappers depend on specific internals (DynamicLayer, create_causal_mask). Re-enable when qwen-tts bumps its compatibility baseline. matchManagers intentionally omitted so the rule fires regardless of which manager detects the package (pep621, uv, custom.regex, etc.).",
       "matchPackageNames": ["transformers"],
       "enabled": false
+    },
+    {
+      "description": "Pin Python to 3.13.x — we have not validated 3.14 with our dependency stack. Covers requires-python in pyproject.toml, the Dockerfile FROM image, and python-version in CI workflows.",
+      "matchPackageNames": ["python"],
+      "allowedVersions": ">=3.13,<3.14"
     }
   ]
 }
