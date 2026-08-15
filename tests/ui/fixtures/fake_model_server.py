@@ -19,6 +19,7 @@ TEST_PROFILE options:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import random
@@ -147,6 +148,25 @@ def _patch_save_voice(app_module, rt):
     app_module.voice_library.update_voice = fake_library.update_voice
     app_module.voice_library.delete_voice = fake_library.delete_voice
     app_module.voice_library.list_voices = fake_library.list_voices
+    app_module.voice_library.duplicate_voice = fake_library.duplicate_voice
+    app_module.voice_library.set_default_variant = fake_library.set_default_variant
+
+
+def _seed_fake_voice_library(rt):
+    """Load the capture-data voice fixtures into the in-memory fake library."""
+    fixtures_dir = Path(__file__).resolve().parent / "capture-data" / "voices"
+    if not fixtures_dir.is_dir():
+        return
+    metas = []
+    for entry in sorted(fixtures_dir.iterdir()):
+        meta_path = entry / "meta.json"
+        if not meta_path.is_file():
+            continue
+        try:
+            metas.append(json.loads(meta_path.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    rt.voice_library.seed(metas)
 
 
 
@@ -178,6 +198,7 @@ def main() -> None:
     _install_fake_voice_design(app_module)
     _patch_omnivoice_run_job(app_module)
     _patch_save_voice(app_module, rt)
+    _seed_fake_voice_library(rt)
 
     from werkzeug.serving import make_server  # noqa: E402
 
@@ -218,6 +239,7 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     _install_fake_voice_design(app_module)
     _patch_omnivoice_run_job(app_module)
     _patch_save_voice(app_module, rt)
+    _seed_fake_voice_library(rt)
 
     shutdown_event = threading.Event()
     app_module._shutdown_hook = shutdown_event.set

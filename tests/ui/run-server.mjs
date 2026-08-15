@@ -1,87 +1,15 @@
-// Spawns the fake-model test server (fixtures/fake_model_server.py) and waits for it to become
-// healthy. Used by playwright.config.js's webServer block and by capture.mjs's default mode.
-// See docs/dev/resolved/E2E_AND_SCREENSHOTTING.md §3.1/§4.3.
-import { spawn } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
+// Thin re-export shim. The implementation moved to
+// tests/ui/capture/harness/server.mjs as part of the capture harness port
+// (docs/plans/20260815-screenshot_and_docs_edit.md Step 1.6). Kept because
+// tests/ui/playwright.config.js and tests/ui/fixtures/generate-capture-fixtures.mjs
+// still import this path directly.
 import { fileURLToPath } from 'node:url'
-import { resolvePython } from './lib/python.mjs'
+export { startFakeServer } from './capture/harness/server.mjs'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const REPO_ROOT = join(__dirname, '..', '..')
-
-export function startFakeServer({ port = 8319 } = {}) {
-  const voiceLibraryDir = mkdtempSync(join(tmpdir(), 'persona-forge-e2e-voices-'))
-  const env = {
-    ...process.env,
-    PYTHONPATH: [REPO_ROOT, join(REPO_ROOT, 'src'), join(REPO_ROOT, 'src', 'export')].join(
-      process.platform === 'win32' ? ';' : ':'
-    ),
-    VOICE_LIBRARY_DIR: voiceLibraryDir,
-    FRONTEND_DIST_DIR: join(REPO_ROOT, 'frontend', 'dist'),
-    PERSONA_FORGE_TEST_PORT: String(port),
-  }
-
-  const python = resolvePython()
-  const child = spawn(python, [join(__dirname, 'fixtures', 'fake_model_server.py')], {
-    env,
-    stdio: 'inherit',
-  })
-
-  child.on('error', (err) => {
-    console.error(`[run-server] spawn failed for python=${python}: ${err.message}`)
-    process.exit(1)
-  })
-  child.on('close', (code) => {
-    if (code !== 0 && code !== null) {
-      console.error(`[run-server] fake_model_server exited with code ${code}`)
-      process.exit(code || 1)
-    }
-  })
-
-  const url = `http://127.0.0.1:${port}`
-
-  async function waitUntilHealthy(timeoutMs = 15000) {
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-      try {
-        const res = await fetch(`${url}/health`)
-        if (res.ok) return
-      } catch {
-        // not up yet
-      }
-      await new Promise((r) => setTimeout(r, 200))
-    }
-    throw new Error(`fake_model_server did not become healthy within ${timeoutMs}ms`)
-  }
-
-  function stop() {
-    child.kill('SIGTERM')
-  }
-
-  process.on('exit', stop)
-  process.on('SIGINT', () => {
-    stop()
-    process.exit(0)
-  })
-  process.on('SIGTERM', () => {
-    stop()
-    process.exit(0)
-  })
-
-  return { child, url, port, waitUntilHealthy, stop }
-}
-
-// Allow running directly: `node tests/ui/run-server.mjs [port]`
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const port = Number(process.argv[2]) || 8319
+if (fileURLToPath(import.meta.url) === process.argv[1]) {
+  const { startFakeServer } = await import('./capture/harness/server.mjs')
+  const port = parseInt(process.argv[2] || '8319', 10)
   const server = startFakeServer({ port })
-  server
-    .waitUntilHealthy()
-    .then(() => console.log(`[run-server] healthy at ${server.url}`))
-    .catch((err) => {
-      console.error(err)
-      process.exit(1)
-    })
+  await server.waitUntilHealthy()
+  console.log(`[run-server] fake_model_server healthy at ${server.url}`)
 }

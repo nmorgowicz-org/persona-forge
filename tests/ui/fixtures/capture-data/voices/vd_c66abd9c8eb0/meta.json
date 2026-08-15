@@ -1,7 +1,7 @@
 {
   "voice_id": "vd_c66abd9c8eb0",
-  "description": "a calm, neutral narrator voice, slightly warmer tone",
-  "sample_text": "This is a sample line used to preview the generated voice.",
+  "description": "Podcast Host",
+  "sample_text": "Alright, let's dive right in. Here's what you need to know.",
   "language": "English",
   "seed": 3553055739,
   "selections": null,

@@ -1,5 +1,5 @@
 // One-time generator for tests/ui/fixtures/capture-data/{voices,segments}. NOT called by
-// capture.mjs — run manually after backend API changes affecting voice/segment shape:
+// the capture harness — run manually after backend API changes affecting voice/segment shape:
 //   node tests/ui/fixtures/generate-capture-fixtures.mjs
 // Spawns a real server on throwaway temp dirs, drives the real HTTP API to create the
 // minimum realistic library state, then copies the resulting dirs into capture-data/.

@@ -6,7 +6,10 @@
   "scripts": {
     "test": "playwright test",
     "test:ci": "playwright test --reporter=list --workers=1 --retries=2",
-    "capture": "node capture.mjs"
+    "capture": "node capture/index.mjs",
+    "capture:group": "node capture/cli-group.mjs",
+    "capture:manifest": "node capture/cli-manifest.mjs --strict",
+    "capture:test": "node --test capture/*.test.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.51.0",
