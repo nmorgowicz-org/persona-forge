@@ -9,7 +9,7 @@ einops
 librosa
 onnxruntime
 sox
-transformers==5.12.1
+transformers==5.15.0
 
 # OmniVoice (Persona Forge accent-design engine, docs/dev/features/persona_forge_studio.md).
 # Installed --no-deps in the Dockerfile since its declared deps (torch/torchaudio/
