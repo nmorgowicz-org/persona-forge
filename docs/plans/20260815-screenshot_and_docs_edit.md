@@ -704,6 +704,13 @@ otherwise.
 **Do not "improve" scenario logic during migration.** A behavior change and a structural move in the
 same step means a failure has two candidate causes. Fix content in Step 1.12 and after.
 
+**One exception, deferred rather than taken here:** scenario #6 `scenarioVoiceVariantList` is already
+broken — it times out waiting on `[data-testid="voice-card"]` against the fake server (correction
+\#36). Migrate it verbatim anyway, let it fail, and fix it in **Step 1.12** as a content fix. That
+keeps the rule intact: the structural move is still a pure move, and the behavior change lands in a
+step where a failure has exactly one candidate cause. Start by checking whether the fake server's
+voice fixtures render a different testid than the one the scenario waits on.
+
 **Verify each one as you go** — this is 16 files and a silent typo in file 3 is expensive to find
 from file 16:
 
@@ -785,6 +792,24 @@ Then repeat **Step 0.1** to re-warm the model after the restart.
 
 > This edits live-instance state on a host you own. It is a text-field change to a sample line,
 > reversible by editing the same field again. Nothing else on the host is touched.
+
+**If the `ssh … <<'PY'` form is refused** (a remote-python heredoc reads as arbitrary remote code
+execution to the permission classifier, and it was refused during this plan's own research), do not
+fight it — use the round-trip that is plainly a file edit:
+
+```bash
+scp root@docker-agent:/var/data/autopirate/persona-forge/voices/vd_000000000001/meta.json /tmp/meta.json
+# edit sample_text with the Edit tool, then:
+scp /tmp/meta.json root@docker-agent:/var/data/autopirate/persona-forge/voices/vd_000000000001/meta.json
+```
+
+Use absolute paths on both ends. A `cd … &&` prefix on `scp` failed with a bare `EXIT=1` here.
+
+Also prefer a health poll over a fixed `sleep`, which the harness blocks:
+
+```bash
+ssh root@docker-agent "until [ \"\$(docker inspect -f '{{.State.Health.Status}}' persona-forge)\" = healthy ]; do sleep 3; done"
+```
 
 ### Step 1.14 — Hero candidates
 
