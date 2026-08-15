@@ -18,7 +18,7 @@ export default async function (ctx) {
     await page.click('[data-testid="omnivoice-audition-button"]');
     await recorder.snap(page);
 
-    const candidateDeadline = Date.now() + 120000;
+    const candidateDeadline = Date.now() + 180000;
     while (Date.now() < candidateDeadline) {
         const count = await page
             .$eval('[data-testid="omnivoice-candidate-take"]', (els) => els.length)
@@ -29,7 +29,8 @@ export default async function (ctx) {
     }
 
     await page.click('[data-testid="omnivoice-stitch-button"]');
-    const resultHandle = await page.waitForSelector('[data-testid="omnivoice-result"]', { timeout: 60000 });
+    // Real CPU inference — do not shorten this timeout.
+    const resultHandle = await page.waitForSelector('[data-testid="omnivoice-result"]', { timeout: 120000 });
     await page.evaluate((el) => el.scrollIntoView({ block: 'center', behavior: 'instant' }), resultHandle);
     await page.waitForFunction(
         (el) => {

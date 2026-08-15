@@ -22,7 +22,7 @@ export default async function (ctx) {
     await page.click('[data-testid="omnivoice-audition-button"]');
     await recorder.snap(page);
 
-    const candidateDeadline = Date.now() + 120000;
+    const candidateDeadline = Date.now() + 180000;
     while (Date.now() < candidateDeadline) {
         const count = await page
             .$eval('[data-testid="omnivoice-candidate-take"]', (els) => els.length)
@@ -65,7 +65,7 @@ export default async function (ctx) {
     await recorder.snap(page);
 
     await page.click('[data-testid="stitch-save-voice"]');
-    await page.waitForSelector('[data-testid="voice-card"]', { timeout: 30000 });
+    await page.waitForSelector('[data-testid="voice-card"]', { timeout: 60000 });
     await recorder.snap(page);
 
     framesToGif(page, prefix, 'design-to-stitch-gif-design-to-stitch.gif', 2);

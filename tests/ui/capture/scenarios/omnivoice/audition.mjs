@@ -11,16 +11,17 @@ export default async function (ctx) {
     await page.waitForSelector('[data-testid="omnivoice-script"]');
     await page.type('[data-testid="omnivoice-script"]', 'The quick brown fox jumps over the lazy dog.');
     await page.click('[data-testid="omnivoice-audition-button"]');
-    await page.waitForSelector('[data-testid="omnivoice-candidate-take"]', { timeout: 120000 });
+    await page.waitForSelector('[data-testid="omnivoice-candidate-take"]', { timeout: 180000 });
     // INTENT: OmniVoice audition candidates rendered.
     await captureShot(page, 'omnivoice-audition-audition-candidates.png', { fullPage: true });
 
     await page.waitForFunction(
         () => document.querySelectorAll('[data-testid="omnivoice-candidate-take"]').length >= 3,
-        { timeout: 120000 }
+        { timeout: 180000 }
     );
     await page.click('[data-testid="omnivoice-stitch-button"]');
-    const resultHandle = await page.waitForSelector('[data-testid="omnivoice-result"]', { timeout: 60000 });
+    // Real CPU inference — do not shorten this timeout.
+    const resultHandle = await page.waitForSelector('[data-testid="omnivoice-result"]', { timeout: 120000 });
     await page.evaluate((el) => el.scrollIntoView({ block: 'center', behavior: 'instant' }), resultHandle);
     await page.waitForFunction(
         (el) => {

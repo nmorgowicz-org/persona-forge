@@ -296,7 +296,7 @@ export async function runCli({ scenario, source } = {}) {
         browser = launched.browser;
         const { page } = launched;
 
-        sourceHandle = await connectSource(page, { force: entry.source, source, scenarioSource: entry.source });
+        sourceHandle = await connectSource(page, { source, scenarioSource: entry.source });
         setCaptureDiagnostics({ source: sourceHandle.kind });
 
         if (entry.setup) await entry.setup({ page, baseURL: sourceHandle.baseURL });

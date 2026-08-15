@@ -9,7 +9,8 @@ export default async function (ctx) {
     // INTENT: Text entered, ready to generate.
     await captureShot(page, 'speak-generate-before-generate.png', { fullPage: true });
     await page.click('[data-testid="speak-generate-button"]');
-    await page.waitForSelector('[data-testid="speak-result"] audio');
+    // Real CPU inference — do not shorten this timeout.
+    await page.waitForSelector('[data-testid="speak-result"] audio', { timeout: 120000 });
     // INTENT: Generated audio result rendered.
     await captureShot(page, 'speak-generate-after-generate.png', { fullPage: true });
 }

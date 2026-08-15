@@ -101,7 +101,11 @@ def run_voice_design_request(
         model.force_unload()
         model.load_model(model.VOICE_DESIGN_PROFILE)
 
-        if getattr(model.model.model, "tts_model_type", None) != "voice_design":
+        # pocket_tts has no separate VoiceDesign checkpoint (pocket_tts_runtime.load_pocket_tts_model()
+        # always loads the same checkpoint-agnostic TTSModel, which has no nested .model to inspect),
+        # so this identity check only applies to the qwen_tts/pytorch/openvino backends, where
+        # model.model is a Qwen3TTSModel wrapper exposing the loaded HF checkpoint as model.model.model.
+        if model.TTS_BACKEND != "pocket_tts" and getattr(model.model.model, "tts_model_type", None) != "voice_design":
             raise RuntimeError(
                 "Loaded checkpoint is not a VoiceDesign checkpoint "
                 f"(tts_model_type={getattr(model.model.model, 'tts_model_type', None)!r}); "

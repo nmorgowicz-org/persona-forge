@@ -17,7 +17,8 @@ export default async function (ctx) {
     // INTENT: Filled-in voice design fields, before generation.
     await captureShot(page, 'voice-design-generate-filled.png', { fullPage: true });
     await page.click('[data-testid="voice-design-generate-button"]');
-    await page.waitForSelector('[data-testid="voice-design-result"]');
+    // Real CPU inference — do not shorten this timeout.
+    await page.waitForSelector('[data-testid="voice-design-result"]', { timeout: 120000 });
     // INTENT: Generated voice design result.
     await captureShot(page, 'voice-design-generate-result.png', { fullPage: true });
 }

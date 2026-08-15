@@ -108,6 +108,42 @@ class FakeVoiceLibrary:
     def list_voices(self):
         return list(self.voices.values())
 
+    def duplicate_voice(self, source_voice_id, variant_filename=None):
+        source = self.voices.get(source_voice_id)
+        if source is None:
+            return None
+        voice_id = f"fake_voice_{len(self.voices)}"
+        meta = dict(source)
+        meta.pop("is_default", None)
+        meta["voice_id"] = voice_id
+        meta["description"] = f"{source.get('description') or source_voice_id} (copy)"
+        meta["source"] = "duplicate"
+        meta["duplicated_from"] = source_voice_id
+        self.voices[voice_id] = meta
+        self.wav_bytes[voice_id] = self.wav_bytes.get(source_voice_id)
+        return meta
+
+    def set_default_variant(self, voice_id):
+        meta = self.voices.get(voice_id)
+        if meta is None:
+            return None
+        family_id = meta.get("family_id")
+        siblings = (
+            [v for v in self.voices.values() if v.get("family_id") == family_id]
+            if family_id
+            else [meta]
+        )
+        for sibling in siblings:
+            sibling["is_default"] = sibling["voice_id"] == voice_id
+        return meta
+
+    def seed(self, metas):
+        """Pre-populate the in-memory library from fixture metadata (dicts)."""
+        for meta in metas:
+            voice_id = meta["voice_id"]
+            self.voices[voice_id] = dict(meta)
+            self.wav_bytes[voice_id] = _make_silent_wav()
+
     def __len__(self):
         return len(self.voices)
 

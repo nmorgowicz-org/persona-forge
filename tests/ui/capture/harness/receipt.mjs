@@ -16,6 +16,9 @@ export function beginCaptureReceipt({ scenario, category, runtime, intent, expec
     }
     const artifactDir = currentArtifactsDir();
     for (const filename of expectedOutputs) fs.rmSync(join(artifactDir, filename), { force: true });
+    // A crashed run must not leave a stale receipt behind claiming success for files
+    // that this run just deleted (and may fail to reproduce).
+    fs.rmSync(join(artifactDir, `${scenario}--receipt.json`), { force: true });
     active = { scenario, category, runtime, intent, expectedOutputs: new Set(expectedOutputs), produced: [], diagnostics: null };
 }
 

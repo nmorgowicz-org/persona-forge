@@ -50,7 +50,7 @@ export default async function (ctx) {
     await page.click('[data-testid="omnivoice-audition-button"]');
     await page.waitForFunction(
         () => document.querySelectorAll('[data-testid="omnivoice-candidate-take"]').length >= 2,
-        { timeout: 120000 }
+        { timeout: 180000 }
     );
     const takeHandles = await page.$$('[data-testid="omnivoice-candidate-take"]');
     await page.evaluate((el) => el.scrollIntoView({ block: 'center', behavior: 'instant' }), takeHandles[takeHandles.length - 1]);

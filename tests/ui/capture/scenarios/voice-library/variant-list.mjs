@@ -6,6 +6,7 @@ export default async function (ctx) {
     await page.goto(baseURL, { waitUntil: 'networkidle0' });
     await page.click('[data-testid="nav-voice-library"]');
     await page.waitForSelector('[data-testid="voice-card"]');
+    await page.waitForSelector('[data-testid="alignment-compare"]');
     // INTENT: Voice library showing variant list.
     await captureShot(page, 'voice-variant-list-variant-list.png', { fullPage: true });
 }
