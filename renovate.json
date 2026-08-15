@@ -54,7 +54,7 @@
       "enabled": false
     },
     {
-      "description": "Pin Python to 3.13.x — we have not validated 3.14 with our dependency stack. Covers requires-python in pyproject.toml, the Dockerfile FROM image, and python-version in CI workflows.",
+      "description": "Pin Python to 3.13.x. The blocker for 3.14 is faster-whisper — users report install failures on 3.14 (no wheels/classifiers yet). Everything else in the stack already supports 3.14 (torch 2.13, pocket-tts 2.1, audioop-lts 0.2.2+). To lift this gate: watch https://github.com/SYSTRAN/faster-whisper/issues/1404 and bump allowedVersions to >=3.13,<3.15 once faster-whisper ships 3.14 wheels. Covers requires-python in pyproject.toml, the Dockerfile FROM image, and python-version in CI workflows.",
       "matchPackageNames": ["python"],
       "allowedVersions": ">=3.13,<3.14"
     }
