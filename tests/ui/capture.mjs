@@ -475,7 +475,10 @@ async function main() {
   }
 
   const browser = await puppeteer.launch({
-    headless: !args.noAttach ? 'new' : false,
+    // `headless: 'new'` was removed from Puppeteer; the option is `boolean | 'shell'`
+    // and `true` is the new headless mode. Passing the stale string still worked on
+    // macOS but broke browser launch on Windows.
+    headless: !args.noAttach,
     defaultViewport: { width: 1440, height: 900 },
   })
 
