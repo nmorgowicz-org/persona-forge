@@ -20,6 +20,10 @@ cd "$(dirname "$0")/.."
 #   scripts/dev-deploy.sh --no-restart    # rebuild frontend only; static assets are
 #                                         # served from the bind mount, so a browser
 #                                         # refresh picks them up with no restart
+#
+# --no-restart depends on the dev override mounting frontend/ rather than
+# frontend/dist/. `vite build` deletes and recreates dist/, and a bind mount of
+# dist/ itself would keep pointing at the deleted inode and serve a stale build.
 
 COMPOSE_DIR="${PERSONA_FORGE_COMPOSE_DIR:-$HOME/docker/docker-agent}"
 BRANCH=""

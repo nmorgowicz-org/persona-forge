@@ -109,6 +109,25 @@ string `0123456789 RTF 1.23x` at `font-size: 16px`:
 The sans path is provably deterministic. The mono path is provably not — same CSS
 declaration, two different typefaces, a 9.5% width delta on a 20-character string.
 
+#### Re-measured after Step 1.5a, 2026-08-15
+
+Same probe, same container, after Geist Mono Variable was bundled and `--font-mono` set
+(commit `cbad410`):
+
+| | macOS (`MacIntel`) | Windows (`Win32`) | Δ |
+|---|---|---|---|
+| `font-sans` width | 165.92px | 165.92px | **0** ✅ |
+| `font-mono` resolved | `"Geist Mono Variable", ui-monospace, monospace` | *(identical)* | — |
+| `font-mono` width | **192.00px** | **192.00px** | **0** ✅ |
+| Root font size | `16px` | `16px` | 0 ✅ |
+| Loaded faces | `["Geist Mono Variable", "Geist Variable"]` | *(identical)* | — |
+| `font-family: monospace` (control) | 192.66px | 175.94px | 16.7px — *still divergent* |
+
+The last row is the control that proves the fix rather than assuming it: the bare
+`monospace` keyword still splits exactly as before, so the system stack is unchanged and
+the closure of the `font-mono` gap is attributable to the bundled face, not to some
+environmental drift between the two runs.
+
 > **The mono gap is the one that bites this plan.** `font-mono` is used in **at least 19 places**
 > across `waveform/`, `StitchTimeline.tsx`, `audio/AudioDeck.tsx`, `OmniVoicePanel.tsx` and others —
 > many of them paired with `tabular-nums`, where a proportional-metrics fallback defeats the point of
@@ -375,6 +394,19 @@ inline inside `capture.mjs:main()`; extracting it is the point.
   > text *can be rendered* — a fallback satisfies it. An assertion built on `check()` passes
   > green in exactly the broken state it exists to catch. Enumerate the `FontFaceSet` and
   > compare family names instead.
+  >
+  > ⚠️ **And enumeration alone is not enough either.** Two further traps, both hit while
+  > measuring on 2026-08-15:
+  > 1. `[...document.fonts]` lists every face **declared** by an `@font-face` rule, whatever
+  >    its load state. Fontsource ships one face per unicode subset, so Geist Mono appears as
+  >    six entries — all `status: 'unloaded'` until a glyph is needed. Filter on
+  >    `face.status === 'loaded'`, or the assertion is satisfied by a face that never
+  >    downloaded. Note a family legitimately appears in *both* the loaded and unloaded
+  >    buckets, since only the subsets actually used get fetched.
+  > 2. Font loading is **lazy**, and `await document.fonts.ready` resolves against whatever
+  >    was pending *at that moment*. Measuring a probe element right after appending it
+  >    returns fallback metrics, because the face request has not finished. Call
+  >    `document.fonts.load(font, text)` for each required family and await that **first**.
 
   Run this **after** Step 1.5a lands, or the mono assertion fails legitimately.
 
@@ -383,10 +415,19 @@ inline inside `capture.mjs:main()`; extracting it is the point.
 
   export async function assertDeterministicFonts(page) {
       const diagnostics = await page.evaluate(async (families) => {
+          // Force the required faces to download first. They are lazy: until a glyph is
+          // needed they sit at status 'unloaded', and both the measurement and the
+          // enumeration below would then describe the fallback rather than the real face.
+          await Promise.all(families.map((family) =>
+              document.fonts.load(`400 16px "${family}"`, '0123456789 RTF 1.23x')));
           await document.fonts.ready;
-          // Enumerate actually-registered faces. document.fonts.check() is unusable here:
-          // it returns true whenever a fallback can render the string.
-          const loadedFaces = [...new Set([...document.fonts].map((face) => face.family))];
+
+          // Enumerate faces that actually loaded. Two things are deliberately avoided here:
+          // document.fonts.check(), which returns true whenever a fallback can render the
+          // string; and unfiltered enumeration, which includes merely-declared faces.
+          const loadedFaces = [...new Set([...document.fonts]
+              .filter((face) => face.status === 'loaded')
+              .map((face) => face.family))];
           return {
               status: document.fonts.status,
               loadedFaces: loadedFaces.sort(),
@@ -1672,6 +1713,9 @@ Everything below came out of running a real macOS↔Windows A/B against
 | 36 | *(not noticed)* | `scenarioVoiceVariantList` **times out** waiting on `[data-testid="voice-card"]` against the fake server | 🟠 A pre-existing broken scenario. Must be fixed as part of the migration, not carried across. |
 | 37 | Step 1.13 treats the risqué sample text as living only in voice `vd_000000000001`'s record | It was **also** the `REF_TEXT` env var in `~/docker/docker-agent/docker-compose.yml`'s persona-forge block | 🟢 **Resolved 2026-08-15.** Removed from compose and pushed (`3a475f4` on `nmorgowicz-org/docker-compose-config`) — pocket_tts ignores `REF_TEXT` entirely (`model.py:462` sets `REF_TEXT_SOURCE = "unused"`), so it was dead config. Container recreated and healthy with the var absent. **Step 1.13 still owns the voice-record copy.** |
 | 38 | *(not noticed)* | Prod container is pinned to **v1.0.10**; the repo is at **1.0.11** | 🟡 Captures against prod are one release behind unless the dev override is active. Note it when promoting images. |
+| 39 | *(this plan, revision 5)* Corrected `assertDeterministicFonts` to enumerate `[...document.fonts]` and compare families | Still wrong. `FontFaceSet` enumerates **declared** faces regardless of load state — Fontsource ships one face per unicode subset, so Geist Mono appeared as six entries, every one `status: 'unloaded'`, while the assertion counted the family as present | 🔴 **My own error, second iteration on the same assertion.** Now filters `face.status === 'loaded'`. Worth stating plainly: I twice wrote a font check that would have passed on an unloaded font. |
+| 40 | *(not noticed)* | Font loading is **lazy** and `await document.fonts.ready` only settles what was already pending. Measuring a probe element immediately after appending it returns **fallback metrics** — my first post-fix run reported Windows mono at 175.94px and looked like the fix had failed | 🔴 Nearly caused a correct fix to be reverted. Must `await document.fonts.load(font, text)` per family *before* measuring. Folded into the Step 1.5 snippet. |
+| 41 | *(dev loop)* `docker-compose.persona-forge-dev.yml` bind-mounted `frontend/dist` | `vite build` deletes and recreates `dist/`, swapping the directory inode. The container kept the **deleted** inode and served the build from before last — silently | 🟠 Caught only because the served asset hashes did not match the fresh build. Override now mounts the stable `frontend/` parent. This also invalidates my earlier "no restart needed" verification, which appended to `index.html` in place and so never exercised directory replacement. |
 
 ### Revisions 1–2 — the original handoff and plan
 
