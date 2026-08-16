@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import fs from 'fs'
 
 test.describe('performance', () => {
   test('page interactive within 5s', async ({ page }) => {
@@ -38,7 +39,9 @@ test.describe('performance', () => {
         !e.includes('404') &&
         !e.toLowerCase().includes('net::')
     )
-    console.log('CONSOLE-ERRORS-DEBUG', JSON.stringify(realErrors, null, 2))
+    test.info().annotation.push({
+      description: 'CONSOLE-ERRORS: ' + JSON.stringify(realErrors, null, 2),
+    })
     expect(realErrors.length).toBe(0)
   })
 })
