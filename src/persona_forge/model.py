@@ -144,6 +144,7 @@ _startup_failed: bool = False
 _startup_error: str | None = None
 _last_request_time: float = time.time()
 _unload_pending: bool = False
+_base_load_in_progress: bool = False
 _ref_text_validation_result: dict | None = None
 
 
@@ -239,12 +240,17 @@ def _ensure_base_loaded():
     after their own requests instead of eagerly swapping back to Base every time — so this
     swaps back on demand, unloading whatever design engine was left loaded.
     """
+    global _base_load_in_progress
     if model is not None and active_profile is BASE_PROFILE and not _any_foreign_loaded():
         return
     print("[app_worker] Swapping back to Base for generation request...", flush=True)
-    unload_foreign_models()
-    force_unload()
-    load_model(BASE_PROFILE)
+    _base_load_in_progress = True
+    try:
+        unload_foreign_models()
+        force_unload()
+        load_model(BASE_PROFILE)
+    finally:
+        _base_load_in_progress = False
 
 
 def _validate_ov_metadata(model_dir: str, model_repo: str, revision: str | None):
@@ -771,6 +777,10 @@ def health_state() -> dict[str, Any]:
         "status": "ok",
         "version": get_app_version(),
         "model_loaded": model is not None,
+        # True while a post-boot Base load is in flight (swap-back, idle-unload lazy
+        # reload, /voices/<id>/warm) — /health turns this into a loading_message the
+        # frontend shows as a top notification bar for the duration of the load.
+        "base_load_in_progress": _base_load_in_progress,
         # Distinct from model_loaded: stays true forever after the first successful load,
         # even through later idle-unload cycles. Lets callers tell "never loaded yet, please
         # wait" apart from "idle-unloaded, will lazy-reload transparently on next request".

@@ -54,3 +54,25 @@ class TestAppHealth:
             assert data["swap_in_progress"] is True
         finally:
             app_module.voice_design._swap_in_progress = orig
+
+    def test_health_base_load_in_progress_message(self, app_module, rt):
+        orig = rt._base_load_in_progress
+        rt._base_load_in_progress = True
+        try:
+            resp = app_module.app.test_client().get("/health")
+            data = resp.get_json()
+            assert data["base_load_in_progress"] is True
+            assert data.get("loading_message") == "Loading model…"
+        finally:
+            rt._base_load_in_progress = orig
+
+    def test_health_omnivoice_loading_message(self, app_module):
+        orig = app_module.omnivoice_engine.swap_in_progress
+        app_module.omnivoice_engine.swap_in_progress = lambda: True
+        try:
+            resp = app_module.app.test_client().get("/health")
+            data = resp.get_json()
+            assert data["swap_in_progress"] is True
+            assert data.get("loading_message") == "Loading OmniVoice…"
+        finally:
+            app_module.omnivoice_engine.swap_in_progress = orig

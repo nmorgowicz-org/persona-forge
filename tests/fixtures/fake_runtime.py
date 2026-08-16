@@ -351,6 +351,7 @@ class FakeModelRuntime:
             "reason": "Baked into the OpenVINO IR at export time.",
         }
         self._reconfig_in_progress = False
+        self._base_load_in_progress = False
 
     # Real model.py exposes TTS_BACKEND as an uppercase module-level constant
     # (app.py reads model.TTS_BACKEND directly) — mirror that here so the fake
@@ -384,6 +385,7 @@ class FakeModelRuntime:
                 "status": status,
                 "service_started": rt._service_started,
                 "model_loaded": rt._model_loaded,
+                "base_load_in_progress": rt._base_load_in_progress,
                 "backend": rt.tts_backend,
             }
             # app.py reads model._service_started and adds loading_message itself,

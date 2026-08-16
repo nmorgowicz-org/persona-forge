@@ -240,9 +240,16 @@ def health():
     state["omnivoice_loaded"] = omnivoice_engine.omnivoice_loaded()
     state["alignment_performance"] = _alignment_jobs.performance()
 
-    # Human-readable hint when model is still loading at startup.
+    # Human-readable hint while a model load is in flight: cold boot (never started),
+    # a post-boot Base swap-back/lazy reload, or the OmniVoice load window (swap pending
+    # while OmniVoice is not yet resident). The frontend keeps polling /health and shows
+    # this as a top notification bar for the duration of the load.
     if not model._service_started:
         state["loading_message"] = "Loading model…"
+    elif state.get("base_load_in_progress"):
+        state["loading_message"] = "Loading model…"
+    elif omnivoice_engine.swap_in_progress() and not state["omnivoice_loaded"]:
+        state["loading_message"] = "Loading OmniVoice…"
 
     return jsonify(state)
 
