@@ -51,7 +51,7 @@ commit: `8f6b862`:
 Still open before release:
 
 1. Run a baked-image test of `/generate/stream` on the first official release image that includes the
-   streaming runtime (completed for `runtime-v0.13.0`; 0.6B INT8 profile on dockermisc1: HTTP 200,
+   streaming runtime (completed for `runtime-v0.13.0`; 0.6B INT8 profile on docker-agent: HTTP 200,
    headers correct, short and paragraph tests pass, internal parity max_abs=0).
 2. Repeat the paragraph gate with terminal-decode reuse enabled and record baseline batch wall time using
    identical seeds. The existing 90.84 s diagnostic intentionally included a duplicate stock decode.
@@ -168,7 +168,7 @@ Before writing any pipeline code, answer: *is there CPU headroom during talker g
 
 ## Logging and telemetry (from validation runs, recommended)
 
-From actual validation runs on dockermisc1, these gaps were observed. Recommended but not blockers:
+From actual validation runs on docker-agent, these gaps were observed. Recommended but not blockers:
 
 - No container logs during streaming for:
   - start of streaming request;

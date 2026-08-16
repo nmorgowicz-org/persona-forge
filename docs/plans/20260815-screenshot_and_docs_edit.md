@@ -32,7 +32,7 @@ Three deliverables, in dependency order:
    makes real-vs-fake explicit. Then several hero candidates on top of it, so a human picks the
    README hero from real images.
 2. **A docs correction pass plus a `docs/README.md` index** — fix stale product names and the
-   `dockermisc1 → docker-agent` host migration, and give the docs folder a navigable front door.
+   `docker-agent → docker-agent` host migration, and give the docs folder a navigable front door.
    The index pass also *feeds back into* the harness: any doc that would read better with a
    screenshot gets a capture scenario added (see [Phase 4](#phase-4--docs-corrections--index)).
 3. **A premium README** that showcases the app with real images and links into the corrected docs.
@@ -1156,25 +1156,25 @@ Judgment applies, per file:
   ```
   (Check relative depth from each file and adjust `../../`.)
 
-### Step 4.3 — Fix the host migration (`dockermisc1` → `docker-agent`)
+### Step 4.3 — Fix the host migration (`docker-agent` → `docker-agent`)
 
-**20 live docs still say `dockermisc1`**, including two a contributor follows as instructions:
+**20 live docs still say `docker-agent`**, including two a contributor follows as instructions:
 
 ```bash
-grep -rln "dockermisc1" docs --include="*.md" | grep -v resolved | grep -v plans
+grep -rln "docker-agent" docs --include="*.md" | grep -v resolved | grep -v plans
 ```
 
 **Fix now (actionable — someone will follow these and hit a dead host):**
 
 | File | Issue |
 |---|---|
-| `docs/DEV_TEST_LOOP.md` | H1 is literally `# Dev / Test Loop with dockermisc1` |
-| `docs/dev/INTERNAL_OPERATIONS.md` | H1 is `# Internal operations (dockermisc1 and related)` |
+| `docs/DEV_TEST_LOOP.md` | H1 is literally `# Dev / Test Loop with docker-agent` |
+| `docs/dev/INTERNAL_OPERATIONS.md` | H1 is `# Internal operations (docker-agent and related)` |
 | `docs/dev/validation_checks.md` | Validation commands target the old host |
 | `docs/TEST_STRATEGY.md` | Test-host references |
 | `docs/architecture/pocket_tts_integration.md` | Deployment references |
 
-Replace `dockermisc1` with `docker-agent` and any IP with `192.168.10.72`. Verify each command still
+Replace `docker-agent` with `docker-agent` and any IP with `192.168.10.72`. Verify each command still
 makes sense on the new host before rewriting it — paths changed too
 (`/var/data/autopirate/persona-forge/` data root, `/root/docker/docker-agent/` compose dir).
 
@@ -1298,7 +1298,7 @@ grep -rn "voice-design-accent-and-queueing" docs/api/ && echo "FAIL" || echo "OK
 
 for f in docs/DEV_TEST_LOOP.md docs/dev/INTERNAL_OPERATIONS.md docs/dev/validation_checks.md \
          docs/TEST_STRATEGY.md docs/architecture/pocket_tts_integration.md; do
-  grep -q dockermisc1 "$f" && echo "FAIL: $f" || echo "OK: $f"
+  grep -q docker-agent "$f" && echo "FAIL: $f" || echo "OK: $f"
 done
 
 test -f docs/README.md && echo "OK: index exists" || echo "FAIL: no index"
@@ -1631,7 +1631,7 @@ git commit -m "docs: README showcase rewrite, docs index, and staleness pass
   API table, and links into the new docs index
 - Add docs/README.md as the documentation front door
 - Fix stale product name and dead branch reference in HTTP_API_REFERENCE
-- Update dockermisc1 -> docker-agent in actionable docs (historical
+- Update docker-agent -> docker-agent in actionable docs (historical
   plan records left as-is)
 - Fix filename-as-title H1s in FRONTEND_OVERVIEW and TEST_STRATEGY
 
@@ -1820,5 +1820,5 @@ Record anything the executor cannot resolve here rather than guessing.
   persona-forge's palette is OKLCH and was not audited in this pass. Out of scope, worth a
   follow-up.
 - **Doc illustration scope** — Step 4.4 caps new scenarios at three. More is a follow-up plan.
-- **Historical `dockermisc1` references** — ~15 archived plan docs still name the old host. Left
+- **Historical `docker-agent` references** — ~15 archived plan docs still name the old host. Left
   deliberately. An "archived" banner would be a separate pass.

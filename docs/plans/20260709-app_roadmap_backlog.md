@@ -6,7 +6,7 @@ Status: Active Engineering Specification. This document serves as both a product
 ---
 
 ## 1. System Invariants & Constraints
-Every roadmap item must adhere to these hard constraints to avoid system instability on the target hardware (dockermisc1).
+Every roadmap item must adhere to these hard constraints to avoid system instability on the target hardware (docker-agent).
 
 - **The One-Model Invariant**: Only one large model may be resident in VRAM at any time. The system operates in `LOW_RAM_MODE=1` with a single gunicorn worker. Any feature that requires switching backends (OpenVINO -> Pocket TTS -> OmniVoice) must trigger a full unload of the previous model.
 - **Memory Floor (M9)**: Live serving already operates near the M9 memory floor. All new persistence layers must be disk-backed (SQLite/JSON). In-memory caches for history or projects are strictly prohibited.

@@ -39,7 +39,7 @@ the same command before they are recommended.
 
 ### Validated generation result (2026-07-13)
 
-- Runtime: `dockermisc1`, Pocket TTS, `persona-forge:local`, development bind mounts,
+- Runtime: `docker-agent`, Pocket TTS, `persona-forge:local`, development bind mounts,
   source candidate `88d0149`.
 - Input: `The rain stopped suddenly. Everyone stepped outside to listen. Then the city
   began to breathe again.` with seed `424242`, WAV output, and ordinary postprocessing off.
@@ -73,7 +73,7 @@ process RSS; it never contains audio or transcript text.
 
 ## Dev-container verification
 
-On `dockermisc1`, update only the qwen project and recreate only its development service:
+On `docker-agent`, update only the qwen project and recreate only its development service:
 
 ```bash
 cd ~/projects/persona-forge
@@ -95,7 +95,7 @@ recreate. No model, IR, or audio artifact is changed by Phase 5.
 
 ## Validated target result (2026-07-13)
 
-- Host: `dockermisc1`, Intel Core i7-1360P, 8 CPU threads allocated to the environment.
+- Host: `docker-agent`, Intel Core i7-1360P, 8 CPU threads allocated to the environment.
 - Runtime: development Compose bind mounts, `persona-forge:local`, Pocket TTS loaded;
   forced aligner on `CPUExecutionProvider`.
 - Aligner: `mms-onnx-v1`, model revision

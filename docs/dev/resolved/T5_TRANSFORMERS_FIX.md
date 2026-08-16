@@ -1,6 +1,6 @@
 # Handoff: transformers 5.x "free-run / never-stop" TTS bug
 
-**Date:** 2026-07-01  **Branch:** `fix/t5-talker-eos-conditioning`  **Box:** `dockermisc1`
+**Date:** 2026-07-01  **Branch:** `fix/t5-talker-eos-conditioning`  **Box:** `docker-agent`
 
 This document records the diagnosis and validated fix. The original investigation notes remain
 below where they provide useful evidence, but the July 1 full-fix result supersedes their proposed
@@ -37,7 +37,7 @@ Validated image: `qwen3-tts-t5-diag:fullfix`, image ID
 Final batch validation for `Hi there.` returned HTTP 200, produced a 56,886-byte WAV lasting
 1.184208 seconds, completed in 21.5 seconds, and stopped without reaching the stateful capacity.
 Whisper transcription was not rerun because Whisper was unavailable on the local and remote hosts.
-Diagnostic artifacts are outside Git at `/tmp/qwen3-tts-t5-diagnosis/` on `dockermisc1`; validation
+Diagnostic artifacts are outside Git at `/tmp/qwen3-tts-t5-diagnosis/` on `docker-agent`; validation
 audio is `/tmp/fullfix-hi.wav` there and `/private/tmp/fullfix-hi.wav` locally.
 
 ---
@@ -235,8 +235,8 @@ are off by default; turn on by `docker exec <container> sh -c "touch /tmp/<flag>
 **Deploy a code change without rebuilding the image** (keeps the OV model warm-ish; full reload is
 only ~1.5-3 min from the on-disk OV cache):
 ```
-scp src/qwen3_tts/openvino/talker.py dockermisc1:/tmp/talker.py
-ssh dockermisc1 'docker cp /tmp/talker.py qwen3-tts:/app/src/qwen3_tts/openvino/talker.py && \
+scp src/qwen3_tts/openvino/talker.py docker-agent:/tmp/talker.py
+ssh docker-agent 'docker cp /tmp/talker.py qwen3-tts:/app/src/qwen3_tts/openvino/talker.py && \
                  docker exec qwen3-tts sh -c "kill -HUP 1"'   # SIGHUP gunicorn master -> new worker imports new file
 # then wait for "Model loaded and ready" in: docker logs qwen3-tts
 ```

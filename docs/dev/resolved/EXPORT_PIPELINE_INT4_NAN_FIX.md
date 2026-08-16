@@ -1,6 +1,6 @@
 # Handoff: export-pipeline transformers-5.x fix + INT4 main-talker NaN bug
 
-**Date:** 2026-07-02  **Branch:** `feat/voice-design`  **Box:** `dockermisc1`
+**Date:** 2026-07-02  **Branch:** `feat/voice-design`  **Box:** `docker-agent`
 
 This document records two related, now-fixed bugs found while validating the VoiceDesign export
 pipeline under `transformers==5.12.1`, plus one still-open, unrelated bug found along the way.
@@ -71,7 +71,7 @@ The above was diagnosed and fixed by an assisting agent session that ran out of 
 fully updating this document or cleaning up its test container. The following was verified
 independently in a follow-up session, not taken on the fixing agent's word:
 
-- Restarted the OpenVINO-backend serving container on dockermisc1
+- Restarted the OpenVINO-backend serving container on docker-agent
   (`~/projects/qwen3-tts-openvino-voicedesign-test`, image `qwen3-tts-openvino:local`) against the
   freshly-exported IR at `data/ov/1.7B/`.
 - Two real `/generate` requests: both HTTP 200, valid 24kHz mono MP3 output, no NaN, steady
@@ -80,9 +80,9 @@ independently in a follow-up session, not taken on the fixing agent's word:
   (`Dockerfile`, `scripts/export.py`, `src/export/export_openvino.py`,
   `src/export/ov_export_wrappers.py`, `src/qwen3_tts/model.py`, `src/qwen3_tts/transformers_compat.py`,
   `tests/test_export_openvino.py`, `tests/test_export_rope_repair.py`) matches byte-for-byte what
-  was validated on dockermisc1, except `src/export/test_transformer_parity.py` (a diagnostic-only
+  was validated on docker-agent, except `src/export/test_transformer_parity.py` (a diagnostic-only
   parity test, not on the serving path — the local copy is actually further along, with a
-  transformers-4/5 compat fallback that the dockermisc1 copy lacks).
+  transformers-4/5 compat fallback that the docker-agent copy lacks).
 
 ## Known separate, still-open bug: PyTorch rollback path
 

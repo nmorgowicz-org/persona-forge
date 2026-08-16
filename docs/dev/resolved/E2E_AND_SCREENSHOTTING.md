@@ -117,12 +117,12 @@ underneath it is fake. This means:
   prints a ready marker once `/health` would return 200.
 
 This is what both Playwright (`webServer` block, §4.3) and `capture.mjs` (default mode, §5) run
-against day to day, on any machine, with no dockermisc1 involvement at all.
+against day to day, on any machine, with no docker-agent involvement at all.
 
-### 3.2 What still needs dockermisc1
+### 3.2 What still needs docker-agent
 
 Real-model behavior (real audio, a real multi-second swap-in-progress state, real waveform
-capture) is validated separately and only on dockermisc1 — see §7. Routine E2E/UI work never
+capture) is validated separately and only on docker-agent — see §7. Routine E2E/UI work never
 needs it.
 
 ## 4. E2E test design (Playwright)
@@ -238,7 +238,7 @@ Patterns (from llama-monitor, adapted):
     `SCREENSHOT_PORT` (default `8892`, kept distinct from both the real service's 8318 and the
     Playwright test port 8319 so all three can run concurrently without colliding).
   - Optionally target a different, already-running instance instead via `--target <url>` — this
-    is how §7's real-model capture against dockermisc1 is invoked.
+    is how §7's real-model capture against docker-agent is invoked.
   - Navigate and interact deterministically.
 - Scenarios:
   - Defined as named functions in a SCENARIOS map.
@@ -337,32 +337,32 @@ Screenshots:
 - Playwright's own auto-screenshots (on failure only) are CI artifacts, never committed to the
   repo.
 
-## 7. Real-model E2E and screenshots on dockermisc1 (manual only)
+## 7. Real-model E2E and screenshots on docker-agent (manual only)
 
 Not a CI gate, not part of routine local dev — this is a deliberate, occasional, manual tier for
 when someone actually wants to see/hear real generation (real audio, a real multi-second
 swap-in-progress state, a real waveform) rather than the fake server's instant silent responses.
 
 Constraint: the container is `linux/amd64` only; a Mac dev box (this project's dev box is
-Apple Silicon / arm64) cannot run it at usable speed even under emulation. dockermisc1
+Apple Silicon / arm64) cannot run it at usable speed even under emulation. docker-agent
 (`x86_64`) is the only place the real model runs.
 
 Procedure:
-1. On dockermisc1: confirm the `qwen3-tts` container is up (`docker compose up -d qwen3-tts`
+1. On docker-agent: confirm the `qwen3-tts` container is up (`docker compose up -d qwen3-tts`
    from the repo checkout there); confirm nothing else heavy (export, a second model) is running
    at the same time — RAM is limited (`docs/agent-reference/RUNTIME_AND_MEMORY.md`).
 2. From the Mac, open an SSH tunnel to it:
    ```
-   ssh -L 8318:127.0.0.1:8318 <user>@dockermisc1 -N -f
+   ssh -L 8318:127.0.0.1:8318 <user>@docker-agent -N -f
    ```
 3. Run Playwright against it directly (`QWEN3_TTS_UI_URL=http://127.0.0.1:8318 npm run test
    --workspace tests/ui`, bypassing the fake-server `webServer` block), or run
    `capture.mjs --target http://127.0.0.1:8318` for real-audio screenshots/GIFs.
-4. Afterward: close the tunnel; stop the dockermisc1 container again if it isn't otherwise
+4. Afterward: close the tunnel; stop the docker-agent container again if it isn't otherwise
    needed for other work, per this host's shared-use conventions (don't leave scoped test
    containers running, don't touch other services on that host).
 
-Never run export and serving concurrently on dockermisc1 (memory), and never leave the real
+Never run export and serving concurrently on docker-agent (memory), and never leave the real
 service down longer than the task needs.
 
 ## 8. Git, artifacts, and .gitignore
@@ -423,7 +423,7 @@ checked; incomplete items are flagged.
     - [ ] On failure: uploads playwright-report as artifact (short retention).
   - [x] Screenshots (capture.mjs) remain local-only (by design, not in CI).
 
-- [x] Manual dockermisc1 procedure (§7) documented:
+- [x] Manual docker-agent procedure (§7) documented:
   - [x] SSH tunnel command.
   - [x] Running Playwright/capture.mjs against the real instance via `--target`/`QWEN3_TTS_UI_URL`.
   - [x] Teardown (stop container, close tunnel).

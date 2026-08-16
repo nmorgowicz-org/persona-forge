@@ -199,7 +199,7 @@ Dev overlay bind-mounts:
 
 1. [DONE] Build and deploy qwen3-tts container with Hermes-compatible changes
 2. [DONE] Test endpoint with voice_id, voice param, WAV and PCM formats
-3. [DONE] Apply Gateway Iris config (OpenAI provider shape) — `~/.hermes-gateway/config.yaml` on dockermisc1, `tts.openai.base_url` → persona-forge's `/v1/audio/speech`
+3. [DONE] Apply Gateway Iris config (OpenAI provider shape) — `~/.hermes-gateway/config.yaml` on docker-agent, `tts.openai.base_url` → persona-forge's `/v1/audio/speech`
 4. [DONE] Test full Hermes integration (LLM response → TTS → barge-in) — verified live 2026-08-12: interrupted a reply mid-playback, TTS stopped instantly
 5. [NOT DONE — not blocking] Verify PCM output sample rate matches Hermes expectation (24kHz) — never explicitly measured; live barge-in test worked, so functionally fine, but not formally confirmed
 6. [NOT DONE — not blocking] Monitor latency for longer sentences (4000-8000 chars) — not exercised by tonight's test

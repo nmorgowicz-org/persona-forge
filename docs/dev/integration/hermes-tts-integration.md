@@ -9,11 +9,11 @@ the real integration work is a batch OpenAI-compatible endpoint.
 
 Should persona-forge invest in streaming (Deliverable A already shipped) and pipelined overlap
 (Deliverable B, gated on the Task 3 measurement)? The deciding factor is what the actual consumer —
-the **hermes-agent** ("Iris") gateway on dockermisc1 — can consume.
+the **hermes-agent** ("Iris") gateway on docker-agent — can consume.
 
 ## What hermes-agent is and how it does TTS
 
-- Image: `nousresearch/hermes-agent` (the NousResearch Hermes agent). Source on dockermisc1 at
+- Image: `nousresearch/hermes-agent` (the NousResearch Hermes agent). Source on docker-agent at
   `~/.hermes/hermes-agent/`; TTS implementation in `tools/tts_tool.py`; feature doc
   `website/docs/user-guide/features/tts.md`.
 - Ten built-in TTS providers: edge (default), elevenlabs, openai, minimax, mistral, gemini, xai,
@@ -117,7 +117,7 @@ is desired (currently the failover lives inside the custom command, which is fin
 
 ## Next steps
 
-1. Implement `/v1/audio/speech` in `app_api.py` + tests; rebuild image; smoke test on dockermisc1.
+1. Implement `/v1/audio/speech` in `app_api.py` + tests; rebuild image; smoke test on docker-agent.
 2. Finalize the streaming-validation PR (Tasks 4 listening, 5 Compose/import smoke, 6 docs/PR) —
    independent of this endpoint; A ships as a dormant capability.
 3. Update `~/.hermes-gateway/config.yaml` fallback arm to the new endpoint (host-side, with Nick).

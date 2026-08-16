@@ -27,14 +27,14 @@ phase's own gate on 2026-08-12:
 | 6 — dev-deploy helper script | Done | `scripts/dev-deploy.sh` exists |
 | 7 — final repo-side acceptance sweep | Done | remaining repo-wide `qwen3-tts`/`qwen3_tts` hits are historical prose (`CHANGELOG.md`, other `docs/plans/*.md`, `docs/dev/resolved/*.md`) or third-party package references, both explicitly excluded per §3.1 |
 | 8 — GitHub repository rename | Done | `gh repo view` confirms `nmorgowicz-org/persona-forge` |
-| 9 — dockermisc1 host migration | Done | production `docker-compose.yml` on dockermisc1 mounts `/var/data/autopirate/persona-forge/*`; the old `/var/data/autopirate/qwen3-tts-new/` dir + tarball are unused leftovers on disk, a disk-cleanup item, not a blocker |
+| 9 — docker-agent host migration | Done | production `docker-compose.yml` on docker-agent mounts `/var/data/autopirate/persona-forge/*`; the old `/var/data/autopirate/qwen3-tts-new/` dir + tarball are unused leftovers on disk, a disk-cleanup item, not a blocker |
 
 ## 1. Purpose and execution contract
 
 This plan coordinates the complete rename of this project from **Qwen3-TTS OpenVINO** /
 `qwen3-tts-openvino` to **Persona Forge** / `persona-forge`. It covers Python package/module
 identity, this repo's own Docker/Compose surface, environment variables, documentation, the
-GitHub repository, and the dockermisc1 dev-deployment host (including its host-local data
+GitHub repository, and the docker-agent dev-deployment host (including its host-local data
 directory, which is not tracked in this repo).
 
 It deliberately does **not** borrow the migration-protocol machinery from the sibling
@@ -70,14 +70,14 @@ them.
 | Product name | **Persona Forge** (already live in the frontend `<title>`) |
 | Canonical slug | `persona-forge` — GitHub repo, Docker image/container, compose project name, `pyproject.toml` `[project].name` |
 | Python package/module | `src/persona_forge` (full internal rename from `src/qwen3_tts` — the product no longer centers on the Qwen3-TTS engine, which is now an opt-in extra alongside OmniVoice and pocket-tts, so locking the internal namespace to it "doesn't make technical sense," per Nick) |
-| GitHub repository | `nmorgowicz-org/persona-forge` (currently private, single consumer — Nick, via dockermisc1) |
+| GitHub repository | `nmorgowicz-org/persona-forge` (currently private, single consumer — Nick, via docker-agent) |
 | Environment variable prefix | `PERSONA_FORGE_*` replacing `QWEN3_TTS_*` |
 | Backward compatibility | **None.** Clean cutover, no aliases, no compat window. Private repo, single maintainer, single deployment host — there is no external consumer to protect. |
 | Default TTS backend (D12) | pocket_tts as product default, OpenVINO opt-in. **Already implemented in code as of 2026-07-11 — see the correction in Phase 2.** This plan closes out the documentation gap, not a code change. |
-| dockermisc1 data directory | Rename `/var/data/autopirate/qwen3-tts-new/` → `/var/data/autopirate/persona-forge/` (full clean rename, not left as legacy cruft — confirmed with Nick despite the higher effort of moving live model/voice data) |
-| dockermisc1 host access | Nick confirmed passwordless sudo is available for Phase 9; use it carefully, one confirmed step at a time |
+| docker-agent data directory | Rename `/var/data/autopirate/qwen3-tts-new/` → `/var/data/autopirate/persona-forge/` (full clean rename, not left as legacy cruft — confirmed with Nick despite the higher effort of moving live model/voice data) |
+| docker-agent host access | Nick confirmed passwordless sudo is available for Phase 9; use it carefully, one confirmed step at a time |
 | Sequencing vs. Initiative C | This rebrand executes **before** resuming `docs/dev/resolved/POST_MERGE_INITIATIVES.md` Initiative C (guided-experience/teaching layer) — no sense building tooltips/docs that reference the old name right before erasing it |
-| Dev-deploy convenience | Add `scripts/dev-deploy.sh` (Phase 6) to oneline the frontend-build + compose-merge steps Nick currently runs by hand on dockermisc1 |
+| Dev-deploy convenience | Add `scripts/dev-deploy.sh` (Phase 6) to oneline the frontend-build + compose-merge steps Nick currently runs by hand on docker-agent |
 
 Nothing else in this plan requires a decision from Nick before execution — everything below has a
 worked-out default.
@@ -102,7 +102,7 @@ earlier phases have landed):
   — import references, Phase 1.
 - **Scripts** (`scripts/benchmark_aligner.py`, `scripts/diagnostics/codec_memory_report.py`,
   `scripts/download_model.py`, `scripts/export.py`, `scripts/patch_local_compat.py`,
-  `scripts/validate_repo.py`, `scripts/entrypoint.sh`, `scripts/run-m4-on-dockermisc1.sh`) — mixed
+  `scripts/validate_repo.py`, `scripts/entrypoint.sh`, `scripts/run-m4-on-docker-agent.sh`) — mixed
   Phase 1 (import references) and Phase 3 (env vars).
 - **Docs** (~50 files under `docs/`, plus `README.md`, `AGENTS.md`, `CHANGELOG.md`,
   `SECURITY.md`) — Phase 5.
@@ -162,11 +162,11 @@ ceremony:
   validation) without leaving this checkout.
 - `[decide-once]` — a judgment call already made in §2; the phase just needs to execute it
   consistently.
-- `[escalate→device]` — requires action on real infrastructure outside this checkout (dockermisc1)
+- `[escalate→device]` — requires action on real infrastructure outside this checkout (docker-agent)
   and/or credentials the executing agent shouldn't hold unattended.
 
 Phases 0-7 are `[local-verifiable]`. Phase 8 is `[escalate→device]` (GitHub account-level change).
-Phase 9 is `[escalate→device]` (SSH + sudo on dockermisc1).
+Phase 9 is `[escalate→device]` (SSH + sudo on docker-agent).
 
 ## 5. Phases
 
@@ -249,7 +249,7 @@ stale project memories that recorded this as still-pending.
 **Owned occurrences:** `compose.yml:34,54,112` (`QWEN3_TTS_IMAGE`, `QWEN3_TTS_PORT`),
 `.github/workflows/ci-ui.yml:154` (`QWEN3_TTS_UI_URL`),
 `frontend/src/pages/IntegrationsPage.tsx:9,20` (`$QWEN3_TTS_BASE_URL`),
-`scripts/run-m4-on-dockermisc1.sh`, `tests/ui/fixtures/fake_model_server.py` (check for env refs).
+`scripts/run-m4-on-docker-agent.sh`, `tests/ui/fixtures/fake_model_server.py` (check for env refs).
 
 **Before renaming `model="qwen3-tts"` (`IntegrationsPage.tsx:23`):** grep
 `src/persona_forge/app.py`'s `/v1/audio/speech` handler for a hardcoded `"qwen3-tts"` model-id
@@ -263,7 +263,7 @@ YAML; `docker compose -f compose.yml config` validates.
 
 ### Phase 4 — This repo's Docker/Compose identity `[local-verifiable]`
 
-**Mission:** rename this repo's own Docker/Compose surface (not dockermisc1's host-side files —
+**Mission:** rename this repo's own Docker/Compose surface (not docker-agent's host-side files —
 that's Phase 9).
 
 **Tasks:**
@@ -314,7 +314,7 @@ Haiku-executability (R1, §7).
 ### Phase 6 — Dev-deploy helper script `[local-verifiable]`
 
 **Mission:** `scripts/dev-deploy.sh` — oneline the frontend-build + compose-merge steps Nick
-currently runs by hand on dockermisc1.
+currently runs by hand on docker-agent.
 
 **Tasks:** create `scripts/dev-deploy.sh`:
 
@@ -337,7 +337,7 @@ Phase 9's gate. Document usage in `docs/dev/LOCAL_SETUP.md`.
 ### Phase 7 — Final repo-side acceptance sweep `[local-verifiable]`
 
 **Mission:** confirm phases 1-6 are consistent and complete before touching GitHub or
-dockermisc1.
+docker-agent.
 
 **Tasks:**
 1. Re-run the Phase 0 census; diff against Phase 5's documented expected-residual list — anything
@@ -369,7 +369,7 @@ remote works; CI green on the next push.
 Confirm explicitly before executing, per standing operating rules, even though the repo is
 currently private.
 
-### Phase 9 — dockermisc1 host migration `[escalate→device]` — Sonnet + Nick, interactively, sudo
+### Phase 9 — docker-agent host migration `[escalate→device]` — Sonnet + Nick, interactively, sudo
 
 **Mission:** bring the dev deployment host in line with the new naming, including the data
 directory that isn't tracked in this repo.
@@ -377,7 +377,7 @@ directory that isn't tracked in this repo.
 **Preconditions:** Phases 1-8 complete; the renamed repo is pullable.
 
 **Tasks — interactive, one confirmed step at a time:**
-1. `ssh dockermisc1`.
+1. `ssh docker-agent`.
 2. Stop the running container:
    `cd ~/docker && docker compose -f docker-compose.yml -f docker-compose.qwen3-tts-dev.yml down qwen3-tts`.
 3. **Before moving anything:** confirm the real data path live on the host (do not trust the
@@ -420,7 +420,7 @@ directly.
 |---|---|---|
 | R1 | Phase 5's docs sweep is the largest text-judgment surface in the plan; under-specifying it risks a Haiku executor missing files or over-eagerly rewriting §3.1 exclusions | Build the expected-residual grep list explicitly before running Phase 5; treat any unexpected diff in Phase 7 as a bug, not noise |
 | R2 | `IntegrationsPage.tsx:23`'s `model="qwen3-tts"` might be a live API contract value, not just an example string | Explicit grep-before-rename instruction baked into Phase 3 |
-| R3 | dockermisc1's actual data path may not match either source (memory vs. `.env.example`) | Phase 9 step 3 verifies live before the `sudo mv`, never assumes |
+| R3 | docker-agent's actual data path may not match either source (memory vs. `.env.example`) | Phase 9 step 3 verifies live before the `sudo mv`, never assumes |
 | R4 | GitHub repo rename (Phase 8) before content-phases land could leave a dangling `LABEL`/`IMAGE_NAME` pointing at the wrong repo | Strict sequencing — Phase 8 only after Phase 7's gate passes |
 | R5 | `release-please` `package-name` change (Phase 4) desyncs from `.release-please-manifest.json` if only one file is updated | Phase 4 explicitly updates both together |
 | R6 | `uv.lock` regeneration (Phase 1) could pull different transitive versions than the pinned 120-package resolution proven during Initiative A | Diff the new lock's resolution against the known-good baseline; stop and escalate on drift rather than accept silently |
@@ -433,8 +433,8 @@ directly.
 - [ ] `docker compose -f compose.yml config` valid; local image build succeeds (or verified via
       Phase 9's real build)
 - [ ] GitHub repo renamed, CI green post-rename
-- [ ] dockermisc1 container healthy under the new name/image/data path
-- [ ] `scripts/dev-deploy.sh` works end to end on dockermisc1
+- [ ] docker-agent container healthy under the new name/image/data path
+- [ ] `scripts/dev-deploy.sh` works end to end on docker-agent
 - [ ] README/docs read coherently as "Persona Forge," no stray old-name mentions in user-facing
       prose outside historical records
 - [ ] `persona-forge-rebrand` and `post-merge-initiatives-plan` memories updated to reflect

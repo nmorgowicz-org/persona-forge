@@ -689,7 +689,7 @@ Gate: default CI selector green; new markers documented in the test README.
 
 1. **No hard cutover.** `TTS_BACKEND` default stays `pocket_tts` (`compose.yml:61`,
    `.env.example:20`). `llama_pocket_tts` is opt-in.
-2. Ship behind opt-in for at least one release; dogfood on dockermisc1; validate on the Plexxie
+2. Ship behind opt-in for at least one release; dogfood on docker-agent; validate on the Plexxie
    hardware host for the iGPU/SYCL angle (that host runs without Docker — keep Nick informed of
    actions taken there).
 3. Fallback policy: if the subprocess fails to become ready at load, **fail loudly with a clear

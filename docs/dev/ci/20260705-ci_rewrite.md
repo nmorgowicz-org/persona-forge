@@ -41,7 +41,7 @@ All tests must be executable on:
 These are explicitly NOT part of this plan:
 
 - Introducing real-model tests into CI (Tier 3/4 parity, latency, RSS).
-  - Those remain manual on dockermisc1.
+  - Those remain manual on docker-agent.
 - Changing the production behavior of model.py, app.py, OpenVINO adapters.
   - We adapt tests to reality, not reality to tests.
 - Modifying frontend behavior or APIs.

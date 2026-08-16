@@ -10,7 +10,7 @@
 This documents a **live integration** — not a proposal. Qwen3-TTS VoiceDesign (the model this
 repo already ships) was observed to produce **American-accented English regardless of prompt
 wording** for regional English accents (Australian confirmed broken via hands-on testing on
-dockermisc1, 2026-07-03 — see repo memory `voicedesign-accent-investigation.md`). Foreign-language
+docker-agent, 2026-07-03 — see repo memory `voicedesign-accent-investigation.md`). Foreign-language
 accents (French, Chinese, etc.) worked better. An INT8-vs-INT4 main-core quantization test was
 one hypothesis; this doc covers the second, independent path that was implemented: swapping in
 **OmniVoice** (`k2-fsa/OmniVoice`) for the accent-control step specifically, while keeping this
@@ -137,26 +137,26 @@ against this repo's actual failing accent case (Australian English), not specula
   duration anomalies. This is the shape of clip that was actually fed into
   `POST /voices/import` (§3) as a real cloning reference, not the short showcase lines.
 - **Not yet tested**: CUDA, plain CPU on x86 (see §2 for a plain-CPU vs-MPS comparison that is
-  *not* dockermisc1's exact hardware), determinism/seed reproducibility beyond "same seed number
+  *not* docker-agent's exact hardware), determinism/seed reproducibility beyond "same seed number
   passed to `torch.manual_seed` before `generate()`", and any accent besides Australian (British
   sounded good in one earlier single-sample spot check; Indian was inconclusive — quieter output,
   not clearly silent, not re-tested with the fp32/moderate-pitch/sentence-design fixes above).
 
-## 2. CPU feasibility for dockermisc1
+## 2. CPU feasibility for docker-agent
 
-dockermisc1: 8 vCPU (Intel i7-1360P, AVX2 + AVX-VNNI, no AVX-512), 15 GiB RAM (swap already under
+docker-agent: 8 vCPU (Intel i7-1360P, AVX2 + AVX-VNNI, no AVX-512), 15 GiB RAM (swap already under
 real pressure — see repo memory `serving-memory-footprint.md`), shared with several other
-containers that must not be starved (`dockermisc1-shared-host-caution.md`).
+containers that must not be starved (`docker-agent-shared-host-caution.md`).
 
 - The official `k2-fsa/OmniVoice` PyPI/GitHub package's *documented* device targets are CUDA,
   Apple Silicon (MPS), and Intel Arc GPU (XPU) — CPU is not documented. **However, it was tested
   hands-on (2026-07-03, `omnivoice==0.1.5`, M5 Max) and the plain package ran on `device="cpu"`
   with zero code changes** — `model.to("cpu")` after `from_pretrained(..., dtype=torch.float32)`
   worked, generated correct-sounding audio, no exceptions. Measured on the M5 Max's CPU cores (not
-  dockermisc1's — see caveat below): RTF ≈ 2.0 (a 3.64s clip took 7.4s to generate) vs RTF ≈ 0.39
+  docker-agent's — see caveat below): RTF ≈ 2.0 (a 3.64s clip took 7.4s to generate) vs RTF ≈ 0.39
   on the same machine's MPS. **The plain `pip install omnivoice` package became the live
   integration path** — the `omnivoice.cpp` GGUF route (discussed below) was not required. Important
-  caveat: an M5 Max's CPU cores are a different, faster architecture than dockermisc1's Intel
+  caveat: an M5 Max's CPU cores are a different, faster architecture than docker-agent's Intel
   i7-1360P mobile cores — this RTF number did not transfer directly; it only proved the code path
   was CPU-portable at all.
 - There is also a community C++ port, **`ServeurpersoCom/omnivoice.cpp`**, explicitly advertising a
@@ -167,7 +167,7 @@ containers that must not be starved (`dockermisc1-shared-host-caution.md`).
   CPU-portability made it unnecessary for the integration as implemented.
   (Source: https://github.com/ServeurpersoCom/omnivoice.cpp)
 - What's *not* documented anywhere found in this research: AVX-512-specific requirements (this
-  repo's exporter deliberately avoids AVX-512-only kernels — dockermisc1 doesn't have it, so this
+  repo's exporter deliberately avoids AVX-512-only kernels — docker-agent doesn't have it, so this
   matters), concrete RAM footprint in GB, or any CPU-only RTF/latency benchmark numbers.
 - **No OpenVINO export path exists or is documented anywhere for OmniVoice.** This repo's whole
   pattern (PyTorch → ONNX → OpenVINO IR, `src/export/export_openvino.py`) is specific to the
@@ -182,13 +182,13 @@ a third "profile" inside the existing OpenVINO runtime.** The plain `pip install
 was confirmed as the live integration path — it runs on CPU with zero code changes, no additional
 toolchain.
 
-**dockermisc1-actual-hardware result (2026-07-03, plain `pip install omnivoice`, `dtype=torch.
+**docker-agent-actual-hardware result (2026-07-03, plain `pip install omnivoice`, `dtype=torch.
 float32`, throwaway `python:3.11-slim` container, `device="cpu"`): RTF ≈ 12.2** (43.1s generate
 for 3.52s audio; 39.6s cold model load on top). This is the number that matters — the M5-Max CPU
-figure above (RTF≈2.0) did **not** transfer; dockermisc1's real RTF was ~6x worse than that and
+figure above (RTF≈2.0) did **not** transfer; docker-agent's real RTF was ~6x worse than that and
 ~31x worse than M5-Max MPS. **This changed the feasibility verdict materially**: combined with the
 ~25% broken-output rate requiring generate-N-and-pick, producing one usable clip could cost
-10-15+ minutes of CPU time on dockermisc1. That ruled out any interactive/live "audition this
+10-15+ minutes of CPU time on docker-agent. That ruled out any interactive/live "audition this
 accent" UX step on this hardware via the plain PyPI package — it would only be workable as a slow,
 explicitly-async background job (submit → wait minutes → notify), and even then it competed for
 CPU with the resident Qwen3-TTS Base service on a shared, already-constrained 15 GiB box.
@@ -237,7 +237,7 @@ Why this shape:
    (OpenVINO Qwen3-TTS + OmniVoice) resident at once on a 15 GiB box that already had swap
    pressure would not be attempted casually. On-demand/short-lived kept the two processes'
    peak memory windows from overlapping for long, and kept the blast radius on
-   "shared-host caution" (other unrelated containers on dockermisc1) small.
+   "shared-host caution" (other unrelated containers on docker-agent) small.
 4. It also sidestepped the CC-BY-NC weight license question living *inside* this repo's own served
    model tree — OmniVoice stayed an external, clearly-separated component that a deployer could
    choose to enable or not, rather than baked into the persona-forge image's default IR set.
@@ -281,12 +281,12 @@ Items 4-7 remain open.
 4. **STILL UNVERIFIED: CPU (`omnivoice.cpp` Q8_0, or the plain package on CPU — §2) inference
    quality/reliability matches the fp32/MPS results above.** Quantization (GGUF) and even plain
    CPU fp32 execution could independently reintroduce the fp16-style instability seen on MPS, or
-   behave differently. Do not assume the MPS findings transferred to dockermisc1 without a real
+   behave differently. Do not assume the MPS findings transferred to docker-agent without a real
    test there.
-5. **STILL UNVERIFIED: actual CPU latency/RTF on dockermisc1's specific hardware.** §2's CPU
+5. **STILL UNVERIFIED: actual CPU latency/RTF on docker-agent's specific hardware.** §2's CPU
    numbers from the M5 Max are from a different and likely faster CPU architecture than
-   dockermisc1's Intel i7-1360P mobile cores. Dockermisc1 latency was unknown until measured there
-   directly. (This was partially addressed by the dockermisc1 test in §2 — RTF≈12.2 — but broader
+   docker-agent's Intel i7-1360P mobile cores. Dockermisc1 latency was unknown until measured there
+   directly. (This was partially addressed by the docker-agent test in §2 — RTF≈12.2 — but broader
    CPU-hardware generalizations remain unverified.)
 6. **ASSUMED BUT NOT CONFIRMED: the CC-BY-NC weight license is compatible with an occasional,
    internal, non-redistributed use** (design a voice for a user's own AI agent, keep the resulting
@@ -296,7 +296,7 @@ Items 4-7 remain open.
    stated intent is this repo is personal-with-eventual-FOSS-goal, so this was lower urgency than
    for an already-commercial product, but still needed a conscious decision before any paid Hermes
    tier depended on it.
-7. **If OmniVoice's CPU performance on dockermisc1 (or the `omnivoice.cpp` path) proves
+7. **If OmniVoice's CPU performance on docker-agent (or the `omnivoice.cpp` path) proves
    unacceptable or not worth the engineering investment:** the fallback in §5.3(b)
    (user-supplied reference clip cloning) already works and needs no further research — it should
    be shipped alone as the accent-dissatisfaction escalation path, and OmniVoice (in any form)
@@ -438,7 +438,7 @@ Updated 2026-07-03 — items 1-3 from the original plan are now answered and ele
 §4. Items 4-7 remain open:
 
 4. **Does the ~25% (fp32) / ~50% (fp16) broken-output rate observed on MPS (§1a) reproduce on
-   dockermisc1's CPU**, or is it MPS-specific? Not yet isolated — only one CPU take was generated
+   docker-agent's CPU**, or is it MPS-specific? Not yet isolated — only one CPU take was generated
    (it succeeded), not a multi-seed batch. Lower priority now that #3's latency finding already
    ruled out interactive use regardless of the exact reliability rate.
 5. **License review**: does CC-BY-NC weight licensing block using OmniVoice output inside a paid
@@ -447,7 +447,7 @@ Updated 2026-07-03 — items 1-3 from the original plan are now answered and ele
    urgency while this repo stays personal/pre-FOSS, but must be resolved before any commercial
    Hermes tier depends on this path.
 6. **Given #3's latency: is `omnivoice.cpp` (GGUF/Q8_0, quantized) worth benchmarking on
-   dockermisc1 before giving up on local CPU hosting entirely?** The plain PyTorch package's CPU
+   docker-agent before giving up on local CPU hosting entirely?** The plain PyTorch package's CPU
    performance is clearly not viable interactively; a quantized llama.cpp-style port could
    plausibly close much of that 12x gap, but this is unverified — nobody has built/run it. This is
    now the live question, superseding the original "try plain package first" framing in the old

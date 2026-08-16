@@ -146,7 +146,7 @@ catch: **0.6B is already small, so the absolute savings are smaller in GiB** tha
 ## Guardrails (carried from M9)
 
 - **Box hygiene:** never blanket `docker kill`/`prune` (it took down `litellm*`/`headroom-proxy`); touch
-  only `persona-forge`. Never two `--memory 13g` jobs at once. See `dockermisc1-ops` memory.
+  only `persona-forge`. Never two `--memory 13g` jobs at once. See `docker-agent-ops` memory.
 - INT8/INT4 graphs are both named `*_int8.xml`; the suffix on the dir is the only precision marker.
 - Measure one backend per process. RTF is overhead-dominated → compare absolute median seconds.
 - Preserve the 4D-mask workaround under any rewrite.
