@@ -1,6 +1,14 @@
 // SCENARIO INTENT: Animate the end-to-end design-to-stitch wizard flow as a GIF.
 import { createRecorder, framesToGif, cleanupFrames } from '../../harness/shot.mjs';
 
+// Repeats the current frame so a viewer has time to actually read what's on
+// screen at key beats, instead of the GIF blowing past them in one 0.5s tick.
+async function hold(recorder, page, count) {
+    for (let i = 0; i < count; i += 1) {
+        await recorder.snap(page);
+    }
+}
+
 export default async function (ctx) {
     const { page, baseURL } = ctx;
     const prefix = 'design-to-stitch';
@@ -19,6 +27,24 @@ export default async function (ctx) {
     await page.waitForSelector('[data-testid="omnivoice-script"]');
     await page.type('[data-testid="omnivoice-script"]', 'The quick brown fox jumps over the lazy dog.');
     await recorder.snap(page);
+
+    // Just 1 candidate — this is a real remote inference job on a shared box
+    // (avg ~2min/candidate), and the GIF only needs one take to lock in, not
+    // the full 3-candidate comparison a real user would want.
+    // The "Advanced" toggle only exists in expert experience mode, and the
+    // candidates-per-segment field is itself unmounted until "Advanced" is
+    // expanded — flip both, set candidates to 1, then collapse again so the
+    // GIF doesn't show an unrelated UI mode switch.
+    await page.click('[data-testid="experience-level-toggle"]');
+    await page.click('[data-testid="omnivoice-advanced-toggle"]');
+    await page.waitForSelector('[data-testid="omnivoice-candidates-per-segment"]');
+    await page.$eval('[data-testid="omnivoice-candidates-per-segment"]', (el) => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(el, '1');
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await page.click('[data-testid="omnivoice-advanced-toggle"]');
+    await page.click('[data-testid="experience-level-toggle"]');
     await page.click('[data-testid="omnivoice-audition-button"]');
     await recorder.snap(page);
 
@@ -27,10 +53,12 @@ export default async function (ctx) {
         const count = await page
             .$eval('[data-testid="omnivoice-candidate-take"]', (els) => els.length)
             .catch(() => 0);
-        if (count >= 3) break;
+        if (count >= 1) break;
         await new Promise((r) => setTimeout(r, 1500));
     }
-    await recorder.snap(page);
+    // Dwell here: this is the "segment rendered" moment the viewer needs to
+    // actually register before the flow moves on.
+    await hold(recorder, page, 4);
 
     const lockButton = await page.waitForSelector('[data-testid="omnivoice-lock-segment"]');
     await lockButton.click();
@@ -62,8 +90,22 @@ export default async function (ctx) {
     await items[0].click();
     await page.click('[data-testid="stitch-picker-insert-segments"]');
     await page.waitForSelector('[data-testid="stitch-clip"]');
-    await recorder.snap(page);
+    // Dwell here: the segment has just landed in the Stitch Studio timeline —
+    // give the viewer time to see it before saving.
+    await hold(recorder, page, 4);
 
+    // The Save button is disabled while the debounced live-preview render is in
+    // flight (isRendering in StitchTimeline). hold() only takes back-to-back
+    // screenshots for GIF pacing — it doesn't wait real wall-clock time — so
+    // without this, the click can land on a still-disabled button and silently
+    // no-op (no request ever reaches /omnivoice/save).
+    await page.waitForFunction(
+        () => {
+            const btn = document.querySelector('[data-testid="stitch-save-voice"]');
+            return btn && !btn.disabled;
+        },
+        { timeout: 30000 }
+    );
     await page.click('[data-testid="stitch-save-voice"]');
     await page.waitForSelector('[data-testid="voice-card"]', { timeout: 60000 });
     await recorder.snap(page);
