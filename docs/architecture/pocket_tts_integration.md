@@ -42,7 +42,8 @@ High-level behavior:
   - The selected voice_state is resolved (default or voice_library voice).
   - generate_pocket_tts(model, voice_state, text) is called.
   - Output is post-processed with an energy-based tail trim using frames_after_eos.
-- Pocket TTS registers as a foreign engine so:
+- Pocket TTS is a backend branch inside `load_model` (only OmniVoice registers as a foreign
+  engine), so:
   - Idle unload and Base/Engine swap logic treat it consistently.
   - Only one heavy model is resident at a time.
 

@@ -33,7 +33,7 @@ Key source files (`src/persona_forge/`):
 Deployment surface: `compose.yml` (`persona-forge` service + `export` + `export-voice-design` services,
 same image, different command), `.env.example`, `README.md`, `docs/HOW_TO_RUN.md`.
 
-The current production deployment (dockermisc1) runs `MODEL_SIZE=1.7B`.
+The current production deployment (docker-agent) runs `MODEL_SIZE=1.7B`.
 
 ## 1. Goal
 
@@ -206,7 +206,14 @@ Response (200):
 }
 Response (503): {"error": "Model busy (voice design swap in progress)"}
 Response (500): {"error": "Voice design failed: <reason>"}
+Response (501, TTS_BACKEND=pocket_tts): {"error": "Qwen VoiceDesign is not available under
+TTS_BACKEND=pocket_tts; use the OmniVoice engine or TTS_BACKEND=pytorch/openvino."}
 ```
+
+pocket_tts has no Qwen3-TTS VoiceDesign checkpoint — its `TTSModel` exposes no
+`generate_voice_design` — so the endpoint rejects that backend up front, before any model
+swap. The frontend disables the Qwen engine and defaults the design engine to OmniVoice on
+pocket_tts deployments (OmniVoice loads independently of the TTS backend).
 
 Implementation:
 1. Validate `description` and `sample_text` are non-empty.
