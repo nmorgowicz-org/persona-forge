@@ -102,6 +102,8 @@ interface StoreState {
   modelLoaded: boolean
   serviceStarted: boolean
   loadingMessage: string | null
+  healthStatus: string | null
+  healthError: string | null
   text: string
   voiceId: string | null
   voices: VoiceMeta[]
@@ -342,6 +344,8 @@ export const useAppStore = create<StoreState>((set) => ({
   modelLoaded: false,
   serviceStarted: false,
   loadingMessage: null,
+  healthStatus: null,
+  healthError: null,
   text: '',
   voiceId: null,
    voices: [],
@@ -685,6 +689,12 @@ const PROGRESS_POLL_MS = 700
       }
       if (data.loading_message !== store.loadingMessage) {
         store.setLoadingMessage(data.loading_message || null)
+      }
+      if ((data.status || null) !== store.healthStatus) {
+        useAppStore.setState({ healthStatus: data.status || null })
+      }
+      if ((data.error || null) !== store.healthError) {
+        useAppStore.setState({ healthError: data.error || null })
       }
       if (data.swap_in_progress !== store.swapInProgress) {
         useAppStore.setState({ swapInProgress: Boolean(data.swap_in_progress) })

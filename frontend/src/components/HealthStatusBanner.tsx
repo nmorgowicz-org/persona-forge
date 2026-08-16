@@ -4,13 +4,30 @@ import { AlertTriangle, Loader2 } from 'lucide-react'
 export function HealthStatusBanner() {
   const serviceStarted = useAppStore((s) => s.serviceStarted)
   const loadingMessage = useAppStore((s) => s.loadingMessage)
+  const healthStatus = useAppStore((s) => s.healthStatus)
+  const healthError = useAppStore((s) => s.healthError)
   const page = useAppStore((s) => s.page)
   const designEngine = useAppStore((s) => s.designEngine)
   const refTextValidation = useAppStore((s) => s.refTextValidation)
 
   // Any in-flight model load (cold boot, post-boot swap-back, or OmniVoice load) gets the
   // top notification bar, on any page, until the server stops reporting loadingMessage.
+  // A startup failure (health status "error") resolves into a persistent error bar instead
+  // of spinning "Loading model…" forever.
   if (loadingMessage) {
+    if (healthStatus === 'error') {
+      return (
+        <div className="flex items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-4 py-1.5 text-xs text-destructive">
+          <AlertTriangle className="size-3 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <span className="inline-block truncate">
+              {loadingMessage}
+              {healthError ? `: ${healthError}` : ''}
+            </span>
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground">
         <div className="min-w-0 flex items-center gap-2">
