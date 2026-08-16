@@ -3,7 +3,6 @@ import type {
   GenerateJobProgress,
   OmniVoiceAuditionProgressResult,
   OmniVoiceCandidate,
-  OmniVoiceProgress,
   SegmentMeta,
   VoiceDesignProgress,
   VoiceMeta,
@@ -220,7 +219,6 @@ interface StoreState {
   ovCurrentText: string
   ovCurrentCandidates: OmniVoiceCandidate[] | null
   ovCurrentSelectedIndex: number
-  ovIsAuditioning: boolean
   ovIsLockingIn: boolean
   ovIsStitching: boolean
   ovIsSaving: boolean
@@ -232,7 +230,6 @@ interface StoreState {
   // auto-open that voice's Adjust Prosody popover, then clears it so it doesn't
   // reopen on a later, unrelated visit to the library.
   deepLinkProsodyVoiceId: string | null
-  ovProgress: OmniVoiceProgress | null
    ovCurrentJobId: string | null
    ovJobTotalSegments: number
    ovJobStatus: 'queued' | 'running' | 'completed' | 'failed' | null
@@ -276,7 +273,6 @@ interface StoreState {
   ) => void
   setOvCurrentCandidates: (v: OmniVoiceCandidate[] | null) => void
   setOvCurrentSelectedIndex: (v: number) => void
-  setOvIsAuditioning: (v: boolean) => void
   setOvIsLockingIn: (v: boolean) => void
   setOvIsStitching: (v: boolean) => void
   setOvIsSaving: (v: boolean) => void
@@ -285,7 +281,6 @@ interface StoreState {
   setOvStitchedBlob: (v: Blob | null) => void
   setOvSavedVoiceId: (v: string | null) => void
   setDeepLinkProsodyVoiceId: (v: string | null) => void
-  setOvProgress: (v: OmniVoiceProgress | null) => void
    setOvCurrentJobId: (v: string | null) => void
    setOvJobTotalSegments: (v: number) => void
    setOvJobStatus: (v: 'queued' | 'running' | 'completed' | 'failed' | null) => void
@@ -487,7 +482,6 @@ export const useAppStore = create<StoreState>((set) => ({
   ovCurrentText: '',
   ovCurrentCandidates: null,
   ovCurrentSelectedIndex: 0,
-  ovIsAuditioning: false,
   ovIsLockingIn: false,
   ovIsStitching: false,
   ovIsSaving: false,
@@ -496,7 +490,6 @@ export const useAppStore = create<StoreState>((set) => ({
   ovStitchedBlob: null,
   ovSavedVoiceId: null,
   deepLinkProsodyVoiceId: null,
-  ovProgress: null,
   ovCurrentJobId: null,
   ovJobTotalSegments: 0,
   ovJobStatus: null,
@@ -577,7 +570,6 @@ export const useAppStore = create<StoreState>((set) => ({
   setOvCurrentCandidates: (v) => set({ ovCurrentCandidates: v }),
   setOvCurrentSelectedIndex: (v) =>
     set({ ovCurrentSelectedIndex: v }),
-  setOvIsAuditioning: (v) => set({ ovIsAuditioning: v }),
   setOvIsLockingIn: (v) => set({ ovIsLockingIn: v }),
   setOvIsStitching: (v) => set({ ovIsStitching: v }),
   setOvIsSaving: (v) => set({ ovIsSaving: v }),
@@ -586,7 +578,6 @@ export const useAppStore = create<StoreState>((set) => ({
   setOvStitchedBlob: (v) => set({ ovStitchedBlob: v }),
   setOvSavedVoiceId: (v) => set({ ovSavedVoiceId: v }),
   setDeepLinkProsodyVoiceId: (v) => set({ deepLinkProsodyVoiceId: v }),
-  setOvProgress: (v) => set({ ovProgress: v }),
   setOvCurrentJobId: (v) => set({ ovCurrentJobId: v }),
   setOvJobTotalSegments: (v) => set({ ovJobTotalSegments: v }),
   setOvJobStatus: (v) => set({ ovJobStatus: v }),
@@ -786,31 +777,7 @@ function updateVdPollHandle(isGenerating: boolean) {
   }
 }
 
-// OmniVoice poller
-let ovPollHandle: ReturnType<typeof setInterval> | null = null
-
-function updateOvPollHandle(isAuditioning: boolean) {
-  if (ovPollHandle && !isAuditioning) {
-    clearInterval(ovPollHandle)
-    ovPollHandle = null
-  }
-  if (!ovPollHandle && isAuditioning) {
-    ovPollHandle = setInterval(async () => {
-      try {
-        const res = await fetch('/omnivoice/progress')
-        if (!res.ok) return
-        const data = await res.json()
-        useAppStore.getState().setOvProgress(data)
-      } catch {
-        // Transient; will retry
-      }
-    }, PROGRESS_POLL_MS)
-  }
-}
-
 useAppStore.subscribe((state, prevState) => {
   if (state.vdIsGenerating !== prevState.vdIsGenerating)
     updateVdPollHandle(state.vdIsGenerating)
-  if (state.ovIsAuditioning !== prevState.ovIsAuditioning)
-    updateOvPollHandle(state.ovIsAuditioning)
 })
