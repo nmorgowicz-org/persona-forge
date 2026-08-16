@@ -178,6 +178,11 @@ def _install_test_controls(app_module, rt):
     fake model state at runtime (simulate an in-flight Base load or a startup failure)
     and reset it afterwards.
     """
+    # Idempotent: CI starts main() for the health check first which registers these
+    # routes on the shared app; when pytest's fixture calls start_server() the app
+    # has already handled the health check, so we can't register new routes.
+    if "/_test/simulate-base-load" in app_module.app.view_functions:
+        return
     from flask import jsonify, request  # noqa: E402
 
     @app_module.app.route("/_test/simulate-base-load", methods=["POST"])
