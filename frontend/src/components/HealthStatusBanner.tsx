@@ -8,6 +8,19 @@ export function HealthStatusBanner() {
   const designEngine = useAppStore((s) => s.designEngine)
   const refTextValidation = useAppStore((s) => s.refTextValidation)
 
+  // Any in-flight model load (cold boot, post-boot swap-back, or OmniVoice load) gets the
+  // top notification bar, on any page, until the server stops reporting loadingMessage.
+  if (loadingMessage) {
+    return (
+      <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground">
+        <div className="min-w-0 flex items-center gap-2">
+          <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
+          <span className="truncate">{loadingMessage}</span>
+        </div>
+      </div>
+    )
+  }
+
   // service_started stays true forever after the first successful load — later idle-unload
   // cycles reload lazily/transparently on the next request, so there's nothing to "wait" for
   // and no banner should show. Only a true cold boot (never started) blocks anything.

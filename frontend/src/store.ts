@@ -666,10 +666,10 @@ export const useAppStore = create<StoreState>((set) => ({
 
 const PROGRESS_POLL_MS = 700
 
-// Model-loading poller: runs at 1s until the service has started at least once (true cold
-// boot), then backs off to a slow keep-alive poll — service_started never goes back to false,
-// but model_loaded can (idle-unload), and later requests reload it lazily/transparently, so
-// there's no need to keep hammering /health once we've seen the service come up once.
+// Model-loading poller: stays alive for the whole app lifetime. Polls at 1s while a model
+// load is in flight (cold boot, post-boot swap-back, or OmniVoice load) and backs off to
+// ~5s in steady state. Post-boot loads must keep updating loadingMessage/swapInProgress/
+// modelLoaded — the top notification bar depends on this staying alive.
 ;(async () => {
   async function poll() {
     try {
@@ -741,18 +741,17 @@ const PROGRESS_POLL_MS = 700
     }
   }
 
-  // First fetch immediately
-  await poll()
-
-  // Then poll every second until the service has started at least once
-  const interval = setInterval(() => {
-    const store = useAppStore.getState()
-    if (store.serviceStarted) {
-      clearInterval(interval)
-      return
-    }
-    void poll()
-  }, 1000)
+  async function tick() {
+    await poll()
+    const s = useAppStore.getState()
+    const loading =
+      !s.serviceStarted ||
+      s.loadingMessage !== null ||
+      s.swapInProgress ||
+      !s.modelLoaded
+    setTimeout(() => void tick(), loading ? 1000 : 5000)
+  }
+  void tick()
 })()
 
 // VoiceDesign poller
