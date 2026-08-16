@@ -81,12 +81,13 @@ export const SCENARIOS = {
     'voice-design-generate': {
         run: voiceDesignGenerate,
         category: 'voice-design',
-        runtime: 'pocket-tts',
+        runtime: 'neutral',
+        source: 'fake',
         contract: {
             intent: 'Fill in Voice Design fields and generate a result.',
             expectedOutputs: [
-                'voice-design-generate--pocket-tts--filled.png',
-                'voice-design-generate--pocket-tts--result.png',
+                'voice-design-generate--neutral--filled.png',
+                'voice-design-generate--neutral--result.png',
             ],
         },
     },
