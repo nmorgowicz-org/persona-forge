@@ -19,10 +19,13 @@ const FRAME_DIR = join(HARNESS_DIR, '..', 'frames');
 
 export async function captureShot(page, rawFilename, options = {}) {
     const filename = tagFilename(rawFilename, options.runtimeTag);
-    const { fullPage = true, expandSelector, runtimeTag, ...screenshotOptions } = options;
+    const { fullPage = true, expandSelector, scrollToSelector, runtimeTag, ...screenshotOptions } = options;
 
-    // Non-full-page captures are disabled by default.
-    if (!fullPage) {
+    // Non-full-page captures are disabled by default, UNLESS scrollToSelector
+    // is given (see below) — that's the sanctioned way to opt out of
+    // fullPage, because it still produces a single normal-viewport frame
+    // rather than an arbitrary partial capture.
+    if (!fullPage && !scrollToSelector) {
         console.log(`[CAPTURE] Skipped non-full-page: ${filename}`);
         return;
     }
@@ -32,6 +35,23 @@ export async function captureShot(page, rawFilename, options = {}) {
     // the native tooltip into the page's own render surface and it shows up
     // in the screenshot. Park the mouse off any content before every shot.
     await page.mouse.move(0, 0).catch(() => {});
+
+    // fullPage screenshots stack the ENTIRE scrollable page into one tall
+    // image — never what we want for a hero/showcase shot. When a scenario
+    // wants to show a section that's below the fold, scroll the main
+    // document so that section is centered in the viewport, then capture a
+    // single normal-viewport-sized frame — same as what a visitor actually
+    // sees, just scrolled to the interesting part.
+    if (scrollToSelector) {
+        await page.evaluate((sel) => {
+            document.querySelector(sel)?.scrollIntoView({ behavior: 'instant', block: 'center' });
+        }, scrollToSelector);
+        await sleep(300);
+        await page.screenshot({ path: join(currentArtifactsDir(), filename), fullPage: false, ...screenshotOptions });
+        recordCapture(filename, page.viewport());
+        console.log(`[CAPTURE] Saved ${filename}`);
+        return;
+    }
 
     // Some panels (modals, scrollable sub-containers) are position:fixed or
     // internally scrolling, so fullPage:true (which sizes off

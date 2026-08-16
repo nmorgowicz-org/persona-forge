@@ -4,6 +4,9 @@
 # Auto-captured UI screenshots/GIFs — curated ones get promoted to docs/screenshots/
 docs/screenshots/artifacts/
 
+# Playwright run-status output
+/test-results/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

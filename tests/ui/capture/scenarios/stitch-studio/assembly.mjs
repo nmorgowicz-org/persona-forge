@@ -22,6 +22,11 @@ export default async function (ctx) {
 
     await page.click('[data-testid="stitch-picker-insert-segments"]');
     await page.waitForSelector('[data-testid="stitch-clip"]');
-    // INTENT: Assembled stitch clip.
-    await captureShot(page, 'stitch-assembly-assembly.png', { fullPage: true });
+    // INTENT: Assembled stitch clip, as a first-time visitor sees it — a single
+    // viewport-sized frame scrolled to the clip, never the whole page stitched
+    // into one tall image.
+    await captureShot(page, 'stitch-assembly-assembly.png', {
+        fullPage: false,
+        scrollToSelector: '[data-testid="stitch-clip"]',
+    });
 }

@@ -6,6 +6,11 @@ export default async function (ctx) {
     const { page, baseURL } = ctx;
     await gotoPage(page, baseURL, 'nav-voice-library', '[data-testid="voice-card"]');
     await page.waitForSelector('[data-testid="alignment-compare"]');
-    // INTENT: Voice Library with prosody fingerprints, as a first-time visitor sees it.
-    await captureShot(page, 'hero-library-panel.png', { fullPage: true });
+    // INTENT: Voice Library's prosody fingerprint, as a first-time visitor sees it —
+    // a single viewport-sized frame scrolled to the block, never the whole page
+    // stitched into one tall image.
+    await captureShot(page, 'hero-library-panel.png', {
+        fullPage: false,
+        scrollToSelector: '[data-testid="alignment-compare"]',
+    });
 }
