@@ -113,8 +113,9 @@ interface StoreState {
    speakLastSeed: number | null
    speakAudioBlob: Blob | null
    editingVoice: EditingVoice | null
-  designEngine: DesignEngine
-  activityStatus: ActivityStatus | null
+   designEngine: DesignEngine
+   designEngineTouched: boolean
+   activityStatus: ActivityStatus | null
   runtimeTtsBackend: string | null
   pocketTtsVoiceCloningAvailable: boolean | null
   swapInProgress: boolean
@@ -352,8 +353,9 @@ export const useAppStore = create<StoreState>((set) => ({
    speakLastSeed: null,
   speakAudioBlob: null,
   editingVoice: null,
-  designEngine: 'qwen',
-  targetFamilyId: null,
+   designEngine: 'omnivoice',
+   designEngineTouched: false,
+   targetFamilyId: null,
     activityStatus: null,
     runtimeTtsBackend: 'pocket_tts',
     pocketTtsVoiceCloningAvailable: null,
@@ -386,14 +388,25 @@ export const useAppStore = create<StoreState>((set) => ({
   setSpeakLastSeed: (v) => set({ speakLastSeed: v }),
   setSpeakAudioBlob: (v) => set({ speakAudioBlob: v }),
   setEditingVoice: (editingVoice) => set({ editingVoice }),
-  setDesignEngine: (engine) => set({ designEngine: engine }),
+  setDesignEngine: (engine) => set({ designEngine: engine, designEngineTouched: true }),
   setTargetFamilyId: (targetFamilyId) => set({ targetFamilyId }),
   setActivityStatus: (activityStatus) => set({ activityStatus }),
   setGlossaryOpen: (v: boolean) => set({ glossaryOpen: v }),
   glossaryOpen: false,
   glossaryFocusId: null,
   openGlossaryAt: (id) => set({ glossaryOpen: true, glossaryFocusId: id }),
-  setRuntimeConfig: (patch) => set(patch),
+  setRuntimeConfig: (patch) => {
+    set(patch)
+    // The default design engine follows the backend (OmniVoice on pocket_tts, Qwen
+    // VoiceDesign on the Qwen backends) until the user picks one explicitly.
+    if (patch.runtimeTtsBackend !== undefined) {
+      const s = useAppStore.getState()
+      if (!s.designEngineTouched) {
+        const preferred: DesignEngine = s.runtimeTtsBackend === 'pocket_tts' ? 'omnivoice' : 'qwen'
+        if (s.designEngine !== preferred) set({ designEngine: preferred })
+      }
+    }
+  },
 
    setRefTextValidation: (refTextValidation) => set({ refTextValidation }),
 
@@ -682,6 +695,14 @@ const PROGRESS_POLL_MS = 700
           healthBackend: resolvedBackend || null,
           runtimeTtsBackend: resolvedBackend || null,
         })
+        // The default design engine follows the backend (OmniVoice on pocket_tts, Qwen
+        // VoiceDesign on the Qwen backends) until the user picks one explicitly.
+        if (!useAppStore.getState().designEngineTouched) {
+          const preferred = resolvedBackend === 'pocket_tts' ? 'omnivoice' : 'qwen'
+          if (useAppStore.getState().designEngine !== preferred) {
+            useAppStore.setState({ designEngine: preferred })
+          }
+        }
       }
       // Sync Pocket TTS voice-cloning status into the store whenever /health
       // indicates the backend is pocket_tts — this is the single source of truth

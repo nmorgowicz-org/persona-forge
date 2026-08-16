@@ -15,6 +15,7 @@ export function VoiceDesignPage() {
 
   const designEngine = useAppStore((s) => s.designEngine)
   const setDesignEngine = useAppStore((s) => s.setDesignEngine)
+  const runtimeTtsBackend = useAppStore((s) => s.runtimeTtsBackend)
 
   // Capture the queued edit once on mount, then clear it from the store — a plain later visit
   // to this page (e.g. via the sidebar) should start fresh, not silently reuse stale edit state.
@@ -54,6 +55,13 @@ export function VoiceDesignPage() {
         <EngineSelector
           value={designEngine}
           onChange={setDesignEngine}
+          disabledReasons={
+            runtimeTtsBackend === 'pocket_tts'
+              ? {
+                  qwen: 'Qwen VoiceDesign needs a Qwen3-TTS backend (TTS_BACKEND=pytorch or openvino) — use OmniVoice for voice design on this deployment.',
+                }
+              : undefined
+          }
         />
       </motion.div>
 
