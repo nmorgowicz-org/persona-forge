@@ -38,7 +38,11 @@ test.describe('performance', () => {
         !e.includes('404') &&
         !e.toLowerCase().includes('net::')
     )
-    test.info().log('CONSOLE-ERRORS: ' + JSON.stringify(realErrors, null, 2))
+    fs.writeFileSync('/tmp/console-errors.json', JSON.stringify(realErrors))
     expect(realErrors.length).toBe(0)
+  })
+
+  test('print console errors for CI debugging', async () => {
+    console.log('CONSOLE-ERRORS-FROM-PREV: ' + fs.readFileSync('/tmp/console-errors.json', 'utf8'))
   })
 })
