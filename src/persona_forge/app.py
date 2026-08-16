@@ -243,9 +243,14 @@ def health():
     # Human-readable hint while a model load is in flight: cold boot (never started),
     # a post-boot Base swap-back/lazy reload, or the OmniVoice load window (swap pending
     # while OmniVoice is not yet resident). The frontend keeps polling /health and shows
-    # this as a top notification bar for the duration of the load.
+    # this as a top notification bar for the duration of the load. A startup failure gets
+    # its own message so the banner resolves into an error state instead of spinning
+    # "Loading model…" forever.
     if not model._service_started:
-        state["loading_message"] = "Loading model…"
+        if state.get("status") == "error":
+            state["loading_message"] = "Model failed to load"
+        else:
+            state["loading_message"] = "Loading model…"
     elif state.get("base_load_in_progress"):
         state["loading_message"] = "Loading model…"
     elif omnivoice_engine.swap_in_progress() and not state["omnivoice_loaded"]:
