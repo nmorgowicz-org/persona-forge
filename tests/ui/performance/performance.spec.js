@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import fs from 'fs'
 
 test.describe('performance', () => {
   test('page interactive within 5s', async ({ page }) => {
