@@ -1,11 +1,11 @@
-# Internal operations (dockermisc1 and related)
+# Internal operations (docker-agent and related)
 
 Internal, host-specific notes. Not intended as public deployment documentation.
 
-## dockermisc1 layout
+## docker-agent layout
 
 - Host: shared live host; multiple containers coexist.
-- Docker Compose lives at `~/docker/docker-compose.yml`.
+- Docker Compose lives at `~/docker/docker-agent/docker-compose.yml` (root@docker-agent, 192.168.10.72).
 - Qwen3-TTS data lives under:
 
   - `/var/data/autopirate/persona-forge/model`        → HF cache (MODEL_CACHE_PATH)
@@ -16,17 +16,17 @@ Internal, host-specific notes. Not intended as public deployment documentation.
 ## Basic operations
 
 - Start:
-  - `docker compose -f ~/docker/docker-compose.yml up -d persona-forge`
+  - `docker compose -f ~/docker/docker-agent/docker-compose.yml up -d persona-forge`
 - Stop (don’t touch unrelated services):
-  - `docker compose -f ~/docker/docker-compose.yml down persona-forge`
+  - `docker compose -f ~/docker/docker-agent/docker-compose.yml down persona-forge`
 - Pull new image (example):
   - `export PERSONA_FORGE_IMAGE=ghcr.io/nmorgowicz-org/persona-forge:<sha>`
-  - `docker compose -f ~/docker/docker-compose.yml pull persona-forge`
-  - `docker compose -f ~/docker/docker-compose.yml up -d persona-forge`
+  - `docker compose -f ~/docker/docker-agent/docker-compose.yml pull persona-forge`
+  - `docker compose -f ~/docker/docker-agent/docker-compose.yml up -d persona-forge`
 - Export (stop service first if constrained):
-  - `docker compose -f ~/docker/docker-compose.yml down persona-forge`
-  - `docker compose -f ~/docker/docker-compose.yml run --rm export`
-  - `docker compose -f ~/docker/docker-compose.yml up -d persona-forge`
+  - `docker compose -f ~/docker/docker-agent/docker-compose.yml down persona-forge`
+  - `docker compose -f ~/docker/docker-agent/docker-compose.yml run --rm export`
+  - `docker compose -f ~/docker/docker-agent/docker-compose.yml up -d persona-forge`
 
 Never run a 13 GiB export alongside a 10 GiB serve on this box (OOM).
 

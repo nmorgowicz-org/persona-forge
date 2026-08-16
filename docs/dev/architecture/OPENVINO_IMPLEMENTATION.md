@@ -1,5 +1,8 @@
 # Qwen3-TTS OpenVINO INT8 Implementation Plan
 
+> Historical record from the Qwen3-TTS/OpenVINO era. The project is now Persona Forge; see
+> [SYSTEM_OVERVIEW](../../architecture/SYSTEM_OVERVIEW.md) for current architecture.
+
 ## Objective
 
 Accelerate either official Qwen3-TTS Base voice-cloning checkpoint on the CPU-only

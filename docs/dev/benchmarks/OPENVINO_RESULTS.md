@@ -1,5 +1,8 @@
 # Qwen3-TTS OpenVINO — Benchmark & Results Log
 
+> Historical record from the Qwen3-TTS/OpenVINO era. The project is now Persona Forge; see
+> [SYSTEM_OVERVIEW](../../architecture/SYSTEM_OVERVIEW.md) for current architecture.
+
 Measured data only. Design, contracts, and plans live in
 [`OPENVINO_IMPLEMENTATION.md`](../architecture/OPENVINO_IMPLEMENTATION.md); this file is the audit record of every
 run so options can be compared without wading through the implementation narrative.

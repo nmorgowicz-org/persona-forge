@@ -941,7 +941,7 @@ flag at all. It is passed explicitly here so the log records what was used.
 cd /Users/nick/SCRIPTS/CLAUDE/persona-forge
 
 for s in \
-  home speak-generate voice-design-panel voice-design-generate \
+  home speak-generate voice-design-panel \
   voice-variant-list accent-project-grouping \
   segment-library-browse stitch-assembly \
   hero-speak-filled hero-speak-result hero-voice-design hero-library ; do
@@ -955,8 +955,10 @@ grep -c "receipt" /tmp/capture-real.log
 The voice-library, project-grouping, and stitch scenarios are here **because the live host has 2
 voices and 6 segments**. If one fails anyway, note which and move it to Step 2.2.
 
-> `hero-speak-result`, `speak-generate`, and `voice-design-generate` perform **real CPU inference**.
-> Expect tens of seconds each.
+> `hero-speak-result` and `speak-generate` perform **real CPU inference**. Expect tens of seconds each.
+> `voice-design-generate` runs against the fake source (Step 2.2) — VoiceDesign's OpenVINO IRs were
+> deleted and pytorch-only inference on this host is untested/expected-slow (torch-xpu is unvalidated),
+> so this scenario doesn't exercise a real backend at all. See [[voice-design-backend-scope]] memory.
 
 Alternatively, by category:
 
@@ -972,7 +974,8 @@ a log.
 ```bash
 for s in \
   omnivoice-audition omnivoice-candidates alignment-compare \
-  voice-promote-variant omnivoice-audition-gif design-to-stitch-gif ; do
+  voice-promote-variant omnivoice-audition-gif design-to-stitch-gif \
+  voice-design-generate ; do
   echo "=== $s ==="
   node tests/ui/capture/index.mjs --scenario "$s" --source fake 2>&1 | tail -4
 done 2>&1 | tee /tmp/capture-fake.log
@@ -1020,9 +1023,9 @@ mkdir -p docs/screenshots
 
 cp docs/screenshots/artifacts/generate/speak-generate--pocket-tts--after-generate.png \
    docs/screenshots/speak.png
-cp docs/screenshots/artifacts/voice-design/voice-design-generate--pocket-tts--filled.png \
+cp docs/screenshots/artifacts/voice-design/voice-design-generate--neutral--filled.png \
    docs/screenshots/voice-design.png
-cp docs/screenshots/artifacts/omnivoice/omnivoice-audition--omnivoice--candidates.png \
+cp docs/screenshots/artifacts/omnivoice/omnivoice-audition--omnivoice--audition-candidates.png \
    docs/screenshots/omnivoice.png
 cp docs/screenshots/artifacts/voice-library/voice-variant-list--neutral--variant-list.png \
    docs/screenshots/voice-library.png
@@ -1085,7 +1088,7 @@ The API check catches the known string; only your eyes catch the unknown one.
 | Speak, filled | `hero-candidates/hero-speak-filled--pocket-tts--speak.png` | The first thing a visitor will actually do. Clean, uncluttered. |
 | Speak, generated | `hero-candidates/hero-speak-result--pocket-tts--speak.png` | Same, plus the AudioDeck waveform — proves the app works. |
 | Voice Design | `hero-candidates/hero-voice-design--neutral--panel.png` | Trait chip grid; the most "designed"-looking surface. |
-| Voice Library | `hero-candidates/hero-library--neutral--library.png` | Prosody fingerprints; signals depth and real data. |
+| Voice Library | `hero-candidates/hero-library--neutral--panel.png` | Prosody fingerprints; signals depth and real data. |
 | Stitch Studio | `hero-candidates/stitch-assembly.png` | Pink/purple/blue timeline; the most visually distinctive. |
 | OmniVoice GIF | `omnivoice-audition.gif` | Motion outperforms static on GitHub; shows accent audition. |
 | Wizard GIF | `design-to-stitch.gif` | Shows the full design→stitch journey end to end. |
@@ -1680,8 +1683,8 @@ Post-port keys. "Real OK" reflects the live host **having 2 voices and 6 segment
 |---|---|---|
 | Hero | *(chosen at Step 3.4)* | `artifacts/hero/` or `artifacts/stitch-studio/` |
 | Speak | `docs/screenshots/speak.png` | `artifacts/generate/speak-generate--pocket-tts--after-generate.png` |
-| Voice Design | `docs/screenshots/voice-design.png` | `artifacts/voice-design/voice-design-generate--pocket-tts--filled.png` |
-| OmniVoice | `docs/screenshots/omnivoice.png` | `artifacts/omnivoice/omnivoice-audition--omnivoice--candidates.png` |
+| Voice Design | `docs/screenshots/voice-design.png` | `artifacts/voice-design/voice-design-generate--neutral--filled.png` |
+| OmniVoice | `docs/screenshots/omnivoice.png` | `artifacts/omnivoice/omnivoice-audition--omnivoice--audition-candidates.png` |
 | Voice Library | `docs/screenshots/voice-library.png` | `artifacts/voice-library/voice-variant-list--neutral--variant-list.png` |
 | Stitch Studio | `docs/screenshots/stitch-studio.png` | `artifacts/stitch-studio/stitch-assembly--neutral--assembly.png` |
 | GIF 1 | `docs/screenshots/omnivoice-audition.gif` | `artifacts/omnivoice/omnivoice-audition-gif--omnivoice--audition.gif` |
@@ -1791,7 +1794,16 @@ Reference: `/Users/nick/SCRIPTS/CLAUDE/llama-monitor/tests/ui/capture/`
 
 Record anything the executor cannot resolve here rather than guessing.
 
-- **Hero image** — pending the Step 3.4 checkpoint.
+- **Hero image** — resolved at Step 3.4: `omnivoice-audition.gif` and `design-to-stitch.gif` as the
+  two primary heroes, plus a 4-image static gallery (`hero-voice-design--neutral--panel.png`,
+  `hero-library--neutral--panel.png`, `stitch-assembly.png`, `hero-speak-result--pocket-tts--speak.png`).
+  `hero-speak-filled--pocket-tts--speak.png` is cut from the README as redundant (kept in
+  `docs/screenshots/` only).
+- **Step 4.4 screenshot coverage** — `docs/architecture/FRONTEND_OVERVIEW.md` and
+  `docs/dev/DESIGN_SYSTEM.md` would both benefit from added visual reference (per-page annotated
+  shots for the former, token/component swatches for the latter). Not captured this pass — adding
+  new scenarios for pure docs-illustration is scope creep beyond this plan's screenshot-harness and
+  docs-correction objectives. Left as a follow-up docs-illustration pass.
 - **`real-local` source viability** — `startRealServer` downloads weights and runs CPU inference. It
   is wired into `source.mjs` for completeness, but Phase 2 never uses it (`remote` is faster and has
   better data). If it turns out to be unusable in CI, mark it unimplemented in `IMPLEMENTED_SOURCES`

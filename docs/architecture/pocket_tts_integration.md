@@ -314,7 +314,7 @@ integration must not violate them:
 
 8. Manual Validation Checklist
 
-On a CPU host with enough RAM (dockermisc1 or equivalent):
+On a CPU host with enough RAM (docker-agent or equivalent):
 
 - Build the image with the pocket-tts dependency and confirm `python -c "from pocket_tts import
   TTSModel"` succeeds, and that torch remains CPU-only (no CUDA wheel pulled in).

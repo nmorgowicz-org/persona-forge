@@ -1,4 +1,4 @@
-# TEST_STRATEGY
+# Test Strategy
 
 You-changed-X → run-Y reference for persona-forge.
 
@@ -28,7 +28,7 @@ Run:
   - pytest tests/test_ov_talker_runtime.py -v
   - Any parity-related unit tests (search for "cache" in tests/).
 - If generation behavior changed (sampling, logits, seeds):
-  - Must run Tier 3 parity on dockermisc1 (see §3).
+  - Must run Tier 3 parity on docker-agent (see §3).
 
 ### 1.2 OpenVINO adapters and runtime (ov_talker, ov_predictor, ov_vocoder, stateful cache)
 
@@ -46,7 +46,7 @@ Run:
 - pytest tests/test_export_openvino.py -v
 - Any parity-related unit tests.
 - If you changed cache, stateful models, or IR construction:
-  - Must run Tier 3 parity on dockermisc1 (see §3).
+  - Must run Tier 3 parity on docker-agent (see §3).
 
 ### 1.3 Export / quantization / IR build (src/export/*)
 
@@ -61,7 +61,7 @@ Run:
 - pytest tests/test_streaming_vocoder.py -v
 - If export graph changed:
   - Rebuild container image.
-  - Must run Tier 3 (FP32 parity) and Tier 4 (quality + perf) on dockermisc1 (see §3-4).
+  - Must run Tier 3 (FP32 parity) and Tier 4 (quality + perf) on docker-agent (see §3-4).
 
 ### 1.4 Queueing / model swap / serving (app.py, runtime behavior)
 
@@ -98,7 +98,7 @@ Run:
   - pytest tests/test_segment_library.py -v
 - If audio post-processing (trimming, normalization) changed:
   - pytest tests/test_audio_post.py -v
-- End-to-end on dockermisc1:
+- End-to-end on docker-agent:
   - Run a short OmniVoice audition + lock-in + stitch + save in UI.
 
 ### 1.6 Frontend-only changes (frontend/)
@@ -172,7 +172,7 @@ Trigger when:
 - cache, stateful models, or quantization strategy changed
 - any code affecting numerical results or IR structure is modified
 
-Run on dockermisc1 only.
+Run on docker-agent only.
 
 High-level steps:
 
@@ -210,7 +210,7 @@ Run for any change that touches:
 - export
 - memory / idle unload behavior
 
-Run on dockermisc1 only.
+Run on docker-agent only.
 
 Record:
 

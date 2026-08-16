@@ -1,8 +1,8 @@
-# Dev / Test Loop with dockermisc1
+# Dev / Test Loop with docker-agent
 
 This doc exists so future sessions (Claude or human) can quickly understand:
 - What’s on this branch
-- How the app runs on dockermisc1
+- How the app runs on docker-agent
 - How to rapidly test local changes
 
 ## 1. Branch and purpose
@@ -19,9 +19,9 @@ Key capabilities:
 - Persistent segment library and “Save to library” for VoiceDesign.
 - UX: composer-style Script input, Non-Verbals/Examples toolbars, sidebar polish.
 
-## 2. dockermisc1: how the app runs
+## 2. docker-agent: how the app runs
 
-- Machine: dockermisc1 (access via SSH as usual).
+- Machine: docker-agent (access via SSH as usual, root@docker-agent, 192.168.10.72).
 - Container: persona-forge
 - Image: persona-forge:voice-design-accent-and-queueing
 - Port: 8318 → 8318 (HTTP)
@@ -39,27 +39,27 @@ Runtime mode:
   - (REF_TEXT set to a fixed reference; confirm if it must change for your use.)
 
 Key mounts:
-- Host: /var/data/autopirate/persona-forge-new/voices
+- Host: /var/data/autopirate/persona-forge/voices
   - Container: /voices
-- Host: /var/data/autopirate/persona-forge-new/segments
+- Host: /var/data/autopirate/persona-forge/segments
   - Container: /segments
-- Host: /var/data/autopirate/persona-forge-new/reference/voice_A.wav
+- Host: /var/data/autopirate/persona-forge/reference/voice_A.wav
   - Container: /voice/reference.wav
-- Host: /var/data/autopirate/persona-forge-new/model
+- Host: /var/data/autopirate/persona-forge/model
   - Container: /root/.cache/huggingface/hub
-- Host: /var/data/autopirate/persona-forge-new/ov
+- Host: /var/data/autopirate/persona-forge/ov
   - Container: /ov
 - Host: /home/nick/projects/persona-forge/src
   - Container: /app/src
 
 Important:
 - The running container uses /app/src from:
-  - /home/nick/projects/persona-forge/src on dockermisc1.
+  - /home/nick/projects/persona-forge/src on docker-agent.
 - That directory is git-tracked to the same repo as this project.
 
 ## 3. Dev-test loop (current default)
 
-Use this when developing locally (or in Claude) and testing on dockermisc1.
+Use this when developing locally (or in Claude) and testing on docker-agent.
 
 From the local repo (e.g. this CWD):
 
@@ -69,7 +69,7 @@ From the local repo (e.g. this CWD):
    - git add -A
    - git commit -m "descriptive message"
    - git push origin voice-design-accent-and-queueing
-3) On dockermisc1:
+3) On docker-agent:
    - cd /home/nick/projects/persona-forge
    - git pull origin voice-design-accent-and-queueing
 4) Reload backend:
@@ -78,7 +78,7 @@ From the local repo (e.g. this CWD):
      - Fast reload: docker exec persona-forge kill -HUP 1
      - Or full restart (safer for bigger changes): docker restart persona-forge
 5) Test:
-   - Hit http://<dockermisc1-host>:8318 to verify behavior.
+   - Hit http://192.168.10.72:8318 to verify behavior.
 
 Notes:
 - If you change Python-only files: HUP or restart is sufficient.
@@ -88,7 +88,7 @@ Notes:
 
 When iterating quickly (e.g., tuning OmniVoice behavior), swap gunicorn for uvicorn with --reload.
 
-Example (run on dockermisc1, or script it):
+Example (run on docker-agent, or script it):
 
 - Stop existing container:
   - docker stop persona-forge && docker rm persona-forge
@@ -98,17 +98,17 @@ Example (run on dockermisc1, or script it):
       --name persona-forge \
       --memory=13g \
       -p 8318:8318 \
-      -v /var/data/autopirate/persona-forge-new/voices:/voices \
-      -v /var/data/autopirate/persona-forge-new/segments:/segments \
+      -v /var/data/autopirate/persona-forge/voices:/voices \
+      -v /var/data/autopirate/persona-forge/segments:/segments \
       -v /home/nick/projects/persona-forge/src:/app/src \
-      -v /var/data/autopirate/persona-forge-new/reference/voice_A.wav:/voice/reference.wav \
-      -v /var/data/autopirate/persona-forge-new/model:/root/.cache/huggingface/hub \
-      -v /var/data/autopirate/persona-forge-new/ov:/ov \
+      -v /var/data/autopirate/persona-forge/reference/voice_A.wav:/voice/reference.wav \
+      -v /var/data/autopirate/persona-forge/model:/root/.cache/huggingface/hub \
+      -v /var/data/autopirate/persona-forge/ov:/ov \
       -e TTS_BACKEND=openvino \
       -e MODEL_SIZE=1.7B \
       -e LOW_RAM_MODE=1 \
       -e FRONTEND_ENABLED=1 \
-      -e "REF_TEXT=Welcome to Rosies. What can I get for you today? You know, Im a good girl. You want me, dont you? I am on the menu too." \
+      -e "REF_TEXT=Welcome to the shop. How can I help you find what you're looking for today?" \
       persona-forge:voice-design-accent-and-queueing \
       python -m uvicorn persona_forge.app:app \
         --host 0.0.0.0 --port 8318 --reload \
@@ -116,7 +116,7 @@ Example (run on dockermisc1, or script it):
 
 Effect:
 - Any change in /home/nick/projects/persona-forge/src triggers auto-reload inside ~1-2 seconds.
-- Combine with git pull on dockermisc1 after pushing from local.
+- Combine with git pull on docker-agent after pushing from local.
 
 When done iterating, revert to normal gunicorn-based container command.
 
@@ -126,7 +126,7 @@ If you’re a new Claude session:
 
 - Assume:
   - We are developing on voice-design-accent-and-queueing.
-  - Running instance is dockermisc1:persona-forge (8318), using /app/src mounted from git-tracked repo.
+  - Running instance is docker-agent:persona-forge (8318), using /app/src mounted from git-tracked repo.
 - Default workflow:
   - Implement in this repo.
   - Commit + push.
