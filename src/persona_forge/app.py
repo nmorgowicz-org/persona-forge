@@ -303,6 +303,21 @@ def voice_design_create():
         return jsonify({"error": "VoiceDesign swap already in progress"}), 503
     if not model._service_started:
         return jsonify({"error": "Model not loaded"}), 503
+    # Qwen VoiceDesign only exists on the Qwen3-TTS backends — under pocket_tts the loaded
+    # TTSModel has no generate_voice_design, so reject up front (501) instead of swapping
+    # the model and failing mid-request. The UI routes voice design through OmniVoice there.
+    if getattr(model, "TTS_BACKEND", None) == "pocket_tts":
+        return (
+            jsonify(
+                {
+                    "error": (
+                        "Qwen VoiceDesign is not available under TTS_BACKEND=pocket_tts; "
+                        "use the OmniVoice engine or TTS_BACKEND=pytorch/openvino."
+                    )
+                }
+            ),
+            501,
+        )
     data = _json_body()
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
