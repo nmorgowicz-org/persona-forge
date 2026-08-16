@@ -170,6 +170,51 @@ def _seed_fake_voice_library(rt):
 
 
 
+def _install_test_controls(app_module, rt):
+    """Test-only runtime state controls for E2E specs.
+
+    The Playwright webServer runs ONE shared fake server for the whole suite, so specs
+    can't rely on per-run TEST_PROFILE values. These endpoints let a spec drive the
+    fake model state at runtime (simulate an in-flight Base load or a startup failure)
+    and reset it afterwards.
+    """
+    from flask import jsonify, request  # noqa: E402
+
+    @app_module.app.route("/_test/simulate-base-load", methods=["POST"])
+    def _test_simulate_base_load():
+        body = request.get_json(silent=True) or {}
+        try:
+            duration = max(0.5, float(body.get("duration_seconds", 3)))
+        except (TypeError, ValueError):
+            duration = 3.0
+        rt._model_loaded = False
+        rt._base_load_in_progress = True
+
+        def _restore():
+            time.sleep(duration)
+            rt._base_load_in_progress = False
+            rt._model_loaded = True
+
+        threading.Thread(target=_restore, daemon=True).start()
+        return jsonify({"ok": True, "duration_seconds": duration})
+
+    @app_module.app.route("/_test/simulate-startup-failure", methods=["POST"])
+    def _test_simulate_startup_failure():
+        rt._service_started = False
+        rt._startup_failed = True
+        rt._startup_error = "fake startup error"
+        return jsonify({"ok": True})
+
+    @app_module.app.route("/_test/reset-state", methods=["POST"])
+    def _test_reset_state():
+        rt._service_started = True
+        rt._model_loaded = True
+        rt._startup_failed = False
+        rt._startup_error = None
+        rt._base_load_in_progress = False
+        return jsonify({"ok": True})
+
+
 def _install_fake_voice_design(app_module):
     def _fake_run_voice_design_request(description, sample_text, language, seed=None):
         time.sleep(random.uniform(0.2, 0.5))
@@ -199,6 +244,7 @@ def main() -> None:
     _patch_omnivoice_run_job(app_module)
     _patch_save_voice(app_module, rt)
     _seed_fake_voice_library(rt)
+    _install_test_controls(app_module, rt)
 
     from werkzeug.serving import make_server  # noqa: E402
 
@@ -240,6 +286,7 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     _patch_omnivoice_run_job(app_module)
     _patch_save_voice(app_module, rt)
     _seed_fake_voice_library(rt)
+    _install_test_controls(app_module, rt)
 
     shutdown_event = threading.Event()
     app_module._shutdown_hook = shutdown_event.set
