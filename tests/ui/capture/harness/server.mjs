@@ -6,12 +6,12 @@ import { fileURLToPath } from 'node:url'
 import net from 'node:net'
 import { resolvePython } from './fixtures.mjs'
 import { seedCaptureFixtures } from './fixtures.mjs'
-import { sleep } from './paths.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(__dirname, '..', '..', '..', '..')
 
-export function startFakeServer({ port = 8319, seedFixtures = true } = {}) {
+export async function startFakeServer({ seedFixtures = true, port } = {}) {
+  port ??= await findAvailablePort(8319)
   const voiceLibraryDir = mkdtempSync(join(tmpdir(), 'persona-forge-e2e-voices-'))
   const segmentLibraryDir = mkdtempSync(join(tmpdir(), 'persona-forge-e2e-segments-'))
   if (seedFixtures) seedCaptureFixtures(voiceLibraryDir, segmentLibraryDir)
@@ -76,8 +76,8 @@ export function startFakeServer({ port = 8319, seedFixtures = true } = {}) {
 
 // Spawns the real backend (Flask dev server) on disposable temp voice/segment library
 // dirs and blocks until the model has finished loading.
-export function startRealServer({
-  port = 8319,
+export async function startRealServer({
+  port,
   voiceLibraryDir,
   segmentLibraryDir,
   modelSize = '0.6B',
@@ -85,6 +85,7 @@ export function startRealServer({
   timeoutMs = 120000,
   seedFixtures = true,
 } = {}) {
+  port ??= await findAvailablePort(8319)
   voiceLibraryDir ??= mkdtempSync(join(tmpdir(), 'persona-forge-capture-voices-'))
   segmentLibraryDir ??= mkdtempSync(join(tmpdir(), 'persona-forge-capture-segments-'))
 
@@ -164,8 +165,7 @@ export function startRealServer({
   return { child, url, port, voiceLibraryDir, segmentLibraryDir, waitUntilHealthy, stop }
 }
 
-// Ported from local-llm-foundry: the current harness hardcodes a port and fails
-// outright if it's busy.
+// Ported from local-llm-foundry: used when a caller doesn't pin an explicit port.
 export async function findAvailablePort(startPort = 8892) {
   for (let port = startPort; port < startPort + 200; port += 1) {
     const available = await new Promise(resolve => {
@@ -179,18 +179,4 @@ export async function findAvailablePort(startPort = 8892) {
     if (available) return port
   }
   throw new Error(`No available port found starting at ${startPort}`)
-}
-
-export async function waitForHttp(url, timeout = 30000) {
-  const start = Date.now()
-  while (Date.now() - start < timeout) {
-    try {
-      const response = await fetch(url, { method: 'GET' })
-      if (response.ok) return
-    } catch {
-      // Keep polling.
-    }
-    await sleep(250)
-  }
-  throw new Error(`Server did not become ready at ${url} within ${timeout}ms`)
 }

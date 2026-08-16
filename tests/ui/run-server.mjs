@@ -9,7 +9,7 @@ export { startFakeServer } from './capture/harness/server.mjs'
 if (fileURLToPath(import.meta.url) === process.argv[1]) {
   const { startFakeServer } = await import('./capture/harness/server.mjs')
   const port = parseInt(process.argv[2] || '8319', 10)
-  const server = startFakeServer({ port })
+  const server = await startFakeServer({ port })
   await server.waitUntilHealthy()
   console.log(`[run-server] fake_model_server healthy at ${server.url}`)
 }

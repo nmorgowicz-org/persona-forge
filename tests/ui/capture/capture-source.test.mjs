@@ -69,5 +69,5 @@ test('rejects an unknown source at any precedence level', () => {
 });
 
 test('CAPTURE_SOURCES lists the known source kinds', () => {
-    assert.deepEqual(CAPTURE_SOURCES, ['fake', 'real-local', 'remote', 'auto']);
+    assert.deepEqual(CAPTURE_SOURCES, ['fake', 'real-local', 'remote']);
 });

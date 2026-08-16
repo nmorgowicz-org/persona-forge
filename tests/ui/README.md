@@ -15,14 +15,11 @@ node tests/ui/capture/index.mjs --scenario health --source real-local
 # Remote tier — points at an already-running instance (default source).
 node tests/ui/capture/index.mjs --scenario health --source remote
 
-# Run everything registered:
-node tests/ui/capture/index.mjs
-
 # See every registered scenario name:
 node tests/ui/capture/index.mjs --list-scenarios
 ```
 
-`--source` accepts `fake`, `real-local`, `remote`, or `auto`; each scenario also declares its own
+`--source` accepts `fake`, `real-local`, or `remote`; each scenario also declares its own
 default source, and `CAPTURE_SOURCE` (env) can override it — `--source` wins over both. Real-tier
 fixtures (one base voice + variants, a duplicate, and a handful of OmniVoice segments) are seeded
 from `tests/ui/fixtures/capture-data/` into disposable temp dirs on every run — never your real
@@ -95,8 +92,9 @@ entire scenario if the capture loop and the driving actions contend for it.
 
 ## Troubleshooting
 
-- **Port already in use**: `DEFAULT_PORT` (`tests/ui/capture/harness/paths.mjs`) is fixed at
-  `8892`; kill any stale `run-real-server`/Flask process holding it before retrying.
+- **Port already in use**: the spawned servers pick the first free port starting at `8319`
+  (`findAvailablePort` in `tests/ui/capture/harness/server.mjs`), so they won't collide with a
+  running e2e fake server or a stale process holding `8319` — nothing to kill by hand.
 - **Real tier hangs on startup**: gated HF downloads or a missing model dependency surface as the
   last `/health` body in `startRealServer`'s timeout error — read it before assuming a harness bug.
 - **A GIF scenario produces zero/blank frames**: check whether the scenario has a concurrent

@@ -6,7 +6,7 @@ import { gotoApp } from './browser.mjs';
 import { startFakeServer, startRealServer } from './server.mjs';
 import { REMOTE_SERVER } from './paths.mjs';
 
-export const CAPTURE_SOURCES = Object.freeze(['fake', 'real-local', 'remote', 'auto']);
+export const CAPTURE_SOURCES = Object.freeze(['fake', 'real-local', 'remote']);
 const IMPLEMENTED_SOURCES = new Set(['fake', 'real-local', 'remote']);
 
 function validateSource(source, origin) {
@@ -63,8 +63,8 @@ export async function connectSource(page, opts = {}) {
     }
 
     const server = source === 'fake'
-        ? startFakeServer(opts.serverOptions)
-        : startRealServer(opts.serverOptions);
+        ? await startFakeServer(opts.serverOptions)
+        : await startRealServer(opts.serverOptions);
     await server.waitUntilHealthy();
     await gotoApp(page, server.url);
     return {

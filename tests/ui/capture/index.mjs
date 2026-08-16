@@ -12,7 +12,7 @@
 //
 // docs/plans/20260815-screenshot_and_docs_edit.md Step 1.10.
 import { setArtifactCategory, setArtifactRuntime, DEFAULT_VIEWPORT } from './harness/paths.mjs';
-import { connectSource, CAPTURE_SOURCES } from './harness/source.mjs';
+import { connectSource, resolveCaptureSource, CAPTURE_SOURCES } from './harness/source.mjs';
 import { launchBrowser } from './harness/browser.mjs';
 import { cleanupFrames } from './harness/shot.mjs';
 import { beginCaptureReceipt, finishCaptureReceipt, setCaptureDiagnostics } from './harness/receipt.mjs';
@@ -300,7 +300,6 @@ export async function runCli({ scenario, source } = {}) {
         sourceHandle = await connectSource(page, { source, scenarioSource: entry.source });
         setCaptureDiagnostics({ source: sourceHandle.kind });
 
-        if (entry.setup) await entry.setup({ page, baseURL: sourceHandle.baseURL });
         await entry.run({ page, baseURL: sourceHandle.baseURL }, {});
 
         return finishCaptureReceipt();
@@ -323,6 +322,8 @@ async function main() {
         for (const key of Object.keys(SCENARIOS)) console.log(key);
         return;
     }
+
+    if (options.source) resolveCaptureSource({ source: options.source });
 
     if (!options.scenario) {
         printUsage();

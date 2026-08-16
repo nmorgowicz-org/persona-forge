@@ -8,7 +8,7 @@ export { startRealServer } from './capture/harness/server.mjs'
 if (fileURLToPath(import.meta.url) === process.argv[1]) {
   const { startRealServer } = await import('./capture/harness/server.mjs')
   const port = parseInt(process.argv[2] || '8319', 10)
-  const server = startRealServer({ port })
+  const server = await startRealServer({ port })
   await server.waitUntilHealthy()
   console.log(`[run-real-server] real server healthy at ${server.url}`)
 }

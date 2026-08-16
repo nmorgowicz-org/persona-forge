@@ -77,7 +77,7 @@ async function createSegmentViaOmnivoice(
 
 async function main() {
   console.log('[generate-capture-fixtures] spawning real server...')
-  const server = startRealServer({ port: 8896, timeoutMs: 600000, seedFixtures: false })
+  const server = await startRealServer({ port: 8896, timeoutMs: 600000, seedFixtures: false })
   await server.waitUntilHealthy()
   console.log(`[generate-capture-fixtures] healthy at ${server.url}`)
 
