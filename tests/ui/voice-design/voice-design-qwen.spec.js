@@ -29,15 +29,17 @@ test.describe('voice design (Qwen engine)', () => {
     await expect(saveBtn).toBeVisible({ timeout: 5000 })
     await saveBtn.click()
 
-    // Confirm saved voice id appears
-    await expect(page.getByText(/saved as/i)).toBeVisible({ timeout: 15000 }).catch(() => {
-      expect(page.getByTestId('voice-design-result')).toBeVisible()
-    })
+    // Confirm the save confirmation appears and capture the saved voice id
+    const savedLine = page.getByText(/saved as/i)
+    await expect(savedLine).toBeVisible({ timeout: 15000 })
+    const savedVoiceId = (await savedLine.innerText()).replace(/^saved as\s+/i, '').trim()
 
-    // Navigate to Voice Library and confirm voice card is present
+    // Navigate to Voice Library and confirm the saved voice card is present.
+    // The fake server seeds committed fixture voices, so assert on the specific
+    // card rather than an absolute total count.
     await page.getByTestId('nav-voice-library').click()
-    const cards = page.locator('[data-testid="voice-card"]')
-    await expect(cards).toHaveCount(1, { timeout: 20000 })
+    const savedCard = page.locator('[data-testid="voice-card"]', { hasText: savedVoiceId })
+    await expect(savedCard).toBeVisible({ timeout: 20000 })
   })
 
 })
