@@ -54,7 +54,18 @@ def _read_test_profile() -> str:
 
 
 def _install_fake_runtime():
-    from tests.fixtures.fake_runtime import FakeModelRuntime  # noqa: E402
+    from tests.fixtures.fake_runtime import FakeModelRuntime, _FakeModule  # noqa: E402
+
+    # Under pytest-xdist, a worker process may already have a FakeModelRuntime
+    # installed into sys.modules["persona_forge.model"] by another test tier's
+    # conftest (e.g. tests/tier2_backend installs its own at import time).
+    # Installing a second one here would clobber that module-level proxy out
+    # from under the other tier's already-bound `rt`/`app_module` fixtures,
+    # causing their HTTP requests to hit a different (freshly-defaulted)
+    # runtime than the one their assertions check. Reuse it instead.
+    existing = sys.modules.get("persona_forge.model")
+    if isinstance(existing, _FakeModule):
+        return existing._rt
 
     profile = _read_test_profile()
 
