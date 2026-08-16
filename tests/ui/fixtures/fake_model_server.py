@@ -150,6 +150,17 @@ def _patch_save_voice(app_module, rt):
     app_module.voice_library.list_voices = fake_library.list_voices
     app_module.voice_library.duplicate_voice = fake_library.duplicate_voice
     app_module.voice_library.set_default_variant = fake_library.set_default_variant
+    # Patch variant helpers so seeded voices are visible to the /variants endpoint.
+    def _fake_is_valid_voice_id(voice_id: str) -> bool:
+        return bool(voice_id) and voice_id in fake_library.voices
+    import pathlib
+    _fake_dir_parent = pathlib.Path(tempfile.mkdtemp(prefix="persona-forge-variant-fixtures-"))
+    def _fake_voice_dir(voice_id: str) -> pathlib.Path:
+        d = _fake_dir_parent / voice_id
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+    app_module.voice_library._is_valid_voice_id = _fake_is_valid_voice_id
+    app_module.voice_library._voice_dir = _fake_voice_dir
 
 
 def _seed_fake_voice_library(rt):
@@ -183,6 +194,12 @@ def _install_test_controls(app_module, rt):
     # has already handled the health check, so we can't register new routes.
     if "/_test/simulate-base-load" in app_module.app.view_functions:
         return
+    # Under pytest-xdist, this worker process may have already served a request on
+    # this same shared `persona_forge.app` object via tests/tier2_backend's
+    # `client` fixture (app.test_client()), which flips Flask's internal
+    # "first request handled" flag and blocks further app.route() calls. Reset it
+    # so we can still register these test-only routes.
+    app_module.app._got_first_request = False
     from flask import jsonify, request  # noqa: E402
 
     @app_module.app.route("/_test/simulate-base-load", methods=["POST"])

@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test'
-import fs from 'fs'
 
 test.describe('performance', () => {
   test('page interactive within 5s', async ({ page }) => {
@@ -39,11 +38,7 @@ test.describe('performance', () => {
         !e.includes('404') &&
         !e.toLowerCase().includes('net::')
     )
-    fs.writeFileSync('/tmp/console-errors.json', JSON.stringify(realErrors))
+    console.log('CONSOLE-ERRORS: ' + JSON.stringify(realErrors))
     expect(realErrors.length).toBe(0)
-  })
-
-  test('print console errors for CI debugging', async () => {
-    console.log('CONSOLE-ERRORS-FROM-PREV: ' + fs.readFileSync('/tmp/console-errors.json', 'utf8'))
   })
 })
