@@ -38,6 +38,7 @@ test.describe('performance', () => {
         !e.includes('404') &&
         !e.toLowerCase().includes('net::')
     )
+    console.log('CONSOLE-ERRORS-DEBUG', JSON.stringify(realErrors, null, 2))
     expect(realErrors.length).toBe(0)
   })
 })
