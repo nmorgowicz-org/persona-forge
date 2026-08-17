@@ -26,7 +26,9 @@ export default async function (ctx) {
     await recorder.snap(page);
     await page.waitForSelector('[data-testid="omnivoice-script"]');
     await page.type('[data-testid="omnivoice-script"]', 'The quick brown fox jumps over the lazy dog.');
-    await recorder.snap(page);
+    // Dwell here: let the viewer read the composed instruct + script before
+    // the audition kicks off.
+    await hold(recorder, page, 2);
 
     // Just 1 candidate — this is a real remote inference job on a shared box
     // (avg ~2min/candidate), and the GIF only needs one take to lock in, not
@@ -58,7 +60,7 @@ export default async function (ctx) {
     }
     // Dwell here: this is the "segment rendered" moment the viewer needs to
     // actually register before the flow moves on.
-    await hold(recorder, page, 4);
+    await hold(recorder, page, 6);
 
     const lockButton = await page.waitForSelector('[data-testid="omnivoice-lock-segment"]');
     await lockButton.click();
@@ -86,13 +88,16 @@ export default async function (ctx) {
     );
     await recorder.snap(page);
 
+    // Pick two segments so the viewer sees what a multi-clip timeline looks
+    // like, not just a single lonely clip.
     const items = await page.$$('[data-testid="stitch-picker-item-segments"]');
     await items[0].click();
+    if (items[1]) await items[1].click();
     await page.click('[data-testid="stitch-picker-insert-segments"]');
     await page.waitForSelector('[data-testid="stitch-clip"]');
-    // Dwell here: the segment has just landed in the Stitch Studio timeline —
-    // give the viewer time to see it before saving.
-    await hold(recorder, page, 4);
+    // Dwell here: the segment(s) have just landed in the Stitch Studio
+    // timeline — give the viewer time to see the result before saving.
+    await hold(recorder, page, 8);
 
     // The Save button is disabled while the debounced live-preview render is in
     // flight (isRendering in StitchTimeline). hold() only takes back-to-back
@@ -108,7 +113,9 @@ export default async function (ctx) {
     );
     await page.click('[data-testid="stitch-save-voice"]');
     await page.waitForSelector('[data-testid="voice-card"]', { timeout: 60000 });
-    await recorder.snap(page);
+    // Dwell here: end on the saved-voice confirmation so the viewer has time
+    // to register the outcome instead of the GIF just stopping mid-beat.
+    await hold(recorder, page, 3);
 
     framesToGif(page, prefix, 'design-to-stitch-gif-design-to-stitch.gif', 2);
     cleanupFrames();
