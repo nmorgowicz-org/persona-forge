@@ -13,9 +13,9 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.51.0",
-    "puppeteer": "^25.3.0"
+    "puppeteer": "^25.5.0"
   },
   "allowScripts": {
-    "puppeteer@25.3.0": true
+    "puppeteer@25.5.0": true
   }
 }
