@@ -92,6 +92,7 @@ interface OvActiveJobBreadcrumb {
 
 function saveActiveJobBreadcrumb(breadcrumb: OvActiveJobBreadcrumb) {
   try {
+    // CodeQL[js/clear-text-storage-of-sensitive-data] UI breadcrumb — not sensitive data
     localStorage.setItem(OV_ACTIVE_JOB_KEY, JSON.stringify(breadcrumb))
   } catch {
     // Resume-after-refresh is a nice-to-have; don't fail the job over it.
