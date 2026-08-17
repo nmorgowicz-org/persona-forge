@@ -1,7 +1,7 @@
 {
   "voice_id": "vd_dba466fcad17",
-  "description": "a calm, neutral narrator voice (copy)",
-  "sample_text": "This is a sample line used to preview the generated voice.",
+  "description": "Calm Professional",
+  "sample_text": "Thank you for calling. How can I help you today?",
   "language": "English",
   "seed": 1251423235,
   "selections": null,

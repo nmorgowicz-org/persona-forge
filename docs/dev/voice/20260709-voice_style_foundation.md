@@ -1427,7 +1427,7 @@ Tasks:
 
 Validation:
 
-- Measure added latency on dockermisc1 (note first-call `librosa`/`numba` JIT
+- Measure added latency on docker-agent (note first-call `librosa`/`numba` JIT
   warmup separately from steady-state):
   - 3 second audio
   - 10 second audio
@@ -1538,7 +1538,7 @@ If the fully integrated path is too expensive:
 - Guaranteed same-speaker style transfer for arbitrary uploaded voices.
 - Hidden prompt injection into Base as the main style mechanism.
 - Running VoiceDesign, Base, OmniVoice, and Pocket TTS all resident together on
-  dockermisc1.
+  docker-agent.
 - Treating post-processing as a substitute for a good reference.
 
 ## Immediate recommendation

@@ -159,7 +159,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
   const stitchedUrl = useAppStore((s) => s.ovStitchedUrl)
   const stitchedBlob = useAppStore((s) => s.ovStitchedBlob)
   const savedVoiceId = useAppStore((s) => s.ovSavedVoiceId)
-  const progress = useAppStore((s) => s.ovProgress)
   // Intentionally subscribed to keep Zustand batched; value used via store hooks in this component.
   useAppStore((s) => s.ovCurrentJobId)
   const jobTotalSegments = useAppStore((s) => s.ovJobTotalSegments)
@@ -225,7 +224,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
   const setSavedVoiceId = useAppStore(
     (s) => s.setOvSavedVoiceId,
   )
-  const setProgress = useAppStore((s) => s.setOvProgress)
   const setCurrentJobId = useAppStore(
     (s) => s.setOvCurrentJobId,
   )
@@ -710,7 +708,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     setIsRackAuditioning(true)
     setError(null)
     setSegmentRack([])
-    setProgress(null)
     setJobMessage(null)
     setJobStatus(null)
     setJobSegmentsCompleted([])
@@ -759,7 +756,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         if (outcome.status === 'completed') {
           // Finalize: keep segment rack + completed list intact
           setIsRackAuditioning(false)
-          setProgress(null)
           setCurrentJobId(null)
           setJobStatus('completed')
           setJobCurrentSegmentIndex(null)
@@ -767,7 +763,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         } else if (outcome.status === 'cancelled') {
           setJobMessage('Cancelled.')
           setIsRackAuditioning(false)
-          setProgress(null)
           setCurrentJobId(null)
           setJobCurrentSegmentIndex(null)
           setJobEtaSeconds(null)
@@ -783,7 +778,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
       clearActiveJobBreadcrumb()
       // On error: fully reset
       setIsRackAuditioning(false)
-      setProgress(null)
       setCurrentJobId(null)
       setJobStatus(null)
       setJobTotalSegments(0)
@@ -813,7 +807,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     setIsRackAuditioning,
     setError,
     setSegmentRack,
-    setProgress,
     setCurrentJobId,
     setJobTotalSegments,
     setJobStatus,
@@ -879,7 +872,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
 
       if (outcome.status === 'completed') {
         setIsRackAuditioning(false)
-        setProgress(null)
         setCurrentJobId(null)
         setJobStatus('completed')
         setJobCurrentSegmentIndex(null)
@@ -887,7 +879,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
       } else if (outcome.status === 'cancelled') {
         setJobMessage('Cancelled.')
         setIsRackAuditioning(false)
-        setProgress(null)
         setCurrentJobId(null)
         setJobCurrentSegmentIndex(null)
         setJobEtaSeconds(null)
@@ -990,7 +981,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
 
       setIsRackAuditioning(true)
       setError(null)
-      setProgress(null)
       setJobMessage(null)
       setJobStatus(null)
       setJobSegmentsCompleted([])
@@ -1052,7 +1042,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         if (outcome.status === 'completed') {
           // Clean up for single-seg regen
           setIsRackAuditioning(false)
-          setProgress(null)
           setCurrentJobId(null)
           setJobStatus(null)
           setJobTotalSegments(0)
@@ -1065,7 +1054,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
           setJobCurrentCandidateIndex(null)
         } else if (outcome.status === 'cancelled') {
           setIsRackAuditioning(false)
-          setProgress(null)
           setCurrentJobId(null)
           setJobStatus(null)
           setJobTotalSegments(0)
@@ -1086,7 +1074,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
             : String(err),
         )
         setIsRackAuditioning(false)
-        setProgress(null)
         setCurrentJobId(null)
         setJobStatus(null)
         setJobTotalSegments(0)
@@ -1115,7 +1102,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
       setIsRackAuditioning,
       setError,
       setSegmentRack,
-      setProgress,
       setCurrentJobId,
       setJobTotalSegments,
       setJobStatus,
@@ -2256,9 +2242,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
                 return 'Job failed'
               return 'Finalizing…'
             })()}
-
-            {progress?.phase === 'loading' &&
-              ' — loading OmniVoice checkpoint…'}
           </p>
 
           {jobStatus === 'running' &&

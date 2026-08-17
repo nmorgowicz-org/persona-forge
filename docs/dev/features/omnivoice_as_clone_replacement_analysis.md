@@ -58,7 +58,7 @@ strongly discourage investing in one.
 
 We already have measured numbers on this hardware that settle this question.
 
-- Base/OpenVINO (current): RTF ≈ 1.35–1.40x on dockermisc1 (1.7B-INT4 at 1.35x, 0.6B-INT8 at
+- Base/OpenVINO (current): RTF ≈ 1.35–1.40x on docker-agent (1.7B-INT4 at 1.35x, 0.6B-INT8 at
   ~1.40x). Measured on the same box, used as the basis for production SLAs.
 - OmniVoice (voice-design, plain PyTorch CPU, same hardware): RTF ≈ 12.2
   (43.1s compute for 3.52s audio; 39.6s cold load separate).
@@ -113,10 +113,10 @@ Listed for completeness; none of them, as-is, invalidates the conclusion.
 1. Real quality bake-off (same clip, same text, several seeds, blind listen).
    - Disposition: still open, but not needed. A latency-unaware bake-off is not worth the investment
      unless the latency story changes.
-2. Cloning-mode RTF measured on dockermisc1.
+2. Cloning-mode RTF measured on docker-agent.
    - Disposition: still open, but not needed. Architecture implies same decode cost as design mode;
      only a dramatic (and implausible) drop would change anything.
-3. `omnivoice.cpp` (GGUF/Q8_0) benchmarked on dockermisc1.
+3. `omnivoice.cpp` (GGUF/Q8_0) benchmarked on docker-agent.
    - Disposition: open, external dependency. If it emerges with a credible, maintained port that
      closes most of the ~9x gap, this conclusion should be revisited.
 4. License resolution (CC-BY-NC constraint).

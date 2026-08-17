@@ -3,7 +3,6 @@ import type {
   GenerateJobProgress,
   OmniVoiceAuditionProgressResult,
   OmniVoiceCandidate,
-  OmniVoiceProgress,
   SegmentMeta,
   VoiceDesignProgress,
   VoiceMeta,
@@ -102,6 +101,8 @@ interface StoreState {
   modelLoaded: boolean
   serviceStarted: boolean
   loadingMessage: string | null
+  healthStatus: string | null
+  healthError: string | null
   text: string
   voiceId: string | null
   voices: VoiceMeta[]
@@ -113,8 +114,9 @@ interface StoreState {
    speakLastSeed: number | null
    speakAudioBlob: Blob | null
    editingVoice: EditingVoice | null
-  designEngine: DesignEngine
-  activityStatus: ActivityStatus | null
+   designEngine: DesignEngine
+   designEngineTouched: boolean
+   activityStatus: ActivityStatus | null
   runtimeTtsBackend: string | null
   pocketTtsVoiceCloningAvailable: boolean | null
   swapInProgress: boolean
@@ -217,7 +219,6 @@ interface StoreState {
   ovCurrentText: string
   ovCurrentCandidates: OmniVoiceCandidate[] | null
   ovCurrentSelectedIndex: number
-  ovIsAuditioning: boolean
   ovIsLockingIn: boolean
   ovIsStitching: boolean
   ovIsSaving: boolean
@@ -229,7 +230,6 @@ interface StoreState {
   // auto-open that voice's Adjust Prosody popover, then clears it so it doesn't
   // reopen on a later, unrelated visit to the library.
   deepLinkProsodyVoiceId: string | null
-  ovProgress: OmniVoiceProgress | null
    ovCurrentJobId: string | null
    ovJobTotalSegments: number
    ovJobStatus: 'queued' | 'running' | 'completed' | 'failed' | null
@@ -273,7 +273,6 @@ interface StoreState {
   ) => void
   setOvCurrentCandidates: (v: OmniVoiceCandidate[] | null) => void
   setOvCurrentSelectedIndex: (v: number) => void
-  setOvIsAuditioning: (v: boolean) => void
   setOvIsLockingIn: (v: boolean) => void
   setOvIsStitching: (v: boolean) => void
   setOvIsSaving: (v: boolean) => void
@@ -282,7 +281,6 @@ interface StoreState {
   setOvStitchedBlob: (v: Blob | null) => void
   setOvSavedVoiceId: (v: string | null) => void
   setDeepLinkProsodyVoiceId: (v: string | null) => void
-  setOvProgress: (v: OmniVoiceProgress | null) => void
    setOvCurrentJobId: (v: string | null) => void
    setOvJobTotalSegments: (v: number) => void
    setOvJobStatus: (v: 'queued' | 'running' | 'completed' | 'failed' | null) => void
@@ -341,6 +339,8 @@ export const useAppStore = create<StoreState>((set) => ({
   modelLoaded: false,
   serviceStarted: false,
   loadingMessage: null,
+  healthStatus: null,
+  healthError: null,
   text: '',
   voiceId: null,
    voices: [],
@@ -352,8 +352,9 @@ export const useAppStore = create<StoreState>((set) => ({
    speakLastSeed: null,
   speakAudioBlob: null,
   editingVoice: null,
-  designEngine: 'qwen',
-  targetFamilyId: null,
+   designEngine: 'omnivoice',
+   designEngineTouched: false,
+   targetFamilyId: null,
     activityStatus: null,
     runtimeTtsBackend: 'pocket_tts',
     pocketTtsVoiceCloningAvailable: null,
@@ -386,14 +387,25 @@ export const useAppStore = create<StoreState>((set) => ({
   setSpeakLastSeed: (v) => set({ speakLastSeed: v }),
   setSpeakAudioBlob: (v) => set({ speakAudioBlob: v }),
   setEditingVoice: (editingVoice) => set({ editingVoice }),
-  setDesignEngine: (engine) => set({ designEngine: engine }),
+  setDesignEngine: (engine) => set({ designEngine: engine, designEngineTouched: true }),
   setTargetFamilyId: (targetFamilyId) => set({ targetFamilyId }),
   setActivityStatus: (activityStatus) => set({ activityStatus }),
   setGlossaryOpen: (v: boolean) => set({ glossaryOpen: v }),
   glossaryOpen: false,
   glossaryFocusId: null,
   openGlossaryAt: (id) => set({ glossaryOpen: true, glossaryFocusId: id }),
-  setRuntimeConfig: (patch) => set(patch),
+  setRuntimeConfig: (patch) => {
+    set(patch)
+    // The default design engine follows the backend (OmniVoice on pocket_tts, Qwen
+    // VoiceDesign on the Qwen backends) until the user picks one explicitly.
+    if (patch.runtimeTtsBackend !== undefined) {
+      const s = useAppStore.getState()
+      if (!s.designEngineTouched) {
+        const preferred: DesignEngine = s.runtimeTtsBackend === 'pocket_tts' ? 'omnivoice' : 'qwen'
+        if (s.designEngine !== preferred) set({ designEngine: preferred })
+      }
+    }
+  },
 
    setRefTextValidation: (refTextValidation) => set({ refTextValidation }),
 
@@ -470,7 +482,6 @@ export const useAppStore = create<StoreState>((set) => ({
   ovCurrentText: '',
   ovCurrentCandidates: null,
   ovCurrentSelectedIndex: 0,
-  ovIsAuditioning: false,
   ovIsLockingIn: false,
   ovIsStitching: false,
   ovIsSaving: false,
@@ -479,7 +490,6 @@ export const useAppStore = create<StoreState>((set) => ({
   ovStitchedBlob: null,
   ovSavedVoiceId: null,
   deepLinkProsodyVoiceId: null,
-  ovProgress: null,
   ovCurrentJobId: null,
   ovJobTotalSegments: 0,
   ovJobStatus: null,
@@ -560,7 +570,6 @@ export const useAppStore = create<StoreState>((set) => ({
   setOvCurrentCandidates: (v) => set({ ovCurrentCandidates: v }),
   setOvCurrentSelectedIndex: (v) =>
     set({ ovCurrentSelectedIndex: v }),
-  setOvIsAuditioning: (v) => set({ ovIsAuditioning: v }),
   setOvIsLockingIn: (v) => set({ ovIsLockingIn: v }),
   setOvIsStitching: (v) => set({ ovIsStitching: v }),
   setOvIsSaving: (v) => set({ ovIsSaving: v }),
@@ -569,7 +578,6 @@ export const useAppStore = create<StoreState>((set) => ({
   setOvStitchedBlob: (v) => set({ ovStitchedBlob: v }),
   setOvSavedVoiceId: (v) => set({ ovSavedVoiceId: v }),
   setDeepLinkProsodyVoiceId: (v) => set({ deepLinkProsodyVoiceId: v }),
-  setOvProgress: (v) => set({ ovProgress: v }),
   setOvCurrentJobId: (v) => set({ ovCurrentJobId: v }),
   setOvJobTotalSegments: (v) => set({ ovJobTotalSegments: v }),
   setOvJobStatus: (v) => set({ ovJobStatus: v }),
@@ -653,10 +661,10 @@ export const useAppStore = create<StoreState>((set) => ({
 
 const PROGRESS_POLL_MS = 700
 
-// Model-loading poller: runs at 1s until the service has started at least once (true cold
-// boot), then backs off to a slow keep-alive poll — service_started never goes back to false,
-// but model_loaded can (idle-unload), and later requests reload it lazily/transparently, so
-// there's no need to keep hammering /health once we've seen the service come up once.
+// Model-loading poller: stays alive for the whole app lifetime. Polls at 1s while a model
+// load is in flight (cold boot, post-boot swap-back, or OmniVoice load) and backs off to
+// ~5s in steady state. Post-boot loads must keep updating loadingMessage/swapInProgress/
+// modelLoaded — the top notification bar depends on this staying alive.
 ;(async () => {
   async function poll() {
     try {
@@ -673,6 +681,12 @@ const PROGRESS_POLL_MS = 700
       if (data.loading_message !== store.loadingMessage) {
         store.setLoadingMessage(data.loading_message || null)
       }
+      if ((data.status || null) !== store.healthStatus) {
+        useAppStore.setState({ healthStatus: data.status || null })
+      }
+      if ((data.error || null) !== store.healthError) {
+        useAppStore.setState({ healthError: data.error || null })
+      }
       if (data.swap_in_progress !== store.swapInProgress) {
         useAppStore.setState({ swapInProgress: Boolean(data.swap_in_progress) })
       }
@@ -682,6 +696,14 @@ const PROGRESS_POLL_MS = 700
           healthBackend: resolvedBackend || null,
           runtimeTtsBackend: resolvedBackend || null,
         })
+        // The default design engine follows the backend (OmniVoice on pocket_tts, Qwen
+        // VoiceDesign on the Qwen backends) until the user picks one explicitly.
+        if (!useAppStore.getState().designEngineTouched) {
+          const preferred = resolvedBackend === 'pocket_tts' ? 'omnivoice' : 'qwen'
+          if (useAppStore.getState().designEngine !== preferred) {
+            useAppStore.setState({ designEngine: preferred })
+          }
+        }
       }
       // Sync Pocket TTS voice-cloning status into the store whenever /health
       // indicates the backend is pocket_tts — this is the single source of truth
@@ -720,18 +742,17 @@ const PROGRESS_POLL_MS = 700
     }
   }
 
-  // First fetch immediately
-  await poll()
-
-  // Then poll every second until the service has started at least once
-  const interval = setInterval(() => {
-    const store = useAppStore.getState()
-    if (store.serviceStarted) {
-      clearInterval(interval)
-      return
-    }
-    void poll()
-  }, 1000)
+  async function tick() {
+    await poll()
+    const s = useAppStore.getState()
+    const loading =
+      !s.serviceStarted ||
+      s.loadingMessage !== null ||
+      s.swapInProgress ||
+      !s.modelLoaded
+    setTimeout(() => void tick(), loading ? 1000 : 5000)
+  }
+  void tick()
 })()
 
 // VoiceDesign poller
@@ -756,31 +777,7 @@ function updateVdPollHandle(isGenerating: boolean) {
   }
 }
 
-// OmniVoice poller
-let ovPollHandle: ReturnType<typeof setInterval> | null = null
-
-function updateOvPollHandle(isAuditioning: boolean) {
-  if (ovPollHandle && !isAuditioning) {
-    clearInterval(ovPollHandle)
-    ovPollHandle = null
-  }
-  if (!ovPollHandle && isAuditioning) {
-    ovPollHandle = setInterval(async () => {
-      try {
-        const res = await fetch('/omnivoice/progress')
-        if (!res.ok) return
-        const data = await res.json()
-        useAppStore.getState().setOvProgress(data)
-      } catch {
-        // Transient; will retry
-      }
-    }, PROGRESS_POLL_MS)
-  }
-}
-
 useAppStore.subscribe((state, prevState) => {
   if (state.vdIsGenerating !== prevState.vdIsGenerating)
     updateVdPollHandle(state.vdIsGenerating)
-  if (state.ovIsAuditioning !== prevState.ovIsAuditioning)
-    updateOvPollHandle(state.ovIsAuditioning)
 })

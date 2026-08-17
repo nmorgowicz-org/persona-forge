@@ -54,3 +54,45 @@ class TestAppHealth:
             assert data["swap_in_progress"] is True
         finally:
             app_module.voice_design._swap_in_progress = orig
+
+    def test_health_base_load_in_progress_message(self, app_module, rt):
+        orig = rt._base_load_in_progress
+        rt._base_load_in_progress = True
+        try:
+            resp = app_module.app.test_client().get("/health")
+            data = resp.get_json()
+            assert data["base_load_in_progress"] is True
+            assert data.get("loading_message") == "Loading model…"
+        finally:
+            rt._base_load_in_progress = orig
+
+    def test_health_omnivoice_loading_message(self, app_module):
+        orig = app_module.omnivoice_engine.swap_in_progress
+        app_module.omnivoice_engine.swap_in_progress = lambda: True
+        try:
+            resp = app_module.app.test_client().get("/health")
+            data = resp.get_json()
+            assert data["swap_in_progress"] is True
+            assert data.get("loading_message") == "Loading OmniVoice…"
+        finally:
+            app_module.omnivoice_engine.swap_in_progress = orig
+
+    def test_health_startup_failed_message(self, app_module, rt):
+        orig_started = rt._service_started
+        orig_failed = rt._startup_failed
+        orig_error = rt._startup_error
+        # A real startup failure sets _startup_failed and _startup_error together
+        # (model.py load path), so mirror that here.
+        rt._service_started = False
+        rt._startup_failed = True
+        rt._startup_error = "fake startup error"
+        try:
+            resp = app_module.app.test_client().get("/health")
+            data = resp.get_json()
+            assert data["status"] == "error"
+            assert data.get("loading_message") == "Model failed to load"
+            assert data.get("error") == "fake startup error"
+        finally:
+            rt._service_started = orig_started
+            rt._startup_failed = orig_failed
+            rt._startup_error = orig_error

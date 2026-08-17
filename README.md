@@ -1,70 +1,178 @@
+<div align="center">
+
 # Persona Forge
 
-Open-source voice-cloning and voice-design studio: OmniVoice + pocket-tts on a portable CPU-first
-backend (Intel iGPU via torch-xpu optional). Runs as a Dockerized web app on Linux AMD64.
+**Open-source voice-cloning and voice-design studio**
 
-One image, one process, multiple cloning engines, voice library, and inference server on port 8318.
-Includes accent/persona design via OmniVoice and Qwen3-TTS (opt-in) export tooling.
+Clone a voice from a single reference WAV. Design accents from scratch. Assemble clips in a
+timeline editor. Serve it all over an OpenAI-compatible API. One container, one process,
+no training required.
+
+[![Release](https://img.shields.io/github/v/release/nmorgowicz-org/persona-forge)](https://github.com/nmorgowicz-org/persona-forge/releases)
+[![Container](https://img.shields.io/badge/ghcr.io-persona--forge-blue?logo=docker)](https://github.com/nmorgowicz-org/persona-forge/pkgs/container/persona-forge)
+[![License](https://img.shields.io/github/license/nmorgowicz-org/persona-forge)](LICENSE)
+
+</div>
+
+---
+
+**OmniVoice accent audition** — generate candidates per segment, across accents, in real time:
+
+![OmniVoice audition](docs/screenshots/omnivoice-audition.gif)
+
+**Voice Design → Stitch Studio** — compose a voice from trait chips, then assemble it into a
+reference clip:
+
+![Voice Design to Stitch](docs/screenshots/design-to-stitch.gif)
+
+---
 
 ## What it does
 
-- Synthesizes speech in a cloned voice from a single reference WAV (no training).
-- Two cloning engines: **pocket-tts** (default, portable) and **OmniVoice** (custom accent design).
-- Optional Qwen3-TTS engine (PyTorch or OpenVINO acceleration) with two model sizes (0.6B/1.7B).
-- OpenAI-compatible `POST /v1/audio/speech`.
-- Web UI with Speak, Voice Design, Voice Library, Integrations, and Runtime tabs.
-- VoiceDesign: generate new voices from a text description via OmniVoice, save them, and use as
-  cloning targets. Requires a separate export (see HOW_TO_RUN).
-- MP3 or WAV output; incremental PCM stream available.
-- Intel iGPU acceleration via torch-xpu (optional, see docs/dev/LOCAL_SETUP.md).
+| | Feature | Description |
+|---|---|---|
+| 🎙️ | **Voice cloning** | Clone a voice from one reference WAV. No fine-tuning, no training data. |
+| 🎨 | **Voice Design** | Compose a voice from trait chips — gender, register, texture, persona — or a free-form description. Preview, then save. |
+| 🌏 | **Accent design** | OmniVoice generates candidates per segment across accents. Audition them, cherry-pick the best takes, stitch the winners into a reference voice. |
+| ✂️ | **Stitch Studio** | Drag segments onto a timeline. Per-clip trim, fade, gain, and DSP, with live preview. |
+| 📚 | **Voice Library** | Prosody fingerprints (LUFS, speech rate, pause ratio, peak dBFS) for every saved voice. Fork, edit, compare variants. |
+| 🔌 | **OpenAI-compatible API** | `POST /v1/audio/speech` — a drop-in TTS endpoint for any OpenAI SDK client. |
+| ⚡ | **CPU-first** | The default pocket-tts backend runs on any CPU. Qwen3-TTS (PyTorch or OpenVINO) is opt-in. |
+| 🎛️ | **Live runtime config** | Change backend, idle-unload timer, and DSP knobs from the UI. No restart. |
 
-No authentication or TLS. Keep port 8318 on a trusted network or behind an authenticated reverse
-proxy (see SECURITY.md).
+---
+
+## Screenshots
+
+<table>
+<tr>
+<td width="50%">
+
+**Speak** — generate from any saved voice
+
+![Speak](docs/screenshots/speak.png)
+
+</td>
+<td width="50%">
+
+**Voice Design** — compose from trait chips
+
+![Voice Design](docs/screenshots/voice-design.png)
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Voice Library** — prosody fingerprints
+
+![Voice Library](docs/screenshots/voice-library.png)
+
+</td>
+<td width="50%">
+
+**Stitch Studio** — assemble clips into a new reference voice
+
+![Stitch Studio](docs/screenshots/stitch-studio.png)
+
+</td>
+</tr>
+</table>
+
+---
 
 ## Getting started
 
-Prerequisites:
+**Prerequisites:** Docker and Docker Compose.
 
-- Docker and Docker Compose
-- Optional: a reference WAV file for a default cloned voice
+```bash
+git clone https://github.com/nmorgowicz-org/persona-forge.git
+cd persona-forge
+cp .env.example .env          # optional: set HF_TOKEN, REF_AUDIO_PATH
+docker compose up -d persona-forge
+open http://localhost:8318
+```
 
-Steps:
+The service is ready when `GET /health` reports `"model_loaded": true` — roughly 30–60 seconds on
+first boot with the default pocket-tts backend.
 
-1. Copy `.env.example` to `.env`; set `HF_TOKEN` only if your selected models are gated. Optional: set `REF_AUDIO_PATH` for a default voice; Whisper drafts its transcript automatically.
-2. `docker compose up --build persona-forge`
-3. Run once to generate model artifacts: `docker compose run --rm --profile export export`
-4. Open `http://localhost:8318`
+> **Want the Qwen engine with OpenVINO acceleration?** Run the export step first and set
+> `TTS_BACKEND=openvino`. See [HOW_TO_RUN.md](docs/HOW_TO_RUN.md).
 
-For advanced configuration, environment variables, and tuning, see [docs/ENV_REFERENCE.md](docs/ENV_REFERENCE.md).
+---
 
-Working on the backend directly (not via Docker)? See [docs/dev/LOCAL_SETUP.md](docs/dev/LOCAL_SETUP.md)
-for the `uv`-managed local dev environment.
+## HTTP API
 
-## Model profiles
+Everything is served on port 8318. There is **no authentication by default**.
 
-| Profile | Quality | Steady serving memory | Max request length | Recommendation |
-|---|---|---|---|---|
-| `0.6B` | Good | ~5.4–5.8 GiB | ~300 seconds | Only if you specifically need it |
-| `1.7B` | Better | ~5.4–5.8 GiB | ~300 seconds | **Default — same memory, better output** |
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Health, model status, backend and mount info |
+| `POST` | `/v1/audio/speech` | **OpenAI-compatible TTS** |
+| `POST` | `/generate` | Native TTS — adds `language`, `seed`, `prosody_repair` |
+| `GET` | `/voices` | Saved voices with prosody metrics |
+| `POST` | `/voice_design` | Generate a voice from a description |
+| `POST` | `/omnivoice/audition` | Accent audition (streaming, multi-segment) |
+| `GET`/`POST` | `/runtime/config` | Live runtime configuration |
 
-Max request length is a qwen3-tts-engine-only (pytorch/openvino) setting
-(`TTS_MAX_SPEECH_SECONDS`), primarily a latency/safety cap, not a memory lever;
-`pocket_tts` is unbounded and doesn't use it. On CPU, `QWEN3_ENGINE_CPU_MAX_NEW_TOKENS`
-applies a much tighter hang-avoidance clamp (~25s) to both `pytorch` and `openvino`.
+```bash
+curl -s http://localhost:8318/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"input": "Hello world", "voice_id": "vd_000000000001", "response_format": "mp3"}' \
+  --output speech.mp3
+```
 
-## HTTP API (summary)
+```python
+from openai import OpenAI
 
-- `GET /health`
-- `POST /v1/audio/speech` (OpenAI-compatible)
-- `POST /generate` (native)
-- `POST /voice_design`
-- `GET /voices`, `GET /voices/<id>`, `DELETE /voices/<id>`
-- `GET/POST /runtime/config`
+client = OpenAI(base_url="http://localhost:8318/v1", api_key="unused")
+client.audio.speech.create(
+    model="tts-1", voice="vd_000000000001", input="Hello world"
+).stream_to_file("speech.mp3")
+```
 
-Full API details, streaming, and runtime/config semantics are in
-[HOW_TO_RUN.md](docs/HOW_TO_RUN.md).
+Full reference: **[docs/api/HTTP_API_REFERENCE.md](docs/api/HTTP_API_REFERENCE.md)**
 
-## Images
+---
 
-Published as `ghcr.io/nmorgowicz-org/persona-forge:<git-sha>` plus release-version and
-`latest` tags. Production must use a SHA tag or digest; never `latest`.
+## Container image
+
+```bash
+docker pull ghcr.io/nmorgowicz-org/persona-forge:latest
+```
+
+Pin a version — or a digest — for anything you depend on:
+
+```bash
+docker pull ghcr.io/nmorgowicz-org/persona-forge:v1.0.11
+```
+
+Tags: `latest`, `v<major>.<minor>.<patch>`, `<git-sha>`.
+
+---
+
+## Documentation
+
+**[📖 Full documentation index](docs/README.md)**
+
+Quick links: [Setup](docs/HOW_TO_RUN.md) · [Environment](docs/ENV_REFERENCE.md) ·
+[HTTP API](docs/api/HTTP_API_REFERENCE.md) ·
+[Architecture](docs/architecture/SYSTEM_OVERVIEW.md) ·
+[Contributing](docs/dev/LOCAL_SETUP.md)
+
+---
+
+## Security
+
+No authentication and no TLS out of the box. Persona Forge is built to run on a trusted LAN or
+behind an authenticated reverse proxy. **Do not expose port 8318 to the internet** without putting
+auth in front of it.
+
+Reporting: [SECURITY.md](SECURITY.md)
+
+---
+
+## License
+
+[MIT](LICENSE) — with the exception of OmniVoice model weights, which are CC-BY-NC
+(non-commercial). See [OMNIVOICE_REFERENCE.md](docs/architecture/OMNIVOICE_REFERENCE.md).

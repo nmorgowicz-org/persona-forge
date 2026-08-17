@@ -19,6 +19,7 @@ TEST_PROFILE options:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import random
@@ -53,7 +54,18 @@ def _read_test_profile() -> str:
 
 
 def _install_fake_runtime():
-    from tests.fixtures.fake_runtime import FakeModelRuntime  # noqa: E402
+    from tests.fixtures.fake_runtime import FakeModelRuntime, _FakeModule  # noqa: E402
+
+    # Under pytest-xdist, a worker process may already have a FakeModelRuntime
+    # installed into sys.modules["persona_forge.model"] by another test tier's
+    # conftest (e.g. tests/tier2_backend installs its own at import time).
+    # Installing a second one here would clobber that module-level proxy out
+    # from under the other tier's already-bound `rt`/`app_module` fixtures,
+    # causing their HTTP requests to hit a different (freshly-defaulted)
+    # runtime than the one their assertions check. Reuse it instead.
+    existing = sys.modules.get("persona_forge.model")
+    if isinstance(existing, _FakeModule):
+        return existing._rt
 
     profile = _read_test_profile()
 
@@ -147,7 +159,93 @@ def _patch_save_voice(app_module, rt):
     app_module.voice_library.update_voice = fake_library.update_voice
     app_module.voice_library.delete_voice = fake_library.delete_voice
     app_module.voice_library.list_voices = fake_library.list_voices
+    app_module.voice_library.duplicate_voice = fake_library.duplicate_voice
+    app_module.voice_library.set_default_variant = fake_library.set_default_variant
+    # Patch variant helpers so seeded voices are visible to the /variants endpoint.
+    def _fake_is_valid_voice_id(voice_id: str) -> bool:
+        return bool(voice_id) and voice_id in fake_library.voices
+    import pathlib
+    _fake_dir_parent = pathlib.Path(tempfile.mkdtemp(prefix="persona-forge-variant-fixtures-"))
+    def _fake_voice_dir(voice_id: str) -> pathlib.Path:
+        d = _fake_dir_parent / voice_id
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+    app_module.voice_library._is_valid_voice_id = _fake_is_valid_voice_id
+    app_module.voice_library._voice_dir = _fake_voice_dir
 
+
+def _seed_fake_voice_library(rt):
+    """Load the capture-data voice fixtures into the in-memory fake library."""
+    fixtures_dir = Path(__file__).resolve().parent / "capture-data" / "voices"
+    if not fixtures_dir.is_dir():
+        return
+    metas = []
+    for entry in sorted(fixtures_dir.iterdir()):
+        meta_path = entry / "meta.json"
+        if not meta_path.is_file():
+            continue
+        try:
+            metas.append(json.loads(meta_path.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    rt.voice_library.seed(metas)
+
+
+
+def _install_test_controls(app_module, rt):
+    """Test-only runtime state controls for E2E specs.
+
+    The Playwright webServer runs ONE shared fake server for the whole suite, so specs
+    can't rely on per-run TEST_PROFILE values. These endpoints let a spec drive the
+    fake model state at runtime (simulate an in-flight Base load or a startup failure)
+    and reset it afterwards.
+    """
+    # Idempotent: CI starts main() for the health check first which registers these
+    # routes on the shared app; when pytest's fixture calls start_server() the app
+    # has already handled the health check, so we can't register new routes.
+    if "/_test/simulate-base-load" in app_module.app.view_functions:
+        return
+    # Under pytest-xdist, this worker process may have already served a request on
+    # this same shared `persona_forge.app` object via tests/tier2_backend's
+    # `client` fixture (app.test_client()), which flips Flask's internal
+    # "first request handled" flag and blocks further app.route() calls. Reset it
+    # so we can still register these test-only routes.
+    app_module.app._got_first_request = False
+    from flask import jsonify, request  # noqa: E402
+
+    @app_module.app.route("/_test/simulate-base-load", methods=["POST"])
+    def _test_simulate_base_load():
+        body = request.get_json(silent=True) or {}
+        try:
+            duration = max(0.5, float(body.get("duration_seconds", 3)))
+        except (TypeError, ValueError):
+            duration = 3.0
+        rt._model_loaded = False
+        rt._base_load_in_progress = True
+
+        def _restore():
+            time.sleep(duration)
+            rt._base_load_in_progress = False
+            rt._model_loaded = True
+
+        threading.Thread(target=_restore, daemon=True).start()
+        return jsonify({"ok": True, "duration_seconds": duration})
+
+    @app_module.app.route("/_test/simulate-startup-failure", methods=["POST"])
+    def _test_simulate_startup_failure():
+        rt._service_started = False
+        rt._startup_failed = True
+        rt._startup_error = "fake startup error"
+        return jsonify({"ok": True})
+
+    @app_module.app.route("/_test/reset-state", methods=["POST"])
+    def _test_reset_state():
+        rt._service_started = True
+        rt._model_loaded = True
+        rt._startup_failed = False
+        rt._startup_error = None
+        rt._base_load_in_progress = False
+        return jsonify({"ok": True})
 
 
 def _install_fake_voice_design(app_module):
@@ -178,6 +276,8 @@ def main() -> None:
     _install_fake_voice_design(app_module)
     _patch_omnivoice_run_job(app_module)
     _patch_save_voice(app_module, rt)
+    _seed_fake_voice_library(rt)
+    _install_test_controls(app_module, rt)
 
     from werkzeug.serving import make_server  # noqa: E402
 
@@ -218,6 +318,8 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     _install_fake_voice_design(app_module)
     _patch_omnivoice_run_job(app_module)
     _patch_save_voice(app_module, rt)
+    _seed_fake_voice_library(rt)
+    _install_test_controls(app_module, rt)
 
     shutdown_event = threading.Event()
     app_module._shutdown_hook = shutdown_event.set

@@ -25,7 +25,7 @@ curl -s localhost:8318/v1/audio/speech -H 'Content-Type: application/json' \
 layout, `MODEL_SIZE` presets, one-command export, `serve.py`/port-8319 proxy removed, docs moved to
 `docs/dev/`. Details are in git history and `docs/dev/benchmarks/OPENVINO_RESULTS.md`; do not re-do them.
 
-Validated on `dockermisc1` (see OPENVINO_RESULTS.md for full provenance):
+Validated on `docker-agent` (see OPENVINO_RESULTS.md for full provenance):
 - **1.7B is the product-preferred profile** (user listening decision 2026-06-30; slightly better than
   0.6B and no memory disadvantage). Profile: main `int4_asym_g32` stateful cap768, predictor
   `int8_asym` explicit, **FP32 OpenVINO vocoder**, bf16 Torch glue.
@@ -64,7 +64,7 @@ The "0.6B ≈ 1.7B memory" surprise is explained and the reduction work is done.
    daemon is not available. After publishing the branch, apply `ready-to-test`; the
    `arc-general-docker` build/import smoke test is the remaining required gate.
 
-3. **After CI passes, deploy an immutable image on `dockermisc1`.** Set `QWEN3_TTS_IMAGE` to
+3. **After CI passes, deploy an immutable image on `docker-agent`.** Set `QWEN3_TTS_IMAGE` to
    `ghcr.io/nmorgowicz-org/qwen3-tts-openvino:<git-sha>`, run the Compose export profile only when IR
    must be regenerated, then start the service. Confirm `/health`, one short generation, and the
    startup `released ~0.32 GiB of PyTorch codec` log. Roll back by restoring the prior image digest.
@@ -76,7 +76,7 @@ The "0.6B ≈ 1.7B memory" surprise is explained and the reduction work is done.
    - Alexandria features (per-request VoiceDesign/cloning) need `OPENVINO_KEEP_CODEC_ENCODER=1`
      (the current default) because they revive the codec encoder. See `docs/plans/alexandria_ideas.md`.
 
-## 5. dockermisc1 quick reference
+## 5. docker-agent quick reference
 
 Paths (host):
 - IR (mounted to `/ov`): `/var/data/autopirate/qwen3-tts/openvino-simplify-v2/{0.6B,1.7B}`

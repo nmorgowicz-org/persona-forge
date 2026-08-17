@@ -1,4 +1,4 @@
-# FRONTEND_OVERVIEW
+# Frontend Overview
 
 Architecture and usage overview of the persona-forge frontend.
 

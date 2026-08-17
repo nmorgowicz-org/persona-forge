@@ -1,6 +1,6 @@
 # Model Swap and Queueing
 
-This document describes how model loading, swapping, and request queueing are implemented in the Qwen3-TTS OpenVINO service. It is normative: changes to swap or queueing behavior must respect these rules.
+This document describes how model loading, swapping, and request queueing are implemented in the Persona Forge service. It is normative: changes to swap or queueing behavior must respect these rules.
 
 The one-model-at-a-time invariant
 

@@ -1766,7 +1766,7 @@
 * **runtime:** validate requests before busy state ([6fc3fcc](https://github.com/nmorgowicz-org/persona-forge/commit/6fc3fcc5e395874503847aed834c715ea4ca2f8d))
 * **runtime:** validate requests before busy state ([f60b444](https://github.com/nmorgowicz-org/persona-forge/commit/f60b4447d9ff6673dd8ea756fe5d2ab475747774))
 * **runtime:** validate requests before busy state ([beb0851](https://github.com/nmorgowicz-org/persona-forge/commit/beb08513a7e6589b2aa23a6d77c14181a0e16a05))
-* **scripts:** default M4 reference WAV to persistent project-owned path on dockermisc1 ([5717ddb](https://github.com/nmorgowicz-org/persona-forge/commit/5717ddb37d5f80398e11ff879a3ed6a882bb3734))
+* **scripts:** default M4 reference WAV to persistent project-owned path on docker-agent ([5717ddb](https://github.com/nmorgowicz-org/persona-forge/commit/5717ddb37d5f80398e11ff879a3ed6a882bb3734))
 * **serve:** drop gunicorn --preload from single-worker model server ([c5d082e](https://github.com/nmorgowicz-org/persona-forge/commit/c5d082e790f1f3976a21f39915234d3ca8f4d7da))
 * **test:** harden code normalization, seed greedy runs, gc for mode=all, add entropy metric ([a78be3d](https://github.com/nmorgowicz-org/persona-forge/commit/a78be3d7a4b137a4588f6af47ad48c028c56a146))
 * **tests:** repair CI test failures from stale fakes and pytest-only test module ([1d56671](https://github.com/nmorgowicz-org/persona-forge/commit/1d56671f39aa3cb4135af59bfc417576408e17c4))
@@ -1794,7 +1794,7 @@
 * **export:** add warm vocoder benchmark harness ([538f29b](https://github.com/nmorgowicz-org/persona-forge/commit/538f29b57bc331c2a45ab8ceb9aff33408d27625))
 * **export:** update tests for relaxed provenance and current behavior ([e9d9943](https://github.com/nmorgowicz-org/persona-forge/commit/e9d9943fcdaed612d6997633be2b6f017b1dabc4))
 * **m4:** add sampled-quality and logits-parity modes to parity harness ([a78be3d](https://github.com/nmorgowicz-org/persona-forge/commit/a78be3d7a4b137a4588f6af47ad48c028c56a146))
-* **parity:** set fp32 gate to SNR &gt;= 60 dB (observed 72–91 dB on dockermisc1) ([4c4c567](https://github.com/nmorgowicz-org/persona-forge/commit/4c4c567f915d51dc4400ae02f7ca772b4b70334f))
+* **parity:** set fp32 gate to SNR &gt;= 60 dB (observed 72–91 dB on docker-agent) ([4c4c567](https://github.com/nmorgowicz-org/persona-forge/commit/4c4c567f915d51dc4400ae02f7ca772b4b70334f))
 * **runtime:** cover stateful predictor generation-step defaults ([7a7b091](https://github.com/nmorgowicz-org/persona-forge/commit/7a7b091d020ba2bf5ec79f99c8e86e4bc7a41af0))
 * **runtime:** validate streaming code capture and transport parity ([d67a505](https://github.com/nmorgowicz-org/persona-forge/commit/d67a505ccaa51a85717e59bec4fdb43c56c5ecd9))
 * update voice design preset capacity to 360 ([6748b8b](https://github.com/nmorgowicz-org/persona-forge/commit/6748b8bf4b622d024d059101ee7e942feff45959))
@@ -2443,7 +2443,7 @@
 
 * **ci:** make Dockerfile COPY-line check robust to additional files ([5717ddb](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5717ddb37d5f80398e11ff879a3ed6a882bb3734))
 * **docker:** include ov_runtime_config, ov_talker_runtime, bench_common, test_ov_generation in build ([5717ddb](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5717ddb37d5f80398e11ff879a3ed6a882bb3734))
-* **scripts:** default M4 reference WAV to persistent project-owned path on dockermisc1 ([5717ddb](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5717ddb37d5f80398e11ff879a3ed6a882bb3734))
+* **scripts:** default M4 reference WAV to persistent project-owned path on docker-agent ([5717ddb](https://github.com/nmorgowicz-org/qwen3-tts-openvino/commit/5717ddb37d5f80398e11ff879a3ed6a882bb3734))
 
 ## [0.6.0](https://github.com/nmorgowicz-org/qwen3-tts-openvino/compare/qwen3-tts-openvino-v0.5.4...qwen3-tts-openvino-v0.6.0) (2026-06-28)
 

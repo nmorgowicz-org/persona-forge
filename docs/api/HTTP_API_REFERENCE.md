@@ -1,6 +1,6 @@
-# Qwen3-TTS OpenVINO — HTTP API Reference
+# Persona Forge — HTTP API Reference
 
-Single-source reference for all HTTP endpoints on branch `voice-design-accent-and-queueing`.
+Single-source reference for all HTTP endpoints exposed by Persona Forge.
 
 - All JSON endpoints expect `application/json`.
 - All audio endpoints that return files set the appropriate `Content-Type` (`audio/mpeg` for MP3, `audio/wav` for WAV).

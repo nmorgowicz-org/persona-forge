@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 #
-# Run the Milestone 4 generation-parity + warm-latency harness on dockermisc1.
+# Run the Milestone 4 generation-parity + warm-latency harness on docker-agent.
 #
 # Stops the prod persona-forge container (so the full model load does not contend for memory
 # or swap-thrash), runs test_ov_generation.py inside the project image against an exported
 # IR directory, then ALWAYS restarts the service — even if the harness fails or is
 # interrupted. The harness writes ov_generation_report.json beside the IR files.
 #
-# Run this ON dockermisc1, not from a dev box.
+# Run this ON docker-agent, not from a dev box.
 #
 # Usage:
-#   scripts/run-m4-on-dockermisc1.sh <ir-dir-name> [fp32|int8]
+#   scripts/run-m4-on-docker-agent.sh <ir-dir-name> [fp32|int8]
 #
 #   <ir-dir-name>   directory name under $OV_ROOT, e.g.
 #                   qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1

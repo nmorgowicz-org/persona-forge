@@ -1,10 +1,13 @@
 # Qwen3-TTS OpenVINO — Benchmark & Results Log
 
+> Historical record from the Qwen3-TTS/OpenVINO era. The project is now Persona Forge; see
+> [SYSTEM_OVERVIEW](../../architecture/SYSTEM_OVERVIEW.md) for current architecture.
+
 Measured data only. Design, contracts, and plans live in
 [`OPENVINO_IMPLEMENTATION.md`](../architecture/OPENVINO_IMPLEMENTATION.md); this file is the audit record of every
 run so options can be compared without wading through the implementation narrative.
 
-All runs: CPU only, dockermisc1 (8 vCPU i7-1360P, AVX2+VNNI, no AVX-512, 15 GiB RAM), 6 threads,
+All runs: CPU only, docker-agent (8 vCPU i7-1360P, AVX2+VNNI, no AVX-512, 15 GiB RAM), 6 threads,
 0.6B Base unless noted. "match" = `mean_overall_codebook_match_rate`; "speedup" = warm
 `speedup_median` (PyTorch ÷ OpenVINO); RTF = OV real-time factor.
 
@@ -99,12 +102,12 @@ hit the 8 GiB limit and recorded 1,370 `memory.events:max` events, confirming th
 for diagnostics that duplicate final decode.
 
 The exact-parity listening WAV is `/private/tmp/profile_17_reuse.wav` on the development Mac and
-`/tmp/profile_17_reuse.wav` on `dockermisc1`; inspect around **11.2 seconds**, where total frame 300
+`/tmp/profile_17_reuse.wav` on `docker-agent`; inspect around **11.2 seconds**, where total frame 300
 crosses from the first emitted block to the final block. Human listening verdict (2026-06-30):
 streamed and batch sound **identical with no audible seam** at the boundary; quality gate closed.
 Fresh A/B WAVs also staged at `audio/streaming-ab/`.
 
-### v0.13.0 baked-image streaming validation (2026-06-30, dockermisc1)
+### v0.13.0 baked-image streaming validation (2026-06-30, docker-agent)
 
 This is the first validation using a CI-baked runtime image containing the streaming runtime and BF16
 loader fix, without mounted branch files.
@@ -130,7 +133,7 @@ loader fix, without mounted branch files.
 
 Both profiles pass Task 1 (baked-image smoke) on v0.13.0.
 
-### Task 2 — identical-seed latency comparison (2026-06-30, dockermisc1)
+### Task 2 — identical-seed latency comparison (2026-06-30, docker-agent)
 
 Container `persona-forge-candidate`, `runtime-v0.13.0`, 0.6B INT8 (stateful main cap-768, stateful
 predictor cap-32, BF16 glue, FP32 OV vocoder), 10 GiB cgroup, 6 threads. Seed 42,
@@ -178,7 +181,7 @@ of repeated vocoder inferences at each decode boundary; however, it starts deliv
 before completion. Task 2 acceptance is met (exact parity, streaming does not regress beyond noise
 for short requests; paragraph regression is documented as a trade-off).
 
-Non-Git artifacts on dockermisc1:
+Non-Git artifacts on docker-agent:
 
 ```text
 /tmp/bench_short_identical_seed_report.json (0.6B)
@@ -190,7 +193,7 @@ Memory note: after these runs the 0.6B container was at 9.446 GiB / 10 GiB. Para
 runs accumulate memory (stateful caches, vocoder buffers, streaming chunk storage). Periodic restart
 or 10 GiB+ headroom is required to avoid OOM.
 
-### Task 2 — 1.7B identical-seed latency comparison (2026-06-30, dockermisc1)
+### Task 2 — 1.7B identical-seed latency comparison (2026-06-30, docker-agent)
 
 Container `persona-forge-candidate`, `runtime-v0.13.0`, 1.7B INT4 asymmetric g32 (stateful main cap-768,
 explicit INT4 predictor, BF16 glue, FP32 OV vocoder), **12 GiB cgroup / 13 GiB swap**, 6 threads.
@@ -218,7 +221,7 @@ paragraph-length requests, matching the 0.6B's 25% regression. Streaming TTFB st
 completion. The 23-25% penalty is consistent across both models and is structural (repeated vocoder
 inference at each 300-frame boundary).
 
-Non-Git artifacts on dockermisc1:
+Non-Git artifacts on docker-agent:
 
 ```text
 /tmp/bench_short_identical_seed_report.json (1.7B — overwrote 0.6B report; 0.6B data captured above)
@@ -228,7 +231,7 @@ Memory note: 1.7B INT4 paragraph-length streaming runs at 12 GiB approach 94% af
 For production with streaming and paragraph loads, 12 GiB is a minimum; 10 GiB is unsafe.
 (Superseded by the `--preload` fix below — see "Serving `--preload` memory fix".)
 
-### Serving `--preload` memory fix (2026-06-30, dockermisc1, 1.7B-INT4)
+### Serving `--preload` memory fix (2026-06-30, docker-agent, 1.7B-INT4)
 
 The Gunicorn worker was launched with `--preload` under `-w 1`. With a single worker, preload shares
 nothing and pins a redundant full model copy in the master. Removing `--preload` from `serve.py`:
@@ -245,7 +248,7 @@ figures were inflated by the preload copy; real 1.7B-INT4 serving steady-state i
 maximum-length paragraph peak on a freshly baked image is not yet re-measured. Tested via `docker cp` of
 the patched `serve.py` onto `runtime-v0.13.0`, 12 GiB cgroup.
 
-### Task 3 — overlap go/no-go: per-core CPU (2026-06-30, dockermisc1, 1.7B-INT4)
+### Task 3 — overlap go/no-go: per-core CPU (2026-06-30, docker-agent, 1.7B-INT4)
 
 `mpstat -P ALL 1` across a 71 s batch paragraph `/generate`, active-window per-core busy%:
 
@@ -277,7 +280,7 @@ batch. Building B is a product decision; Deliverable A ships regardless. Raw: `/
   no regression; paragraph: exact parity, 25% slower total wall time with 60 s head start on audio.
 - Run: disconnect/timeout tests (ok), mixed serialized requests (ok), fresh-process PyTorch rollback (ok, 503).
 
-Raw diagnostics remain outside Git on `dockermisc1` under `/tmp/stream_{long,reuse}*`,
+Raw diagnostics remain outside Git on `docker-agent` under `/tmp/stream_{long,reuse}*`,
 `/tmp/infer_stream.f32`, and `/tmp/stream_cpu.txt`. The temporary container was stopped after testing.
 
 ---
@@ -315,7 +318,7 @@ semantically identical pre-commit working tree mounted over `/app`). Image `expo
 `abec65a5d2f2dcf07382d707513cb2a9f5c2a4c5872728069b169d9601e3da7f`; OpenVINO 2026.2.1;
 6 threads; INT8_ASYM cores; FP32 OV vocoder; `OPENVINO_BUFFER_KV=1`. Generated IR/audio/profile
 artifacts remain outside Git under
-`...0.6b_5d83992436ea_ov-2026.2.1_stateful/` on `dockermisc1`.
+`...0.6b_5d83992436ea_ov-2026.2.1_stateful/` on `docker-agent`.
 
 Transformed artifacts:
 
@@ -515,7 +518,7 @@ first divergence 160. Remaining divergence originates inside the quantized trans
 
 `calibration_capture.py` recorded the exact explicit-cache positional contract per graph from 24
 seeded generations: main prefill 24, main decode 48, predictor prefill 48, predictor decode 48.
-On dockermisc1 under `openvino/calib_0.6b/` (not in Git):
+On docker-agent under `openvino/calib_0.6b/` (not in Git):
 
 | File | Size | SHA-256 |
 |---|---:|---|
@@ -576,7 +579,7 @@ Protected containers (`litellm*`, `headroom-proxy`) stayed healthy throughout.
 
 ## 1.7B track — first export + M7 memory characterization (2026-06-29)
 
-First 1.7B run on dockermisc1. IR exported with `exporter-v0.9.1`:
+First 1.7B run on docker-agent. IR exported with `exporter-v0.9.1`:
 - Transformer cores INT8_ASYM: `qwen-tts-0.1.1_1.7b_fd4b25438912_ov-2026.2.1`
 - Vocoder FP32 (separate dir): `qwen-tts-0.1.1_1.7b_fd4b25438912_ov-2026.2.1_vocoder`
 
@@ -678,7 +681,7 @@ image `exporter-v0.10.0` at digest
 `fd4b25438912…`, the validated INT4-g32 transformer directory, FP32 OV vocoder, 6 threads,
 `OPENVINO_BUFFER_KV=1`, `OPENVINO_RELEASE_TORCH=1`, and a 13 GiB/14 GiB memory/swap limit. The default
 short prompt produced 3.68 s of audio. Raw profile:
-`m9_rss_core_1.7b_int4.json` beside the INT4 IR on `dockermisc1` (outside Git).
+`m9_rss_core_1.7b_int4.json` beside the INT4 IR on `docker-agent` (outside Git).
 
 | Checkpoint | RSS |
 |---|---:|
@@ -764,7 +767,7 @@ Branch `feat/m9-generation-peak-profile`, commits `4c5f32c` / `752b0ec` / `4519a
 if main-graph compile fails after weights were released, and (4) cleaned `_OVStatefulCore`
 delegation / `generation_steps` acceptance.
 
-One production-sampling end-to-end run on `dockermisc1` used those changes plus stateful INT4
+One production-sampling end-to-end run on `docker-agent` used those changes plus stateful INT4
 main (`main_stateful_int4_v2.xml`), explicit INT4 predictor, FP32 OV vocoder, 6 threads,
 `OPENVINO_BUFFER_KV=1`, `OPENVINO_RELEASE_TORCH=1`, 13 GiB memory limit, and the same short
 prompt as prior runs.
@@ -812,7 +815,7 @@ OpenVINO threading/activation tuning.
 ### M9 gates: capacity, latency, concurrency, rollback — measured 2026-06-29
 
 Branch `feat/m9-generation-peak-profile`, commits `4519a19` / `e2294e7` / `483cb1d`, files mounted
-into `exporter-v0.10.0` on `dockermisc1`. Configuration: stateful INT4 main (`main_stateful_int4_v2.xml`),
+into `exporter-v0.10.0` on `docker-agent`. Configuration: stateful INT4 main (`main_stateful_int4_v2.xml`),
 explicit INT4 predictor, FP32 OV vocoder, 6 threads, `OPENVINO_BUFFER_KV=1`,
 `OPENVINO_RELEASE_TORCH=1`, 13 GiB memory limit.
 
@@ -1003,7 +1006,7 @@ The 2026-06-30 streaming-profile follow-up supersedes the production limit with 
 ### simplify-v2 0.6B end-to-end validation — PASSED (2026-06-30)
 
 Validated the uncommitted `refactor/simplify-v2` worktree based on source commit `8d49141` on
-`dockermisc1`. Local image IDs were runtime
+`docker-agent`. Local image IDs were runtime
 `sha256:c93d0267d73f5352fc8c6a3d5634ec3cbfde7fb6fc3976cdab6dabad2e759063` and exporter
 `sha256:9607147cdf069adc17899d7245a8ff4179390822f67e8acb1736cbbb014de15c`; these are local test
 images, not published artifacts.
@@ -1023,7 +1026,7 @@ images, not published artifacts.
   4.1/8.0 GiB used. No clean pre/post swap delta was captured, so this run is functional validation,
   not the final performance gate.
 - Non-Git outputs: `/tmp/simplify-06.mp3`, `/tmp/simplify-06-openai.wav`,
-  `/tmp/simplify-06-native.wav`, and `/tmp/simplify-06-stream.f32le` on `dockermisc1`.
+  `/tmp/simplify-06-native.wav`, and `/tmp/simplify-06-stream.f32le` on `docker-agent`.
 - Rollback: prior `persona-forge-candidate` container remains present but stopped; the rollback image is
   `runtime-v0.13.0`. Rollback was not restarted during this run.
 
@@ -1048,7 +1051,7 @@ benchmarking, PyTorch rollback verification, and the complete 1.7B export/runtim
   generation returns audio within the serving timeout or the rollback timeout contract is changed
   deliberately.
 
-Non-Git follow-up files on `dockermisc1`: `/tmp/simplify-06-parity.wav`,
+Non-Git follow-up files on `docker-agent`: `/tmp/simplify-06-parity.wav`,
 `/tmp/simplify-06-warm-{1..5}.wav`, and `/tmp/simplify-06-warm.tsv`.
 
 ### simplify-v2 1.7B end-to-end validation — FUNCTIONAL/LISTENING PASS, MEMORY COMPARISON OPEN (2026-06-30)
@@ -1073,7 +1076,7 @@ The cap768 stateful main compiled with 56 `[1,8,768,128]` states; XML SHA-256 is
   accounting and ranked reduction experiments.
 - Saved files: `/tmp/simplify-17.mp3`, `/tmp/simplify-17-native.wav`,
   `/tmp/simplify-17-parity.wav`, `/tmp/simplify-17-warm-{1..5}.wav`, and
-  `/tmp/simplify-17-warm.tsv` on `dockermisc1`.
+  `/tmp/simplify-17-warm.tsv` on `docker-agent`.
 
 Listening verdict (user, 2026-06-30): every copied 0.6B and 1.7B WAV was consistent and acceptable.
 There were minor pronunciation differences across all samples, but no material defect. The user
@@ -1094,7 +1097,7 @@ gate passes, prefer 1.7B based on listening; otherwise retain 0.6B as the safe f
 
 ### Why 0.6B and 1.7B have nearly identical steady memory — root cause (2026-06-30)
 
-This surprised us; MEASURED with `scripts/codec_memory_report.py` on `dockermisc1` (2026-06-30). An
+This surprised us; MEASURED with `scripts/codec_memory_report.py` on `docker-agent` (2026-06-30). An
 earlier draft of this section guessed the PyTorch speech-tokenizer/codec was the big shared chunk —
 **that guess was wrong; the instrumentation corrected it.** Post-OV-release resident bytes:
 
@@ -1148,7 +1151,7 @@ footprint gain. `scripts/codec_memory_report.py` remains as the standing instrum
 
 ### Codec release + INT8 vocoder — MEASURED A/B (2026-06-30, shipped codec release)
 
-Two memory levers were built and measured on `dockermisc1` against the 1.7B simplify-v2 runtime image
+Two memory levers were built and measured on `docker-agent` against the 1.7B simplify-v2 runtime image
 (bind-mounted `src`, `--memory 10g`, one fresh container per config, cgroup `memory.current` at idle
 load and `memory.peak` after one ~35-word `/generate`):
 
@@ -1196,7 +1199,7 @@ PyTorch fallback falls through to the fp32 default (`resolve_torch_load_config` 
 locally that `TTS_BACKEND=pytorch` no longer receives a forced bf16 dtype, the OpenVINO path is
 unchanged (bf16 + release), and an explicit expert `OPENVINO_TORCH_DTYPE` override is still honored.
 
-**CONFIRMED PASS on `dockermisc1` (2026-06-30):** with the fix, `TTS_BACKEND=pytorch MODEL_SIZE=0.6B`
+**CONFIRMED PASS on `docker-agent` (2026-06-30):** with the fix, `TTS_BACKEND=pytorch MODEL_SIZE=0.6B`
 loads at `torch_dtype=float32` and a short-prompt `POST /generate` returned **HTTP 200 in 20.4 s** with
 a valid 24 kHz mono WAV (vs the previous >300 s timeout under bf16). The rollback gate passes for 0.6B.
 Follow-up (non-blocking): spot-check 1.7B PyTorch (the deployed fallback size) with a short prompt — it

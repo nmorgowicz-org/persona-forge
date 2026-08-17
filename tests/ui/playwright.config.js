@@ -24,7 +24,7 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   // Only spin up the fake-model server ourselves when no explicit target was given (§7 points
   // PERSONA_FORGE_UI_URL at a real, already-running instance instead, e.g. over an SSH tunnel to
-  // dockermisc1 — Playwright must not try to also start a fake server in that case).
+  // docker-agent — Playwright must not try to also start a fake server in that case).
   webServer: explicitUrl
     ? undefined
     : {

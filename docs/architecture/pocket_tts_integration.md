@@ -42,7 +42,8 @@ High-level behavior:
   - The selected voice_state is resolved (default or voice_library voice).
   - generate_pocket_tts(model, voice_state, text) is called.
   - Output is post-processed with an energy-based tail trim using frames_after_eos.
-- Pocket TTS registers as a foreign engine so:
+- Pocket TTS is a backend branch inside `load_model` (only OmniVoice registers as a foreign
+  engine), so:
   - Idle unload and Base/Engine swap logic treat it consistently.
   - Only one heavy model is resident at a time.
 
@@ -314,7 +315,7 @@ integration must not violate them:
 
 8. Manual Validation Checklist
 
-On a CPU host with enough RAM (dockermisc1 or equivalent):
+On a CPU host with enough RAM (docker-agent or equivalent):
 
 - Build the image with the pocket-tts dependency and confirm `python -c "from pocket_tts import
   TTSModel"` succeeds, and that torch remains CPU-only (no CUDA wheel pulled in).

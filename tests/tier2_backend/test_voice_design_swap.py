@@ -93,6 +93,28 @@ class TestVoiceDesignSwap:
             model.force_unload = original_force_unload
             model.load_model = original_load_model
 
+    def test_endpoint_rejects_pocket_tts_backend(self, client, app_module, rt):
+        previous = rt.tts_backend
+        rt.tts_backend = "pocket_tts"
+        try:
+            assert app_module.model.TTS_BACKEND == "pocket_tts"
+            model_loaded_before = rt._model_loaded
+            resp = client.post(
+                "/voice_design",
+                json={
+                    "description": "calm narrator",
+                    "sample_text": "hello there",
+                    "language": "English",
+                },
+            )
+            assert resp.status_code == 501
+            assert "OmniVoice" in resp.get_json()["error"]
+            # Rejected before the swap: the model slot is untouched.
+            assert rt._model_loaded is model_loaded_before
+            assert app_module.voice_design.swap_in_progress() is False
+        finally:
+            rt.tts_backend = previous
+
     def test_validate_sample_text_accepts_short(self, app_module):
         app_module.voice_design.validate_sample_text("A short reference sample.")
 

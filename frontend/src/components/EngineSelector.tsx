@@ -13,40 +13,45 @@ interface EngineOption {
 
 const ENGINE_OPTIONS: EngineOption[] = [
   {
-    id: 'qwen',
-    label: 'Qwen VoiceDesign',
-    description: 'Free-form description, best for tone/persona — not accent-precise.',
-    icon: Sparkles,
-  },
-  {
     id: 'omnivoice',
     label: 'OmniVoice',
     description: 'Fixed trait chips, genuinely accent-capable — audition, cherry-pick, stitch.',
     icon: Wand2,
+  },
+  {
+    id: 'qwen',
+    label: 'Qwen VoiceDesign',
+    description: 'Free-form description, best for tone/persona — not accent-precise.',
+    icon: Sparkles,
   },
 ]
 
 interface EngineSelectorProps {
   value: DesignEngine
   onChange: (engine: DesignEngine) => void
+  disabledReasons?: Partial<Record<DesignEngine, string>>
 }
 
-export function EngineSelector({ value, onChange }: EngineSelectorProps) {
+export function EngineSelector({ value, onChange, disabledReasons }: EngineSelectorProps) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {ENGINE_OPTIONS.map((option) => {
         const selected = value === option.id
+        const disabledReason = disabledReasons?.[option.id]
         return (
           <button
             key={option.id}
             type="button"
             data-testid={`engine-${option.id}`}
             onClick={() => onChange(option.id)}
+            disabled={Boolean(disabledReason)}
+            title={disabledReason}
             className={cn(
               'relative flex items-start gap-3 rounded-xl border p-4 text-left transition-colors',
               selected
                 ? 'border-primary bg-primary/5'
                 : 'border-border bg-card hover:bg-accent/40',
+              disabledReason && 'cursor-not-allowed opacity-50',
             )}
           >
             {selected && (

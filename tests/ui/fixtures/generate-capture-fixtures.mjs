@@ -1,5 +1,5 @@
 // One-time generator for tests/ui/fixtures/capture-data/{voices,segments}. NOT called by
-// capture.mjs — run manually after backend API changes affecting voice/segment shape:
+// the capture harness — run manually after backend API changes affecting voice/segment shape:
 //   node tests/ui/fixtures/generate-capture-fixtures.mjs
 // Spawns a real server on throwaway temp dirs, drives the real HTTP API to create the
 // minimum realistic library state, then copies the resulting dirs into capture-data/.
@@ -77,7 +77,7 @@ async function createSegmentViaOmnivoice(
 
 async function main() {
   console.log('[generate-capture-fixtures] spawning real server...')
-  const server = startRealServer({ port: 8896, timeoutMs: 600000, seedFixtures: false })
+  const server = await startRealServer({ port: 8896, timeoutMs: 600000, seedFixtures: false })
   await server.waitUntilHealthy()
   console.log(`[generate-capture-fixtures] healthy at ${server.url}`)
 

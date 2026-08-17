@@ -228,7 +228,7 @@ Implementation:
 **Background**: `vd_000000000001` ("Mounted reference (Default)") is created by
 `ensure_mounted_ref_voice()` in `voice_library.py`. Its `original.wav` is a
 **symlink** to the actual container-mounted `REF_AUDIO_PATH` file, which is often
-mounted `:ro` (read-only) by the deployment (see `dockermisc1-dev-deploy.md` memory
+mounted `:ro` (read-only) by the deployment (see `docker-agent-dev-deploy.md` memory
 for the dev container's compose/bind-mount setup). `current.wav` symlinks to
 `original.wav`.
 

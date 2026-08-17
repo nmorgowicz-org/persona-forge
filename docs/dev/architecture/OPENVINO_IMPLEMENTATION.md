@@ -1,9 +1,12 @@
 # Qwen3-TTS OpenVINO INT8 Implementation Plan
 
+> Historical record from the Qwen3-TTS/OpenVINO era. The project is now Persona Forge; see
+> [SYSTEM_OVERVIEW](../../architecture/SYSTEM_OVERVIEW.md) for current architecture.
+
 ## Objective
 
 Accelerate either official Qwen3-TTS Base voice-cloning checkpoint on the CPU-only
-`dockermisc1` VM while preserving the current `/generate`, `/infer`, and voice-cloning
+`docker-agent` VM while preserving the current `/generate`, `/infer`, and voice-cloning
 behavior:
 
 - `Qwen/Qwen3-TTS-12Hz-0.6B-Base` is the default and first optimization target.
@@ -90,11 +93,11 @@ producer must precede pipelining or a streaming HTTP endpoint. See `../features/
   accumulation reordering produces single-sample outliers; SNR ≥ 40 dB is the accepted gate.
 - INT8 weight compression **rejected**: SNR 16.3 dB (audibly degraded); speedup negligible
   (1.23×) vs FP32 IR (1.27×). Conv/GAN operations do not benefit from weight-only INT8.
-- Warm vocoder-only latency (dockermisc1, 6 threads, seq=325): PyTorch 15.6s → FP32 IR 12.3s
+- Warm vocoder-only latency (docker-agent, 6 threads, seq=325): PyTorch 15.6s → FP32 IR 12.3s
   (1.27×). The 1.5× target was set for INT8; FP32-only is accepted given INT8 is rejected on
   quality grounds. End-to-end impact: vocoder is 29% of wall time, so 1.27× vocoder → ~1.07×
   end-to-end — modest on its own. Transformer cores are the dominant remaining target.
-- IR artifacts: `qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1_vocoder/` on dockermisc1.
+- IR artifacts: `qwen-tts-0.1.1_0.6b_5d83992436ea_ov-2026.2.1_vocoder/` on docker-agent.
   Parity report: `vocoder_parity_metrics.json`. Benchmark: `vocoder_benchmark.json`.
 
 In place today:
@@ -114,14 +117,14 @@ In place today:
 
 **Milestone 2 — Transformer core export and FP32 parity gate: COMPLETE (2026-06-28)**
 
-Four IR graphs exported and parity-gated against PyTorch eager on dockermisc1:
+Four IR graphs exported and parity-gated against PyTorch eager on docker-agent:
 
 - `main_prefill.xml`, `main_decode.xml` (28-layer, 0.6B main talker)
 - `predictor_prefill.xml`, `predictor_decode.xml` (5-layer code predictor)
 
 FP32 parity (OV 2026.2.1, 6 threads, seed 20260628): SNR **72–91 dB** across all 8
 scopes (prefill + 3 decode steps for each core). Gate: SNR ≥ 60 dB. All pass.
-IR artifacts: `qwen-tts-0.1.1_0.6b_main_ov-2026.2.1/` on dockermisc1.
+IR artifacts: `qwen-tts-0.1.1_0.6b_main_ov-2026.2.1/` on docker-agent.
 Parity report: `transformer_parity.json`.
 
 Two non-obvious export bugs encountered and fixed during this milestone:
@@ -217,7 +220,7 @@ level FP32/INT8 validation, or the `TTS_BACKEND=openvino` worker path with `/hea
 
 ## Validated Deployment Snapshot
 
-Validated on `dockermisc1` on 2026-06-28 (M3 characterization current):
+Validated on `docker-agent` on 2026-06-28 (M3 characterization current):
 
 - Host kernel: Linux `7.0.0-27-generic` under KVM.
 - CPU exposed to the VM: 8 single-threaded vCPUs from an Intel Core i7-1360P.
@@ -421,7 +424,7 @@ Workflow placement:
 - `arc-general-docker`: Buildx builds the AMD64 image after an internal PR receives
   `ready-to-test`, and publishes it from Release Please version tags or an explicit manual
   workflow dispatch. Merges to `main` do not publish images.
-- `dockermisc1`: downloads the Hugging Face model, runs export/quantization, validates the
+- `docker-agent`: downloads the Hugging Face model, runs export/quantization, validates the
   generated IR, and runs hardware-specific benchmarks.
 
 CI smoke tests may import packages and exercise synthetic wrapper models, but must not
@@ -662,7 +665,7 @@ The 1.5× INT8 target is withdrawn — INT8 is quality-rejected. FP32 result acc
 ## Milestone 2: Export the Two Transformer Cores ✓ COMPLETE
 
 Create `export_openvino.py`. CI places this script in the exporter image. After that image is
-published, run it on `dockermisc1` against the persistent model cache and write the result to
+published, run it on `docker-agent` against the persistent model cache and write the result to
 a persistent, versioned output directory such as:
 
 ```text
@@ -793,7 +796,7 @@ compressed = nncf.compress_weights(
 ov.save_model(compressed, output_xml)
 ```
 
-NNCF mode behavior (validated 2026-06-28 on dockermisc1):
+NNCF mode behavior (validated 2026-06-28 on docker-agent):
 
 - INT8 modes (INT8_ASYM, INT8_SYM):
   - All weights, per-channel, no tuning knobs.
@@ -807,7 +810,7 @@ NNCF mode behavior (validated 2026-06-28 on dockermisc1):
   INT8 compression pass with an explicit `IgnoredScope` for layers retained in FP32.
 
 Do not assume INT8 modes support group_size/ratio; this constraint caused a failed
-export attempt on dockermisc1 (see #29).
+export attempt on docker-agent (see #29).
 
 Compile the compressed models for CPU latency:
 
@@ -848,7 +851,7 @@ per-channel):
 - These are hidden-state SNR measurements from the superseded synthetic harness. They are
   insufficient to accept or reject a runtime configuration.
 
-The run used exporter-v0.5.2 on dockermisc1. Source commit:
+The run used exporter-v0.5.2 on docker-agent. Source commit:
 `4fe690b0ff4dd2f74cbe47a2cfb7c942bc18ccb6`; exporter digest:
 `sha256:0808f1f70777f160f8bca4b29486c0b94a6728c372715eef96e39a945e2c817d`; actual model
 revision: `5d83992436eae1d760afd27aff78a71d676296fc`; IR metadata SHA-256:
@@ -1008,7 +1011,7 @@ lands well under the 2x goal, INT8 becomes load-bearing and the retained INT8_AS
 re-evaluated through this same generation-level harness. `test_ov_generation.py` produces both
 the bounded generated-code agreement (greedy) and the warm sampling latency/RTF/peak-RSS rows.
 
-### M4 measured results: COMPLETE (2026-06-28, dockermisc1, 0.6B Base, 6 threads)
+### M4 measured results: COMPLETE (2026-06-28, docker-agent, 0.6B Base, 6 threads)
 
 > **Full measured runs moved to [`OPENVINO_RESULTS.md` § Milestone 4](../benchmarks/OPENVINO_RESULTS.md#milestone-4--generation-runtime-measured-2026-06-28).**
 
@@ -1315,7 +1318,7 @@ checkpoint-load transient, not startup overlap. Loading the native-bf16 checkpoi
 predictor (~60 MiB) are kept but are minor next to bf16. The historical release used 8G for 1.7B;
 the 2026-06-30 streaming-profile follow-up requires 10G/11G for 20% production headroom.
 
-**M9 gates status (measured 2026-06-29 on dockermisc1):**
+**M9 gates status (measured 2026-06-29 on docker-agent):**
 - Long-prompt capacity (200+ words, capacities 2048/1024/768): passed; 768 recommended as default.
 - Capacity tuning: 768 vs 2048 reduces generation/retained RSS by 500-1500 MiB for long prompts; no audible difference.
 - Warm latency (greedy, 3 s audio, 5 runs): stable; RTF 7.4-7.9, no warm-up artifacts.
@@ -1490,10 +1493,10 @@ minimum, not a production limit; use `TTS_MEMORY_LIMIT=10G` and `TTS_MEMORY_SWAP
 currently persisted 1.7B profile uses an explicit INT4 predictor; do not point at a nonexistent
 stateful predictor artifact.
 
-### Private GHCR authentication on `dockermisc1`
+### Private GHCR authentication on `docker-agent`
 
 The GitHub Actions token that publishes the images is scoped to the workflow runner and is not
-available on `dockermisc1`. Before pulling a private image, authenticate with a token that has
+available on `docker-agent`. Before pulling a private image, authenticate with a token that has
 `read:packages`. When GitHub CLI is already authenticated on the host, use:
 
 ```bash
@@ -1514,7 +1517,7 @@ leaving registry credentials on disk.
    Please pull request.
 2. The Release Please tag triggers `arc-general-docker` to build and push
    `<release-commit-sha>`.
-3. Authenticate `dockermisc1` to private GHCR with `read:packages`, pull the immutable tag,
+3. Authenticate `docker-agent` to private GHCR with `read:packages`, pull the immutable tag,
    then remove temporary registry credentials.
 4. Set `MODEL_SIZE` to `0.6B` or `1.7B`, with optional `HF_TOKEN_FILE`, and pre-download the
    selected checkpoint into the persistent cache.
@@ -1556,8 +1559,8 @@ convenience but must not be the Compose production reference.
 | `docs/HOW_TO_RUN.md` | Operator commands, mounts, environment variables, safety, and benchmark capture |
 | `.github/workflows/ci.yml` | Lightweight tests on `arc-general` without model download |
 | `.github/workflows/image.yml` | Build and publish the unified image on `arc-general-docker` |
-| `scripts/export-on-dockermisc1.sh` | Versioned host-side export and validation command |
-| `scripts/run-m4-on-dockermisc1.sh` | Stop service, run the M4 generation harness in the unified image, restart |
+| `scripts/export-on-docker-agent.sh` | Versioned host-side export and validation command |
+| `scripts/run-m4-on-docker-agent.sh` | Stop service, run the M4 generation harness in the unified image, restart |
 
 ## Release Gates
 
@@ -1586,7 +1589,7 @@ resource-savings grounds.
 Run read-only verification before modifying the service:
 
 ```bash
-ssh nick@dockermisc1
+ssh nick@docker-agent
 cd /home/nick/docker/persona-forge
 
 docker exec persona-forge python3 - <<'PY'

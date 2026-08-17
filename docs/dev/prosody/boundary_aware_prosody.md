@@ -597,7 +597,7 @@ distinguishing manufactured (`insert_ms > 0`) from natural (`insert_ms == 0`) ga
 > Library warns on a slow successful alignment without discarding its usable result. Compose
 > passes the aligner provider, latency budget, and idle-unload controls into the serving
 > container. `scripts/benchmark_aligner.py` is the fail-closed real-model gate. On
-> `dockermisc1` (Intel i7-1360P, 8 allocated CPU threads), the exact 11.16 s Aussie screenshot
+> `docker-agent` (Intel i7-1360P, 8 allocated CPU threads), the exact 11.16 s Aussie screenshot
 > reference ran through pinned MMS INT8 ONNX / CPU EP at warm p50 **3.511 s** and p95
 > **4.136 s** over 10 measured iterations (cold session load 5.106 s; peak benchmark RSS
 > 958.4 MiB), passing the strict `< 5 s` gate. The complete fake lane, frontend build,
@@ -619,7 +619,7 @@ distinguishing manufactured (`insert_ms > 0`) from natural (`insert_ms == 0`) ga
 > or `budget_fallback` through raw-audio headers or structured JSON/progress metadata. The
 > five-second server deadline runs the existing `repair_segment_audio` engine with
 > cancellation checks, so successful edits use the canonical boundary planner/renderer and
-> late ONNX results are neither rendered nor cached. On `dockermisc1`, an unflagged
+> late ONNX results are neither rendered nor cached. On `docker-agent`, an unflagged
 > same-seed Pocket request returned `not_requested`; its cold flagged counterpart returned
 > `budget_fallback` at **5.000339 s**, and both WAV files were byte-identical at SHA-256
 > `6a1423df520946cc613c3fdd8ae021d99f98a57368f83039c2c659a2320e0bbe`. Warm native,

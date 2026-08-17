@@ -3,7 +3,7 @@
 **Status:** Proposed; Track A is ready for implementation, Track B remains gated by evidence  
 **Date:** 2026-07-13  
 **Primary runtime:** Pocket-TTS on CPU-only Linux AMD64  
-**Primary host:** `dockermisc1`  
+**Primary host:** `docker-agent`
 **Current package:** `pocket-tts==2.1.0`
 
 ## 1. Objective
@@ -161,7 +161,7 @@ This plan is technical guidance, not legal advice.
   backends.
 - Keep model weights, ONNX graphs, reference audio, generated audio, tokens, and voice-state
   caches outside Git.
-- Do not run export and the serving model simultaneously on `dockermisc1`.
+- Do not run export and the serving model simultaneously on `docker-agent`.
 
 ## 7. Target Architecture
 
@@ -324,7 +324,7 @@ Unit/fake tests must cover:
 
 ### 8.7 Track A live acceptance
 
-On `dockermisc1`:
+On `docker-agent`:
 
 1. Remove only the disposable test copy of the Pocket cloning artifact; do not delete unrelated
    Hugging Face or model caches.
@@ -566,7 +566,7 @@ FP32 ONNX must not regress intelligibility, speaker identity, naturalness, or bo
 
 ### Phase B6 — Performance benchmark
 
-Run one engine at a time on `dockermisc1`. Compare:
+Run one engine at a time on `docker-agent`. Compare:
 
 1. Current Torch FP32.
 2. Current Torch quantized mode if supported and stable.
@@ -722,7 +722,7 @@ PYTHONPATH=src:src/export .venv/bin/python -m pytest \
 ```
 
 Container/dependency changes require the Linux AMD64 image build and import smoke test. Real model
-parity, export, quality, and performance belong on `dockermisc1`.
+parity, export, quality, and performance belong on `docker-agent`.
 
 Frontend changes, if health/degraded messaging is surfaced, require:
 

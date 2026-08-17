@@ -37,5 +37,5 @@
 
 ## Agent rule
 
-- Never change export code without re-running parity tests on `dockermisc1`.
+- Never change export code without re-running parity tests on `docker-agent`.
 - IR paths in `presets.py` must match what export produces.

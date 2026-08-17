@@ -161,7 +161,7 @@ per §4.4 before relying on them; prefer the cited file/line over this summary i
   *strips OmniVoice's per-package index association*, so torch resolves from default PyPI on both
   platforms — arm64 (cpu+mps) on macOS, and the CUDA-enabled-but-CPU-capable wheel on linux.
   `environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]`. Proof: macOS lock =
-  120 pkgs green; linux (dockermisc1, Ubuntu 26.04, no GPU) = 124 pkgs, `uv sync` installs,
+  120 pkgs green; linux (docker-agent, Ubuntu 26.04, no GPU) = 124 pkgs, `uv sync` installs,
   `torch 2.12.1+cu130` imports with `cuda.is_available()==False` and runs on CPU, OmniVoice imports
   OK. **Caveat:** the linux install is ~5.5 GB (the unused NVIDIA libs); a *slim* CPU build is an
   advanced/deferred path (D9). The container Dockerfile stays canonical, non-uv (D3). (§2.1, §6 A1)
@@ -457,7 +457,7 @@ overrides, no `cu128`, and the OmniVoice git rev; `requirements-dev.txt` and `Do
 
 **Mission:** confirm a fresh `uv sync` produces an environment that loads the real model and
 passes the test suite — the whole point of the migration. (Note: `uv sync` + torch/torchaudio/
-transformers/omnivoice imports are **already proven on real linux**, dockermisc1, 2026-07-20 —
+transformers/omnivoice imports are **already proven on real linux**, docker-agent, 2026-07-20 —
 124 pkgs, runs on CPU. This phase re-confirms on the operator's machine and adds the pytest +
 model-load checks.)
 

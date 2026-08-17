@@ -240,9 +240,21 @@ def health():
     state["omnivoice_loaded"] = omnivoice_engine.omnivoice_loaded()
     state["alignment_performance"] = _alignment_jobs.performance()
 
-    # Human-readable hint when model is still loading at startup.
+    # Human-readable hint while a model load is in flight: cold boot (never started),
+    # a post-boot Base swap-back/lazy reload, or the OmniVoice load window (swap pending
+    # while OmniVoice is not yet resident). The frontend keeps polling /health and shows
+    # this as a top notification bar for the duration of the load. A startup failure gets
+    # its own message so the banner resolves into an error state instead of spinning
+    # "Loading model…" forever.
     if not model._service_started:
+        if state.get("status") == "error":
+            state["loading_message"] = "Model failed to load"
+        else:
+            state["loading_message"] = "Loading model…"
+    elif state.get("base_load_in_progress"):
         state["loading_message"] = "Loading model…"
+    elif omnivoice_engine.swap_in_progress() and not state["omnivoice_loaded"]:
+        state["loading_message"] = "Loading OmniVoice…"
 
     return jsonify(state)
 
@@ -303,6 +315,21 @@ def voice_design_create():
         return jsonify({"error": "VoiceDesign swap already in progress"}), 503
     if not model._service_started:
         return jsonify({"error": "Model not loaded"}), 503
+    # Qwen VoiceDesign only exists on the Qwen3-TTS backends — under pocket_tts the loaded
+    # TTSModel has no generate_voice_design, so reject up front (501) instead of swapping
+    # the model and failing mid-request. The UI routes voice design through OmniVoice there.
+    if getattr(model, "TTS_BACKEND", None) == "pocket_tts":
+        return (
+            jsonify(
+                {
+                    "error": (
+                        "Qwen VoiceDesign is not available under TTS_BACKEND=pocket_tts; "
+                        "use the OmniVoice engine or TTS_BACKEND=pytorch/openvino."
+                    )
+                }
+            ),
+            501,
+        )
     data = _json_body()
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400

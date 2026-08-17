@@ -85,7 +85,7 @@ generation, quantization, memory loading, Docker packaging, or deployment behavi
 - Both profiles land at ~5.4–6.9 GiB steady serving RSS on the validated host. Export needs up to 13 GiB.
 - `LOW_RAM_MODE=1` enables glibc malloc tuning + idle unload. Python calls `malloc_trim(0)` after idle unload. LD_PRELOAD allocator replacement (jemalloc, tcmalloc) is incompatible with OpenVINO `compile_model()` under transformers 5.x — both caused SIGABRT/SIGSEGV. `libjemalloc2` remains in the image for reference.
 - OV compiled kernel cache at `/ov/cache` (default) eliminates ~60–120s recompilation on every restart.
-- Full model export, parity, and performance benchmarks run on `dockermisc1`, not on ARC runners.
+- Full model export, parity, and performance benchmarks run on `docker-agent`, not on ARC runners.
 
 ## Architecture invariants
 
@@ -107,7 +107,7 @@ Never commit to Git or bake into the image:
 - Reference voice audio or generated speech
 - HF tokens, GitHub tokens, PEM keys, `.env` files, or deployment credentials
 
-Persistent host paths on `dockermisc1`:
+Persistent host paths on `docker-agent`:
 ```text
 /var/data/autopirate/persona-forge/model      ← HF cache (MODEL_CACHE_PATH)
 /var/data/autopirate/persona-forge/openvino   ← OpenVINO IR  (OV_DATA_PATH)
@@ -134,22 +134,22 @@ Persistent host paths on `dockermisc1`:
 - `buildcache` and `latest` are protected from cleanup. Keep at least 5 older versions for rollback.
 - Production Compose must pin the SHA tag or digest; never `latest`.
 
-GHCR pulls on `dockermisc1` need a `read:packages` token. Pass via `docker login --password-stdin` only; never echo or embed in Compose.
+GHCR pulls on `docker-agent` need a `read:packages` token. Pass via `docker login --password-stdin` only; never echo or embed in Compose.
 
-## Development Iteration (dockermisc1)
+## Development Iteration (docker-agent)
 
 To iterate on code and see changes live on the development VM:
 
 ### Rapid Debugging (Preferred for UI/small fixes)
-1. Sync specific files: `scp frontend/src/components/AppShell.tsx nick@dockermisc1:~/projects/persona-forge/frontend/src/components/AppShell.tsx`
-2. Build frontend: `ssh dockermisc1 "cd ~/projects/persona-forge/frontend && npm run build"`
-3. Restart the container: `ssh dockermisc1 "docker compose -f ~/docker/docker-compose.yml -f ~/docker/docker-compose.persona-forge-dev.yml restart persona-forge"`
+1. Sync specific files: `scp frontend/src/components/AppShell.tsx nick@docker-agent:~/projects/persona-forge/frontend/src/components/AppShell.tsx`
+2. Build frontend: `ssh docker-agent "cd ~/projects/persona-forge/frontend && npm run build"`
+3. Restart the container: `ssh docker-agent "docker compose -f ~/docker/docker-compose.yml -f ~/docker/docker-compose.persona-forge-dev.yml restart persona-forge"`
 
 ### Permanent Changes
 1. Commit and push changes to the working branch.
-2. Sync the codebase: `ssh dockermisc1 "cd ~/projects/persona-forge && git pull origin <branch>"`
-3. Build frontend (if applicable): `ssh dockermisc1 "cd ~/projects/persona-forge/frontend && npm run build"`
-4. Restart the container: `ssh dockermisc1 "docker compose -f ~/docker/docker-compose.yml -f ~/docker/docker-compose.persona-forge-dev.yml restart persona-forge"`
+2. Sync the codebase: `ssh docker-agent "cd ~/projects/persona-forge && git pull origin <branch>"`
+3. Build frontend (if applicable): `ssh docker-agent "cd ~/projects/persona-forge/frontend && npm run build"`
+4. Restart the container: `ssh docker-agent "docker compose -f ~/docker/docker-compose.yml -f ~/docker/docker-compose.persona-forge-dev.yml restart persona-forge"`
 
 The dev compose file (`~/docker/docker-compose.persona-forge-dev.yml`) enables bind-mounts for source code synchronization.
 
@@ -170,7 +170,7 @@ Model execution changes also require the staged gates from `docs/dev/architectur
 2. FP32 OpenVINO tensor, token, position, and cache parity
 3. INT8 accuracy and greedy-code agreement
 4. Voice quality listening checks
-5. Warm median/p95 latency, RTF, and peak RSS on `dockermisc1`
+5. Warm median/p95 latency, RTF, and peak RSS on `docker-agent`
 6. PyTorch rollback verification
 
 ## Test tiers
@@ -189,7 +189,7 @@ Model execution changes also require the staged gates from `docs/dev/architectur
 - Assert Torch is a CPU build (no CUDA shared libraries)
 - Validate `compose.yml`, the health check endpoint, both MODEL_SIZE presets, the downloader module
 
-### Tier 3 — Model parity (dockermisc1, do_sample=False)
+### Tier 3 — Model parity (docker-agent, do_sample=False)
 1. PyTorch vs. FP32 OpenVINO main prefill
 2. Several main decode steps with growing cache
 3. Predictor prefill and all 15 codebook steps
@@ -197,7 +197,7 @@ Model execution changes also require the staged gates from `docs/dev/architectur
 
 Record max/mean absolute error, top-1 agreement, top-k overlap, cache shapes, first divergent step. Parity gates fail closed — never catch missing outputs or lower thresholds to make a run pass.
 
-### Tier 4 — Quality and performance (dockermisc1)
+### Tier 4 — Quality and performance (docker-agent)
 Record: audio duration, end-to-end latency, RTF, warm median/p95, container peak RSS, host RAM/swap, and listening notes. Keep benchmark prompts in source control; store audio outside Git.
 
 ## Troubleshooting
@@ -246,7 +246,7 @@ Every handoff must state:
 - Known divergences, first failing step, and non-Git artifact locations
 - Rollback procedure and whether it was tested
 
-## Production VM safety (dockermisc1)
+## Production VM safety (docker-agent)
 
 - Shared live host — prefer read-only inspection unless the user explicitly authorizes changes.
 - Stop only `persona-forge` during export; never touch unrelated containers (`litellm*`, `headroom-proxy`, `crowdsec`, `hermes-*`, `*arr`, `searxng`).

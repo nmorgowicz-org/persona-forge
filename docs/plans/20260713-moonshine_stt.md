@@ -2,7 +2,7 @@
 
 **Status:** Proposed exploration; no runtime change approved yet  
 **Date:** 2026-07-13  
-**Primary target:** CPU-only Linux AMD64 on `dockermisc1`  
+**Primary target:** CPU-only Linux AMD64 on `docker-agent`
 **Current baseline:** `faster-whisper` `tiny.en`, CPU INT8
 
 ## 1. Purpose
@@ -77,7 +77,7 @@ Relevant English models reported by the project as of 2026-07-13 include:
 
 The published latency comparison reports Tiny Streaming at 69 ms and Small Streaming at
 165 ms on Linux x86, compared with 1,141 ms for Whisper Tiny. These are upstream measurements,
-not measurements from this repository or `dockermisc1`, and must not be treated as local
+not measurements from this repository or `docker-agent`, and must not be treated as local
 acceptance evidence.
 
 Important upstream caveats:
@@ -238,7 +238,7 @@ must not hide a worse non-speech gate.
 
 ### 8.2 Performance
 
-Measure on `dockermisc1` with Pocket-TTS as the primary runtime context:
+Measure on `docker-agent` with Pocket-TTS as the primary runtime context:
 
 - Dependency/model download size.
 - ASR model initialization time.
@@ -370,7 +370,7 @@ PYTHONPATH=src:src/export .venv/bin/python -m pytest \
 ```
 
 Dependency/container changes also require a Linux AMD64 image build and import smoke test. Real
-ASR model runs and performance measurements belong on `dockermisc1`, with model artifacts and
+ASR model runs and performance measurements belong on `docker-agent`, with model artifacts and
 audio outside Git. Validate the Faster-Whisper rollback path using the same corpus and runtime
 settings.
 

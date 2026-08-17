@@ -19,12 +19,12 @@ PYTHONPATH=src:src/export python -m pytest -m "not slow and not requires_torch a
 ```
 
 ```bash
-# Local or dockermisc1 Torch lane: real Torch-backed code, no model weights required unless separately marked.
+# Local or docker-agent Torch lane: real Torch-backed code, no model weights required unless separately marked.
 PYTHONPATH=src:src/export python -m pytest -m "requires_torch and not requires_model_weights and not requires_openvino_ir" --tb=short tests/tier1_unit
 ```
 
 ```bash
-# dockermisc1 model/runtime lane: real model artifacts and exported IR.
+# docker-agent model/runtime lane: real model artifacts and exported IR.
 PYTHONPATH=src:src/export python -m pytest -m "requires_model_weights or requires_openvino_ir" --tb=short
 ```
 
