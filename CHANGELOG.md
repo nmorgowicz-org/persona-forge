@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.1.0...persona-forge-v1.1.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **deps:** resolve Renovate allowedVersions error for python pin ([#191](https://github.com/nmorgowicz-org/persona-forge/issues/191)) ([8d200f4](https://github.com/nmorgowicz-org/persona-forge/commit/8d200f4b27f8a597e444be6743ff670b20e98dc9))
+
 ## [1.1.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.11...persona-forge-v1.1.0) (2026-08-17)
 
 
