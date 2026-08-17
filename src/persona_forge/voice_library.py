@@ -482,6 +482,10 @@ def preview_prosody_variant(
 
 def _voice_dir(voice_id: str) -> Path:
     parent_id, _slug = parse_voice_id(voice_id)
+    # Validate parent_id against the expected hex pattern to prevent path traversal.
+    # Both plain vd_<hex> IDs and variant vd_<hex>/<slug> IDs resolve here.
+    if not _VOICE_ID_RE.match(parent_id):
+        raise ValueError(f"Invalid voice_id format: {voice_id!r}")
     return VOICE_LIBRARY_DIR / parent_id
 
 

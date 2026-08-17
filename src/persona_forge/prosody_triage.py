@@ -62,7 +62,7 @@ _ABBREVIATIONS = frozenset({
     "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "mt", "vs", "etc",
     "inc", "ltd", "co", "corp", "no", "vol", "fig", "e.g", "i.e", "a.m", "p.m",
 })
-_TRAILING_WORD = re.compile(r"([A-Za-z][A-Za-z.]*)$")
+_TRAILING_WORD = re.compile(r"([A-Za-z][A-Za-z.]{0,99})$")
 
 
 @dataclass

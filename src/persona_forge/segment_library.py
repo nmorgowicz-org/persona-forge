@@ -38,6 +38,9 @@ def _is_valid_segment_id(segment_id: str) -> bool:
 
 
 def _segment_dir(segment_id: str) -> Path:
+    # Validate segment_id to prevent path traversal from user input.
+    if not _SEGMENT_ID_RE.match(segment_id):
+        raise ValueError(f"Invalid segment_id format: {segment_id!r}")
     return SEGMENT_LIBRARY_DIR / segment_id
 
 
