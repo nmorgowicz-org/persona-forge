@@ -1,5 +1,53 @@
 # Changelog
 
+## [1.1.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.11...persona-forge-v1.1.0) (2026-08-17)
+
+
+### Features
+
+* **frontend:** list OmniVoice first and default the design engine on pocket_tts ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+* **test:** port UI capture harness to split harness/scenarios architecture with contract tests ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+
+
+### Bug Fixes
+
+* **ci:** suppress py/stack-trace-exposure in codeql config for Flask production mode ([bb5e36c](https://github.com/nmorgowicz-org/persona-forge/commit/bb5e36c6d7fe34b7aabfa740b4b9803a9e1a4dde))
+* **frontend:** keep /health poller alive and show loading bar on any page ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+* **frontend:** self-host Geist Mono and pin rem baseline for cross-platform screenshot determinism ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+* **frontend:** show model startup failure in the top status bar ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+* **frontend:** suppress js/clear-text-storage for non-sensitive UI breadcrumb ([bb5e36c](https://github.com/nmorgowicz-org/persona-forge/commit/bb5e36c6d7fe34b7aabfa740b4b9803a9e1a4dde))
+* **model:** resolve py/path-injection, py/polynomial-redos, py/stack-trace-exposure CodeQL alerts ([bb5e36c](https://github.com/nmorgowicz-org/persona-forge/commit/bb5e36c6d7fe34b7aabfa740b4b9803a9e1a4dde))
+* **runtime:** reject Qwen VoiceDesign under pocket_tts before the model swap ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+* **runtime:** report startup failure in /health loading_message ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+* **runtime:** surface in-flight model loads in /health loading_message ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+* **test:** add waveform-readiness waits, stale-receipt guard, and VoiceDesign checkpoint check to capture harness ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+
+
+### Code Refactoring
+
+* **frontend:** remove dead OmniVoice progress polling code ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+
+
+### Tests
+
+* align voice-design-generate capture scenario to neutral runtime ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+* assert the saved voice card rather than an absolute count in the Qwen e2e spec ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+* find a free capture server port, drop the unimplemented auto source, and remove dead harness code ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+* **ui:** assert status bar for base load and startup failure ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+
+
+### Documentation
+
+* document Qwen VoiceDesign unavailability under pocket_tts ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+* fix stale product names, dead branch references, and replace banned REF_TEXT example phrases ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+* promote curated screenshots into docs/screenshots and rewrite README as a showcase with docs index ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+* rename dockermisc1 host references to docker-agent ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+
+
+### Miscellaneous Chores
+
+* ignore .serena agent tooling dir ([9d92172](https://github.com/nmorgowicz-org/persona-forge/commit/9d921729bec2f2016352e5641271c8ca86ce923d))
+
 ## [1.0.11](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.0.10...persona-forge-v1.0.11) (2026-08-15)
 
 
