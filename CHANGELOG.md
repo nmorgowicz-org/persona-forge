@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.3](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.1.2...persona-forge-v1.1.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **docs:** fix broken screenshot refs to actual committed filenames ([6a8903a](https://github.com/nmorgowicz-org/persona-forge/commit/6a8903a0537b5df1de99d67e49c74ce98d2f7b1e))
+* **renovate:** close manager-scope gaps letting locked numpy/python upgrades through ([#205](https://github.com/nmorgowicz-org/persona-forge/issues/205)) ([c982025](https://github.com/nmorgowicz-org/persona-forge/commit/c982025e109756562ba09daee9970816d08e97f9))
+* **tests:** reset swap/reconfig flags between tier2_backend tests ([6a8903a](https://github.com/nmorgowicz-org/persona-forge/commit/6a8903a0537b5df1de99d67e49c74ce98d2f7b1e))
+
+
+### Documentation
+
+* add containerization rationale to README, Dockerfile, compose.yml ([6a8903a](https://github.com/nmorgowicz-org/persona-forge/commit/6a8903a0537b5df1de99d67e49c74ce98d2f7b1e))
+
 ## [1.1.2](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.1.1...persona-forge-v1.1.2) (2026-08-22)
 
 
