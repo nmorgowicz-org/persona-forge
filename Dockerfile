@@ -1,3 +1,12 @@
+# Why this is a container and not a standalone (pip/pipx/binary) app: the runtime needs
+# pinned CPU-only torch/torchaudio wheels that diverge from PyPI defaults (ARGs below,
+# enforced again in pyproject.toml's override-dependencies), source-level monkey-patches
+# applied to installed qwen_tts/transformers packages (see the sed/python patch RUN steps
+# further down), a per-accelerator-family install resolved at first boot by
+# scripts/entrypoint.sh (GPU_FAMILY probing into /opt/accel-venv), and a separately built
+# frontend bundle. Reproducing that on an arbitrary host's Python install is a real, ongoing
+# maintenance burden — the container is what makes those pins/patches invisible to users.
+# Revisit only if standalone packaging becomes a real ask (today there's a single known user).
 ARG PYTHON_IMAGE=python:3.13-slim@sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a
 # Not digest-pinned like PYTHON_IMAGE below (build-stage only, never shipped in the final
 # image) — override via --build-arg if you need reproducibility guarantees for CI.
