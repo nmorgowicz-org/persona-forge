@@ -23,6 +23,33 @@
   ],
   "packageRules": [
     {
+      "description": "Ecosystem grouping: collapse non-major Python dep bumps into one PR per Renovate run. Placed first so the stack-specific rules below (OpenVINO, PyTorch) can override groupName for the packages they name.",
+      "matchManagers": ["pep621", "pip_requirements", "pip-compile", "uv"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "groupName": "python dependencies",
+      "groupSlug": "python-deps"
+    },
+    {
+      "description": "Ecosystem grouping: one PR for all non-major frontend npm bumps.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "groupName": "frontend npm dependencies",
+      "groupSlug": "frontend-npm"
+    },
+    {
+      "description": "Ecosystem grouping: one PR for all GitHub Actions bumps, including the digest pins from config:best-practices.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions",
+      "groupSlug": "github-actions"
+    },
+    {
+      "description": "Ecosystem grouping: one PR for base-image / Dockerfile bumps.",
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "groupName": "docker base images",
+      "groupSlug": "docker-images"
+    },
+    {
       "description": "Keep the OpenVINO export stack together",
       "matchManagers": ["pep621"],
       "matchPackageNames": ["openvino", "optimum-intel", "nncf"],
