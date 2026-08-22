@@ -27,6 +27,7 @@ import voicePromoteVariant from './scenarios/voice-library/promote-variant.mjs';
 import accentProjectGrouping from './scenarios/voice-library/project-grouping.mjs';
 import voicesList from './scenarios/voice-library/list.mjs';
 import alignmentCompare from './scenarios/prosody/alignment-compare.mjs';
+import prosodyAdjustment from './scenarios/prosody/prosody-adjustment.mjs';
 import segmentLibraryBrowse from './scenarios/stitch-studio/segment-library-browse.mjs';
 import stitchAssembly from './scenarios/stitch-studio/assembly.mjs';
 import omnivoiceAudition from './scenarios/omnivoice/audition.mjs';
@@ -139,6 +140,20 @@ export const SCENARIOS = {
         contract: {
             intent: 'Show the prosody alignment comparison view.',
             expectedOutputs: ['alignment-compare--pocket-tts--alignment-compare.png'],
+        },
+    },
+    'prosody-adjustment': {
+        run: prosodyAdjustment,
+        category: 'prosody',
+        runtime: 'pocket-tts',
+        contract: {
+            intent: 'Showcase the prosody adjustment feature — Precise mode, Calm preset, with pause markers on the adjusted waveform.',
+            expectedOutputs: [
+                'prosody-adjustment--pocket-tts--voice-library.png',
+                'prosody-adjustment--pocket-tts--settings-open.png',
+                'prosody-adjustment--pocket-tts--preset-selected.png',
+                'prosody-adjustment--pocket-tts--calm-adjusted.png',
+            ],
         },
     },
     'segment-library-browse': {
