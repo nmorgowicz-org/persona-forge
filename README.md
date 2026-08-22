@@ -175,8 +175,10 @@ reproducible deploy.
 torch/torchaudio wheels, source-level patches applied to installed third-party packages
 (qwen_tts, transformers), a per-accelerator-family install step, and a separately built
 frontend bundle. The container packages all of that so it's invisible to users. A standalone
-(pip/pipx/binary) install is possible in principle but isn't planned unless there's real demand
-for it.
+(pip/pipx/binary) install is possible in principle — likely via PyInstaller or Nuitka bundling
+the existing Python app, since the ML stack (torch, transformers, librosa/numba) is Python/C-extension
+based and isn't something a Rust or other native rewrite would meaningfully replace — but isn't
+planned unless there's real demand for it.
 
 ---
 
