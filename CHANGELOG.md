@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.4](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.1.3...persona-forge-v1.1.4) (2026-08-22)
+
+
+### Bug Fixes
+
+* **docs:** showcase prosody adjustment feature with hero screenshot ([2b04776](https://github.com/nmorgowicz-org/persona-forge/commit/2b04776c1e084082c6eee6af99ab093b35067efe))
+
 ## [1.1.3](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.1.2...persona-forge-v1.1.3) (2026-08-22)
 
 
