@@ -50,3 +50,24 @@ def app_module():
 def client(app_module):
     """Fresh test_client per test module to avoid shared request contexts."""
     return app_module.app.test_client()
+
+
+def _reset_swap_flags() -> None:
+    """Clear the swap/reconfig-in-progress flags on the shared session-scoped fakes.
+
+    rt/app_module are session-scoped singletons; several sibling tests flip these
+    flags True and restore them in a try/finally, but any leak (a failed restore,
+    or just unlucky xdist worker ordering) leaves the flag stuck True for every
+    other test on that worker, causing spurious 503s (e.g. #206).
+    """
+    _rt_instance._reconfig_in_progress = False
+    _rt_instance.swap_in_progress = False
+    _app_module.voice_design._swap_in_progress = False
+    _app_module.omnivoice_engine._swap_in_progress = False
+
+
+@pytest.fixture(autouse=True)
+def _reset_swap_state():
+    _reset_swap_flags()
+    yield
+    _reset_swap_flags()
