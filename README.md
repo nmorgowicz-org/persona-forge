@@ -171,6 +171,13 @@ Tags: `latest`, `v<major>.<minor>.<patch>`, `<git-sha>`. Use any of these as
 `PERSONA_FORGE_IMAGE` (see [Getting started](#getting-started)) instead of `latest` for a
 reproducible deploy.
 
+**Why a container, not a standalone install?** The runtime depends on pinned CPU-only
+torch/torchaudio wheels, source-level patches applied to installed third-party packages
+(qwen_tts, transformers), a per-accelerator-family install step, and a separately built
+frontend bundle. The container packages all of that so it's invisible to users. A standalone
+(pip/pipx/binary) install is possible in principle but isn't planned unless there's real demand
+for it.
+
 ---
 
 ## Documentation
