@@ -1,0 +1,9 @@
+{
+  "excludeAuthors": [
+    "nmorgowicz-org-release-please[bot]",
+    "release-please[bot]"
+  ],
+  "excludeBranches": [
+    "release-please--**"
+  ]
+}
