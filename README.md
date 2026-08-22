@@ -83,18 +83,38 @@ reference clip:
 
 ## Getting started
 
-**Prerequisites:** Docker and Docker Compose.
+**Prerequisites:** Docker and Docker Compose. Images are published to
+[GHCR](https://github.com/nmorgowicz-org/persona-forge/pkgs/container/persona-forge) on every
+release — this pulls a prebuilt image rather than building from source.
 
 ```bash
 git clone https://github.com/nmorgowicz-org/persona-forge.git
 cd persona-forge
 cp .env.example .env          # optional: set HF_TOKEN, REF_AUDIO_PATH
+echo 'PERSONA_FORGE_IMAGE=ghcr.io/nmorgowicz-org/persona-forge:latest' >> .env
 docker compose up -d persona-forge
 open http://localhost:8318
 ```
 
 The service is ready when `GET /health` reports `"model_loaded": true` — roughly 30–60 seconds on
 first boot with the default pocket-tts backend.
+
+Leave `PERSONA_FORGE_IMAGE` unset only if you're changing the Dockerfile/source and want
+`docker compose up --build` to build a local image instead. See [Container image](#container-image)
+below for pinned version/digest tags.
+
+> **No Compose, or don't want to clone the repo?** Run the published image directly:
+>
+> ```bash
+> docker run -d --name persona-forge -p 8318:8318 \
+>   -v "$(pwd)/data/model:/root/.cache/huggingface/hub" \
+>   -v "$(pwd)/data/voices:/voices" \
+>   ghcr.io/nmorgowicz-org/persona-forge:latest
+> ```
+>
+> Covers the pocket-tts default with a persistent model cache and voice library. See
+> [compose.yml](compose.yml) for the full set of optional volumes/env (reference audio, OpenVINO
+> IR cache, segment library).
 
 > **Want the Qwen engine with OpenVINO acceleration?** Run the export step first and set
 > `TTS_BACKEND=openvino`. See [HOW_TO_RUN.md](docs/HOW_TO_RUN.md).
@@ -147,7 +167,9 @@ Pin a version — or a digest — for anything you depend on:
 docker pull ghcr.io/nmorgowicz-org/persona-forge:v1.0.11
 ```
 
-Tags: `latest`, `v<major>.<minor>.<patch>`, `<git-sha>`.
+Tags: `latest`, `v<major>.<minor>.<patch>`, `<git-sha>`. Use any of these as
+`PERSONA_FORGE_IMAGE` (see [Getting started](#getting-started)) instead of `latest` for a
+reproducible deploy.
 
 ---
 

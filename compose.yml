@@ -5,8 +5,10 @@ name: persona-forge
 #   HF_TOKEN="your token repo is gated"  # if needed
 #   REF_AUDIO_PATH=/path/to/reference.wav  # optional default voice
 #   REF_TEXT="exact transcript reference audio"  # optional override; Whisper drafts by default
+#   PERSONA_FORGE_IMAGE=ghcr.io/nmorgowicz-org/persona-forge:latest  # pull published image instead of building
 # - Then:
-#     docker compose up --build persona-forge
+#     docker compose up -d persona-forge          # pulls PERSONA_FORGE_IMAGE if set, else builds :local
+#     docker compose up --build persona-forge     # force a local build from source
 # The default backend (pocket_tts) needs no export step. Only run the export
 # below if you switch TTS_BACKEND=openvino for the accelerated Qwen path:
 #     docker compose run --rm --profile export export   (once, to generate IR)

@@ -19,7 +19,16 @@ Requirements: Linux AMD64, Docker with Compose, at least 10 GiB for the service.
    # MODEL_SIZE and TTS_BACKEND default to 1.7B and pocket_tts respectively.
    ```
 
-2. Start the service:
+2. Start the service. By default `docker compose up` (without `--build`) resolves
+   `PERSONA_FORGE_IMAGE` (unset → `persona-forge:local`), which doesn't exist yet on a fresh clone,
+   so it builds from source. To skip the build and pull the published image instead, set
+   `PERSONA_FORGE_IMAGE` in `.env` first:
+
+   ```bash
+   echo 'PERSONA_FORGE_IMAGE=ghcr.io/nmorgowicz-org/persona-forge:latest' >> .env
+   ```
+
+   Then either way:
 
    ```bash
    docker compose up -d persona-forge
