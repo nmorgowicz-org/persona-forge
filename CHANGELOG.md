@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.2](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.1.1...persona-forge-v1.1.2) (2026-08-22)
+
+
+### Miscellaneous Chores
+
+* **ci:** group Renovate PRs by ecosystem, skip Greptile on release-please ([#201](https://github.com/nmorgowicz-org/persona-forge/issues/201)) ([762aaa3](https://github.com/nmorgowicz-org/persona-forge/commit/762aaa3bc571e7fac4704fa0beadfe2afaf8dd14))
+* **deps:** combined dependency updates (gunicorn, oxlint, lucide-react, setup-buildx) ([#202](https://github.com/nmorgowicz-org/persona-forge/issues/202)) ([b1a955b](https://github.com/nmorgowicz-org/persona-forge/commit/b1a955bd0a19f7038ef138254f6781d2f8fb39bf))
+* **deps:** update actions/upload-artifact action to v7 ([#194](https://github.com/nmorgowicz-org/persona-forge/issues/194)) ([5581148](https://github.com/nmorgowicz-org/persona-forge/commit/55811487c543bda88df3b3b0855b17d949712133))
+* **deps:** update github/codeql-action digest to db488dd ([#197](https://github.com/nmorgowicz-org/persona-forge/issues/197)) ([2d00975](https://github.com/nmorgowicz-org/persona-forge/commit/2d009750acb393feac74feaf3580f19ff73c4f7a))
+
 ## [1.1.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.1.0...persona-forge-v1.1.1) (2026-08-17)
 
 
