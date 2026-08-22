@@ -18,12 +18,12 @@ no training required.
 
 **OmniVoice accent audition** — generate candidates per segment, across accents, in real time:
 
-![OmniVoice audition](docs/screenshots/omnivoice-audition.gif)
+![OmniVoice audition](docs/screenshots/omnivoice-audition-gif--omnivoice--audition.gif)
 
 **Voice Design → Stitch Studio** — compose a voice from trait chips, then assemble it into a
 reference clip:
 
-![Voice Design to Stitch](docs/screenshots/design-to-stitch.gif)
+![Voice Design to Stitch](docs/screenshots/design-to-stitch-gif--pocket-tts--design-to-stitch.gif)
 
 ---
 
@@ -50,14 +50,14 @@ reference clip:
 
 **Speak** — generate from any saved voice
 
-![Speak](docs/screenshots/speak.png)
+![Speak](docs/screenshots/speak-generate--pocket-tts--after-generate.png)
 
 </td>
 <td width="50%">
 
 **Voice Design** — compose from trait chips
 
-![Voice Design](docs/screenshots/voice-design.png)
+![Voice Design](docs/screenshots/hero-voice-design--neutral--panel.png)
 
 </td>
 </tr>
@@ -66,14 +66,14 @@ reference clip:
 
 **Voice Library** — prosody fingerprints
 
-![Voice Library](docs/screenshots/voice-library.png)
+![Voice Library](docs/screenshots/voice-variant-list--neutral--variant-list.png)
 
 </td>
 <td width="50%">
 
 **Stitch Studio** — assemble clips into a new reference voice
 
-![Stitch Studio](docs/screenshots/stitch-studio.png)
+![Stitch Studio](docs/screenshots/stitch-assembly--neutral--assembly.png)
 
 </td>
 </tr>
