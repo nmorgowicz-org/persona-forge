@@ -18,12 +18,12 @@ no training required.
 
 **OmniVoice accent audition** — generate candidates per segment, across accents, in real time:
 
-![OmniVoice audition](docs/screenshots/omnivoice-audition.gif)
+![OmniVoice audition](docs/screenshots/omnivoice-audition-gif--omnivoice--audition.gif)
 
 **Voice Design → Stitch Studio** — compose a voice from trait chips, then assemble it into a
 reference clip:
 
-![Voice Design to Stitch](docs/screenshots/design-to-stitch.gif)
+![Voice Design to Stitch](docs/screenshots/design-to-stitch-gif--pocket-tts--design-to-stitch.gif)
 
 ---
 
@@ -50,14 +50,14 @@ reference clip:
 
 **Speak** — generate from any saved voice
 
-![Speak](docs/screenshots/speak.png)
+![Speak](docs/screenshots/speak-generate--pocket-tts--after-generate.png)
 
 </td>
 <td width="50%">
 
 **Voice Design** — compose from trait chips
 
-![Voice Design](docs/screenshots/voice-design.png)
+![Voice Design](docs/screenshots/hero-voice-design--neutral--panel.png)
 
 </td>
 </tr>
@@ -66,14 +66,14 @@ reference clip:
 
 **Voice Library** — prosody fingerprints
 
-![Voice Library](docs/screenshots/voice-library.png)
+![Voice Library](docs/screenshots/voice-variant-list--neutral--variant-list.png)
 
 </td>
 <td width="50%">
 
 **Stitch Studio** — assemble clips into a new reference voice
 
-![Stitch Studio](docs/screenshots/stitch-studio.png)
+![Stitch Studio](docs/screenshots/stitch-assembly--neutral--assembly.png)
 
 </td>
 </tr>
@@ -83,18 +83,38 @@ reference clip:
 
 ## Getting started
 
-**Prerequisites:** Docker and Docker Compose.
+**Prerequisites:** Docker and Docker Compose. Images are published to
+[GHCR](https://github.com/nmorgowicz-org/persona-forge/pkgs/container/persona-forge) on every
+release — this pulls a prebuilt image rather than building from source.
 
 ```bash
 git clone https://github.com/nmorgowicz-org/persona-forge.git
 cd persona-forge
 cp .env.example .env          # optional: set HF_TOKEN, REF_AUDIO_PATH
+echo 'PERSONA_FORGE_IMAGE=ghcr.io/nmorgowicz-org/persona-forge:latest' >> .env
 docker compose up -d persona-forge
 open http://localhost:8318
 ```
 
 The service is ready when `GET /health` reports `"model_loaded": true` — roughly 30–60 seconds on
 first boot with the default pocket-tts backend.
+
+Leave `PERSONA_FORGE_IMAGE` unset only if you're changing the Dockerfile/source and want
+`docker compose up --build` to build a local image instead. See [Container image](#container-image)
+below for pinned version/digest tags.
+
+> **No Compose, or don't want to clone the repo?** Run the published image directly:
+>
+> ```bash
+> docker run -d --name persona-forge -p 8318:8318 \
+>   -v "$(pwd)/data/model:/root/.cache/huggingface/hub" \
+>   -v "$(pwd)/data/voices:/voices" \
+>   ghcr.io/nmorgowicz-org/persona-forge:latest
+> ```
+>
+> Covers the pocket-tts default with a persistent model cache and voice library. See
+> [compose.yml](compose.yml) for the full set of optional volumes/env (reference audio, OpenVINO
+> IR cache, segment library).
 
 > **Want the Qwen engine with OpenVINO acceleration?** Run the export step first and set
 > `TTS_BACKEND=openvino`. See [HOW_TO_RUN.md](docs/HOW_TO_RUN.md).
@@ -147,7 +167,19 @@ Pin a version — or a digest — for anything you depend on:
 docker pull ghcr.io/nmorgowicz-org/persona-forge:v1.0.11
 ```
 
-Tags: `latest`, `v<major>.<minor>.<patch>`, `<git-sha>`.
+Tags: `latest`, `v<major>.<minor>.<patch>`, `<git-sha>`. Use any of these as
+`PERSONA_FORGE_IMAGE` (see [Getting started](#getting-started)) instead of `latest` for a
+reproducible deploy.
+
+**Why a container, not a standalone install?** The runtime depends on pinned CPU-only
+torch/torchaudio wheels, source-level patches applied to installed third-party packages
+(qwen_tts, transformers), a per-accelerator-family install step, and a Node/npm frontend build
+(`frontend/`) that has to run and get bundled in ahead of time. The container packages all of
+that — backend and frontend — so it's invisible to users. A standalone (pip/pipx/binary) install
+is possible in principle — likely via PyInstaller or Nuitka bundling the Python app plus the
+prebuilt frontend static assets, since the ML stack (torch, transformers, librosa/numba) is
+Python/C-extension based and isn't something a Rust or other native rewrite would meaningfully
+replace — but isn't planned unless there's real demand for it.
 
 ---
 

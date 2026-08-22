@@ -1022,20 +1022,20 @@ cd /Users/nick/SCRIPTS/CLAUDE/persona-forge
 mkdir -p docs/screenshots
 
 cp docs/screenshots/artifacts/generate/speak-generate--pocket-tts--after-generate.png \
-   docs/screenshots/speak.png
+   docs/screenshots/speak-generate--pocket-tts--after-generate.png
 cp docs/screenshots/artifacts/voice-design/voice-design-generate--neutral--filled.png \
-   docs/screenshots/voice-design.png
+   docs/screenshots/hero-voice-design--neutral--panel.png
 cp docs/screenshots/artifacts/omnivoice/omnivoice-audition--omnivoice--audition-candidates.png \
-   docs/screenshots/omnivoice.png
+   docs/screenshots/omnivoice-audition--omnivoice--audition-candidates.png
 cp docs/screenshots/artifacts/voice-library/voice-variant-list--neutral--variant-list.png \
-   docs/screenshots/voice-library.png
+   docs/screenshots/voice-variant-list--neutral--variant-list.png
 cp docs/screenshots/artifacts/stitch-studio/stitch-assembly--neutral--assembly.png \
-   docs/screenshots/stitch-studio.png
+   docs/screenshots/stitch-assembly--neutral--assembly.png
 
 cp docs/screenshots/artifacts/omnivoice/omnivoice-audition-gif--omnivoice--audition.gif \
-   docs/screenshots/omnivoice-audition.gif
+   docs/screenshots/omnivoice-audition-gif--omnivoice--audition.gif
 cp docs/screenshots/artifacts/wizard/design-to-stitch-gif--pocket-tts--design-to-stitch.gif \
-   docs/screenshots/design-to-stitch.gif
+   docs/screenshots/design-to-stitch-gif--pocket-tts--design-to-stitch.gif
 
 mkdir -p docs/screenshots/hero-candidates
 cp docs/screenshots/artifacts/hero/*.png docs/screenshots/hero-candidates/
@@ -1052,7 +1052,7 @@ from the runtime tag, which is useful in `artifacts/` and noise in a README URL.
 ### Step 3.2 — Confirm the promoted files are committable
 
 ```bash
-git check-ignore -v docs/screenshots/speak.png && \
+git check-ignore -v docs/screenshots/speak-generate--pocket-tts--after-generate.png && \
   echo "STILL IGNORED — STOP" || echo "OK: promoted files are committable"
 
 git add -n docs/screenshots/ | head -20
@@ -1376,14 +1376,14 @@ no training required.
 
 **Speak** — generate from any saved voice
 
-![Speak](docs/screenshots/speak.png)
+![Speak](docs/screenshots/speak-generate--pocket-tts--after-generate.png)
 
 </td>
 <td width="50%">
 
 **Voice Design** — compose from trait chips
 
-![Voice Design](docs/screenshots/voice-design.png)
+![Voice Design](docs/screenshots/hero-voice-design--neutral--panel.png)
 
 </td>
 </tr>
@@ -1392,14 +1392,14 @@ no training required.
 
 **OmniVoice** — accent audition, per segment
 
-![OmniVoice](docs/screenshots/omnivoice.png)
+![OmniVoice](docs/screenshots/omnivoice-audition--omnivoice--audition-candidates.png)
 
 </td>
 <td width="50%">
 
 **Voice Library** — prosody fingerprints
 
-![Voice Library](docs/screenshots/voice-library.png)
+![Voice Library](docs/screenshots/voice-variant-list--neutral--variant-list.png)
 
 </td>
 </tr>
@@ -1407,13 +1407,13 @@ no training required.
 
 **Stitch Studio** — assemble clips into a new reference voice:
 
-![Stitch Studio](docs/screenshots/stitch-studio.png)
+![Stitch Studio](docs/screenshots/stitch-assembly--neutral--assembly.png)
 
 ### In motion
 
 | OmniVoice audition | Voice Design → Stitch |
 |---|---|
-| ![Audition](docs/screenshots/omnivoice-audition.gif) | ![Wizard](docs/screenshots/design-to-stitch.gif) |
+| ![Audition](docs/screenshots/omnivoice-audition-gif--omnivoice--audition.gif) | ![Wizard](docs/screenshots/design-to-stitch-gif--pocket-tts--design-to-stitch.gif) |
 
 ---
 
@@ -1682,13 +1682,13 @@ Post-port keys. "Real OK" reflects the live host **having 2 voices and 6 segment
 | README slot | Committed path | Promoted from |
 |---|---|---|
 | Hero | *(chosen at Step 3.4)* | `artifacts/hero/` or `artifacts/stitch-studio/` |
-| Speak | `docs/screenshots/speak.png` | `artifacts/generate/speak-generate--pocket-tts--after-generate.png` |
-| Voice Design | `docs/screenshots/voice-design.png` | `artifacts/voice-design/voice-design-generate--neutral--filled.png` |
-| OmniVoice | `docs/screenshots/omnivoice.png` | `artifacts/omnivoice/omnivoice-audition--omnivoice--audition-candidates.png` |
-| Voice Library | `docs/screenshots/voice-library.png` | `artifacts/voice-library/voice-variant-list--neutral--variant-list.png` |
-| Stitch Studio | `docs/screenshots/stitch-studio.png` | `artifacts/stitch-studio/stitch-assembly--neutral--assembly.png` |
-| GIF 1 | `docs/screenshots/omnivoice-audition.gif` | `artifacts/omnivoice/omnivoice-audition-gif--omnivoice--audition.gif` |
-| GIF 2 | `docs/screenshots/design-to-stitch.gif` | `artifacts/wizard/design-to-stitch-gif--pocket-tts--design-to-stitch.gif` |
+| Speak | `docs/screenshots/speak-generate--pocket-tts--after-generate.png` | `artifacts/generate/speak-generate--pocket-tts--after-generate.png` |
+| Voice Design | `docs/screenshots/hero-voice-design--neutral--panel.png` | `artifacts/voice-design/voice-design-generate--neutral--filled.png` |
+| OmniVoice | `docs/screenshots/omnivoice-audition--omnivoice--audition-candidates.png` | `artifacts/omnivoice/omnivoice-audition--omnivoice--audition-candidates.png` |
+| Voice Library | `docs/screenshots/voice-variant-list--neutral--variant-list.png` | `artifacts/voice-library/voice-variant-list--neutral--variant-list.png` |
+| Stitch Studio | `docs/screenshots/stitch-assembly--neutral--assembly.png` | `artifacts/stitch-studio/stitch-assembly--neutral--assembly.png` |
+| GIF 1 | `docs/screenshots/omnivoice-audition-gif--omnivoice--audition.gif` | `artifacts/omnivoice/omnivoice-audition-gif--omnivoice--audition.gif` |
+| GIF 2 | `docs/screenshots/design-to-stitch-gif--pocket-tts--design-to-stitch.gif` | `artifacts/wizard/design-to-stitch-gif--pocket-tts--design-to-stitch.gif` |
 
 ## Appendix C — Live instance
 
