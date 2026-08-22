@@ -173,12 +173,13 @@ reproducible deploy.
 
 **Why a container, not a standalone install?** The runtime depends on pinned CPU-only
 torch/torchaudio wheels, source-level patches applied to installed third-party packages
-(qwen_tts, transformers), a per-accelerator-family install step, and a separately built
-frontend bundle. The container packages all of that so it's invisible to users. A standalone
-(pip/pipx/binary) install is possible in principle — likely via PyInstaller or Nuitka bundling
-the existing Python app, since the ML stack (torch, transformers, librosa/numba) is Python/C-extension
-based and isn't something a Rust or other native rewrite would meaningfully replace — but isn't
-planned unless there's real demand for it.
+(qwen_tts, transformers), a per-accelerator-family install step, and a Node/npm frontend build
+(`frontend/`) that has to run and get bundled in ahead of time. The container packages all of
+that — backend and frontend — so it's invisible to users. A standalone (pip/pipx/binary) install
+is possible in principle — likely via PyInstaller or Nuitka bundling the Python app plus the
+prebuilt frontend static assets, since the ML stack (torch, transformers, librosa/numba) is
+Python/C-extension based and isn't something a Rust or other native rewrite would meaningfully
+replace — but isn't planned unless there's real demand for it.
 
 ---
 
