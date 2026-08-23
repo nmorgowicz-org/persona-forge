@@ -66,11 +66,12 @@ RUN python -m pip install \
       "torch==${TORCH_VERSION}" "torchaudio==${TORCHAUDIO_VERSION}" && \
     python -m pip install qwen-tts==0.1.1 --no-deps && \
     python -m pip install -r requirements/requirements-runtime.txt && \
-    python -m pip install "git+https://github.com/k2-fsa/OmniVoice.git@398b6113" --no-deps
-    # ^ Pinned to a commit past 0.1.5 (not yet on PyPI) for pad_duration/fade_duration
-    #   support (needed for accurate segment duration targeting). Once a new PyPI
-    #   release ships with this commit, swap back to:
-    #     python -m pip install omnivoice==0.1.5 --no-deps
+    python -m pip install omnivoice==0.2.1 --no-deps
+    # ^ PyPI release. The 0.2.0 changelog lists commit 398b6113 ("Expose pad_duration and
+    #   fade_duration to let users control fade-in/out and silence padding") — the support
+    #   needed for accurate segment duration targeting. Verified 2026-08-22 against the
+    #   0.2.1 tag source: OmniVoiceGenerationConfig.pad_duration/fade_duration exist and
+    #   generate() passes them through, matching our omnivoice_engine.py usage.
 
 RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/' \
     /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_25hz/vq/speech_vq.py || true && \

@@ -70,7 +70,7 @@ if [ "${_gpu_family}" != "cpu" ]; then
             "torch==${_torch_version}" "torchaudio==${_torch_version}" \
             --index-url "${_torch_index_url}"
         pip install --target "${_accel_site_packages}" --no-cache-dir --no-deps \
-            "omnivoice @ git+https://github.com/k2-fsa/OmniVoice.git@${ACCEL_OMNIVOICE_REV:-398b6113}"
+            "omnivoice==0.2.1"
 
         touch "${_accel_marker}"
         echo "[entrypoint] ${_gpu_family}: install complete, marker written at ${_accel_marker}"
