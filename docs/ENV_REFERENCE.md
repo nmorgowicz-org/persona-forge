@@ -52,6 +52,19 @@ Recommended (simple knobs):
 | `ALIGNER_IDLE_UNLOAD_SECONDS` | `120` | Seconds after the serialized alignment queue drains before releasing the ONNX session. |
 | `GENERATION_REPAIR_BUDGET_SECONDS` | `5` | Hard per-request deadline for explicit `prosody_repair` on complete-file generation routes. Timeout returns the original un-repaired output with a `budget_fallback` outcome. |
 
+## Accelerator families
+
+Family (which torch wheel to install) is a separate axis from the runtime device knobs above
+(`TTS_DEVICE`, `OPENVINO_DEVICE`). See `architecture/ACCELERATOR_FAMILIES.md` for probe details,
+first-boot install behavior, and per-family validation status.
+
+| Var | Default | Description |
+|-----|---------|-------------|
+| `GPU_FAMILY` | `auto` | Torch wheel family: `cpu` / `intel-xpu` / `cuda` / `rocm`. `auto` picks the highest-priority vendor (`cuda` > `rocm` > `intel-xpu`) only when the device node is actually present (torch-independent PCI + device-node probes); an explicit value (including `cpu`) always wins; unrecognized values warn and fall back to auto-detect. Changes the torch wheel for the Qwen3-TTS PyTorch backend and OmniVoice only — Pocket-TTS is CPU-only and unaffected. |
+| `ACCEL_VENV_DIR` | `/opt/accel-venv` | Persisted per-family first-boot install location (`<dir>/<family>/site-packages`). Mounted as the compose `accel-venv` named volume so the install survives container recreation; unused when the family resolves to `cpu`. |
+| `ACCEL_TORCH_INDEX_URL` | per-family (`.../whl/xpu`, `.../whl/cu124`, `.../whl/rocm6.2`) | Wheel index for the first-boot torch/torchaudio install when the family is not `cpu`. Override if the per-family default is wrong for your hardware. |
+| `ACCEL_TORCH_VERSION` | `2.8.0` | torch/torchaudio version for the first-boot install. |
+
 ## Memory / OpenVINO (advanced)
 
 Unless you're tuning performance, leave these at defaults.

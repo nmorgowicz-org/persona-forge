@@ -112,6 +112,5 @@ before relying on it.
 | `ACCEL_TORCH_INDEX_URL` | per-family (see above) | Wheel index for the first-boot torch install |
 | `ACCEL_TORCH_VERSION` | `2.8.0` | torch/torchaudio version for the first-boot install |
 
-Note: these accelerator vars are documented here rather than in
-`ENV_REFERENCE.md` — add them there before treating the accelerator path as
-an operator-facing knob.
+The full table is above; the variables are also listed in `ENV_REFERENCE.md`
+("Accelerator families"), so the accelerator path is an operator-facing knob.

@@ -3,7 +3,7 @@
 Single-source reference for all HTTP endpoints exposed by Persona Forge.
 
 - All JSON endpoints expect `application/json`.
-- All audio endpoints that return files set the appropriate `Content-Type` (`audio/mpeg` for MP3, `audio/wav` for WAV).
+- All audio endpoints that return files set the appropriate `Content-Type` (`audio/mpeg` for MP3, `audio/wav` for WAV, `audio/pcm` for raw PCM).
 - All endpoints are relative to the service root (default: `http://host:8318`).
 - The service is single-worker (Gunicorn `-w 1`); model access is serialized via a single-thread executor.
 
@@ -21,7 +21,8 @@ Request body (JSON):
 - `language` (string, optional, default "English") — language label.
 - `voice_id` (string, optional) — ID of a voice from the voice library to clone.
 - `instruct` (string, optional) — optional instruction/steering prompt.
-- `response_format` (string, optional, default "mp3") — "mp3" or "wav".
+- `response_format` (string, optional, default "mp3") — "mp3", "wav", or "pcm"
+  (raw int16 LE mono, `audio/pcm`).
 - `seed` (integer, optional) — RNG seed for reproducibility; if present must be an integer.
 - `prosody_repair` (boolean, optional, default false) — batch/offline output repair using
   the input text. The server-enforced deadline defaults to five seconds.
@@ -29,7 +30,7 @@ Request body (JSON):
 Response:
 
 - 200:
-  - Body: raw audio bytes (MP3 or WAV, based on `response_format`).
+  - Body: raw audio bytes (MP3, WAV, or PCM, based on `response_format`).
   - Header: `X-Seed`: the resolved integer seed used.
   - Header: `X-Prosody-Repair-Outcome`: `not_requested`, `repaired`, `unnecessary`,
     `failed`, or `budget_fallback`.
@@ -60,7 +61,8 @@ Request body (JSON):
 - `language` (string, optional, default "English") — language label.
 - `voice_id` (string, optional) — ID of a voice to clone.
 - `instruct` (string, optional) — instruction/steering prompt.
-- `response_format` (string, optional, default "mp3") — "mp3" or "wav".
+- `response_format` (string, optional, default "mp3") — "mp3", "wav", or "pcm"
+  (raw int16 LE mono, `audio/pcm`).
 - `seed` (integer, optional) — RNG seed.
 - `prosody_repair` (boolean, optional, default false) — same bounded complete-file repair
   contract as `/generate`.
@@ -68,7 +70,7 @@ Request body (JSON):
 Response:
 
 - 200:
-  - Body: raw audio bytes (MP3 or WAV).
+  - Body: raw audio bytes (MP3, WAV, or PCM, based on `response_format`).
   - Header: `X-Seed`: resolved integer seed.
   - Headers: the same `X-Prosody-Repair-*` outcome metadata as `/generate`.
 - 503:
@@ -86,15 +88,136 @@ Important notes:
 
 - Same FIFO queueing behind swaps as `/generate`.
 
-### POST /generate/with_metrics and POST /generate/async
+### POST /generate/with_metrics
 
-- Both accept the same boolean `prosody_repair` opt-in as `/generate`.
-- `/generate/with_metrics` returns a `prosody_repair` object alongside metrics.
-- `/generate/async` returns the requested/pending state immediately; `GET /generate/progress`
-  reports the final structured outcome, and `GET /generate/job/<job_id>/audio` carries the
-  same `X-Prosody-Repair-*` headers as the synchronous routes.
+- Purpose: Same generation as `/generate` but returns a JSON envelope with base64 audio,
+  reference metrics, and take diagnoses (used by the frontend VariantCompare).
+
+Request body (JSON):
+
+- Same fields as `/generate`: `text` (string, required), `language`, `voice_id`, `instruct`,
+  `seed`, `prosody_repair`, plus optional pass-throughs `voice_variant_id`, `style_preset`,
+  `postprocess`.
+
+Response (JSON):
+
+- 200:
+  - `audio_base64` (string) — WAV of the generated audio.
+  - `media_type` (string) — `audio/wav` (always encoded as WAV).
+  - `seed` (int) — resolved seed.
+  - `metrics` (object) — `analyze_reference` metrics for the generated audio; an `error` field
+    if analysis failed.
+  - `diagnoses` (array) — take-diagnosis objects.
+  - `job_id` (string) and `prosody_repair` (object) — present when a repair outcome is tracked
+    for the job.
+- 503:
+  - If model not loaded or a runtime reconfiguration is in progress.
+- 400:
+  - If JSON invalid, `text` missing, `seed` not integer, or `builtin_voice` unsupported on the
+    active backend.
+- 422:
+  - If generation aborted (cache capacity exceeded).
+- 500:
+  - If an inference error occurs.
+
+### POST /generate/async
+
+- Purpose: Start a generation job and return immediately with a `job_id`; generation runs in a
+  background thread. Poll `GET /generate/progress`, fetch the audio via
+  `GET /generate/job/{job_id}/audio`, or stop early with `POST /generate/cancel`.
+
+Request body (JSON):
+
+- Same fields as `/generate`: `text` (string, required), `language`, `voice_id`, `instruct`,
+  `seed`, `prosody_repair`, `response_format` ("mp3", "wav", or "pcm"), plus optional
+  pass-throughs `voice_variant_id`, `style_preset`, `postprocess`.
+
+Response (JSON):
+
+- 200:
+  - `job_id` (string)
+  - `prosody_repair` (object): `requested` (boolean), `outcome` ("pending" if requested, else
+    "not_requested").
+- 503:
+  - If model not loaded or a runtime reconfiguration is in progress.
+- 400:
+  - If JSON invalid, `text` missing, unsupported `response_format`, `seed` not integer, or
+    `builtin_voice` unsupported on the active backend.
+
+Important notes:
+
+- Generation errors (including capacity-exceeded) do not fail this call: they surface later as
+  `status: "failed"` on `GET /generate/progress`. The progress response has no dedicated `error`
+  field; the failure string is stored on the job record but not exposed by this endpoint.
 - `failed` and `budget_fallback` are successful generation outcomes: audio remains available
   and is the clean pre-repair waveform (with ordinary configured output DSP still applied).
+- Jobs are cleaned up ~120 s after completion; fetch audio before then.
+
+### GET /generate/progress
+
+- Purpose: Poll live progress/ETA for an async generation job.
+
+Query params:
+
+- `job_id` (string, required) — from `/generate/async`.
+
+Response (JSON):
+
+- 200:
+  - `job_id` (string)
+  - `status` (string) — one of: "queued", "running", "completed", "failed", "cancelled".
+  - `frames_generated`, `expected_total_frames` (ints)
+  - `progress_pct` (number, 0–100)
+  - `elapsed_seconds`, `audio_seconds` (numbers)
+  - `rtf`, `live_rtf_estimate` (number or null)
+  - `eta_seconds` (number or null)
+  - `message` (string or null)
+  - `style_preset`, `postprocess_applied`, `applied_steps`, `prosody_repair` — from job state.
+  - `audio_available` (boolean) — true once completed; for cancelled/failed jobs, true if a
+    (partial) waveform was captured.
+- 400:
+  - If `job_id` parameter missing.
+- 404:
+  - If job unknown or expired (~120 s after completion).
+
+### POST /generate/cancel
+
+- Purpose: Cooperatively cancel a running async generation job.
+
+Params:
+
+- `job_id` (string, required) — as a query parameter or in the JSON body.
+
+Response (JSON):
+
+- 200: `{ "cancelled": true, "job_id": "..." }`.
+- 400: If `job_id` missing.
+- 404: If job unknown or not running.
+
+Important notes:
+
+- Cooperative: generation ends at the next decode step; partial audio may remain retrievable via
+  `GET /generate/job/{job_id}/audio`.
+
+### GET /generate/job/{job_id}/audio
+
+- Purpose: Retrieve the audio of a completed (or cancelled-with-partial-audio) async job.
+
+Query params:
+
+- `response_format` (string, optional, default "mp3") — "mp3", "wav", or "pcm".
+
+Response:
+
+- 200:
+  - Body: audio bytes (MP3, WAV, or raw PCM).
+  - Headers: `X-Seed`, `X-Job-Id`, the same `X-Prosody-Repair-*` headers as the synchronous
+    routes, plus `X-Style-Preset`, `X-Postprocess-Applied`, `X-Audio-Seconds`, `X-RTF`, and
+    `X-Applied-Steps` when present.
+- 400:
+  - If the job is not completed/cancelled yet, or `response_format` unsupported.
+- 404:
+  - If job unknown/expired, or no audio available.
 
 ### POST /generate/stream
 
@@ -214,6 +337,54 @@ Important notes:
 
 - Runs on the model executor with a 300-second timeout.
 - No auth gate; service is assumed to sit behind a trusted network or reverse proxy.
+
+### POST /runtime/config/reset
+
+- Purpose: Drop the persisted runtime config (keeping locked keys) and revert unlocked keys to
+  their hardcoded defaults.
+
+Response:
+
+- 200: updated config state (same shape as GET response).
+- 503: if another runtime reconfiguration or VoiceDesign/OmniVoice swap is already in progress.
+- 500: if an error occurs during reset.
+
+Important notes:
+
+- Runs on the model executor with a 300-second timeout.
+- No auth gate; same rationale as POST `/runtime/config`.
+
+### POST /health/validate-ref-text
+
+- Purpose: Validate the configured default reference (`REF_AUDIO`/`REF_AUDIO_PATH` + `REF_TEXT`)
+  with Whisper and return the match verdict.
+
+Response (JSON):
+
+- 200: validation result with at least:
+  - `severity` (string) — "ok", "warn", "fail", "no_speech", or "error".
+  - `match_score` (number or null)
+  - `whisper_transcript` (string or null)
+  - `suggestion` (string or null)
+- 400:
+  - If `REF_AUDIO`/`REF_AUDIO_PATH` or `REF_TEXT` is not configured.
+- 503:
+  - If model not loaded.
+- 500:
+  - If validation fails (`error` field).
+
+### GET /alignment/performance
+
+- Purpose: Bounded observed latency window for forced-alignment jobs (cold starts and cache hits
+  included).
+
+Response (JSON):
+
+- `sample_count`, `window_size` (ints)
+- `budget_seconds` (number) — the configured `ALIGNER_LATENCY_BUDGET_SECONDS`
+- `p50_seconds`, `p95_seconds` (number or null)
+- `within_budget` (boolean) — p95 under budget (true when no samples yet)
+- `breach_count` (int)
 
 ---
 
@@ -336,6 +507,386 @@ Response:
 - 200: `{ "deleted": "<voice_id>" }`.
 - 404: if voice not found.
 
+### GET /voices/built-in
+
+- Purpose: List the curated built-in voices for the Pocket TTS backend.
+
+Response (JSON):
+
+- `voices` (array) — each object:
+  - `voice_id` (string, e.g. "pocket:amy"), `builtin_voice`, `backend` ("pocket_tts"),
+    `display_name`, `source`, `license`, `language`, `language_code`, `category`, `note`,
+    `prompt`, `requires_backend` ("pocket_tts").
+
+### POST /voices/{voice_id}/duplicate
+
+- Purpose: Fork a voice into an independent `voice_id` (also used as a safety copy before
+  destructive reference-audio editing).
+
+Request body (JSON, optional):
+
+- `variant_filename` (string, optional) — fork this specific prosody variant rather than the
+  currently active one.
+
+Response (JSON):
+
+- 201: new voice metadata.
+- 404: if voice not found.
+- 500: if the duplicate fails.
+
+### POST /voices/{voice_id}/analyze
+
+- Purpose: Backfill reference metrics without changing the saved WAV.
+
+Response (JSON):
+
+- 200: updated voice metadata (with metrics).
+- 404: if voice not found.
+- 500: if reference analysis fails.
+
+### POST /voices/{voice_id}/undo-reference-edit
+
+- Purpose: Undo the most recent reference-audio edit (restore the pre-edit audio).
+
+Response (JSON):
+
+- 200: updated voice metadata.
+- 409: if there is no audio edit to undo.
+
+### POST /voices/{voice_id}/normalize
+
+- Purpose: Re-normalize the saved reference clip's loudness/peak in place (-20 LUFS, -1 dBTP).
+
+Response (JSON):
+
+- 200: updated voice metadata.
+- 404: if voice not found.
+- 409: if the reference is mounted/read-only (duplicate the voice and edit the copy instead).
+- 500: if normalization fails.
+
+### POST /voices/{voice_id}/trim-silence
+
+- Purpose: Trim leading/trailing silence from the saved reference clip in place.
+
+Response (JSON):
+
+- 200: updated voice metadata.
+- 404: if voice not found.
+- 409: if the reference is mounted/read-only.
+- 500: if trimming fails.
+
+### POST /voices/{voice_id}/set-default
+
+- Purpose: Mark this voice as the default variant within its family.
+
+Response (JSON):
+
+- 200: updated voice metadata.
+- 404: if voice not found.
+
+### POST /voices/{voice_id}/project
+
+- Purpose: Assign or clear the Accent Design Project this voice belongs to.
+
+Request body (JSON):
+
+- `project_id` (string, optional) — `proj_<12 hex>`; omit/null to clear.
+- `project_name` (string, optional) — denormalized name tag.
+
+Response (JSON):
+
+- 200: updated voice metadata.
+- 404: if voice not found.
+
+### POST /voices/{voice_id}/set-active-variant
+
+- Purpose: Set the active prosody variant for a voice, or reset to the original.
+
+Request body (JSON):
+
+- `variant_filename` (string, optional) — variant to activate; omit/null to reset to original.
+
+Response (JSON):
+
+- 200: voice metadata plus `status` and `active_variant`.
+- 400: if the voice or variant file is invalid.
+- 500: if setting the variant fails.
+
+### GET /voices/{voice_id}/variants
+
+- Purpose: List the original reference plus all saved prosody variants for a voice.
+
+Response (JSON):
+
+- `entries` (array) — first entry is the original (`is_original: true`); each variant entry has
+  `id` ("<voice_id>.<slug>"), `slug`, `filename`, `label`, `source`, `created_at`,
+  `is_original: false`.
+- `variants` (string[]) — sorted variant filenames.
+- `active_variant` (string or null) — the variant currently served (null when serving original).
+- `active_filename` (string) — filename currently served ("original.wav" or a variant).
+- 400: if voice_id invalid.
+- 404: if voice not found.
+
+### GET /voices/{voice_id}/variants/{variant_filename}/audio
+
+- Purpose: Fetch a single variant's raw audio for per-variant preview playback.
+
+Response (JSON):
+
+- 200: `{ "audio_base64": "..." }` (WAV).
+- 404: if variant not found.
+
+### GET /voices/{voice_id}/variants/{variant_filename}/metrics
+
+- Purpose: Compute a single variant's quality metrics without persisting them (preview-only).
+
+Response (JSON):
+
+- 200: metrics object.
+- 404: if variant not found.
+
+### DELETE /voices/{voice_id}/variants/{variant_filename}
+
+- Purpose: Delete a prosody variant. If it was active, the voice falls back to original.wav.
+
+Response (JSON):
+
+- 200: `{ "deleted": "<variant_filename>" }`.
+- 404: if variant not found.
+
+### POST /voices/{voice_id}/activate
+
+- Purpose: Make a saved voice the runtime API default (hot-swaps the Pocket default voice state).
+
+Response (JSON):
+
+- 200: voice metadata with `api_active: true`.
+- 409: if the active backend is not `pocket_tts`.
+- 404: if voice not found.
+- 503: if model not loaded.
+- 500: if activation fails.
+
+### POST /voices/{voice_id}/warm
+
+- Purpose: Ensure the voice's clone state is loaded and cached before generation (bounces the
+  runtime back from an idle-unloaded state and pre-builds that voice's state).
+
+Response (JSON):
+
+- 200: `{ "warmed": true, "voice_id": "..." }`; or
+  `{ "warmed": false, "reason": "not pocket_tts backend" }` when the backend is not `pocket_tts`.
+- 404: if voice not found.
+- 503: if model not loaded.
+- 500: if warm-up fails.
+
+### GET /voices/{voice_id}/preview-prosody
+
+- Purpose: Preview prosody adjustments without saving a variant.
+
+Query params:
+
+- `style_preset` (string, default "Neutral")
+- `pace_multiplier` (number, default 1.0)
+- `pause_offset` (number, default 0.0)
+- `mode` ("natural" | "precise" | "auto", default "auto")
+- `target_overrides` (JSON object as a string, optional) — per-boundary target deltas (ms) keyed
+  by rounded at_ms, layered on top of `pause_offset`.
+
+Response (JSON):
+
+- 200:
+  - `audio_base64` (string) — adjusted WAV.
+  - `metrics` (object) — analysis of the adjusted audio (or an `error` field).
+  - `diagnoses` (array) — take diagnostics.
+  - `sample_rate` (int), `sample_count` (int)
+  - `plan` (object) — the prosody adjustment plan.
+- 400: if params non-numeric, `mode` invalid, or `target_overrides` malformed.
+- 404: if voice not found.
+- 500: if preview failed.
+
+### POST /voices/{voice_id}/adjust-pauses
+
+- Purpose: Adjust interior pauses of the saved reference clip in place based on a prosody map
+  and pace.
+
+Request body (JSON):
+
+- `style_preset` (string, default "Neutral")
+- `pace_multiplier` (number, default 1.0)
+- `pause_offset` (number, default 0.0)
+- `mode` ("natural" | "precise" | "auto", default "auto")
+
+Response (JSON):
+
+- 200: updated voice metadata.
+- 400: if params non-numeric or `mode` invalid.
+- 404: if voice not found.
+- 409: if the reference is mounted/read-only.
+- 500: if the adjustment fails.
+
+### POST /voices/{voice_id}/prosody-variants
+
+- Purpose: Bake and save a prosody variant without promoting it to the active/served audio.
+
+Request body (JSON):
+
+- Same fields as `/adjust-pauses`, plus optional:
+  - `target_overrides` (object of numbers) — precise per-boundary corrections.
+
+Response (JSON):
+
+- 200: saved variant metadata.
+- 400: as with `/adjust-pauses`, or if `target_overrides` malformed.
+- 404: if voice not found.
+- 409: if the reference is mounted/read-only.
+- 500: if saving fails.
+
+### POST /voices/{voice_id}/region-edits
+
+- Purpose: Apply a manual region-edit list (delete / insert_silence / fade / gain / mute) to the
+  saved reference clip in place.
+
+Request body (JSON):
+
+- `edits` (array, optional) — each edit:
+  - `type` (string, required): one of `gain`, `mute`, `fade`, `delete`, `insert_silence`.
+  - `gain` / `mute` / `fade` / `delete`: `start_ms`, `end_ms` (required numbers); optional
+    `gain_db` (gain only), `fade_in_ms`, `fade_out_ms` (where applicable).
+  - `insert_silence`: `at_ms`, `duration_ms` (required numbers).
+
+Response (JSON):
+
+- 200: updated voice metadata.
+- 400: if the edits payload is invalid.
+- 404: if voice not found.
+- 409: if the reference is mounted/read-only.
+- 500: if the edit fails.
+
+### POST /voices/{voice_id}/triage
+
+- Purpose: Cheap, synchronous triage: does this reference need forced alignment?
+
+Response (JSON):
+
+- 200: triage result:
+  - `mode` (string) — the recommended prosody mode.
+  - `coverage` (number or null), `boundaries_expected` (number), `gaps_detected` (int)
+  - `reasons` (string[])
+  - `median_gap_ms`, `speech_rate_cv` (numbers)
+- 404: if voice not found, or reference audio missing.
+- 500: if triage fails.
+
+### POST /voices/{voice_id}/align
+
+- Purpose: Start (or reuse) a forced-alignment job. Async: returns a job to poll.
+
+Request body (JSON, optional):
+
+- `force` (boolean, optional) — recompute even when a cached alignment exists.
+
+Response (JSON):
+
+- 202: job object:
+  - `job_id`, `voice_id`, `status` ("queued"/"running"/"completed"/"failed"/"cancelled"),
+    `created_at`, `started_at`, `finished_at`, `duration_seconds`,
+    `latency_budget_seconds`, `within_latency_budget`,
+    `result` (null until completed), `error` (null unless failed).
+- 400: if the voice has no transcript.
+- 404: if voice not found.
+
+Important notes:
+
+- At most one alignment runs at a time; terminal jobs are evicted by TTL/count
+  (default 600 s / 50 jobs).
+
+### GET /voices/{voice_id}/align/{job_id}
+
+- Purpose: Poll a forced-alignment job.
+
+Response (JSON):
+
+- 200: same job object as `POST /align`; `result` carries the alignment on completion.
+- 404: if the job is unknown or belongs to a different voice.
+
+### DELETE /voices/{voice_id}/align/{job_id}
+
+- Purpose: Cancel a forced-alignment job.
+
+Response (JSON):
+
+- 200: job object (a cancelled job never reports "completed").
+- 404: if the job is unknown or belongs to a different voice.
+
+### POST /voices/{voice_id}/validate
+
+- Purpose: Validate the voice's saved transcript against its reference audio with Whisper.
+
+Response (JSON):
+
+- 200: same validation result shape as `POST /health/validate-ref-text`.
+- 400: if the voice is missing wav_path or sample_text.
+- 404: if voice not found.
+- 503: if model not loaded.
+- 500: if validation fails.
+
+---
+
+## Projects
+
+Accent Design Projects are name/description tags that group voices and segments. Membership is
+derived from each voice's/segment's own `project_id`/`project_name` fields (set via
+`POST /voices/{voice_id}/project` and `POST /omnivoice/segments/{segment_id}/project`); the
+registry is persisted in `projects.json` inside the voice-library volume. Deleting a project does
+not touch its voices/segments — they simply fall back to "Ungrouped".
+
+### GET /projects
+
+- Purpose: List all projects, newest first.
+
+Response (JSON):
+
+- Array of project objects:
+  - `project_id` (string, "proj_<12 hex>"), `name` (string), `description` (string or null),
+    `created_at` (number, epoch seconds).
+
+### POST /projects
+
+- Purpose: Create a project.
+
+Request body (JSON):
+
+- `name` (string, required)
+- `description` (string, optional)
+
+Response (JSON):
+
+- 200: the created project object (shape as above).
+- 400: if JSON invalid or `name` missing/empty.
+
+### PATCH /projects/{project_id}
+
+- Purpose: Rename a project (optionally update its description).
+
+Request body (JSON):
+
+- `name` (string, required)
+- `description` (string, optional) — updated only when present.
+
+Response (JSON):
+
+- 200: the updated project object.
+- 400: if JSON invalid or `name` missing/empty.
+- 404: if project_id unknown.
+
+### DELETE /projects/{project_id}
+
+- Purpose: Delete a project from the registry (its voices/segments are not touched).
+
+Response (JSON):
+
+- 200: `{ "deleted": true }`.
+- 404: if project_id unknown.
+
 ---
 
 ## OmniVoice audition
@@ -430,6 +981,25 @@ Important notes:
 - The `segments_completed` list grows incrementally; poll until `status == "completed"` or `"failed"`.
 - Each candidate's `audio_base64` is large; responses can be several MB per segment.
 
+### POST /omnivoice/audition/cancel
+
+- Purpose: Cancel a running (or queued) OmniVoice audition job.
+
+Query params:
+
+- `job_id` (string, required) — from `/omnivoice/audition`.
+
+Response (JSON):
+
+- 200: `{ "cancelled": true, "job_id": "..." }`.
+- 400: if `job_id` missing, or the job is not currently running/queued.
+- 404: if job unknown or expired.
+
+Important notes:
+
+- Cooperative: the engine stops at the next segment/candidate boundary. A still-queued job is
+  finalized immediately with `status: "failed"` and message "Cancelled by user."
+
 ### GET /omnivoice/progress
 
 - Purpose: Low-level engine progress for the currently running OmniVoice job (for UI banners and internal use).
@@ -508,6 +1078,20 @@ Response:
 - 200: `{ "deleted": true }`.
 - 404: if not found.
 
+### POST /omnivoice/segments/{segment_id}/project
+
+- Purpose: Assign or clear the Accent Design Project this segment belongs to.
+
+Request body (JSON):
+
+- `project_id` (string, optional) — `proj_<12 hex>`; omit/null to clear.
+- `project_name` (string, optional) — denormalized name tag.
+
+Response (JSON):
+
+- 200: updated segment metadata.
+- 404: if segment not found.
+
 ---
 
 ## OmniVoice stitch
@@ -561,6 +1145,29 @@ Important notes:
 - `segment_id`-based clips are stable across restarts; `candidate_id`-based clips depend on in-memory audition cache and can disappear on a new audition job.
 - `voice_id`-based clips pull from the voice library (useful for mixing a saved reference voice as a clip).
 
+### POST /omnivoice/stitch/pacing-targets
+
+- Purpose: Resolve inter-segment pause targets (stitch padding) through the canonical prosody
+  target table, for the given transcripts and pacing.
+
+Request body (JSON):
+
+- `transcripts` (string[], required) — non-empty list of the segment texts, in stitch order.
+- `pace_multiplier` (number, optional, default 1.0) — must be within [0.25, 4.0].
+- `pause_offset_ms` (number, optional, default 0.0) — must be within [-2000, 5000].
+- `style_preset` (string, optional, default "Neutral") — falls back to "Neutral" if not a known
+  prosody preset.
+
+Response (JSON):
+
+- 200:
+  - `padding_ms` (number[]) — suggested seam pause after every clip except the last
+    (length = `len(transcripts) - 1`), derived from each preceding clip's terminal punctuation.
+  - `style_preset` (string) — the preset actually used.
+- 400:
+  - If JSON invalid, `transcripts` is not a non-empty list of strings, pacing values are
+    non-numeric, or pacing values are out of range.
+
 ---
 
 ## OmniVoice save (stitch + persist)
@@ -598,3 +1205,31 @@ Important notes:
 
 - The resulting voice is usable with `/generate` and `/v1/audio/speech` via its `voice_id`.
 - Intern metadata (`segment_ids`, `candidate_ids`, `stitch_plan`) is stored in `selections` for later reconstruction.
+
+---
+
+## Frontend (static)
+
+Present only when `FRONTEND_ENABLED` is on (default) and a built frontend dist is available;
+otherwise the service runs API-only and these routes do not exist.
+
+### GET /
+
+- Purpose: Serve the web UI entry point (index.html).
+
+### GET /assets/{filename}
+
+- Purpose: Serve compiled frontend static assets (JS/CSS/etc.).
+
+### GET /favicon.svg
+
+- Purpose: Serve the favicon.
+
+---
+
+## Internal / test-only
+
+### GET /_shutdown
+
+- Purpose: Test-only hook used by the fake model server to shut down a test instance. Returns
+  plain-text "ok". Not part of the product API surface.

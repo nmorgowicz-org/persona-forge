@@ -23,9 +23,9 @@ Affected:
 Run:
 - python scripts/validate_repo.py
 - pytest tests/ -k "model" -v
-- pytest tests/test_app_api.py -v   # /generate round-trips
+- pytest tests/tier2_backend/test_app_generate.py -v   # /generate round-trips
 - If K/V cache, stateful, or position IDs touched:
-  - pytest tests/test_ov_talker_runtime.py -v
+  - pytest tests/tier1_unit/test_ov_talker_runtime.py -v
   - Any parity-related unit tests (search for "cache" in tests/).
 - If generation behavior changed (sampling, logits, seeds):
   - Must run Tier 3 parity on docker-agent (see §3).
@@ -41,9 +41,9 @@ Affected:
 
 Run:
 - python scripts/validate_repo.py
-- pytest tests/test_ov_talker_runtime.py -v
-- pytest tests/test_ov_vocoder_runtime.py -v
-- pytest tests/test_export_openvino.py -v
+- pytest tests/tier1_unit/test_ov_talker_runtime.py -v
+- pytest tests/tier1_unit/test_ov_vocoder_runtime.py -v
+- pytest tests/tier1_unit/test_export_utils.py tests/tier1_unit/test_export_rope_repair.py -v
 - Any parity-related unit tests.
 - If you changed cache, stateful models, or IR construction:
   - Must run Tier 3 parity on docker-agent (see §3).
@@ -56,9 +56,9 @@ Affected:
 
 Run:
 - python scripts/validate_repo.py
-- pytest tests/test_export_openvino.py -v
-- pytest tests/test_parity_helpers.py -v
-- pytest tests/test_streaming_vocoder.py -v
+- pytest tests/tier1_unit/test_export_utils.py tests/tier1_unit/test_export_rope_repair.py -v
+- pytest tests/tier1_unit/test_parity_helpers.py -v
+- pytest tests/tier1_unit/test_streaming_vocoder.py -v
 - If export graph changed:
   - Rebuild container image.
   - Must run Tier 3 (FP32 parity) and Tier 4 (quality + perf) on docker-agent (see §3-4).
@@ -73,7 +73,7 @@ Affected:
 
 Run:
 - python scripts/validate_repo.py
-- pytest tests/test_app_api.py -v
+- pytest tests/tier2_backend/ -v
 - docker compose config --quiet   # ensure no compose regressions
 - If you changed /health or /runtime/config:
   - Verify frontend health-status and swap banners visually.
@@ -92,12 +92,12 @@ Affected:
 
 Run:
 - python scripts/validate_repo.py
-- pytest tests/test_omnivoice_engine.py -v
-- pytest tests/test_app_api.py -v -k "omnivoice"
+- pytest tests/tier2_backend/test_omnivoice_engine_logic.py -v
+- pytest tests/tier2_backend/test_app_omnivoice.py -v
 - If segment library or stitch changed:
-  - pytest tests/test_segment_library.py -v
+  - pytest tests/tier1_unit/test_segment_library.py -v
 - If audio post-processing (trimming, normalization) changed:
-  - pytest tests/test_audio_post.py -v
+  - pytest tests/tier1_unit/test_audio_post.py -v
 - End-to-end on docker-agent:
   - Run a short OmniVoice audition + lock-in + stitch + save in UI.
 
@@ -144,25 +144,25 @@ Run:
 For any PR, at minimum:
 
 - python scripts/validate_repo.py
-- docker compose config --quiet   # requires REF_AUDIO_PATH, REF_TEXT env vars set
+- docker compose config --quiet   # REF_AUDIO_PATH and REF_TEXT are optional; passes with neither set
 - pytest tests/ -v
 
 Typical pytest filters (useful subsets):
 
 - Model and runtime:
-  - pytest tests/test_ov_talker_runtime.py tests/test_model_config.py -v
+  - pytest tests/tier1_unit/test_ov_talker_runtime.py tests/tier1_unit/test_model_config.py -v
 - Export:
-  - pytest tests/test_export_openvino.py tests/test_parity_helpers.py -v
+  - pytest tests/tier1_unit/test_export_utils.py tests/tier1_unit/test_export_rope_repair.py tests/tier1_unit/test_parity_helpers.py -v
 - API and endpoints:
-  - pytest tests/test_app_api.py -v
+  - pytest tests/tier2_backend/ -v
 - Voice design and voice library:
-  - pytest tests/test_voice_design.py tests/test_voice_library.py -v
+  - pytest tests/tier2_backend/test_app_voice_design.py tests/tier1_unit/test_voice_library.py -v
 - OmniVoice:
-  - pytest tests/test_omnivoice_engine.py tests/test_segment_library.py -v
+  - pytest tests/tier2_backend/test_omnivoice_engine_logic.py tests/tier1_unit/test_segment_library.py -v
 - Audio post-processing:
-  - pytest tests/test_audio_post.py -v
+  - pytest tests/tier1_unit/test_audio_post.py -v
 - Presets and repo validation:
-  - pytest tests/test_presets.py tests/test_validate_repo.py -v
+  - pytest tests/tier1_unit/test_presets.py tests/tier1_unit/test_validate_repo.py -v
 
 ## 3. Parity gates (Tier 3)
 
