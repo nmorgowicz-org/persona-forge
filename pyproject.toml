@@ -14,9 +14,10 @@ dependencies = [
   "transformers==5.12.1",
   "torch==2.13.0",
   "torchaudio==2.11.0",
-  # OmniVoice (Persona Forge accent-design engine) — declared deps already match the pins
-  # above, so it's a git source installed without re-resolving its own dependency set.
-  "omnivoice",
+  # OmniVoice (Persona Forge accent-design engine) — PyPI release, same pin as the
+  # container image (Dockerfile / entrypoint.sh). Its declared torch/torchaudio/transformers
+  # requirements are loose; override-dependencies below forces them to the pins above.
+  "omnivoice==0.2.1",
   # pocket-tts (Persona Forge cloning/generation engine) — a main lever alongside OmniVoice,
   # not optional; see D12/Persona Forge pivot.
   "pocket-tts==2.1.0",
@@ -67,6 +68,3 @@ override-dependencies = [
   "torch==2.13.0",
   "torchaudio==2.11.0",
 ]
-
-[tool.uv.sources]
-omnivoice = { git = "https://github.com/k2-fsa/OmniVoice.git", rev = "38e992bc60f85548faeb77e8fa70158ba71deb30" }
