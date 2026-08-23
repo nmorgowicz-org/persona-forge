@@ -3,7 +3,7 @@
 // committed synthetic fixtures (tests/ui/fixtures/capture-data/). Never
 // copies from real data/voices or data/segments.
 // Moved from tests/ui/lib/python.mjs and tests/ui/lib/seed.mjs
-// (docs/plans/20260815-screenshot_and_docs_edit.md Step 1.7).
+// (docs/plans/archive/screenshots/20260815-screenshot_and_docs_edit.md Step 1.7).
 import { cpSync, existsSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'

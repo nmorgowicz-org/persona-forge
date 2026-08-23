@@ -1,5 +1,5 @@
 // Rewrite of local-llm-foundry's tests/ui/capture/capture-platform.test.mjs
-// per docs/plans/20260815-screenshot_and_docs_edit.md Step 1.15. That test
+// per docs/plans/archive/screenshots/20260815-screenshot_and_docs_edit.md Step 1.15. That test
 // exercised capturePlatformSkipReason (Apple-Silicon/rapid-preset gating),
 // which has no persona-forge analogue. This tests resolveCaptureSource's
 // precedence order (force -> --source -> CAPTURE_SOURCE env -> scenario

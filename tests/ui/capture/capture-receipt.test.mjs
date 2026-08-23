@@ -1,5 +1,5 @@
 // Ported verbatim from local-llm-foundry's tests/ui/capture/capture-receipt.test.mjs
-// per docs/plans/20260815-screenshot_and_docs_edit.md Step 1.15.
+// per docs/plans/archive/screenshots/20260815-screenshot_and_docs_edit.md Step 1.15.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';

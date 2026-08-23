@@ -1,6 +1,6 @@
 // Thin re-export shim. The implementation moved to
 // tests/ui/capture/harness/server.mjs as part of the capture harness port
-// (docs/plans/20260815-screenshot_and_docs_edit.md Step 1.6). Kept because
+// (docs/plans/archive/screenshots/20260815-screenshot_and_docs_edit.md Step 1.6). Kept because
 // tests/ui/playwright.config.js and tests/ui/fixtures/generate-capture-fixtures.mjs
 // still import this path directly.
 import { fileURLToPath } from 'node:url'

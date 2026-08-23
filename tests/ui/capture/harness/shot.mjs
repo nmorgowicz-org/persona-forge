@@ -2,7 +2,7 @@
 // Ported from local-llm-foundry's tests/ui/capture/harness/shot.mjs (captureShot,
 // captureElementScreenshot) merged with persona-forge's tests/ui/lib/gif.mjs
 // (createRecorder/framesToGif/cleanupFrames), per
-// docs/plans/20260815-screenshot_and_docs_edit.md Step 1.9.
+// docs/plans/archive/screenshots/20260815-screenshot_and_docs_edit.md Step 1.9.
 //
 // Dropped from the local-llm-foundry source: captureSparklineClips,
 // startLiveGeneration, waitForRapidTelemetry, deleteRapidLiveTestPreset,

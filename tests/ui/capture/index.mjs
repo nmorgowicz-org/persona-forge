@@ -10,7 +10,7 @@
 //   --source, --help/-h. Dropped --chat-only/--gpu-only/--inference-only/
 //   --no-attach/--close-up (local-llm-foundry chat/telemetry concepts).
 //
-// docs/plans/20260815-screenshot_and_docs_edit.md Step 1.10.
+// docs/plans/archive/screenshots/20260815-screenshot_and_docs_edit.md Step 1.10.
 import { setArtifactCategory, setArtifactRuntime, DEFAULT_VIEWPORT } from './harness/paths.mjs';
 import { connectSource, resolveCaptureSource, CAPTURE_SOURCES } from './harness/source.mjs';
 import { launchBrowser } from './harness/browser.mjs';
