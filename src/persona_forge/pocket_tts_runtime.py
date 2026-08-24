@@ -91,6 +91,10 @@ _MODEL_SOURCE_ALLOWED: dict[str, tuple[str, ...]] = {
     "local": (),
 }
 
+# Public read-only view of the valid modes (validated before any unload by
+# model.apply_runtime_config so an invalid value never triggers a reload).
+MODEL_SOURCE_MODES: tuple[str, ...] = tuple(_MODEL_SOURCE_ALLOWED)
+
 # Modes that may degrade to the separately pinned non-cloning (built-in-only)
 # model when the cloning model cannot be resolved.
 _DEGRADABLE_MODES = ("auto", "official")

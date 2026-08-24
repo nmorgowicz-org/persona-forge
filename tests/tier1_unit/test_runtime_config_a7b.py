@@ -133,3 +133,64 @@ print("OK")
     result = _run(script, {"DATA_DIR": str(tmp_path)})
     assert result.returncode == 0, result.stdout + result.stderr
     assert "OK" in result.stdout
+
+
+def test_pocket_sourcing_update_does_not_reload_other_backend(tmp_path):
+    # "requires reload" is printed only inside the force_unload() branch, so its
+    # absence proves the active PyTorch model was not unloaded.
+    script = """
+import os
+from persona_forge import model
+
+assert model.TTS_BACKEND == "pytorch", model.TTS_BACKEND
+state = model.apply_runtime_config({"POCKET_TTS_MODEL_SOURCE": "lunahr"}, persist=False)
+# Pocket live keys are hidden while another backend is active, but the value
+# must still be staged for a future pocket load.
+assert "POCKET_TTS_MODEL_SOURCE" not in state["live"]
+assert os.environ.get("POCKET_TTS_MODEL_SOURCE") == "lunahr", "value must be staged"
+print("DONE")
+"""
+    result = _run(script, {"DATA_DIR": str(tmp_path), "TTS_BACKEND": "pytorch"})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "DONE" in result.stdout
+    assert "requires reload" not in result.stdout, result.stdout
+
+
+def test_preview_pocket_sourcing_reload_scoped_to_active_backend(tmp_path):
+    script = """
+from persona_forge import model
+
+pytorch_preview = model.preview_runtime_config({"POCKET_TTS_MODEL_SOURCE": "official"})
+assert pytorch_preview["reload_required"] is False, pytorch_preview
+
+model.TTS_BACKEND = "pocket_tts"
+pocket_preview = model.preview_runtime_config({"POCKET_TTS_MODEL_SOURCE": "official"})
+assert pocket_preview["reload_required"] is True, pocket_preview
+print("OK")
+"""
+    result = _run(script, {"DATA_DIR": str(tmp_path), "TTS_BACKEND": "pytorch"})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "OK" in result.stdout
+
+
+def test_invalid_pocket_source_rejected_before_unload(tmp_path):
+    script = """
+import os
+from persona_forge import model
+
+model.TTS_BACKEND = "pocket_tts"
+try:
+    model.apply_runtime_config({"POCKET_TTS_MODEL_SOURCE": "bogus"}, persist=False)
+except ValueError as e:
+    assert "POCKET_TTS_MODEL_SOURCE" in str(e), e
+    print("REJECTED")
+else:
+    raise AssertionError("expected ValueError for invalid source")
+
+assert model.TTS_BACKEND == "pocket_tts"
+assert "POCKET_TTS_MODEL_SOURCE" not in os.environ, "rejected value must not be staged"
+"""
+    result = _run(script, {"DATA_DIR": str(tmp_path), "TTS_BACKEND": "pytorch"})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "REJECTED" in result.stdout
+    assert "requires reload" not in result.stdout, result.stdout

@@ -924,6 +924,11 @@ _HOT_ENV_KEYS = {"SILENCE_TRIM", "SILENCE_TRIM_THRESH", "SILENCE_TRIM_PAD_MS"}
 _RELOAD_ENV_KEYS = {
     "OV_DYNAMIC_QUANT_GROUP_SIZE",
     "MODEL_DTYPE",
+}
+# Pocket-TTS-only reload keys. They take effect only when the active backend is
+# pocket_tts; updating them while PyTorch/OpenVINO is active must stage the value
+# without force-unloading the unrelated (expensive) model.
+_POCKET_RELOAD_ENV_KEYS = {
     "POCKET_TTS_MODEL_SOURCE",
     "POCKET_TTS_ARTIFACT_DIR",
 }
@@ -938,6 +943,7 @@ _POCKET_TTS_RUNTIME_KEYS = {
 LIVE_RUNTIME_KEYS = (
     _HOT_ENV_KEYS
     | _RELOAD_ENV_KEYS
+    | _POCKET_RELOAD_ENV_KEYS
     | _GLOBAL_KEYS
     | _POCKET_TTS_RUNTIME_KEYS
 )
@@ -1088,13 +1094,30 @@ def apply_runtime_config(updates: dict[str, Any], persist: bool = True) -> dict[
     if unknown:
         raise ValueError(f"Not a live-adjustable key: {sorted(unknown)}")
 
+    # Reject an invalid Pocket-TTS source mode before any unload happens, so a
+    # bad value can never leave the active model unloaded.
+    if "POCKET_TTS_MODEL_SOURCE" in updates:
+        from persona_forge import pocket_tts_runtime
+
+        source = str(updates["POCKET_TTS_MODEL_SOURCE"]).strip() or "auto"
+        if source not in pocket_tts_runtime.MODEL_SOURCE_MODES:
+            raise ValueError(
+                f"Invalid POCKET_TTS_MODEL_SOURCE: {source!r} "
+                f"(allowed: {sorted(pocket_tts_runtime.MODEL_SOURCE_MODES)})"
+            )
+
     global TTS_BACKEND, IDLE_UNLOAD_SECONDS, _reconfig_in_progress
 
     # Pocket TTS knobs are always writable (they are live keys).
     # They only trigger a reload when the active backend is pocket_tts.
     ptts_changed = bool(set(updates) & _POCKET_TTS_RUNTIME_KEYS)
+    pocket_reload_changed = bool(set(updates) & _POCKET_RELOAD_ENV_KEYS)
 
-    needs_reload = bool(set(updates) & _RELOAD_ENV_KEYS) or "TTS_BACKEND" in updates
+    needs_reload = (
+        bool(set(updates) & _RELOAD_ENV_KEYS)
+        or "TTS_BACKEND" in updates
+        or (TTS_BACKEND == "pocket_tts" and pocket_reload_changed)
+    )
 
     _reconfig_in_progress = True
     try:
@@ -1107,7 +1130,7 @@ def apply_runtime_config(updates: dict[str, Any], persist: bool = True) -> dict[
         if "IDLE_UNLOAD_SECONDS" in updates:
             IDLE_UNLOAD_SECONDS = int(updates["IDLE_UNLOAD_SECONDS"])
 
-        for key in _HOT_ENV_KEYS | _RELOAD_ENV_KEYS:
+        for key in _HOT_ENV_KEYS | _RELOAD_ENV_KEYS | _POCKET_RELOAD_ENV_KEYS:
             if key in updates:
                 os.environ[key] = str(updates[key])
 
@@ -1170,11 +1193,12 @@ def preview_runtime_config(updates: dict[str, Any]) -> dict[str, Any]:
     would_apply = {k: v for k, v in updates.items() if k not in locked_in_updates}
 
     ptts_changed = bool(set(updates) & _POCKET_TTS_RUNTIME_KEYS)
+    pocket_reload_changed = bool(set(updates) & _POCKET_RELOAD_ENV_KEYS)
     backend_after = str(updates.get("TTS_BACKEND", TTS_BACKEND)).strip().lower()
     needs_reload = (
         bool(set(updates) & _RELOAD_ENV_KEYS)
         or "TTS_BACKEND" in updates
-        or (ptts_changed and backend_after == "pocket_tts")
+        or (backend_after == "pocket_tts" and (ptts_changed or pocket_reload_changed))
     )
 
     predicted_live = dict(runtime_config_state()["live"])
@@ -1204,7 +1228,11 @@ def reset_runtime_config() -> dict[str, Any]:
     if not to_revert:
         return runtime_config_state()
 
-    needs_reload = bool(to_revert & _RELOAD_ENV_KEYS) or "TTS_BACKEND" in to_revert
+    needs_reload = (
+        bool(to_revert & _RELOAD_ENV_KEYS)
+        or "TTS_BACKEND" in to_revert
+        or (TTS_BACKEND == "pocket_tts" and bool(to_revert & _POCKET_RELOAD_ENV_KEYS))
+    )
 
     _reconfig_in_progress = True
     try:
