@@ -255,4 +255,5 @@ CLAUDE.local.md
 .claude/
 .claude.json
 .mcp.json
+.opencode/
 .serena/

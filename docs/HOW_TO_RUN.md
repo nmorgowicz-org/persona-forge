@@ -35,8 +35,17 @@ Requirements: Linux AMD64, Docker with Compose, at least 10 GiB for the service.
    docker compose logs -f persona-forge
    ```
 
-   First boot loads the model; subsequent boots are fast.
-   Health will report `status: "starting"` until ready.
+    First boot loads the model; subsequent boots are fast.
+    Health will report `status: "starting"` until ready.
+
+    On first boot the Pocket-TTS English model and built-in voice embeddings are downloaded
+    once and verified against pinned SHA-256 checksums; they are cached in the persistent
+    artifact directory (`POCKET_TTS_ARTIFACT_DIR`, default `<MODEL_CACHE_PATH>/pocket-tts`),
+    so later boots never re-download. If the voice-cloning model cannot be fetched at all,
+    the service still starts with the built-in voices only — `/health` reports
+    `pocket_cloning_status: "degraded"` and `pocket_model_source` shows what loaded.
+    Sourcing modes are controlled by `POCKET_TTS_MODEL_SOURCE` (see
+    `docs/ENV_REFERENCE.md`, "Pocket-TTS artifact sourcing").
 
 3. Verify:
 

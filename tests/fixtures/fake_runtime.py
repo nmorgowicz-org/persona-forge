@@ -328,6 +328,13 @@ class FakeModelRuntime:
         # active_profile
         self.active_profile = self.BASE_PROFILE
  
+        # Pocket TTS provenance (parity with model.py health_state pocket block).
+        # Tests may set rt.pocket_provenance / rt.pocket_language to drive it.
+        self.pocket_language: str = "english"
+        self.pocket_provenance: Dict[str, Any] = {}
+        # Mirrors pocket_tts_runtime.pocket_tts_default_voice_state (legacy field).
+        self.pocket_default_voice_state: Dict[str, Any] | None = None
+
         # Runtime config internals: /runtime/config endpoints.
         self._runtime_live: Dict[str, Any] = {
             "TTS_BACKEND": self.tts_backend,
@@ -392,6 +399,40 @@ class FakeModelRuntime:
             # but we include it here for direct model-level callers.
             if not rt._service_started:
                 result["loading_message"] = "Loading model…"
+            # Pocket TTS block: mirrors the pocket_tts branch of model.health_state()
+            # (fields sourced from rt.pocket_provenance, settable by tests).
+            if rt.tts_backend == "pocket_tts":
+                prov = dict(rt.pocket_provenance)
+                voice_cloning_available = rt.pocket_default_voice_state is not None
+                cloning_available = prov.get("cloning_available")
+                if cloning_available is None:
+                    cloning_available = voice_cloning_available
+                cloning_status = prov.get("cloning_status")
+                if not cloning_status:
+                    cloning_status = "ready" if cloning_available else "unavailable"
+                block: Dict[str, Any] = {
+                    "backend": "pocket_tts",
+                    "runtime_wired": True,
+                    "language": rt.pocket_language,
+                    "pocket_engine": prov.get("engine", "torch"),
+                    "pocket_model_source": prov.get("model_source"),
+                    "pocket_model_revision": prov.get("model_revision"),
+                    "pocket_model_sha256": prov.get("model_sha256"),
+                    "pocket_model_verified": bool(prov.get("model_verified")),
+                    "pocket_cloning_available": cloning_available,
+                    "pocket_cloning_status": cloning_status,
+                    "voice_cloning_available": voice_cloning_available,
+                }
+                if not cloning_available:
+                    message = (prov.get("message") or "").strip()
+                    if not message:
+                        message = (
+                            "Pocket TTS voice cloning model not available. "
+                            "Set an HF_TOKEN with access to kyutai/pocket-tts via HF_TOKEN_FILE "
+                            "or your startup config."
+                        )
+                    block["message"] = message
+                result["pocket_tts"] = block
             return result
 
         def reconfig_in_progress() -> bool:

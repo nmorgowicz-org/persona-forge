@@ -1,6 +1,7 @@
 # Pocket-TTS Zero-Friction Artifacts and ONNX Runtime Plan
 
-**Status:** Proposed; Track A is ready for implementation, Track B remains gated by evidence  
+**Status:** Track A implemented and committed on branch `pocket-tts-ungated-onnx` (resolver, English config, runtime wiring, health provenance, tests, docs) and passing local validation; no PR per user instruction. Remaining: CI image smoke test via `ready-to-test`, and the §8.7 live acceptance on `docker-agent`. Track B remains gated by evidence (updated 2026-08-23)
+
 **Date:** 2026-07-13  
 **Primary runtime:** Pocket-TTS on CPU-only Linux AMD64  
 **Primary host:** `docker-agent`
@@ -113,16 +114,21 @@ Exporter: KevinAHM/pocket-tts-onnx-export
 reviewed head: b25d4a7d (2026-04-21)
 ```
 
-The English bundle contains:
+The English bundle with the full manifest lives at `onnx/english_2026-04/` (matching
+the package's `english_2026-04.yaml` config) and contains:
 
 - `flow_lm_main.onnx` and `flow_lm_main_int8.onnx`.
 - `flow_lm_flow.onnx` and `flow_lm_flow_int8.onnx`.
-- `mimi_encoder.onnx` for arbitrary reference-audio cloning.
+- `mimi_encoder.onnx` (and `_int8`) for arbitrary reference-audio cloning.
 - `mimi_decoder.onnx` and `mimi_decoder_int8.onnx`.
-- `text_conditioner.onnx`.
+- `text_conditioner.onnx` (and `_int8`).
 - `tokenizer.model`.
 - `bos_before_voice.npy`.
 - `bundle.json` with explicit state manifests.
+
+A root-level `onnx/` directory also holds bare English graphs (same model family,
+slightly different sizes) without a `bundle.json` or `bos_before_voice.npy`. Other
+languages live under `onnx/<language>/`.
 
 The selected English INT8 execution set is approximately 165 MB on disk when the FP32 Mimi
 encoder and text conditioner are retained. Do not download the entire multilingual repository
@@ -131,6 +137,33 @@ for an English-only deployment.
 The third-party runtime is feasibility evidence, not yet an authoritative production artifact.
 Its wrapper, exporter patches, graph hashes, and model behavior must be independently reviewed
 and validated.
+
+### 4.3 Fresh re-verification (2026-08-22)
+
+Re-verified all of §3–§4.2 against live Hugging Face / GitHub / PyPI state (authenticated
+API) immediately before Track A implementation:
+
+- `pocket-tts==2.1.0` is still the latest PyPI release (uploaded 2026-05-04). The installed
+  package's `config/english.yaml` matches §3's `hf://` paths and revisions exactly.
+- Every pinned revision still exists and is stable: `kyutai/pocket-tts` remains gated
+  (`gated=auto`); `lunahr/pocket-tts-ungated` `main` is still exactly the pinned
+  `d03cd734` (no drift); `KevinAHM/pocket-tts-onnx` `main` is still `58a6d00c`; the exporter
+  head is still the reviewed `b25d4a7d` (2026-04-21).
+- File identities (HF-reported sha256, re-fetched 2026-08-22):
+  - Cloning model, `languages/english/model.safetensors`: 219,029,196 bytes,
+    `473f47d99560bd50eb8b4509d3cacfe7f316ab20bdca86505403a2e6a936a6e9` — hash-identical at
+    `kyutai/pocket-tts@39592ff2` and `lunahr/pocket-tts-ungated@d03cd734` (confirms §4.1).
+  - Non-cloning model, `languages/english/model.safetensors`: 219,029,196 bytes,
+    `be9c6b4876d3f30740a8225dfcaa2e43dc4aeb753c15272735bee16bbb4abb0a` (identical at both
+    pinned revisions) — pin this for the degraded built-in-only path.
+  - Tokenizer, `languages/english/tokenizer.model`: 59,339 bytes,
+    `d461765ae179566678c93091c5fa6f2984c31bbe990bf1aa62d92c64d91bc3f6` (identical across all
+    three repositories) — pin this for explicit built-in voice resolution.
+- The 26-voice `languages/english/embeddings/` layout is unchanged at `e041936c` and `main`,
+  including exactly the five voices named in §3; `d29db79` still carries 21; `embeddings_v3`
+  still carries 21. All 26 per-voice (size, sha256) pins are recorded in code, not in this
+  plan: `VOICE_EMBEDDING_PINS` in `src/persona_forge/pocket_artifact_resolver.py` (verified
+  2026-08-22).
 
 ## 5. Licensing and Use Constraints
 
@@ -339,6 +372,72 @@ On `docker-agent`:
 
 Track A ships only after zero-token cloning, authenticated official fallback, and built-in-only
 degradation all work from clean startup states.
+
+### 8.8 Track A execution status (2026-08-23)
+
+Implemented (branch `pocket-tts-ungated-onnx`, not yet committed):
+
+- `src/persona_forge/pocket_artifact_resolver.py` — pinned catalog (3 core artifacts + 26
+  built-in voice embeddings with size/SHA-256), stdlib-only `PocketArtifactResolver`
+  (streaming size-capped download, hash-as-you-stream, per-artifact flock, atomic
+  content-addressed install, corrupt-cache redownload, gated-source skip policy,
+  secret-redacted errors), injectable `fetch` for tests.
+- `src/persona_forge/pocket_english_config.py` — project-owned English config renderer
+  (byte-for-byte pocket-tts 2.1.0 schema; the three downloadable paths rewritten to
+  verified local files) + atomic writer under `<artifact_dir>/config/english-pf.yaml`.
+- `src/persona_forge/pocket_tts_runtime.py` — English loads go through
+  `_load_via_resolved_artifacts()` (`POCKET_TTS_MODEL_SOURCE` modes `auto`/`lunahr`/
+  `official`/`local`, auto/official degrade to the pinned built-in-only model with
+  `has_voice_cloning=False`, `local`/`lunahr` fail closed, tokenizer falls back to the
+  package's public pin outside `local`); built-in voice names resolve to pinned local
+  `.safetensors` and are passed as paths to `get_state_for_audio_prompt`; provenance dict
+  (`pocket_tts_provenance`) persists across idle-unload. Non-English loads keep the legacy
+  package-config path.
+- `src/persona_forge/model.py` — `POCKET_TTS_MODEL_SOURCE` / `POCKET_TTS_ARTIFACT_DIR`
+  passthrough (reload keys), `/health` gains `pocket_engine`, `pocket_model_source`,
+  `pocket_model_revision`, `pocket_model_sha256`, `pocket_model_verified`,
+  `pocket_cloning_available`, `pocket_cloning_status` (+ provenance-sourced message);
+  legacy `voice_cloning_available` semantics unchanged.
+- Tests: `tests/tier1_unit/test_pocket_artifact_resolver.py` (18 tests, model-free lane),
+  `tests/tier1_unit/test_pocket_tts_runtime.py` extended (`TestResolvedArtifactLoading`,
+  11 tests; legacy-path tests repointed to `french_24l`), `tests/tier2_backend/test_app_health.py`
+  (+2 pocket provenance tests), `tests/fixtures/fake_runtime.py` parity block.
+- Docs: `.env.example`, `compose.yml`, `docs/ENV_REFERENCE.md` (new
+  "Pocket-TTS artifact sourcing" section), `docs/HOW_TO_RUN.md`,
+  `docs/architecture/pocket_tts_integration.md` (new §9), this plan (§13/§4.2/§4.3).
+- Frontend: unchanged — all health fields are additive; existing
+  `voice_cloning_available` / `message` wiring in `store.ts` still works.
+
+Local validation passed (2026-08-23): model-free pytest lane (482 passed),
+`scripts/validate_repo.py`, `git diff --check`. One real bug found and fixed by the new
+tests: `load_pocket_tts_model` was missing `global` for the cloning status fields, so
+degraded-mode status never reached module state.
+
+Independent re-validation (2026-08-23) found and fixed two additional small bugs:
+`local` mode could still download the dormant non-cloning fallback entry (it is now
+resolved cache-only, keeping `local` strictly network-free), and
+`build_default_voice_state` overwrote the load-time degraded provenance message with the
+generic gated-terms fallback when the default voice_state failed to build (the provenance
+message is now preserved). Re-validated: model-free lane 482 passed, torch lane 426
+passed, `scripts/validate_repo.py`, `git diff --check`, `docker compose config --quiet`,
+import smoke (29-artifact catalog), and strict `load_config` acceptance of the rendered
+project config.
+
+Execution log (2026-08-23): committed and pushed on `pocket-tts-ungated-onnx` as a single
+Conventional Commit; no PR, per user instruction. Field observation on `docker-agent`
+(image `v1.1.4`, pre-Track A): after a `LOW_RAM_MODE` idle-unload, the legacy
+`voice_cloning_available` flag (in-memory default voice_state presence) reported `false`
+with the generic "set an HF_TOKEN" message although the gated model was cached, the token
+valid, and a live generation request succeeded via transparent reload. The provenance-backed
+`pocket_cloning_status` / `pocket_cloning_available` fields fix this class of false warning;
+confirm in the §8.7 acceptance.
+
+Remaining before Track A ships:
+
+1. CI image build + import smoke test via `ready-to-test` (no dependency changes in this
+   pass, but the new modules must import cleanly in the image).
+2. §8.7 nine-step live acceptance on `docker-agent` (zero-token LunaHR acquisition,
+   verified-cache restart, degraded + official paths, metrics capture).
 
 ## 9. Track B — ONNX Feasibility and Eventual Runtime
 
@@ -733,19 +832,22 @@ npm run --prefix frontend build
 
 ## 13. Deployment Procedure
 
-Permanent changes follow the development bind-mount workflow:
+Permanent changes follow the development bind-mount workflow on `docker-agent`
+(AGENTS.md, Development section):
 
 ```bash
-cd ~/projects/qwen3-tts-openvino && git pull
+cd ~/projects/persona-forge && git pull origin <branch>
 cd frontend && npm run build
-cd ~/docker
-docker compose -f docker-compose.yml -f docker-compose.qwen3-tts-dev.yml \
-  up -d --force-recreate qwen3-tts
+ssh docker-agent "docker compose -f ~/docker/docker-agent/docker-compose.yml \
+  -f ~/docker/docker-agent/docker-compose.persona-forge-dev.yml \
+  up -d --force-recreate persona-forge"
 ```
 
-Only recreate `qwen3-tts`. Never disturb unrelated containers. Wait for
-`service_started=true` and `model_loaded=true` before judging health. Do not misinterpret
-transitional startup state as a gated-token failure.
+or simply run `scripts/dev-deploy.sh <branch>` on docker-agent (builds the frontend
+and recreates with the dev override). Only recreate `persona-forge`. Never disturb
+unrelated containers. Wait for `service_started=true` and `model_loaded=true`
+before judging health. Do not misinterpret transitional startup state as a
+gated-token failure.
 
 ## 14. Documentation Deliverables
 

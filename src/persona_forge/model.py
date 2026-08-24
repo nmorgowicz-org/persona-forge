@@ -440,6 +440,12 @@ def load_model(profile: ModelProfile | None = None):
         frames_after_eos_raw = os.getenv("POCKET_TTS_FRAMES_AFTER_EOS", "8").strip()
         frames_after_eos = int(frames_after_eos_raw) if frames_after_eos_raw else 8
         quantize = int(os.getenv("POCKET_TTS_QUANTIZE", "0"))
+        model_source = (os.getenv("POCKET_TTS_MODEL_SOURCE") or "auto").strip() or "auto"
+        # A null override persisted via /runtime/config arrives as the literal
+        # string "None"; treat it as unset.
+        artifact_dir = os.getenv("POCKET_TTS_ARTIFACT_DIR", "").strip()
+        if not artifact_dir or artifact_dir.lower() == "none":
+            artifact_dir = None
 
         pocket_tts_runtime.load_pocket_tts_model(
             language=language,
@@ -449,6 +455,8 @@ def load_model(profile: ModelProfile | None = None):
             noise_clamp=noise_clamp,
             frames_after_eos=frames_after_eos,
             quantize=bool(quantize),
+            model_source=model_source,
+            artifact_dir=artifact_dir,
         )
 
         model = pocket_tts_runtime.pocket_tts_model
@@ -854,19 +862,40 @@ def health_state() -> dict[str, Any]:
     # Pocket TTS health metadata
     if TTS_BACKEND == "pocket_tts":
         from persona_forge import pocket_tts_runtime
+        # Legacy field: whether the default (REF_AUDIO) voice_state exists.
         voice_cloning_available = pocket_tts_runtime.pocket_tts_default_voice_state is not None
+        prov = dict(pocket_tts_runtime.pocket_tts_provenance or {})
+        # New field: whether the loaded model weights support voice cloning.
+        # Falls back to the legacy state when no provenance exists yet (loads
+        # from before artifact resolution, or non-English legacy loads).
+        cloning_available = prov.get("cloning_available")
+        if cloning_available is None:
+            cloning_available = voice_cloning_available
+        cloning_status = prov.get("cloning_status")
+        if not cloning_status:
+            cloning_status = "ready" if cloning_available else "unavailable"
         base["pocket_tts"] = {
             "backend": "pocket_tts",
             "runtime_wired": True,
             "language": os.getenv("POCKET_TTS_LANGUAGE", "english"),
+            "pocket_engine": prov.get("engine", "torch"),
+            "pocket_model_source": prov.get("model_source"),
+            "pocket_model_revision": prov.get("model_revision"),
+            "pocket_model_sha256": prov.get("model_sha256"),
+            "pocket_model_verified": bool(prov.get("model_verified")),
+            "pocket_cloning_available": cloning_available,
+            "pocket_cloning_status": cloning_status,
             "voice_cloning_available": voice_cloning_available,
         }
-        if not voice_cloning_available:
-            base["pocket_tts"]["message"] = (
-                "Pocket TTS voice cloning model not available. "
-                "Set an HF_TOKEN with access to kyutai/pocket-tts via HF_TOKEN_FILE "
-                "or your startup config."
-            )
+        if not cloning_available:
+            message = (prov.get("message") or "").strip()
+            if not message:
+                message = (
+                    "Pocket TTS voice cloning model not available. "
+                    "Set an HF_TOKEN with access to kyutai/pocket-tts via HF_TOKEN_FILE "
+                    "or your startup config."
+                )
+            base["pocket_tts"]["message"] = message
 
     def _json_safe(obj):
         if isinstance(obj, Path):
@@ -892,7 +921,12 @@ def health_state() -> dict[str, Any]:
 #     watcher loop each tick (IDLE_UNLOAD_SECONDS, effectively "hot" too but listed here
 #     since it's a plain global rather than an os.environ lookup).
 _HOT_ENV_KEYS = {"SILENCE_TRIM", "SILENCE_TRIM_THRESH", "SILENCE_TRIM_PAD_MS"}
-_RELOAD_ENV_KEYS = {"OV_DYNAMIC_QUANT_GROUP_SIZE", "MODEL_DTYPE"}
+_RELOAD_ENV_KEYS = {
+    "OV_DYNAMIC_QUANT_GROUP_SIZE",
+    "MODEL_DTYPE",
+    "POCKET_TTS_MODEL_SOURCE",
+    "POCKET_TTS_ARTIFACT_DIR",
+}
 _GLOBAL_KEYS = {"TTS_BACKEND", "IDLE_UNLOAD_SECONDS"}
 _POCKET_TTS_RUNTIME_KEYS = {
     "POCKET_TTS_TEMP",
@@ -951,6 +985,12 @@ def runtime_config_state() -> dict[str, Any]:
         live["POCKET_TTS_EOS_THRESHOLD"] = float(os.getenv("POCKET_TTS_EOS_THRESHOLD", "-4.0"))
         live["POCKET_TTS_NOISE_CLAMP"] = float(_ptts_noise) if _ptts_noise else None
         live["POCKET_TTS_FRAMES_AFTER_EOS"] = int(_ptts_frames) if _ptts_frames else 4
+        # Artifact sourcing (model reload required to apply).
+        live["POCKET_TTS_MODEL_SOURCE"] = (os.getenv("POCKET_TTS_MODEL_SOURCE") or "auto").strip() or "auto"
+        _ptts_artifact_dir = os.getenv("POCKET_TTS_ARTIFACT_DIR", "").strip()
+        live["POCKET_TTS_ARTIFACT_DIR"] = (
+            None if not _ptts_artifact_dir or _ptts_artifact_dir.lower() == "none" else _ptts_artifact_dir
+        )
 
         cloning_ok = pocket_tts_runtime.pocket_tts_cloning_available
         cloning_msg = (pocket_tts_runtime.pocket_tts_cloning_status_message or "").strip()

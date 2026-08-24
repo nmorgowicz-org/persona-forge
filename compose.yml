@@ -61,6 +61,12 @@ services:
       # cloning the UI is built around. Set TTS_BACKEND=openvino for the
       # accelerated Qwen path once you have run the export (see below).
       TTS_BACKEND: ${TTS_BACKEND:-pocket_tts}
+      # Pocket-TTS artifact sourcing (TTS_BACKEND=pocket_tts only). auto (default):
+      # verified cache, then the ungated LunaHR mirror, then the gated official
+      # repo (needs HF_TOKEN), degrading to built-in-only if all sources fail.
+      POCKET_TTS_MODEL_SOURCE: ${POCKET_TTS_MODEL_SOURCE:-auto}
+      # Verified artifact cache directory; defaults to <MODEL_CACHE_PATH>/pocket-tts.
+      POCKET_TTS_ARTIFACT_DIR: ${POCKET_TTS_ARTIFACT_DIR:-}
       TZ: ${TZ:-America/Detroit}
 
       # Phase A6/A6d-e: which torch wheel family the entrypoint resolves/installs. `auto`

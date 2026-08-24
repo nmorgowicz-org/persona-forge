@@ -24,6 +24,14 @@ import re
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
 from persona_forge.voice_library import VOICE_LIBRARY_DIR, get_voice
+from persona_forge.pocket_artifact_resolver import (
+    KYUTAI_WITHOUT_CLONING_REPO,
+    KYUTAI_WITHOUT_CLONING_REVISION,
+    PocketArtifactError,
+    PocketArtifactResolver,
+    VOICE_EMBEDDING_PINS,
+)
+from persona_forge.pocket_english_config import write_pocket_english_config
 
 # Cache directory for persisted voice states (.safetensors)
 STATE_CACHE_DIR = VOICE_LIBRARY_DIR / ".state_cache"
@@ -57,6 +65,12 @@ pocket_tts_voice_state_cache: dict[str, Any] = {}
 pocket_tts_cloning_available: bool = False
 pocket_tts_cloning_status_message: str = ""
 
+# Artifact provenance for the current (or most recent) load: engine, model
+# source/revision/sha256, cloning status. Persists across idle-unload so /health
+# keeps reporting the verified identity of the cached artifacts.
+pocket_tts_provenance: dict[str, Any] = {}
+pocket_tts_artifact_dir: str | None = None
+
 # Extra audio frames to keep after the last speech frame (post-EOS tail control).
 # 1 frame = 1/12.5 s of audio at 24 kHz (1920 samples), matching the Mimi codec's frame rate.
 # Controlled by POCKET_TTS_FRAMES_AFTER_EOS env var (default 8).
@@ -67,6 +81,195 @@ pocket_tts_frames_after_eos: int = 8
 # Model loading
 # ---------------------------------------------------------------------------
 
+# POCKET_TTS_MODEL_SOURCE -> allowed catalog source names for the cloning model.
+# An empty tuple means "cache only, no network". Gated sources are additionally
+# skipped when no HF token is configured (never probed unauthenticated).
+_MODEL_SOURCE_ALLOWED: dict[str, tuple[str, ...]] = {
+    "auto": ("lunahr", "kyutai"),
+    "lunahr": ("lunahr",),
+    "official": ("kyutai",),
+    "local": (),
+}
+
+# Modes that may degrade to the separately pinned non-cloning (built-in-only)
+# model when the cloning model cannot be resolved.
+_DEGRADABLE_MODES = ("auto", "official")
+
+
+def _default_artifact_dir() -> Path:
+    return (
+        Path(os.getenv("MODEL_CACHE_CONTAINER_PATH", "/root/.cache/huggingface/hub"))
+        / "pocket-tts"
+    )
+
+
+def _load_via_resolved_artifacts(
+    language: str,
+    temp: float,
+    lsd_decode_steps: int,
+    eos_threshold: float,
+    *,
+    quantize: bool,
+    noise_clamp: float | None,
+    model_source: str,
+    artifact_dir: str | Path | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Resolve pinned Pocket-TTS artifacts and build the load kwargs + provenance.
+
+    Returns ``(load_kwargs, provenance)`` where ``load_kwargs`` uses a
+    project-owned local config file (no ``language=``). Raises RuntimeError for
+    fail-closed mode failures; degraded loads (built-in-only model) are encoded
+    in the returned provenance and applied post-load by the caller.
+    """
+    if model_source not in _MODEL_SOURCE_ALLOWED:
+        raise ValueError(
+            f"POCKET_TTS_MODEL_SOURCE must be one of {sorted(_MODEL_SOURCE_ALLOWED)}, "
+            f"got {model_source!r}"
+        )
+
+    dir_path = Path(artifact_dir) if artifact_dir else _default_artifact_dir()
+    resolver = PocketArtifactResolver(dir_path, token=os.environ.get("HF_TOKEN") or None)
+    allowed = _MODEL_SOURCE_ALLOWED[model_source]
+
+    # 1) Cloning model (preferred). In auto/official modes a failure degrades to
+    #    the separately pinned non-cloning model (built-in voices only).
+    cloning: Any = None
+    cloning_error: PocketArtifactError | None = None
+    try:
+        cloning = resolver.resolve("model_cloning_english", allowed_sources=allowed)
+    except PocketArtifactError as exc:
+        cloning_error = exc
+
+    degraded = False
+    integrity_failure = False
+    if cloning is None:
+        integrity_failure = "integrity_mismatch" in (cloning_error.kinds() if cloning_error else [])
+        if model_source not in _DEGRADABLE_MODES:
+            detail = str(cloning_error) if cloning_error else "no sources allowed"
+            raise RuntimeError(
+                f"[pocket_tts] POCKET_TTS_MODEL_SOURCE={model_source!r} requires the "
+                f"voice-cloning model, which could not be resolved ({detail}). "
+                "Fix network/token access or set POCKET_TTS_MODEL_SOURCE=auto."
+            ) from cloning_error
+        print(f"[pocket_tts] Cloning model unavailable ({cloning_error}); degrading to built-in-only model.")
+        try:
+            noncloning = resolver.resolve("model_noncloning_english")
+        except PocketArtifactError as exc:
+            raise RuntimeError(
+                "[pocket_tts] Neither the voice-cloning model nor the built-in-only "
+                f"model could be resolved (cloning: {cloning_error}; "
+                f"built-in-only: {exc}). Check network access or pre-populate "
+                "POCKET_TTS_ARTIFACT_DIR and use POCKET_TTS_MODEL_SOURCE=local."
+            ) from exc
+        weights_path = str(noncloning.path)
+        source_name = noncloning.source_name
+        repo_id = noncloning.repo_id
+        revision = noncloning.revision
+        sha256 = noncloning.sha256
+        degraded = True
+    else:
+        weights_path = str(cloning.path)
+        source_name = cloning.source_name
+        repo_id = cloning.repo_id
+        revision = cloning.revision
+        sha256 = cloning.sha256
+
+    # 2) Tokenizer. In local mode this is required from the cache; elsewhere a
+    #    failure falls back to the package's own public pinned download.
+    tokenizer = None
+    tokenizer_error: PocketArtifactError | None = None
+    try:
+        tokenizer = resolver.resolve("tokenizer_english", allowed_sources=allowed)
+    except PocketArtifactError as exc:
+        tokenizer_error = exc
+    if tokenizer is None:
+        if model_source == "local":
+            raise RuntimeError(
+                "[pocket_tts] POCKET_TTS_MODEL_SOURCE=local requires the tokenizer in the "
+                f"artifact cache ({tokenizer_error})."
+            ) from tokenizer_error
+        print(
+            f"[pocket_tts] Tokenizer not in artifact cache ({tokenizer_error}); "
+            "falling back to the package's pinned public download."
+        )
+        tokenizer_path = (
+            f"hf://{KYUTAI_WITHOUT_CLONING_REPO}/languages/english/tokenizer.model"
+            f"@{KYUTAI_WITHOUT_CLONING_REVISION}"
+        )
+    else:
+        tokenizer_path = str(tokenizer.path)
+
+    # 3) Non-cloning fallback weights: prefer the verified local file, else the
+    #    package's public pin (only reachable if the package's internal fallback
+    #    ever triggers, which it should not once weights_path is a local file).
+    noncloning_weights_path: str | None = None
+    try:
+        noncloning_weights_path = str(
+            resolver.resolve(
+                "model_noncloning_english",
+                allowed_sources=[] if model_source == "local" else None,
+            ).path
+        )
+    except PocketArtifactError:
+        noncloning_weights_path = None
+
+    provenance: dict[str, Any] = {
+        "engine": "torch",
+        "language": language,
+        "model_source": source_name,
+        "model_source_requested": model_source,
+        "model_repo": repo_id,
+        "model_revision": revision,
+        "model_sha256": sha256,
+        "model_verified": True,
+        "model_file": Path(weights_path).name,
+        "artifact_dir": str(dir_path),
+        "cloning_available": not degraded,
+        "cloning_status": (
+            "integrity_error" if integrity_failure else ("degraded" if degraded else "ready")
+        ),
+        "message": (
+            "Voice cloning weights failed integrity verification and were not loaded; "
+            "running with built-in voices only. Delete the affected files in "
+            "POCKET_TTS_ARTIFACT_DIR to re-download them."
+            if integrity_failure
+            else (
+                "Voice cloning model could not be downloaded; running with built-in "
+                "voices only. Set an HF_TOKEN (for the official kyutai source) or "
+                "restore network access to enable cloning."
+                if degraded
+                else ""
+            )
+        ),
+        "allowed_sources": list(allowed),
+        # Built-in voice embeddings come from the public non-cloning repo; only
+        # local mode is strictly network-free for them.
+        "voice_allowed_sources": [] if model_source == "local" else None,
+    }
+
+    config_path = write_pocket_english_config(
+        dir_path,
+        weights_path=weights_path,
+        noncloning_weights_path=noncloning_weights_path,
+        tokenizer_path=tokenizer_path,
+        provenance=f"{source_name} {repo_id}@{revision} sha256={sha256[:16]}…",
+    )
+
+    load_kwargs: dict[str, Any] = dict(
+        config=str(config_path),
+        temp=temp,
+        lsd_decode_steps=lsd_decode_steps,
+        eos_threshold=eos_threshold,
+        quantize=quantize,
+    )
+    # noise_clamp defaults to TTSModel's own DEFAULT_NOISE_CLAMP when omitted; only override
+    # it when the caller explicitly set one.
+    if noise_clamp is not None:
+        load_kwargs["noise_clamp"] = noise_clamp
+
+    return load_kwargs, provenance
+
+
 def load_pocket_tts_model(
     language: str,
     temp: float,
@@ -76,6 +279,8 @@ def load_pocket_tts_model(
     quantize: bool = False,
     noise_clamp: float | None = None,
     frames_after_eos: int | None = None,
+    model_source: str = "auto",
+    artifact_dir: str | Path | None = None,
 ) -> TTSModel:
     """Load (or reload) the Pocket TTS model into the global handle.
 
@@ -87,14 +292,22 @@ def load_pocket_tts_model(
         quantize: Whether to enable int8 quantization.
         noise_clamp: Optional noise magnitude cap.
         frames_after_eos: Optional extra frames to keep after EOS.
+        model_source: Artifact source mode: "auto" (cache -> LunaHR -> official
+            gated -> built-in-only degradation), "lunahr" (cache or LunaHR
+            ungated), "official" (cache or authenticated kyutai), or "local"
+            (verified cache only, network-free).
+        artifact_dir: Persistent directory for verified artifacts; defaults to
+            <MODEL_CACHE_CONTAINER_PATH>/pocket-tts.
 
     Returns:
         The loaded TTSModel instance.
 
     Raises:
         RuntimeError: If the model fails to load.
+        ValueError: If ``model_source`` is not a known mode.
     """
-    global pocket_tts_model
+    global pocket_tts_model, pocket_tts_provenance, pocket_tts_artifact_dir
+    global pocket_tts_cloning_available, pocket_tts_cloning_status_message
 
     # Unload any previous instance first (hotswap-safe).
     unload_pocket_tts()
@@ -102,26 +315,72 @@ def load_pocket_tts_model(
     print(
         f"[pocket_tts] Loading model — language={language!r}, "
         f"temp={temp}, lsd_decode_steps={lsd_decode_steps}, "
-        f"eos_threshold={eos_threshold}, quantize={quantize}, noise_clamp={noise_clamp}"
+        f"eos_threshold={eos_threshold}, quantize={quantize}, noise_clamp={noise_clamp}, "
+        f"model_source={model_source!r}"
     )
 
-    load_kwargs: dict[str, Any] = dict(
-        language=language,
-        temp=temp,
-        lsd_decode_steps=lsd_decode_steps,
-        eos_threshold=eos_threshold,
-        quantize=quantize,
-    )
-    # noise_clamp defaults to TTSModel's own DEFAULT_NOISE_CLAMP when omitted; only override
-    # it when the caller explicitly set one.
-    if noise_clamp is not None:
-        load_kwargs["noise_clamp"] = noise_clamp
+    degraded = False
+    if language == "english":
+        load_kwargs, provenance = _load_via_resolved_artifacts(
+            language,
+            temp,
+            lsd_decode_steps,
+            eos_threshold,
+            quantize=quantize,
+            noise_clamp=noise_clamp,
+            model_source=model_source,
+            artifact_dir=artifact_dir,
+        )
+        degraded = provenance["cloning_status"] in ("degraded", "integrity_error")
+        pocket_tts_provenance = provenance
+        pocket_tts_artifact_dir = provenance["artifact_dir"]
+    else:
+        load_kwargs: dict[str, Any] = dict(
+            language=language,
+            temp=temp,
+            lsd_decode_steps=lsd_decode_steps,
+            eos_threshold=eos_threshold,
+            quantize=quantize,
+        )
+        if noise_clamp is not None:
+            load_kwargs["noise_clamp"] = noise_clamp
+        # Non-English languages keep the legacy package-config loading path
+        # (no artifact resolution yet); provenance stays minimal.
+        pocket_tts_provenance = {
+            "engine": "torch",
+            "language": language,
+            "model_source": None,
+            "model_source_requested": None,
+            "model_repo": None,
+            "model_revision": None,
+            "model_sha256": None,
+            "model_verified": False,
+            "model_file": None,
+            "artifact_dir": None,
+            "cloning_available": None,
+            "cloning_status": "unavailable",
+            "message": "",
+            "allowed_sources": None,
+            "voice_allowed_sources": None,
+        }
+        pocket_tts_artifact_dir = None
 
     try:
         pocket_tts_model = TTSModel.load_model(**load_kwargs)
     except Exception as exc:
         pocket_tts_model = None
         raise RuntimeError(f"[pocket_tts] Failed to load TTSModel: {exc}") from exc
+
+    if degraded and pocket_tts_model is not None:
+        # The loaded weights are the built-in-only checkpoint: the package's
+        # audio-prompt path raises VOICE_CLONING_UNSUPPORTED for it.
+        pocket_tts_model.has_voice_cloning = False
+        pocket_tts_cloning_available = False
+        pocket_tts_cloning_status_message = pocket_tts_provenance["message"]
+        print(
+            f"[pocket_tts] Loaded in {pocket_tts_provenance['cloning_status']} mode: "
+            "built-in voices only, voice cloning disabled."
+        )
 
     # Store advanced knobs for use during generation.
     global pocket_tts_frames_after_eos
@@ -197,18 +456,17 @@ def build_default_voice_state(
         return pocket_tts_default_voice_state
     except Exception as exc:
         pocket_tts_default_voice_state = None
+        pocket_tts_cloning_available = False
         msg = str(exc)
-
-        if "We could not download the weights for the model with voice cloning" in msg:
-            pocket_tts_cloning_available = False
-            pocket_tts_cloning_status_message = (
-                "Voice cloning model unavailable. "
-                "Accept the terms at https://huggingface.co/kyutai/pocket-tts with the account "
-                "used for HF_TOKEN, then restart the container."
-            )
-        else:
-            pocket_tts_cloning_available = False
-            pocket_tts_cloning_status_message = f"Voice cloning unavailable: {msg}"
+        if not (pocket_tts_provenance.get("message") or "").strip():
+            if "We could not download the weights for the model with voice cloning" in msg:
+                pocket_tts_cloning_status_message = (
+                    "Voice cloning model unavailable. "
+                    "Accept the terms at https://huggingface.co/kyutai/pocket-tts with the account "
+                    "used for HF_TOKEN, then restart the container."
+                )
+            else:
+                pocket_tts_cloning_status_message = f"Voice cloning unavailable: {msg}"
 
         print(
             f"[pocket_tts] Failed to build default voice_state: {exc}. "
@@ -275,6 +533,41 @@ def set_default_voice_state_from_library(
 # ---------------------------------------------------------------------------
 # Voice selection (default, library, or custom)
 # ---------------------------------------------------------------------------
+
+def _resolve_builtin_voice_artifact(name: str) -> Path | None:
+    """Resolve a built-in voice name to a resolver-verified local .safetensors.
+
+    Loading through a project-owned config changes the model's ``origin``, so the
+    package's own predefined-voice lookup (which requires the origin to be inside
+    the package's config directory) is unavailable. Instead, pinned built-in
+    voices are resolved through the artifact resolver and passed to
+    ``get_state_for_audio_prompt`` as an explicit .safetensors path (a branch that
+    performs no origin check).
+
+    Returns None when artifact resolution is not active (non-English loads) or
+    the name has no pin, in which case the caller falls back to the package's
+    own resolution.
+    """
+    artifact_dir = pocket_tts_artifact_dir
+    if not artifact_dir:
+        return None
+    if name not in VOICE_EMBEDDING_PINS:
+        return None
+    resolver = PocketArtifactResolver(
+        Path(artifact_dir), token=os.environ.get("HF_TOKEN") or None
+    )
+    try:
+        result = resolver.resolve(
+            f"voice_embed_english_{name}",
+            allowed_sources=pocket_tts_provenance.get("voice_allowed_sources"),
+        )
+    except PocketArtifactError as exc:
+        raise RuntimeError(
+            f"[pocket_tts] Could not resolve built-in voice {name!r} from the "
+            f"artifact cache: {exc}"
+        ) from exc
+    return result.path
+
 
 def get_pocket_tts_voice_state(
     model: TTSModel,
@@ -373,9 +666,16 @@ def get_pocket_tts_voice_state(
     # 3) Try built-in preset or hf:// path.
     # If it doesn't look like a library ID (starts with 'vd_'), try treating it as a preset/path.
     if not resolved_id.startswith("vd_"):
+        # With a project-owned config the package can't honor predefined names
+        # (origin check), so pinned built-in voices are resolved to verified
+        # local .safetensors first; unpinned names and hf:// paths pass through.
+        state_input = resolved_id
+        local_voice_file = _resolve_builtin_voice_artifact(resolved_id)
+        if local_voice_file is not None:
+            state_input = str(local_voice_file)
         try:
             print(f"[pocket_tts] Attempting to load built-in voice: {resolved_id!r}")
-            state = model.get_state_for_audio_prompt(resolved_id)
+            state = model.get_state_for_audio_prompt(state_input)
             pocket_tts_voice_state_cache[resolved_id] = state
             model.export_model_state(state, str(cache_path))
             print(f"[pocket_tts] voice_state resolution: {resolved_id!r} (built-in preset, rebuilt)")

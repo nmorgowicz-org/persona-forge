@@ -162,6 +162,27 @@ Only used when TTS_BACKEND=pocket_tts. Pocket TTS does not use or require REF_TE
 | `POCKET_TTS_FRAMES_AFTER_EOS` | `8` | Extra audio frames kept after the last speech frame before truncating trailing silence. Each frame = 1/12.5 s at 24 kHz, matching the Mimi codec's frame rate. Higher → longer tail; lower → more aggressive trim; 0 → trim aggressively. Only affects post-generation trimming, not generation itself. |
 | `POCKET_TTS_NOISE_CLAMP` | unset | Noise magnitude cap for the flow-matching noise draw (wired through to `flow_lm`; a tight clamp can bias the model toward earlier EOS emission). |
 | `POCKET_TTS_QUANTIZE` | `0` | Enable int8 quantization (0/1). |
+| `POCKET_TTS_MODEL_SOURCE` | `auto` | English artifact sourcing mode (see below). |
+| `POCKET_TTS_ARTIFACT_DIR` | `<MODEL_CACHE_CONTAINER_PATH>/pocket-tts` | Persistent directory for verified artifacts (model, tokenizer, built-in voice embeddings). |
+
+### Pocket-TTS artifact sourcing
+
+The English backend loads a project-owned config whose model, tokenizer, and built-in
+voice-embedding paths point at **resolver-verified** artifacts in `POCKET_TTS_ARTIFACT_DIR`
+(each file is checked against a pinned size + SHA-256 before use). `POCKET_TTS_MODEL_SOURCE`
+controls where the English voice-cloning model comes from:
+
+| Mode | Behavior |
+|------|----------|
+| `auto` (default) | Verified cache first, then the ungated LunaHR mirror, then the gated official `kyutai/pocket-tts` repo (only with an `HF_TOKEN`; gated sources are never probed unauthenticated). If the cloning model cannot be resolved, the service degrades to the separately pinned built-in-only model — voice cloning is disabled and `/health` reports `pocket_cloning_status: degraded`. |
+| `lunahr` | Verified cache or the ungated LunaHR mirror only. Fails closed (no degradation) if the cloning model cannot be resolved. |
+| `official` | Verified cache or the gated official repo (requires `HF_TOKEN`). May degrade to built-in-only like `auto`. |
+| `local` | Verified cache only, fully network-free. Fails closed if the cloning model or tokenizer is missing from the cache. |
+
+Built-in voice names (e.g. `pocket:alba`) are resolved to pinned local `.safetensors` files
+the same way; unpinned names and `hf://` paths fall through to the package's own resolution.
+Changes require a model reload (`/runtime/config` marks both vars as reload keys). Non-English
+`POCKET_TTS_LANGUAGE` values still use the package's own loading path.
 
 When cloning is available, the mounted REF_AUDIO is automatically registered as a voice named "Mounted reference (Default)" in the library so it can be selected explicitly as well as used as the default.
 
