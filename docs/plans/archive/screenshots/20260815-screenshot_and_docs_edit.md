@@ -1,6 +1,8 @@
 # Screenshot & Docs Overhaul — 2026-08-15
 
-> **Status:** Ready for execution. Rewritten 2026-08-15 by Opus.
+> **Status:** Executed and closed 2026-08-22 — see [Execution outcome](#execution-outcome--2026-08-22).
+>
+> **Original status:** Ready for execution. Rewritten 2026-08-15 by Opus.
 >
 > **Revision 3** replaces Phase 1 entirely. Revisions 1–2 treated the capture harness as something to
 > *patch*. It is not — persona-forge is running the **pre-split ancestor** of the harness that
@@ -1822,3 +1824,32 @@ Record anything the executor cannot resolve here rather than guessing.
 - **Doc illustration scope** — Step 4.4 caps new scenarios at three. More is a follow-up plan.
 - **Historical `docker-agent` references** — ~15 archived plan docs still name the old host. Left
   deliberately. An "archived" banner would be a separate pass.
+
+## Execution outcome — 2026-08-22
+
+Executed 2026-08-15 → 22 and closed as PR #188 (squash commit `9d92172`, 34 original commits),
+with follow-ups `6a8903a` (broken README image refs) and `2b04776` (prosody-adjustment gallery
+slot). All phases completed in substance; Phase 6's five-commit structure collapsed into the
+single squash commit per the repo's squash-merge convention.
+
+Deviations from the letter of the plan:
+
+- `docs/screenshots/hero-candidates/` was never created — the hero decision (two GIFs + static
+  gallery) led to direct promotion; recorded in `9d92172`'s commit body.
+- The static gallery diverged: `2b04776` added `prosody-adjustment--pocket-tts--calm-adjusted.png`
+  to the grid, and `hero-library` / `hero-speak-result` were left in `artifacts/` un-promoted.
+- Promoted `voice-variant-list--neutral--variant-list.png` is a stand-in (byte-identical to the
+  hero-library shot) and is orphaned after `2b04776` replaced its grid slot.
+- `health` and `voices-list` left no receipts during the Phase 2 runs (19/21 scenarios).
+- The plan text's "docker-agent → docker-agent" host migration is a redaction; the real
+  migration was `dockermisc1` → `docker-agent`.
+
+Gaps found at close-out and their resolution:
+
+- Step 1.5a.5 (frontend font test) was never added — closed 2026-08-22 by
+  `tests/ui/core/font-determinism.spec.js` (first line of defence in the existing Playwright
+  lane; the capture-time `assertDeterministicFonts` remains the second).
+- The README's pinned image tag (`v1.0.11`) went stale — closed 2026-08-22 by a
+  release-please workflow step that bumps it on every release.
+- Remaining follow-ups (cross-platform visual gate, WCAG audit, docs-illustration pass) are
+  unchanged and tracked under [Open questions](#open-questions).

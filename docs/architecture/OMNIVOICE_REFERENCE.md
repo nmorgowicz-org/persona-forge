@@ -22,7 +22,9 @@ What it is NOT:
 
 ## How it loads
 
-- Loaded via the installed `omnivoice` Python package (pinned at a specific git commit via Dockerfile; past 0.1.5 on PyPI).
+- Loaded via the installed `omnivoice` Python package (pinned to a PyPI release in the
+  Dockerfile — `omnivoice==0.2.1`; the `pad_duration`/`fade_duration` knobs we rely on
+  shipped in 0.2.0).
 - Always loaded as `float32`; float16 showed ~50% broken-output rate in testing.
 - Loaded with:
   - `OmniVoice.from_pretrained("k2-fsa/OmniVoice", dtype=torch.float32)`

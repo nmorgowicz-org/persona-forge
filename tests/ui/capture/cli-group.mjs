@@ -1,6 +1,6 @@
 // Run every scenario belonging to a registry category (== scenarios/<group>/
 // directory name). Ported from local-llm-foundry's tests/ui/capture/cli-group.mjs
-// per docs/plans/20260815-screenshot_and_docs_edit.md Step 1.15. Drops
+// per docs/plans/archive/screenshots/20260815-screenshot_and_docs_edit.md Step 1.15. Drops
 // local-llm-foundry's TEMP_APP_CONFIG_DIR bootstrap (Go-binary-specific, no
 // persona-forge analogue) and groups by SCENARIOS[key].category rather than by
 // scanning the scenario directory tree, since persona-forge's registry keys

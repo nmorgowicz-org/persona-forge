@@ -1,4 +1,4 @@
-# Qwen3-TTS OpenVINO — Agent Guide
+# Persona Forge — Agent Guide
 
 ## Agent Operational Guidelines
 
@@ -19,85 +19,103 @@ To ensure code integrity and prevent accidental deletions:
 
 ## How to use this guide
 
-- This is your single source of truth for working on this repo.
+- This is your single source of truth for working in this repo. `docs/README.md` is the full doc map.
 - When implementing or modifying features, treat `docs/plans/` as authoritative and binding.
   Do not silently relax stack choices, runtime constraints, or memory rules to "simplify"—
   only propose alternatives explicitly.
-- For runtime invariants, memory rules, and LOW_RAM_MODE details, see:
-  - `docs/agent-reference/RUNTIME_AND_MEMORY.md`
-- For the transformers 5 compatibility hacks, see:
-  - `docs/agent-reference/TRANSFORMERS_COMPAT.md`
-- For export system behavior and fragility, see:
-  - `docs/agent-reference/EXPORT_SYSTEM.md`
-- For VoiceDesign and frontend work, follow:
-  - `docs/dev/architecture/voice_design.md`
-- For local validation commands, see:
-  - `docs/dev/validation_checks.md`
+- Read before changing:
+  - Runtime invariants, memory rules, LOW_RAM_MODE → `docs/agent-reference/RUNTIME_AND_MEMORY.md`
+  - Export system behavior and fragility → `docs/agent-reference/EXPORT_SYSTEM.md`
+  - Transformers 5 compatibility hacks → `docs/agent-reference/TRANSFORMERS_COMPAT.md`
+  - VoiceDesign model + frontend → `docs/dev/architecture/voice_design.md`
+  - Local validation commands → `docs/dev/validation_checks.md`
+  - HTTP endpoints → `docs/api/HTTP_API_REFERENCE.md`
+  - Environment variables → `docs/ENV_REFERENCE.md` (accelerator-family vars are in
+    `docs/architecture/ACCELERATOR_FAMILIES.md`, not yet in ENV_REFERENCE)
+  - Test tiers → `docs/TEST_STRATEGY.md`
 
 If a change conflicts with any of these, stop and propose alternatives explicitly.
 
 ## Quick orientation
 
 ```
-src/persona_forge/     Flask app, model runtime, model config, OpenVINO runtime adapters
-src/export/        OpenVINO export/quantization, parity tests, benchmark tooling
-scripts/           entrypoint.sh (container entrypoint), export.py, download_model.py, run-*.sh
-tests/             Unit and integration tests; no model weights needed
-requirements/      runtime.txt  openvino.txt  export.txt
-Dockerfile         Single image: ENTRYPOINT=entrypoint.sh, default CMD = gunicorn serving
-compose.yml        Services (persona-forge, export, export-voice-design) sharing one image
+src/persona_forge/     Flask app, model runtime, config, Pocket-TTS/OpenVINO/PyTorch runtimes, OmniVoice engine, libraries
+src/export/            OpenVINO export/quantization, parity tests, benchmark tooling
+frontend/              React 19 + Vite 8 + Tailwind 4 SPA (built in frontend-build stage, served at /)
+scripts/               entrypoint.sh (container entrypoint), export.py, dev-deploy.sh, validate_repo.py, download_model.py
+tests/                 tier1_unit/  tier2_backend/  tier3_api_integration/  ui/ (Playwright E2E + capture harness)
+requirements/          requirements-{runtime,openvino,export,pocket-tts}.txt
+Dockerfile             Single image (frontend-build stage + runtime); ENTRYPOINT=entrypoint.sh, default CMD = gunicorn
+compose.yml            Services: persona-forge (serving) + export (profile `export`, one-time IR export) — one image
 ```
 
 `PYTHONPATH=/app/src:/app/src/export` — both `persona_forge.*` and export modules are importable inside the container.
 
-### Runtime Architecture
-The system supports three primary runtime backends for inference:
-- **Pocket-TTS**: The primary high-performance engine.
-- **OpenVINO**: Provides Intel CPU acceleration for Qwen3-TTS (Base, VoiceDesign, and custom voices).
-- **PyTorch**: The baseline and fallback path for Qwen3-TTS (Base, VoiceDesign, and custom voices).
+**Product.** Open-source voice cloning and voice design studio: voice cloning, Qwen VoiceDesign,
+accent design and audition via OmniVoice, Stitch Studio (segment timeline assembly), prosody
+variants/adjustment, segments and voice libraries, projects, and an OpenAI-compatible API.
+Overview: `docs/architecture/SYSTEM_OVERVIEW.md`; data model: `docs/architecture/STUDIO_LIBRARIES.md`.
 
-For **VoiceDesign**, additional generation and synthesis options are available to refine voice characteristics before saving.
+**TTS backends.** `TTS_BACKEND` (canonical values `pytorch` / `openvino` / `pocket_tts`;
+`pocket-tts` is normalized in `config.py`):
+- `pocket_tts` — the product default. Self-contained, CPU-only, no IR export needed.
+  See `docs/architecture/pocket_tts_integration.md`.
+- `openvino` — Intel CPU acceleration for Qwen3-TTS (Base, VoiceDesign, custom voices);
+  needs a one-time IR export via the compose `export` service.
+- `pytorch` — baseline/fallback for Qwen3-TTS.
+
+**OmniVoice (k2-fsa/OmniVoice) is NOT a TTS backend.** It is a separate voice-designer
+subsystem (accent candidates, audition, Stitch Studio). See `docs/architecture/OMNIVOICE_REFERENCE.md`.
+
+**Accelerator families (Phase A6).** `GPU_FAMILY` (default `auto`) resolves
+`cpu`/`intel-xpu`/`cuda`/`rocm` via torch-independent PCI/device probes; the entrypoint does a
+first-boot per-family torch install into the persisted `/opt/accel-venv` volume. intel-xpu is
+validated on hardware; cuda/rocm are unvalidated. Details: `docs/architecture/ACCELERATOR_FAMILIES.md`.
 
 **One image, two behaviors.** `scripts/entrypoint.sh` is the container ENTRYPOINT; it applies
-`LOW_RAM_MODE` tuning before exec-ing the CMD. The serving container runs the image's default CMD (gunicorn). The export service overrides CMD with `python scripts/export.py`. There are no multi-stage build targets.
+`LOW_RAM_MODE` tuning and accelerator-family setup before exec-ing the CMD. The serving container
+runs the image's default CMD (gunicorn). The export service overrides CMD with `python scripts/export.py`.
 
 **Gunicorn constraints.** Always `-w 1 -k gthread --threads 4`. Never `--preload`. Never more than
 one worker. The single worker holds the model and serializes all inference through a
 `concurrent.futures.ThreadPoolExecutor(max_workers=1)` to prevent concurrent model access.
 
-**Model size.** `MODEL_SIZE` (0.6B or 1.7B) is the only required preset. `resolve_model_repo`
-in `model_config.py` maps it to the checkpoint and IR paths. 1.7B is the recommended default.
-
-## Project objective
-
-Reproducible Linux AMD64 container for Qwen3-TTS voice-cloning. Supports multiple runtime backends: Pocket-TTS (primary engine), OpenVINO (Intel CPU acceleration), and PyTorch (baseline/rollback).
-
-Read `docs/dev/architecture/OPENVINO_IMPLEMENTATION.md` before changing model export, cache handling,
-generation, quantization, memory loading, Docker packaging, or deployment behavior.
+**Model size and capacity.** `MODEL_SIZE` (0.6B or 1.7B; 1.7B recommended) is mapped in
+`model_config.py` to the checkpoint and IR paths. K/V capacity is env-driven:
+`TTS_MAX_SPEECH_SECONDS` (default 300s) → capacity = round(seconds × 12 Hz) → capacity-keyed IR
+paths (`/ov/<size>/main_stateful_cap{N}.xml`); changing it requires a re-export. VoiceDesign is
+separate: `VOICE_DESIGN_MODEL_SIZE` (1.7B), `VOICE_DESIGN_MAX_SPEECH_SECONDS` (default 30s →
+cap 360), IR under `/ov/<size>-voicedesign/`. Quantization: 0.6B ships INT8 main + INT8 stateful
+predictor (cap 32 file); 1.7B ships INT4 asymmetric (group 32) main + INT8 explicit (non-stateful)
+predictor. Details: `docs/agent-reference/RUNTIME_AND_MEMORY.md`, `src/persona_forge/presets.py`.
 
 ## Current state
 
 - Single image ships serving and export tooling. CI publishes it as `ghcr.io/nmorgowicz-org/persona-forge:<sha>`.
-- `TTS_BACKEND=pytorch` is the tested rollback baseline.
-- OpenVINO accelerates both transformer cores and the FP32 vocoder.
-- 0.6B ships INT8 with stateful main (cap 768) + stateful predictor (cap 32).
-- 1.7B ships INT4 asymmetric (group 32) with stateful main (cap 768) + INT8 explicit predictor.
-- Both profiles land at ~5.4–6.9 GiB steady serving RSS on the validated host. Export needs up to 13 GiB.
-- `LOW_RAM_MODE=1` enables glibc malloc tuning + idle unload. Python calls `malloc_trim(0)` after idle unload. LD_PRELOAD allocator replacement (jemalloc, tcmalloc) is incompatible with OpenVINO `compile_model()` under transformers 5.x — both caused SIGABRT/SIGSEGV. `libjemalloc2` remains in the image for reference.
+- `pocket_tts` is the product default; `openvino`/`pytorch` run the Qwen3-TTS engines (opt-in).
+  `TTS_BACKEND=pytorch` is the tested rollback baseline.
+- OpenVINO accelerates both Qwen3-TTS transformer cores and the FP32 vocoder.
+- Both size profiles land at ~5.4–6.9 GiB steady serving RSS on the validated host. Export needs up to 13 GiB.
+- `LOW_RAM_MODE=1` (compose default) enables glibc malloc tuning + idle unload. Python calls `malloc_trim(0)`
+  after idle unload. LD_PRELOAD allocator replacement (jemalloc, tcmalloc) is incompatible with OpenVINO
+  `compile_model()` under transformers 5.x — both caused SIGABRT/SIGSEGV. `libjemalloc2` remains in the image for reference.
 - OV compiled kernel cache at `/ov/cache` (default) eliminates ~60–120s recompilation on every restart.
 - Full model export, parity, and performance benchmarks run on `docker-agent`, not on ARC runners.
 
 ## Architecture invariants
 
-- Two nested autoregressive transformer paths: 28-layer main talker (codebook 1), 5-layer code predictor (codebooks 2–16). Both must be accelerated.
+- Two nested autoregressive transformer paths (Qwen3-TTS): 28-layer main talker (codebook 1), 5-layer code predictor (codebooks 2–16). Both must be accelerated.
 - Keep prompt construction, embeddings, sampling, and lightweight glue in PyTorch.
 - Export main and predictor transformer cores separately; validate K/V cache before introducing stateful models.
 - Reuse persistent `InferRequest` objects; never create one per token or per request.
 - Preserve the talker object's embeddings, projections, codebook heads, config, dtype, and device behavior.
-- Keep `/generate`, `/v1/audio/speech`, `/health`, MP3/WAV output, and serialized inference compatible with the baseline.
+- Preserve the HTTP API surface and its compatibility — core: `/generate`, `/v1/audio/speech`,
+  `/health`, MP3/WAV output, serialized inference. Full inventory: `docs/api/HTTP_API_REFERENCE.md`.
 - Keep `TTS_BACKEND=pytorch` as an explicit rollback path.
 - Return HTTP 503 during initial startup (before `_service_started` is set). After first successful load,
   idle-unloaded requests block in the executor and reload transparently — do not 503 them.
+- Studio libraries: the strict ID regexes (`vd_`/`seg_`/`proj_` + 12 hex) are the path-traversal defense
+  for IDs that flow into filesystem paths. Data model: `docs/architecture/STUDIO_LIBRARIES.md`.
 
 ## Model and secret safety
 
@@ -116,56 +134,67 @@ Persistent host paths on `docker-agent`:
 ## Dependency rules
 
 - The OpenVINO stack (OpenVINO, NNCF, Transformers, Python) moves together; pin all of them.
-- `qwen-tts==0.1.1` hard-pins `transformers==4.57.3` but is installed `--no-deps` in the Dockerfile so that `requirements/requirements-runtime.txt` can supply `transformers==5.12.1` (CVE-2026-1839 fix). All other qwen-tts runtime deps (accelerate, einops, librosa, onnxruntime) are listed explicitly in requirements-runtime.txt. Re-verify export wrappers and parity gate after any transformers bump.
+  Pin authority: `requirements/requirements-*.txt` (image) and `pyproject.toml`/`uv.lock`
+  (local dev). Do not copy version numbers into docs or plan files.
+- `qwen-tts` is installed `--no-deps` because it hard-pins an older transformers.
+  `requirements/requirements-runtime.txt` supplies the current transformers (including the
+  CVE-2026-1839 fix); all other qwen-tts runtime deps are listed explicitly there.
+  Re-verify export wrappers and the parity gate after any transformers bump.
 - Install CPU-only Torch before `qwen-tts` to prevent CUDA library pulls.
-- Validated Python 3.13 CPU pair: `torch==2.12.1+cpu` + `torchaudio==2.11.0+cpu`.
 - Do not update one OpenVINO-stack dependency in isolation without rebuilding the image and rerunning export parity.
-- Optimum Intel is intentionally absent: the custom talker has no registered exporter in `TasksManager`. Use `openvino.convert_model` + `nncf.compress_weights` directly.
-- Do not pass datasets, AWQ, GPTQ, LoRA correction, or sensitivity selection to NNCF 3.2.0 `compress_weights`; the API rejects them. Do not substitute W8A8 `nncf.quantize` (caused ~23 dB SNR regression at M6).
-- Renovate tracks pip requirements, Docker base images, and GitHub Actions. OpenVINO, Qwen-TTS, and PyTorch CPU-stack updates must not auto-merge.
+- Optimum Intel is intentionally absent: the custom talker has no registered exporter in `TasksManager`.
+  Use `openvino.convert_model` + `nncf.compress_weights` directly.
+- Do not pass datasets, AWQ, GPTQ, LoRA correction, or sensitivity selection to NNCF
+  `compress_weights`; the API rejects them. Do not substitute W8A8 `nncf.quantize`
+  (caused ~23 dB SNR regression at M6).
+- Renovate tracks pip requirements, Docker base images, and GitHub Actions. OpenVINO, Qwen-TTS,
+  and PyTorch CPU-stack updates must not auto-merge.
 
 ## Build and CI
 
 - `arc-general`: validation, labels, and release automation.
 - `arc-general-docker`: native Linux AMD64 image builds.
 - CI builds one image per run — no matrix. Smoke test imports all export and serving modules.
-- Image build runs on PRs with `ready-to-test` label. Tag pushes publish to GHCR.
+- Image build runs on PRs with `ready-to-test` label. Tag pushes (`persona-forge-v*`) publish to GHCR.
 - `main` pushes alone do not build or publish.
 - `buildcache` and `latest` are protected from cleanup. Keep at least 5 older versions for rollback.
 - Production Compose must pin the SHA tag or digest; never `latest`.
 
 GHCR pulls on `docker-agent` need a `read:packages` token. Pass via `docker login --password-stdin` only; never echo or embed in Compose.
 
-## Development Iteration (docker-agent)
+## Development (docker-agent)
 
-To iterate on code and see changes live on the development VM:
+The team runs three docker LXC boxes; Persona Forge lives on the **docker-agent** box (SSH alias
+`docker-agent`). Compose dir: `~/docker/docker-agent/`. The codified loop is `scripts/dev-deploy.sh`
+(run on docker-agent from `~/projects/persona-forge`: `[branch] [--image] [--no-restart]` — builds the
+frontend and `compose up -d` with the dev override that bind-mounts source). Operational details:
+`docs/dev/INTERNAL_OPERATIONS.md`.
 
 ### Rapid Debugging (Preferred for UI/small fixes)
 1. Sync specific files: `scp frontend/src/components/AppShell.tsx nick@docker-agent:~/projects/persona-forge/frontend/src/components/AppShell.tsx`
 2. Build frontend: `ssh docker-agent "cd ~/projects/persona-forge/frontend && npm run build"`
-3. Restart the container: `ssh docker-agent "docker compose -f ~/docker/docker-compose.yml -f ~/docker/docker-compose.persona-forge-dev.yml restart persona-forge"`
+3. Restart the container: `ssh docker-agent "docker compose -f ~/docker/docker-agent/docker-compose.yml -f ~/docker/docker-agent/docker-compose.persona-forge-dev.yml restart persona-forge"`
 
 ### Permanent Changes
 1. Commit and push changes to the working branch.
 2. Sync the codebase: `ssh docker-agent "cd ~/projects/persona-forge && git pull origin <branch>"`
 3. Build frontend (if applicable): `ssh docker-agent "cd ~/projects/persona-forge/frontend && npm run build"`
-4. Restart the container: `ssh docker-agent "docker compose -f ~/docker/docker-compose.yml -f ~/docker/docker-compose.persona-forge-dev.yml restart persona-forge"`
+4. Restart the container (or run `scripts/dev-deploy.sh`).
 
-The dev compose file (`~/docker/docker-compose.persona-forge-dev.yml`) enables bind-mounts for source code synchronization.
+The dev compose file (`~/docker/docker-agent/docker-compose.persona-forge-dev.yml`) enables bind-mounts for source code synchronization.
 
 ## Required validation
-
 
 Repository-only changes:
 ```bash
 python scripts/validate_repo.py
-docker compose config --quiet   # requires REF_AUDIO_PATH, REF_TEXT env vars
+docker compose config --quiet   # REF_AUDIO_PATH and REF_TEXT are optional
 git diff --check
 ```
 
 Container or dependency changes: apply `ready-to-test` to trigger the image build and import smoke test on `arc-general-docker`. Do this only after local validation passes.
 
-Model execution changes also require the staged gates from `docs/dev/architecture/OPENVINO_IMPLEMENTATION.md`:
+Model execution changes (Qwen3-TTS/OpenVINO path) also require the staged gates from `docs/dev/architecture/OPENVINO_IMPLEMENTATION.md`:
 1. PyTorch baseline/profile
 2. FP32 OpenVINO tensor, token, position, and cache parity
 3. INT8 accuracy and greedy-code agreement
@@ -175,38 +204,15 @@ Model execution changes also require the staged gates from `docs/dev/architectur
 
 ## Test tiers
 
-### Tier 1 — Repository/unit (arc-general, no model)
-- K/V cache flattening, naming, ordering, reconstruction
-- Prefill vs. one-token decode shapes
-- Position IDs, cache positions, masks, cache-length accounting
-- Export metadata validation and source/config hash checks
-- Backend selection and startup mismatch failures
-- HTTP request validation and response formats
-
-### Tier 2 — Container (arc-general-docker, no model weights)
-- Build the single image for Linux AMD64
-- Import Torch, Torchaudio, Qwen3-TTS, OpenVINO, NNCF, and all export modules
-- Assert Torch is a CPU build (no CUDA shared libraries)
-- Validate `compose.yml`, the health check endpoint, both MODEL_SIZE presets, the downloader module
-
-### Tier 3 — Model parity (docker-agent, do_sample=False)
-1. PyTorch vs. FP32 OpenVINO main prefill
-2. Several main decode steps with growing cache
-3. Predictor prefill and all 15 codebook steps
-4. Complete generated code sequences
-
-Record max/mean absolute error, top-1 agreement, top-k overlap, cache shapes, first divergent step. Parity gates fail closed — never catch missing outputs or lower thresholds to make a run pass.
-
-### Tier 4 — Quality and performance (docker-agent)
-Record: audio duration, end-to-end latency, RTF, warm median/p95, container peak RSS, host RAM/swap, and listening notes. Keep benchmark prompts in source control; store audio outside Git.
+`tests/` has four directories: `tier1_unit/` (repo/unit, no model), `tier2_backend/` (container, no
+weights), `tier3_api_integration/` (HTTP API), and `ui/` (Playwright E2E + screenshot capture
+harness — `tests/ui/README.md`). Canonical tier definitions, the changed-X→run-Y quick reference,
+and the parity gates live in `docs/TEST_STRATEGY.md` — consult it before running tests.
 
 ## Troubleshooting
 
 ### CPU Torch/Torchaudio unresolvable
 Inspect the CPU wheel index directly. Keep TORCH_VERSION and TORCHAUDIO_VERSION as independent Dockerfile ARGs. After changing a pin, rebuild and smoke-test.
-
-### Why Optimum Intel is absent
-`persona_forge_talker` has no registered exporter in `TasksManager`. Use `openvino.convert_model()` + `nncf.compress_weights()` instead.
 
 ### Export expects input_ids
 The generation path supplies `inputs_embeds`. Wrappers must expose embeddings as the primary input. An `input_ids`-only IR is incompatible with the current generator.
@@ -221,7 +227,7 @@ Check in order: K/V layer/key/value ordering; cache sequence length; `cache_posi
 - Use `query_state()` in tests to confirm reset length.
 
 ### OpenVINO loaded but RAM stays high
-The first hybrid implementation keeps both PyTorch and OpenVINO weights resident. RSS drops only after unused PyTorch layers are released. Measure after GC; allocator retention can hide freed tensors. Do not delete the talker object — embeddings, projections, and codebook heads are still needed.
+The hybrid implementation keeps both PyTorch and OpenVINO weights resident. RSS drops only after unused PyTorch layers are released. Measure after GC; allocator retention can hide freed tensors. Do not delete the talker object — embeddings, projections, and codebook heads are still needed.
 
 ### INT8 runs but not faster
 Confirm both cores use OpenVINO; confirm IR weights are compressed; check MatMul activation quantization; benchmark group sizes 0/32/64; profile main vs. predictor; check for per-token array copies; verify host isn't swapping.
@@ -248,7 +254,7 @@ Every handoff must state:
 
 ## Production VM safety (docker-agent)
 
-- Shared live host — prefer read-only inspection unless the user explicitly authorizes changes.
+- One of three shared live docker LXC boxes — prefer read-only inspection unless the user explicitly authorizes changes.
 - Stop only `persona-forge` during export; never touch unrelated containers (`litellm*`, `headroom-proxy`, `crowdsec`, `hermes-*`, `*arr`, `searxng`).
 - Never run two large model jobs at once (export + serve will OOM a 15 GiB box).
 - Record host load, available RAM, and swap alongside performance results.
@@ -279,18 +285,10 @@ So user-facing changes need a `feat:` or `fix:` title.
 that exact version regardless of commit type — this is checked before any breaking/feat
 heuristics, so it's the reliable way to land a specific version (e.g. `Release-As: 1.0.0`).
 
-**Scopes** (choose the one that matches your change; omit only if obvious):
-
-- `(model)` — model.py, model_config.py, generation, sampling, seed handling, cache logic
-- `(openvino)` — OpenVINO adapters, IR, runtime, quantization, stateful models, vocoder
-- `(export)` — export.py, export modules, parity tests, benchmarks
-- `(runtime)` — Flask app, startup, idle unload, config, memory, Gunicorn, endpoints
-- `(frontend)` — frontend UI, VoiceDesign page, components, API calls
-- `(docker)` — Dockerfile, container behavior, entrypoint.sh, compose.yml
-- `(deps)` — requirements, dependency updates, version changes
-- `(ci)` — CI workflows, ARC runners, build and publish
-- `(docs)` — documentation, README, HOW_TO_RUN, AGENTS, etc.
-- `(test)` — unit and integration tests
+**Scopes** are free-form — choose one that matches the change area, e.g.
+`(model)`, `(openvino)`, `(export)`, `(runtime)`, `(frontend)`, `(docker)`, `(deps)`, `(ci)`,
+`(docs)`, `(test)`. A scope, if present, must match `^[a-z0-9][a-z0-9._/-]*$` — enforced by
+`scripts/validate_repo.py`. Omit only if obvious.
 
 Every implementation PR body must include a Release Please override block using this exact format:
 

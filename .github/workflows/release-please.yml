@@ -26,6 +26,31 @@ jobs:
           private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
 
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: .github/release-please/config.json5
+
+      # Keep the README's pinned image-tag example in sync after each release.
+      # `ref: main` checks out the post-release tip (release-please has already pushed
+      # the release commit), so the bump lands cleanly on top of it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: steps.release.outputs.release_created == 'true'
+        with:
+          ref: main
+          fetch-depth: 1
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Keep README image tag in sync
+        if: steps.release.outputs.release_created == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          sed -i "s|persona-forge:v[0-9][0-9.]*|persona-forge:v${{ steps.release.outputs.release_semver }}|" README.md
+          if git diff --quiet; then
+            echo "README image tag already current; nothing to do"
+          else
+            git add README.md
+            git commit -m "docs: bump README image tag to v${{ steps.release.outputs.release_semver }}"
+            git push
+          fi

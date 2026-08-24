@@ -1,6 +1,6 @@
 // Capture manifest report/lint. Ported from local-llm-foundry's
 // tests/ui/capture/cli-manifest.mjs per
-// docs/plans/20260815-screenshot_and_docs_edit.md Step 1.15, with the
+// docs/plans/archive/screenshots/20260815-screenshot_and_docs_edit.md Step 1.15, with the
 // wizard-rapidmlx/wizard-llamacpp category-registration checks (a
 // local-llm-foundry-specific concept with no persona-forge analogue)
 // replaced by a scenario-file <-> registry parity check.

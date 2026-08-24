@@ -23,6 +23,17 @@ Core files:
   - Builds voice_state from reference audio.
   - Wraps generate_audio with post-EOS trimming.
   - Handles unload / hotswap.
+  - For `POCKET_TTS_LANGUAGE=english`, loads through a project-owned config whose
+    model/tokenizer/voice-embedding paths are resolver-verified local artifacts.
+- src/persona_forge/pocket_artifact_resolver.py:
+  - Pinned artifact catalog (English model, non-cloning fallback model, tokenizer,
+    26 built-in voice embeddings) with size + SHA-256 pins and per-source metadata.
+  - Verified-download cache: stdlib-only streaming download, per-artifact lockfile
+    (concurrent-safe), atomic content-addressed install, corrupt-cache redownload.
+- src/persona_forge/pocket_english_config.py:
+  - Renders the project-owned English config (byte-for-byte the pocket-tts 2.1.0
+    `config/english.yaml` schema) with the three downloadable paths rewritten to
+    resolver-verified local files; written atomically under the artifact dir.
 - src/persona_forge/model.py:
   - Integrates Pocket TTS as a backend choice.
   - Wires /generate and /v1/audio/speech into Pocket TTS when TTS_BACKEND=pocket_tts.
@@ -333,3 +344,54 @@ On a CPU host with enough RAM (docker-agent or equivalent):
   out of scope for this integration — see "What it is NOT" above).
 - Confirm no regressions in the openvino/pytorch backends, and that VoiceDesign/OmniVoice
   (which manage their own model swap) still work.
+
+9. Artifact Sourcing (verified downloads, no token required)
+
+The official `kyutai/pocket-tts` repo is gated, so the English backend sources its
+artifacts without a token by default and verifies every file before use.
+
+How it works:
+
+- `pocket_artifact_resolver.py` owns a pinned catalog: the English voice-cloning model,
+  the separately pinned built-in-only (non-cloning) model, the tokenizer, and all 26
+  built-in voice embeddings. Each entry pins an exact size and SHA-256; sources are
+  ordered tuples of (name, repo, revision, gated?).
+- `PocketArtifactResolver` resolves one artifact: cache hit (verified) → download from
+  the first usable source. Downloads stream to a temp file with a size cap, are hashed
+  as they stream, and are only installed (atomic `os.replace`) when the digest matches.
+  A per-artifact lockfile (fcntl) makes concurrent loads safe; a corrupt cached file is
+  redownloaded. Gated sources are never probed unauthenticated, and 401/403 with a
+  token surfaces as `auth_unavailable` — error messages never contain tokens, URLs,
+  or headers.
+- The resolver is pure stdlib (urllib/fcntl/tempfile) and the `fetch` callable is
+  injectable, so the whole path is unit-testable without network or torch.
+- `pocket_english_config.py` renders a project-owned English config — the pocket-tts
+  2.1.0 `config/english.yaml` schema byte-for-byte — with `weights_path`,
+  `weights_path_without_voice_cloning`, and `tokenizer_path` rewritten to verified
+  local files. Loading through this config intentionally changes the model's `origin`,
+  which disables the package's own predefined-voice lookup; in exchange,
+  `pocket_tts_runtime` resolves built-in voice names (e.g. `pocket:alba`) to
+  resolver-verified local `.safetensors` files itself and passes the path to
+  `get_state_for_audio_prompt` (a branch with no origin check). Unpinned names and
+  `hf://` paths still fall through to the package's resolution.
+- Sourcing modes (`POCKET_TTS_MODEL_SOURCE`, default `auto`):
+  - `auto`: verified cache → ungated LunaHR mirror → gated official repo (token only,
+    if present). If the cloning model cannot be resolved, the load degrades to the
+    built-in-only model: generation works, voice cloning is disabled
+    (`has_voice_cloning=False`), and the provenance records `cloning_status=degraded`.
+  - `lunahr`: cache or the ungated mirror only; fails closed if the cloning model is
+    unresolvable.
+  - `official`: cache or the gated official repo (token required); may degrade like `auto`.
+  - `local`: verified cache only, fully network-free; fails closed on a miss.
+- Provenance: every load records `pocket_tts_provenance` (engine, source, repo,
+  revision, SHA-256, verified flag, cloning status, human-readable message) in module
+  state. It persists across idle-unload, so `/health` keeps reporting the verified
+  identity of the cached artifacts (`pocket_engine`, `pocket_model_source`,
+  `pocket_model_revision`, `pocket_model_sha256`, `pocket_model_verified`,
+  `pocket_cloning_available`, `pocket_cloning_status`); the legacy
+  `voice_cloning_available` field (default voice_state present) is unchanged.
+- Both `POCKET_TTS_MODEL_SOURCE` and `POCKET_TTS_ARTIFACT_DIR` are reload keys:
+  `/runtime/config` writes the env and hotswaps the model to apply them.
+
+Non-English `POCKET_TTS_LANGUAGE` values keep the legacy package-config loading path
+(no artifact resolution, minimal provenance) until their bundles are pinned.

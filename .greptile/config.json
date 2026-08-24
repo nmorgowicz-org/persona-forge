@@ -4,6 +4,7 @@
     "release-please[bot]"
   ],
   "excludeBranches": [
-    "release-please--**"
+    "release-please--**",
+    "renovate/**"
   ]
 }
