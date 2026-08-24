@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.2.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.1.4...persona-forge-v1.2.0) (2026-08-24)
+
+
+### Features
+
+* **runtime:** zero-token Pocket-TTS artifact sourcing with verified provenance ([cb135cb](https://github.com/nmorgowicz-org/persona-forge/commit/cb135cb077187bd031b4f337df853187fb68bff3))
+
+
+### Bug Fixes
+
+* **deps:** update dependency gunicorn to v26.2.0 ([#214](https://github.com/nmorgowicz-org/persona-forge/issues/214)) ([7bd07ef](https://github.com/nmorgowicz-org/persona-forge/commit/7bd07ef3f903f79589e1f23f8b303ab06270fdcc))
+
+
+### Miscellaneous Chores
+
+* **ci:** skip Greptile review on Renovate PRs ([cb135cb](https://github.com/nmorgowicz-org/persona-forge/commit/cb135cb077187bd031b4f337df853187fb68bff3))
+* **deps:** update frontend npm dependencies ([#210](https://github.com/nmorgowicz-org/persona-forge/issues/210)) ([091d45f](https://github.com/nmorgowicz-org/persona-forge/commit/091d45fda941d7f5f69b7c065ac319d84ebac679))
+* **deps:** update omnivoice digest to 08be0b4 ([#212](https://github.com/nmorgowicz-org/persona-forge/issues/212)) ([083c0d7](https://github.com/nmorgowicz-org/persona-forge/commit/083c0d75ff0c43ceae29f84205956308f2bee601))
+
 ## [1.1.4](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.1.3...persona-forge-v1.1.4) (2026-08-22)
 
 
