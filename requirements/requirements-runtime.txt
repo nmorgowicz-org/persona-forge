@@ -1,5 +1,5 @@
 flask==3.1.3
-gunicorn==26.1.0
+gunicorn==26.2.0
 soundfile==0.14.0
 # qwen-tts==0.1.1 hard-pins transformers==4.57.3, so the Dockerfile installs it
 # with --no-deps before this file to bypass that constraint (CVE-2026-1839).
