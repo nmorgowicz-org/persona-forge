@@ -7,10 +7,10 @@
 # frontend bundle. Reproducing that on an arbitrary host's Python install is a real, ongoing
 # maintenance burden — the container is what makes those pins/patches invisible to users.
 # Revisit only if standalone packaging becomes a real ask (today there's a single known user).
-ARG PYTHON_IMAGE=python:3.13-slim@sha256:ffb752e139c0a19692a43af8d8523b274222dd68eebad5d583b45c2201c6e30a
+ARG PYTHON_IMAGE=python:3.13-slim@sha256:7e3a6aca9d74f93cca21a91d86a8dad8c34749afd5b4a98ee481c9c47b9f5ed4
 # Not digest-pinned like PYTHON_IMAGE below (build-stage only, never shipped in the final
 # image) — override via --build-arg if you need reproducibility guarantees for CI.
-ARG NODE_IMAGE=node:24-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03
+ARG NODE_IMAGE=node:24-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df
 
 # Static export, served by Flask at / (see src/persona_forge/app.py). Independent stage so the
 # final image never needs a Node toolchain.
