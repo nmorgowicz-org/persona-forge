@@ -170,7 +170,7 @@ They combine knobs into consistent styles for different use cases.
 
 - Natural (Recommended default)
   - temp: 1.0–1.1
-  - lsd_decode_steps: 3–4
+  - sampler_decode_steps: 3–4
   - eos_threshold: -3.8
   - frames_after_eos: 3
   - noise_clamp: 0.4–0.6
@@ -178,7 +178,7 @@ They combine knobs into consistent styles for different use cases.
 
 - Compact
   - temp: 0.7–0.8
-  - lsd_decode_steps: 2–3
+  - sampler_decode_steps: 2–3
   - eos_threshold: -2.5 to -3.0
   - frames_after_eos: 0–1
   - noise_clamp: 0.2–0.3
@@ -186,7 +186,7 @@ They combine knobs into consistent styles for different use cases.
 
 - Expressive
   - temp: 1.3–1.5
-  - lsd_decode_steps: 5–6
+  - sampler_decode_steps: 5–6
   - eos_threshold: -4.5 to -5.0
   - frames_after_eos: 5–7
   - noise_clamp: none or high
@@ -195,7 +195,7 @@ They combine knobs into consistent styles for different use cases.
 
 - Soft/Calm
   - temp: 0.6–0.8
-  - lsd_decode_steps: 4–5
+  - sampler_decode_steps: 4–5
   - eos_threshold: -4.5 to -5.0
   - frames_after_eos: 4–6
   - noise_clamp: 0.1–0.3
@@ -203,7 +203,7 @@ They combine knobs into consistent styles for different use cases.
 
 - Energetic
   - temp: 1.2–1.4
-  - lsd_decode_steps: 2–3
+  - sampler_decode_steps: 2–3
   - eos_threshold: -2.5 to -3.0
   - frames_after_eos: 1–2
   - noise_clamp: 0.5–0.7
@@ -211,7 +211,7 @@ They combine knobs into consistent styles for different use cases.
 
 - Ultra-clean (Dev/Batch)
   - temp: 0.4–0.5
-  - lsd_decode_steps: 2
+  - sampler_decode_steps: 2
   - eos_threshold: -2.5
   - frames_after_eos: 0–1
   - noise_clamp: 0.1

@@ -94,12 +94,12 @@ class TestLoadPocketTtsModel:
     def test_forwards_core_kwargs(self, pocket_tts_runtime):
         rt = pocket_tts_runtime
         rt.load_pocket_tts_model(
-            language="french_24l", temp=1.2, lsd_decode_steps=5, eos_threshold=-4.0
+            language="french_24l", temp=1.2, sampler_decode_steps=5, eos_threshold=-4.0
         )
         assert FakeTTSModel.last_load_kwargs == {
             "language": "french_24l",
             "temp": 1.2,
-            "lsd_decode_steps": 5,
+            "sampler_decode_steps": 5,
             "eos_threshold": -4.0,
             "quantize": False,
         }
@@ -109,7 +109,7 @@ class TestLoadPocketTtsModel:
         rt.load_pocket_tts_model(
             language="french_24l",
             temp=1.2,
-            lsd_decode_steps=5,
+            sampler_decode_steps=5,
             eos_threshold=-4.0,
             noise_clamp=0.3,
         )
@@ -119,21 +119,21 @@ class TestLoadPocketTtsModel:
         """Regression: noise_clamp used to be accepted but never passed to TTSModel.load_model."""
         rt = pocket_tts_runtime
         rt.load_pocket_tts_model(
-            language="french_24l", temp=1.2, lsd_decode_steps=5, eos_threshold=-4.0, noise_clamp=None
+            language="french_24l", temp=1.2, sampler_decode_steps=5, eos_threshold=-4.0, noise_clamp=None
         )
         assert "noise_clamp" not in FakeTTSModel.last_load_kwargs
 
     def test_sets_global_model_handle(self, pocket_tts_runtime):
         rt = pocket_tts_runtime
         model = rt.load_pocket_tts_model(
-            language="french_24l", temp=1.2, lsd_decode_steps=5, eos_threshold=-4.0
+            language="french_24l", temp=1.2, sampler_decode_steps=5, eos_threshold=-4.0
         )
         assert rt.pocket_tts_model is model
 
     def test_frames_after_eos_defaults_to_eight(self, pocket_tts_runtime):
         rt = pocket_tts_runtime
         rt.load_pocket_tts_model(
-            language="french_24l", temp=1.2, lsd_decode_steps=5, eos_threshold=-4.0
+            language="french_24l", temp=1.2, sampler_decode_steps=5, eos_threshold=-4.0
         )
         assert rt.pocket_tts_frames_after_eos == 8
 
@@ -142,7 +142,7 @@ class TestLoadPocketTtsModel:
         rt.load_pocket_tts_model(
             language="french_24l",
             temp=1.2,
-            lsd_decode_steps=5,
+            sampler_decode_steps=5,
             eos_threshold=-4.0,
             frames_after_eos=8,
         )
@@ -364,7 +364,7 @@ class TestUnloadPocketTts:
     def test_clears_model_and_cache(self, pocket_tts_runtime):
         rt = pocket_tts_runtime
         rt.load_pocket_tts_model(
-            language="french_24l", temp=1.2, lsd_decode_steps=5, eos_threshold=-4.0
+            language="french_24l", temp=1.2, sampler_decode_steps=5, eos_threshold=-4.0
         )
         rt.pocket_tts_voice_state_cache["vd_abc123"] = {"ref_path": "x.wav"}
         rt.pocket_tts_default_voice_state = {"ref_path": "default.wav"}
@@ -379,12 +379,12 @@ class TestUnloadPocketTts:
         """load_pocket_tts_model always unloads first, so no stale state survives a hotswap."""
         rt = pocket_tts_runtime
         rt.load_pocket_tts_model(
-            language="french_24l", temp=1.2, lsd_decode_steps=5, eos_threshold=-4.0
+            language="french_24l", temp=1.2, sampler_decode_steps=5, eos_threshold=-4.0
         )
         rt.pocket_tts_voice_state_cache["vd_abc123"] = {"ref_path": "x.wav"}
 
         rt.load_pocket_tts_model(
-            language="spanish_24l", temp=1.0, lsd_decode_steps=3, eos_threshold=-3.0
+            language="spanish_24l", temp=1.0, sampler_decode_steps=3, eos_threshold=-3.0
         )
 
         assert rt.pocket_tts_voice_state_cache == {}
@@ -474,7 +474,7 @@ class TestResolvedArtifactLoading:
         model = rt.load_pocket_tts_model(
             language="english",
             temp=1.2,
-            lsd_decode_steps=5,
+            sampler_decode_steps=5,
             eos_threshold=-4.0,
             model_source="auto",
             artifact_dir=tmp_path,
@@ -485,7 +485,7 @@ class TestResolvedArtifactLoading:
         assert "language" not in kwargs
         assert kwargs["config"] == str(tmp_path / "config" / "english-pf.yaml")
         assert kwargs["temp"] == 1.2
-        assert kwargs["lsd_decode_steps"] == 5
+        assert kwargs["sampler_decode_steps"] == 5
         assert kwargs["eos_threshold"] == -4.0
         assert kwargs["quantize"] is False
 
@@ -516,7 +516,7 @@ class TestResolvedArtifactLoading:
         model = rt.load_pocket_tts_model(
             language="english",
             temp=1.2,
-            lsd_decode_steps=5,
+            sampler_decode_steps=5,
             eos_threshold=-4.0,
             model_source="auto",
             artifact_dir=tmp_path,
@@ -547,7 +547,7 @@ class TestResolvedArtifactLoading:
         model = rt.load_pocket_tts_model(
             language="english",
             temp=1.2,
-            lsd_decode_steps=5,
+            sampler_decode_steps=5,
             eos_threshold=-4.0,
             model_source="auto",
             artifact_dir=tmp_path,
@@ -575,7 +575,7 @@ class TestResolvedArtifactLoading:
         rt.load_pocket_tts_model(
             language="english",
             temp=1.2,
-            lsd_decode_steps=5,
+            sampler_decode_steps=5,
             eos_threshold=-4.0,
             model_source="auto",
             artifact_dir=tmp_path,
@@ -598,7 +598,7 @@ class TestResolvedArtifactLoading:
             rt.load_pocket_tts_model(
                 language="english",
                 temp=1.2,
-                lsd_decode_steps=5,
+                sampler_decode_steps=5,
                 eos_threshold=-4.0,
                 model_source="lunahr",
                 artifact_dir=tmp_path,
@@ -619,7 +619,7 @@ class TestResolvedArtifactLoading:
             rt.load_pocket_tts_model(
                 language="english",
                 temp=1.2,
-                lsd_decode_steps=5,
+                sampler_decode_steps=5,
                 eos_threshold=-4.0,
                 model_source="local",
                 artifact_dir=tmp_path,
@@ -637,7 +637,7 @@ class TestResolvedArtifactLoading:
         rt.load_pocket_tts_model(
             language="english",
             temp=1.2,
-            lsd_decode_steps=5,
+            sampler_decode_steps=5,
             eos_threshold=-4.0,
             model_source="local",
             artifact_dir=tmp_path,
@@ -656,7 +656,7 @@ class TestResolvedArtifactLoading:
             rt.load_pocket_tts_model(
                 language="english",
                 temp=1.2,
-                lsd_decode_steps=5,
+                sampler_decode_steps=5,
                 eos_threshold=-4.0,
                 model_source="bogus",
             )
@@ -671,7 +671,7 @@ class TestResolvedArtifactLoading:
         rt.load_pocket_tts_model(
             language="english",
             temp=1.2,
-            lsd_decode_steps=5,
+            sampler_decode_steps=5,
             eos_threshold=-4.0,
             model_source="auto",
             artifact_dir=tmp_path,
@@ -691,7 +691,7 @@ class TestResolvedArtifactLoading:
         install_stub_resolver(rt, monkeypatch, plans, calls)
 
         rt.load_pocket_tts_model(
-            language="french_24l", temp=1.0, lsd_decode_steps=3, eos_threshold=-3.0
+            language="french_24l", temp=1.0, sampler_decode_steps=3, eos_threshold=-3.0
         )
 
         assert calls == []
@@ -718,7 +718,7 @@ class TestResolvedArtifactLoading:
         model = rt.load_pocket_tts_model(
             language="english",
             temp=1.2,
-            lsd_decode_steps=5,
+            sampler_decode_steps=5,
             eos_threshold=-4.0,
             model_source="auto",
             artifact_dir=tmp_path,
@@ -747,7 +747,7 @@ class TestResolvedArtifactLoading:
         model = rt.load_pocket_tts_model(
             language="english",
             temp=1.2,
-            lsd_decode_steps=5,
+            sampler_decode_steps=5,
             eos_threshold=-4.0,
             model_source="auto",
             artifact_dir=tmp_path,

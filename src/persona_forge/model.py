@@ -433,7 +433,7 @@ def load_model(profile: ModelProfile | None = None):
 
         language = (os.getenv("POCKET_TTS_LANGUAGE") or "english").strip() or "english"
         temp = float(os.getenv("POCKET_TTS_TEMP", "1.2"))
-        lsd_steps = int(os.getenv("POCKET_TTS_LSD_DECODE_STEPS", "5"))
+        sampler_decode_steps = int(os.getenv("POCKET_TTS_LSD_DECODE_STEPS", "5"))
         eos_threshold = float(os.getenv("POCKET_TTS_EOS_THRESHOLD", "-4.0"))
         noise_clamp_raw = os.getenv("POCKET_TTS_NOISE_CLAMP", "").strip()
         noise_clamp = float(noise_clamp_raw) if noise_clamp_raw else None
@@ -450,7 +450,7 @@ def load_model(profile: ModelProfile | None = None):
         pocket_tts_runtime.load_pocket_tts_model(
             language=language,
             temp=temp,
-            lsd_decode_steps=lsd_steps,
+            sampler_decode_steps=sampler_decode_steps,
             eos_threshold=eos_threshold,
             noise_clamp=noise_clamp,
             frames_after_eos=frames_after_eos,
