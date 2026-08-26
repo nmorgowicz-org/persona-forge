@@ -51,6 +51,6 @@ jobs:
             echo "README image tag already current; nothing to do"
           else
             git add README.md
-            git commit -m "docs: bump README image tag to v${{ steps.release.outputs.release_semver }}"
+            git commit -m "docs: bump README image tag to v${{ steps.release.outputs.version }}"
             git push
           fi
