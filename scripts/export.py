@@ -6,7 +6,7 @@ Supported EXPORT_TARGET values:
 - voice_design: exports the VoiceDesign checkpoint.
 - both: exports both Base and VoiceDesign in one run (intended for compose export service).
 
-For details on IR layout and VoiceDesign wiring, see docs/dev/architecture/voice_design.md.
+For details on IR layout and VoiceDesign wiring, see docs/architecture/VOICE_DESIGN.md.
 """
 
 from __future__ import annotations

@@ -27,7 +27,7 @@ To ensure code integrity and prevent accidental deletions:
   - Runtime invariants, memory rules, LOW_RAM_MODE → `docs/agent-reference/RUNTIME_AND_MEMORY.md`
   - Export system behavior and fragility → `docs/agent-reference/EXPORT_SYSTEM.md`
   - Transformers 5 compatibility hacks → `docs/agent-reference/TRANSFORMERS_COMPAT.md`
-  - VoiceDesign model + frontend → `docs/dev/architecture/voice_design.md`
+  - VoiceDesign model + frontend → `docs/architecture/VOICE_DESIGN.md`
   - Local validation commands → `docs/dev/validation_checks.md`
   - HTTP endpoints → `docs/api/HTTP_API_REFERENCE.md`
   - Environment variables → `docs/ENV_REFERENCE.md` (accelerator-family vars are in
@@ -194,7 +194,7 @@ git diff --check
 
 Container or dependency changes: apply `ready-to-test` to trigger the image build and import smoke test on `arc-general-docker`. Do this only after local validation passes.
 
-Model execution changes (Qwen3-TTS/OpenVINO path) also require the staged gates from `docs/dev/architecture/OPENVINO_IMPLEMENTATION.md`:
+Model execution changes (Qwen3-TTS/OpenVINO path) also require the staged gates from `docs/archive/openvino/OPENVINO_IMPLEMENTATION.md`:
 1. PyTorch baseline/profile
 2. FP32 OpenVINO tensor, token, position, and cache parity
 3. INT8 accuracy and greedy-code agreement

@@ -75,7 +75,7 @@ class ModelProfile:
 
     ``load_model()`` used to read MODEL_ID/OV_MODEL_DIR/etc. as module-level
     constants computed once at import time. Swapping in a second checkpoint (e.g.
-    VoiceDesign, see docs/dev/architecture/voice_design.md) needs those to vary per call,
+    VoiceDesign, see docs/architecture/VOICE_DESIGN.md) needs those to vary per call,
     so they now travel as a profile instead. OVTalkerRuntime still reads its IR
     paths from the environment (OV_MODEL_DIR / OPENVINO_*_STATEFUL_MODEL), so
     ``load_model`` writes the profile's values into ``os.environ`` before
@@ -114,7 +114,7 @@ _voice_design_preset = get_voice_design_preset(
 )
 
 # VoiceDesign is never the model loaded at startup — it is only ever installed via the
-# lazy model-swap path in persona_forge.voice_design (docs/dev/architecture/voice_design.md §3/§4.2).
+# lazy model-swap path in persona_forge.voice_design (docs/architecture/VOICE_DESIGN.md §3/§4.2).
 # generate_voice_design() synthesizes the sample_text directly from the description; there
 # is no reference audio/transcript to build a voice_clone_prompt from.
 VOICE_DESIGN_PROFILE = ModelProfile(
@@ -909,7 +909,7 @@ def health_state() -> dict[str, Any]:
     return _json_safe(base)
 
 
-# ── Runtime control panel (docs/dev/architecture/voice_design.md §8.8) ──────────────────────────────────
+# ── Runtime control panel (docs/architecture/VOICE_DESIGN.md §8.8) ──────────────────────────────────
 #
 # Category 1 (live-adjustable): applied via apply_runtime_config(), always inside
 # model.executor so it never races inference. Two flavors:
