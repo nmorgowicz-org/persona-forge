@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.2.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.2.0...persona-forge-v1.2.1) (2026-08-26)
+
+
+### Bug Fixes
+
+* **ci:** correct release-please README version-sync output name ([#220](https://github.com/nmorgowicz-org/persona-forge/issues/220)) ([18dd6cf](https://github.com/nmorgowicz-org/persona-forge/commit/18dd6cff274929beb66858c8f3a5d7fd1734590a))
+* **deps:** update dependency pocket-tts to v3 ([#218](https://github.com/nmorgowicz-org/persona-forge/issues/218)) ([f7366fc](https://github.com/nmorgowicz-org/persona-forge/commit/f7366fc137411ffbbc5cc96cea5514fd26fde5a8))
+
+
+### Code Refactoring
+
+* rename lsd_decode_steps to sampler_decode_steps ([#219](https://github.com/nmorgowicz-org/persona-forge/issues/219)) ([06d7982](https://github.com/nmorgowicz-org/persona-forge/commit/06d7982799058604a2ac6d20775298ab73e93ccf))
+
+
+### Continuous Integration
+
+* bump README image tag via release-please extra-files ([#221](https://github.com/nmorgowicz-org/persona-forge/issues/221)) ([b83caee](https://github.com/nmorgowicz-org/persona-forge/commit/b83caeed87667119ed18ef96b8ecf03c171bb68a))
+* bump README image tag via release-please extra-files, not a custom step ([b83caee](https://github.com/nmorgowicz-org/persona-forge/commit/b83caeed87667119ed18ef96b8ecf03c171bb68a))
+
+
+### Miscellaneous Chores
+
+* **deps:** update dependency shadcn to v4.19.0 ([#215](https://github.com/nmorgowicz-org/persona-forge/issues/215)) ([8f99cd0](https://github.com/nmorgowicz-org/persona-forge/commit/8f99cd0651d7e52709441e015960e58a0ed73030))
+* **deps:** update docker base images ([#216](https://github.com/nmorgowicz-org/persona-forge/issues/216)) ([27ca79f](https://github.com/nmorgowicz-org/persona-forge/commit/27ca79fd335737ddc499898e9533cf1c10a32cdf))
+
 ## [1.2.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.1.4...persona-forge-v1.2.0) (2026-08-24)
 
 
