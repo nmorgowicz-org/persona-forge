@@ -23,7 +23,7 @@ voices and segments.
 - Used by `/generate` and `/v1/audio/speech` (via `voice_id`) and by the
   frontend voice library page. Endpoint shapes: `api/HTTP_API_REFERENCE.md`
   (Voice library section). Design→library lifecycle:
-  `dev/architecture/voice_design.md`.
+  `architecture/VOICE_DESIGN.md`.
 
 ## Segment library
 

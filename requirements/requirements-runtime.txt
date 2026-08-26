@@ -11,7 +11,7 @@ onnxruntime
 sox
 transformers==5.12.1
 
-# OmniVoice (Persona Forge accent-design engine, docs/dev/features/persona_forge_studio.md).
+# OmniVoice (Persona Forge accent-design engine, docs/architecture/PERSONA_FORGE_STUDIO.md).
 # Installed --no-deps in the Dockerfile since its declared deps (torch/torchaudio/
 # transformers/accelerate/librosa/soundfile/numpy) already match the pins above exactly, and
 # its unpinned extras (gradio/tensorboardx/webdataset) are unused by the inference path this

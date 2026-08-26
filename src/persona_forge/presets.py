@@ -75,7 +75,7 @@ PRESETS: dict[str, dict[str, object]] = {
 }
 
 
-# VoiceDesign (docs/dev/architecture/voice_design.md) only ever generates a short sample
+# VoiceDesign (docs/architecture/VOICE_DESIGN.md) only ever generates a short sample
 # utterance for reference capture, never long-form speech, so its IR capacity can stay
 # much smaller than the Base preset's default.
 VOICE_DESIGN_DEFAULT_MAX_SPEECH_SECONDS = 30.0

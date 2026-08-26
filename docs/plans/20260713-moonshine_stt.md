@@ -269,7 +269,7 @@ Confirm:
   repository's memory targets.
 
 Before implementing model lifecycle changes, re-read
-`docs/dev/architecture/OPENVINO_IMPLEMENTATION.md` and
+`docs/archive/openvino/OPENVINO_IMPLEMENTATION.md` and
 `docs/agent-reference/RUNTIME_AND_MEMORY.md`.
 
 ## 9. Test and Validation Plan

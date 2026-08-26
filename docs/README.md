@@ -21,7 +21,8 @@ Start here. Docs are grouped by what you are trying to do.
 | [architecture/OMNIVOICE_REFERENCE.md](architecture/OMNIVOICE_REFERENCE.md) | OmniVoice accent engine, audition flow, licensing |
 | [architecture/STUDIO_LIBRARIES.md](architecture/STUDIO_LIBRARIES.md) | Voice/segment/project libraries: storage layout, ID scheme, invariants |
 | [architecture/ACCELERATOR_FAMILIES.md](architecture/ACCELERATOR_FAMILIES.md) | GPU family resolution and per-family first-boot torch install (Phase A6) |
-| [dev/architecture/voice_design.md](dev/architecture/voice_design.md) | Qwen VoiceDesign: model, design flow, design→library lifecycle |
+| [architecture/VOICE_DESIGN.md](architecture/VOICE_DESIGN.md) | Qwen VoiceDesign: model, design flow, design→library lifecycle |
+| [architecture/PERSONA_FORGE_STUDIO.md](architecture/PERSONA_FORGE_STUDIO.md) | Studio UI architecture: layout, panels, cross-cutting flows |
 
 ## Develop it
 
@@ -48,11 +49,10 @@ Compact references written for AI coding agents working in this repo.
 
 ## Archive
 
-- [`dev/features/`](dev/features/), [`dev/voice/`](dev/voice/), [`dev/prosody/`](dev/prosody/) —
-  dated design and implementation plans, kept as a record
+- [`archive/`](archive/) — dated design, implementation, and analysis plans, grouped by topic,
+  kept as a record once resolved or superseded
 - [`dev/benchmarks/`](dev/benchmarks/) — benchmark logs from the OpenVINO era
-- [`dev/resolved/`](dev/resolved/) — completed plans
-- [`dev/architecture/OPENVINO_IMPLEMENTATION.md`](dev/architecture/OPENVINO_IMPLEMENTATION.md)
+- [`archive/openvino/OPENVINO_IMPLEMENTATION.md`](archive/openvino/OPENVINO_IMPLEMENTATION.md)
   and [`dev/benchmarks/OPENVINO_RESULTS.md`](dev/benchmarks/OPENVINO_RESULTS.md) —
   Qwen3-TTS/OpenVINO-era implementation and benchmark records (both carry historical banners;
   AGENTS.md still cites the staged validation gates in the former)

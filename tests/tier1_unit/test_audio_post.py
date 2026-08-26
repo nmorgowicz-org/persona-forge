@@ -388,7 +388,7 @@ class TestApplyRegionEdits:
 
 class TestBoundaryPausePlan:
     """Phase 3 gate: surgical alignment-owned pauses insert into blended (zero-gap)
-    speech without an audible click. See docs/dev/prosody/boundary_aware_prosody.md §5.3."""
+    speech without an audible click. See docs/archive/prosody/boundary_aware_prosody.md §5.3."""
 
     def _blended_clip(self, sr: int) -> np.ndarray:
         # Two voiced "words" butted with no gap — the blended-speech failure mode.

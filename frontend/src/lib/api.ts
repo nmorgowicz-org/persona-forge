@@ -1049,7 +1049,7 @@ export interface OmniVoiceSaveParams {
   familyId?: string | null
   variantName?: string | null
   variantKind?: string | null
-  /** Optional stitch_plan for full control (docs/dev/features/stitch_editor.md). */
+  /** Optional stitch_plan for full control (docs/archive/stitch-editor/stitch_editor.md). */
   stitchPlan?: StitchPlanPayload | null
   projectId?: string | null
   projectName?: string | null

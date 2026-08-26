@@ -58,7 +58,7 @@ export interface SegmentRackRow {
   previousBatches?: CandidateBatch[]
 }
 
-// Stitch editor (docs/dev/features/stitch_editor.md §5)
+// Stitch editor (docs/archive/stitch-editor/stitch_editor.md §5)
 export type ClipRef =
   | { segmentId: string }
   | { candidateId: string }
@@ -301,7 +301,7 @@ interface StoreState {
       updater: Set<string> | ((prev: Set<string>) => Set<string>),
     ) => void
 
-  // ---- Stitch editor (docs/dev/features/stitch_editor.md) ----
+  // ---- Stitch editor (docs/archive/stitch-editor/stitch_editor.md) ----
   ovStitchPlanClips: StitchPlanClip[]
   ovStitchPlanPaddingMs: number[]
   ovStitchPlanDsp: StitchPlanDsp

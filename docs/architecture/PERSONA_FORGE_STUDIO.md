@@ -2,7 +2,7 @@
 
 > Audience: a fresh AI coding agent with zero prior context.
 > This document describes what was built. For the research and validation
-> that motivated it, see `docs/dev/integration/omnivoice_integration.md`.
+> that motivated it, see `docs/archive/omnivoice/omnivoice_integration.md`.
 
 ## 0. Rationale and high-level design
 

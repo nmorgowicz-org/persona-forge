@@ -110,7 +110,7 @@ def _default_artifact_dir() -> Path:
 def _load_via_resolved_artifacts(
     language: str,
     temp: float,
-    lsd_decode_steps: int,
+    sampler_decode_steps: int,
     eos_threshold: float,
     *,
     quantize: bool,
@@ -262,7 +262,7 @@ def _load_via_resolved_artifacts(
     load_kwargs: dict[str, Any] = dict(
         config=str(config_path),
         temp=temp,
-        lsd_decode_steps=lsd_decode_steps,
+        sampler_decode_steps=sampler_decode_steps,
         eos_threshold=eos_threshold,
         quantize=quantize,
     )
@@ -277,7 +277,7 @@ def _load_via_resolved_artifacts(
 def load_pocket_tts_model(
     language: str,
     temp: float,
-    lsd_decode_steps: int,
+    sampler_decode_steps: int,
     eos_threshold: float,
     *,
     quantize: bool = False,
@@ -291,7 +291,7 @@ def load_pocket_tts_model(
     Args:
         language: Pocket TTS language config (e.g. "english", "french_24l").
         temp: Sampling temperature.
-        lsd_decode_steps: Number of LSD refinement steps per audio frame.
+        sampler_decode_steps: Number of LSD refinement steps per audio frame.
         eos_threshold: Logits-based EOS threshold.
         quantize: Whether to enable int8 quantization.
         noise_clamp: Optional noise magnitude cap.
@@ -318,7 +318,7 @@ def load_pocket_tts_model(
 
     print(
         f"[pocket_tts] Loading model — language={language!r}, "
-        f"temp={temp}, lsd_decode_steps={lsd_decode_steps}, "
+        f"temp={temp}, sampler_decode_steps={sampler_decode_steps}, "
         f"eos_threshold={eos_threshold}, quantize={quantize}, noise_clamp={noise_clamp}, "
         f"model_source={model_source!r}"
     )
@@ -328,7 +328,7 @@ def load_pocket_tts_model(
         load_kwargs, provenance = _load_via_resolved_artifacts(
             language,
             temp,
-            lsd_decode_steps,
+            sampler_decode_steps,
             eos_threshold,
             quantize=quantize,
             noise_clamp=noise_clamp,
@@ -342,7 +342,7 @@ def load_pocket_tts_model(
         load_kwargs: dict[str, Any] = dict(
             language=language,
             temp=temp,
-            lsd_decode_steps=lsd_decode_steps,
+            sampler_decode_steps=sampler_decode_steps,
             eos_threshold=eos_threshold,
             quantize=quantize,
         )
