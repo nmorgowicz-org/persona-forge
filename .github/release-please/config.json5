@@ -32,6 +32,10 @@
         {
           "type": "generic",
           "path": "src/persona_forge/__init__.py"
+        },
+        {
+          "type": "generic",
+          "path": "README.md"
         }
       ]
     }
