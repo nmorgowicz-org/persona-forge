@@ -1,2 +1,2 @@
 # Pocket TTS: lightweight CPU TTS backend
-pocket-tts==2.1.0
+pocket-tts==3.0.2
