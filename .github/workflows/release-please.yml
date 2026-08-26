@@ -46,7 +46,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          sed -i "s|persona-forge:v[0-9][0-9.]*|persona-forge:v${{ steps.release.outputs.release_semver }}|" README.md
+          sed -i "s|persona-forge:v[0-9][0-9.]*|persona-forge:v${{ steps.release.outputs.version }}|" README.md
           if git diff --quiet; then
             echo "README image tag already current; nothing to do"
           else
