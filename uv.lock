@@ -1038,16 +1038,16 @@ wheels = [
 
 [[package]]
 name = "openvino"
-version = "2026.3.0"
+version = "2026.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "openvino-telemetry" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/dd/371187173998ca980b7a53a29cf48fede4310cedd77e27a64e334b048ea2/openvino-2026.3.0-22451-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:5e1d3dc569cc1a81f4fd004ecbfdbdda0b07996af1bf87228b9f186e8497bac1", size = 31609578, upload-time = "2026-08-04T09:06:39.908Z" },
-    { url = "https://files.pythonhosted.org/packages/8c/d3/69e7083339f32621359f0bce2be3a7454db3c9a71fa7492f0a0941c00037/openvino-2026.3.0-22451-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:b7d09f20f009b9167a863f615a2b27400ce025bda8086cc72a2eb6ac3bf1d2af", size = 57480757, upload-time = "2026-08-04T09:06:44.336Z" },
-    { url = "https://files.pythonhosted.org/packages/80/61/19ac3641dcfcaee5bf9ada945579b3ab69701750e5270346633c56fdf876/openvino-2026.3.0-22451-cp313-cp313-manylinux_2_35_aarch64.whl", hash = "sha256:0b071a4e2f731ab29bb9a08bab804c326cc4893283274c352ca56fccafa44749", size = 28760034, upload-time = "2026-08-04T09:06:47.326Z" },
+    { url = "https://files.pythonhosted.org/packages/75/cc/66b460cc6266c1b4d49a458dc56ab1d10a2fd7016613010b0971330dd879/openvino-2026.3.1-22476-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:5b0acfa02cfb822de0b5a38a314ecb1c67f122b55a491a3c6eb0c4945c550d96", size = 31612322, upload-time = "2026-08-26T09:17:39.719Z" },
+    { url = "https://files.pythonhosted.org/packages/73/f9/b40f5c5921cac3906f74911ca038d28e6a2905b632e37a51289137ae1817/openvino-2026.3.1-22476-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:bb39ba741cea93277cc6c80cf7f70d1c19dea9a0f2a37f07543e0b4a7e00e0c4", size = 57510484, upload-time = "2026-08-26T09:17:43.482Z" },
+    { url = "https://files.pythonhosted.org/packages/27/0c/a430eb38645fe164928f2387d81d7214599138ca18b95a187076856243e7/openvino-2026.3.1-22476-cp313-cp313-manylinux_2_35_aarch64.whl", hash = "sha256:45304d238719b98d51a605752df8ba4696e8bcf6c4560acc00ffd676ef7e70c0", size = 28778137, upload-time = "2026-08-26T09:17:46.985Z" },
 ]
 
 [[package]]
@@ -1104,7 +1104,7 @@ wheels = [
 
 [[package]]
 name = "persona-forge"
-version = "1.2.0"
+version = "1.2.1"
 source = { virtual = "." }
 dependencies = [
     { name = "accelerate" },
@@ -1190,9 +1190,9 @@ dev = [
 ]
 export = [
     { name = "nncf", specifier = "==3.3.0" },
-    { name = "openvino", specifier = "==2026.3.0" },
+    { name = "openvino", specifier = "==2026.3.1" },
 ]
-openvino = [{ name = "openvino", specifier = "==2026.3.0" }]
+openvino = [{ name = "openvino", specifier = "==2026.3.1" }]
 
 [[package]]
 name = "pillow"

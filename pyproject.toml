@@ -53,10 +53,10 @@ dev = [
   "pyloudnorm",
 ]
 openvino = [
-  "openvino==2026.3.0",
+  "openvino==2026.3.1",
 ]
 export = [
-  "openvino==2026.3.0",
+  "openvino==2026.3.1",
   "nncf==3.3.0",
 ]
 
