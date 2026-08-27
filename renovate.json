@@ -96,12 +96,11 @@
       "allowedVersions": ">=3.13,<3.14"
     },
     {
-      "description": "Pin the actions/setup-python python-version input to 3.13.x in CI workflows — same faster-whisper blocker as the requires-python gate above. Renovate's github-actions manager resolves the `python-version:` input via the github-runners datasource (not a 'python-version' datasource, which the manager doesn't support — that's why PR #222 slipped through 3.13 -> 3.14 despite this rule existing).",
+      "description": "Pin the actions/setup-python python-version input to 3.13.x in CI workflows — same faster-whisper blocker as the requires-python gate above. Renovate's github-actions manager extracts this via extractVersionedAction: datasource github-releases, depName \"python\", but packageName \"actions/python-versions\" (constructed as `actions/${action}-versions`) — so matchPackageNames: [\"python\"] never matched (packageName != depName here), on top of the datasource being wrong (github-runners is for runner images, not this). Versioning defaults to npm-style for this dep, so the range uses npm syntax (space-separated), not pep440 comma syntax.",
       "matchManagers": ["github-actions"],
-      "matchDatasources": ["github-runners"],
-      "matchPackageNames": ["python"],
-      "versioning": "pep440",
-      "allowedVersions": ">=3.13,<3.14"
+      "matchDatasources": ["github-releases"],
+      "matchDepNames": ["python"],
+      "allowedVersions": ">=3.13 <3.14"
     }
   ]
 }
