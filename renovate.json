@@ -50,10 +50,11 @@
       "groupSlug": "docker-images"
     },
     {
-      "description": "Keep the OpenVINO export stack together",
-      "matchManagers": ["pep621"],
+      "description": "Keep the OpenVINO export stack together. openvino is declared twice (pyproject.toml pep621 dependency + requirements/requirements-openvino.txt, which the Dockerfile installs into the container) — group both managers so a bump never lands in one file without the other (PR #223/#224 split: pep621 bumped alone, requirements-openvino.txt bumped in a separate ungrouped PR, leaving the container's install file out of step).",
+      "matchManagers": ["pep621", "pip_requirements"],
       "matchPackageNames": ["openvino", "optimum-intel", "nncf"],
       "groupName": "OpenVINO stack",
+      "groupSlug": "openvino-stack",
       "automerge": false
     },
     {
@@ -95,12 +96,11 @@
       "allowedVersions": ">=3.13,<3.14"
     },
     {
-      "description": "Pin the actions/setup-python python-version input to 3.13.x in CI workflows — same faster-whisper blocker as the requires-python gate above; the github-actions manager's python-version datasource is scoped separately so it needs its own rule.",
+      "description": "Pin the actions/setup-python python-version input to 3.13.x in CI workflows — same faster-whisper blocker as the requires-python gate above. Renovate's github-actions manager extracts this via extractVersionedAction: datasource github-releases, depName \"python\", but packageName \"actions/python-versions\" (constructed as `actions/${action}-versions`) — so matchPackageNames: [\"python\"] never matched (packageName != depName here), on top of the datasource being wrong (github-runners is for runner images, not this). Versioning defaults to npm-style for this dep, so the range uses npm syntax (space-separated), not pep440 comma syntax.",
       "matchManagers": ["github-actions"],
-      "matchDatasources": ["python-version"],
-      "matchPackageNames": ["python"],
-      "versioning": "pep440",
-      "allowedVersions": ">=3.13,<3.14"
+      "matchDatasources": ["github-releases"],
+      "matchDepNames": ["python"],
+      "allowedVersions": ">=3.13 <3.14"
     }
   ]
 }
