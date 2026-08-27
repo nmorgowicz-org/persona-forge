@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.2](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.2.1...persona-forge-v1.2.2) (2026-08-27)
+
+
+### Bug Fixes
+
+* **renovate:** correct python-version datasource and group openvino across managers ([#227](https://github.com/nmorgowicz-org/persona-forge/issues/227)) ([1ae0b2d](https://github.com/nmorgowicz-org/persona-forge/commit/1ae0b2d9ed720f141287ca4e46da502a55617f8d))
+
+
+### Miscellaneous Chores
+
+* **deps:** update dependency @types/react-dom to v19.2.5 ([#225](https://github.com/nmorgowicz-org/persona-forge/issues/225)) ([85e1059](https://github.com/nmorgowicz-org/persona-forge/commit/85e1059fcf827f984300f355120a9e6938f80775))
+
 ## [1.2.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.2.0...persona-forge-v1.2.1) (2026-08-26)
 
 
