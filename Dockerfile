@@ -7,7 +7,7 @@
 # frontend bundle. Reproducing that on an arbitrary host's Python install is a real, ongoing
 # maintenance burden — the container is what makes those pins/patches invisible to users.
 # Revisit only if standalone packaging becomes a real ask (today there's a single known user).
-ARG PYTHON_IMAGE=python:3.13-slim@sha256:7ce4b6dfe35e55397b7cda544f8a13f191b7ae28dc5aad71fe664dbc9bc2623f
+ARG PYTHON_IMAGE=python:3.13-slim@sha256:881d80734ee05dca6f7f42dcb080975652a53c7eda9ba1f03bb8da31aa6a6ec2
 # Not digest-pinned like PYTHON_IMAGE below (build-stage only, never shipped in the final
 # image) — override via --build-arg if you need reproducibility guarantees for CI.
 ARG NODE_IMAGE=node:24-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
