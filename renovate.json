@@ -19,6 +19,22 @@
       "depNameTemplate": "torchaudio",
       "datasourceTemplate": "pypi",
       "versioningTemplate": "pep440"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^pyproject\\.toml$/"],
+      "matchStrings": ["override-dependencies\\s*=\\s*\\[[\\s\\S]*?\\\"torch==(?<currentValue>[^\\\"\\s]+)\\\""],
+      "depNameTemplate": "torch",
+      "datasourceTemplate": "pypi",
+      "versioningTemplate": "pep440"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^pyproject\\.toml$/"],
+      "matchStrings": ["override-dependencies\\s*=\\s*\\[[\\s\\S]*?\\\"torchaudio==(?<currentValue>[^\\\"\\s]+)\\\""],
+      "depNameTemplate": "torchaudio",
+      "datasourceTemplate": "pypi",
+      "versioningTemplate": "pep440"
     }
   ],
   "packageRules": [
