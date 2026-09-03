@@ -58,6 +58,7 @@ import {
   setActiveVoiceVariant,
   setDefaultVoiceVariant,
   trimVoiceReferenceSilence,
+  transcribeVoiceReference,
   updateVoiceSampleText,
   undoVoiceReferenceEdit,
   listProjects,
@@ -774,6 +775,7 @@ function VoiceCard({
   onDelete,
   onDuplicate,
   onSaveSampleText,
+  onTranscribe,
   onNormalize,
   onTrimSilence,
   onFixAll,
@@ -801,6 +803,7 @@ function VoiceCard({
   // changing which one is active on the source voice.
   onDuplicate: (variantFilename?: string) => Promise<VoiceMeta | null>
   onSaveSampleText: (text: string) => Promise<void>
+  onTranscribe: () => Promise<void>
   onNormalize: (voiceId: string) => Promise<void>
   onTrimSilence: (voiceId: string) => Promise<void>
   onFixAll: () => void
@@ -827,6 +830,7 @@ function VoiceCard({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(voice.sample_text)
   const [saving, setSaving] = useState(false)
+  const [transcribing, setTranscribing] = useState(false)
   const [editingAudio, setEditingAudio] = useState(false)
   const [editorAudio, setEditorAudio] = useState<string | null>(null)
   const [regionEdits, setRegionEdits] = useState<StitchPlanRegionEdit[]>([])
@@ -1278,12 +1282,29 @@ function VoiceCard({
       )}
 
        <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-         <div className="mb-1 flex items-center justify-between gap-2">
-           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-             Reference text
-           </p>
-           <span className="shrink-0 text-[10px] text-muted-foreground">{transcriptSource}</span>
-         </div>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Reference text
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              {!hasTranscript && !editing && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 gap-1 px-1.5 text-[10px] text-cyan-400 hover:bg-cyan-500/10 hover:text-cyan-300"
+                  disabled={busy || transcribing}
+                  onClick={() => {
+                    setTranscribing(true)
+                    void onTranscribe().finally(() => setTranscribing(false))
+                  }}
+                >
+                  <Wand2 className="size-3" />
+                  {transcribing ? 'Transcribing…' : 'Generate with Whisper'}
+                </Button>
+              )}
+              <span className="text-[10px] text-muted-foreground">{transcriptSource}</span>
+            </div>
+          </div>
          {editing ? (
            <textarea
              ref={inputRef}
@@ -1860,6 +1881,16 @@ export function VoiceLibraryPage() {
     }
   }
 
+  async function transcribe(voiceId: string) {
+    setError(null)
+    try {
+      await transcribeVoiceReference(voiceId)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   async function remove(voiceId: string) {
     if (!window.confirm(`Delete voice ${voiceId}? This can't be undone.`)) return
     setBusyVoiceId(voiceId)
@@ -2126,6 +2157,7 @@ export function VoiceLibraryPage() {
       autoOpenProsody={deepLinkProsodyVoiceId === voice.voice_id}
       onAutoOpenProsodyConsumed={() => setDeepLinkProsodyVoiceId(null)}
       onSaveSampleText={(text) => saveSampleText(voice.voice_id, text)}
+      onTranscribe={() => transcribe(voice.voice_id)}
       onNormalize={(voiceId) => normalize(voiceId)}
       onTrimSilence={async (voiceId) => { await trimVoiceReferenceSilence(voiceId); await refresh() }}
       onFixAll={() => fixAll(voice.voice_id)}

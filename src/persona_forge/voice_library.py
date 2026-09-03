@@ -43,6 +43,7 @@ from persona_forge.reference_analysis import calculate_quality_score
 # Fixed container-side mount point, same pattern as persona_forge.config.REF_AUDIO_PATH.
 # compose.yml binds ${VOICE_LIBRARY_PATH:-./data/voices} (host) -> this path (container).
 VOICE_LIBRARY_DIR = Path(os.getenv("VOICE_LIBRARY_DIR", "/voices"))
+ACTIVE_DEFAULT_FILE = VOICE_LIBRARY_DIR / ".active_default"
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,30 @@ _VOICE_ID_RE = re.compile(r"^vd_[0-9a-f]{12}$")
 # (no '.', '/', or leading dash/dot) so it can never contain a path separator or traversal
 # sequence, and cannot itself contain another '.' (no nested sub-IDs).
 _VARIANT_ID_RE = re.compile(r"^vd_([0-9a-f]{12})\.([a-z0-9][a-z0-9_-]{0,63})$")
+
+
+def get_active_default_voice_id() -> str | None:
+    """Return the persisted voice used by no-voice API requests, if any."""
+    try:
+        voice_id = ACTIVE_DEFAULT_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return voice_id or None
+
+
+def set_active_default_voice_id(voice_id: str) -> None:
+    """Persist the voice used by no-voice API requests."""
+    if not _is_valid_voice_id(voice_id):
+        raise ValueError(f"invalid voice_id: {voice_id!r}")
+    ACTIVE_DEFAULT_FILE.write_text(voice_id, encoding="utf-8")
+
+
+def clear_active_default_voice_id() -> None:
+    """Clear the persisted no-voice API default, if present."""
+    try:
+        ACTIVE_DEFAULT_FILE.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Could not clear active API default %s", ACTIVE_DEFAULT_FILE)
 
 
 def new_voice_id() -> str:
@@ -732,8 +757,14 @@ def set_voice_project(
     return meta
 
 
-def update_voice(voice_id: str, *, sample_text: str) -> dict[str, Any] | None:
-    """Patch a saved voice's reference transcript in place (metadata only, no re-clone).
+def update_voice(
+    voice_id: str,
+    *,
+    sample_text: str,
+    sample_text_source: str | None = None,
+    asr: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Patch a saved voice's reference transcript and optional ASR metadata in place.
 
     Reference text must match what's actually spoken in reference.wav for cloning quality
     (see app.py's omnivoice_save), so users need to fix typos/spacing/accent-spelling here
@@ -745,8 +776,10 @@ def update_voice(voice_id: str, *, sample_text: str) -> dict[str, Any] | None:
         return None
     meta.pop("wav_path", None)
     meta["sample_text"] = sample_text
-    meta["sample_text_source"] = "user"
-    meta["needs_review"] = False
+    meta["sample_text_source"] = sample_text_source or "user"
+    meta["needs_review"] = False if asr is None else asr.get("severity") not in (None, "ok")
+    if asr is not None:
+        meta["asr"] = asr
     voice_dir = _voice_dir(voice_id)
     (voice_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta

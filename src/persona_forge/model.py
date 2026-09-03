@@ -339,6 +339,48 @@ def _resolve_reference_text(profile: ModelProfile) -> tuple[str | None, str, dic
     return None, "none", result
 
 
+def _resolve_library_voice_clone_inputs(voice_id: str) -> tuple[str, str]:
+    """Return the current reference audio and transcript for a saved Qwen voice."""
+    from persona_forge import voice_library
+
+    meta = voice_library.get_voice(voice_id)
+    if meta is None:
+        raise ValueError(f"voice_id not found: {voice_id!r}")
+    ref_audio = (meta.get("wav_path") or "").strip()
+    ref_text = (meta.get("sample_text") or "").strip()
+    if not ref_audio or not os.path.isfile(ref_audio):
+        raise FileNotFoundError(f"Voice {voice_id!r} has no readable reference audio")
+    if not ref_text:
+        raise ValueError(
+            f"Voice {voice_id!r} has no reference transcript. "
+            "Generate a transcript with Whisper or edit the reference text before activating it."
+        )
+    return ref_audio, ref_text
+
+
+def activate_default_voice_from_library(voice_id: str) -> None:
+    """Hot-swap the no-voice Qwen API default and persist the selected voice."""
+    global voice_clone_prompt
+
+    if model is None:
+        raise RuntimeError("Model is not loaded")
+    if getattr(ov_runtime, "codec_released", False):
+        raise RuntimeError(
+            "The PyTorch codec encoder is not available for runtime voice activation. "
+            "Restart with OPENVINO_KEEP_CODEC_ENCODER=1."
+        )
+    ref_audio, ref_text = _resolve_library_voice_clone_inputs(voice_id)
+    voice_clone_prompt = model.create_voice_clone_prompt(
+        ref_audio=ref_audio,
+        ref_text=ref_text,
+        x_vector_only_mode=False,
+    )
+    from persona_forge import voice_library
+
+    voice_library.set_active_default_voice_id(voice_id)
+    print(f"[app_worker] Activated library voice {voice_id!r} as the Qwen API default.", flush=True)
+
+
 def load_model(profile: ModelProfile | None = None):
     global model, voice_clone_prompt, ov_runtime, active_profile
     global MODEL_ID, OV_MODEL_DIR, OPENVINO_MAIN_STATEFUL_MODEL, OPENVINO_PREDICTOR_STATEFUL_MODEL
@@ -347,6 +389,7 @@ def load_model(profile: ModelProfile | None = None):
     global TORCH_DTYPE, TORCH_DTYPE_NAME, OPENVINO_LOW_CPU_MEM_USAGE
 
     profile = profile or BASE_PROFILE
+    from persona_forge import voice_library
 
     # Backend can change without restarting the worker.  Do not retain the BF16
     # load policy selected for OpenVINO when loading the pure-PyTorch CPU path.
@@ -527,7 +570,36 @@ def load_model(profile: ModelProfile | None = None):
             REF_TEXT_SOURCE = ref_text_source
             _ref_text_validation_result = ref_text_result
 
-            if profile.ref_audio and effective_ref_text:
+            # A saved voice activated through the Voice Library is the persisted default
+            # for no-voice Qwen API requests.  Resolve it after the model is loaded so the
+            # selection survives a restart and does not depend on REF_AUDIO_PATH.
+            active_default_id = voice_library.get_active_default_voice_id()
+            active_default_built = False
+            if active_default_id:
+                try:
+                    active_ref_audio, active_ref_text = _resolve_library_voice_clone_inputs(
+                        active_default_id
+                    )
+                    print(
+                        f"[app_worker] Building Qwen API default from saved voice "
+                        f"{active_default_id!r}...",
+                        flush=True,
+                    )
+                    voice_clone_prompt = model.create_voice_clone_prompt(
+                        ref_audio=active_ref_audio,
+                        ref_text=active_ref_text,
+                        x_vector_only_mode=False,
+                    )
+                    active_default_built = True
+                except (ValueError, FileNotFoundError) as exc:
+                    print(
+                        f"[app_worker] Clearing unusable saved API default "
+                        f"{active_default_id!r}: {exc}",
+                        flush=True,
+                    )
+                    voice_library.clear_active_default_voice_id()
+
+            if not active_default_built and profile.ref_audio and effective_ref_text:
                 print(
                     f"[app_worker] Model loaded. building voice clone prompt "
                     f"(ref_text_source={ref_text_source})...",
