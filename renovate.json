@@ -75,14 +75,14 @@
     },
     {
       "description": "Track CPU Torch packages together and require compatibility review",
-      "matchManagers": ["custom.regex", "pep621"],
+      "matchManagers": ["custom.regex", "pep621", "uv"],
       "matchPackageNames": ["torch", "torchaudio"],
       "groupName": "PyTorch CPU stack",
       "automerge": false
     },
     {
       "description": "Hold Torch below 2.14 until the complete pinned CPU/Qwen/OpenVINO stack is deliberately qualified; allow compatible 2.13.x maintenance updates",
-      "matchManagers": ["custom.regex", "pep621"],
+      "matchManagers": ["custom.regex", "pep621", "uv"],
       "matchPackageNames": ["torch"],
       "allowedVersions": "<2.14.0"
     },
