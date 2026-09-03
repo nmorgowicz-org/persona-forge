@@ -502,3 +502,29 @@ def test_ensure_mounted_ref_voice_replaces_changed_mount_and_resets_current(tmp_
     assert meta["sample_text"] == "second transcript"
     assert meta["asr"]["severity"] == "warn"
     assert voice_library.is_mounted_or_readonly_reference(voice_id)
+
+
+def test_ensure_mounted_ref_voice_never_replaces_independent_reserved_voice(tmp_path):
+    voice_library.VOICE_LIBRARY_DIR = tmp_path / "library"
+    voice_id = voice_library.MOUNTED_REF_VOICE_ID
+    voice_dir = voice_library._voice_dir(voice_id)
+    voice_dir.mkdir(parents=True)
+    rosie_audio = _sine_wav_bytes(amplitude=0.05)
+    (voice_dir / "reference.wav").write_bytes(rosie_audio)
+    (voice_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "voice_id": voice_id,
+                "description": "Rosie",
+                "sample_text": "Welcome to Rosie’s.",
+                "source": "legacy",
+            }
+        ),
+        encoding="utf-8",
+    )
+    ref_audio = tmp_path / "mounted-reference.wav"
+    ref_audio.write_bytes(_sine_wav_bytes(amplitude=0.15))
+
+    assert voice_library.ensure_mounted_ref_voice(str(ref_audio), sample_text="mounted") is None
+    assert (voice_dir / "reference.wav").read_bytes() == rosie_audio
+    assert not (voice_dir / "original.wav").exists()

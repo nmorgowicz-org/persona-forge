@@ -46,7 +46,9 @@ VOICE_LIBRARY_DIR = Path(os.getenv("VOICE_LIBRARY_DIR", "/voices"))
 ACTIVE_DEFAULT_FILE = VOICE_LIBRARY_DIR / ".active_default"
 # The mounted REF_AUDIO is materialized under this stable ID so diagnostics and UI
 # actions can refer to the same library record across restarts.
-MOUNTED_REF_VOICE_ID = "vd_000000000001"
+# Keep the startup-mounted reference separate from historical/user-created voices.
+# vd_000000000001 is Rosie’s original library voice and must never be repurposed.
+MOUNTED_REF_VOICE_ID = "vd_000000000000"
 
 logger = logging.getLogger(__name__)
 
@@ -1141,6 +1143,23 @@ def ensure_mounted_ref_voice(
                 updated["needs_review"] = asr.get("severity") not in (None, "ok")
             meta_path.write_text(json.dumps(updated, indent=2), encoding="utf-8")
             return MOUNTED_VOICE_ID
+
+        # A reserved ID must not silently consume an independent voice if it already
+        # exists on a persisted host volume (including legacy records without meta.json).
+        # Returning None is non-fatal; the mounted REF_AUDIO remains usable directly.
+        if existing is not None and existing.get("source") != "mounted_ref_audio":
+            logger.warning(
+                "Refusing to replace independent voice %s while registering mounted reference",
+                MOUNTED_VOICE_ID,
+            )
+            return None
+        if existing is None and (voice_dir / "reference.wav").is_file():
+            logger.warning(
+                "Refusing to replace legacy voice %s while registering mounted reference",
+                MOUNTED_VOICE_ID,
+            )
+            return None
+
         voice_dir.mkdir(parents=True, exist_ok=True)
         # Bridge to the actual mounted physical file. The mount can change between
         # launches (or while developing locally), so replace old links safely instead
