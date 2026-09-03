@@ -1,5 +1,5 @@
 import { useAppStore } from '@/store'
-import { AlertTriangle, ArrowRight, Loader2 } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Info, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 export function HealthStatusBanner() {
@@ -58,30 +58,40 @@ export function HealthStatusBanner() {
       const activeVoiceDiffers = Boolean(
         activeApiVoiceId && voiceId && activeApiVoiceId !== voiceId,
       )
+      const affectsActiveGeneration = !activeVoiceDiffers
       const textSource = refTextValidation.textSource
       const audioPath = refTextValidation.audioPath
       const configuredText = refTextValidation.configuredText
-      const mismatchDetail = voiceId
-        ? `Reference text does not match the mounted audio for ${voiceId}.`
-        : 'Reference text may not match the mounted reference audio.'
+      const mismatchDetail = voiceId && activeVoiceDiffers
+        ? `Mounted reference configuration needs review for ${voiceId}.`
+        : voiceId
+          ? `Reference text does not match the mounted audio for ${voiceId}.`
+          : 'Reference text may not match the mounted reference audio.'
 
       return (
         <div
           className={
             'flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-4 py-1.5 text-xs ' +
-            (isFail
+            (affectsActiveGeneration && isFail
               ? 'border-destructive/30 bg-destructive/10 text-destructive'
-              : 'border-warning/30 bg-warning/10 text-warning')
+              : affectsActiveGeneration
+                ? 'border-warning/30 bg-warning/10 text-warning'
+                : 'border-border bg-muted/30 text-muted-foreground')
           }
         >
-          <AlertTriangle className="size-3 shrink-0" />
+          {affectsActiveGeneration ? (
+            <AlertTriangle className="size-3 shrink-0" />
+          ) : (
+            <Info className="size-3 shrink-0" />
+          )}
           <div className="min-w-0 flex-1 leading-tight">
             <span className="font-medium">{mismatchDetail}</span>{' '}
             <span className="opacity-80">
-              {textSource === 'env'
-                ? 'The configured REF_TEXT belongs to different audio.'
-                : 'Review or regenerate the transcript before cloning.'}
-              {activeVoiceDiffers && ` The active API default is ${activeApiVoiceId}.`}
+              {activeVoiceDiffers
+                ? `It is not the active API voice, so current no-voice generation uses ${activeApiVoiceId}.`
+                : textSource === 'env'
+                  ? 'The configured REF_TEXT belongs to different audio.'
+                  : 'Review or regenerate the transcript before cloning.'}
             </span>
             {(audioPath || configuredText || refTextValidation.whisperTranscript) && (
               <span className="mt-0.5 block truncate text-[10px] opacity-70" title={configuredText || undefined}>

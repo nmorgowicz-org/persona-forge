@@ -72,7 +72,7 @@ test.describe('health banner', () => {
 
     await page.goto('/')
     await expect(page.getByTestId('health-review-voice')).toBeVisible(CLEAR_TIMEOUT)
-    await expect(page.getByText(`Reference text does not match the mounted audio for ${voiceId}.`)).toBeVisible()
+    await expect(page.getByText(`Mounted reference configuration needs review for ${voiceId}.`)).toBeVisible()
 
     await page.getByTestId('health-review-voice').click()
     const card = page.locator(`[data-voice-id="${voiceId}"]`)

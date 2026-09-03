@@ -1142,13 +1142,23 @@ def ensure_mounted_ref_voice(
             meta_path.write_text(json.dumps(updated, indent=2), encoding="utf-8")
             return MOUNTED_VOICE_ID
         voice_dir.mkdir(parents=True, exist_ok=True)
-        # Bridge to the actual mounted physical file
-        (voice_dir / "original.wav").symlink_to(ref_audio_path)
-        # Also set the current pointer to original
-        (voice_dir / "current.wav").symlink_to(voice_dir / "original.wav")
+        # Bridge to the actual mounted physical file. The mount can change between
+        # launches (or while developing locally), so replace old links safely instead
+        # of letting FileExistsError leave a stale library recording in place.
+        original_wav = voice_dir / "original.wav"
+        current_wav = voice_dir / "current.wav"
+        for link in (original_wav, current_wav):
+            if link.is_symlink():
+                link.unlink()
+            elif link.exists():
+                raise OSError(f"refusing to replace non-symlink mounted voice file: {link}")
+        original_wav.symlink_to(ref_audio_path)
+        # Any existing prosody variants belong to the old recording; reset the served
+        # pointer to the new original while leaving those files available for cleanup.
+        current_wav.symlink_to(original_wav)
 
         # Perform reference analysis and quality gating
-        quality_score, quality_warnings, metrics = calculate_quality_score(voice_dir / "original.wav", transcript=sample_text)
+        quality_score, quality_warnings, metrics = calculate_quality_score(original_wav, transcript=sample_text)
 
         meta = {
             "voice_id": MOUNTED_VOICE_ID,
