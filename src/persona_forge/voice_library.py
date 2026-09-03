@@ -44,6 +44,9 @@ from persona_forge.reference_analysis import calculate_quality_score
 # compose.yml binds ${VOICE_LIBRARY_PATH:-./data/voices} (host) -> this path (container).
 VOICE_LIBRARY_DIR = Path(os.getenv("VOICE_LIBRARY_DIR", "/voices"))
 ACTIVE_DEFAULT_FILE = VOICE_LIBRARY_DIR / ".active_default"
+# The mounted REF_AUDIO is materialized under this stable ID so diagnostics and UI
+# actions can refer to the same library record across restarts.
+MOUNTED_REF_VOICE_ID = "vd_000000000001"
 
 logger = logging.getLogger(__name__)
 
@@ -1112,7 +1115,7 @@ def ensure_mounted_ref_voice(
     Idempotent: skips if hash matches; updates WAV+meta if hash changed.
     Returns voice_id if created/updated, else None on any error (non-fatal).
     """
-    MOUNTED_VOICE_ID = "vd_000000000001"
+    MOUNTED_VOICE_ID = MOUNTED_REF_VOICE_ID
     if not ref_audio_path or not os.path.isfile(ref_audio_path):
         return None
     try:

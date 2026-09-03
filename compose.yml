@@ -113,7 +113,10 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 120s
+      # Qwen first-run downloads and model initialization can take several
+      # minutes, especially on native Apple Silicon or a cold HF cache.
+      # Keep this aligned with the image healthcheck's 10-minute allowance.
+      start_period: 10m
 
   # Unified export service: exports both Base and VoiceDesign IR in one run.
   export:

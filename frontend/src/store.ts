@@ -134,9 +134,17 @@ interface StoreState {
         severity: string | null
         matchScore: number | null
         whisperTranscript: string | null
+        voiceId: string | null
+        audioPath: string | null
+        textSource: string | null
+        configuredText: string | null
+        activeApiVoiceId: string | null
       }
     | null
   setRefTextValidation: (v: StoreState['refTextValidation']) => void
+  // Voice Library card to focus after a diagnostic action in a global banner.
+  voiceLibraryFocusVoiceId: string | null
+  setVoiceLibraryFocusVoiceId: (voiceId: string | null) => void
 
   setPage: (page: Page) => void
   setTheme: (theme: Theme) => void
@@ -363,6 +371,7 @@ export const useAppStore = create<StoreState>((set) => ({
     reconfigInProgress: false,
     pocketTtsVoiceCloningMessage: null,
     refTextValidation: null,
+    voiceLibraryFocusVoiceId: null,
 
     setPage: (page) => set({ page }),
   setTheme: (theme) => {
@@ -578,6 +587,7 @@ export const useAppStore = create<StoreState>((set) => ({
   setOvStitchedBlob: (v) => set({ ovStitchedBlob: v }),
   setOvSavedVoiceId: (v) => set({ ovSavedVoiceId: v }),
   setDeepLinkProsodyVoiceId: (v) => set({ deepLinkProsodyVoiceId: v }),
+  setVoiceLibraryFocusVoiceId: (voiceId) => set({ voiceLibraryFocusVoiceId: voiceId }),
   setOvCurrentJobId: (v) => set({ ovCurrentJobId: v }),
   setOvJobTotalSegments: (v) => set({ ovJobTotalSegments: v }),
   setOvJobStatus: (v) => set({ ovJobStatus: v }),
@@ -730,12 +740,28 @@ const PROGRESS_POLL_MS = 700
             whisper_transcript?: string
           }
         | null
+      const rtd = data.ref_text_diagnostic as
+        | {
+            voice_id?: string
+            audio_path?: string
+            text_source?: string
+            configured_text?: string | null
+            active_api_voice_id?: string | null
+          }
+        | null
       if (rvt) {
         store.setRefTextValidation({
           severity: rvt.severity || null,
           matchScore: rvt.match_score ?? null,
           whisperTranscript: rvt.whisper_transcript || null,
+          voiceId: rtd?.voice_id || null,
+          audioPath: rtd?.audio_path || null,
+          textSource: rtd?.text_source || null,
+          configuredText: rtd?.configured_text || null,
+          activeApiVoiceId: rtd?.active_api_voice_id || null,
         })
+      } else if (store.refTextValidation !== null) {
+        store.setRefTextValidation(null)
       }
     } catch {
       // Transient; will retry

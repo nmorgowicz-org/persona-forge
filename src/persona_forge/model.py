@@ -626,7 +626,7 @@ def load_model(profile: ModelProfile | None = None):
                     print(f"[prompt_diag] reference prompt saved: {manifest_path}", flush=True)
                     parameter_path = dump_talker_parameter_manifest(model.model.talker, _prompt_dump_dir)
                     print(f"[prompt_diag] talker parameters saved: {parameter_path}", flush=True)
-            else:
+            elif not active_default_built:
                 print(
                     "[app_worker] Model loaded without default reference voice. "
                     "Add/generate a voice or mount REF_AUDIO before generation.",
@@ -842,6 +842,31 @@ def get_app_version() -> str:
 
 def health_state() -> dict[str, Any]:
     """Return JSON-serializable model and backend readiness state."""
+    # Keep the reference-text warning actionable.  REF_AUDIO is also registered as
+    # a first-class library voice during startup, so expose the stable record ID and
+    # the persisted API default separately.  They can legitimately be different:
+    # an operator may have selected a saved voice while an old REF_AUDIO/REF_TEXT
+    # pair remains mounted for fallback or inspection.
+    reference_diagnostic = None
+    try:
+        from persona_forge import voice_library
+
+        active_api_voice_id = voice_library.get_active_default_voice_id()
+        if REF_AUDIO and os.path.isfile(REF_AUDIO):
+            reference_diagnostic = {
+                "voice_id": voice_library.MOUNTED_REF_VOICE_ID,
+                "audio_path": REF_AUDIO,
+                "text_source": REF_TEXT_SOURCE,
+                "configured_text": REF_TEXT if REF_TEXT_SOURCE == "env" else None,
+                "active_api_voice_id": active_api_voice_id,
+                "is_active_api_voice": active_api_voice_id
+                == voice_library.MOUNTED_REF_VOICE_ID,
+            }
+    except Exception:
+        # Health must remain available even if the optional library mount is absent
+        # or unreadable during startup.
+        pass
+
     if _startup_failed:
         return {
             "status": "error",
@@ -850,6 +875,10 @@ def health_state() -> dict[str, Any]:
             "backend": TTS_BACKEND,
             "resolved_backend": TTS_BACKEND,
             "error": _startup_error,
+            "ref_audio": REF_AUDIO,
+            "ref_text_source": REF_TEXT_SOURCE,
+            "ref_text_validation": _ref_text_validation_result,
+            "ref_text_diagnostic": reference_diagnostic,
         }
 
     idle_unload_seconds = IDLE_UNLOAD_SECONDS if IDLE_UNLOAD_SECONDS > 0 else None
@@ -879,6 +908,7 @@ def health_state() -> dict[str, Any]:
         "ref_audio": REF_AUDIO,
         "ref_text_source": REF_TEXT_SOURCE,
         "ref_text_validation": _ref_text_validation_result,
+        "ref_text_diagnostic": reference_diagnostic,
         "mount": _health_mount_status(),
         "timestamp": time.time(),
     }

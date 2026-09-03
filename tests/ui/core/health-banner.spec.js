@@ -49,4 +49,34 @@ test.describe('health banner', () => {
     // After the reset, the bar clears on the next poll.
     await expect(page.getByText('Model failed to load')).toBeHidden(CLEAR_TIMEOUT)
   })
+
+  test('reference mismatch identifies and focuses the affected library voice', async ({ page }) => {
+    const voiceId = 'vd_c66abd9c8eb0'
+    await page.route('**/health', async (route) => {
+      const response = await route.fetch()
+      const data = await response.json()
+      data.ref_text_validation = {
+        severity: 'fail',
+        match_score: 0.12,
+        whisper_transcript: 'What the mounted audio actually says.',
+      }
+      data.ref_text_diagnostic = {
+        voice_id: voiceId,
+        audio_path: '/voice/reference.wav',
+        text_source: 'env',
+        configured_text: 'Text from a different voice.',
+        active_api_voice_id: 'vd_dba466fcad17',
+      }
+      await route.fulfill({ response, json: data })
+    })
+
+    await page.goto('/')
+    await expect(page.getByTestId('health-review-voice')).toBeVisible(CLEAR_TIMEOUT)
+    await expect(page.getByText(`Reference text does not match the mounted audio for ${voiceId}.`)).toBeVisible()
+
+    await page.getByTestId('health-review-voice').click()
+    const card = page.locator(`[data-voice-id="${voiceId}"]`)
+    await expect(card).toBeVisible(CLEAR_TIMEOUT)
+    await expect(card).toBeFocused()
+  })
 })

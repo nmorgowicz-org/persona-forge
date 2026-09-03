@@ -788,6 +788,8 @@ function VoiceCard({
   onRefresh,
   autoOpenProsody,
   onAutoOpenProsodyConsumed,
+  focusOnMount,
+  onFocusOnMountConsumed,
   projects,
   onSetProject,
 }: {
@@ -822,6 +824,9 @@ function VoiceCard({
   // prosody workflow instead of having to find the new voice manually.
   autoOpenProsody?: boolean
   onAutoOpenProsodyConsumed?: () => void
+  // True when a health diagnostic navigated here and identified this exact voice.
+  focusOnMount?: boolean
+  onFocusOnMountConsumed?: () => void
   projects: Project[]
   onSetProject: (voiceId: string, projectId: string) => void
 }) {
@@ -877,6 +882,7 @@ function VoiceCard({
   // hover-lift mid-interaction. Pin the lift on while either popover is open to stop that.
   const [prosodyPopoverOpen, setProsodyPopoverOpen] = useState(false)
   const [moreActionsPopoverOpen, setMoreActionsPopoverOpen] = useState(false)
+  const [deepLinkFocused, setDeepLinkFocused] = useState(false)
   const cardRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -888,6 +894,20 @@ function VoiceCard({
     // store flag so this doesn't retrigger if the parent re-renders the card.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenProsody])
+
+  useEffect(() => {
+    if (!focusOnMount) return
+    const card = cardRef.current
+    if (!card) return
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    card.focus({ preventScroll: true })
+    setDeepLinkFocused(true)
+    onFocusOnMountConsumed?.()
+    const timer = window.setTimeout(() => setDeepLinkFocused(false), 3500)
+    return () => window.clearTimeout(timer)
+    // The parent consumes the one-shot target immediately after this card mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusOnMount])
 
   // One place to render a prosody preview, so the Preview button and per-marker nudges
   // stay in sync. Passing an explicit overrides map avoids stale-state races on rapid drags.
@@ -941,6 +961,9 @@ function VoiceCard({
       : 'Transcript is ready for Qwen backends.')
 
   const hasTranscript = Boolean((voice.sample_text || '').trim())
+  const hasWhisperReplacement = Boolean(
+    whisperTranscript && whisperTranscript !== voice.sample_text.trim(),
+  )
   const triage = metrics?.triage ?? null
   // Whether the current mode will actually attempt forced alignment: explicit Precise,
   // or Auto when triage judged the clip blended. Natural never aligns.
@@ -1162,10 +1185,15 @@ function VoiceCard({
     <motion.div
       ref={cardRef}
       data-testid="voice-card"
+      data-voice-id={voice.voice_id}
+      tabIndex={-1}
       initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: reducedMotion || !(prosodyPopoverOpen || moreActionsPopoverOpen) ? 0 : -2 }}
       whileHover={reducedMotion ? {} : { y: -2 }}
-      className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm transition-shadow duration-200 hover:border-border/80 hover:shadow-lg"
+      className={cn(
+        'flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm transition-shadow duration-200 hover:border-border/80 hover:shadow-lg',
+        deepLinkFocused && 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-background',
+      )}
     >
 
       <div className="space-y-1.5">
@@ -1287,7 +1315,7 @@ function VoiceCard({
               Reference text
             </p>
             <div className="flex shrink-0 items-center gap-2">
-              {!hasTranscript && !editing && (
+              {(!hasTranscript || hasWhisperReplacement) && !editing && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -1299,7 +1327,11 @@ function VoiceCard({
                   }}
                 >
                   <Wand2 className="size-3" />
-                  {transcribing ? 'Transcribing…' : 'Generate with Whisper'}
+                  {transcribing
+                    ? 'Transcribing…'
+                    : hasWhisperReplacement
+                      ? 'Use Whisper transcript'
+                      : 'Generate with Whisper'}
                 </Button>
               )}
               <span className="text-[10px] text-muted-foreground">{transcriptSource}</span>
@@ -1698,6 +1730,8 @@ export function VoiceLibraryPage() {
   const setOvStitchPlanDsp = useAppStore((s) => s.setOvStitchPlanDsp)
   const deepLinkProsodyVoiceId = useAppStore((s) => s.deepLinkProsodyVoiceId)
   const setDeepLinkProsodyVoiceId = useAppStore((s) => s.setDeepLinkProsodyVoiceId)
+  const voiceLibraryFocusVoiceId = useAppStore((s) => s.voiceLibraryFocusVoiceId)
+  const setVoiceLibraryFocusVoiceId = useAppStore((s) => s.setVoiceLibraryFocusVoiceId)
 
   async function refresh() {
     const [v, segs, projs] = await Promise.all([
@@ -2156,6 +2190,8 @@ export function VoiceLibraryPage() {
       onDuplicate={(variantFilename) => duplicate(voice.voice_id, variantFilename)}
       autoOpenProsody={deepLinkProsodyVoiceId === voice.voice_id}
       onAutoOpenProsodyConsumed={() => setDeepLinkProsodyVoiceId(null)}
+      focusOnMount={voiceLibraryFocusVoiceId === voice.voice_id}
+      onFocusOnMountConsumed={() => setVoiceLibraryFocusVoiceId(null)}
       onSaveSampleText={(text) => saveSampleText(voice.voice_id, text)}
       onTranscribe={() => transcribe(voice.voice_id)}
       onNormalize={(voiceId) => normalize(voiceId)}

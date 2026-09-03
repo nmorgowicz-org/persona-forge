@@ -1,5 +1,6 @@
 import { useAppStore } from '@/store'
-import { AlertTriangle, Loader2 } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Loader2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 export function HealthStatusBanner() {
   const serviceStarted = useAppStore((s) => s.serviceStarted)
@@ -9,6 +10,8 @@ export function HealthStatusBanner() {
   const page = useAppStore((s) => s.page)
   const designEngine = useAppStore((s) => s.designEngine)
   const refTextValidation = useAppStore((s) => s.refTextValidation)
+  const setPage = useAppStore((s) => s.setPage)
+  const setVoiceLibraryFocusVoiceId = useAppStore((s) => s.setVoiceLibraryFocusVoiceId)
 
   // Any in-flight model load (cold boot, post-boot swap-back, or OmniVoice load) gets the
   // top notification bar, on any page, until the server stops reporting loadingMessage.
@@ -50,28 +53,61 @@ export function HealthStatusBanner() {
         refTextValidation.severity === 'warn')
     ) {
       const isFail = refTextValidation.severity === 'fail'
+      const voiceId = refTextValidation.voiceId
+      const activeApiVoiceId = refTextValidation.activeApiVoiceId
+      const activeVoiceDiffers = Boolean(
+        activeApiVoiceId && voiceId && activeApiVoiceId !== voiceId,
+      )
+      const textSource = refTextValidation.textSource
+      const audioPath = refTextValidation.audioPath
+      const configuredText = refTextValidation.configuredText
+      const mismatchDetail = voiceId
+        ? `Reference text does not match the mounted audio for ${voiceId}.`
+        : 'Reference text may not match the mounted reference audio.'
 
       return (
         <div
           className={
-            'flex items-center gap-2 border-b px-4 py-1.5 text-xs ' +
+            'flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-4 py-1.5 text-xs ' +
             (isFail
               ? 'border-destructive/30 bg-destructive/10 text-destructive'
               : 'border-warning/30 bg-warning/10 text-warning')
           }
         >
           <AlertTriangle className="size-3 shrink-0" />
-          <div className="min-w-0 flex-1">
-            <span className="inline-block truncate">
-              {isFail
-                ? 'The reference text does not match the reference audio. This will degrade speech quality.'
-                : 'Reference text may need review; speech quality can be affected.'}
+          <div className="min-w-0 flex-1 leading-tight">
+            <span className="font-medium">{mismatchDetail}</span>{' '}
+            <span className="opacity-80">
+              {textSource === 'env'
+                ? 'The configured REF_TEXT belongs to different audio.'
+                : 'Review or regenerate the transcript before cloning.'}
+              {activeVoiceDiffers && ` The active API default is ${activeApiVoiceId}.`}
             </span>
+            {(audioPath || configuredText || refTextValidation.whisperTranscript) && (
+              <span className="mt-0.5 block truncate text-[10px] opacity-70" title={configuredText || undefined}>
+                {audioPath && `Audio: ${audioPath}`}
+                {textSource && ` · Text source: ${textSource === 'env' ? 'REF_TEXT' : textSource}`}
+                {configuredText && ` · Configured: “${configuredText}”`}
+                {refTextValidation.whisperTranscript &&
+                  ` · Whisper heard: “${refTextValidation.whisperTranscript}”`}
+              </span>
+            )}
           </div>
-          {isFail && (
-            <span className="shrink-0 text-[10px] opacity-70">
-              Review it in Voice Library.
-            </span>
+          {voiceId && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              data-testid="health-review-voice"
+              className="h-6 shrink-0 gap-1 px-1.5 text-[10px] underline underline-offset-2"
+              onClick={() => {
+                setVoiceLibraryFocusVoiceId(voiceId)
+                setPage('voice-library')
+              }}
+            >
+              Review {voiceId}
+              <ArrowRight className="size-3" />
+            </Button>
           )}
         </div>
       )

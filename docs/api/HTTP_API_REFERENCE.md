@@ -304,6 +304,11 @@ Response (JSON):
   - `reconfig_in_progress` — whether a runtime config reload is in progress.
   - `omnivoice_loaded` — whether the OmniVoice checkpoint is resident.
   - `loading_message` — present if service is still loading (e.g. "Loading model…").
+  - `ref_text_validation` — startup validation for the configured reference audio/text.
+  - `ref_text_diagnostic` — when `REF_AUDIO` is a readable file, identifies the mounted
+    library voice (`voice_id`), `audio_path`, text source, and persisted
+    `active_api_voice_id`. This lets clients link a mismatch to the exact Voice Library
+    record; the active API voice may legitimately be a different saved voice.
 
 Important notes:
 
