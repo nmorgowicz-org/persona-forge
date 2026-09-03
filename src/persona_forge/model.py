@@ -854,7 +854,8 @@ def health_state() -> dict[str, Any]:
         active_api_voice_id = voice_library.get_active_default_voice_id()
         if REF_AUDIO and os.path.isfile(REF_AUDIO):
             reference_diagnostic = {
-                "voice_id": voice_library.MOUNTED_REF_VOICE_ID,
+                "voice_id": voice_library.find_voice_id_for_audio(REF_AUDIO)
+                or voice_library.MOUNTED_REF_VOICE_ID,
                 "audio_path": REF_AUDIO,
                 "text_source": REF_TEXT_SOURCE,
                 "configured_text": REF_TEXT if REF_TEXT_SOURCE == "env" else None,

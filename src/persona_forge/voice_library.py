@@ -1105,6 +1105,56 @@ def compute_variant_metrics(voice_id: str, variant_filename: str) -> dict[str, A
     }
 
 
+def _find_voice_by_audio_hash(file_hash: str, *, include_mounted: bool = False) -> str | None:
+    """Find a persisted voice whose stored master/current audio matches ``file_hash``."""
+    if not VOICE_LIBRARY_DIR.is_dir():
+        return None
+
+    import hashlib
+
+    for entry in sorted(VOICE_LIBRARY_DIR.iterdir(), key=lambda path: path.name):
+        if not entry.is_dir() or not _VOICE_ID_RE.match(entry.name):
+            continue
+        meta: dict[str, Any] = {}
+        meta_path = entry / "meta.json"
+        if meta_path.is_file():
+            try:
+                loaded = json.loads(meta_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    meta = loaded
+            except (OSError, json.JSONDecodeError):
+                continue
+        if meta.get("source") == "mounted_ref_audio" and not include_mounted:
+            continue
+        if meta.get("sha256") == file_hash:
+            return entry.name
+        for filename in ("current.wav", "original.wav", "reference.wav"):
+            audio_path = entry / filename
+            if not audio_path.is_file():
+                continue
+            try:
+                if hashlib.sha256(audio_path.read_bytes()).hexdigest() == file_hash:
+                    return entry.name
+            except OSError:
+                continue
+    return None
+
+
+def find_voice_id_for_audio(ref_audio_path: str) -> str | None:
+    """Return the existing voice ID matching a mounted reference audio file, if any."""
+    if not ref_audio_path or not os.path.isfile(ref_audio_path):
+        return None
+    try:
+        import hashlib
+
+        file_hash = hashlib.sha256(Path(ref_audio_path).read_bytes()).hexdigest()
+    except OSError:
+        return None
+    return _find_voice_by_audio_hash(file_hash) or _find_voice_by_audio_hash(
+        file_hash, include_mounted=True
+    )
+
+
 def ensure_mounted_ref_voice(
     ref_audio_path: str,
     sample_text: str | None = None,
@@ -1126,6 +1176,15 @@ def ensure_mounted_ref_voice(
         if len(data) == 0:
             return None
         file_hash = hashlib.sha256(data).hexdigest()
+
+        existing_voice_id = _find_voice_by_audio_hash(file_hash)
+        if existing_voice_id:
+            logger.info(
+                "Mounted reference matches existing voice %s; skipping duplicate registration",
+                existing_voice_id,
+            )
+            return existing_voice_id
+
         voice_dir = _voice_dir(MOUNTED_VOICE_ID)
         meta_path = voice_dir / "meta.json"
         existing = None

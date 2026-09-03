@@ -528,3 +528,22 @@ def test_ensure_mounted_ref_voice_never_replaces_independent_reserved_voice(tmp_
     assert voice_library.ensure_mounted_ref_voice(str(ref_audio), sample_text="mounted") is None
     assert (voice_dir / "reference.wav").read_bytes() == rosie_audio
     assert not (voice_dir / "original.wav").exists()
+
+
+def test_ensure_mounted_ref_voice_reuses_existing_voice_with_matching_audio(tmp_path):
+    voice_library.VOICE_LIBRARY_DIR = tmp_path / "library"
+    rosie_audio = _sine_wav_bytes(amplitude=0.05)
+    saved = voice_library.save_voice(
+        rosie_audio,
+        description="Rosie (Original)",
+        sample_text="Welcome to Rosie’s.",
+        language="en",
+    )
+    ref_audio = tmp_path / "reference.wav"
+    ref_audio.write_bytes(rosie_audio)
+
+    assert voice_library.ensure_mounted_ref_voice(str(ref_audio), sample_text="mounted") == saved[
+        "voice_id"
+    ]
+    assert not voice_library._voice_dir(voice_library.MOUNTED_REF_VOICE_ID).exists()
+    assert voice_library.find_voice_id_for_audio(str(ref_audio)) == saved["voice_id"]
