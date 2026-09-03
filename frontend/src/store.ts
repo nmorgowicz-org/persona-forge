@@ -747,13 +747,14 @@ const PROGRESS_POLL_MS = 700
             text_source?: string
             configured_text?: string | null
             active_api_voice_id?: string | null
+            whisper_transcript?: string
           }
         | null
-      if (rvt) {
+      if (rvt || rtd) {
         store.setRefTextValidation({
-          severity: rvt.severity || null,
-          matchScore: rvt.match_score ?? null,
-          whisperTranscript: rvt.whisper_transcript || null,
+          severity: rvt?.severity || null,
+          matchScore: rvt?.match_score ?? null,
+          whisperTranscript: rtd?.whisper_transcript || rvt?.whisper_transcript || null,
           voiceId: rtd?.voice_id || null,
           audioPath: rtd?.audio_path || null,
           textSource: rtd?.text_source || null,

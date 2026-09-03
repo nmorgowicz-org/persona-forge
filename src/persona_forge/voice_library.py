@@ -1163,7 +1163,7 @@ def ensure_mounted_ref_voice(
 ) -> str | None:
     """Register the mounted REF_AUDIO as a first-class 'Mounted reference' voice.
 
-    Creates/updates voice vd_000000000001 backed by the same WAV.
+    Creates/updates the reserved mounted-reference voice backed by the same WAV.
     Idempotent: skips if hash matches; updates WAV+meta if hash changed.
     Returns voice_id if created/updated, else None on any error (non-fatal).
     """
@@ -1176,6 +1176,7 @@ def ensure_mounted_ref_voice(
         if len(data) == 0:
             return None
         file_hash = hashlib.sha256(data).hexdigest()
+        resolved_ref_audio_path = Path(ref_audio_path).resolve(strict=True)
 
         existing_voice_id = _find_voice_by_audio_hash(file_hash)
         if existing_voice_id:
@@ -1230,10 +1231,16 @@ def ensure_mounted_ref_voice(
                 link.unlink()
             elif link.exists():
                 raise OSError(f"refusing to replace non-symlink mounted voice file: {link}")
-        original_wav.symlink_to(ref_audio_path)
-        # Any existing prosody variants belong to the old recording; reset the served
-        # pointer to the new original while leaving those files available for cleanup.
-        current_wav.symlink_to(original_wav)
+        try:
+            original_wav.symlink_to(resolved_ref_audio_path)
+            # Any existing prosody variants belong to the old recording; reset the served
+            # pointer to the new original while leaving those files available for cleanup.
+            current_wav.symlink_to(original_wav)
+        except FileExistsError as exc:
+            # symlink_to() is no-replace: a concurrent writer won the race after the
+            # preflight checks. Do not overwrite it or expose a raw filesystem error.
+            logger.warning("Mounted reference link changed concurrently: %s", exc)
+            return None
 
         # Perform reference analysis and quality gating
         quality_score, quality_warnings, metrics = calculate_quality_score(original_wav, transcript=sample_text)

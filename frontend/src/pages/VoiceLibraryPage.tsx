@@ -1322,9 +1322,23 @@ function VoiceCard({
                   className="h-6 gap-1 px-1.5 text-[10px] text-cyan-400 hover:bg-cyan-500/10 hover:text-cyan-300"
                   disabled={busy || transcribing}
                   onClick={() => {
+                    if (
+                      hasWhisperReplacement &&
+                      !window.confirm(
+                        'Whisper found a different transcript. Replace the current reference text? ' +
+                          'Your current text will be overwritten.',
+                      )
+                    ) {
+                      return
+                    }
                     setTranscribing(true)
                     void onTranscribe().finally(() => setTranscribing(false))
                   }}
+                  title={
+                    hasWhisperReplacement
+                      ? 'Replace the current reference text with Whisper output'
+                      : 'Generate a reference transcript with Whisper'
+                  }
                 >
                   <Wand2 className="size-3" />
                   {transcribing
