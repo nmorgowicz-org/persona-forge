@@ -233,6 +233,25 @@ class TestVoices:
             },
         )
 
+    def test_transcribe_voice_does_not_expose_exception_details(self, client, app_module, tmp_path):
+        wav_path = tmp_path / "reference.wav"
+        wav_path.write_bytes(b"wav")
+        with patch.object(
+            app_module.voice_library,
+            "get_voice",
+            return_value={"voice_id": "vd_aabbccddeeff", "wav_path": str(wav_path)},
+        ), patch.object(
+            app_module,
+            "transcribe_reference_audio",
+            side_effect=RuntimeError("secret model path /opt/private/model.bin"),
+        ):
+            resp = client.post("/voices/vd_aabbccddeeff/transcribe")
+        assert resp.status_code == 500
+        body = resp.get_json()
+        assert body["error"] == "Transcription failed; see server logs for details."
+        assert "secret model path" not in body["error"]
+
+
     def test_get_variants_lists_original_plus_saved_variants(self, client, app_module, tmp_path):
         voice_dir = tmp_path / "vd_aabbccddeeff"
         voice_dir.mkdir(parents=True)

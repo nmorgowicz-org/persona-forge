@@ -545,8 +545,9 @@ def voices_transcribe(voice_id: str):
 
     try:
         result = model.executor.submit(transcribe_reference_audio, wav_path).result(timeout=120)
-    except Exception as exc:
-        return jsonify({"error": f"Transcription failed: {exc}"}), 500
+    except Exception:
+        logger.exception("Voice transcription failed for %s", voice_id)
+        return jsonify({"error": "Transcription failed; see server logs for details."}), 500
 
     transcript = (result.get("whisper_transcript") or "").strip()
     if not transcript:
