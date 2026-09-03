@@ -20,7 +20,7 @@ dependencies = [
   "omnivoice==0.2.1",
   # pocket-tts (Persona Forge cloning/generation engine) — a main lever alongside OmniVoice,
   # not optional; see D12/Persona Forge pivot.
-  "pocket-tts==3.0.2",
+  "pocket-tts==3.1.0",
   "pydub",
   "audioop-lts",  # pydub needs this on Python 3.13+, where stdlib audioop was removed
   "pyloudnorm",
