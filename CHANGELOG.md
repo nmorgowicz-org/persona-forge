@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.3.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.2.2...persona-forge-v1.3.0) (2026-09-03)
+
+
+### Features
+
+* **runtime:** validate native Persona Forge with Torch 2.14 ([9de620c](https://github.com/nmorgowicz-org/persona-forge/commit/9de620c064bff2b0cafe69e4f5aecca151a2ad3e))
+
+
+### Bug Fixes
+
+* **deps:** adopt tested Torch 2.14 CPU stack ([9de620c](https://github.com/nmorgowicz-org/persona-forge/commit/9de620c064bff2b0cafe69e4f5aecca151a2ad3e))
+* **deps:** update dependency pocket-tts to v3.1.0 ([#241](https://github.com/nmorgowicz-org/persona-forge/issues/241)) ([fdc5531](https://github.com/nmorgowicz-org/persona-forge/commit/fdc5531385422e13b9cf42797613318490c2d3c5))
+* **security:** avoid exposing transcription exceptions ([9de620c](https://github.com/nmorgowicz-org/persona-forge/commit/9de620c064bff2b0cafe69e4f5aecca151a2ad3e))
+* **voice-library:** harden reference transcription workflows ([9de620c](https://github.com/nmorgowicz-org/persona-forge/commit/9de620c064bff2b0cafe69e4f5aecca151a2ad3e))
+* **voice-library:** preserve and deduplicate Rosie reference ([9de620c](https://github.com/nmorgowicz-org/persona-forge/commit/9de620c064bff2b0cafe69e4f5aecca151a2ad3e))
+
+
+### Continuous Integration
+
+* **deps:** gate Torch upgrades on complete stack validation ([9de620c](https://github.com/nmorgowicz-org/persona-forge/commit/9de620c064bff2b0cafe69e4f5aecca151a2ad3e))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump fast-uri from 3.1.5 to 3.1.7 in /frontend ([#237](https://github.com/nmorgowicz-org/persona-forge/issues/237)) ([f17bf50](https://github.com/nmorgowicz-org/persona-forge/commit/f17bf500a227487e4227d87f5af89bf9aa641794))
+* **deps:** bump qs from 6.15.3 to 6.16.0 in /frontend ([#239](https://github.com/nmorgowicz-org/persona-forge/issues/239)) ([9615a60](https://github.com/nmorgowicz-org/persona-forge/commit/9615a60f6252687b15b6e6488a5d2309c8d71c2e))
+* **deps:** update dependency lucide-react to v1.37.0 ([#234](https://github.com/nmorgowicz-org/persona-forge/issues/234)) ([f4c9860](https://github.com/nmorgowicz-org/persona-forge/commit/f4c9860e63917225ea85bde0b5f61fa2ce10a6b9))
+* **deps:** update dependency lucide-react to v1.38.0 ([#238](https://github.com/nmorgowicz-org/persona-forge/issues/238)) ([e3beead](https://github.com/nmorgowicz-org/persona-forge/commit/e3beead390599e03359df036688249ad7ca75394))
+* **deps:** update dependency shadcn to v4.19.1 ([#240](https://github.com/nmorgowicz-org/persona-forge/issues/240)) ([577f22e](https://github.com/nmorgowicz-org/persona-forge/commit/577f22e7c098eb54ed1cd82583320a9a89fef651))
+* **deps:** update docker base images ([#231](https://github.com/nmorgowicz-org/persona-forge/issues/231)) ([9866677](https://github.com/nmorgowicz-org/persona-forge/commit/986667730d1ef4e79db973b3c40dd6538c58e405))
+* **deps:** update frontend npm dependencies ([#229](https://github.com/nmorgowicz-org/persona-forge/issues/229)) ([bcb777b](https://github.com/nmorgowicz-org/persona-forge/commit/bcb777b5a29203ca8387d5f2cde04da95c228a01))
+* **deps:** update frontend npm dependencies ([#232](https://github.com/nmorgowicz-org/persona-forge/issues/232)) ([0ad3135](https://github.com/nmorgowicz-org/persona-forge/commit/0ad31355c85768c142bad0a4961528bda1d41be8))
+* **deps:** update github/codeql-action digest to cdf488f ([#228](https://github.com/nmorgowicz-org/persona-forge/issues/228)) ([8945a79](https://github.com/nmorgowicz-org/persona-forge/commit/8945a79780b75e555c2f88aa0d25875d22ba7653))
+* **deps:** update python:3.13-slim docker digest to 881d807 ([#233](https://github.com/nmorgowicz-org/persona-forge/issues/233)) ([4321ca3](https://github.com/nmorgowicz-org/persona-forge/commit/4321ca37dfff1e0a515446e45daa33d3e8e5fda5))
+* **deps:** update python:3.13-slim docker digest to 9d2e555 ([#235](https://github.com/nmorgowicz-org/persona-forge/issues/235)) ([3acadb2](https://github.com/nmorgowicz-org/persona-forge/commit/3acadb2cd0c23ce2013db3c3c39998c79d13a227))
+
 ## [1.2.2](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.2.1...persona-forge-v1.2.2) (2026-08-27)
 
 
