@@ -473,3 +473,77 @@ class TestSetDefaultVariant:
 
     def test_unknown_voice_returns_none(self):
         assert voice_library.set_default_variant("vd_000000000000") is None
+def test_ensure_mounted_ref_voice_replaces_changed_mount_and_resets_current(tmp_path):
+    # Keep the simulated mounted file outside the library root so the read-only
+    # mount detector sees the same topology as a container bind mount.
+    voice_library.VOICE_LIBRARY_DIR = tmp_path / "library"
+    ref_audio = tmp_path / "reference.wav"
+    ref_audio.write_bytes(_sine_wav_bytes(amplitude=0.05))
+
+    voice_id = voice_library.ensure_mounted_ref_voice(
+        str(ref_audio), sample_text="first transcript", asr={"severity": "ok"}
+    )
+    assert voice_id == voice_library.MOUNTED_REF_VOICE_ID
+
+    voice_dir = voice_library._voice_dir(voice_id)
+    stale_variant = voice_dir / "prosody_stale.wav"
+    stale_variant.write_bytes(_sine_wav_bytes(amplitude=0.01))
+    (voice_dir / "current.wav").unlink()
+    (voice_dir / "current.wav").symlink_to(stale_variant)
+
+    ref_audio.write_bytes(_sine_wav_bytes(amplitude=0.15, lead_silence=0.0))
+    voice_library.ensure_mounted_ref_voice(
+        str(ref_audio), sample_text="second transcript", asr={"severity": "warn"}
+    )
+
+    assert (voice_dir / "original.wav").resolve() == ref_audio.resolve()
+    assert (voice_dir / "current.wav").resolve() == ref_audio.resolve()
+    meta = json.loads((voice_dir / "meta.json").read_text(encoding="utf-8"))
+    assert meta["sample_text"] == "second transcript"
+    assert meta["asr"]["severity"] == "warn"
+    assert voice_library.is_mounted_or_readonly_reference(voice_id)
+
+
+def test_ensure_mounted_ref_voice_never_replaces_independent_reserved_voice(tmp_path):
+    voice_library.VOICE_LIBRARY_DIR = tmp_path / "library"
+    voice_id = voice_library.MOUNTED_REF_VOICE_ID
+    voice_dir = voice_library._voice_dir(voice_id)
+    voice_dir.mkdir(parents=True)
+    rosie_audio = _sine_wav_bytes(amplitude=0.05)
+    (voice_dir / "reference.wav").write_bytes(rosie_audio)
+    (voice_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "voice_id": voice_id,
+                "description": "Rosie",
+                "sample_text": "Welcome to Rosie’s.",
+                "source": "legacy",
+            }
+        ),
+        encoding="utf-8",
+    )
+    ref_audio = tmp_path / "mounted-reference.wav"
+    ref_audio.write_bytes(_sine_wav_bytes(amplitude=0.15))
+
+    assert voice_library.ensure_mounted_ref_voice(str(ref_audio), sample_text="mounted") is None
+    assert (voice_dir / "reference.wav").read_bytes() == rosie_audio
+    assert not (voice_dir / "original.wav").exists()
+
+
+def test_ensure_mounted_ref_voice_reuses_existing_voice_with_matching_audio(tmp_path):
+    voice_library.VOICE_LIBRARY_DIR = tmp_path / "library"
+    rosie_audio = _sine_wav_bytes(amplitude=0.05)
+    saved = voice_library.save_voice(
+        rosie_audio,
+        description="Rosie (Original)",
+        sample_text="Welcome to Rosie’s.",
+        language="en",
+    )
+    ref_audio = tmp_path / "reference.wav"
+    ref_audio.write_bytes(rosie_audio)
+
+    assert voice_library.ensure_mounted_ref_voice(str(ref_audio), sample_text="mounted") == saved[
+        "voice_id"
+    ]
+    assert not voice_library._voice_dir(voice_library.MOUNTED_REF_VOICE_ID).exists()
+    assert voice_library.find_voice_id_for_audio(str(ref_audio)) == saved["voice_id"]

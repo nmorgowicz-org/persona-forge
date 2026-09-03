@@ -304,6 +304,11 @@ Response (JSON):
   - `reconfig_in_progress` — whether a runtime config reload is in progress.
   - `omnivoice_loaded` — whether the OmniVoice checkpoint is resident.
   - `loading_message` — present if service is still loading (e.g. "Loading model…").
+  - `ref_text_validation` — startup validation for the configured reference audio/text.
+  - `ref_text_diagnostic` — when `REF_AUDIO` is a readable file, identifies the mounted
+    library voice (`voice_id`), `audio_path`, text source, and persisted
+    `active_api_voice_id`. This lets clients link a mismatch to the exact Voice Library
+    record; the active API voice may legitimately be a different saved voice.
 
 Important notes:
 
@@ -498,6 +503,18 @@ Response:
 - 400: if `sample_text` missing.
 - 404: if voice not found.
 
+### POST /voices/{voice_id}/transcribe
+
+- Purpose: Generate and persist a reference transcript with the service's `faster-whisper`
+  (`tiny.en`, CPU `int8`) ASR path. This is useful for mounted or imported voices whose
+  audio has no saved `sample_text`.
+- Response:
+  - 200: updated voice metadata with `sample_text_source: "whisper"` and ASR metadata.
+  - 400: if the voice has no readable reference audio.
+  - 404: if voice not found.
+  - 422: if Whisper detects no usable speech.
+  - 503: if the model service is not ready.
+
 ### DELETE /voices/{voice_id}
 
 - Purpose: Delete a voice from the library.
@@ -656,12 +673,14 @@ Response (JSON):
 
 ### POST /voices/{voice_id}/activate
 
-- Purpose: Make a saved voice the runtime API default (hot-swaps the Pocket default voice state).
+- Purpose: Make a saved voice the no-voice runtime API default. Hot-swaps the Pocket voice
+  state or Qwen clone prompt and persists the choice across restarts.
 
 Response (JSON):
 
 - 200: voice metadata with `api_active: true`.
-- 409: if the active backend is not `pocket_tts`.
+- 400: if a Qwen backend voice has no reference transcript.
+- 409: if the active backend does not support saved-voice API defaults.
 - 404: if voice not found.
 - 503: if model not loaded.
 - 500: if activation fails.

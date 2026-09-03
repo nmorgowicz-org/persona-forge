@@ -43,6 +43,12 @@ from persona_forge.reference_analysis import calculate_quality_score
 # Fixed container-side mount point, same pattern as persona_forge.config.REF_AUDIO_PATH.
 # compose.yml binds ${VOICE_LIBRARY_PATH:-./data/voices} (host) -> this path (container).
 VOICE_LIBRARY_DIR = Path(os.getenv("VOICE_LIBRARY_DIR", "/voices"))
+ACTIVE_DEFAULT_FILE = VOICE_LIBRARY_DIR / ".active_default"
+# The mounted REF_AUDIO is materialized under this stable ID so diagnostics and UI
+# actions can refer to the same library record across restarts.
+# Keep the startup-mounted reference separate from historical/user-created voices.
+# vd_000000000001 is Rosie’s original library voice and must never be repurposed.
+MOUNTED_REF_VOICE_ID = "vd_000000000000"
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +57,30 @@ _VOICE_ID_RE = re.compile(r"^vd_[0-9a-f]{12}$")
 # (no '.', '/', or leading dash/dot) so it can never contain a path separator or traversal
 # sequence, and cannot itself contain another '.' (no nested sub-IDs).
 _VARIANT_ID_RE = re.compile(r"^vd_([0-9a-f]{12})\.([a-z0-9][a-z0-9_-]{0,63})$")
+
+
+def get_active_default_voice_id() -> str | None:
+    """Return the persisted voice used by no-voice API requests, if any."""
+    try:
+        voice_id = ACTIVE_DEFAULT_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return voice_id or None
+
+
+def set_active_default_voice_id(voice_id: str) -> None:
+    """Persist the voice used by no-voice API requests."""
+    if not _is_valid_voice_id(voice_id):
+        raise ValueError(f"invalid voice_id: {voice_id!r}")
+    ACTIVE_DEFAULT_FILE.write_text(voice_id, encoding="utf-8")
+
+
+def clear_active_default_voice_id() -> None:
+    """Clear the persisted no-voice API default, if present."""
+    try:
+        ACTIVE_DEFAULT_FILE.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Could not clear active API default %s", ACTIVE_DEFAULT_FILE)
 
 
 def new_voice_id() -> str:
@@ -732,8 +762,14 @@ def set_voice_project(
     return meta
 
 
-def update_voice(voice_id: str, *, sample_text: str) -> dict[str, Any] | None:
-    """Patch a saved voice's reference transcript in place (metadata only, no re-clone).
+def update_voice(
+    voice_id: str,
+    *,
+    sample_text: str,
+    sample_text_source: str | None = None,
+    asr: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Patch a saved voice's reference transcript and optional ASR metadata in place.
 
     Reference text must match what's actually spoken in reference.wav for cloning quality
     (see app.py's omnivoice_save), so users need to fix typos/spacing/accent-spelling here
@@ -745,8 +781,10 @@ def update_voice(voice_id: str, *, sample_text: str) -> dict[str, Any] | None:
         return None
     meta.pop("wav_path", None)
     meta["sample_text"] = sample_text
-    meta["sample_text_source"] = "user"
-    meta["needs_review"] = False
+    meta["sample_text_source"] = sample_text_source or "user"
+    meta["needs_review"] = False if asr is None else asr.get("severity") not in (None, "ok")
+    if asr is not None:
+        meta["asr"] = asr
     voice_dir = _voice_dir(voice_id)
     (voice_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta
@@ -1067,6 +1105,56 @@ def compute_variant_metrics(voice_id: str, variant_filename: str) -> dict[str, A
     }
 
 
+def _find_voice_by_audio_hash(file_hash: str, *, include_mounted: bool = False) -> str | None:
+    """Find a persisted voice whose stored master/current audio matches ``file_hash``."""
+    if not VOICE_LIBRARY_DIR.is_dir():
+        return None
+
+    import hashlib
+
+    for entry in sorted(VOICE_LIBRARY_DIR.iterdir(), key=lambda path: path.name):
+        if not entry.is_dir() or not _VOICE_ID_RE.match(entry.name):
+            continue
+        meta: dict[str, Any] = {}
+        meta_path = entry / "meta.json"
+        if meta_path.is_file():
+            try:
+                loaded = json.loads(meta_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    meta = loaded
+            except (OSError, json.JSONDecodeError):
+                continue
+        if meta.get("source") == "mounted_ref_audio" and not include_mounted:
+            continue
+        if meta.get("sha256") == file_hash:
+            return entry.name
+        for filename in ("current.wav", "original.wav", "reference.wav"):
+            audio_path = entry / filename
+            if not audio_path.is_file():
+                continue
+            try:
+                if hashlib.sha256(audio_path.read_bytes()).hexdigest() == file_hash:
+                    return entry.name
+            except OSError:
+                continue
+    return None
+
+
+def find_voice_id_for_audio(ref_audio_path: str) -> str | None:
+    """Return the existing voice ID matching a mounted reference audio file, if any."""
+    if not ref_audio_path or not os.path.isfile(ref_audio_path):
+        return None
+    try:
+        import hashlib
+
+        file_hash = hashlib.sha256(Path(ref_audio_path).read_bytes()).hexdigest()
+    except OSError:
+        return None
+    return _find_voice_by_audio_hash(file_hash) or _find_voice_by_audio_hash(
+        file_hash, include_mounted=True
+    )
+
+
 def ensure_mounted_ref_voice(
     ref_audio_path: str,
     sample_text: str | None = None,
@@ -1075,11 +1163,11 @@ def ensure_mounted_ref_voice(
 ) -> str | None:
     """Register the mounted REF_AUDIO as a first-class 'Mounted reference' voice.
 
-    Creates/updates voice vd_000000000001 backed by the same WAV.
+    Creates/updates the reserved mounted-reference voice backed by the same WAV.
     Idempotent: skips if hash matches; updates WAV+meta if hash changed.
     Returns voice_id if created/updated, else None on any error (non-fatal).
     """
-    MOUNTED_VOICE_ID = "vd_000000000001"
+    MOUNTED_VOICE_ID = MOUNTED_REF_VOICE_ID
     if not ref_audio_path or not os.path.isfile(ref_audio_path):
         return None
     try:
@@ -1088,6 +1176,16 @@ def ensure_mounted_ref_voice(
         if len(data) == 0:
             return None
         file_hash = hashlib.sha256(data).hexdigest()
+        resolved_ref_audio_path = Path(ref_audio_path).resolve(strict=True)
+
+        existing_voice_id = _find_voice_by_audio_hash(file_hash)
+        if existing_voice_id:
+            logger.info(
+                "Mounted reference matches existing voice %s; skipping duplicate registration",
+                existing_voice_id,
+            )
+            return existing_voice_id
+
         voice_dir = _voice_dir(MOUNTED_VOICE_ID)
         meta_path = voice_dir / "meta.json"
         existing = None
@@ -1105,14 +1203,47 @@ def ensure_mounted_ref_voice(
                 updated["needs_review"] = asr.get("severity") not in (None, "ok")
             meta_path.write_text(json.dumps(updated, indent=2), encoding="utf-8")
             return MOUNTED_VOICE_ID
+
+        # A reserved ID must not silently consume an independent voice if it already
+        # exists on a persisted host volume (including legacy records without meta.json).
+        # Returning None is non-fatal; the mounted REF_AUDIO remains usable directly.
+        if existing is not None and existing.get("source") != "mounted_ref_audio":
+            logger.warning(
+                "Refusing to replace independent voice %s while registering mounted reference",
+                MOUNTED_VOICE_ID,
+            )
+            return None
+        if existing is None and (voice_dir / "reference.wav").is_file():
+            logger.warning(
+                "Refusing to replace legacy voice %s while registering mounted reference",
+                MOUNTED_VOICE_ID,
+            )
+            return None
+
         voice_dir.mkdir(parents=True, exist_ok=True)
-        # Bridge to the actual mounted physical file
-        (voice_dir / "original.wav").symlink_to(ref_audio_path)
-        # Also set the current pointer to original
-        (voice_dir / "current.wav").symlink_to(voice_dir / "original.wav")
+        # Bridge to the actual mounted physical file. The mount can change between
+        # launches (or while developing locally), so replace old links safely instead
+        # of letting FileExistsError leave a stale library recording in place.
+        original_wav = voice_dir / "original.wav"
+        current_wav = voice_dir / "current.wav"
+        for link in (original_wav, current_wav):
+            if link.is_symlink():
+                link.unlink()
+            elif link.exists():
+                raise OSError(f"refusing to replace non-symlink mounted voice file: {link}")
+        try:
+            original_wav.symlink_to(resolved_ref_audio_path)
+            # Any existing prosody variants belong to the old recording; reset the served
+            # pointer to the new original while leaving those files available for cleanup.
+            current_wav.symlink_to(original_wav)
+        except FileExistsError as exc:
+            # symlink_to() is no-replace: a concurrent writer won the race after the
+            # preflight checks. Do not overwrite it or expose a raw filesystem error.
+            logger.warning("Mounted reference link changed concurrently: %s", exc)
+            return None
 
         # Perform reference analysis and quality gating
-        quality_score, quality_warnings, metrics = calculate_quality_score(voice_dir / "original.wav", transcript=sample_text)
+        quality_score, quality_warnings, metrics = calculate_quality_score(original_wav, transcript=sample_text)
 
         meta = {
             "voice_id": MOUNTED_VOICE_ID,

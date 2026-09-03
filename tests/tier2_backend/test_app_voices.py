@@ -165,6 +165,93 @@ class TestVoices:
             resp = client.post("/voices/vd_doesnotexist/set-default")
         assert resp.status_code == 404
 
+    def test_activate_voice_for_qwen_api_default(self, client, app_module, tmp_path):
+        wav_path = tmp_path / "reference.wav"
+        wav_path.write_bytes(b"wav")
+        meta = {
+            "voice_id": "vd_aabbccddeeff",
+            "wav_path": str(wav_path),
+            "sample_text": "Hello from the saved voice.",
+        }
+        with patch.object(app_module.voice_library, "get_voice", return_value=meta), patch.object(
+            app_module.model._rt,
+            "activate_default_voice_from_library",
+            create=True,
+        ) as activate:
+            resp = client.post("/voices/vd_aabbccddeeff/activate")
+        assert resp.status_code == 200
+        assert resp.get_json()["api_active"] is True
+        activate.assert_called_once_with("vd_aabbccddeeff")
+
+    def test_activate_qwen_voice_requires_transcript(self, client, app_module):
+        with patch.object(
+            app_module.voice_library,
+            "get_voice",
+            return_value={"voice_id": "vd_aabbccddeeff", "sample_text": ""},
+        ), patch.object(
+            app_module.model._rt,
+            "activate_default_voice_from_library",
+            create=True,
+        ) as activate:
+            resp = client.post("/voices/vd_aabbccddeeff/activate")
+        assert resp.status_code == 400
+        assert "Generate a transcript with Whisper" in resp.get_json()["error"]
+        activate.assert_not_called()
+
+    def test_transcribe_voice_persists_whisper_result(self, client, app_module, tmp_path):
+        wav_path = tmp_path / "reference.wav"
+        wav_path.write_bytes(b"wav")
+        with patch.object(
+            app_module.voice_library,
+            "get_voice",
+            return_value={"voice_id": "vd_aabbccddeeff", "wav_path": str(wav_path)},
+        ), patch.object(
+            app_module,
+            "transcribe_reference_audio",
+            return_value={
+                "ok": True,
+                "severity": "ok",
+                "whisper_transcript": "Hello from Whisper.",
+                "match_score": 1.0,
+            },
+        ), patch.object(
+            app_module.voice_library,
+            "update_voice",
+            return_value={"voice_id": "vd_aabbccddeeff", "sample_text": "Hello from Whisper."},
+        ) as update:
+            resp = client.post("/voices/vd_aabbccddeeff/transcribe")
+        assert resp.status_code == 200
+        update.assert_called_once_with(
+            "vd_aabbccddeeff",
+            sample_text="Hello from Whisper.",
+            sample_text_source="whisper",
+            asr={
+                "ok": True,
+                "severity": "ok",
+                "whisper_transcript": "Hello from Whisper.",
+                "match_score": 1.0,
+            },
+        )
+
+    def test_transcribe_voice_does_not_expose_exception_details(self, client, app_module, tmp_path):
+        wav_path = tmp_path / "reference.wav"
+        wav_path.write_bytes(b"wav")
+        with patch.object(
+            app_module.voice_library,
+            "get_voice",
+            return_value={"voice_id": "vd_aabbccddeeff", "wav_path": str(wav_path)},
+        ), patch.object(
+            app_module,
+            "transcribe_reference_audio",
+            side_effect=RuntimeError("secret model path /opt/private/model.bin"),
+        ):
+            resp = client.post("/voices/vd_aabbccddeeff/transcribe")
+        assert resp.status_code == 500
+        body = resp.get_json()
+        assert body["error"] == "Transcription failed; see server logs for details."
+        assert "secret model path" not in body["error"]
+
+
     def test_get_variants_lists_original_plus_saved_variants(self, client, app_module, tmp_path):
         voice_dir = tmp_path / "vd_aabbccddeeff"
         voice_dir.mkdir(parents=True)

@@ -58,6 +58,7 @@ import {
   setActiveVoiceVariant,
   setDefaultVoiceVariant,
   trimVoiceReferenceSilence,
+  transcribeVoiceReference,
   updateVoiceSampleText,
   undoVoiceReferenceEdit,
   listProjects,
@@ -774,6 +775,7 @@ function VoiceCard({
   onDelete,
   onDuplicate,
   onSaveSampleText,
+  onTranscribe,
   onNormalize,
   onTrimSilence,
   onFixAll,
@@ -786,6 +788,8 @@ function VoiceCard({
   onRefresh,
   autoOpenProsody,
   onAutoOpenProsodyConsumed,
+  focusOnMount,
+  onFocusOnMountConsumed,
   projects,
   onSetProject,
 }: {
@@ -801,6 +805,7 @@ function VoiceCard({
   // changing which one is active on the source voice.
   onDuplicate: (variantFilename?: string) => Promise<VoiceMeta | null>
   onSaveSampleText: (text: string) => Promise<void>
+  onTranscribe: () => Promise<void>
   onNormalize: (voiceId: string) => Promise<void>
   onTrimSilence: (voiceId: string) => Promise<void>
   onFixAll: () => void
@@ -819,6 +824,9 @@ function VoiceCard({
   // prosody workflow instead of having to find the new voice manually.
   autoOpenProsody?: boolean
   onAutoOpenProsodyConsumed?: () => void
+  // True when a health diagnostic navigated here and identified this exact voice.
+  focusOnMount?: boolean
+  onFocusOnMountConsumed?: () => void
   projects: Project[]
   onSetProject: (voiceId: string, projectId: string) => void
 }) {
@@ -827,6 +835,7 @@ function VoiceCard({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(voice.sample_text)
   const [saving, setSaving] = useState(false)
+  const [transcribing, setTranscribing] = useState(false)
   const [editingAudio, setEditingAudio] = useState(false)
   const [editorAudio, setEditorAudio] = useState<string | null>(null)
   const [regionEdits, setRegionEdits] = useState<StitchPlanRegionEdit[]>([])
@@ -873,6 +882,7 @@ function VoiceCard({
   // hover-lift mid-interaction. Pin the lift on while either popover is open to stop that.
   const [prosodyPopoverOpen, setProsodyPopoverOpen] = useState(false)
   const [moreActionsPopoverOpen, setMoreActionsPopoverOpen] = useState(false)
+  const [deepLinkFocused, setDeepLinkFocused] = useState(false)
   const cardRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -884,6 +894,20 @@ function VoiceCard({
     // store flag so this doesn't retrigger if the parent re-renders the card.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenProsody])
+
+  useEffect(() => {
+    if (!focusOnMount) return
+    const card = cardRef.current
+    if (!card) return
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    card.focus({ preventScroll: true })
+    setDeepLinkFocused(true)
+    onFocusOnMountConsumed?.()
+    const timer = window.setTimeout(() => setDeepLinkFocused(false), 3500)
+    return () => window.clearTimeout(timer)
+    // The parent consumes the one-shot target immediately after this card mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusOnMount])
 
   // One place to render a prosody preview, so the Preview button and per-marker nudges
   // stay in sync. Passing an explicit overrides map avoids stale-state races on rapid drags.
@@ -937,6 +961,9 @@ function VoiceCard({
       : 'Transcript is ready for Qwen backends.')
 
   const hasTranscript = Boolean((voice.sample_text || '').trim())
+  const hasWhisperReplacement = Boolean(
+    whisperTranscript && whisperTranscript !== voice.sample_text.trim(),
+  )
   const triage = metrics?.triage ?? null
   // Whether the current mode will actually attempt forced alignment: explicit Precise,
   // or Auto when triage judged the clip blended. Natural never aligns.
@@ -1158,10 +1185,15 @@ function VoiceCard({
     <motion.div
       ref={cardRef}
       data-testid="voice-card"
+      data-voice-id={voice.voice_id}
+      tabIndex={-1}
       initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: reducedMotion || !(prosodyPopoverOpen || moreActionsPopoverOpen) ? 0 : -2 }}
       whileHover={reducedMotion ? {} : { y: -2 }}
-      className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm transition-shadow duration-200 hover:border-border/80 hover:shadow-lg"
+      className={cn(
+        'flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm transition-shadow duration-200 hover:border-border/80 hover:shadow-lg',
+        deepLinkFocused && 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-background',
+      )}
     >
 
       <div className="space-y-1.5">
@@ -1278,12 +1310,47 @@ function VoiceCard({
       )}
 
        <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
-         <div className="mb-1 flex items-center justify-between gap-2">
-           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-             Reference text
-           </p>
-           <span className="shrink-0 text-[10px] text-muted-foreground">{transcriptSource}</span>
-         </div>
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Reference text
+            </p>
+            <div className="flex shrink-0 items-center gap-2">
+              {(!hasTranscript || hasWhisperReplacement) && !editing && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 gap-1 px-1.5 text-[10px] text-cyan-400 hover:bg-cyan-500/10 hover:text-cyan-300"
+                  disabled={busy || transcribing}
+                  onClick={() => {
+                    if (
+                      hasWhisperReplacement &&
+                      !window.confirm(
+                        'Whisper found a different transcript. Replace the current reference text? ' +
+                          'Your current text will be overwritten.',
+                      )
+                    ) {
+                      return
+                    }
+                    setTranscribing(true)
+                    void onTranscribe().finally(() => setTranscribing(false))
+                  }}
+                  title={
+                    hasWhisperReplacement
+                      ? 'Replace the current reference text with Whisper output'
+                      : 'Generate a reference transcript with Whisper'
+                  }
+                >
+                  <Wand2 className="size-3" />
+                  {transcribing
+                    ? 'Transcribing…'
+                    : hasWhisperReplacement
+                      ? 'Use Whisper transcript'
+                      : 'Generate with Whisper'}
+                </Button>
+              )}
+              <span className="text-[10px] text-muted-foreground">{transcriptSource}</span>
+            </div>
+          </div>
          {editing ? (
            <textarea
              ref={inputRef}
@@ -1677,6 +1744,8 @@ export function VoiceLibraryPage() {
   const setOvStitchPlanDsp = useAppStore((s) => s.setOvStitchPlanDsp)
   const deepLinkProsodyVoiceId = useAppStore((s) => s.deepLinkProsodyVoiceId)
   const setDeepLinkProsodyVoiceId = useAppStore((s) => s.setDeepLinkProsodyVoiceId)
+  const voiceLibraryFocusVoiceId = useAppStore((s) => s.voiceLibraryFocusVoiceId)
+  const setVoiceLibraryFocusVoiceId = useAppStore((s) => s.setVoiceLibraryFocusVoiceId)
 
   async function refresh() {
     const [v, segs, projs] = await Promise.all([
@@ -1854,6 +1923,16 @@ export function VoiceLibraryPage() {
     setError(null)
     try {
       await updateVoiceSampleText(voiceId, text)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function transcribe(voiceId: string) {
+    setError(null)
+    try {
+      await transcribeVoiceReference(voiceId)
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -2125,7 +2204,10 @@ export function VoiceLibraryPage() {
       onDuplicate={(variantFilename) => duplicate(voice.voice_id, variantFilename)}
       autoOpenProsody={deepLinkProsodyVoiceId === voice.voice_id}
       onAutoOpenProsodyConsumed={() => setDeepLinkProsodyVoiceId(null)}
+      focusOnMount={voiceLibraryFocusVoiceId === voice.voice_id}
+      onFocusOnMountConsumed={() => setVoiceLibraryFocusVoiceId(null)}
       onSaveSampleText={(text) => saveSampleText(voice.voice_id, text)}
+      onTranscribe={() => transcribe(voice.voice_id)}
       onNormalize={(voiceId) => normalize(voiceId)}
       onTrimSilence={async (voiceId) => { await trimVoiceReferenceSilence(voiceId); await refresh() }}
       onFixAll={() => fixAll(voice.voice_id)}

@@ -12,7 +12,7 @@ dependencies = [
   "accelerate",
   "librosa",
   "transformers==5.12.1",
-  "torch==2.13.0",
+  "torch==2.14.0",
   "torchaudio==2.11.0",
   # OmniVoice (Persona Forge accent-design engine) — PyPI release, same pin as the
   # container image (Dockerfile / entrypoint.sh). Its declared torch/torchaudio/transformers
@@ -65,6 +65,6 @@ package = false
 environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
 override-dependencies = [
   "transformers==5.12.1",
-  "torch==2.13.0",
+  "torch==2.14.0",
   "torchaudio==2.11.0",
 ]

@@ -28,6 +28,25 @@ PYTHONPATH=src:src/export python -m pytest -m "requires_torch and not requires_m
 PYTHONPATH=src:src/export python -m pytest -m "requires_model_weights or requires_openvino_ir" --tb=short
 ```
 
+## Dependency Bump Verification
+
+For any Renovate or Dependabot update involving Torch, Torchaudio, Transformers, or the
+OpenVINO stack, run the source contract check before installing or merging the candidate:
+
+```bash
+python scripts/check_torch_stack.py
+scripts/verify_dependency_bump.sh <pr-number>
+```
+
+The contract check requires Dockerfile args, `pyproject.toml` pins, uv overrides, and `uv.lock`
+to resolve the same exact Torch/Torchaudio versions. The PR verifier runs that check on both
+branches, requires `uv lock --check` and `uv sync --locked`, then compares the real Torch test
+lane against the base branch. It fails closed on dependency, setup, collection, or test errors
+and retains complete logs in its temporary work directory.
+
+For changes to container inputs, apply `ready-to-test` only after these local gates pass and
+require the container image build/import smoke test. A skipped image job is not runtime evidence.
+
 ## Focused Checks
 
 For focused audio style and voice-library changes, add:

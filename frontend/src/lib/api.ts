@@ -136,7 +136,7 @@ export interface VoiceMeta {
   quality_score?: number
   quality_warnings?: string[]
   auto_fixed?: boolean
-  // True when this voice is the runtime default the OpenAI endpoint clones from (pocket_tts only).
+  // True when this voice is the runtime default the no-voice API request clones from.
   api_active?: boolean
   undo_available?: boolean
   // True when original.wav is a symlink resolving outside the voice library tree (e.g. a
@@ -398,6 +398,12 @@ export async function updateVoiceSampleText(voiceId: string, sampleText: string)
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sample_text: sampleText }),
   })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function transcribeVoiceReference(voiceId: string): Promise<VoiceMeta> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/transcribe`, { method: 'POST' })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
 }

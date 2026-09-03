@@ -32,7 +32,7 @@ from persona_forge import (
     voice_design,
     voice_library,
 )
-from persona_forge.asr_check import validate_reference_text
+from persona_forge.asr_check import transcribe_reference_audio, validate_reference_text
 from persona_forge.alignment_jobs import AlignmentJobManager
 
 # candidate_id -> (wav, sample_rate). In-memory only, single-user local tool (locked decision,
@@ -457,11 +457,9 @@ def voices_list():
     """Return list of all saved voices in the library, flagging the runtime API default."""
     voices = voice_library.list_voices()
     active_id = None
-    if getattr(model, "TTS_BACKEND", None) == "pocket_tts":
+    if getattr(model, "TTS_BACKEND", None) in ("pytorch", "openvino", "pocket_tts"):
         try:
-            from persona_forge import pocket_tts_runtime
-
-            active_id = pocket_tts_runtime.get_active_default_voice_id()
+            active_id = voice_library.get_active_default_voice_id()
         except Exception:
             active_id = None
     for voice in voices:
@@ -529,8 +527,48 @@ def voices_update(voice_id: str):
     meta = voice_library.update_voice(voice_id, sample_text=sample_text)
     if meta is None:
         return jsonify({"error": "voice_id not found"}), 404
-    model.invalidate_voice_clone_prompt(voice_id)
+    _invalidate_voice_clone_state(voice_id)
     return jsonify(meta)
+
+
+@app.post("/voices/<voice_id>/transcribe")
+def voices_transcribe(voice_id: str):
+    """Generate and persist a missing voice transcript with the existing Whisper ASR path."""
+    if not model._service_started:
+        return jsonify({"error": "Model not loaded"}), 503
+    meta = voice_library.get_voice(voice_id)
+    if meta is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    wav_path = (meta.get("wav_path") or "").strip()
+    if not wav_path or not os.path.isfile(wav_path):
+        return jsonify({"error": "Voice has no readable reference audio"}), 400
+
+    try:
+        result = model.executor.submit(transcribe_reference_audio, wav_path).result(timeout=120)
+    except Exception:
+        logger.exception("Voice transcription failed for %s", voice_id)
+        return jsonify({"error": "Transcription failed; see server logs for details."}), 500
+
+    transcript = (result.get("whisper_transcript") or "").strip()
+    if not transcript:
+        return jsonify(
+            {
+                "error": result.get("suggestion")
+                or "Whisper could not find speech in the reference audio",
+                "asr": result,
+            }
+        ), 422
+
+    updated = voice_library.update_voice(
+        voice_id,
+        sample_text=transcript,
+        sample_text_source="whisper",
+        asr=result,
+    )
+    if updated is None:
+        return jsonify({"error": "voice_id not found"}), 404
+    _invalidate_voice_clone_state(voice_id)
+    return jsonify(updated)
 
 
 @app.post("/voices/<voice_id>/duplicate")
@@ -575,6 +613,8 @@ def voices_delete(voice_id: str):
     deleted = voice_library.delete_voice(voice_id)
     if not deleted:
         return jsonify({"error": "voice_id not found"}), 404
+    if voice_library.get_active_default_voice_id() == voice_id:
+        voice_library.clear_active_default_voice_id()
     model.invalidate_voice_clone_prompt(voice_id)
     try:
         from persona_forge import pocket_tts_runtime
@@ -586,28 +626,24 @@ def voices_delete(voice_id: str):
 
 def _invalidate_voice_clone_state(voice_id: str) -> None:
     model.invalidate_voice_clone_prompt(voice_id)
-    try:
-        from persona_forge import pocket_tts_runtime
-        pocket_tts_runtime.invalidate_voice_state(voice_id)
-    except ImportError:
-        return  # pocket-tts package not installed (non-pocket_tts deployment); nothing to invalidate.
+    active_backend = getattr(model, "TTS_BACKEND", None)
+    if not model._service_started or voice_library.get_active_default_voice_id() != voice_id:
+        return
 
-    # This voice_id's per-id cache entry is gone, but no-voice_id requests read a
-    # separate module-level default_voice_state that isn't keyed by voice_id at all —
-    # if voice_id is the persisted API default, that global state is now stale and
-    # must be rebuilt from the (just-changed) current.wav, or default requests keep
-    # serving pre-mutation audio until the next idle-unload/reload.
-    if (
-        getattr(model, "TTS_BACKEND", None) == "pocket_tts"
-        and model._service_started
-        and pocket_tts_runtime.get_active_default_voice_id() == voice_id
-    ):
-        try:
-            model.executor.submit(
-                pocket_tts_runtime.set_default_voice_state_from_library, voice_id
-            ).result(timeout=30)
-        except Exception:
-            logger.exception("Failed to rebuild API default voice_state after mutating %s", voice_id)
+    # The module-level no-voice state is not keyed by voice_id. Rebuild it after
+    # editing audio or transcript so an active API default changes immediately.
+    try:
+        if active_backend == "pocket_tts":
+            from persona_forge import pocket_tts_runtime
+
+            rebuild = pocket_tts_runtime.set_default_voice_state_from_library
+        elif active_backend in ("pytorch", "openvino"):
+            rebuild = model.activate_default_voice_from_library
+        else:
+            return
+        model.executor.submit(rebuild, voice_id).result(timeout=120)
+    except Exception:
+        logger.exception("Failed to rebuild API default voice state after mutating %s", voice_id)
 
 
 @app.post("/voices/<voice_id>/normalize")
@@ -753,11 +789,11 @@ def voices_delete_variant(voice_id: str, variant_filename: str):
 
 @app.post("/voices/<voice_id>/activate")
 def voices_activate(voice_id: str):
-    """Make a saved voice the runtime API default (hot-swap Pocket's default voice_state)."""
+    """Make a saved voice the runtime API default and hot-swap its clone state."""
     active_backend = getattr(model, "TTS_BACKEND", None)
-    if active_backend != "pocket_tts":
+    if active_backend not in ("pytorch", "openvino", "pocket_tts"):
         return (
-            jsonify({"error": "Activate-for-API requires TTS_BACKEND=pocket_tts"}),
+            jsonify({"error": f"Activate-for-API is unavailable for TTS_BACKEND={active_backend}"}),
             409,
         )
     if not model._service_started:
@@ -766,14 +802,25 @@ def voices_activate(voice_id: str):
     if meta is None:
         return jsonify({"error": "voice_id not found"}), 404
 
-    from persona_forge import pocket_tts_runtime
+    if active_backend in ("pytorch", "openvino"):
+        if not (meta.get("sample_text") or "").strip():
+            return jsonify(
+                {
+                    "error": (
+                        "This voice has no reference transcript. Generate a transcript with Whisper "
+                        "or edit the reference text before activating it."
+                    )
+                }
+            ), 400
+        rebuild = model.activate_default_voice_from_library
+    else:
+        from persona_forge import pocket_tts_runtime
 
-    def _run():
-        pocket_tts_runtime.set_default_voice_state_from_library(voice_id)
+        rebuild = pocket_tts_runtime.set_default_voice_state_from_library
 
     try:
         # Run on the model executor so the voice-state forward pass never races generation.
-        model.executor.submit(_run).result(timeout=60)
+        model.executor.submit(rebuild, voice_id).result(timeout=120)
     except Exception as exc:
         return jsonify({"error": f"Activate failed: {exc}"}), 500
     return jsonify({**meta, "api_active": True})
