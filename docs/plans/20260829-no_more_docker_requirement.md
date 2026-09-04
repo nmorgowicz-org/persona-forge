@@ -854,6 +854,16 @@ END_COMMIT_OVERRIDE
 
 Apply `ready-to-test` only after local validation is green and container inputs are final.
 
+### Archive this plan
+
+Once the PR merges, mark this plan and its companion architecture doc complete and move both
+out of `docs/plans/` into `docs/archive/no-docker/` (new directory — distinct from the existing
+`docs/archive/container/`, which covers the container *image* itself, not removing the Docker
+requirement), keeping their filenames unchanged per the existing archive convention:
+
+- `docs/plans/20260829-no_more_docker_requirement.md`
+- `docs/plans/20260829-no_more_docker_architecture.md`
+
 ### Required handoff
 
 ```text
