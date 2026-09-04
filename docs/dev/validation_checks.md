@@ -28,6 +28,20 @@ PYTHONPATH=src:src/export python -m pytest -m "requires_torch and not requires_m
 PYTHONPATH=src:src/export python -m pytest -m "requires_model_weights or requires_openvino_ir" --tb=short
 ```
 
+## Native packaging changes
+
+For changes to `pyproject.toml`, `src/persona_forge/paths.py`, `src/persona_forge/bootstrap.py`,
+`src/persona_forge/cli.py`, `launcher/`, or the packaging/release scripts under `scripts/`:
+
+```bash
+rtk uv lock --check
+uv build && uv run python scripts/inspect_release_artifacts.py --dist-dir dist
+pytest tests/tier1_unit/test_package_launcher_archive.py tests/tier1_unit/test_validate_release_contract.py -v
+```
+
+See [TEST_STRATEGY.md](../TEST_STRATEGY.md) §1.8 for the full changed-file mapping and
+[../RUN_LOCAL.md](../RUN_LOCAL.md) for what these artifacts are.
+
 ## Dependency Bump Verification
 
 For any Renovate or Dependabot update involving Torch, Torchaudio, Transformers, or the

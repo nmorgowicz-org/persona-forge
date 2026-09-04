@@ -5,8 +5,8 @@
 **Open-source voice-cloning and voice-design studio**
 
 Clone a voice from a single reference WAV. Design accents from scratch. Assemble clips in a
-timeline editor. Serve it all over an OpenAI-compatible API. One container, one process,
-no training required.
+timeline editor. Serve it all over an OpenAI-compatible API. One process, no training required —
+run it in the container or natively.
 
 [![Release](https://img.shields.io/github/v/release/nmorgowicz-org/persona-forge)](https://github.com/nmorgowicz-org/persona-forge/releases)
 [![Container](https://img.shields.io/badge/ghcr.io-persona--forge-blue?logo=docker)](https://github.com/nmorgowicz-org/persona-forge/pkgs/container/persona-forge)
@@ -120,6 +120,11 @@ below for pinned version/digest tags.
 > **Want the Qwen engine with OpenVINO acceleration?** Run the export step first and set
 > `TTS_BACKEND=openvino`. See [HOW_TO_RUN.md](docs/HOW_TO_RUN.md).
 
+> **Don't want Docker?** Persona Forge also runs natively — via a source checkout (`uv sync`), an
+> installed wheel (`pip install persona-forge`), or a self-contained launcher archive with no
+> Python preinstall required. See [RUN_LOCAL.md](docs/RUN_LOCAL.md); to move an existing Docker
+> deployment's data over, see [MIGRATION.md](docs/MIGRATION.md).
+
 ---
 
 ## HTTP API
@@ -172,15 +177,16 @@ Tags: `latest`, `v<major>.<minor>.<patch>`, `<git-sha>`. Use any of these as
 `PERSONA_FORGE_IMAGE` (see [Getting started](#getting-started)) instead of `latest` for a
 reproducible deploy.
 
-**Why a container, not a standalone install?** The runtime depends on pinned CPU-only
-torch/torchaudio wheels, source-level patches applied to installed third-party packages
-(qwen_tts, transformers), a per-accelerator-family install step, and a Node/npm frontend build
-(`frontend/`) that has to run and get bundled in ahead of time. The container packages all of
-that — backend and frontend — so it's invisible to users. A standalone (pip/pipx/binary) install
-is possible in principle — likely via PyInstaller or Nuitka bundling the Python app plus the
-prebuilt frontend static assets, since the ML stack (torch, transformers, librosa/numba) is
-Python/C-extension based and isn't something a Rust or other native rewrite would meaningfully
-replace — but isn't planned unless there's real demand for it.
+**Container vs. native — why both exist.** The runtime depends on pinned torch/torchaudio
+wheels, source-level patches applied to installed third-party packages (qwen_tts, transformers),
+a per-accelerator-family install step, and a Node/npm frontend build (`frontend/`) that has to
+run and get bundled in ahead of time. The container packages all of that into one pinned,
+reproducible artifact — backend and frontend — so none of it is visible to the operator, and it
+stays the most-tested, canonical deployment path. Persona Forge also installs and runs natively
+(source checkout via `uv`, an installable wheel/sdist, or a self-contained launcher archive) —
+the same pins and patches are applied by the native `setup`/`serve` commands instead of a
+container build. See [RUN_LOCAL.md](docs/RUN_LOCAL.md) for the native paths and their current
+hardware-validation status, and [MIGRATION.md](docs/MIGRATION.md) for moving between the two.
 
 ---
 
@@ -188,7 +194,8 @@ replace — but isn't planned unless there's real demand for it.
 
 **[📖 Full documentation index](docs/README.md)**
 
-Quick links: [Setup](docs/HOW_TO_RUN.md) · [Environment](docs/ENV_REFERENCE.md) ·
+Quick links: [Docker setup](docs/HOW_TO_RUN.md) · [Native setup](docs/RUN_LOCAL.md) ·
+[Migration](docs/MIGRATION.md) · [Environment](docs/ENV_REFERENCE.md) ·
 [HTTP API](docs/api/HTTP_API_REFERENCE.md) ·
 [Architecture](docs/architecture/SYSTEM_OVERVIEW.md) ·
 [Contributing](docs/dev/LOCAL_SETUP.md)

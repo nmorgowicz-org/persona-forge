@@ -5,6 +5,13 @@ Defaults are as implemented in code.
 
 For a minimal setup, see “Minimal required” below; everything else is optional.
 
+This reference applies to both the Docker container ([HOW_TO_RUN.md](HOW_TO_RUN.md)) and a
+native install ([RUN_LOCAL.md](RUN_LOCAL.md)). All runtime/backend/tuning vars behave
+identically on both. Path vars (`*_DIR`/`*_PATH`) differ only in their *default* — Docker
+defaults to a fixed container mount point, native resolves a platform-appropriate app-data
+directory (`persona_forge/paths.py`) — the var name and override behavior are the same either
+way. See [MIGRATION.md](MIGRATION.md) for the full container-path-to-native-path mapping.
+
 Legend:
 - Required: must be set.
 - Recommended: omission changes behavior noticeably.

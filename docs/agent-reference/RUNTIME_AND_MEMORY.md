@@ -19,6 +19,11 @@
 - Inference is serialized via `ThreadPoolExecutor(max_workers=1)`.
 - All expensive work (generation, swap, idle unload, per-request voice cloning) must run through this executor.
 - Never create your own thread pool for model work; it will race and OOM.
+- These invariants hold regardless of launch surface: `persona-forge serve` (native, POSIX) runs
+  the same single-worker Gunicorn command; on Windows it execs single-worker Waitress instead
+  (no Gunicorn/`fork()` support there). `bootstrap.apply_env_defaults` applies the same
+  LOW_RAM_MODE/malloc-tuning env defaults natively that `scripts/entrypoint.sh` applies in the
+  container, so the two surfaces don't drift.
 
 ## 3. LOW_RAM_MODE behavior
 

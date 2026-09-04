@@ -139,6 +139,33 @@ Run:
     - health endpoint
     - idle-unload and reload behavior
 
+### 1.8 Native packaging / launcher (paths.py, bootstrap.py, cli.py, launcher/, packaging scripts)
+
+Affected:
+- src/persona_forge/paths.py, bootstrap.py, cli.py
+- pyproject.toml (dependencies, extras, `[project.scripts]`)
+- launcher/ (Rust launcher crate)
+- scripts/package_launcher_archive.py, scripts/validate_release_contract.py,
+  scripts/fetch_uv_binary.sh, scripts/inspect_release_artifacts.py
+- .github/workflows/release-launcher.yml, ci-packaging.yml
+
+Run:
+- python scripts/validate_repo.py
+- rtk uv lock --check
+- pytest tests/tier1_unit/test_paths.py tests/tier1_unit/test_bootstrap.py tests/tier1_unit/test_cli.py -v
+- If pyproject.toml dependencies/extras changed:
+  - uv build && uv run python scripts/inspect_release_artifacts.py --dist-dir dist
+  - pytest tests/tier1_unit/test_accelerator_manifest.py -v
+- If launcher/ or packaging scripts changed:
+  - pytest tests/tier1_unit/test_package_launcher_archive.py tests/tier1_unit/test_validate_release_contract.py -v
+  - cargo test --manifest-path launcher/Cargo.toml (if launcher/ itself changed)
+  - cargo clippy --manifest-path launcher/Cargo.toml -- -D warnings (if launcher/ itself changed)
+- If release-launcher.yml or ci-packaging.yml changed:
+  - Confirm the workflow YAML parses (`python3 -c "import yaml; yaml.safe_load(open('.github/workflows/<file>'))"`)
+  - CI receipt required: a real workflow run's job summary/logs (local edits alone are not evidence).
+- Update docs/RUN_LOCAL.md, docs/MIGRATION.md, and docs/ENV_REFERENCE.md if paths.py's resolver
+  defaults or override var names changed — those docs hand-document the same mapping.
+
 ## 2. Standard commands (run these first, always)
 
 For any PR, at minimum:

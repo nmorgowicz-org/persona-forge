@@ -1,12 +1,16 @@
-# Why this is a container and not a standalone (pip/pipx/binary) app: the runtime needs
-# pinned CPU-only torch/torchaudio wheels that diverge from PyPI defaults (ARGs below,
-# enforced again in pyproject.toml's override-dependencies), source-level monkey-patches
-# applied to installed qwen_tts/transformers packages (see the compat_patch.py RUN step
-# further down), a per-accelerator-family install resolved at first boot by
-# scripts/entrypoint.sh (GPU_FAMILY probing into /opt/accel-venv), and a separately built
-# frontend bundle. Reproducing that on an arbitrary host's Python install is a real, ongoing
-# maintenance burden — the container is what makes those pins/patches invisible to users.
-# Revisit only if standalone packaging becomes a real ask (today there's a single known user).
+# This container remains the canonical, most-tested deployment path: it needs pinned
+# torch/torchaudio wheels that diverge from PyPI defaults (ARGs below, enforced again in
+# pyproject.toml's override-dependencies), source-level monkey-patches applied to installed
+# qwen_tts/transformers packages (see the compat_patch.py RUN step further down), a
+# per-accelerator-family install resolved at first boot by scripts/entrypoint.sh (GPU_FAMILY
+# probing into /opt/accel-venv), and a separately built frontend bundle — all baked into one
+# pinned, reproducible image so none of it is visible to the operator.
+#
+# Persona Forge also installs and runs natively (no container) — see docs/RUN_LOCAL.md. The
+# native `persona-forge setup`/`serve` commands (src/persona_forge/cli.py, bootstrap.py) apply
+# the equivalent pins/patches directly against the host Python instead of a container build;
+# accelerator wheels are opt-in extras at install time there rather than a first-boot install
+# into a persisted volume. See docs/MIGRATION.md for moving a deployment between the two.
 ARG PYTHON_IMAGE=python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285
 # Not digest-pinned like PYTHON_IMAGE below (build-stage only, never shipped in the final
 # image) — override via --build-arg if you need reproducibility guarantees for CI.

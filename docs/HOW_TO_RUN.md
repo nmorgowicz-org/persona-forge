@@ -1,7 +1,10 @@
 # How to run Persona Forge
 
 This document is for anyone deploying or operating this container. Internal host-specific
-procedures are in [INTERNAL_OPERATIONS.md](docs/dev/INTERNAL_OPERATIONS.md).
+procedures are in [INTERNAL_OPERATIONS.md](docs/dev/INTERNAL_OPERATIONS.md). Running without
+Docker? See [RUN_LOCAL.md](RUN_LOCAL.md) instead; the env vars below apply equally to both paths
+except where noted (see [ENV_REFERENCE.md](ENV_REFERENCE.md) and [MIGRATION.md](MIGRATION.md)
+for the container-path-vs-native-path mapping).
 
 ## Quick start (pocket-tts, no export required)
 
@@ -217,9 +220,10 @@ no dropped requests).
 
 Use these only if you have a reason. All other internals are preset-derived and work out of the box.
 
-**`TTS_BACKEND`** (default `openvino`)
-- Set to `pytorch` as a rollback backend when OpenVINO IR is broken or missing.
-- PyTorch is slower and does not use the IR, but is useful for verification.
+**`TTS_BACKEND`** (default `pocket_tts`)
+- `pocket_tts` is the product default (self-contained, no export step). `openvino` is the
+  accelerated Qwen path on Intel CPUs (requires export); `pytorch` is a portable rollback when
+  OpenVINO IR is broken or missing — slower, doesn't use the IR, useful for verification.
 - Change live via Runtime panel or `.env`; triggers a model reload.
 
 **`OV_INFERENCE_THREADS`** (default `6`)

@@ -5,6 +5,11 @@ fast iteration — writing/debugging Python, running the real-model capture harn
 container build (`Dockerfile`) is the canonical, production-facing path and is **not** migrated to
 `uv`; this is a local-dev convenience layered on top (see `pyproject.toml` / `uv.lock`).
 
+Just want to *run* Persona Forge natively rather than develop against it (no repo checkout, or
+you don't need the dev/test tooling below)? See [../RUN_LOCAL.md](../RUN_LOCAL.md) instead — it
+covers the same `uv sync` path plus the installed-wheel and launcher-archive alternatives, with
+none of the iteration-focused detail below.
+
 ## Prerequisites
 
 - [`uv`](https://docs.astral.sh/uv/) installed (`brew install uv` on macOS).
