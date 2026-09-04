@@ -25,6 +25,7 @@ import logging
 import os
 import random
 import secrets
+import socket
 import subprocess
 import sys
 import tempfile
@@ -55,23 +56,41 @@ def _read_test_profile() -> str:
     return (os.getenv("TEST_PROFILE") or "").strip().lower()
 
 
-def _ensure_loopback_bypasses_proxies() -> None:
+def _ensure_loopback_bypasses_proxies(extra_host: str | None = None) -> None:
     """Keep HTTP clients from sending the fake server through a runner proxy."""
+    hosts = ["127.0.0.1", "localhost", "::1"]
+    if extra_host is not None:
+        hosts.append(extra_host)
     for name in ("NO_PROXY", "no_proxy"):
         values = [
             value.strip()
             for value in os.environ.get(name, "").split(",")
             if value.strip()
         ]
-        for host in ("127.0.0.1", "localhost", "::1"):
+        for host in hosts:
             if host not in values:
                 values.append(host)
         os.environ[name] = ",".join(values)
 
 
-def _loopback_get(port: int, path: str, timeout: float) -> int:
-    """GET a loopback endpoint without proxy or TLS setup."""
-    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+def _select_non_loopback_host() -> str:
+    """Return a host address usable when loopback is restricted by the runner."""
+    try:
+        addresses = socket.getaddrinfo(
+            socket.gethostname(), None, socket.AF_INET, socket.SOCK_STREAM
+        )
+    except OSError:
+        addresses = []
+    for address in addresses:
+        host = address[4][0]
+        if not host.startswith(("127.", "169.254.")):
+            return host
+    return "127.0.0.1"
+
+
+def _loopback_get(host: str, port: int, path: str, timeout: float) -> int:
+    """GET a local endpoint without proxy or TLS setup."""
+    connection = http.client.HTTPConnection(host, port, timeout=timeout)
     try:
         connection.request("GET", path)
         response = connection.getresponse()
@@ -290,6 +309,8 @@ def main() -> None:
     _setup_pythonpath()
 
     port = int(os.getenv("PERSONA_FORGE_TEST_PORT", "8319"))
+    host = os.getenv("PERSONA_FORGE_TEST_HOST", "127.0.0.1")
+    bind_host = os.getenv("PERSONA_FORGE_TEST_BIND_HOST", host)
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
     # Ensure library dirs before importing app (uses segment_library which defaults to /segments).
@@ -313,11 +334,11 @@ def main() -> None:
 
     app_module._shutdown_hook = shutdown_event.set
 
-    server = make_server("127.0.0.1", port, app_module.app, threaded=True)
+    server = make_server(bind_host, port, app_module.app, threaded=True)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
 
-    print(f"[fake_model_server] listening on http://127.0.0.1:{port}", flush=True)
+    print(f"[fake_model_server] listening on http://{host}:{port}", flush=True)
     print(f"[fake_model_server] TEST_PROFILE={_read_test_profile()}", flush=True)
     print(f"[fake_model_server] voice library: {os.environ['VOICE_LIBRARY_DIR']}", flush=True)
 
@@ -343,8 +364,12 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
         # configuration. Keep the server in a child process so it does not inherit
         # the parent test process's already-imported Flask/fake-runtime modules.
         port = int(os.getenv("PERSONA_FORGE_WINDOWS_TEST_PORT", "18318"))
+        host = _select_non_loopback_host()
+        _ensure_loopback_bypasses_proxies(host)
         child_env = os.environ.copy()
         child_env["PERSONA_FORGE_TEST_PORT"] = str(port)
+        child_env["PERSONA_FORGE_TEST_HOST"] = host
+        child_env["PERSONA_FORGE_TEST_BIND_HOST"] = "0.0.0.0"
         child = subprocess.Popen(
             [sys.executable, str(Path(__file__).resolve())],
             env=child_env,
@@ -353,11 +378,11 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
             text=True,
         )
         actual_port = port
-        base_url = f"http://127.0.0.1:{actual_port}"
+        base_url = f"http://{host}:{actual_port}"
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             try:
-                if _loopback_get(actual_port, "/health", timeout=1) == 200:
+                if _loopback_get(host, actual_port, "/health", timeout=1) == 200:
                     break
             except Exception:
                 if child.poll() is not None:
@@ -377,7 +402,7 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
 
         def stop_fn():
             try:
-                _loopback_get(actual_port, "/_shutdown", timeout=2)
+                _loopback_get(host, actual_port, "/_shutdown", timeout=2)
             except Exception:
                 pass
             try:
@@ -435,7 +460,7 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         try:
-            if _loopback_get(actual_port, "/health", timeout=1) == 200:
+            if _loopback_get("127.0.0.1", actual_port, "/health", timeout=1) == 200:
                 break
         except Exception:
             time.sleep(0.1)
@@ -444,7 +469,7 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
 
     def stop_fn():
         try:
-            _loopback_get(actual_port, "/_shutdown", timeout=2)
+            _loopback_get("127.0.0.1", actual_port, "/_shutdown", timeout=2)
         except Exception:
             pass
         shutdown_event.wait(timeout=5)
