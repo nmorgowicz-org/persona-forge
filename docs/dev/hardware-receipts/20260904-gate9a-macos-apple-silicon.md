@@ -1,6 +1,6 @@
 # Gate 9A hardware receipt — macOS Apple Silicon
 
-Phase 9 of `docs/plans/20260829-no_more_docker_requirement.md`. Real hardware, not simulated.
+Phase 9 of `docs/archive/no-docker/20260829-no_more_docker_requirement.md`. Real hardware, not simulated.
 
 ## Source
 

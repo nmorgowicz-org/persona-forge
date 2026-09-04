@@ -1,8 +1,10 @@
 # Native Persona Forge — Architecture Contract
 
-**Status:** Binding design for `20260829-no_more_docker_requirement.md`  
+**Status:** Implemented; PR https://github.com/nmorgowicz-org/persona-forge/pull/243. Binding
+design for `20260829-no_more_docker_requirement.md` during execution; moved to
+`docs/archive/no-docker/` as reference now that it's done.  
 **Source baseline:** `986667730d1ef4e79db973b3c40dd6538c58e405`  
-**Execution plan:** `docs/plans/20260829-no_more_docker_requirement.md`
+**Execution plan:** `docs/archive/no-docker/20260829-no_more_docker_requirement.md`
 
 ## 1. Goal
 
@@ -244,7 +246,7 @@ Verified 2026-08-29 against `download.pytorch.org/whl/<index>/torch/`, torch 2.1
   `rocm6.4` with torch pinned to `2.9.1`. ROCm7.x cp313 wheels exist only on the nightly index and
   are out of scope per the plan's non-goals (no real ROCm support without hardware, and nightly
   wheels are not a reproducible pin).
-- The Phase 4 resolution gates (`docs/plans/20260829-no_more_docker_requirement.md`) must exercise
+- The Phase 4 resolution gates (`docs/archive/no-docker/20260829-no_more_docker_requirement.md`) must exercise
   `--extra cuda12` alongside `--extra cuda13`; testing only `cuda13` leaves the `cuda12` floor
   unverified.
 

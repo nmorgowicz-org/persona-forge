@@ -1,6 +1,6 @@
 # Gate 9B hardware receipt — Windows x86-64 + NVIDIA
 
-Phase 9 of `docs/plans/20260829-no_more_docker_requirement.md`. Real hardware, not simulated.
+Phase 9 of `docs/archive/no-docker/20260829-no_more_docker_requirement.md`. Real hardware, not simulated.
 
 ## Source
 
@@ -114,7 +114,7 @@ terminated on every path (readiness timeout, generation error, or success). Scri
 ## Not claimed
 
 - Qwen3-TTS / OpenVINO are **not** supported on Windows by this project
-  (`docs/plans/20260829-no_more_docker_architecture.md` line 47) — `persona-forge setup`
+  (`docs/archive/no-docker/20260829-no_more_docker_architecture.md` line 47) — `persona-forge setup`
   correctly no-ops the Qwen compat-patch step on Windows (`_qwen_patch_setup`); this receipt
   makes no claim about Qwen/OpenVINO on this platform.
 - Launcher archive smoke: out of scope, same reasoning as the Gate 9A receipt

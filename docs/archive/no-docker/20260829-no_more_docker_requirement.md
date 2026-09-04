@@ -1,7 +1,10 @@
 # Native Persona Forge — Execution Plan
 
+Status: implemented; PR https://github.com/nmorgowicz-org/persona-forge/pull/243. This doc moved
+to `docs/archive/no-docker/` as reference.
+
 > This is the lower-tier-model execution document. The binding decisions live in
-> `docs/plans/20260829-no_more_docker_architecture.md`. Read that document completely before each
+> `docs/archive/no-docker/20260829-no_more_docker_architecture.md`. Read that document completely before each
 > phase. If this plan and the architecture contract disagree, stop and repair the documents; do not
 > choose one silently.
 
@@ -861,8 +864,8 @@ out of `docs/plans/` into `docs/archive/no-docker/` (new directory — distinct 
 `docs/archive/container/`, which covers the container *image* itself, not removing the Docker
 requirement), keeping their filenames unchanged per the existing archive convention:
 
-- `docs/plans/20260829-no_more_docker_requirement.md`
-- `docs/plans/20260829-no_more_docker_architecture.md`
+- `docs/archive/no-docker/20260829-no_more_docker_requirement.md`
+- `docs/archive/no-docker/20260829-no_more_docker_architecture.md`
 
 ### Required handoff
 

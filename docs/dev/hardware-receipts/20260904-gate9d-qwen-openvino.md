@@ -1,6 +1,6 @@
 # Gate 9D — Qwen/OpenVINO staged gates
 
-Phase 9 of `docs/plans/20260829-no_more_docker_requirement.md`.
+Phase 9 of `docs/archive/no-docker/20260829-no_more_docker_requirement.md`.
 
 ## Verdict: N/A — model execution unchanged on this branch
 
