@@ -194,6 +194,7 @@ jobs:
 
   resolve:
     name: target-resolution
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: arc-general
     timeout-minutes: 20
     steps:
