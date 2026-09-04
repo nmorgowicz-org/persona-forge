@@ -19,11 +19,13 @@ TEST_PROFILE options:
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import os
 import random
 import secrets
+import subprocess
 import sys
 import tempfile
 import threading
@@ -51,6 +53,32 @@ def _setup_pythonpath():
 
 def _read_test_profile() -> str:
     return (os.getenv("TEST_PROFILE") or "").strip().lower()
+
+
+def _ensure_loopback_bypasses_proxies() -> None:
+    """Keep HTTP clients from sending the fake server through a runner proxy."""
+    for name in ("NO_PROXY", "no_proxy"):
+        values = [
+            value.strip()
+            for value in os.environ.get(name, "").split(",")
+            if value.strip()
+        ]
+        for host in ("127.0.0.1", "localhost", "::1"):
+            if host not in values:
+                values.append(host)
+        os.environ[name] = ",".join(values)
+
+
+def _loopback_get(port: int, path: str, timeout: float) -> int:
+    """GET a loopback endpoint without proxy or TLS setup."""
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+    try:
+        connection.request("GET", path)
+        response = connection.getresponse()
+        response.read()
+        return response.status
+    finally:
+        connection.close()
 
 
 def _install_fake_runtime():
@@ -304,10 +332,63 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     Intended for Tier 3 API integration tests and Playwright E2E.
     """
     _setup_pythonpath()
+    _ensure_loopback_bypasses_proxies()
     lib_dir = tempfile.mkdtemp(prefix="persona-forge-e2e-voices-")
     seg_dir = tempfile.mkdtemp(prefix="persona-forge-e2e-segments-")
     os.environ.setdefault("VOICE_LIBRARY_DIR", lib_dir)
     os.environ.setdefault("SEGMENT_LIBRARY_DIR", seg_dir)
+
+    if sys.platform.startswith("win") and port == 0:
+        # The self-hosted Windows runner has a restricted NetworkService loopback
+        # configuration. Keep the server in a child process so it does not inherit
+        # the parent test process's already-imported Flask/fake-runtime modules.
+        port = int(os.getenv("PERSONA_FORGE_WINDOWS_TEST_PORT", "18318"))
+        child_env = os.environ.copy()
+        child_env["PERSONA_FORGE_TEST_PORT"] = str(port)
+        child = subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve())],
+            env=child_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        actual_port = port
+        base_url = f"http://127.0.0.1:{actual_port}"
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            try:
+                if _loopback_get(actual_port, "/health", timeout=1) == 200:
+                    break
+            except Exception:
+                if child.poll() is not None:
+                    output = child.stdout.read() if child.stdout is not None else ""
+                    raise RuntimeError(
+                        "fake_model_server exited before becoming reachable "
+                        f"(code {child.returncode}): {output.strip()}"
+                    )
+                time.sleep(0.1)
+        else:
+            child.terminate()
+            output = child.communicate(timeout=5)[0]
+            raise RuntimeError(
+                "fake_model_server did not become reachable within 30 seconds "
+                f"(child output: {output.strip()})"
+            )
+
+        def stop_fn():
+            try:
+                _loopback_get(actual_port, "/_shutdown", timeout=2)
+            except Exception:
+                pass
+            try:
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                child.terminate()
+                child.wait(timeout=5)
+            if child.stdout is not None:
+                child.stdout.read()
+
+        return base_url, stop_fn
 
     rt = _install_fake_runtime()
     _patch_generate_for_slow_async(rt)
@@ -347,8 +428,6 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     t = threading.Thread(target=serve_until_stopped, daemon=True)
     t.start()
 
-    import urllib.request
-
     base_url = f"http://127.0.0.1:{actual_port}"
     # 30s, not 10s: under `pytest-xdist -n auto` every worker starts its own server + imports
     # persona_forge.app concurrently, and on the self-hosted Windows runner that contention
@@ -356,9 +435,8 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(f"{base_url}/health", timeout=1) as resp:
-                if resp.status == 200:
-                    break
+            if _loopback_get(actual_port, "/health", timeout=1) == 200:
+                break
         except Exception:
             time.sleep(0.1)
     else:
@@ -366,7 +444,7 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
 
     def stop_fn():
         try:
-            urllib.request.urlopen(f"{base_url}/_shutdown", timeout=2)
+            _loopback_get(actual_port, "/_shutdown", timeout=2)
         except Exception:
             pass
         shutdown_event.wait(timeout=5)
