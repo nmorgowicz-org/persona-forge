@@ -14,6 +14,7 @@ A standard wheel build always builds fresh (no stamp-skip here — that convenie
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -32,7 +33,12 @@ class FrontendBuildHook(BuildHookInterface):
     def initialize(self, version: str, build_data: dict) -> None:
         if self.target_name != "wheel" or version != "standard":
             return
-        for step in (["npm", "ci"], ["npm", "run", "check"], ["npm", "run", "build"]):
+        npm = "npm.cmd" if os.name == "nt" else "npm"
+        for step in (
+            [npm, "ci"],
+            [npm, "run", "check"],
+            [npm, "run", "build"],
+        ):
             subprocess.run(step, cwd=_FRONTEND_DIR, check=True)
         if not (_FRONTEND_DIST_DIR / "index.html").is_file():
             raise RuntimeError(
