@@ -14,18 +14,14 @@ import warnings
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping
 
+from persona_forge import paths
+
 _SCHEMA_VERSION = 1
 _FILENAME = "runtime.json"
 
 
 def _data_dir() -> Path:
-    root = (
-        os.getenv("DATA_DIR")
-        or os.getenv("VOICE_LIBRARY_DIR")
-        or os.getenv("VOICE_LIBRARY_PATH_CONTAINER")
-        or "/voices"
-    )
-    return Path(root)
+    return paths.runtime_data_dir()
 
 
 def _runtime_json_path() -> Path:

@@ -25,6 +25,7 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 
+from persona_forge import paths
 from persona_forge.audio_post import (
     apply_region_edits,
     apply_resolved_boundary_pause_plan,
@@ -40,9 +41,9 @@ from persona_forge.audio_style import (
 from persona_forge.reference_analysis import calculate_quality_score
 
 
-# Fixed container-side mount point, same pattern as persona_forge.config.REF_AUDIO_PATH.
-# compose.yml binds ${VOICE_LIBRARY_PATH:-./data/voices} (host) -> this path (container).
-VOICE_LIBRARY_DIR = Path(os.getenv("VOICE_LIBRARY_DIR", "/voices"))
+# docs/plans/20260829-no_more_docker_architecture.md §4: VOICE_LIBRARY_DIR overrides else
+# <app data root>/voices natively, /voices in the container (compose.yml sets the env var).
+VOICE_LIBRARY_DIR = paths.voice_library_dir()
 ACTIVE_DEFAULT_FILE = VOICE_LIBRARY_DIR / ".active_default"
 # The mounted REF_AUDIO is materialized under this stable ID so diagnostics and UI
 # actions can refer to the same library record across restarts.

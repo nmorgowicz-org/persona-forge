@@ -24,6 +24,18 @@ x-model-environment: &model-environment
   MODEL_REVISION: ${MODEL_REVISION:-}
   # Capacity baked into the IR at export time; changing it requires re-export.
   TTS_MAX_SPEECH_SECONDS: ${TTS_MAX_SPEECH_SECONDS:-}
+  # Container-side runtime paths (docs/plans/20260829-no_more_docker_architecture.md §4).
+  # These are the persona_forge.paths resolvers' highest-precedence inputs, distinct from
+  # the host-side Compose bind-mount variables (MODEL_CACHE_PATH, OV_DATA_PATH, etc. above/
+  # below) — never confuse the two. Fixed to match the mounts so native/non-Docker runs and
+  # the container agree on every default except the root.
+  MODEL_CACHE_CONTAINER_PATH: /root/.cache/huggingface/hub
+  OV_DATA_DIR: /ov
+  VOICE_LIBRARY_DIR: /voices
+  SEGMENT_LIBRARY_DIR: /segments
+  REF_AUDIO: /voice/reference.wav
+  HF_TOKEN_FILE: /app/.hf_token
+  OV_CACHE_DIR: /ov/cache
 
 x-model-volumes: &model-volumes
   - ${MODEL_CACHE_PATH:-./data/model}:/root/.cache/huggingface/hub:rw

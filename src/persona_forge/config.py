@@ -13,10 +13,13 @@ from __future__ import annotations
 import os
 from collections.abc import MutableMapping
 
+from persona_forge import paths
 from persona_forge.presets import get_preset, has_valid_export, normalize_size
 
-# The reference WAV is always mounted at this fixed path (see compose.yml / .env.example).
-REF_AUDIO_PATH = "/voice/reference.wav"
+# docs/plans/20260829-no_more_docker_architecture.md §4: REF_AUDIO overrides else
+# <app data root>/reference.wav natively, the fixed /voice/reference.wav mount in the
+# container (compose.yml sets the env var).
+REF_AUDIO_PATH = str(paths.reference_audio_path())
 
 
 def normalize_backend(value: str | None) -> str:

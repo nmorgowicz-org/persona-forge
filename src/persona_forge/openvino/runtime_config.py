@@ -8,6 +8,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from persona_forge import paths
+
 
 def resolve_inference_threads() -> int:
     """Choose inference thread count based on available cores.
@@ -50,11 +52,12 @@ def get_ov_config() -> dict[str, object]:
     dynamic_quant_group = os.getenv("OV_DYNAMIC_QUANT_GROUP_SIZE", "32").strip()
     kv_cache_precision = os.getenv("OV_KV_CACHE_PRECISION", "f32").strip()
 
-    # Compiled kernel cache — eliminates ~60–120s JIT on every restart/reload.
-    # Defaults to /ov/cache, which is already on the persistent OV_DATA_PATH mount.
+    # Compiled kernel cache — eliminates ~60-120s JIT on every restart/reload.
+    # Defaults under the OV data root (persona_forge.paths.ov_cache_dir); compose.yml/Dockerfile
+    # set OV_CACHE_DIR=/ov/cache explicitly so containerized behavior is unchanged.
     # Set OV_CACHE_DIR="" to disable.
-    cache_dir_raw = os.getenv("OV_CACHE_DIR", "/ov/cache").strip()
-    cache_dir = cache_dir_raw or None
+    resolved_cache_dir = paths.ov_cache_dir(os.environ)
+    cache_dir = str(resolved_cache_dir) if resolved_cache_dir is not None else None
     if cache_dir:
         Path(cache_dir).mkdir(parents=True, exist_ok=True)
 

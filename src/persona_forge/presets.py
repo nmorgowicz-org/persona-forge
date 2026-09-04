@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import os
 
+from persona_forge import paths
+
 # The main stateful graph's codec runs at 12 Hz — one frame per 1/12 second of audio.
 # This is what turns a human "max speech seconds" knob into an OpenVINO static-capacity
 # frame count. See docs/dev/benchmarks/OPENVINO_RESULTS.md ("768 ~= 64s of 12 Hz context").
@@ -37,12 +39,24 @@ def seconds_for_capacity(capacity: int) -> float:
 
 
 def _ir_paths(size: str, capacity: int) -> dict[str, str]:
-    base = f"/ov/{size}"
+    base = paths.ov_root() / size
     return {
-        "ov_model_dir": f"{base}/ir",
-        "main_stateful_model": f"{base}/main_stateful_cap{capacity}.xml",
-        "vocoder_dir": f"{base}/vocoder",
+        "ov_model_dir": str(base / "ir"),
+        "main_stateful_model": str(base / f"main_stateful_cap{capacity}.xml"),
+        "vocoder_dir": str(base / "vocoder"),
     }
+
+
+# 0.6B's predictor capacity is fixed at 32 frames — unrelated to the main graph's
+# max-speech-driven capacity — so it is keyed by size only, not by the resolved capacity.
+_PREDICTOR_STATEFUL_FILENAMES = {"0.6B": "predictor_stateful_cap32.xml"}
+
+
+def _predictor_stateful_model(size: str) -> str | None:
+    filename = _PREDICTOR_STATEFUL_FILENAMES.get(size)
+    if filename is None:
+        return None
+    return str(paths.ov_root() / size / filename)
 
 
 PRESETS: dict[str, dict[str, object]] = {
@@ -55,7 +69,7 @@ PRESETS: dict[str, dict[str, object]] = {
         "predictor_compression": "int8",
         "vocoder_enabled": True,
         "max_speech_seconds": DEFAULT_MAX_SPEECH_SECONDS,
-        "predictor_stateful_model": "/ov/0.6B/predictor_stateful_cap32.xml",
+        "predictor_stateful_model": None,  # resolved dynamically in get_preset() via ov_root()
         "torch_dtype": "bfloat16",
         "mem_limit": "10G",
         "mem_swap_limit": "11G",
@@ -82,14 +96,14 @@ VOICE_DESIGN_DEFAULT_MAX_SPEECH_SECONDS = 30.0
 
 
 def _voice_design_ir_paths(size: str, capacity: int) -> dict[str, str]:
-    # A distinct, size-keyed directory tree (never "/ov/<size>/...") so a VoiceDesign
+    # A distinct, size-keyed directory tree (never "<ov_root>/<size>/...") so a VoiceDesign
     # export can never collide with — or accidentally overwrite — the Base export for
     # the same MODEL_SIZE.
-    base = f"/ov/{size}-voicedesign"
+    base = paths.ov_root() / f"{size}-voicedesign"
     return {
-        "ov_model_dir": f"{base}/ir",
-        "main_stateful_model": f"{base}/main_stateful_cap{capacity}.xml",
-        "vocoder_dir": f"{base}/vocoder",
+        "ov_model_dir": str(base / "ir"),
+        "main_stateful_model": str(base / f"main_stateful_cap{capacity}.xml"),
+        "vocoder_dir": str(base / "vocoder"),
     }
 
 
@@ -188,5 +202,6 @@ def get_preset(model_size: str | None, max_speech_seconds: float | None = None) 
     capacity = capacity_for_seconds(seconds)
     preset["max_speech_seconds"] = seconds
     preset["stateful_capacity"] = capacity
+    preset["predictor_stateful_model"] = _predictor_stateful_model(key)
     preset.update(_ir_paths(key, capacity))
     return preset

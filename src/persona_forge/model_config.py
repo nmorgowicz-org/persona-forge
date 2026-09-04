@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 from collections.abc import MutableMapping
-from pathlib import Path
+
+from persona_forge import paths
 
 
 MODEL_PRESETS = {
@@ -42,17 +43,18 @@ def configure_hf_token(environ: MutableMapping[str, str] = os.environ) -> None:
 
     Precedence:
       1) HF_TOKEN env var (set by user, Compose, or runtime config)
-      2) HF_TOKEN_FILE (explicit Docker secret)
-      3) /app/.hf_token (persisted via runtime config panel, if it exists)
+      2) HF_TOKEN_FILE (explicit Docker secret; compose.yml/Dockerfile set this to
+         /app/.hf_token in the container, so containerized behavior is unchanged)
+      3) the native app-state default (persona_forge.paths.hf_token_file), if it exists
     """
 
     if environ.get("HF_TOKEN"):
         return
 
-    token_file = environ.get("HF_TOKEN_FILE") or "/app/.hf_token"
+    token_file = paths.hf_token_file(environ)
 
     try:
-        token = Path(token_file).read_text(encoding="utf-8").strip()
+        token = token_file.read_text(encoding="utf-8").strip()
     except OSError:
         return  # no file or unreadable: continue with no token
 

@@ -14,15 +14,17 @@ Layout: <SEGMENT_LIBRARY_DIR>/<segment_id>/clip.wav + <SEGMENT_LIBRARY_DIR>/<seg
 from __future__ import annotations
 
 import json
-import os
 import re
 import secrets
 import time
 from pathlib import Path
 from typing import Any
 
-# compose.yml binds ${SEGMENT_LIBRARY_PATH:-./data/segments} (host) -> this path (container).
-SEGMENT_LIBRARY_DIR = Path(os.getenv("SEGMENT_LIBRARY_DIR", "/segments"))
+from persona_forge import paths
+
+# docs/plans/20260829-no_more_docker_architecture.md §4: SEGMENT_LIBRARY_DIR overrides else
+# <app data root>/segments natively, /segments in the container (compose.yml sets the env var).
+SEGMENT_LIBRARY_DIR = paths.segment_library_dir()
 
 _SEGMENT_ID_RE = re.compile(r"^seg_[0-9a-f]{12}$")
 

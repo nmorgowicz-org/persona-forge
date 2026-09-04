@@ -14,6 +14,15 @@ from persona_forge.presets import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _pin_ov_root_to_container_default(monkeypatch):
+    # presets.py resolves IR paths via persona_forge.paths.ov_root(), whose native default
+    # is the platform app-data root; pin OV_DATA_DIR to the container default (what
+    # compose.yml/Dockerfile set) so these assertions exercise the same "/ov/..." paths
+    # regardless of the machine/platform running the tests.
+    monkeypatch.setenv("OV_DATA_DIR", "/ov")
+
+
 class TestPresetsEnv:
     def test_06b_stateful_main_and_predictor(self):
         environ = {"MODEL_SIZE": "0.6b"}
