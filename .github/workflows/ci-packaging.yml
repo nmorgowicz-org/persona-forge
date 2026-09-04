@@ -75,14 +75,19 @@ jobs:
             runs-on: arc-general
             pythonpath: "src:src/export"
             os_probe: "uname -a"
+            pytest_workers: "auto"
           - name: macos
             runs-on: self-hosted-macos
             pythonpath: "src:src/export"
             os_probe: "uname -a"
+            pytest_workers: "auto"
           - name: windows
             runs-on: self-hosted-windows
             pythonpath: "src;src/export"
             os_probe: "[System.Environment]::OSVersion.VersionString"
+            # Each xdist worker starts an in-process fake HTTP server. The native Windows
+            # runner's loopback stack becomes unreliable under eight simultaneous startups.
+            pytest_workers: "1"
     env:
       PYTHONPATH: ${{ matrix.pythonpath }}
     steps:
@@ -144,7 +149,7 @@ jobs:
       # down, then the whole directory is uploaded unconditionally.
       - name: Semantic tests (fast, fake lane)
         shell: bash
-        run: uv run --frozen python -m pytest -m "not slow and not requires_torch and not requires_model_weights and not requires_openvino_ir" -n auto --tb=short tests/tier1_unit tests/tier2_backend tests/tier3_api_integration 2>&1 | tee logs/semantic-tests.log
+        run: uv run --frozen python -m pytest -m "not slow and not requires_torch and not requires_model_weights and not requires_openvino_ir" -n ${{ matrix.pytest_workers }} --tb=short tests/tier1_unit tests/tier2_backend tests/tier3_api_integration 2>&1 | tee logs/semantic-tests.log
 
       - name: Spawned-process acceptance (fake-runtime readiness + clean shutdown)
         shell: bash
