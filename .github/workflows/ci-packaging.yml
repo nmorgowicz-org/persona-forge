@@ -208,7 +208,7 @@ jobs:
       # failures are collected), a truthful machine-readable receipt is written, and the step is
       # fail-closed: it exits non-zero if ANY target fails to resolve.
       - name: Resolve targets (no foreign wheels installed)
-        shell: ${{ matrix.bash_shell }}
+        shell: bash
         run: |
           set -o pipefail
           status="pass"
