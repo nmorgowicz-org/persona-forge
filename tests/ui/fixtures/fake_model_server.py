@@ -313,8 +313,6 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     _patch_generate_for_slow_async(rt)
 
     from persona_forge import app as app_module  # noqa: E402
-    from werkzeug.serving import make_server  # noqa: E402
-
     _install_fake_voice_design(app_module)
     _patch_omnivoice_run_job(app_module)
     _patch_save_voice(app_module, rt)
@@ -324,9 +322,34 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     shutdown_event = threading.Event()
     app_module._shutdown_hook = shutdown_event.set
 
-    server = make_server("127.0.0.1", port, app_module.app, threaded=True)
-    actual_port = server.server_address[1]
-    t = threading.Thread(target=server.serve_forever, daemon=True)
+    if sys.platform.startswith("win"):
+        # Use the same WSGI server as the production Windows CLI. Werkzeug's threaded
+        # development server binds but does not reliably accept loopback requests on the
+        # self-hosted Windows runner, leaving every readiness probe stuck until timeout.
+        from waitress import create_server  # noqa: E402
+
+        server = create_server(app_module.app, host="127.0.0.1", port=port, threads=4)
+        actual_port = server.socket.getsockname()[1]
+        serve = server.run
+        shutdown = server.close
+    else:
+        from werkzeug.serving import make_server  # noqa: E402
+
+        server = make_server("127.0.0.1", port, app_module.app, threaded=True)
+        actual_port = server.server_address[1]
+        serve = server.serve_forever
+        shutdown = server.shutdown
+
+    def serve_until_stopped():
+        try:
+            serve()
+        except OSError:
+            # Waitress closes its listening socket from stop_fn; its select loop can
+            # observe that close as a bad descriptor while the server is stopping.
+            if not shutdown_event.is_set():
+                raise
+
+    t = threading.Thread(target=serve_until_stopped, daemon=True)
     t.start()
 
     import urllib.request
@@ -352,7 +375,8 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
         except Exception:
             pass
         shutdown_event.wait(timeout=5)
-        server.shutdown()
+        shutdown()
+        t.join(timeout=5)
 
     return base_url, stop_fn
 
