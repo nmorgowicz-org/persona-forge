@@ -356,7 +356,7 @@ class TestPortConflict:
 
 @pytest.mark.slow
 @pytest.mark.skipif(
-    sys.platform.startswith("win") and os.getenv("CI"),
+    sys.platform.startswith("win") and os.getenv("CI", "").lower() == "true",
     reason=(
         "the NetworkService Windows CI runner blocks parent-to-child TCP; "
         "semantic HTTP coverage uses WSGI transport"
