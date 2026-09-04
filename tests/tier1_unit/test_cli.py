@@ -355,6 +355,13 @@ class TestPortConflict:
 
 
 @pytest.mark.slow
+@pytest.mark.skipif(
+    sys.platform.startswith("win") and os.getenv("CI"),
+    reason=(
+        "the NetworkService Windows CI runner blocks parent-to-child TCP; "
+        "semantic HTTP coverage uses WSGI transport"
+    ),
+)
 class TestSpawnedProcessAcceptance:
     """Task 8: model-free spawned-process acceptance fixture.
 
