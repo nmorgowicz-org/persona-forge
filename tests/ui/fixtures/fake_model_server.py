@@ -363,6 +363,7 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
         client = httpx.Client(transport=transport, base_url="http://testserver")
         original_get = httpx.get
         original_post = httpx.post
+        original_delete = httpx.delete
 
         def _test_get(url, **kwargs):
             return client.get(url, **kwargs)
@@ -370,12 +371,17 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
         def _test_post(url, **kwargs):
             return client.post(url, **kwargs)
 
+        def _test_delete(url, **kwargs):
+            return client.delete(url, **kwargs)
+
         httpx.get = _test_get
         httpx.post = _test_post
+        httpx.delete = _test_delete
 
         def stop_fn():
             httpx.get = original_get
             httpx.post = original_post
+            httpx.delete = original_delete
             client.close()
 
         return "http://testserver", stop_fn
