@@ -24,7 +24,7 @@ class TestResolveFrontendDir:
         )
         assert result == override
 
-    def test_package_local_wins_over_checkout(self, tmp_path):
+    def test_checkout_wins_over_package_local_staging_assets(self, tmp_path):
         package_static = tmp_path / "pkg-static"
         checkout = tmp_path / "checkout"
         _touch_index(package_static)
@@ -32,7 +32,7 @@ class TestResolveFrontendDir:
         result = frontend.resolve_frontend_dir(
             {}, package_static_dir=package_static, checkout_dist_dir=checkout
         )
-        assert result == package_static
+        assert result == checkout
 
     def test_falls_back_to_checkout_when_package_local_absent(self, tmp_path):
         package_static = tmp_path / "pkg-static"  # never created

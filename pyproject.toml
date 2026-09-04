@@ -14,21 +14,22 @@ dependencies = [
   "waitress==3.0.2; sys_platform == 'win32'",
   "soundfile==0.14.0",
   # Shared by OmniVoice and pocket-tts (our two main accent-design/cloning levers) as well as
-  # the optional qwen3-tts engine below; override-dependencies also pins the transformers/torch
-  # versions here (CVE-2026-1839) so they must stay declared at this level.
+  # the optional qwen3-tts engine below; override-dependencies pins the Transformers version here
+  # (CVE-2026-1839), so it must stay declared at this level.
   "accelerate",
   "librosa",
   "transformers==5.12.1",
   # Native accelerator selection (Phase 4, persona_forge.accelerator_manifest is the source of
   # truth for these numbers). The range must admit every accelerator extra's exact pin below
-  # (2.14.0 default down to rocm's 2.9.1 — rocm6.4 has no 2.14.0 cp313 wheel) so an extra
-  # narrows this line instead of conflicting with it; with no extra active it still resolves to
-  # 2.14.0/2.11.0, unchanged from before this phase.
+  # (2.14.0 default down to rocm's 2.9.1 — rocm6.4 has no 2.14.0 cp313 wheel) because uv
+  # cannot conditionally replace a base dependency by selected extra. The universal lock records
+  # the exact default and per-extra variants; scripts/check_torch_stack.py verifies that set so
+  # this envelope cannot silently broaden an install.
   "torch>=2.9.1,<2.15",
   "torchaudio>=2.9.1,<2.12",
   # OmniVoice (Persona Forge accent-design engine) — PyPI release, same pin as the
   # container image (Dockerfile / entrypoint.sh). Its declared torch/torchaudio/transformers
-  # requirements are loose; override-dependencies below forces them to the pins above.
+  # requirements are loose; the direct project pins and accelerator extras below constrain them.
   "omnivoice==0.2.1",
   # pocket-tts (Persona Forge cloning/generation engine) — a main lever alongside OmniVoice,
   # not optional; see D12/Persona Forge pivot.

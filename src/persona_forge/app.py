@@ -103,8 +103,8 @@ def _test_shutdown():
     return "ok"
 
 
-# Static frontend export: FRONTEND_DIST_DIR override > package-local built UI > checkout
-# frontend/dist > API-only (persona_forge.frontend.resolve_frontend_dir, see
+# Static frontend export: FRONTEND_DIST_DIR override > checkout frontend/dist > package-local built
+# UI > API-only (persona_forge.frontend.resolve_frontend_dir, see
 # docs/plans/20260829-no_more_docker_architecture.md §6). Auto-disables (falls back to a bare
 # API service) if the resolved directory isn't present, e.g. a local run without ever building
 # the frontend.

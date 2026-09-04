@@ -278,6 +278,7 @@ class TestSetupFrontendBuild:
         package_static.mkdir()
         (package_static / "index.html").write_text("<html></html>")
         monkeypatch.setattr(cli.frontend, "PACKAGE_STATIC_DIR", package_static)
+        monkeypatch.setattr(cli, "_FRONTEND_SOURCE_DIR", tmp_path / "no-checkout-frontend")
         monkeypatch.setenv("PERSONA_FORGE_HOME", str(tmp_path / "pf-home"))
         monkeypatch.setattr(
             cli,
@@ -286,6 +287,22 @@ class TestSetupFrontendBuild:
         )
         args = cli.build_parser().parse_args(["setup"])
         assert cli.cmd_setup(args) == 0
+
+    def test_checkout_build_is_not_skipped_for_package_local_staging_assets(self, tmp_path, monkeypatch):
+        package_static = tmp_path / "pkg-static"
+        package_static.mkdir()
+        (package_static / "index.html").write_text("<html>stale</html>")
+        checkout_frontend = tmp_path / "frontend"
+        checkout_frontend.mkdir()
+        monkeypatch.setattr(cli.frontend, "PACKAGE_STATIC_DIR", package_static)
+        monkeypatch.setattr(cli, "_FRONTEND_SOURCE_DIR", checkout_frontend)
+        monkeypatch.setenv("PERSONA_FORGE_HOME", str(tmp_path / "pf-home"))
+        calls = []
+        monkeypatch.setattr(cli, "_build_checkout_frontend", lambda **kwargs: calls.append(kwargs) or 0)
+
+        args = cli.build_parser().parse_args(["setup"])
+        assert cli.cmd_setup(args) == 0
+        assert calls == [{"force": False}]
 
     def test_fails_when_npm_absent_from_path(self, tmp_path, monkeypatch):
         frontend_dir = tmp_path / "frontend"

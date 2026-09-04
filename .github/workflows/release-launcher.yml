@@ -143,12 +143,41 @@ jobs:
       - name: Smoke-test launcher doctor --json (target-native runner)
         run: |
           set -euo pipefail
-          LAUNCHER_BIN="launcher/target/${{ matrix.target }}/release/persona-forge-launcher"
-          [ "${{ matrix.target }}" = "x86_64-pc-windows-gnu" ] && LAUNCHER_BIN="${LAUNCHER_BIN}.exe"
-          if [ "$(uname -m)-$(uname -s)" = "$(echo ${{ matrix.target }} | cut -d- -f1)-$(uname -s)" ]; then
-            "$LAUNCHER_BIN" doctor --json || echo "doctor smoke test non-zero exit recorded, see logs"
+          NATIVE=0
+          case "${{ matrix.target }}" in
+            x86_64-unknown-linux-musl)
+              if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ]; then NATIVE=1; fi
+              ARCHIVE="release-assets/persona-forge-bootstrap-${{ matrix.asset_stem }}.tar.gz"
+              ;;
+            aarch64-unknown-linux-musl)
+              if [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "aarch64" ]; then NATIVE=1; fi
+              ARCHIVE="release-assets/persona-forge-bootstrap-${{ matrix.asset_stem }}.tar.gz"
+              ;;
+            x86_64-pc-windows-gnu)
+              case "$(uname -s)" in
+                MINGW*|MSYS*|CYGWIN*) if [ "$(uname -m)" = "x86_64" ]; then NATIVE=1; fi ;;
+              esac
+              ARCHIVE="release-assets/persona-forge-bootstrap-${{ matrix.asset_stem }}.zip"
+              ;;
+            aarch64-apple-darwin)
+              if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then NATIVE=1; fi
+              ARCHIVE="release-assets/persona-forge-bootstrap-${{ matrix.asset_stem }}.tar.gz"
+              ;;
+          esac
+
+          if [ "$NATIVE" -eq 1 ]; then
+            SMOKE_DIR=$(mktemp -d)
+            trap 'rm -rf "$SMOKE_DIR"' EXIT
+            case "$ARCHIVE" in
+              *.zip) unzip -q "$ARCHIVE" -d "$SMOKE_DIR" ;;
+              *.tar.gz) tar -xzf "$ARCHIVE" -C "$SMOKE_DIR" ;;
+              *) echo "unsupported launcher archive: $ARCHIVE" >&2; exit 1 ;;
+            esac
+            LAUNCHER_BIN="$SMOKE_DIR/persona-forge-launcher"
+            [ "${{ matrix.target }}" = "x86_64-pc-windows-gnu" ] && LAUNCHER_BIN="${LAUNCHER_BIN}.exe"
+            PERSONA_FORGE_HOME="$SMOKE_DIR/state" "$LAUNCHER_BIN" doctor --json
           else
-            echo "skipping in-job doctor smoke test: ${{ matrix.target }} is not this runner's native architecture"
+            echo "skipping in-job doctor smoke test: ${{ matrix.target }} is not this runner's native OS/architecture"
           fi
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

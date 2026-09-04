@@ -1,7 +1,11 @@
 """Frontend UI resolution shared by ``app.py`` and ``cli.py``.
 
 Precedence (docs/plans/20260829-no_more_docker_architecture.md §6):
-``FRONTEND_DIST_DIR`` override > package-local built UI > checkout ``frontend/dist`` > API-only.
+``FRONTEND_DIST_DIR`` override > checkout ``frontend/dist`` > package-local built UI > API-only.
+
+When a standard wheel build leaves its ignored package-local staging directory in a source
+checkout, the checkout tier deliberately wins. This keeps local ``build-ui`` output authoritative
+without affecting an installed wheel, which has no adjacent checkout ``frontend/dist``.
 Pure: no I/O beyond the ``.is_dir()``/``.is_file()`` checks needed to decide precedence — callers
 still check the returned path's own presence to decide UI vs. API-only mode.
 """
@@ -39,7 +43,10 @@ def resolve_frontend_dir(
     override = environ.get("FRONTEND_DIST_DIR", "").strip()
     if override:
         return Path(override)
+    checkout_dist_dir = checkout_dist_dir if checkout_dist_dir is not None else CHECKOUT_DIST_DIR
+    if (checkout_dist_dir / "index.html").is_file():
+        return checkout_dist_dir
     package_static_dir = package_static_dir if package_static_dir is not None else PACKAGE_STATIC_DIR
     if (package_static_dir / "index.html").is_file():
         return package_static_dir
-    return checkout_dist_dir if checkout_dist_dir is not None else CHECKOUT_DIST_DIR
+    return checkout_dist_dir

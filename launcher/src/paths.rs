@@ -33,7 +33,7 @@ pub fn app_data_root(environ: &Environ, platform: &str, home: &Path) -> PathBuf 
         return home.join("AppData").join("Local").join("persona-forge");
     }
     if platform == "darwin" {
-        return home.join("Library").join("Application Support").join("persona-forge");
+        return home.join(".config").join("persona-forge");
     }
     if let Some(xdg) = clean(environ, "XDG_DATA_HOME") {
         return PathBuf::from(xdg).join("persona-forge");
@@ -96,12 +96,12 @@ mod tests {
     }
 
     #[test]
-    fn macos_default_uses_application_support() {
+    fn macos_default_uses_config_dir() {
         let home = PathBuf::from("/Users/nick");
         let e = env(&[]);
         assert_eq!(
             app_data_root(&e, "darwin", &home),
-            home.join("Library").join("Application Support").join("persona-forge")
+            home.join(".config").join("persona-forge")
         );
     }
 

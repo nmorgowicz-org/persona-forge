@@ -42,6 +42,7 @@ If a change conflicts with any of these, stop and propose alternatives explicitl
 src/persona_forge/     Flask app, model runtime, config, Pocket-TTS/OpenVINO/PyTorch runtimes, OmniVoice engine, libraries
 src/export/            OpenVINO export/quantization, parity tests, benchmark tooling
 frontend/              React 19 + Vite 8 + Tailwind 4 SPA (built in frontend-build stage, served at /)
+launcher/              Rust native bootstrap launcher and cross-platform archive entry point
 scripts/               entrypoint.sh (container entrypoint), export.py, dev-deploy.sh, validate_repo.py, download_model.py
 tests/                 tier1_unit/  tier2_backend/  tier3_api_integration/  ui/ (Playwright E2E + capture harness)
 requirements/          requirements-{runtime,openvino,export,pocket-tts}.txt
@@ -57,6 +58,14 @@ into `.venv` (editable, via Hatchling) and exposes the `persona-forge` console s
 `PYTHONPATH`-only tooling — keep `PYTHONPATH=src:src/export` for anything importing export modules (e.g.
 running the full test suite). Docker remains the reproducible deployment/export path; this does not change
 `Dockerfile`/`compose.yml`/`entrypoint.sh`. Details: `docs/plans/20260829-no_more_docker_architecture.md`.
+
+Native accelerator extras are mutually exclusive: `cuda12`/`cuda13` use the manifest's default
+CUDA stack, while validated XPU and ROCm wheels intentionally use their family-specific pins. The
+base Torch requirements therefore remain a compatibility envelope for uv's universal resolver; the
+checked-in `uv.lock` and `scripts/check_torch_stack.py` enforce the exact default and per-extra
+versions. Native launcher archives contain only the Rust launcher, pinned uv, wheel, hashed target
+requirements, manifest, and README; smoke tests must execute the launcher from the extracted archive so
+`manifest.json` is adjacent to the binary.
 
 **Product.** Open-source voice cloning and voice design studio: voice cloning, Qwen VoiceDesign,
 accent design and audition via OmniVoice, Stitch Studio (segment timeline assembly), prosody
@@ -143,6 +152,10 @@ Persistent host paths on `docker-agent`:
 - The OpenVINO stack (OpenVINO, NNCF, Transformers, Python) moves together; pin all of them.
   Pin authority: `requirements/requirements-*.txt` (image) and `pyproject.toml`/`uv.lock`
   (local dev). Do not copy version numbers into docs or plan files.
+- Native Torch versions are an intentional matrix, not one global pin: default/CUDA uses the
+  manifest defaults, while XPU and ROCm use their family-specific pins. Change
+  `src/persona_forge/accelerator_manifest.py` first, then regenerate and validate `uv.lock`; run
+  `scripts/check_torch_stack.py` to catch drift.
 - `qwen-tts` is installed `--no-deps` because it hard-pins an older transformers.
   `requirements/requirements-runtime.txt` supplies the current transformers (including the
   CVE-2026-1839 fix); all other qwen-tts runtime deps are listed explicitly there.
@@ -161,6 +174,11 @@ Persistent host paths on `docker-agent`:
 
 - `arc-general`: validation, labels, and release automation.
 - `arc-general-docker`: native Linux AMD64 image builds.
+- `ci-packaging.yml` runs native package validation on Linux/macOS/Windows and skips all jobs for
+  fork pull requests before checked-out code executes on persistent self-hosted runners. Its
+  foreign-target resolver is similarly origin-guarded.
+- `release-launcher.yml` builds exact launcher archives and must fail closed if an extracted
+  target-native `doctor --json` smoke test fails; cross-built artifacts are not native proof.
 - CI builds one image per run — no matrix. Smoke test imports all export and serving modules.
 - Image build runs on PRs with `ready-to-test` label. Tag pushes (`persona-forge-v*`) publish to GHCR.
 - `main` pushes alone do not build or publish.

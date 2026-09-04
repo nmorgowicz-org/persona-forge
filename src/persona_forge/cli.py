@@ -257,7 +257,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
     if args.no_ui:
         print("[setup] --no-ui: skipping frontend build")
         return 0
-    if (frontend.PACKAGE_STATIC_DIR / "index.html").is_file():
+    if not _FRONTEND_SOURCE_DIR.is_dir() and (frontend.PACKAGE_STATIC_DIR / "index.html").is_file():
         print(f"[setup] package-local UI already present at {frontend.PACKAGE_STATIC_DIR}")
         return 0
     return _build_checkout_frontend(force=False)

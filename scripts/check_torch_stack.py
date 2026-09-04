@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Check that the pinned Torch CPU stack is internally consistent.
+"""Check that the pinned Torch stack is internally consistent.
 
-This is intentionally a source/lockfile contract check. It does not claim that a
-new Torch release is runtime-compatible; the dependency-bump verifier must still
-run the real Torch tests and, for image changes, the container build/import smoke.
+The universal uv lock contains one exact wheel variant for each supported accelerator
+extra, so different package versions in the lock are expected: ROCm uses 2.9.1 and
+XPU uses 2.13.0 while the default/CUDA stack uses 2.14.0. This checks that those are
+the only versions present, that the default resolution remains exact, and that the
+container defaults match the manifest. It does not claim runtime compatibility; the
+dependency-bump verifier still runs real Torch tests and image import smoke.
 """
 
 from __future__ import annotations
@@ -16,6 +19,35 @@ from pathlib import Path
 
 
 PACKAGES = ("torch", "torchaudio")
+
+
+def _manifest_versions(root: Path, package: str) -> set[str]:
+    src_dir = str(root / "src")
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    from persona_forge.accelerator_manifest import ACCELERATOR_PINS
+
+    attribute = f"{package}_version"
+    return {getattr(pin, attribute) for pin in ACCELERATOR_PINS.values()}
+
+
+def _default_version(root: Path, package: str) -> str:
+    src_dir = str(root / "src")
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    from persona_forge.accelerator_manifest import (
+        DEFAULT_TORCH_VERSION,
+        DEFAULT_TORCHAUDIO_VERSION,
+    )
+
+    return {
+        "torch": DEFAULT_TORCH_VERSION,
+        "torchaudio": DEFAULT_TORCHAUDIO_VERSION,
+    }[package]
+
+
+def _base_version(version: str) -> str:
+    return version.split("+", 1)[0]
 
 
 def _exact_pin(value: str, package: str) -> str | None:
@@ -94,13 +126,40 @@ def main() -> int:
         if not entries:
             errors.append(f"{package}: no exact pin found")
             continue
-        versions = {version for _, version in entries}
-        if len(versions) != 1:
-            detail = ", ".join(f"{source}={version}" for source, version in entries)
-            errors.append(f"{package}: inconsistent pins ({detail})")
-        else:
-            version = next(iter(versions))
-            print(f"OK: {package}={version} ({len(entries)} declarations)")
+
+        default_version = _default_version(root, package)
+        docker_versions = {
+            version for source, version in entries if source.startswith("Dockerfile ARG")
+        }
+        if docker_versions != {default_version}:
+            errors.append(
+                f"{package}: Dockerfile pin {sorted(docker_versions)!r}, expected {default_version}"
+            )
+
+        lock_versions = {
+            _base_version(version)
+            for source, version in entries
+            if source == "uv.lock package.version"
+        }
+        expected_versions = _manifest_versions(root, package)
+        if lock_versions != expected_versions:
+            errors.append(
+                f"{package}: uv.lock versions {sorted(lock_versions)!r}, "
+                f"expected accelerator pins {sorted(expected_versions)!r}"
+            )
+
+        default_lock = {
+            _base_version(version)
+            for source, version in entries
+            if source == "uv.lock package.version" and "+" not in version
+        }
+        if default_lock != {default_version}:
+            errors.append(
+                f"{package}: default uv.lock version {sorted(default_lock)!r}, "
+                f"expected {default_version}"
+            )
+
+        print(f"OK: {package} default={default_version}; variants={sorted(lock_versions)}")
 
     if errors:
         for error in errors:
