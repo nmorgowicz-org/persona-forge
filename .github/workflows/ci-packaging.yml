@@ -96,12 +96,19 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      # actions/setup-python's hermetic Python download assumes the GitHub-hosted directory
+      # layout (its install script hard-`mkdir`s /Users/runner on macOS) and fails with
+      # "Permission denied" as a non-`runner` user on a self-hosted box. `python -m pip install`
+      # is equally unsafe to assume: this Mac's system Python is Homebrew-managed and PEP
+      # 668-externally-managed, so pip refuses outright. astral-sh/setup-uv installs the pinned
+      # uv binary directly (no Python/pip dependency) and works identically hosted or
+      # self-hosted; `uv python install` then gets Python from uv's own toolchain.
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          version: ${{ env.UV_VERSION }}
 
-      - name: Install uv (pinned)
-        run: python -m pip install uv==${{ env.UV_VERSION }}
+      - name: uv python install (pinned)
+        run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: uv lock --check
         run: uv lock --check
@@ -179,12 +186,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          version: ${{ env.UV_VERSION }}
 
-      - name: Install uv (pinned)
-        run: python -m pip install uv==${{ env.UV_VERSION }}
+      - name: uv python install (pinned)
+        run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: uv lock --check
         run: uv lock --check
