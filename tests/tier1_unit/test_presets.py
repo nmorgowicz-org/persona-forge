@@ -13,10 +13,15 @@ from persona_forge.presets import (
     seconds_for_capacity,
 )
 
+# get_preset()/get_voice_design_preset() resolve IR paths via persona_forge.paths.ov_root(environ),
+# so tests pass OV_DATA_DIR through the injected environ mapping directly (never monkeypatch the
+# real process environ) — see docs/plans/20260829-no_more_docker_architecture.md §4.
+OV_ENVIRON = {"OV_DATA_DIR": "/ov"}
+
 
 class TestPresetsEnv:
     def test_06b_stateful_main_and_predictor(self):
-        environ = {"MODEL_SIZE": "0.6b"}
+        environ = {"MODEL_SIZE": "0.6b", "OV_DATA_DIR": "/ov"}
         apply_preset_env(environ)
         assert environ["OV_MAIN_COMPRESSION"] == "int8"
         assert environ["OV_PREDICTOR_COMPRESSION"] == "int8"
@@ -37,7 +42,7 @@ class TestPresetsEnv:
         assert environ["OV_MAIN_COMPRESSION"] == "fp32"
 
     def test_max_speech_seconds_env_override(self):
-        environ = {"MODEL_SIZE": "1.7B", "TTS_MAX_SPEECH_SECONDS": "20"}
+        environ = {"MODEL_SIZE": "1.7B", "TTS_MAX_SPEECH_SECONDS": "20", "OV_DATA_DIR": "/ov"}
         apply_preset_env(environ)
         assert environ["OPENVINO_MAIN_STATEFUL_MODEL"] == "/ov/1.7B/main_stateful_cap240.xml"
         assert environ["TTS_MAX_SPEECH_SECONDS"] == "20"
@@ -56,25 +61,32 @@ class TestCapacityMath:
 
 class TestGetPreset:
     def test_default_17b(self):
-        preset = get_preset("1.7B")
+        preset = get_preset("1.7B", environ=OV_ENVIRON)
         assert preset["stateful_capacity"] == 3600
         assert preset["main_stateful_model"] == "/ov/1.7B/main_stateful_cap3600.xml"
 
     def test_override_capacity_no_collision(self):
-        default_preset = get_preset("1.7B")
-        short_preset = get_preset("1.7B", max_speech_seconds=15)
+        default_preset = get_preset("1.7B", environ=OV_ENVIRON)
+        short_preset = get_preset("1.7B", max_speech_seconds=15, environ=OV_ENVIRON)
         assert default_preset["main_stateful_model"] != short_preset["main_stateful_model"]
         assert short_preset["stateful_capacity"] == 180
+
+    def test_injected_environ_wins_over_real_process_environ(self, monkeypatch):
+        # The real process environ must never leak into a call that supplies its own
+        # mapping — this is the exact bug class Phase 2 Task 0 closes.
+        monkeypatch.setenv("OV_DATA_DIR", "/should-not-be-used")
+        preset = get_preset("1.7B", environ={"OV_DATA_DIR": "/ov"})
+        assert preset["main_stateful_model"] == "/ov/1.7B/main_stateful_cap3600.xml"
 
 
 class TestHasValidExport:
     def test_no_files_on_disk_is_false(self, tmp_path):
-        preset = get_preset("1.7B")
+        preset = get_preset("1.7B", environ=OV_ENVIRON)
         preset["main_stateful_model"] = str(tmp_path / "missing.xml")
         assert has_valid_export(preset) is False
 
     def test_main_present_no_predictor_declared_is_true(self, tmp_path):
-        preset = get_preset("1.7B")
+        preset = get_preset("1.7B", environ=OV_ENVIRON)
         main = tmp_path / "main.xml"
         main.touch()
         preset["main_stateful_model"] = str(main)
@@ -82,7 +94,7 @@ class TestHasValidExport:
         assert has_valid_export(preset) is True
 
     def test_predictor_declared_but_missing_is_false(self, tmp_path):
-        preset = get_preset("0.6B")
+        preset = get_preset("0.6B", environ=OV_ENVIRON)
         main = tmp_path / "main.xml"
         main.touch()
         preset["main_stateful_model"] = str(main)
@@ -90,7 +102,7 @@ class TestHasValidExport:
         assert has_valid_export(preset) is False
 
     def test_main_and_predictor_present_is_true(self, tmp_path):
-        preset = get_preset("0.6B")
+        preset = get_preset("0.6B", environ=OV_ENVIRON)
         main = tmp_path / "main.xml"
         predictor = tmp_path / "predictor.xml"
         main.touch()
@@ -117,7 +129,7 @@ class TestBackendFallbackAutoSelect:
 
 class TestVoiceDesignPreset:
     def test_own_ir_tree(self):
-        preset = get_voice_design_preset("1.7B")
+        preset = get_voice_design_preset("1.7B", environ=OV_ENVIRON)
         assert preset["model_repo"] == "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
         assert preset["ov_model_dir"] == "/ov/1.7B-voicedesign/ir"
         assert preset["vocoder_dir"] == "/ov/1.7B-voicedesign/vocoder"
@@ -125,8 +137,8 @@ class TestVoiceDesignPreset:
         assert preset["main_stateful_model"] == "/ov/1.7B-voicedesign/main_stateful_cap360.xml"
 
     def test_no_collision_with_base(self):
-        base = get_preset("1.7B", max_speech_seconds=20)
-        voice_design = get_voice_design_preset("1.7B")
+        base = get_preset("1.7B", max_speech_seconds=20, environ=OV_ENVIRON)
+        voice_design = get_voice_design_preset("1.7B", environ=OV_ENVIRON)
         assert base["main_stateful_model"] != voice_design["main_stateful_model"]
         assert base["ov_model_dir"] != voice_design["ov_model_dir"]
 

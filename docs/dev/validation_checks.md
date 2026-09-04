@@ -28,6 +28,20 @@ PYTHONPATH=src:src/export python -m pytest -m "requires_torch and not requires_m
 PYTHONPATH=src:src/export python -m pytest -m "requires_model_weights or requires_openvino_ir" --tb=short
 ```
 
+## Native packaging changes
+
+For changes to `pyproject.toml`, `src/persona_forge/paths.py`, `src/persona_forge/bootstrap.py`,
+`src/persona_forge/cli.py`, `launcher/`, or the packaging/release scripts under `scripts/`:
+
+```bash
+rtk uv lock --check
+uv build && uv run python scripts/inspect_release_artifacts.py --dist-dir dist
+pytest tests/tier1_unit/test_package_launcher_archive.py tests/tier1_unit/test_validate_release_contract.py -v
+```
+
+See [TEST_STRATEGY.md](../TEST_STRATEGY.md) §1.8 for the full changed-file mapping and
+[../RUN_LOCAL.md](../RUN_LOCAL.md) for what these artifacts are.
+
 ## Dependency Bump Verification
 
 For any Renovate or Dependabot update involving Torch, Torchaudio, Transformers, or the
@@ -38,8 +52,10 @@ python scripts/check_torch_stack.py
 scripts/verify_dependency_bump.sh <pr-number>
 ```
 
-The contract check requires Dockerfile args, `pyproject.toml` pins, uv overrides, and `uv.lock`
-to resolve the same exact Torch/Torchaudio versions. The PR verifier runs that check on both
+The contract check requires the Dockerfile defaults to match the accelerator manifest and the
+universal `uv.lock` to contain only the manifest's exact Torch/Torchaudio version set, including
+the exact default resolution. The accelerator extras and their indexes are checked separately by
+`scripts/validate_repo.py`. The PR verifier runs that check on both
 branches, requires `uv lock --check` and `uv sync --locked`, then compares the real Torch test
 lane against the base branch. It fails closed on dependency, setup, collection, or test errors
 and retains complete logs in its temporary work directory.

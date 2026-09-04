@@ -13,10 +13,20 @@ from __future__ import annotations
 import os
 from collections.abc import MutableMapping
 
+from persona_forge import paths
 from persona_forge.presets import get_preset, has_valid_export, normalize_size
 
-# The reference WAV is always mounted at this fixed path (see compose.yml / .env.example).
-REF_AUDIO_PATH = "/voice/reference.wav"
+# docs/plans/20260829-no_more_docker_architecture.md §4: REF_AUDIO overrides else
+# <app data root>/reference.wav natively, the fixed /voice/reference.wav mount in the
+# container (compose.yml sets the env var).
+REF_AUDIO_PATH = str(paths.reference_audio_path())
+
+# docs/plans/20260829-no_more_docker_architecture.md §3: the one shared product default for
+# TTS_BACKEND — self-contained, no export needed. compose.yml already sets this explicitly for
+# Docker; persona_forge.bootstrap.apply_env_defaults setdefaults it for native runs so the two
+# surfaces agree. Every unset/blank TTS_BACKEND fallback site in this module and model.py must
+# reference this constant rather than hardcode a literal.
+DEFAULT_TTS_BACKEND = "pocket_tts"
 
 
 def normalize_backend(value: str | None) -> str:
@@ -45,7 +55,9 @@ def apply_preset_env(environ: MutableMapping[str, str] = os.environ) -> dict[str
     environ["MODEL_SIZE"] = normalize_size(model_size)
 
     max_speech_seconds = environ.get("TTS_MAX_SPEECH_SECONDS")
-    preset = get_preset(model_size, float(max_speech_seconds) if max_speech_seconds else None)
+    preset = get_preset(
+        model_size, float(max_speech_seconds) if max_speech_seconds else None, environ
+    )
     _setdefault(environ, "TTS_MAX_SPEECH_SECONDS", preset["max_speech_seconds"])
 
     # Backend (MODEL_REPO is resolved from MODEL_SIZE by model_config.resolve_model_repo).

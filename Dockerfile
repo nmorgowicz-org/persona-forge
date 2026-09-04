@@ -1,12 +1,16 @@
-# Why this is a container and not a standalone (pip/pipx/binary) app: the runtime needs
-# pinned CPU-only torch/torchaudio wheels that diverge from PyPI defaults (ARGs below,
-# enforced again in pyproject.toml's override-dependencies), source-level monkey-patches
-# applied to installed qwen_tts/transformers packages (see the sed/python patch RUN steps
-# further down), a per-accelerator-family install resolved at first boot by
-# scripts/entrypoint.sh (GPU_FAMILY probing into /opt/accel-venv), and a separately built
-# frontend bundle. Reproducing that on an arbitrary host's Python install is a real, ongoing
-# maintenance burden — the container is what makes those pins/patches invisible to users.
-# Revisit only if standalone packaging becomes a real ask (today there's a single known user).
+# This container remains the canonical, most-tested deployment path: it needs pinned
+# torch/torchaudio wheels that diverge from PyPI defaults (ARGs below, enforced again in
+# pyproject.toml's override-dependencies), source-level monkey-patches applied to installed
+# qwen_tts/transformers packages (see the compat_patch.py RUN step further down), a
+# per-accelerator-family install resolved at first boot by scripts/entrypoint.sh (GPU_FAMILY
+# probing into /opt/accel-venv), and a separately built frontend bundle — all baked into one
+# pinned, reproducible image so none of it is visible to the operator.
+#
+# Persona Forge also installs and runs natively (no container) — see docs/RUN_LOCAL.md. The
+# native `persona-forge setup`/`serve` commands (src/persona_forge/cli.py, bootstrap.py) apply
+# the equivalent pins/patches directly against the host Python instead of a container build;
+# accelerator wheels are opt-in extras at install time there rather than a first-boot install
+# into a persisted volume. See docs/MIGRATION.md for moving a deployment between the two.
 ARG PYTHON_IMAGE=python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285
 # Not digest-pinned like PYTHON_IMAGE below (build-stage only, never shipped in the final
 # image) — override via --build-arg if you need reproducibility guarantees for CI.
@@ -73,40 +77,18 @@ RUN python -m pip install \
     #   0.2.1 tag source: OmniVoiceGenerationConfig.pad_duration/fade_duration exist and
     #   generate() passes them through, matching our omnivoice_engine.py usage.
 
-RUN sed -i 's/option\.intra_op_num_threads = 1/option.intra_op_num_threads = 6/' \
-    /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_25hz/vq/speech_vq.py || true && \
-    sed -i '/@check_model_inputs/d' \
-    /usr/local/lib/python3.13/site-packages/qwen_tts/core/tokenizer_12hz/modeling_qwen3_tts_tokenizer_v2.py || true && \
-    sed -i 's/create_sliding_window_causal_mask/create_causal_mask/g' \
-    /usr/local/lib/python3.13/site-packages/transformers/models/mimi/modeling_mimi.py && \
-    python -c "\
-p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/modeling_qwen3_tts.py'; \
-t = open(p).read(); \
-t = t.replace('from transformers.activations import ACT2FN', 'from transformers import initialization as init\nfrom transformers.activations import ACT2FN'); \
-t = t.replace('module.weight.data.normal_(mean=0.0, std=std)', 'init.normal_(module.weight, mean=0.0, std=std)'); \
-t = t.replace('module.bias.data.zero_()', 'init.zeros_(module.bias)'); \
-t = t.replace('module.weight.data.fill_(1.0)', 'init.ones_(module.weight)'); \
-t = t.replace('if module.padding_idx is not None:\n                module.weight.data[module.padding_idx].zero_()', 'if module.padding_idx is not None and not getattr(module.weight, \"_is_hf_initialized\", False):\n                module.weight.data[module.padding_idx].zero_()'); \
-t = t.replace('self.padding_idx = config.pad_token_id', 'self.padding_idx = getattr(config, \"pad_token_id\", None)'); \
-t = t.replace('input_embeds=inputs_embeds', 'inputs_embeds=inputs_embeds'); \
-t = t.replace('\"input_embeds\": inputs_embeds,', '\"inputs_embeds\": inputs_embeds,'); \
-t = t.replace('\n                \"cache_position\": cache_position,\n', '\n'); \
-t = t.replace('\n            cache_position=cache_position,\n', ''); \
-open(p, 'w').write(t)" && \
-    python -c "\
-p = '/usr/local/lib/python3.13/site-packages/qwen_tts/core/models/configuration_qwen3_tts.py'; \
-t = open(p).read(); \
-t = t.replace('from transformers.configuration_utils import PretrainedConfig, layer_type_validation', 'from transformers.configuration_utils import PretrainedConfig'); \
-t = t.replace('layer_type_validation(self.layer_types)', 'self.validate_layer_type()'); \
-open(p, 'w').write(t)" && \
-    python -c "\
-import pathlib; \
-p = pathlib.Path('/usr/local/lib/python3.13/site-packages/transformers/modeling_rope_utils.py'); \
-t = p.read_text(); \
-fn = '''\ndef _compute_default_rope_parameters(config=None, device=None, **kwargs):\n    import torch as _t\n    base = float(getattr(config, 'rope_theta', 10000.0))\n    factor = float(getattr(config, 'partial_rotary_factor', 1.0))\n    head_dim = getattr(config, 'head_dim', None) or (getattr(config, 'hidden_size', 512) // getattr(config, 'num_attention_heads', 8))\n    dim = int(head_dim * factor)\n    inv_freq = 1.0 / (base ** (_t.arange(0, dim, 2, dtype=_t.int64).float().to(device) / dim))\n    return inv_freq, 1.0\n\n'''; \
-t = t.replace('ROPE_INIT_FUNCTIONS:', fn + 'ROPE_INIT_FUNCTIONS:'); \
-t = t.replace('\"linear\": _compute_linear_scaling_rope_parameters', '\"default\": _compute_default_rope_parameters,\n    \"linear\": _compute_linear_scaling_rope_parameters'); \
-p.write_text(t)"
+# Single source of truth for both the container and local-dev patch paths (Phase 5) — see
+# persona_forge/compat_patch.py's module docstring for the full patch inventory and the
+# idempotency-marker design. Copied in isolation (not the full `COPY src/ src/` below) so this
+# layer's cache key depends only on this one file, not on unrelated source changes.
+COPY src/persona_forge/compat_patch.py /tmp/compat_patch.py
+RUN python -c "\
+import sys, json; \
+sys.path.insert(0, '/tmp'); \
+from compat_patch import apply_qwen_patches; \
+report = apply_qwen_patches(); \
+print(json.dumps(report, indent=2)); \
+sys.exit(1 if report['status'] == 'failed' else 0)"
 
 # One image, all capabilities: OpenVINO serving runtime + export/quantization tooling.
 RUN python -m pip install -r requirements/requirements-openvino.txt && \

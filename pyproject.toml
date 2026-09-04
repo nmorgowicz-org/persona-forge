@@ -1,22 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "persona-forge"
 version = "1.3.0"  # x-release-please-version
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "flask==3.1.3",
-  "gunicorn==26.2.0",
+  # POSIX-only WSGI server (Dockerfile CMD / persona_forge.cli serve). Waitress below is the
+  # Windows equivalent — gunicorn has no Windows support (no fork()).
+  "gunicorn==26.2.0; sys_platform != 'win32'",
+  "waitress==3.0.2; sys_platform == 'win32'",
   "soundfile==0.14.0",
   # Shared by OmniVoice and pocket-tts (our two main accent-design/cloning levers) as well as
-  # the optional qwen3-tts engine below; override-dependencies also pins the transformers/torch
-  # versions here (CVE-2026-1839) so they must stay declared at this level.
+  # the optional qwen3-tts engine below; override-dependencies pins the Transformers version here
+  # (CVE-2026-1839), so it must stay declared at this level.
   "accelerate",
   "librosa",
   "transformers==5.12.1",
-  "torch==2.14.0",
-  "torchaudio==2.11.0",
+  # Native accelerator selection (Phase 4, persona_forge.accelerator_manifest is the source of
+  # truth for these numbers). The range must admit every accelerator extra's exact pin below
+  # (2.14.0 default down to rocm's 2.9.1 — rocm6.4 has no 2.14.0 cp313 wheel) because uv
+  # cannot conditionally replace a base dependency by selected extra. The universal lock records
+  # the exact default and per-extra variants; scripts/check_torch_stack.py verifies that set so
+  # this envelope cannot silently broaden an install.
+  "torch>=2.9.1,<2.15",
+  "torchaudio>=2.9.1,<2.12",
   # OmniVoice (Persona Forge accent-design engine) — PyPI release, same pin as the
   # container image (Dockerfile / entrypoint.sh). Its declared torch/torchaudio/transformers
-  # requirements are loose; override-dependencies below forces them to the pins above.
+  # requirements are loose; the direct project pins and accelerator extras below constrain them.
   "omnivoice==0.2.1",
   # pocket-tts (Persona Forge cloning/generation engine) — a main lever alongside OmniVoice,
   # not optional; see D12/Persona Forge pivot.
@@ -26,6 +39,9 @@ dependencies = [
   "pyloudnorm",
   "faster-whisper",
 ]
+
+[project.scripts]
+persona-forge = "persona_forge.cli:main"
 
 [project.optional-dependencies]
 # Qwen3-TTS is now the opt-in engine (OpenVINO acceleration is a further opt-in on top of
@@ -37,6 +53,35 @@ qwen-tts = [
   "onnxruntime",
   "sox",
   "qwen-tts==0.1.1",
+]
+
+# Native accelerator extras (Phase 4) — mutually exclusive (see [tool.uv.conflicts]); each
+# narrows the base torch/torchaudio range above to persona_forge.accelerator_manifest's exact
+# pin for that extra and redirects the install index via [tool.uv.sources]/[[tool.uv.index]].
+# cuda12/cuda13 are Windows+Linux; xpu is Windows+Linux (no macOS Xe/Arc wheel); rocm is
+# Linux-only (rocm6.4 has no Windows/macOS cp313 build) — the markers below keep those two off
+# platforms with no matching wheel rather than letting them silently resolve to something else.
+cuda12 = [
+  "torch==2.14.0; sys_platform == 'linux' or sys_platform == 'win32'",
+  "torchaudio==2.11.0; sys_platform == 'linux' or sys_platform == 'win32'",
+]
+cuda13 = [
+  "torch==2.14.0; sys_platform == 'linux' or sys_platform == 'win32'",
+  "torchaudio==2.11.0; sys_platform == 'linux' or sys_platform == 'win32'",
+]
+xpu = [
+  # torch==2.14.0+xpu requires triton-xpu~=3.8.0 (live-verified via its wheel METADATA), and no
+  # triton-xpu wheel above 3.7.2 is published for cp313 on the PyTorch xpu index — 2.14.0 is
+  # therefore not installable on xpu at all right now. 2.13.0+xpu pins triton-xpu==3.7.2, which
+  # the index does have, so xpu tracks that older torch until 3.8.x-compatible wheels land.
+  "torch==2.13.0; sys_platform == 'linux' or sys_platform == 'win32'",
+  "torchaudio==2.11.0; sys_platform == 'linux' or sys_platform == 'win32'",
+  "triton-xpu==3.7.2; sys_platform == 'linux' or sys_platform == 'win32'",
+]
+rocm = [
+  "torch==2.9.1; sys_platform == 'linux'",
+  "torchaudio==2.9.1; sys_platform == 'linux'",
+  "pytorch-triton-rocm==3.5.1; sys_platform == 'linux'",
 ]
 
 [dependency-groups]
@@ -61,10 +106,85 @@ export = [
 ]
 
 [tool.uv]
-package = false
-environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
+package = true
+environments = [
+  "sys_platform == 'darwin'",
+  "sys_platform == 'linux'",
+  "sys_platform == 'win32'",
+]
 override-dependencies = [
   "transformers==5.12.1",
-  "torch==2.14.0",
-  "torchaudio==2.11.0",
 ]
+
+conflicts = [
+  [
+    { extra = "cuda12" },
+    { extra = "cuda13" },
+    { extra = "xpu" },
+    { extra = "rocm" },
+  ],
+]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu126", extra = "cuda12" },
+  { index = "pytorch-cu130", extra = "cuda13" },
+  { index = "pytorch-xpu", extra = "xpu" },
+  { index = "pytorch-rocm64", extra = "rocm" },
+]
+torchaudio = [
+  { index = "pytorch-cu126", extra = "cuda12" },
+  { index = "pytorch-cu130", extra = "cuda13" },
+  { index = "pytorch-xpu", extra = "xpu" },
+  { index = "pytorch-rocm64", extra = "rocm" },
+]
+# torch==2.14.0+xpu depends on triton-xpu>=3.8.0 — PyPI's own triton-xpu tops out at 3.3.0b1
+# (live-verified), so the xpu extra's triton must also come from the PyTorch xpu index.
+triton-xpu = [{ index = "pytorch-xpu", extra = "xpu" }]
+# torch==2.9.1+rocm6.4 depends on pytorch-triton-rocm==3.5.1, published only on the rocm index.
+pytorch-triton-rocm = [{ index = "pytorch-rocm64", extra = "rocm" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-xpu"
+url = "https://download.pytorch.org/whl/xpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-rocm64"
+url = "https://download.pytorch.org/whl/rocm6.4"
+explicit = true
+
+[tool.hatch.build.targets.wheel]
+# src/persona_forge only; src/export stays separate export-only tooling
+# (docs/plans/20260829-no_more_docker_architecture.md §5a). `artifacts` force-includes the
+# frontend build output that hatch_build.py copies to src/persona_forge/static for a standard
+# (non-editable) wheel build — it is git-ignored, so `packages` alone would not pick it up (§6).
+packages = ["src/persona_forge"]
+artifacts = ["src/persona_forge/static/**"]
+
+[tool.hatch.build.targets.sdist]
+# The sdist ships the frontend *sources* + lockfiles (reproducible via `npm ci && npm run build`),
+# never the build output or dependency caches. hatchling's sdist file selection does not honor the
+# *nested* .gitignore files under frontend/ and tests/ui/, so their node_modules (100s of MB of
+# platform binaries) would otherwise be bundled into the source distribution — exclude them
+# explicitly along with the wheel-only baked UI (Phase 6 artifact gate).
+exclude = [
+  "frontend/node_modules/**",
+  "tests/ui/node_modules/**",
+  "**/node_modules/**",
+  "frontend/dist/**",
+  "src/persona_forge/static/**",
+]
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"

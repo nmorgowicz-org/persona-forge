@@ -125,9 +125,12 @@ def render_english_config(
         package_version=POCKET_TTS_PACKAGE_VERSION,
         provenance=provenance,
         generated_at=generated_at,
-        weights_path=weights_path,
-        noncloning_weights_path=noncloning_weights_path,
-        tokenizer_path=tokenizer_path,
+        # Backslashes are YAML escape characters inside a double-quoted scalar;
+        # a raw Windows path (e.g. "D:\scripts\...") is invalid YAML. Forward
+        # slashes are safe in both YAML and as Windows file paths.
+        weights_path=weights_path.replace("\\", "/"),
+        noncloning_weights_path=noncloning_weights_path.replace("\\", "/"),
+        tokenizer_path=tokenizer_path.replace("\\", "/"),
     )
 
 

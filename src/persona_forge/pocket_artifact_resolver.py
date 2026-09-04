@@ -18,16 +18,21 @@ runs in the model-free test lane.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import hashlib
 import os
 import re
+import sys
 import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Mapping, Optional, Protocol, Sequence, Tuple
+
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 # ---------------------------------------------------------------------------
 # Pinned artifact identities (verified 2026-08-22, plan section 4.3)
@@ -340,10 +345,22 @@ class PocketArtifactResolver:
         lock_path = self._locks_dir / f"{safe}.lock"
         fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            if sys.platform == "win32":
+                # msvcrt.locking requires the locked region to already exist in the
+                # file; flock has no such requirement on POSIX.
+                if os.fstat(fd).st_size < 1:
+                    os.write(fd, b"\0")
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+            else:
+                fcntl.flock(fd, fcntl.LOCK_EX)
             yield
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if sys.platform == "win32":
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
 
     def _verify_cache(self, final_path: Path, artifact: Artifact) -> bool:

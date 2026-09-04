@@ -12,11 +12,18 @@ image serves CPU, Intel iGPU, NVIDIA, and AMD hosts.
   This is deliberately torch-independent: inside the CPU-base image,
   `torch.<accel>.is_available()` is always False even with a GPU passed
   through (the CPU wheel has no accel support compiled in), so family
-  selection must never depend on torch. Probes are pure filesystem reads:
+  selection must never depend on torch. Probes are pure filesystem reads,
+  plus one subprocess signal:
   - PCI vendor IDs from `/sys/bus/pci/devices/*/vendor` — NVIDIA `0x10de`,
     AMD `0x1002`, Intel `0x8086`.
   - Device nodes: `/dev/nvidia*` (cuda), `/dev/kfd` (rocm — AMD-exclusive),
     `/dev/dri/renderD*` (intel-xpu).
+  - `nvidia-smi --query-gpu=driver_version --format=csv,noheader` (Phase 4
+    Task 2): `/dev` and `/sys/bus/pci` are Linux-only, so on Windows the two
+    NVIDIA probes above always read as absent even with a real driver-
+    installed GPU. A successful, parseable `nvidia-smi` run is itself treated
+    as present *and* capable — it ships with the driver on both OSes, so this
+    is what lets `auto` pick `cuda` on Windows at all.
 - **Device** — where a torch-backed model loads *at runtime*. `TTS_DEVICE`
   (legacy alias `DEVICE`) resolved by `persona_forge/device.py::resolve_device`:
   auto-detect `cuda` > `xpu` > `mps` > `cpu`, or a forced value. A
@@ -47,12 +54,23 @@ Pocket-TTS is CPU-only and is unaffected by family selection.
    `/opt/accel-venv`, a named compose volume) is missing, it installs once
    into `${ACCEL_VENV_DIR}/<family>/site-packages` via
    `pip install --target`:
-   - `torch` + `torchaudio` from the family's wheel index — all families
-     default to version `2.8.0`, overridable via `ACCEL_TORCH_INDEX_URL` and
-     `ACCEL_TORCH_VERSION`:
-     - `intel-xpu` → `https://download.pytorch.org/whl/xpu`
-     - `cuda` → `https://download.pytorch.org/whl/cu124`
-     - `rocm` → `https://download.pytorch.org/whl/rocm6.2`
+   - `torch` + `torchaudio` from the family's wheel index. Defaults come from
+     `persona_forge/accelerator_manifest.py` (Phase 4 Task 4/7) — the same
+     manifest that drives the native `uv sync --extra <name>` pins below, so
+     both install paths change together instead of drifting:
+     - `intel-xpu` → `https://download.pytorch.org/whl/xpu`, torch `2.13.0`,
+       torchaudio `2.11.0`
+     - `cuda` → `https://download.pytorch.org/whl/cu126`, torch `2.14.0`,
+       torchaudio `2.11.0`
+     - `rocm` → `https://download.pytorch.org/whl/rocm6.4`, torch `2.9.1`,
+       torchaudio `2.9.1`
+     Override the index with `ACCEL_TORCH_INDEX_URL`, the torch version with
+     `ACCEL_TORCH_VERSION`, and the torchaudio version with the new
+     `ACCEL_TORCHAUDIO_VERSION`. If `ACCEL_TORCHAUDIO_VERSION` is unset but
+     `ACCEL_TORCH_VERSION` was overridden, torchaudio falls back to matching
+     that overridden torch version (the old compatibility rule, since the
+     operator is already deviating from the manifest); with neither set,
+     torchaudio uses the manifest's own pin, which need not equal torch's.
    - the pinned `omnivoice` (same pin as the Dockerfile).
    The site-packages directory is then prepended to `PYTHONPATH`. The marker
    is written only after a successful install (and `set -e` exits on
@@ -78,13 +96,42 @@ historically targets Ubuntu; Debian's own archive does not carry these
 packages). Validate with a real build + generate check on Intel iGPU hardware
 before relying on it.
 
+## Native install (Phase 4)
+
+Outside the container, `uv sync --extra <name>` installs the same
+accelerator torch/torchaudio pins natively, routed to the matching PyTorch
+index via `[tool.uv.sources]`/`[[tool.uv.index]]` (`pyproject.toml`):
+`cuda12` (cu126) / `cuda13` (cu130) / `xpu` / `rocm`. All four are mutually
+exclusive (`[tool.uv.conflicts]`); `cuda12`/`cuda13`/`xpu` are Windows+Linux,
+`rocm` is Linux-only (no Windows/macOS rocm6.4 build). No macOS accelerator
+extra exists — macOS installs use the base (unaccelerated-by-this-manifest)
+torch pin regardless of which extra is requested; requesting `rocm`/`xpu` on
+an unsupported platform is a known uv soft spot (see
+`persona_forge/accelerator_manifest.py`'s module docstring) rather than a
+hard resolver error. `persona_forge.accelerator_manifest.ACCELERATOR_PINS` is
+the single source of truth for every one of these pins/indexes/versions;
+`scripts/validate_repo.py::validate_accelerator_manifest` cross-checks
+`pyproject.toml`'s static entries against it, and
+`scripts/verify_torch_wheel_matrix.py` live-checks them against the real
+PyTorch index.
+
+`persona-forge doctor`'s JSON reports two distinct torch-device fields
+(Phase 4 Task 3): `dependencies.torch.runtime_device` is the unforced
+`device.py::auto_detect_device()` pick with no env override applied (the raw
+torch-capability signal), while `accelerator.device` is the override-aware
+`resolve_device()` value the active backend will actually run on — the two
+can differ, e.g. a `TTS_DEVICE` override masking a torch build with no
+accelerator support at all.
+
 ## Validation status
 
 - `intel-xpu`: **validated** on real Xe-LP iGPU hardware (host `plexxie`, per
   A6.1) — fp64-emu env + torch-xpu wheel + OmniVoice on the iGPU.
 - `cuda` / `rocm`: index URLs and wheel versions are **unvalidated** on real
-  hardware. Treat as best-effort; override `ACCEL_TORCH_INDEX_URL` /
-  `ACCEL_TORCH_VERSION` as needed.
+  hardware (though live-checked against the PyTorch index's own wheel
+  metadata as of 2026-09-03 — see `accelerator_manifest.py`). Treat as
+  best-effort; override `ACCEL_TORCH_INDEX_URL` / `ACCEL_TORCH_VERSION` /
+  `ACCEL_TORCHAUDIO_VERSION` as needed.
 
 ## Surface and tests
 
@@ -95,8 +142,10 @@ before relying on it.
   `GPU_FAMILY` override) — that split is what an "you have the hardware, map
   it" coach needs. `family` is the *resolved* family (override-aware) and can
   differ from `detected_family`. Unit-tested in
-  `tests/tier1_unit/test_gpu_family.py` with injectable probes; not yet
-  surfaced in `/health`.
+  `tests/tier1_unit/test_gpu_family.py` with injectable probes (including the
+  Windows-only `nvidia-smi` path); not yet surfaced in `/health`.
+- `persona_forge.accelerator_manifest.ACCELERATOR_PINS` is unit-tested in
+  `tests/tier1_unit/test_accelerator_manifest.py`.
 - compose wires `GPU_FAMILY: ${GPU_FAMILY:-auto}` on the persona-forge service
   and mounts the `accel-venv` named volume at `/opt/accel-venv` (harmless/
   unused when the family resolves to `cpu`).
@@ -109,8 +158,9 @@ before relying on it.
 | `TTS_DEVICE` | auto-detect | Torch device for the Qwen3-TTS PyTorch backend and OmniVoice |
 | `OPENVINO_DEVICE` | `AUTO` | OpenVINO compile target for the Qwen3-TTS cores (`CPU`/`GPU`) |
 | `ACCEL_VENV_DIR` | `/opt/accel-venv` | Persisted per-family first-boot install location |
-| `ACCEL_TORCH_INDEX_URL` | per-family (see above) | Wheel index for the first-boot torch install |
-| `ACCEL_TORCH_VERSION` | `2.8.0` | torch/torchaudio version for the first-boot install |
+| `ACCEL_TORCH_INDEX_URL` | per-family manifest pin (see above) | Wheel index for the first-boot torch install |
+| `ACCEL_TORCH_VERSION` | per-family manifest pin (see above) | torch version for the first-boot install |
+| `ACCEL_TORCHAUDIO_VERSION` | per-family manifest pin, or `ACCEL_TORCH_VERSION` if that's set | torchaudio version for the first-boot install |
 
 The full table is above; the variables are also listed in `ENV_REFERENCE.md`
 ("Accelerator families"), so the accelerator path is an operator-facing knob.

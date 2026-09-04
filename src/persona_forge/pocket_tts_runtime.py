@@ -23,6 +23,7 @@ import os
 import re
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
+from persona_forge import paths
 from persona_forge.voice_library import VOICE_LIBRARY_DIR, get_voice
 from persona_forge.pocket_artifact_resolver import (
     KYUTAI_WITHOUT_CLONING_REPO,
@@ -101,10 +102,7 @@ _DEGRADABLE_MODES = ("auto", "official")
 
 
 def _default_artifact_dir() -> Path:
-    return (
-        Path(os.getenv("MODEL_CACHE_CONTAINER_PATH", "/root/.cache/huggingface/hub"))
-        / "pocket-tts"
-    )
+    return paths.pocket_tts_artifact_dir()
 
 
 def _load_via_resolved_artifacts(

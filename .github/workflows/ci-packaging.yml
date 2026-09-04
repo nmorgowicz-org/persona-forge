@@ -1,0 +1,250 @@
+# Phase 6 — Portable-package CI and native runners
+# (docs/plans/20260829-no_more_docker_architecture.md §9; execution plan Phase 6).
+#
+# Responsibilities kept distinct from the existing fake CI (ci.yml, Task 1) and the image build
+# (image.yml, Task 5): this workflow proves the *installable* product — a self-contained wheel +
+# reproducible sdist with the Studio baked in — across a real Linux runner (arc-general), a native
+# macOS runner, and a native Windows runner. A Linux cross runner cannot satisfy the native jobs
+# (real Torch/MPS/Waitress/filesystem/audio behavior requires the actual OS). Target-resolution
+# jobs resolve for foreign platforms with --python-platform without installing foreign wheels
+# (Task 3).
+#
+# Runner-label ruling (ADR, not a placeholder): every other workflow in this repo (ci.yml,
+# image.yml, labeler.yml, release-please.yml, ci-ui.yml) runs on self-hosted arc-* labels
+# provisioned via ../llama-monitor-runner — but that sibling repo's arc-* scale sets are all
+# Linux pods (they cross-compile toward macOS/Windows targets with osxcross/mingw, they don't
+# execute on those OSes), so they can't satisfy Gate 6's "native jobs must identify their real
+# OS; a cross runner cannot satisfy them" requirement. Native execution needs a real kernel.
+# Both the macos and windows legs now run on dedicated self-hosted runners (plain
+# actions-runner agent, not ARC — ARC is Kubernetes/Linux-only) registered directly against
+# this repo: `self-hosted-macos` and `self-hosted-windows`. Zero GitHub-hosted billable
+# minutes for either leg. The "Identify real OS" step plus the doctor receipt's
+# platform.sys_platform field make the real OS auditable in every run.
+name: Packaging
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/ci-packaging.yml
+      - pyproject.toml
+      - uv.lock
+      - hatch_build.py
+      - "src/persona_forge/**"
+      - "frontend/**"
+      - "tests/fixtures/**"
+      - "tests/tier1_unit/test_cli.py"
+      - "scripts/inspect_release_artifacts.py"
+      - "scripts/ci_isolated_install.py"
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/ci-packaging.yml
+      - pyproject.toml
+      - uv.lock
+      - hatch_build.py
+      - "src/persona_forge/**"
+      - "frontend/**"
+      - "tests/fixtures/**"
+      - "tests/tier1_unit/test_cli.py"
+      - "scripts/inspect_release_artifacts.py"
+      - "scripts/ci_isolated_install.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packaging-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.9"
+  PYTHON_VERSION: "3.13"
+  NODE_VERSION: "24"
+
+jobs:
+  package:
+    name: package-${{ matrix.name }}
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            runs-on: arc-general
+            pythonpath: "src:src/export"
+            os_probe: "uname -a"
+            pytest_workers: "auto"
+          - name: macos
+            runs-on: self-hosted-macos
+            pythonpath: "src:src/export"
+            os_probe: "uname -a"
+            pytest_workers: "auto"
+          - name: windows
+            runs-on: self-hosted-windows
+            pythonpath: "src;src/export"
+            os_probe: "[System.Environment]::OSVersion.VersionString"
+            # Each xdist worker starts an in-process fake HTTP server. The native Windows
+            # runner's loopback stack becomes unreliable under eight simultaneous startups.
+            pytest_workers: "1"
+    env:
+      PYTHONPATH: ${{ matrix.pythonpath }}
+    steps:
+      # Gate 6 requires native jobs to identify their real OS (a cross runner cannot satisfy
+      # them). The probe lands in the run log AND the doctor receipt captures platform.sys_platform.
+      - name: Identify real OS
+        run: ${{ matrix.os_probe }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # actions/setup-python's hermetic Python download assumes the GitHub-hosted directory
+      # layout (its install script hard-`mkdir`s /Users/runner on macOS) and fails with
+      # "Permission denied" as a non-`runner` user on a self-hosted box. `python -m pip install`
+      # is equally unsafe to assume: this Mac's system Python is Homebrew-managed and PEP
+      # 668-externally-managed, so pip refuses outright. astral-sh/setup-uv installs the pinned
+      # uv binary directly (no Python/pip dependency) and works identically hosted or
+      # self-hosted; `uv python install` then gets Python from uv's own toolchain.
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: uv python install (pinned)
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: uv lock --check
+        run: uv lock --check
+
+      - name: uv sync --locked
+        run: uv sync --locked
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Frontend check + build (mandatory)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run check
+          npm run build
+
+      # On this self-hosted Windows box, System32 precedes Git\bin on PATH, so plain `shell:
+      # bash` resolves to the WSL launcher stub at System32\bash.exe (WSL isn't installed here,
+      # and it's staying that way) instead of Git Bash. GITHUB_PATH only affects this job's own
+      # remaining steps in this run — no machine-wide PATH edit, no WSL. `shell:` itself can't
+      # take an expression (GitHub rejects `matrix` there at parse time — "Unrecognized
+      # named-value"), so the fix has to live in PATH ordering, not in a dynamic shell field.
+      - name: Prefer Git Bash over the WSL stub (Windows only)
+        if: matrix.name == 'windows'
+        shell: powershell
+        run: echo "C:\Program Files\Git\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Make logs directory
+        shell: bash
+        run: mkdir -p logs
+
+      # Task 6: "upload full logs and machine-readable receipts on failure and success" - every
+      # step below tees its full output into logs/, independent of the receipts uploaded further
+      # down, then the whole directory is uploaded unconditionally.
+      - name: Semantic tests (fast, fake lane)
+        shell: bash
+        run: uv run --frozen python -m pytest -m "not slow and not requires_torch and not requires_model_weights and not requires_openvino_ir" -n ${{ matrix.pytest_workers }} --tb=short tests/tier1_unit tests/tier2_backend tests/tier3_api_integration 2>&1 | tee logs/semantic-tests.log
+
+      - name: Spawned-process acceptance (fake-runtime readiness + clean shutdown)
+        shell: bash
+        run: uv run --frozen python -m pytest -m "slow" --tb=long tests/tier1_unit/test_cli.py 2>&1 | tee logs/spawned-process-acceptance.log
+
+      - name: Build wheel + sdist
+        shell: bash
+        run: uv build 2>&1 | tee logs/build.log
+
+      - name: Inspect release artifacts (fail-closed)
+        shell: bash
+        run: uv run --frozen python scripts/inspect_release_artifacts.py --dist-dir dist --receipt-out artifact-receipt.json 2>&1 | tee logs/inspect-release-artifacts.log
+
+      - name: Isolated non-editable install + read-only doctor (outside checkout)
+        shell: bash
+        run: uv run --frozen python scripts/ci_isolated_install.py 2>&1 | tee logs/ci-isolated-install.log
+
+      - name: Upload full logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: logs-${{ matrix.name }}
+          path: logs/
+          retention-days: 7
+
+      - name: Upload artifact receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: artifact-receipt-${{ matrix.name }}
+          path: artifact-receipt.json
+          retention-days: 7
+
+      - name: Upload wheel + sdist
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: artifacts-${{ matrix.name }}
+          path: dist/
+          retention-days: 7
+
+  resolve:
+    name: target-resolution
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: arc-general
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: uv python install (pinned)
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: uv lock --check
+        run: uv lock --check
+
+      # Resolution-only proof for foreign targets: --dry-run resolves and reports the install set
+      # without downloading or installing a single foreign wheel (Task 3). macOS is proven by the
+      # real macos-latest job instead, because torch's macOS wheel needs a specific platform tag
+      # the generic --python-platform value does not express. Every target is attempted (all
+      # failures are collected), a truthful machine-readable receipt is written, and the step is
+      # fail-closed: it exits non-zero if ANY target fails to resolve.
+      - name: Resolve targets (no foreign wheels installed)
+        shell: bash
+        run: |
+          set -o pipefail
+          status="pass"
+          run() { echo "+ $*"; if ! "$@"; then status="fail"; echo "  !! resolution failed: $*"; fi; }
+
+          run uv sync --locked --dry-run --python-platform x86_64-unknown-linux-gnu
+          run uv sync --locked --dry-run --python-platform x86_64-pc-windows-msvc
+
+          run uv sync --locked --dry-run --python-platform x86_64-unknown-linux-gnu --extra cuda12
+          run uv sync --locked --dry-run --python-platform x86_64-unknown-linux-gnu --extra cuda13
+          run uv sync --locked --dry-run --python-platform x86_64-unknown-linux-gnu --extra xpu
+          run uv sync --locked --dry-run --python-platform x86_64-unknown-linux-gnu --extra rocm
+
+          run uv sync --locked --dry-run --python-platform x86_64-pc-windows-msvc --extra cuda12
+          run uv sync --locked --dry-run --python-platform x86_64-pc-windows-msvc --extra cuda13
+          run uv sync --locked --dry-run --python-platform x86_64-pc-windows-msvc --extra xpu
+
+          cat > resolve-receipt.json <<JSON
+          {"job":"target-resolution","status":"${status}","platforms":["x86_64-unknown-linux-gnu","x86_64-pc-windows-msvc"],"extras":["cuda12","cuda13","xpu","rocm"]}
+          JSON
+          echo "=== receipt ==="; cat resolve-receipt.json
+          if [ "${status}" != "pass" ]; then echo "target resolution FAILED"; exit 1; fi
+
+      - name: Upload resolution receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: resolve-receipt
+          path: resolve-receipt.json
+          retention-days: 7

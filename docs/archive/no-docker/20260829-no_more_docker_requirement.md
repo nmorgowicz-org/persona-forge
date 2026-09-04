@@ -1,7 +1,10 @@
 # Native Persona Forge — Execution Plan
 
+Status: implemented; PR https://github.com/nmorgowicz-org/persona-forge/pull/243. This doc moved
+to `docs/archive/no-docker/` as reference.
+
 > This is the lower-tier-model execution document. The binding decisions live in
-> `docs/plans/20260829-no_more_docker_architecture.md`. Read that document completely before each
+> `docs/archive/no-docker/20260829-no_more_docker_architecture.md`. Read that document completely before each
 > phase. If this plan and the architecture contract disagree, stop and repair the documents; do not
 > choose one silently.
 
@@ -200,6 +203,23 @@ Commit:
 feat(paths): add native state paths without changing container mounts
 ```
 
+### Known follow-up (tracked, fix in Phase 2 Task 0)
+
+Discovered while wiring `model.py`'s remaining consumers: `presets.py`'s `get_preset()` and
+`get_voice_design_preset()` call `paths.ov_root()`/`paths.ov_cache_dir()` with no `environ`
+argument, so they always read the real process `os.environ` — unlike `config.apply_preset_env()`,
+`model_config.py`, and every other Phase 1 consumer, which accept an injectable `environ` mapping
+per the pure-resolver contract in the architecture doc §4. `config.apply_preset_env(environ)`
+receives an injectable `environ` but cannot actually thread it into the preset's IR path
+resolution, so a caller who injects `environ` (as `tests/tier1_unit/test_config.py` and
+`test_presets.py` do) sees Base/VoiceDesign IR paths computed from real `os.environ` instead of
+the mapping they passed in. Both existing tests were patched to `monkeypatch.setenv("OV_DATA_DIR",
+"/ov")` as a workaround rather than left broken — that workaround should be removed once the fix
+below lands. Not fixed in Phase 1 because it is a signature change to `presets.py`'s public API
+(`get_preset`, `get_voice_design_preset`, and their private `_ir_paths`/`_predictor_stateful_model`/
+`_voice_design_ir_paths` helpers) rather than a mechanical call-site swap, and Phase 1 was scoped to
+routing existing call sites through already-defined resolvers.
+
 ---
 
 ## Phase 2 — Installable package, native bootstrap, and CLI
@@ -212,6 +232,9 @@ default, and platform WSGI selection without importing the model in CLI diagnost
 ### Files
 
 - Modify `pyproject.toml` and `uv.lock`.
+- Modify `presets.py` (Task 0) and its callers `config.py`, `model.py`.
+- Modify `tests/tier1_unit/test_config.py`, `test_presets.py` (Task 0: drop the `OV_DATA_DIR`
+  `monkeypatch.setenv` workaround once `environ` threads through for real).
 - Create `src/persona_forge/bootstrap.py` and `src/persona_forge/cli.py`.
 - Create `tests/tier1_unit/test_bootstrap.py`, `test_cli.py`, and a reusable readiness harness under
   `tests/helpers/` or `scripts/`.
@@ -219,6 +242,18 @@ default, and platform WSGI selection without importing the model in CLI diagnost
 
 ### Tasks
 
+0. **Close the Phase 1 environ-injection gap (see Phase 1's "Known follow-up"):** give
+   `get_preset()`, `get_voice_design_preset()`, and their private `_ir_paths`/
+   `_predictor_stateful_model`/`_voice_design_ir_paths` helpers an `environ: MutableMapping[str,
+   str] = os.environ` parameter (matching every other Phase 1 resolver/consumer) and thread it
+   into their `paths.ov_root()`/`paths.ov_cache_dir()` calls instead of relying on the implicit
+   real-`os.environ` default. Thread the same `environ` through from `config.apply_preset_env()`,
+   which already receives one but currently drops it before calling `get_preset()`. Update
+   `test_config.py::test_06b_sets_expected_vars` and every `TestPresetsEnv`/`TestGetPreset`/
+   `TestVoiceDesignPreset` case in `test_presets.py` to pass `OV_DATA_DIR` via the injected
+   `environ` dict directly, and delete the `monkeypatch.setenv`/autouse-fixture workaround added in
+   Phase 1. This is prerequisite groundwork for this phase's CLI/bootstrap work below, which must
+   not leak into or read from the real process environment during tests.
 1. **Packaging transition:** Change `pyproject.toml` from `[tool.uv] package = false` to
    `package = true` with console entry point `persona-forge = persona_forge.cli:main`.
    This changes the developer workflow from direct source execution to local package
@@ -249,6 +284,10 @@ default, and platform WSGI selection without importing the model in CLI diagnost
 
 ### Tests first
 
+- `get_preset()`/`get_voice_design_preset()` given an injected `environ` dict with `OV_DATA_DIR`
+  set resolve IR paths under that value, never the real `os.environ`'s (Task 0).
+- `config.apply_preset_env(environ)` with an injected `environ` produces the same IR paths as
+  calling `get_preset()` directly with that same `environ` (Task 0).
 - Importing only `persona_forge.cli` in an isolated subprocess leaves `torch`, OpenVINO,
   Transformers, and `persona_forge.model` absent from `sys.modules`.
 - No tautological `or True` assertions.
@@ -286,7 +325,8 @@ pip install --quiet --target /tmp/build-pf-venv-$(date +%s) /tmp/build-pf-$(date
 python -m persona_forge doctor --json | python -c "import json,sys; json.load(sys.stdin)"
 
 rtk proxy env PYTHONPATH=src:src/export uv run --frozen python -m pytest \
-  tests/tier1_unit/test_bootstrap.py tests/tier1_unit/test_cli.py -v
+  tests/tier1_unit/test_bootstrap.py tests/tier1_unit/test_cli.py \
+  tests/tier1_unit/test_config.py tests/tier1_unit/test_presets.py -v
 rtk uv lock --check
 rtk python scripts/validate_repo.py
 rtk git diff --check
@@ -580,13 +620,12 @@ archives are released, every gate in this phase becomes mandatory for those arti
   - Linux x86-64 archive.
   - Windows x86-64 zip.
   - macOS ARM64 tarball.
-  - Linux ARM64 only as experimental until native runtime evidence exists.
 
 Each archive contains exactly the architecture-contract payload: launcher, pinned uv binary,
 wheel, hash-locked target requirements, manifest, and README.
 
-Build targets are `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`,
-`x86_64-pc-windows-gnu`, and `aarch64-apple-darwin`. Add musl targets/preflight to the Persona
+Build targets are `x86_64-unknown-linux-musl`, `x86_64-pc-windows-gnu`, and
+`aarch64-apple-darwin`. Add the supported targets/preflight to the Persona
 Forge release runner rather than creating a new high glibc floor for a tiny launcher.
 
 ### Launcher behavior
@@ -619,7 +658,6 @@ For tag `persona-forge-vX.Y.Z`, the exact release set is:
 persona_forge-X.Y.Z-py3-none-any.whl
 persona_forge-X.Y.Z.tar.gz
 persona-forge-bootstrap-linux-x86_64.tar.gz
-persona-forge-bootstrap-linux-aarch64.tar.gz
 persona-forge-bootstrap-windows-x86_64.zip
 persona-forge-bootstrap-macos-aarch64.tar.gz
 checksums.json
@@ -816,6 +854,16 @@ END_COMMIT_OVERRIDE
 ```
 
 Apply `ready-to-test` only after local validation is green and container inputs are final.
+
+### Archive this plan
+
+Once the PR merges, mark this plan and its companion architecture doc complete and move both
+out of `docs/plans/` into `docs/archive/no-docker/` (new directory — distinct from the existing
+`docs/archive/container/`, which covers the container *image* itself, not removing the Docker
+requirement), keeping their filenames unchanged per the existing archive convention:
+
+- `docs/archive/no-docker/20260829-no_more_docker_requirement.md`
+- `docs/archive/no-docker/20260829-no_more_docker_architecture.md`
 
 ### Required handoff
 

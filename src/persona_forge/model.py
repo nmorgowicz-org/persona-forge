@@ -9,11 +9,11 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
-from persona_forge import __version__
+from persona_forge import __version__, paths
 
 # Apply thread and runtime envs before heavy imports
 from persona_forge.asr_check import transcribe_reference_audio, validate_reference_text
-from persona_forge.config import REF_AUDIO_PATH, apply_preset_env, normalize_backend
+from persona_forge.config import DEFAULT_TTS_BACKEND, REF_AUDIO_PATH, apply_preset_env, normalize_backend
 from persona_forge.openvino.runtime_config import apply_thread_env, resolve_inference_threads
 from persona_forge.presets import get_voice_design_preset, seconds_for_capacity
 from persona_forge.audio_style import apply_style_preset
@@ -50,8 +50,8 @@ MODEL_ID = resolve_model_repo()
 MODEL_REVISION = os.getenv("MODEL_REVISION") or None
 DEVICE = resolve_device()
 OPENVINO_DEVICE = (os.getenv("OPENVINO_DEVICE") or "AUTO").strip().upper()
-TTS_BACKEND = normalize_backend(os.getenv("TTS_BACKEND") or "pytorch")
-REF_AUDIO = (os.getenv("REF_AUDIO") or REF_AUDIO_PATH).strip() or None
+TTS_BACKEND = normalize_backend(os.getenv("TTS_BACKEND") or DEFAULT_TTS_BACKEND)
+REF_AUDIO = REF_AUDIO_PATH.strip() or None
 REF_TEXT = (os.getenv("REF_TEXT") or "").strip()
 REF_TEXT_SOURCE = "env" if REF_TEXT else "unset"
 REF_TEXT_AUTO = (os.getenv("REF_TEXT_AUTO", "whisper") or "whisper").strip().lower()
@@ -441,7 +441,7 @@ def load_model(profile: ModelProfile | None = None):
         )
 
     # Voice library (/voices)
-    voice_lib = os.getenv("VOICE_LIBRARY_DIR", "/voices")
+    voice_lib = str(paths.voice_library_dir())
     if not os.path.isdir(voice_lib):
         _mount_warnings.append(
             "Voice library directory missing: "
@@ -454,7 +454,7 @@ def load_model(profile: ModelProfile | None = None):
         )
 
     # Segment library (/segments)
-    segment_lib = os.getenv("SEGMENT_LIBRARY_DIR", "/segments")
+    segment_lib = str(paths.segment_library_dir())
     if not os.path.isdir(segment_lib):
         _mount_warnings.append(
             "Segment library directory missing: "
@@ -790,19 +790,19 @@ if IDLE_UNLOAD_SECONDS > 0:
 def _health_mount_status() -> dict[str, Any]:
     """Return mount and runtime config status for /health and Runtime page."""
     # Reference audio
-    ref_audio_path = os.getenv("REF_AUDIO") or REF_AUDIO_PATH or "/voice/reference.wav"
+    ref_audio_path = str(paths.reference_audio_path())
     ref_audio_ok = os.path.isfile(ref_audio_path)
 
     # Voice library
-    voice_lib = os.getenv("VOICE_LIBRARY_DIR", "/voices")
+    voice_lib = str(paths.voice_library_dir())
     voice_lib_ok = os.path.isdir(voice_lib) and os.access(voice_lib, os.W_OK)
 
     # Segment library
-    segment_lib = os.getenv("SEGMENT_LIBRARY_DIR", "/segments")
+    segment_lib = str(paths.segment_library_dir())
     segment_lib_ok = os.path.isdir(segment_lib) and os.access(segment_lib, os.W_OK)
 
     # Model cache (HF hub)
-    hf_cache = os.getenv("MODEL_CACHE_PATH", "/root/.cache/huggingface/hub")
+    hf_cache = str(paths.model_cache_dir())
     hf_cache_ok = os.path.isdir(hf_cache) and os.access(hf_cache, os.W_OK)
 
     # OpenVINO directory
@@ -1061,9 +1061,9 @@ def reconfig_in_progress() -> bool:
 def runtime_config_state() -> dict[str, Any]:
     """Snapshot of every knob the runtime control panel can show, in its three categories."""
     mounts = {
-        "model_cache": os.getenv("MODEL_CACHE_CONTAINER_PATH", "/root/.cache/huggingface/hub"),
+        "model_cache": str(paths.model_cache_dir()),
         "ov_data": OV_MODEL_DIR and str(Path(OV_MODEL_DIR).parent) or None,
-        "voice_library": os.getenv("VOICE_LIBRARY_PATH_CONTAINER", "/voices"),
+        "voice_library": str(paths.voice_library_dir()),
     }
     mount_access = {}
     for name, path in mounts.items():
@@ -1343,7 +1343,7 @@ def reset_runtime_config() -> dict[str, Any]:
             os.environ.pop(key, None)
 
         if "TTS_BACKEND" in to_revert:
-            TTS_BACKEND = normalize_backend(os.getenv("TTS_BACKEND") or "pytorch")
+            TTS_BACKEND = normalize_backend(os.getenv("TTS_BACKEND") or DEFAULT_TTS_BACKEND)
         if "IDLE_UNLOAD_SECONDS" in to_revert:
             IDLE_UNLOAD_SECONDS = int(os.environ.get("IDLE_UNLOAD_SECONDS", "0") or "0")
 

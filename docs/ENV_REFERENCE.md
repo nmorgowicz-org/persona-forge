@@ -5,6 +5,13 @@ Defaults are as implemented in code.
 
 For a minimal setup, see “Minimal required” below; everything else is optional.
 
+This reference applies to both the Docker container ([HOW_TO_RUN.md](HOW_TO_RUN.md)) and a
+native install ([RUN_LOCAL.md](RUN_LOCAL.md)). All runtime/backend/tuning vars behave
+identically on both. Path vars (`*_DIR`/`*_PATH`) differ only in their *default* — Docker
+defaults to a fixed container mount point, native resolves a platform-appropriate app-data
+directory (`persona_forge/paths.py`) — the var name and override behavior are the same either
+way. See [MIGRATION.md](MIGRATION.md) for the full container-path-to-native-path mapping.
+
 Legend:
 - Required: must be set.
 - Recommended: omission changes behavior noticeably.
@@ -60,10 +67,13 @@ first-boot install behavior, and per-family validation status.
 
 | Var | Default | Description |
 |-----|---------|-------------|
-| `GPU_FAMILY` | `auto` | Torch wheel family: `cpu` / `intel-xpu` / `cuda` / `rocm`. `auto` picks the highest-priority vendor (`cuda` > `rocm` > `intel-xpu`) only when the device node is actually present (torch-independent PCI + device-node probes); an explicit value (including `cpu`) always wins; unrecognized values warn and fall back to auto-detect. Changes the torch wheel for the Qwen3-TTS PyTorch backend and OmniVoice only — Pocket-TTS is CPU-only and unaffected. |
+| `GPU_FAMILY` | `auto` | Torch wheel family: `cpu` / `intel-xpu` / `cuda` / `rocm`. `auto` picks the highest-priority vendor (`cuda` > `rocm` > `intel-xpu`) only when the device is actually present/capable — for NVIDIA this includes a successful `nvidia-smi` run, not just Linux sysfs/device-node probes, so `auto` also works on Windows; an explicit value (including `cpu`) always wins; unrecognized values warn and fall back to auto-detect. Changes the torch wheel for the Qwen3-TTS PyTorch backend and OmniVoice only — Pocket-TTS is CPU-only and unaffected. |
 | `ACCEL_VENV_DIR` | `/opt/accel-venv` | Persisted per-family first-boot install location (`<dir>/<family>/site-packages`). Mounted as the compose `accel-venv` named volume so the install survives container recreation; unused when the family resolves to `cpu`. |
-| `ACCEL_TORCH_INDEX_URL` | per-family (`.../whl/xpu`, `.../whl/cu124`, `.../whl/rocm6.2`) | Wheel index for the first-boot torch/torchaudio install when the family is not `cpu`. Override if the per-family default is wrong for your hardware. |
-| `ACCEL_TORCH_VERSION` | `2.8.0` | torch/torchaudio version for the first-boot install. |
+| `ACCEL_TORCH_INDEX_URL` | per-family manifest pin (`.../whl/xpu`, `.../whl/cu126`, `.../whl/rocm6.4`) | Wheel index for the first-boot torch/torchaudio install when the family is not `cpu`. Sourced from `persona_forge/accelerator_manifest.py`; override if the default is wrong for your hardware. |
+| `ACCEL_TORCH_VERSION` | per-family manifest pin (`intel-xpu` 2.13.0 / `cuda` 2.14.0 / `rocm` 2.9.1) | torch version for the first-boot install. |
+| `ACCEL_TORCHAUDIO_VERSION` | per-family manifest pin, or `ACCEL_TORCH_VERSION` if that's set and this isn't | torchaudio version for the first-boot install — a separate knob from `ACCEL_TORCH_VERSION` since the manifest's torch/torchaudio pins aren't always equal (e.g. `intel-xpu`: torch 2.13.0, torchaudio 2.11.0). |
+
+Native (non-container) accelerator installs use `uv sync --extra <cuda12\|cuda13\|xpu\|rocm>` instead — see "Native install (Phase 4)" in `architecture/ACCELERATOR_FAMILIES.md`.
 
 ## Memory / OpenVINO (advanced)
 

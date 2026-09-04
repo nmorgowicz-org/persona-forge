@@ -24,6 +24,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory, send_f
 from persona_forge import (
     audio_diagnostics,
     audio_style,
+    frontend,
     model,
     omnivoice_engine,
     project_library,
@@ -102,18 +103,13 @@ def _test_shutdown():
     return "ok"
 
 
-# Static frontend export (frontend/, built by `npm run build`; see docs/architecture/VOICE_DESIGN.md
-# §8.1). The Dockerfile copies the build output to /app/frontend/dist; app.py lives at
-# /app/src/persona_forge/app.py, so parent.parent.parent is /app in the container by construction.
-# Auto-disables (falls back to a bare API service) if the dist directory isn't present, e.g. a
-# local `python -m persona_forge.app` run without ever building the frontend.
-_FRONTEND_DIR = Path(
-    os.getenv("FRONTEND_DIST_DIR", str(Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"))
-)
-_frontend_enabled = os.getenv("FRONTEND_ENABLED", "1").strip().lower() not in (
-    "0",
-    "false",
-) and _FRONTEND_DIR.is_dir()
+# Static frontend export: FRONTEND_DIST_DIR override > checkout frontend/dist > package-local built
+# UI > API-only (persona_forge.frontend.resolve_frontend_dir, see
+# docs/plans/20260829-no_more_docker_architecture.md §6). Auto-disables (falls back to a bare
+# API service) if the resolved directory isn't present, e.g. a local run without ever building
+# the frontend.
+_FRONTEND_DIR = frontend.resolve_frontend_dir(os.environ)
+_frontend_enabled = frontend.frontend_enabled(os.environ) and _FRONTEND_DIR.is_dir()
 
 if _frontend_enabled:
 

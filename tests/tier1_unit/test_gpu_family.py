@@ -10,6 +10,7 @@ from persona_forge.gpu_family import Probes, describe_accelerator, resolve_gpu_f
 def _probes(
     cuda_node=False,
     nvidia_pci=False,
+    nvidia_smi=False,
     rocm_node=False,
     amd_pci=False,
     intel_node=False,
@@ -18,6 +19,7 @@ def _probes(
     return Probes(
         cuda_device_node=lambda: cuda_node,
         nvidia_pci=lambda: nvidia_pci,
+        nvidia_smi=lambda: nvidia_smi,
         rocm_device_node=lambda: rocm_node,
         amd_pci=lambda: amd_pci,
         intel_device_node=lambda: intel_node,
@@ -64,6 +66,21 @@ class TestResolveGpuFamily:
     def test_unrecognized_gpu_family_falls_back_to_auto(self):
         probes = _probes(intel_node=True, intel_pci=True)
         assert resolve_gpu_family({"GPU_FAMILY": "bogus"}, probes) == "intel-xpu"
+
+    def test_nvidia_smi_alone_is_capable_cuda(self):
+        # No sysfs/device-node evidence at all (the Windows case) — nvidia-smi succeeding is
+        # itself the capability signal (Task 2).
+        probes = _probes(nvidia_smi=True)
+        assert resolve_gpu_family({}, probes) == "cuda"
+
+    def test_nvidia_smi_absent_and_no_pci_stays_cpu(self):
+        probes = _probes(nvidia_smi=False)
+        assert resolve_gpu_family({}, probes) == "cpu"
+
+    def test_nvidia_pci_present_but_smi_fails_still_gated_by_device_node(self):
+        # PCI-present without a device node or a working nvidia-smi: not capable.
+        probes = _probes(nvidia_pci=True, nvidia_smi=False)
+        assert resolve_gpu_family({}, probes) == "cpu"
 
 
 class TestDescribeAccelerator:

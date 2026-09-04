@@ -8,6 +8,8 @@ import json
 import os
 import re
 import subprocess
+import sys
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -152,8 +154,10 @@ def validate_dockerfile() -> None:
         "EXPOSE 8318",
         "requirements/requirements-openvino.txt",
         "requirements/requirements-export.txt",
-        "from transformers import initialization as init",
-        "s/create_sliding_window_causal_mask/create_causal_mask/g",
+        # Phase 5: the qwen_tts/transformers compat patches are defined once in
+        # persona_forge/compat_patch.py and invoked here rather than duplicated inline.
+        "COPY src/persona_forge/compat_patch.py /tmp/compat_patch.py",
+        "from compat_patch import apply_qwen_patches",
     ):
         if marker not in dockerfile:
             raise RuntimeError(f"Dockerfile single-image contract is missing {marker!r}")
@@ -209,6 +213,77 @@ def validate_artifact_policy() -> None:
         )
 
 
+def _dep_version(entries: list[str], package: str) -> str | None:
+    """Return the ``==`` pin for ``package`` in an optional-dependencies entry list, or None."""
+    for entry in entries:
+        name = entry.split(";", 1)[0].strip()
+        if name.startswith(f"{package}=="):
+            return name.split("==", 1)[1]
+    return None
+
+
+def validate_accelerator_manifest() -> None:
+    """Cross-check pyproject.toml's static accelerator extras against the manifest (Task 4).
+
+    ``persona_forge.accelerator_manifest.ACCELERATOR_PINS`` is the single source of truth (see
+    that module's docstring); this catches the manifest and pyproject.toml drifting apart —
+    someone editing one without the other — rather than only surfacing as a live `uv lock` failure.
+    """
+    src_dir = str(ROOT / "src")
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    from persona_forge.accelerator_manifest import ACCELERATOR_PINS
+
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    optional_deps = pyproject["project"]["optional-dependencies"]
+    uv_sources = pyproject["tool"]["uv"]["sources"]
+    uv_indexes = {entry["name"]: entry["url"] for entry in pyproject["tool"]["uv"]["index"]}
+
+    errors: list[str] = []
+    for extra, pin in ACCELERATOR_PINS.items():
+        entries = optional_deps.get(extra)
+        if entries is None:
+            errors.append(f"[project.optional-dependencies] is missing extra {extra!r}")
+            continue
+
+        for package, expected_version in (
+            ("torch", pin.torch_version),
+            ("torchaudio", pin.torchaudio_version),
+            *pin.extra_pins.items(),
+        ):
+            actual_version = _dep_version(entries, package)
+            if actual_version != expected_version:
+                errors.append(
+                    f"extra {extra!r}: {package} pinned to {actual_version!r} in pyproject.toml, "
+                    f"manifest says {expected_version!r}"
+                )
+            source_entries = uv_sources.get(package, [])
+            matching = [s for s in source_entries if s.get("extra") == extra]
+            if not matching:
+                errors.append(
+                    f"extra {extra!r}: [tool.uv.sources] {package} has no entry routing to an "
+                    "index for this extra"
+                )
+            elif matching[0].get("index") != pin.index_name:
+                errors.append(
+                    f"extra {extra!r}: [tool.uv.sources] {package} routes to "
+                    f"{matching[0].get('index')!r}, manifest says {pin.index_name!r}"
+                )
+
+        actual_index_url = uv_indexes.get(pin.index_name)
+        if actual_index_url != pin.index_url:
+            errors.append(
+                f"[[tool.uv.index]] {pin.index_name!r} is {actual_index_url!r}, "
+                f"manifest says {pin.index_url!r}"
+            )
+
+    if errors:
+        raise RuntimeError(
+            "pyproject.toml accelerator extras drifted from persona_forge.accelerator_manifest:\n"
+            + "\n".join(f"  - {e}" for e in errors)
+        )
+
+
 def main() -> None:
     validate_pr_event()
     validate_python()
@@ -217,6 +292,7 @@ def main() -> None:
     validate_compose()
     validate_dockerfile()
     validate_artifact_policy()
+    validate_accelerator_manifest()
     print("repository validation passed")
 
 

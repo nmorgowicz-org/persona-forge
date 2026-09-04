@@ -7,6 +7,8 @@ Start here. Docs are grouped by what you are trying to do.
 | Doc | What it covers |
 |---|---|
 | [HOW_TO_RUN.md](HOW_TO_RUN.md) | Docker Compose setup, first boot, the export step for Qwen/OpenVINO |
+| [RUN_LOCAL.md](RUN_LOCAL.md) | Running natively — source checkout, installed wheel, or launcher archive, no Docker |
+| [MIGRATION.md](MIGRATION.md) | Moving a deployment's data between Docker and native |
 | [ENV_REFERENCE.md](ENV_REFERENCE.md) | Every environment variable, with defaults |
 | [api/HTTP_API_REFERENCE.md](api/HTTP_API_REFERENCE.md) | Every HTTP endpoint, request and response shapes |
 

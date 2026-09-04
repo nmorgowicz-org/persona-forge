@@ -19,6 +19,7 @@ TEST_PROFILE options:
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import os
@@ -51,6 +52,35 @@ def _setup_pythonpath():
 
 def _read_test_profile() -> str:
     return (os.getenv("TEST_PROFILE") or "").strip().lower()
+
+
+def _ensure_loopback_bypasses_proxies(extra_host: str | None = None) -> None:
+    """Keep HTTP clients from sending the fake server through a runner proxy."""
+    hosts = ["127.0.0.1", "localhost", "::1"]
+    if extra_host is not None:
+        hosts.append(extra_host)
+    for name in ("NO_PROXY", "no_proxy"):
+        values = [
+            value.strip()
+            for value in os.environ.get(name, "").split(",")
+            if value.strip()
+        ]
+        for host in hosts:
+            if host not in values:
+                values.append(host)
+        os.environ[name] = ",".join(values)
+
+
+def _loopback_get(host: str, port: int, path: str, timeout: float) -> int:
+    """GET a local endpoint without proxy or TLS setup."""
+    connection = http.client.HTTPConnection(host, port, timeout=timeout)
+    try:
+        connection.request("GET", path)
+        response = connection.getresponse()
+        response.read()
+        return response.status
+    finally:
+        connection.close()
 
 
 def _install_fake_runtime():
@@ -262,6 +292,8 @@ def main() -> None:
     _setup_pythonpath()
 
     port = int(os.getenv("PERSONA_FORGE_TEST_PORT", "8319"))
+    host = os.getenv("PERSONA_FORGE_TEST_HOST", "127.0.0.1")
+    bind_host = os.getenv("PERSONA_FORGE_TEST_BIND_HOST", host)
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
     # Ensure library dirs before importing app (uses segment_library which defaults to /segments).
@@ -285,11 +317,11 @@ def main() -> None:
 
     app_module._shutdown_hook = shutdown_event.set
 
-    server = make_server("127.0.0.1", port, app_module.app, threaded=True)
+    server = make_server(bind_host, port, app_module.app, threaded=True)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
 
-    print(f"[fake_model_server] listening on http://127.0.0.1:{port}", flush=True)
+    print(f"[fake_model_server] listening on http://{host}:{port}", flush=True)
     print(f"[fake_model_server] TEST_PROFILE={_read_test_profile()}", flush=True)
     print(f"[fake_model_server] voice library: {os.environ['VOICE_LIBRARY_DIR']}", flush=True)
 
@@ -304,6 +336,7 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     Intended for Tier 3 API integration tests and Playwright E2E.
     """
     _setup_pythonpath()
+    _ensure_loopback_bypasses_proxies()
     lib_dir = tempfile.mkdtemp(prefix="persona-forge-e2e-voices-")
     seg_dir = tempfile.mkdtemp(prefix="persona-forge-e2e-segments-")
     os.environ.setdefault("VOICE_LIBRARY_DIR", lib_dir)
@@ -313,43 +346,96 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     _patch_generate_for_slow_async(rt)
 
     from persona_forge import app as app_module  # noqa: E402
-    from werkzeug.serving import make_server  # noqa: E402
-
     _install_fake_voice_design(app_module)
     _patch_omnivoice_run_job(app_module)
     _patch_save_voice(app_module, rt)
     _seed_fake_voice_library(rt)
     _install_test_controls(app_module, rt)
 
+    if sys.platform.startswith("win") and port == 0:
+        # The self-hosted Windows runner blocks TCP between NetworkService
+        # processes, including its own loopback interface. HTTPX's WSGI transport
+        # keeps these semantic HTTP tests black-box at the request boundary while
+        # the separate spawned acceptance tests cover a real server process.
+        import httpx
+
+        transport = httpx.WSGITransport(app=app_module.app)
+        client = httpx.Client(transport=transport, base_url="http://testserver")
+        original_get = httpx.get
+        original_post = httpx.post
+        original_delete = httpx.delete
+
+        def _test_get(url, **kwargs):
+            return client.get(url, **kwargs)
+
+        def _test_post(url, **kwargs):
+            return client.post(url, **kwargs)
+
+        def _test_delete(url, **kwargs):
+            return client.delete(url, **kwargs)
+
+        httpx.get = _test_get
+        httpx.post = _test_post
+        httpx.delete = _test_delete
+
+        def stop_fn():
+            httpx.get = original_get
+            httpx.post = original_post
+            httpx.delete = original_delete
+            client.close()
+
+        return "http://testserver", stop_fn
+
     shutdown_event = threading.Event()
     app_module._shutdown_hook = shutdown_event.set
 
+    if sys.platform.startswith("win") and port == 0:
+        # The NetworkService account on the self-hosted runner cannot connect to some
+        # OS-assigned loopback ports (WinError 10013). A fixed test port avoids that
+        # restricted dynamic-port range; the Windows packaging matrix is single-worker.
+        port = int(os.getenv("PERSONA_FORGE_WINDOWS_TEST_PORT", "18318"))
+
+    from werkzeug.serving import make_server  # noqa: E402
+
     server = make_server("127.0.0.1", port, app_module.app, threaded=True)
     actual_port = server.server_address[1]
-    t = threading.Thread(target=server.serve_forever, daemon=True)
+    serve = server.serve_forever
+    shutdown = server.shutdown
+
+    def serve_until_stopped():
+        try:
+            serve()
+        except OSError:
+            # Waitress closes its listening socket from stop_fn; its select loop can
+            # observe that close as a bad descriptor while the server is stopping.
+            if not shutdown_event.is_set():
+                raise
+
+    t = threading.Thread(target=serve_until_stopped, daemon=True)
     t.start()
 
-    import urllib.request
-
     base_url = f"http://127.0.0.1:{actual_port}"
-    deadline = time.monotonic() + 10
+    # 30s, not 10s: under `pytest-xdist -n auto` every worker starts its own server + imports
+    # persona_forge.app concurrently, and on the self-hosted Windows runner that contention
+    # alone can push first-response past 10s even though the server is healthy.
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(f"{base_url}/health", timeout=1) as resp:
-                if resp.status == 200:
-                    break
+            if _loopback_get("127.0.0.1", actual_port, "/health", timeout=1) == 200:
+                break
         except Exception:
             time.sleep(0.1)
     else:
-        raise RuntimeError("fake_model_server did not become reachable within 10 seconds")
+        raise RuntimeError("fake_model_server did not become reachable within 30 seconds")
 
     def stop_fn():
         try:
-            urllib.request.urlopen(f"{base_url}/_shutdown", timeout=2)
+            _loopback_get("127.0.0.1", actual_port, "/_shutdown", timeout=2)
         except Exception:
             pass
         shutdown_event.wait(timeout=5)
-        server.shutdown()
+        shutdown()
+        t.join(timeout=5)
 
     return base_url, stop_fn
 

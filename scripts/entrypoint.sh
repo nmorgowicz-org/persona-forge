@@ -38,38 +38,64 @@ echo "[entrypoint] accelerator family resolved: ${_gpu_family}"
 # script exits (set -e) before the marker is written, so a failed install can never look done.
 _accel_venv_dir="${ACCEL_VENV_DIR:-/opt/accel-venv}"
 if [ "${_gpu_family}" != "cpu" ]; then
-    _accel_site_packages="${_accel_venv_dir}/${_gpu_family}/site-packages"
-    _accel_marker="${_accel_venv_dir}/${_gpu_family}/.installed"
+    _accel_prefix="${_accel_venv_dir}/${_gpu_family}"
+    _py_version="$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+    _accel_site_packages="${_accel_prefix}/lib/python${_py_version}/site-packages"
+    _accel_marker="${_accel_prefix}/.installed"
 
     if [ ! -f "${_accel_marker}" ]; then
         echo "[entrypoint] ${_gpu_family}: no cached torch install found at ${_accel_site_packages}, installing..."
         mkdir -p "${_accel_site_packages}"
 
-        case "${_gpu_family}" in
-            intel-xpu)
-                _torch_index_url="${ACCEL_TORCH_INDEX_URL:-https://download.pytorch.org/whl/xpu}"
-                _torch_version="${ACCEL_TORCH_VERSION:-2.8.0}"
-                ;;
-            cuda)
-                _torch_index_url="${ACCEL_TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu124}"
-                _torch_version="${ACCEL_TORCH_VERSION:-2.8.0}"
-                ;;
-            rocm)
-                _torch_index_url="${ACCEL_TORCH_INDEX_URL:-https://download.pytorch.org/whl/rocm6.2}"
-                _torch_version="${ACCEL_TORCH_VERSION:-2.8.0}"
-                ;;
-            *)
-                echo "[entrypoint] ERROR: no torch install recipe for family '${_gpu_family}'" >&2
-                exit 1
-                ;;
-        esac
+        # Defaults come from persona_forge.accelerator_manifest (Phase 4 Task 4/7) — the single
+        # source of truth also validated against pyproject.toml's native uv extras — rather than
+        # being hardcoded here a second time and drifting stale (the old cu124/rocm6.2/2.8.0
+        # defaults this replaced went unnoticed for a full accelerator generation).
+        _manifest_pin="$(python -c "
+from persona_forge.accelerator_manifest import pin_for_family
+p = pin_for_family('${_gpu_family}')
+print(p.index_url if p else '')
+print(p.torch_version if p else '')
+print(p.torchaudio_version if p else '')
+")"
+        _manifest_index_url="$(echo "${_manifest_pin}" | sed -n '1p')"
+        _manifest_torch_version="$(echo "${_manifest_pin}" | sed -n '2p')"
+        _manifest_torchaudio_version="$(echo "${_manifest_pin}" | sed -n '3p')"
+        if [ -z "${_manifest_index_url}" ]; then
+            echo "[entrypoint] ERROR: no torch install recipe for family '${_gpu_family}'" >&2
+            exit 1
+        fi
 
-        # cuda/rocm index URLs + versions are unvalidated on real hardware (only intel-xpu has been
-        # proven, on plexxie, per A6.1); override via ACCEL_TORCH_INDEX_URL/ACCEL_TORCH_VERSION if wrong.
-        pip install --target "${_accel_site_packages}" --no-cache-dir \
-            "torch==${_torch_version}" "torchaudio==${_torch_version}" \
+        _torch_index_url="${ACCEL_TORCH_INDEX_URL:-${_manifest_index_url}}"
+        _torch_version="${ACCEL_TORCH_VERSION:-${_manifest_torch_version}}"
+        # ACCEL_TORCHAUDIO_VERSION is a new escape hatch (Task 6): when unset, fall back to the
+        # old compatibility rule (torchaudio pinned to the same version as torch) only if
+        # ACCEL_TORCH_VERSION was itself overridden (the operator is already deviating from the
+        # manifest, so matching torchaudio to their torch choice is the safer guess); otherwise
+        # use the manifest's own torchaudio pin, which need not equal the torch version.
+        if [ -n "${ACCEL_TORCHAUDIO_VERSION:-}" ]; then
+            _torchaudio_version="${ACCEL_TORCHAUDIO_VERSION}"
+        elif [ -n "${ACCEL_TORCH_VERSION:-}" ]; then
+            _torchaudio_version="${ACCEL_TORCH_VERSION}"
+        else
+            _torchaudio_version="${_manifest_torchaudio_version}"
+        fi
+
+        # index URL/version are unvalidated on real hardware for cuda/rocm (only intel-xpu has
+        # been proven, on docker-agent, per Gate 9C); override via ACCEL_TORCH_INDEX_URL/
+        # ACCEL_TORCH_VERSION/ACCEL_TORCHAUDIO_VERSION if wrong.
+        #
+        # --prefix, not --target: some accel wheels (e.g. intel-xpu's intel-sycl-rt) ship native
+        # runtime libraries via install-scheme "data" entries with ../-relative RECORD paths,
+        # meant to land at <prefix>/lib/*.so*. pip's --target mode has no destination for a path
+        # that resolves outside site-packages and silently drops those files -- torch then
+        # imports fine at install time but crashes at runtime with
+        # "ImportError: libsycl.so.9: cannot open shared object file" (found on real Intel
+        # iGPU hardware, Gate 9C). --prefix mode places them correctly.
+        pip install --prefix "${_accel_prefix}" --no-cache-dir \
+            "torch==${_torch_version}" "torchaudio==${_torchaudio_version}" \
             --index-url "${_torch_index_url}"
-        pip install --target "${_accel_site_packages}" --no-cache-dir --no-deps \
+        pip install --prefix "${_accel_prefix}" --no-cache-dir --no-deps \
             "omnivoice==0.2.1"
 
         touch "${_accel_marker}"
@@ -79,6 +105,9 @@ if [ "${_gpu_family}" != "cpu" ]; then
     fi
 
     export PYTHONPATH="${_accel_site_packages}:${PYTHONPATH:-}"
+    # --prefix (see above) also places native runtime libraries under <prefix>/lib, which the
+    # dynamic linker needs to find at import time (e.g. libsycl.so.9).
+    export LD_LIBRARY_PATH="${_accel_prefix}/lib:${LD_LIBRARY_PATH:-}"
 fi
 
 if [ "${_gpu_family}" = "intel-xpu" ]; then

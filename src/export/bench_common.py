@@ -21,8 +21,8 @@ for _key, _val in (
 ):
     os.environ.setdefault(_key, _val)
 
-import resource
 import statistics
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -85,7 +85,15 @@ def swap_delta(before: tuple[int | None, int | None], after: tuple[int | None, i
 
 
 def peak_rss_bytes() -> int:
-    """Peak resident set size for this process. ru_maxrss is KiB on Linux, bytes on macOS."""
+    """Peak resident set size for this process. ru_maxrss is KiB on Linux, bytes on macOS.
+
+    POSIX-only (uses the stdlib ``resource`` module) — this benchmark harness targets Linux
+    and macOS profiling runs, never Windows.
+    """
+    if sys.platform == "win32":
+        raise NotImplementedError("peak_rss_bytes is POSIX-only (no 'resource' module on Windows)")
+
+    import resource
 
     maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return maxrss * 1024 if os.uname().sysname == "Linux" else maxrss
