@@ -171,5 +171,19 @@ explicit = true
 packages = ["src/persona_forge"]
 artifacts = ["src/persona_forge/static/**"]
 
+[tool.hatch.build.targets.sdist]
+# The sdist ships the frontend *sources* + lockfiles (reproducible via `npm ci && npm run build`),
+# never the build output or dependency caches. hatchling's sdist file selection does not honor the
+# *nested* .gitignore files under frontend/ and tests/ui/, so their node_modules (100s of MB of
+# platform binaries) would otherwise be bundled into the source distribution — exclude them
+# explicitly along with the wheel-only baked UI (Phase 6 artifact gate).
+exclude = [
+  "frontend/node_modules/**",
+  "tests/ui/node_modules/**",
+  "**/node_modules/**",
+  "frontend/dist/**",
+  "src/persona_forge/static/**",
+]
+
 [tool.hatch.build.hooks.custom]
 path = "hatch_build.py"
