@@ -266,6 +266,12 @@ Confirm `arc-general` or `arc-general-docker` label; confirm ARC GitHub App is i
 ### GHCR build cache fails
 Use the `:buildcache` reference with `mode=min,ignore-error=true`. Cache failure must not invalidate an otherwise successful build.
 
+### BuildKit bootstrap times out
+`image.yml` pre-pulls `moby/buildkit:buildx-stable-1` with bounded retries before
+`docker/setup-buildx-action`. If all attempts fail with a Docker Hub timeout, the source build has
+not started; repair Docker Hub connectivity or configure a registry mirror on `arc-general-docker`
+before rerunning the workflow.
+
 ## Agent handoff requirements
 
 Every handoff must state:

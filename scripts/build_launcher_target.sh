@@ -16,12 +16,6 @@ case "$TARGET" in
     CC_x86_64_unknown_linux_musl=musl-gcc \
       cargo build --release --manifest-path "$MANIFEST" --target x86_64-unknown-linux-musl
     ;;
-  aarch64-unknown-linux-musl)
-    CC_aarch64_unknown_linux_musl=aarch64-linux-musl-gcc \
-      AR_aarch64_unknown_linux_musl=aarch64-linux-musl-ar \
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-musl-gcc \
-      cargo build --release --manifest-path "$MANIFEST" --target aarch64-unknown-linux-musl
-    ;;
   x86_64-pc-windows-gnu)
     CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc \
       cargo build --release --manifest-path "$MANIFEST" --target x86_64-pc-windows-gnu

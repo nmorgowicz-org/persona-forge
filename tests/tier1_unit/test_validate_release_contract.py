@@ -22,7 +22,6 @@ VERSION = "1.3.0"
 
 BOOTSTRAP_MEMBERS = {
     "persona-forge-bootstrap-linux-x86_64.tar.gz": ("persona-forge-launcher", "uv"),
-    "persona-forge-bootstrap-linux-aarch64.tar.gz": ("persona-forge-launcher", "uv"),
     "persona-forge-bootstrap-windows-x86_64.zip": ("persona-forge-launcher.exe", "uv.exe"),
     "persona-forge-bootstrap-macos-aarch64.tar.gz": ("persona-forge-launcher", "uv"),
 }

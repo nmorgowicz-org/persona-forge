@@ -13,7 +13,6 @@ command -v rustup >/dev/null || { echo "FAIL: rustup not found"; exit 1; }
 
 TARGETS=(
   x86_64-unknown-linux-musl
-  aarch64-unknown-linux-musl
   x86_64-pc-windows-gnu
   aarch64-apple-darwin
 )
@@ -24,8 +23,6 @@ for target in "${TARGETS[@]}"; do
 done
 
 command -v musl-gcc >/dev/null || { echo "FAIL: musl-gcc not found (needed for x86_64-unknown-linux-musl)"; exit 1; }
-command -v aarch64-linux-musl-gcc >/dev/null \
-  || { echo "FAIL: aarch64-linux-musl-gcc not found (needed for aarch64-unknown-linux-musl)"; exit 1; }
 command -v x86_64-w64-mingw32-gcc >/dev/null \
   || { echo "FAIL: x86_64-w64-mingw32-gcc not found (needed for x86_64-pc-windows-gnu)"; exit 1; }
 

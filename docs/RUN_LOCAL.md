@@ -60,6 +60,16 @@ The launcher is a small native binary that provisions an application-managed Pyt
 it — it does not itself contain the ML stack. Model weights and accelerator wheels are still
 downloaded separately on first use.
 
+On macOS, Gatekeeper may quarantine executables extracted from a browser download. After
+verifying the release checksum, run this from the extracted archive directory if the launcher is
+blocked:
+
+```bash
+xattr -dr com.apple.quarantine .
+```
+
+Only run this in the directory created for the verified Persona Forge archive.
+
 ## The CLI surface
 
 All three paths above expose the same four subcommands (`src/persona_forge/cli.py`):

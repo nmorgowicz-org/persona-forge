@@ -620,13 +620,12 @@ archives are released, every gate in this phase becomes mandatory for those arti
   - Linux x86-64 archive.
   - Windows x86-64 zip.
   - macOS ARM64 tarball.
-  - Linux ARM64 only as experimental until native runtime evidence exists.
 
 Each archive contains exactly the architecture-contract payload: launcher, pinned uv binary,
 wheel, hash-locked target requirements, manifest, and README.
 
-Build targets are `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`,
-`x86_64-pc-windows-gnu`, and `aarch64-apple-darwin`. Add musl targets/preflight to the Persona
+Build targets are `x86_64-unknown-linux-musl`, `x86_64-pc-windows-gnu`, and
+`aarch64-apple-darwin`. Add the supported targets/preflight to the Persona
 Forge release runner rather than creating a new high glibc floor for a tiny launcher.
 
 ### Launcher behavior
@@ -659,7 +658,6 @@ For tag `persona-forge-vX.Y.Z`, the exact release set is:
 persona_forge-X.Y.Z-py3-none-any.whl
 persona_forge-X.Y.Z.tar.gz
 persona-forge-bootstrap-linux-x86_64.tar.gz
-persona-forge-bootstrap-linux-aarch64.tar.gz
 persona-forge-bootstrap-windows-x86_64.zip
 persona-forge-bootstrap-macos-aarch64.tar.gz
 checksums.json

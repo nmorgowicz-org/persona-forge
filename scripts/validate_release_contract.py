@@ -5,7 +5,6 @@ For tag `persona-forge-vX.Y.Z` the release directory must contain exactly:
     persona_forge-X.Y.Z-py3-none-any.whl
     persona_forge-X.Y.Z.tar.gz
     persona-forge-bootstrap-linux-x86_64.tar.gz
-    persona-forge-bootstrap-linux-aarch64.tar.gz
     persona-forge-bootstrap-windows-x86_64.zip
     persona-forge-bootstrap-macos-aarch64.tar.gz
     checksums.json
@@ -28,19 +27,12 @@ from pathlib import Path
 
 BOOTSTRAP_ASSETS = (
     "persona-forge-bootstrap-linux-x86_64.tar.gz",
-    "persona-forge-bootstrap-linux-aarch64.tar.gz",
     "persona-forge-bootstrap-windows-x86_64.zip",
     "persona-forge-bootstrap-macos-aarch64.tar.gz",
 )
 
 BOOTSTRAP_MEMBERS = {
     "persona-forge-bootstrap-linux-x86_64.tar.gz": {
-        "persona-forge-launcher",
-        "uv",
-        "manifest.json",
-        "README.txt",
-    },
-    "persona-forge-bootstrap-linux-aarch64.tar.gz": {
         "persona-forge-launcher",
         "uv",
         "manifest.json",

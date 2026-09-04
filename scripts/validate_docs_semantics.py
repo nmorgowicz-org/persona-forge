@@ -162,7 +162,6 @@ def check_release_workflow_contract(failures: list[str]) -> None:
     }
     expected_targets = {
         "x86_64-unknown-linux-musl",
-        "aarch64-unknown-linux-musl",
         "x86_64-pc-windows-gnu",
         "aarch64-apple-darwin",
     }

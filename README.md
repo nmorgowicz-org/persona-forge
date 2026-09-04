@@ -125,6 +125,10 @@ below for pinned version/digest tags.
 > Python preinstall required. See [RUN_LOCAL.md](docs/RUN_LOCAL.md); to move an existing Docker
 > deployment's data over, see [MIGRATION.md](docs/MIGRATION.md).
 
+> On macOS, verify the release checksum first. If Gatekeeper blocks the extracted launcher, run
+> `xattr -dr com.apple.quarantine .` from that archive's directory. See [native setup](docs/RUN_LOCAL.md)
+> for the safety note.
+
 ---
 
 ## HTTP API

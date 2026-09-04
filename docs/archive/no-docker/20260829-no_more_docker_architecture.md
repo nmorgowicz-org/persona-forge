@@ -37,7 +37,6 @@ is present. `persona-forge setup --no-ui` is the explicit API-only setup path.
 | macOS Apple Silicon | Pocket-TTS on CPU; full UI | Torch MPS for engines that actually support it | Native setup, ready health, and generation smoke |
 | Linux x86-64 | Pocket-TTS on CPU; full UI | CUDA, Intel XPU, and ROCm extras | CPU validated via container parity (9C) and CI; CUDA/XPU only where hardware-tested; ROCm experimental |
 | Windows x86-64 | Pocket-TTS on CPU; Waitress; full UI | CUDA Torch for supported Torch consumers | Native setup, ready health, generation smoke, clean shutdown |
-| Linux ARM64 | Package/launcher resolution | Target-dependent | Experimental until native runtime evidence exists |
 
 Important distinctions:
 
