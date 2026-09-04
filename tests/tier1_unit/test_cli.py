@@ -213,18 +213,23 @@ class TestBuildUiStamp:
         (dist_dir / cli._BUILD_STAMP_NAME).write_text("stale-hash")
         monkeypatch.setattr(cli, "_FRONTEND_SOURCE_DIR", frontend_dir)
         monkeypatch.setattr(cli, "_CHECKOUT_DIST_DIR", dist_dir)
+        monkeypatch.setattr(cli.shutil, "which", lambda name: "/resolved/npm")
 
         calls = []
 
         def fake_run(step, cwd=None):
             calls.append(step)
-            if step == ["npm", "run", "build"]:
+            if step == ["/resolved/npm", "run", "build"]:
                 (dist_dir / "index.html").write_text("<html>rebuilt</html>")
             return subprocess.CompletedProcess(step, 0)
 
         monkeypatch.setattr(cli.subprocess, "run", fake_run)
         assert cli._build_checkout_frontend(force=False) == 0
-        assert calls == [["npm", "ci"], ["npm", "run", "check"], ["npm", "run", "build"]]
+        assert calls == [
+            ["/resolved/npm", "ci"],
+            ["/resolved/npm", "run", "check"],
+            ["/resolved/npm", "run", "build"],
+        ]
         assert (dist_dir / cli._BUILD_STAMP_NAME).read_text() == cli._package_lock_hash()
 
     def test_force_rebuilds_even_when_stamp_current(self, tmp_path, monkeypatch):
@@ -235,6 +240,7 @@ class TestBuildUiStamp:
         monkeypatch.setattr(cli, "_FRONTEND_SOURCE_DIR", frontend_dir)
         monkeypatch.setattr(cli, "_CHECKOUT_DIST_DIR", dist_dir)
         (dist_dir / cli._BUILD_STAMP_NAME).write_text(cli._package_lock_hash())
+        monkeypatch.setattr(cli.shutil, "which", lambda name: "/resolved/npm")
 
         calls = []
 
@@ -244,7 +250,11 @@ class TestBuildUiStamp:
 
         monkeypatch.setattr(cli.subprocess, "run", fake_run)
         assert cli._build_checkout_frontend(force=True) == 0
-        assert calls == [["npm", "ci"], ["npm", "run", "check"], ["npm", "run", "build"]]
+        assert calls == [
+            ["/resolved/npm", "ci"],
+            ["/resolved/npm", "run", "check"],
+            ["/resolved/npm", "run", "build"],
+        ]
 
     def test_missing_frontend_source_dir_fails(self, tmp_path, monkeypatch):
         monkeypatch.setattr(cli, "_FRONTEND_SOURCE_DIR", tmp_path / "does-not-exist")

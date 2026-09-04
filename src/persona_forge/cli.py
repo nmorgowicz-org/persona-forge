@@ -15,6 +15,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -152,15 +153,24 @@ def _checkout_build_current(dist_dir: Path, lock_hash: str) -> bool:
 
 
 def _run_frontend_build_steps(frontend_dir: Path) -> int:
-    for step in (["npm", "ci"], ["npm", "run", "check"], ["npm", "run", "build"]):
-        print(f"[build-ui] running: {' '.join(step)}")
+    # `shutil.which` resolves npm.CMD on Windows, but bare `subprocess.run(["npm", ...])`
+    # still raises FileNotFoundError there: CreateProcess doesn't resolve extensionless
+    # names to .cmd/.bat shims without going through a shell. Resolving the executable
+    # ourselves works on every platform and avoids `shell=True`.
+    npm = shutil.which("npm")
+    if npm is None:
+        print("[build-ui] npm not found on PATH; install Node.js/npm to build the Studio UI")
+        return 1
+    for args in (["ci"], ["run", "check"], ["run", "build"]):
+        step = [npm, *args]
+        print(f"[build-ui] running: npm {' '.join(args)}")
         try:
             result = subprocess.run(step, cwd=frontend_dir)
         except FileNotFoundError:
             print("[build-ui] npm not found on PATH; install Node.js/npm to build the Studio UI")
             return 1
         if result.returncode != 0:
-            print(f"[build-ui] {' '.join(step)} failed with exit code {result.returncode}")
+            print(f"[build-ui] npm {' '.join(args)} failed with exit code {result.returncode}")
             return result.returncode
     return 0
 
