@@ -1,5 +1,10 @@
 # macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
 
 # Auto-captured UI screenshots/GIFs — curated ones get promoted to docs/screenshots/
 docs/screenshots/artifacts/
