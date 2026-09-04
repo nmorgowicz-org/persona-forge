@@ -73,17 +73,22 @@ jobs:
         include:
           - name: linux
             runs-on: arc-general
-            shell: bash
+            bash_shell: bash
             pythonpath: "src:src/export"
             os_probe: "uname -a"
           - name: macos
             runs-on: self-hosted-macos
-            shell: bash
+            bash_shell: bash
             pythonpath: "src:src/export"
             os_probe: "uname -a"
           - name: windows
             runs-on: self-hosted-windows
-            shell: pwsh
+            # bash-shelled steps below (mkdir/tests/build) use matrix.bash_shell, not "bash": on
+            # this self-hosted box System32 precedes Git\bin on PATH, so plain `shell: bash`
+            # resolves to the WSL launcher stub at System32\bash.exe (WSL isn't installed here) —
+            # not a workflow bug, `wsl.exe --list --online` in the run log gives it away. Pointing
+            # at Git Bash's full path sidesteps a machine-wide PATH edit on shared runner hardware.
+            bash_shell: 'C:\Program Files\Git\bin\bash.exe --noprofile --norc -e -o pipefail -c "{0}"'
             pythonpath: "src;src/export"
             os_probe: "[System.Environment]::OSVersion.VersionString"
     env:
@@ -128,7 +133,7 @@ jobs:
           npm run build
 
       - name: Make logs directory
-        shell: bash
+        shell: ${{ matrix.bash_shell }}
         run: mkdir -p logs
 
       # Task 6: "upload full logs and machine-readable receipts on failure and success" - every
@@ -136,23 +141,23 @@ jobs:
       # the Windows runner's built-in Git Bash too), independent of the receipts uploaded further
       # down, then the whole directory is uploaded unconditionally.
       - name: Semantic tests (fast, fake lane)
-        shell: bash
+        shell: ${{ matrix.bash_shell }}
         run: uv run --frozen python -m pytest -m "not slow and not requires_torch and not requires_model_weights and not requires_openvino_ir" -n auto --tb=short tests/tier1_unit tests/tier2_backend tests/tier3_api_integration 2>&1 | tee logs/semantic-tests.log
 
       - name: Spawned-process acceptance (fake-runtime readiness + clean shutdown)
-        shell: bash
+        shell: ${{ matrix.bash_shell }}
         run: uv run --frozen python -m pytest -m "slow" --tb=long tests/tier1_unit/test_cli.py 2>&1 | tee logs/spawned-process-acceptance.log
 
       - name: Build wheel + sdist
-        shell: bash
+        shell: ${{ matrix.bash_shell }}
         run: uv build 2>&1 | tee logs/build.log
 
       - name: Inspect release artifacts (fail-closed)
-        shell: bash
+        shell: ${{ matrix.bash_shell }}
         run: uv run --frozen python scripts/inspect_release_artifacts.py --dist-dir dist --receipt-out artifact-receipt.json 2>&1 | tee logs/inspect-release-artifacts.log
 
       - name: Isolated non-editable install + read-only doctor (outside checkout)
-        shell: bash
+        shell: ${{ matrix.bash_shell }}
         run: uv run --frozen python scripts/ci_isolated_install.py 2>&1 | tee logs/ci-isolated-install.log
 
       - name: Upload full logs
@@ -203,7 +208,7 @@ jobs:
       # failures are collected), a truthful machine-readable receipt is written, and the step is
       # fail-closed: it exits non-zero if ANY target fails to resolve.
       - name: Resolve targets (no foreign wheels installed)
-        shell: bash
+        shell: ${{ matrix.bash_shell }}
         run: |
           set -o pipefail
           status="pass"
