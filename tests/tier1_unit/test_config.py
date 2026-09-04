@@ -6,13 +6,12 @@ from persona_forge.config import apply_preset_env
 
 
 class TestApplyPresetEnv:
-    def test_06b_sets_expected_vars(self, monkeypatch):
-        # presets.py resolves OV IR paths via persona_forge.paths.ov_root(), which reads the
-        # real process environ (not the injectable `environ` dict below — see presets.py);
-        # pin OV_DATA_DIR to the container default (compose.yml/Dockerfile set this explicitly)
-        # so the assertion below exercises the same path regardless of platform.
-        monkeypatch.setenv("OV_DATA_DIR", "/ov")
-        environ = {"MODEL_SIZE": "0.6b"}
+    def test_06b_sets_expected_vars(self):
+        # apply_preset_env threads its own `environ` mapping into get_preset(), which resolves
+        # OV IR paths via persona_forge.paths.ov_root(environ) — pin OV_DATA_DIR in the injected
+        # dict itself (never the real process environ) so this exercises the same path
+        # regardless of platform.
+        environ = {"MODEL_SIZE": "0.6b", "OV_DATA_DIR": "/ov"}
         preset = apply_preset_env(environ)
         # pytorch, not pocket_tts: this preset is Qwen3-TTS-specific (model_repo points at a
         # Qwen3-TTS checkpoint), which pocket_tts (a separate engine) cannot run. The product

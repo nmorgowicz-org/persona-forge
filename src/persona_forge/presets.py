@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 
 from persona_forge import paths
+from persona_forge.paths import Environ
 
 # The main stateful graph's codec runs at 12 Hz — one frame per 1/12 second of audio.
 # This is what turns a human "max speech seconds" knob into an OpenVINO static-capacity
@@ -38,8 +39,8 @@ def seconds_for_capacity(capacity: int) -> float:
     return capacity / FRAME_RATE_HZ
 
 
-def _ir_paths(size: str, capacity: int) -> dict[str, str]:
-    base = paths.ov_root() / size
+def _ir_paths(size: str, capacity: int, environ: Environ = os.environ) -> dict[str, str]:
+    base = paths.ov_root(environ) / size
     return {
         "ov_model_dir": str(base / "ir"),
         "main_stateful_model": str(base / f"main_stateful_cap{capacity}.xml"),
@@ -52,11 +53,11 @@ def _ir_paths(size: str, capacity: int) -> dict[str, str]:
 _PREDICTOR_STATEFUL_FILENAMES = {"0.6B": "predictor_stateful_cap32.xml"}
 
 
-def _predictor_stateful_model(size: str) -> str | None:
+def _predictor_stateful_model(size: str, environ: Environ = os.environ) -> str | None:
     filename = _PREDICTOR_STATEFUL_FILENAMES.get(size)
     if filename is None:
         return None
-    return str(paths.ov_root() / size / filename)
+    return str(paths.ov_root(environ) / size / filename)
 
 
 PRESETS: dict[str, dict[str, object]] = {
@@ -95,11 +96,11 @@ PRESETS: dict[str, dict[str, object]] = {
 VOICE_DESIGN_DEFAULT_MAX_SPEECH_SECONDS = 30.0
 
 
-def _voice_design_ir_paths(size: str, capacity: int) -> dict[str, str]:
+def _voice_design_ir_paths(size: str, capacity: int, environ: Environ = os.environ) -> dict[str, str]:
     # A distinct, size-keyed directory tree (never "<ov_root>/<size>/...") so a VoiceDesign
     # export can never collide with — or accidentally overwrite — the Base export for
     # the same MODEL_SIZE.
-    base = paths.ov_root() / f"{size}-voicedesign"
+    base = paths.ov_root(environ) / f"{size}-voicedesign"
     return {
         "ov_model_dir": str(base / "ir"),
         "main_stateful_model": str(base / f"main_stateful_cap{capacity}.xml"),
@@ -137,6 +138,7 @@ def get_voice_design_preset(
     model_size: str | None = None,
     max_speech_seconds: float | None = None,
     main_compression: str | None = None,
+    environ: Environ = os.environ,
 ) -> dict[str, object]:
     """Return a copy of the VoiceDesign preset settings, mirroring :func:`get_preset`.
 
@@ -145,6 +147,10 @@ def get_voice_design_preset(
     INT8 main core against the default INT4 for accent fidelity. It only affects which IR
     variant scripts/export.py promotes; it does not change the IR output path, so re-running
     export with a different override overwrites the previous VoiceDesign IR in place.
+
+    ``environ`` is forwarded to :func:`persona_forge.paths.ov_root` so callers holding an
+    injected mapping (rather than the real process environment) get IR paths resolved
+    against it — see docs/plans/20260829-no_more_docker_architecture.md §4.
     """
     key = normalize_voice_design_size(model_size)
     preset = dict(VOICE_DESIGN_PRESETS[key])
@@ -159,7 +165,7 @@ def get_voice_design_preset(
                 "choose int4 or int8"
             )
         preset["main_compression"] = main_compression
-    preset.update(_voice_design_ir_paths(key, capacity))
+    preset.update(_voice_design_ir_paths(key, capacity, environ))
     return preset
 
 
@@ -189,12 +195,20 @@ def normalize_size(model_size: str | None) -> str:
     raise ValueError(f"Unsupported MODEL_SIZE={model_size!r}; choose one of: {choices}")
 
 
-def get_preset(model_size: str | None, max_speech_seconds: float | None = None) -> dict[str, object]:
+def get_preset(
+    model_size: str | None,
+    max_speech_seconds: float | None = None,
+    environ: Environ = os.environ,
+) -> dict[str, object]:
     """Return a copy of the preset settings for the given MODEL_SIZE.
 
     ``max_speech_seconds`` overrides the preset default (e.g. from ``TTS_MAX_SPEECH_SECONDS``)
     and drives both the derived ``stateful_capacity`` (frames) and the ``main_stateful_model``
     IR path, which is capacity-keyed so different capacities never collide on disk.
+
+    ``environ`` is forwarded to :func:`persona_forge.paths.ov_root` so callers holding an
+    injected mapping (rather than the real process environment) get IR paths resolved
+    against it — see docs/plans/20260829-no_more_docker_architecture.md §4.
     """
     key = normalize_size(model_size)
     preset = dict(PRESETS[key])
@@ -202,6 +216,6 @@ def get_preset(model_size: str | None, max_speech_seconds: float | None = None) 
     capacity = capacity_for_seconds(seconds)
     preset["max_speech_seconds"] = seconds
     preset["stateful_capacity"] = capacity
-    preset["predictor_stateful_model"] = _predictor_stateful_model(key)
-    preset.update(_ir_paths(key, capacity))
+    preset["predictor_stateful_model"] = _predictor_stateful_model(key, environ)
+    preset.update(_ir_paths(key, capacity, environ))
     return preset

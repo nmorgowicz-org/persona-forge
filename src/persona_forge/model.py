@@ -13,7 +13,7 @@ from persona_forge import __version__, paths
 
 # Apply thread and runtime envs before heavy imports
 from persona_forge.asr_check import transcribe_reference_audio, validate_reference_text
-from persona_forge.config import REF_AUDIO_PATH, apply_preset_env, normalize_backend
+from persona_forge.config import DEFAULT_TTS_BACKEND, REF_AUDIO_PATH, apply_preset_env, normalize_backend
 from persona_forge.openvino.runtime_config import apply_thread_env, resolve_inference_threads
 from persona_forge.presets import get_voice_design_preset, seconds_for_capacity
 from persona_forge.audio_style import apply_style_preset
@@ -50,7 +50,7 @@ MODEL_ID = resolve_model_repo()
 MODEL_REVISION = os.getenv("MODEL_REVISION") or None
 DEVICE = resolve_device()
 OPENVINO_DEVICE = (os.getenv("OPENVINO_DEVICE") or "AUTO").strip().upper()
-TTS_BACKEND = normalize_backend(os.getenv("TTS_BACKEND") or "pytorch")
+TTS_BACKEND = normalize_backend(os.getenv("TTS_BACKEND") or DEFAULT_TTS_BACKEND)
 REF_AUDIO = REF_AUDIO_PATH.strip() or None
 REF_TEXT = (os.getenv("REF_TEXT") or "").strip()
 REF_TEXT_SOURCE = "env" if REF_TEXT else "unset"
@@ -1343,7 +1343,7 @@ def reset_runtime_config() -> dict[str, Any]:
             os.environ.pop(key, None)
 
         if "TTS_BACKEND" in to_revert:
-            TTS_BACKEND = normalize_backend(os.getenv("TTS_BACKEND") or "pytorch")
+            TTS_BACKEND = normalize_backend(os.getenv("TTS_BACKEND") or DEFAULT_TTS_BACKEND)
         if "IDLE_UNLOAD_SECONDS" in to_revert:
             IDLE_UNLOAD_SECONDS = int(os.environ.get("IDLE_UNLOAD_SECONDS", "0") or "0")
 

@@ -1,10 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "persona-forge"
 version = "1.3.0"  # x-release-please-version
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "flask==3.1.3",
-  "gunicorn==26.2.0",
+  # POSIX-only WSGI server (Dockerfile CMD / persona_forge.cli serve). Waitress below is the
+  # Windows equivalent — gunicorn has no Windows support (no fork()).
+  "gunicorn==26.2.0; sys_platform != 'win32'",
+  "waitress==3.0.2; sys_platform == 'win32'",
   "soundfile==0.14.0",
   # Shared by OmniVoice and pocket-tts (our two main accent-design/cloning levers) as well as
   # the optional qwen3-tts engine below; override-dependencies also pins the transformers/torch
@@ -26,6 +33,9 @@ dependencies = [
   "pyloudnorm",
   "faster-whisper",
 ]
+
+[project.scripts]
+persona-forge = "persona_forge.cli:main"
 
 [project.optional-dependencies]
 # Qwen3-TTS is now the opt-in engine (OpenVINO acceleration is a further opt-in on top of
@@ -61,10 +71,20 @@ export = [
 ]
 
 [tool.uv]
-package = false
-environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
+package = true
+environments = [
+  "sys_platform == 'darwin'",
+  "sys_platform == 'linux'",
+  "sys_platform == 'win32'",
+]
 override-dependencies = [
   "transformers==5.12.1",
   "torch==2.14.0",
   "torchaudio==2.11.0",
 ]
+
+[tool.hatch.build.targets.wheel]
+# Phase 2: package only src/persona_forge; src/export stays separate export-only tooling
+# (docs/plans/20260829-no_more_docker_architecture.md §5a). Phase 3 adds the frontend build
+# output via the `artifacts` option once the packaged UI exists.
+packages = ["src/persona_forge"]

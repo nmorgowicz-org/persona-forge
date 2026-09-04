@@ -51,6 +51,13 @@ compose.yml            Services: persona-forge (serving) + export (profile `expo
 
 `PYTHONPATH=/app/src:/app/src/export` — both `persona_forge.*` and export modules are importable inside the container.
 
+**Native install (no Docker).** `[tool.uv] package = true`; `uv sync --locked` installs `persona_forge`
+into `.venv` (editable, via Hatchling) and exposes the `persona-forge` console script
+(`doctor`/`setup`/`build-ui`/`serve` — `src/persona_forge/cli.py`). `src/export` is not packaged and stays
+`PYTHONPATH`-only tooling — keep `PYTHONPATH=src:src/export` for anything importing export modules (e.g.
+running the full test suite). Docker remains the reproducible deployment/export path; this does not change
+`Dockerfile`/`compose.yml`/`entrypoint.sh`. Details: `docs/plans/20260829-no_more_docker_architecture.md`.
+
 **Product.** Open-source voice cloning and voice design studio: voice cloning, Qwen VoiceDesign,
 accent design and audition via OmniVoice, Stitch Studio (segment timeline assembly), prosody
 variants/adjustment, segments and voice libraries, projects, and an OpenAI-compatible API.
