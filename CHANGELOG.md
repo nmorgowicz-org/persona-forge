@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.4.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.3.0...persona-forge-v1.4.0) (2026-09-04)
+
+
+### Features
+
+* **accelerator:** add native wheel selection without removing container installs ([ba36805](https://github.com/nmorgowicz-org/persona-forge/commit/ba36805fcad71b3832451e67d6fb24f241a4e0c0))
+* **cli:** add native setup doctor and serve commands ([ba36805](https://github.com/nmorgowicz-org/persona-forge/commit/ba36805fcad71b3832451e67d6fb24f241a4e0c0))
+* **packaging:** distribute the Studio and platform launcher metadata ([ba36805](https://github.com/nmorgowicz-org/persona-forge/commit/ba36805fcad71b3832451e67d6fb24f241a4e0c0))
+* **paths:** add native state paths without changing container mounts ([ba36805](https://github.com/nmorgowicz-org/persona-forge/commit/ba36805fcad71b3832451e67d6fb24f241a4e0c0))
+
+
+### Bug Fixes
+
+* **qwen:** make compatibility patching exhaustive and idempotent ([ba36805](https://github.com/nmorgowicz-org/persona-forge/commit/ba36805fcad71b3832451e67d6fb24f241a4e0c0))
+* **release:** keep uv lock synchronized with Release Please ([62f414d](https://github.com/nmorgowicz-org/persona-forge/commit/62f414dddc9090a1c298399e8e5067a02c969b66))
+
+
+### Documentation
+
+* **setup:** document native container and launcher workflows ([ba36805](https://github.com/nmorgowicz-org/persona-forge/commit/ba36805fcad71b3832451e67d6fb24f241a4e0c0))
+
+
+### Continuous Integration
+
+* **packaging:** validate native packages and target resolution ([ba36805](https://github.com/nmorgowicz-org/persona-forge/commit/ba36805fcad71b3832451e67d6fb24f241a4e0c0))
+
+
+### Miscellaneous Chores
+
+* **deps:** update frontend npm dependencies ([#244](https://github.com/nmorgowicz-org/persona-forge/issues/244)) ([7a13c4c](https://github.com/nmorgowicz-org/persona-forge/commit/7a13c4c8eb9af2d33c62e5ccb0f58e09af2a73db))
+
 ## [1.3.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.2.2...persona-forge-v1.3.0) (2026-09-03)
 
 
