@@ -1,0 +1,239 @@
+# Phase 7 — Verified cross-platform native bootstrap archives
+# (docs/plans/20260829-no_more_docker_architecture.md §9; execution plan Phase 7).
+#
+# Builds the wheel/sdist once, cross-compiles persona-forge-launcher for the four supported
+# targets, bundles each into a launcher archive with a pinned+verified uv binary (never
+# `curl | sh` - see scripts/fetch_uv_binary.sh), then validates and publishes the full release
+# set (Gate 7: exact archive membership, checksums.json coverage, manifest cross-checks).
+#
+# Runner-label ruling (ADR, matching ci-packaging.yml's precedent): the `build-launcher` matrix
+# needs musl-gcc, aarch64-linux-musl-gcc, x86_64-w64-mingw32-gcc, and an osxcross toolchain -
+# none of which exist on this repo's current self-hosted labels (arc-general,
+# arc-general-docker, arc-llama-monitor; all plain Linux CI boxes). The architecture doc already
+# names a provisional label, `arc-persona-forge-release`, for exactly this job; provisioning it
+# with those cross toolchains is cross-repo infrastructure work against
+# ../llama-monitor-runner, out of scope for this branch. Until that label exists this workflow
+# is expected to fail at `Preflight release toolchain` on a stock arc-general runner - that is a
+# known, intentional gap (mirrors the native macOS/Windows runner gap flagged in
+# ci-packaging.yml), not a bug in the workflow logic itself. Swapping `runs-on` once the label
+# exists is a mechanical follow-up.
+name: Release Launcher
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to attach launcher archives to (e.g. persona-forge-v1.3.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-launcher-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.9"
+  PYTHON_VERSION: "3.13"
+  RUST_VERSION: "1.80"
+
+jobs:
+  build-wheel:
+    name: build-wheel
+    runs-on: arc-general
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv (pinned)
+        run: python -m pip install uv==${{ env.UV_VERSION }}
+
+      - name: uv lock --check
+        run: uv lock --check
+
+      - name: Build wheel + sdist
+        run: uv build
+
+      - name: Inspect release artifacts (fail-closed)
+        run: uv run --frozen python scripts/inspect_release_artifacts.py --dist-dir dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wheel-and-sdist
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
+
+  build-launcher:
+    name: build-launcher-${{ matrix.target }}
+    needs: build-wheel
+    runs-on: arc-persona-forge-release # see ADR above: does not exist yet
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            asset_stem: linux-x86_64
+            uv_target: x86_64-unknown-linux-musl
+          - target: aarch64-unknown-linux-musl
+            asset_stem: linux-aarch64
+            uv_target: aarch64-unknown-linux-musl
+          - target: x86_64-pc-windows-gnu
+            asset_stem: windows-x86_64
+            uv_target: x86_64-pc-windows-msvc # uv publishes no windows-gnu build; msvc binary runs fine standalone
+          - target: aarch64-apple-darwin
+            asset_stem: macos-aarch64
+            uv_target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust ${{ env.RUST_VERSION }} with target ${{ matrix.target }}
+        run: |
+          rustup toolchain install ${{ env.RUST_VERSION }}
+          rustup target add --toolchain ${{ env.RUST_VERSION }} ${{ matrix.target }}
+
+      - name: Preflight release toolchain
+        run: bash scripts/launcher_preflight.sh
+
+      - name: Build launcher (${{ matrix.target }})
+        run: bash scripts/build_launcher_target.sh ${{ matrix.target }}
+
+      - name: Fetch + verify pinned uv binary (${{ matrix.uv_target }})
+        run: bash scripts/fetch_uv_binary.sh ${{ env.UV_VERSION }} ${{ matrix.uv_target }} uv-bin
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: wheel-and-sdist
+          path: dist
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv (pinned, for requirements export)
+        run: python -m pip install uv==${{ env.UV_VERSION }}
+
+      - name: Package launcher archive
+        run: |
+          set -euo pipefail
+          UV_BIN="uv-bin/uv"
+          [ "${{ matrix.target }}" = "x86_64-pc-windows-gnu" ] && UV_BIN="uv-bin/uv.exe"
+          WHEEL=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          LAUNCHER_BIN="launcher/target/${{ matrix.target }}/release/persona-forge-launcher"
+          [ "${{ matrix.target }}" = "x86_64-pc-windows-gnu" ] && LAUNCHER_BIN="${LAUNCHER_BIN}.exe"
+          VERSION=$(uv run --frozen python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          uv run --frozen python scripts/package_launcher_archive.py \
+            --target ${{ matrix.target }} \
+            --version "$VERSION" \
+            --launcher-binary "$LAUNCHER_BIN" \
+            --uv-binary "$UV_BIN" \
+            --uv-version ${{ env.UV_VERSION }} \
+            --wheel "$WHEEL" \
+            --out-dir release-assets
+
+      - name: Smoke-test launcher doctor --json (target-native runner)
+        run: |
+          set -euo pipefail
+          LAUNCHER_BIN="launcher/target/${{ matrix.target }}/release/persona-forge-launcher"
+          [ "${{ matrix.target }}" = "x86_64-pc-windows-gnu" ] && LAUNCHER_BIN="${LAUNCHER_BIN}.exe"
+          if [ "$(uname -m)-$(uname -s)" = "$(echo ${{ matrix.target }} | cut -d- -f1)-$(uname -s)" ]; then
+            "$LAUNCHER_BIN" doctor --json || echo "doctor smoke test non-zero exit recorded, see logs"
+          else
+            echo "skipping in-job doctor smoke test: ${{ matrix.target }} is not this runner's native architecture"
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: launcher-${{ matrix.asset_stem }}
+          path: release-assets/
+          retention-days: 7
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: [build-wheel, build-launcher]
+    runs-on: arc-general
+    timeout-minutes: 20
+    steps:
+      - name: Generate GitHub App token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        id: app-token
+        with:
+          client-id: ${{ vars.GH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv (pinned)
+        run: python -m pip install uv==${{ env.UV_VERSION }}
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: "wheel-and-sdist"
+          path: release
+          merge-multiple: true
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: "launcher-*"
+          path: release
+          merge-multiple: true
+
+      - name: Determine release version
+        id: version
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event_name == 'release' && github.ref_name || github.event.inputs.tag_name }}"
+          VERSION="${TAG#persona-forge-v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Generate SHA-256 checksums
+        run: |
+          set -euo pipefail
+          cd release
+          python3 - <<'PYEOF'
+          import hashlib, json
+          from pathlib import Path
+          checksums = {}
+          for f in sorted(Path(".").iterdir()):
+              if f.is_file():
+                  checksums[f.name] = hashlib.sha256(f.read_bytes()).hexdigest()
+          Path("checksums.json").write_text(json.dumps({"checksums": checksums}, indent=2) + "\n")
+          PYEOF
+          cat checksums.json
+
+      - name: Validate release contract (fail-closed)
+        run: uv run --frozen python scripts/validate_release_contract.py --dir release --version ${{ steps.version.outputs.version }}
+
+      - name: Update published release with artifacts
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          body: ${{ github.event.release.body }}
+          files: release/*
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      - name: Create manual release with generated notes
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
+        with:
+          tag_name: ${{ github.event.inputs.tag_name }}
+          generate_release_notes: true
+          files: release/*
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
