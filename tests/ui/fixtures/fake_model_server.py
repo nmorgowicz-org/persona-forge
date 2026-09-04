@@ -25,8 +25,6 @@ import logging
 import os
 import random
 import secrets
-import socket
-import subprocess
 import sys
 import tempfile
 import threading
@@ -71,21 +69,6 @@ def _ensure_loopback_bypasses_proxies(extra_host: str | None = None) -> None:
             if host not in values:
                 values.append(host)
         os.environ[name] = ",".join(values)
-
-
-def _select_non_loopback_host() -> str:
-    """Return a host address usable when loopback is restricted by the runner."""
-    try:
-        addresses = socket.getaddrinfo(
-            socket.gethostname(), None, socket.AF_INET, socket.SOCK_STREAM
-        )
-    except OSError:
-        addresses = []
-    for address in addresses:
-        host = address[4][0]
-        if not host.startswith(("127.", "169.254.")):
-            return host
-    return "127.0.0.1"
 
 
 def _loopback_get(host: str, port: int, path: str, timeout: float) -> int:
@@ -359,62 +342,6 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     os.environ.setdefault("VOICE_LIBRARY_DIR", lib_dir)
     os.environ.setdefault("SEGMENT_LIBRARY_DIR", seg_dir)
 
-    if sys.platform.startswith("win") and port == 0:
-        # The self-hosted Windows runner has a restricted NetworkService loopback
-        # configuration. Keep the server in a child process so it does not inherit
-        # the parent test process's already-imported Flask/fake-runtime modules.
-        port = int(os.getenv("PERSONA_FORGE_WINDOWS_TEST_PORT", "18318"))
-        host = _select_non_loopback_host()
-        _ensure_loopback_bypasses_proxies(host)
-        child_env = os.environ.copy()
-        child_env["PERSONA_FORGE_TEST_PORT"] = str(port)
-        child_env["PERSONA_FORGE_TEST_HOST"] = host
-        child_env["PERSONA_FORGE_TEST_BIND_HOST"] = "0.0.0.0"
-        child = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve())],
-            env=child_env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        actual_port = port
-        base_url = f"http://{host}:{actual_port}"
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            try:
-                if _loopback_get(host, actual_port, "/health", timeout=1) == 200:
-                    break
-            except Exception:
-                if child.poll() is not None:
-                    output = child.stdout.read() if child.stdout is not None else ""
-                    raise RuntimeError(
-                        "fake_model_server exited before becoming reachable "
-                        f"(code {child.returncode}): {output.strip()}"
-                    )
-                time.sleep(0.1)
-        else:
-            child.terminate()
-            output = child.communicate(timeout=5)[0]
-            raise RuntimeError(
-                "fake_model_server did not become reachable within 30 seconds "
-                f"(child output: {output.strip()})"
-            )
-
-        def stop_fn():
-            try:
-                _loopback_get(host, actual_port, "/_shutdown", timeout=2)
-            except Exception:
-                pass
-            try:
-                child.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                child.terminate()
-                child.wait(timeout=5)
-            if child.stdout is not None:
-                child.stdout.read()
-
-        return base_url, stop_fn
-
     rt = _install_fake_runtime()
     _patch_generate_for_slow_async(rt)
 
@@ -424,6 +351,34 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     _patch_save_voice(app_module, rt)
     _seed_fake_voice_library(rt)
     _install_test_controls(app_module, rt)
+
+    if sys.platform.startswith("win") and port == 0:
+        # The self-hosted Windows runner blocks TCP between NetworkService
+        # processes, including its own loopback interface. HTTPX's WSGI transport
+        # keeps these semantic HTTP tests black-box at the request boundary while
+        # the separate spawned acceptance tests cover a real server process.
+        import httpx
+
+        transport = httpx.WSGITransport(app=app_module.app)
+        client = httpx.Client(transport=transport, base_url="http://testserver")
+        original_get = httpx.get
+        original_post = httpx.post
+
+        def _test_get(url, **kwargs):
+            return client.get(url, **kwargs)
+
+        def _test_post(url, **kwargs):
+            return client.post(url, **kwargs)
+
+        httpx.get = _test_get
+        httpx.post = _test_post
+
+        def stop_fn():
+            httpx.get = original_get
+            httpx.post = original_post
+            client.close()
+
+        return "http://testserver", stop_fn
 
     shutdown_event = threading.Event()
     app_module._shutdown_hook = shutdown_event.set
