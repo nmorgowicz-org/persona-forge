@@ -73,6 +73,13 @@ Use stdlib `pathlib`; do not add a direct platformdirs dependency merely for thi
 resolver accepts an environment mapping and injectable platform/home inputs for unit tests. No
 resolver performs I/O at import time.
 
+This obligation is not limited to `paths.py` itself: any function that calls into a resolver
+(`presets.py`'s IR path helpers, `config.apply_preset_env`, etc.) must accept and forward its own
+`environ` mapping rather than let the resolver silently fall back to the real `os.environ` default.
+A caller that receives an injectable `environ` but drops it before reaching the resolver defeats
+the contract just as surely as a resolver that skips the parameter (tracked as a Phase 1 follow-up,
+fixed in Phase 2 Task 0 — see the requirement doc).
+
 `PERSONA_FORGE_HOME` is the new application-state root override. Defaults are:
 
 - Linux: `$XDG_DATA_HOME/persona-forge`, else `~/.local/share/persona-forge`.
