@@ -101,6 +101,86 @@ class TestSetup:
         assert created_first == created_second
 
 
+class TestQwenPatchSetup:
+    """Task 6: default (no qwen/openvino), Qwen PyTorch, Qwen + OpenVINO, and unsupported
+    Windows Qwen/OpenVINO must each behave distinctly. importlib.util.find_spec and sys.platform
+    are monkeypatched rather than actually installing qwen_tts (Phase 5 keeps cli.py free of
+    heavy imports at module scope)."""
+
+    def test_default_no_qwen_installed_is_a_clean_noop(self, monkeypatch):
+        # find_spec returning None short-circuits before persona_forge.compat_patch is ever
+        # imported, so there's nothing further to stub — the absence of an import IS the no-op.
+        monkeypatch.setattr(cli.importlib.util, "find_spec", lambda name: None)
+        assert cli._qwen_patch_setup(apply=False) == 0
+        assert cli._qwen_patch_setup(apply=True) == 0
+
+    def test_qwen_installed_pytorch_only_verifies_by_default(self, monkeypatch):
+        monkeypatch.setattr(cli.importlib.util, "find_spec", lambda name: object())
+        monkeypatch.setattr(cli.sys, "platform", "linux")
+
+        import persona_forge.compat_patch as compat_patch
+
+        calls = []
+        monkeypatch.setattr(
+            compat_patch,
+            "verify_qwen_patches",
+            lambda: calls.append("verify") or {"status": "already_applied", "patches": []},
+        )
+        monkeypatch.setattr(
+            compat_patch,
+            "apply_qwen_patches",
+            lambda: (_ for _ in ()).throw(AssertionError("apply should not run without the flag")),
+        )
+        assert cli._qwen_patch_setup(apply=False) == 0
+        assert calls == ["verify"]
+
+    def test_qwen_plus_openvino_present_applies_with_explicit_flag(self, monkeypatch):
+        monkeypatch.setattr(cli.importlib.util, "find_spec", lambda name: object())
+        monkeypatch.setattr(cli.sys, "platform", "linux")
+
+        import persona_forge.compat_patch as compat_patch
+
+        calls = []
+        monkeypatch.setattr(
+            compat_patch,
+            "apply_qwen_patches",
+            lambda: calls.append("apply") or {"status": "already_applied", "patches": []},
+        )
+        assert cli._qwen_patch_setup(apply=True) == 0
+        assert calls == ["apply"]
+
+    def test_unsupported_windows_qwen_reports_diagnostic_and_skips(self, monkeypatch, capsys):
+        monkeypatch.setattr(cli.importlib.util, "find_spec", lambda name: object())
+        monkeypatch.setattr(cli.sys, "platform", "win32")
+
+        import persona_forge.compat_patch as compat_patch
+
+        monkeypatch.setattr(
+            compat_patch,
+            "verify_qwen_patches",
+            lambda: (_ for _ in ()).throw(AssertionError("must not verify on unsupported Windows")),
+        )
+        monkeypatch.setattr(
+            compat_patch,
+            "apply_qwen_patches",
+            lambda: (_ for _ in ()).throw(AssertionError("must not apply on unsupported Windows")),
+        )
+        assert cli._qwen_patch_setup(apply=True) == 0
+        out = capsys.readouterr().out
+        assert "not supported on" in out.lower() and "windows" in out.lower()
+
+    def test_failed_patch_status_fails_setup(self, monkeypatch):
+        monkeypatch.setattr(cli.importlib.util, "find_spec", lambda name: object())
+        monkeypatch.setattr(cli.sys, "platform", "linux")
+
+        import persona_forge.compat_patch as compat_patch
+
+        monkeypatch.setattr(
+            compat_patch, "verify_qwen_patches", lambda: {"status": "failed", "patches": []}
+        )
+        assert cli._qwen_patch_setup(apply=False) == 1
+
+
 class TestBuildUiStamp:
     """Task 3: package-lock hash stamp gates rebuild; subprocess mocked (Phase 3)."""
 

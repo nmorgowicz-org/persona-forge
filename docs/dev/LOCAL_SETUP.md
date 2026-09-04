@@ -45,10 +45,15 @@ uv run python scripts/patch_local_compat.py   # one-time per fresh venv, only ne
 ```
 
 **`scripts/patch_local_compat.py` is required after every fresh `uv sync --extra qwen-tts`.**
-`qwen-tts==0.1.1` was written against an older `transformers` API; the Docker image patches the
-installed site-packages after `pip install` to bridge that gap (`Dockerfile` lines ~45–78). A plain
+`qwen-tts==0.1.1` was written against an older `transformers` API; both the Docker image and this
+script apply the same patches (Phase 5's `src/persona_forge/compat_patch.py`) to bridge that gap
+after install — one definition, two callers, so they can no longer drift apart. A plain
 `uv sync --extra qwen-tts` doesn't apply those patches, so `from persona_forge.app import app` fails
-without running this script once against the new `.venv`. It's idempotent — safe to re-run.
+without running this script once against the new `.venv`. It's genuinely idempotent — safe to
+re-run — including against the rope-parameters insertion, which is marker-guarded rather than
+re-applied on every run. Use `persona-forge setup --apply-qwen-patches` for the same effect via the
+CLI (`persona-forge setup` alone only verifies patch status when `qwen_tts` is installed, and is a
+no-op otherwise).
 
 Set `HF_TOKEN` in your shell (not `.env` — that's for the container) if your selected checkpoint is
 gated.

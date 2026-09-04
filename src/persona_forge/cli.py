@@ -189,11 +189,61 @@ def _build_checkout_frontend(*, force: bool) -> int:
     return 0
 
 
+def _qwen_patch_setup(*, apply: bool) -> int:
+    """Task 5/6: default installs are clean no-ops. Only when qwen_tts is actually installed do
+    we even look at patch status; only with the explicit ``--apply-qwen-patches`` flag do we
+    write anything. Windows + qwen is an unsupported combination (architecture.md line 47) and
+    gets a clear diagnostic rather than a silent attempt."""
+    if importlib.util.find_spec("qwen_tts") is None:
+        return 0
+
+    if sys.platform == "win32":
+        print(
+            "[setup] qwen_tts is installed, but Qwen3-TTS/OpenVINO are not supported on "
+            "Windows by this project — skipping compat-patch verification. See "
+            "docs/plans/20260829-no_more_docker_architecture.md."
+        )
+        return 0
+
+    from persona_forge.compat_patch import apply_qwen_patches, verify_qwen_patches
+
+    if apply:
+        report = apply_qwen_patches()
+        action = "apply"
+    else:
+        report = verify_qwen_patches()
+        action = "verify"
+
+    for patch in report["patches"]:
+        print(f"[setup] qwen-patch {action} [{patch['status']}] {patch['name']}")
+
+    if report["status"] == "failed":
+        print(
+            "[setup] qwen compat-patch verification failed — installed qwen_tts/transformers "
+            "versions may have drifted from the pinned ones this project patches for. Run "
+            "`persona-forge setup --apply-qwen-patches` for details, or re-run with "
+            "--apply-qwen-patches to attempt the patch.",
+            file=sys.stderr,
+        )
+        return 1
+    if not apply and report["status"] == "applied":
+        print(
+            "[setup] qwen compat patches are not yet applied to this environment — re-run with "
+            "`persona-forge setup --apply-qwen-patches` to apply them."
+        )
+    return 0
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     environ = os.environ
     created = bootstrap.prepare_writable_state(environ)
     for directory in created:
         print(f"[setup] ensured {directory}")
+
+    patch_status = _qwen_patch_setup(apply=args.apply_qwen_patches)
+    if patch_status != 0:
+        return patch_status
+
     if args.no_ui:
         print("[setup] --no-ui: skipping frontend build")
         return 0
@@ -278,6 +328,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     setup_parser = subparsers.add_parser("setup", help="Create state directories (idempotent)")
     setup_parser.add_argument("--no-ui", action="store_true", help="Skip the frontend build step")
+    setup_parser.add_argument(
+        "--apply-qwen-patches",
+        action="store_true",
+        help=(
+            "Apply the qwen_tts/transformers compat patches (persona_forge.compat_patch) if "
+            "qwen_tts is installed. Without this flag, setup only verifies patch status "
+            "(no-op when qwen_tts isn't installed)."
+        ),
+    )
     setup_parser.set_defaults(func=cmd_setup)
 
     build_ui_parser = subparsers.add_parser("build-ui", help="Build the frontend from source")

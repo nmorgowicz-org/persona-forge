@@ -154,8 +154,10 @@ def validate_dockerfile() -> None:
         "EXPOSE 8318",
         "requirements/requirements-openvino.txt",
         "requirements/requirements-export.txt",
-        "from transformers import initialization as init",
-        "s/create_sliding_window_causal_mask/create_causal_mask/g",
+        # Phase 5: the qwen_tts/transformers compat patches are defined once in
+        # persona_forge/compat_patch.py and invoked here rather than duplicated inline.
+        "COPY src/persona_forge/compat_patch.py /tmp/compat_patch.py",
+        "from compat_patch import apply_qwen_patches",
     ):
         if marker not in dockerfile:
             raise RuntimeError(f"Dockerfile single-image contract is missing {marker!r}")
