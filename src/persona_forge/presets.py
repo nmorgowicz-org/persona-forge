@@ -42,9 +42,9 @@ def seconds_for_capacity(capacity: int) -> float:
 def _ir_paths(size: str, capacity: int, environ: Environ = os.environ) -> dict[str, str]:
     base = paths.ov_root(environ) / size
     return {
-        "ov_model_dir": str(base / "ir"),
-        "main_stateful_model": str(base / f"main_stateful_cap{capacity}.xml"),
-        "vocoder_dir": str(base / "vocoder"),
+        "ov_model_dir": (base / "ir").as_posix(),
+        "main_stateful_model": (base / f"main_stateful_cap{capacity}.xml").as_posix(),
+        "vocoder_dir": (base / "vocoder").as_posix(),
     }
 
 
@@ -57,7 +57,7 @@ def _predictor_stateful_model(size: str, environ: Environ = os.environ) -> str |
     filename = _PREDICTOR_STATEFUL_FILENAMES.get(size)
     if filename is None:
         return None
-    return str(paths.ov_root(environ) / size / filename)
+    return (paths.ov_root(environ) / size / filename).as_posix()
 
 
 PRESETS: dict[str, dict[str, object]] = {
@@ -102,9 +102,9 @@ def _voice_design_ir_paths(size: str, capacity: int, environ: Environ = os.envir
     # the same MODEL_SIZE.
     base = paths.ov_root(environ) / f"{size}-voicedesign"
     return {
-        "ov_model_dir": str(base / "ir"),
-        "main_stateful_model": str(base / f"main_stateful_cap{capacity}.xml"),
-        "vocoder_dir": str(base / "vocoder"),
+        "ov_model_dir": (base / "ir").as_posix(),
+        "main_stateful_model": (base / f"main_stateful_cap{capacity}.xml").as_posix(),
+        "vocoder_dir": (base / "vocoder").as_posix(),
     }
 
 

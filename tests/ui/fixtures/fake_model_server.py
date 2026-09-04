@@ -332,7 +332,10 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     import urllib.request
 
     base_url = f"http://127.0.0.1:{actual_port}"
-    deadline = time.monotonic() + 10
+    # 30s, not 10s: under `pytest-xdist -n auto` every worker starts its own server + imports
+    # persona_forge.app concurrently, and on the self-hosted Windows runner that contention
+    # alone can push first-response past 10s even though the server is healthy.
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         try:
             with urllib.request.urlopen(f"{base_url}/health", timeout=1) as resp:
@@ -341,7 +344,7 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
         except Exception:
             time.sleep(0.1)
     else:
-        raise RuntimeError("fake_model_server did not become reachable within 10 seconds")
+        raise RuntimeError("fake_model_server did not become reachable within 30 seconds")
 
     def stop_fn():
         try:

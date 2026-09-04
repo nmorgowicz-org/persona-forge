@@ -277,19 +277,25 @@ def describe_paths(
     voice_lib = voice_library_dir(environ, root=root, home=home)
     ov = ov_root(environ, root=root, home=home)
     cache = ov_cache_dir(environ, ov_data_root=ov, home=home)
+    # .as_posix() (not str()) so a value inherited verbatim from a POSIX-only source — a Docker
+    # container env var, an IR path baked in by the Linux export step — reports identically
+    # regardless of which OS this doctor snapshot runs on, instead of picking up native
+    # backslashes on Windows.
     return {
-        "app_data_root": str(root),
-        "model_cache_dir": str(model_cache),
-        "pocket_tts_artifact_dir": str(
-            pocket_tts_artifact_dir(environ, model_cache=model_cache, home=home)
-        ),
-        "ov_root": str(ov),
-        "voice_library_dir": str(voice_lib),
-        "segment_library_dir": str(segment_library_dir(environ, root=root, home=home)),
-        "runtime_data_dir": str(runtime_data_dir(environ, voice_library=voice_lib, home=home)),
-        "reference_audio_path": str(reference_audio_path(environ, root=root, home=home)),
-        "hf_token_file": str(hf_token_file(environ, root=root, home=home)),
-        "ov_cache_dir": str(cache) if cache is not None else None,
+        "app_data_root": root.as_posix(),
+        "model_cache_dir": model_cache.as_posix(),
+        "pocket_tts_artifact_dir": pocket_tts_artifact_dir(
+            environ, model_cache=model_cache, home=home
+        ).as_posix(),
+        "ov_root": ov.as_posix(),
+        "voice_library_dir": voice_lib.as_posix(),
+        "segment_library_dir": segment_library_dir(environ, root=root, home=home).as_posix(),
+        "runtime_data_dir": runtime_data_dir(
+            environ, voice_library=voice_lib, home=home
+        ).as_posix(),
+        "reference_audio_path": reference_audio_path(environ, root=root, home=home).as_posix(),
+        "hf_token_file": hf_token_file(environ, root=root, home=home).as_posix(),
+        "ov_cache_dir": cache.as_posix() if cache is not None else None,
     }
 
 

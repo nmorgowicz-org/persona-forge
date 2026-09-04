@@ -19,6 +19,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -268,9 +269,18 @@ def cmd_build_ui(args: argparse.Namespace) -> int:
 
 
 def _port_in_use(host: str, port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(0.5)
-        return sock.connect_ex((host, port)) == 0
+    # A single immediate connect_ex() is flaky right after a peer's listen() call returns —
+    # observed on the self-hosted Windows runner, where the socket stack can take a moment to
+    # finish transitioning to LISTENING, so the very next connect gets refused. A few quick
+    # retries absorb that without meaningfully slowing down the (rare) true-negative case.
+    for attempt in range(3):
+        if attempt:
+            time.sleep(0.1)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.5)
+            if sock.connect_ex((host, port)) == 0:
+                return True
+    return False
 
 
 def _server_command(host: str, port: int, *, platform: str = sys.platform) -> list[str]:
