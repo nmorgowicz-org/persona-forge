@@ -90,6 +90,7 @@ def main() -> int:
             raise SystemExit("doctor JSON report is missing expected sections (backend/paths/ui)")
         receipt = {
             "status": "pass",
+            "platform": report.get("platform"),
             "wheel": wheel,
             "isolated_venv": str(venv_dir),
             "console_script": str(doctor),

@@ -5,9 +5,23 @@
 # (image.yml, Task 5): this workflow proves the *installable* product — a self-contained wheel +
 # reproducible sdist with the Studio baked in — across a real Linux runner (arc-general), a native
 # macOS runner, and a native Windows runner. A Linux cross runner cannot satisfy the native jobs
-# (real Torch/MPS/Waitress/filesystem/audio behavior requires the actual OS), so macos/windows use
-# GitHub-hosted runners that identify their real OS. Target-resolution jobs resolve for foreign
-# platforms with --python-platform without installing foreign wheels (Task 3).
+# (real Torch/MPS/Waitress/filesystem/audio behavior requires the actual OS). Target-resolution
+# jobs resolve for foreign platforms with --python-platform without installing foreign wheels
+# (Task 3).
+#
+# Runner-label ruling (ADR, not a placeholder): every other workflow in this repo (ci.yml,
+# image.yml, labeler.yml, release-please.yml, ci-ui.yml) runs on self-hosted arc-* labels
+# provisioned via ../llama-monitor-runner. As of this workflow's authorship, that sibling repo
+# provisions no native macOS or Windows label — only arc-general, arc-general-docker, and
+# arc-llama-monitor exist, all Linux. Standing up native macOS/Windows self-hosted runners is
+# out of scope here: it is cross-repo infrastructure work belonging to a separate, explicitly
+# scoped change against ../llama-monitor-runner, not something this branch may do silently.
+# Given that, macos-latest/windows-latest (GitHub-hosted) are used deliberately, not as a stopgap:
+# they satisfy Gate 6's "native jobs must identify their real OS; a cross runner cannot satisfy
+# them" requirement today, at zero added infra cost, and the "Identify real OS" step plus the
+# doctor receipt's platform.sys_platform field make the real OS auditable in every run. If/when
+# ../llama-monitor-runner grows native macOS/Windows labels, swapping matrix.runs-on to them is a
+# mechanical follow-up, not a design change.
 name: Packaging
 
 on:
@@ -63,17 +77,25 @@ jobs:
             runs-on: arc-general
             shell: bash
             pythonpath: "src:src/export"
+            os_probe: "uname -a"
           - name: macos
             runs-on: macos-latest
             shell: bash
             pythonpath: "src:src/export"
+            os_probe: "uname -a"
           - name: windows
             runs-on: windows-latest
             shell: pwsh
             pythonpath: "src;src/export"
+            os_probe: "ver"
     env:
       PYTHONPATH: ${{ matrix.pythonpath }}
     steps:
+      # Gate 6 requires native jobs to identify their real OS (a cross runner cannot satisfy
+      # them). The probe lands in the run log AND the doctor receipt captures platform.sys_platform.
+      - name: Identify real OS
+        run: ${{ matrix.os_probe }}
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -100,20 +122,41 @@ jobs:
           npm run check
           npm run build
 
+      - name: Make logs directory
+        shell: bash
+        run: mkdir -p logs
+
+      # Task 6: "upload full logs and machine-readable receipts on failure and success" - every
+      # step below tees its full output into logs/ (shell: bash forced so `tee` is available on
+      # the Windows runner's built-in Git Bash too), independent of the receipts uploaded further
+      # down, then the whole directory is uploaded unconditionally.
       - name: Semantic tests (fast, fake lane)
-        run: uv run --frozen python -m pytest -m "not slow and not requires_torch and not requires_model_weights and not requires_openvino_ir" -n auto --tb=short tests/tier1_unit tests/tier2_backend tests/tier3_api_integration
+        shell: bash
+        run: uv run --frozen python -m pytest -m "not slow and not requires_torch and not requires_model_weights and not requires_openvino_ir" -n auto --tb=short tests/tier1_unit tests/tier2_backend tests/tier3_api_integration 2>&1 | tee logs/semantic-tests.log
 
       - name: Spawned-process acceptance (fake-runtime readiness + clean shutdown)
-        run: uv run --frozen python -m pytest -m "slow" --tb=long tests/tier1_unit/test_cli.py
+        shell: bash
+        run: uv run --frozen python -m pytest -m "slow" --tb=long tests/tier1_unit/test_cli.py 2>&1 | tee logs/spawned-process-acceptance.log
 
       - name: Build wheel + sdist
-        run: uv build
+        shell: bash
+        run: uv build 2>&1 | tee logs/build.log
 
       - name: Inspect release artifacts (fail-closed)
-        run: uv run --frozen python scripts/inspect_release_artifacts.py --dist-dir dist --receipt-out artifact-receipt.json
+        shell: bash
+        run: uv run --frozen python scripts/inspect_release_artifacts.py --dist-dir dist --receipt-out artifact-receipt.json 2>&1 | tee logs/inspect-release-artifacts.log
 
       - name: Isolated non-editable install + read-only doctor (outside checkout)
-        run: uv run --frozen python scripts/ci_isolated_install.py
+        shell: bash
+        run: uv run --frozen python scripts/ci_isolated_install.py 2>&1 | tee logs/ci-isolated-install.log
+
+      - name: Upload full logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: logs-${{ matrix.name }}
+          path: logs/
+          retention-days: 7
 
       - name: Upload artifact receipt
         if: always()

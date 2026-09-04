@@ -19,7 +19,7 @@ import tarfile
 import zipfile
 from pathlib import Path
 
-_REQUIRED_SUFFIXES = (".bin", ".xml", ".safetensors", ".pt", ".pth", ".ckpt", ".wav", ".mp3", ".onnx")
+_FORBIDDEN_BINARY_SUFFIXES = (".bin", ".xml", ".safetensors", ".pt", ".pth", ".ckpt", ".wav", ".mp3", ".onnx")
 
 
 def _sha256(path: Path) -> str:
@@ -69,7 +69,7 @@ def _forbidden_present(members: list[str], kind: str) -> list[str]:
     hits: list[str] = []
     for m in members:
         lm = m.lower()
-        if any(lm.endswith(s) for s in _REQUIRED_SUFFIXES):
+        if any(lm.endswith(s) for s in _FORBIDDEN_BINARY_SUFFIXES):
             hits.append(m)
         elif "hf_token" in lm:
             hits.append(m)
@@ -153,6 +153,9 @@ def main(argv: list[str] | None = None) -> int:
         "failures": failures,
     }
     print(json.dumps(receipt, indent=2))
+
+    if args.receipt_out:
+        Path(args.receipt_out).write_text(json.dumps(receipt, indent=2), encoding="utf-8")
 
     if failures:
         print(f"\nartifact inspection FAILED: {len(failures)} violation(s)", file=sys.stderr)
