@@ -16,19 +16,28 @@ _VALID_DEVICES = ("cuda", "xpu", "mps", "cpu")
 
 
 def _cuda_available() -> bool:
-    import torch
+    try:
+        import torch
+    except ImportError:
+        return False
 
     return bool(torch.cuda.is_available())
 
 
 def _xpu_available() -> bool:
-    import torch
+    try:
+        import torch
+    except ImportError:
+        return False
 
     return bool(getattr(torch, "xpu", None) is not None and torch.xpu.is_available())
 
 
 def _mps_available() -> bool:
-    import torch
+    try:
+        import torch
+    except ImportError:
+        return False
 
     return bool(torch.backends.mps.is_available())
 

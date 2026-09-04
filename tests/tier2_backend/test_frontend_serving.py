@@ -8,6 +8,7 @@ Runs in a fresh subprocess (never the shared session-scoped ``app_module``) so i
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -50,14 +51,21 @@ def test_installed_style_app_serves_ui_assets_and_health(tmp_path):
     (dist_dir / "assets" / "app-abc123.js").write_text("console.log('fake studio bundle');")
 
     script = _SCRIPT.format(tests_root=str(REPO_ROOT))
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "PYTHONPATH": str(REPO_ROOT / "src"),
+        "FRONTEND_DIST_DIR": str(dist_dir),
+    }
+    # Some Python builds (e.g. actions/setup-python's relocatable download) load libpython
+    # from a bundled lib dir via LD_LIBRARY_PATH rather than the system loader path; without
+    # it the interpreter itself fails to start. Carrying it through doesn't weaken the
+    # __file__-relative-resolution proof this test cares about (PATH/cwd stay sandboxed).
+    if ld_library_path := os.environ.get("LD_LIBRARY_PATH"):
+        env["LD_LIBRARY_PATH"] = ld_library_path
     result = subprocess.run(
         [sys.executable, "-c", script],
         cwd=tmp_path,  # outside the checkout: proves resolution is __file__-relative, not cwd
-        env={
-            "PATH": "/usr/bin:/bin",
-            "PYTHONPATH": str(REPO_ROOT / "src"),
-            "FRONTEND_DIST_DIR": str(dist_dir),
-        },
+        env=env,
         capture_output=True,
         text=True,
         timeout=30,
