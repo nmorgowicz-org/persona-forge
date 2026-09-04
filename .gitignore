@@ -27,6 +27,10 @@ eggs/
 lib64/
 parts/
 sdist/
+
+# Package-local Studio UI, copied in from frontend/dist by hatch_build.py for a standard
+# (non-editable) wheel build; force-included via [tool.hatch.build.targets.wheel] artifacts.
+src/persona_forge/static/
 var/
 wheels/
 share/python-wheels/

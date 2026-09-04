@@ -11,6 +11,7 @@ process image, never inside this one.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -20,12 +21,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from persona_forge import bootstrap, paths
+from persona_forge import bootstrap, frontend, paths
 from persona_forge.config import DEFAULT_TTS_BACKEND
 from persona_forge.gpu_family import describe_accelerator
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_FRONTEND_DIST_DIR_DEFAULT = _REPO_ROOT / "frontend" / "dist"
+_FRONTEND_SOURCE_DIR = _REPO_ROOT / "frontend"
+_CHECKOUT_DIST_DIR = _FRONTEND_SOURCE_DIR / "dist"
+_BUILD_STAMP_NAME = ".persona-forge-build-stamp"
 _DEFAULT_PORT = 8318
 
 
@@ -43,18 +46,25 @@ def _probe_import(name: str) -> dict[str, Any]:
 
 
 def _frontend_dist_dir(environ: paths.Environ) -> Path:
-    override = environ.get("FRONTEND_DIST_DIR", "").strip()
-    return Path(override) if override else _FRONTEND_DIST_DIR_DEFAULT
+    return frontend.resolve_frontend_dir(environ)
 
 
 def _ui_diagnostics(environ: paths.Environ) -> dict[str, Any]:
     dist_dir = _frontend_dist_dir(environ)
-    enabled = environ.get("FRONTEND_ENABLED", "1").strip().lower() not in ("0", "false")
+    enabled = frontend.frontend_enabled(environ)
+    present = dist_dir.is_dir()
     return {
         "dist_dir": str(dist_dir),
-        "dist_dir_present": dist_dir.is_dir(),
+        "dist_dir_present": present,
         "frontend_enabled_env": enabled,
-        "mode": "ui" if (enabled and dist_dir.is_dir()) else "api-only",
+        "source": (
+            "package"
+            if dist_dir == frontend.PACKAGE_STATIC_DIR
+            else "checkout"
+            if dist_dir == frontend.CHECKOUT_DIST_DIR
+            else "override"
+        ),
+        "mode": "ui" if (enabled and present) else "api-only",
     }
 
 
@@ -110,6 +120,56 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def _package_lock_hash() -> str:
+    lock_path = _FRONTEND_SOURCE_DIR / "package-lock.json"
+    return hashlib.sha256(lock_path.read_bytes()).hexdigest()
+
+
+def _checkout_build_current(dist_dir: Path, lock_hash: str) -> bool:
+    if not (dist_dir / "index.html").is_file():
+        return False
+    stamp_file = dist_dir / _BUILD_STAMP_NAME
+    return stamp_file.is_file() and stamp_file.read_text().strip() == lock_hash
+
+
+def _run_frontend_build_steps(frontend_dir: Path) -> int:
+    for step in (["npm", "ci"], ["npm", "run", "check"], ["npm", "run", "build"]):
+        print(f"[build-ui] running: {' '.join(step)}")
+        try:
+            result = subprocess.run(step, cwd=frontend_dir)
+        except FileNotFoundError:
+            print("[build-ui] npm not found on PATH; install Node.js/npm to build the Studio UI")
+            return 1
+        if result.returncode != 0:
+            print(f"[build-ui] {' '.join(step)} failed with exit code {result.returncode}")
+            return result.returncode
+    return 0
+
+
+def _build_checkout_frontend(*, force: bool) -> int:
+    """Build `frontend/dist` from source, skipping when the package-lock hash stamp is current.
+
+    Only ever targets the checkout `frontend/dist` tier — the package-local UI (an installed
+    wheel's baked-in Studio) is produced at wheel-build time by `hatch_build.py`, not here.
+    """
+    if not _FRONTEND_SOURCE_DIR.is_dir():
+        print(f"[build-ui] no frontend/ source directory at {_FRONTEND_SOURCE_DIR}; nothing to build")
+        return 1
+    lock_hash = _package_lock_hash()
+    if not force and _checkout_build_current(_CHECKOUT_DIST_DIR, lock_hash):
+        print(f"[build-ui] {_CHECKOUT_DIST_DIR} already up to date; pass --force to rebuild")
+        return 0
+    status = _run_frontend_build_steps(_FRONTEND_SOURCE_DIR)
+    if status != 0:
+        return status
+    if not (_CHECKOUT_DIST_DIR / "index.html").is_file():
+        print(f"[build-ui] build completed but {_CHECKOUT_DIST_DIR}/index.html is missing")
+        return 1
+    (_CHECKOUT_DIST_DIR / _BUILD_STAMP_NAME).write_text(lock_hash)
+    print(f"[build-ui] built {_CHECKOUT_DIST_DIR}")
+    return 0
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     environ = os.environ
     created = bootstrap.prepare_writable_state(environ)
@@ -117,32 +177,15 @@ def cmd_setup(args: argparse.Namespace) -> int:
         print(f"[setup] ensured {directory}")
     if args.no_ui:
         print("[setup] --no-ui: skipping frontend build")
-    else:
-        dist_dir = _frontend_dist_dir(environ)
-        if dist_dir.is_dir():
-            print(f"[setup] frontend already built at {dist_dir}")
-        else:
-            print(f"[setup] frontend not built at {dist_dir}; run 'persona-forge build-ui'")
-    return 0
+        return 0
+    if (frontend.PACKAGE_STATIC_DIR / "index.html").is_file():
+        print(f"[setup] package-local UI already present at {frontend.PACKAGE_STATIC_DIR}")
+        return 0
+    return _build_checkout_frontend(force=False)
 
 
 def cmd_build_ui(args: argparse.Namespace) -> int:
-    frontend_dir = _REPO_ROOT / "frontend"
-    dist_dir = _frontend_dist_dir(os.environ)
-    if not frontend_dir.is_dir():
-        print(f"[build-ui] no frontend/ source directory at {frontend_dir}; nothing to build")
-        return 1
-    if dist_dir.is_dir() and not args.force:
-        print(f"[build-ui] {dist_dir} already exists; pass --force to rebuild")
-        return 0
-    for step in (["npm", "ci"], ["npm", "run", "build"]):
-        print(f"[build-ui] running: {' '.join(step)}")
-        result = subprocess.run(step, cwd=frontend_dir)
-        if result.returncode != 0:
-            print(f"[build-ui] {' '.join(step)} failed with exit code {result.returncode}")
-            return result.returncode
-    print(f"[build-ui] built {dist_dir}")
-    return 0
+    return _build_checkout_frontend(force=args.force)
 
 
 def _port_in_use(host: str, port: int) -> bool:

@@ -84,7 +84,12 @@ override-dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-# Phase 2: package only src/persona_forge; src/export stays separate export-only tooling
-# (docs/plans/20260829-no_more_docker_architecture.md §5a). Phase 3 adds the frontend build
-# output via the `artifacts` option once the packaged UI exists.
+# src/persona_forge only; src/export stays separate export-only tooling
+# (docs/plans/20260829-no_more_docker_architecture.md §5a). `artifacts` force-includes the
+# frontend build output that hatch_build.py copies to src/persona_forge/static for a standard
+# (non-editable) wheel build — it is git-ignored, so `packages` alone would not pick it up (§6).
 packages = ["src/persona_forge"]
+artifacts = ["src/persona_forge/static/**"]
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"

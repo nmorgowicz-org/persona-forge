@@ -91,6 +91,119 @@ class TestSetup:
         assert created_first == created_second
 
 
+class TestBuildUiStamp:
+    """Task 3: package-lock hash stamp gates rebuild; subprocess mocked (Phase 3)."""
+
+    def _fake_frontend_source(self, tmp_path):
+        frontend_dir = tmp_path / "frontend"
+        frontend_dir.mkdir()
+        (frontend_dir / "package-lock.json").write_text('{"lockfileVersion": 1}')
+        return frontend_dir
+
+    def test_skips_when_stamp_matches_lockfile_hash(self, tmp_path, monkeypatch):
+        frontend_dir = self._fake_frontend_source(tmp_path)
+        dist_dir = frontend_dir / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html></html>")
+        monkeypatch.setattr(cli, "_FRONTEND_SOURCE_DIR", frontend_dir)
+        monkeypatch.setattr(cli, "_CHECKOUT_DIST_DIR", dist_dir)
+        (dist_dir / cli._BUILD_STAMP_NAME).write_text(cli._package_lock_hash())
+
+        calls = []
+        monkeypatch.setattr(cli.subprocess, "run", lambda *a, **k: calls.append(a))
+
+        assert cli._build_checkout_frontend(force=False) == 0
+        assert calls == []
+
+    def test_stale_stamp_triggers_rebuild(self, tmp_path, monkeypatch):
+        frontend_dir = self._fake_frontend_source(tmp_path)
+        dist_dir = frontend_dir / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html></html>")
+        (dist_dir / cli._BUILD_STAMP_NAME).write_text("stale-hash")
+        monkeypatch.setattr(cli, "_FRONTEND_SOURCE_DIR", frontend_dir)
+        monkeypatch.setattr(cli, "_CHECKOUT_DIST_DIR", dist_dir)
+
+        calls = []
+
+        def fake_run(step, cwd=None):
+            calls.append(step)
+            if step == ["npm", "run", "build"]:
+                (dist_dir / "index.html").write_text("<html>rebuilt</html>")
+            return subprocess.CompletedProcess(step, 0)
+
+        monkeypatch.setattr(cli.subprocess, "run", fake_run)
+        assert cli._build_checkout_frontend(force=False) == 0
+        assert calls == [["npm", "ci"], ["npm", "run", "check"], ["npm", "run", "build"]]
+        assert (dist_dir / cli._BUILD_STAMP_NAME).read_text() == cli._package_lock_hash()
+
+    def test_force_rebuilds_even_when_stamp_current(self, tmp_path, monkeypatch):
+        frontend_dir = self._fake_frontend_source(tmp_path)
+        dist_dir = frontend_dir / "dist"
+        dist_dir.mkdir()
+        (dist_dir / "index.html").write_text("<html></html>")
+        monkeypatch.setattr(cli, "_FRONTEND_SOURCE_DIR", frontend_dir)
+        monkeypatch.setattr(cli, "_CHECKOUT_DIST_DIR", dist_dir)
+        (dist_dir / cli._BUILD_STAMP_NAME).write_text(cli._package_lock_hash())
+
+        calls = []
+
+        def fake_run(step, cwd=None):
+            calls.append(step)
+            return subprocess.CompletedProcess(step, 0)
+
+        monkeypatch.setattr(cli.subprocess, "run", fake_run)
+        assert cli._build_checkout_frontend(force=True) == 0
+        assert calls == [["npm", "ci"], ["npm", "run", "check"], ["npm", "run", "build"]]
+
+    def test_missing_frontend_source_dir_fails(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cli, "_FRONTEND_SOURCE_DIR", tmp_path / "does-not-exist")
+        monkeypatch.setattr(cli, "_CHECKOUT_DIST_DIR", tmp_path / "does-not-exist" / "dist")
+        assert cli._build_checkout_frontend(force=False) == 1
+
+
+class TestSetupFrontendBuild:
+    """Task 4: setup builds a missing/stale checkout UI unless --no-ui; npm-missing is a failure."""
+
+    def test_no_ui_flag_never_touches_npm(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PERSONA_FORGE_HOME", str(tmp_path / "pf-home"))
+        monkeypatch.setattr(
+            cli.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("npm ran"))
+        )
+        args = cli.build_parser().parse_args(["setup", "--no-ui"])
+        assert cli.cmd_setup(args) == 0
+
+    def test_skips_build_when_package_local_ui_already_present(self, tmp_path, monkeypatch):
+        package_static = tmp_path / "pkg-static"
+        package_static.mkdir()
+        (package_static / "index.html").write_text("<html></html>")
+        monkeypatch.setattr(cli.frontend, "PACKAGE_STATIC_DIR", package_static)
+        monkeypatch.setenv("PERSONA_FORGE_HOME", str(tmp_path / "pf-home"))
+        monkeypatch.setattr(
+            cli,
+            "_build_checkout_frontend",
+            lambda **k: (_ for _ in ()).throw(AssertionError("checkout build attempted")),
+        )
+        args = cli.build_parser().parse_args(["setup"])
+        assert cli.cmd_setup(args) == 0
+
+    def test_fails_when_npm_absent_from_path(self, tmp_path, monkeypatch):
+        frontend_dir = tmp_path / "frontend"
+        frontend_dir.mkdir()
+        (frontend_dir / "package-lock.json").write_text("{}")
+        monkeypatch.setattr(cli, "_FRONTEND_SOURCE_DIR", frontend_dir)
+        monkeypatch.setattr(cli, "_CHECKOUT_DIST_DIR", frontend_dir / "dist")
+        monkeypatch.setattr(cli.frontend, "PACKAGE_STATIC_DIR", tmp_path / "no-such-package-static")
+        monkeypatch.setenv("PERSONA_FORGE_HOME", str(tmp_path / "pf-home"))
+
+        def raise_not_found(*a, **k):
+            raise FileNotFoundError("npm not found")
+
+        monkeypatch.setattr(cli.subprocess, "run", raise_not_found)
+        args = cli.build_parser().parse_args(["setup"])
+        assert cli.cmd_setup(args) != 0
+
+
 class TestServerCommand:
     def test_posix_argv_exact(self):
         argv = cli._server_command("127.0.0.1", 8318, platform="linux")
