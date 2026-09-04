@@ -19,8 +19,13 @@ dependencies = [
   "accelerate",
   "librosa",
   "transformers==5.12.1",
-  "torch==2.14.0",
-  "torchaudio==2.11.0",
+  # Native accelerator selection (Phase 4, persona_forge.accelerator_manifest is the source of
+  # truth for these numbers). The range must admit every accelerator extra's exact pin below
+  # (2.14.0 default down to rocm's 2.9.1 — rocm6.4 has no 2.14.0 cp313 wheel) so an extra
+  # narrows this line instead of conflicting with it; with no extra active it still resolves to
+  # 2.14.0/2.11.0, unchanged from before this phase.
+  "torch>=2.9.1,<2.15",
+  "torchaudio>=2.9.1,<2.12",
   # OmniVoice (Persona Forge accent-design engine) — PyPI release, same pin as the
   # container image (Dockerfile / entrypoint.sh). Its declared torch/torchaudio/transformers
   # requirements are loose; override-dependencies below forces them to the pins above.
@@ -47,6 +52,35 @@ qwen-tts = [
   "onnxruntime",
   "sox",
   "qwen-tts==0.1.1",
+]
+
+# Native accelerator extras (Phase 4) — mutually exclusive (see [tool.uv.conflicts]); each
+# narrows the base torch/torchaudio range above to persona_forge.accelerator_manifest's exact
+# pin for that extra and redirects the install index via [tool.uv.sources]/[[tool.uv.index]].
+# cuda12/cuda13 are Windows+Linux; xpu is Windows+Linux (no macOS Xe/Arc wheel); rocm is
+# Linux-only (rocm6.4 has no Windows/macOS cp313 build) — the markers below keep those two off
+# platforms with no matching wheel rather than letting them silently resolve to something else.
+cuda12 = [
+  "torch==2.14.0; sys_platform == 'linux' or sys_platform == 'win32'",
+  "torchaudio==2.11.0; sys_platform == 'linux' or sys_platform == 'win32'",
+]
+cuda13 = [
+  "torch==2.14.0; sys_platform == 'linux' or sys_platform == 'win32'",
+  "torchaudio==2.11.0; sys_platform == 'linux' or sys_platform == 'win32'",
+]
+xpu = [
+  # torch==2.14.0+xpu requires triton-xpu~=3.8.0 (live-verified via its wheel METADATA), and no
+  # triton-xpu wheel above 3.7.2 is published for cp313 on the PyTorch xpu index — 2.14.0 is
+  # therefore not installable on xpu at all right now. 2.13.0+xpu pins triton-xpu==3.7.2, which
+  # the index does have, so xpu tracks that older torch until 3.8.x-compatible wheels land.
+  "torch==2.13.0; sys_platform == 'linux' or sys_platform == 'win32'",
+  "torchaudio==2.11.0; sys_platform == 'linux' or sys_platform == 'win32'",
+  "triton-xpu==3.7.2; sys_platform == 'linux' or sys_platform == 'win32'",
+]
+rocm = [
+  "torch==2.9.1; sys_platform == 'linux'",
+  "torchaudio==2.9.1; sys_platform == 'linux'",
+  "pytorch-triton-rocm==3.5.1; sys_platform == 'linux'",
 ]
 
 [dependency-groups]
@@ -79,9 +113,55 @@ environments = [
 ]
 override-dependencies = [
   "transformers==5.12.1",
-  "torch==2.14.0",
-  "torchaudio==2.11.0",
 ]
+
+conflicts = [
+  [
+    { extra = "cuda12" },
+    { extra = "cuda13" },
+    { extra = "xpu" },
+    { extra = "rocm" },
+  ],
+]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cu126", extra = "cuda12" },
+  { index = "pytorch-cu130", extra = "cuda13" },
+  { index = "pytorch-xpu", extra = "xpu" },
+  { index = "pytorch-rocm64", extra = "rocm" },
+]
+torchaudio = [
+  { index = "pytorch-cu126", extra = "cuda12" },
+  { index = "pytorch-cu130", extra = "cuda13" },
+  { index = "pytorch-xpu", extra = "xpu" },
+  { index = "pytorch-rocm64", extra = "rocm" },
+]
+# torch==2.14.0+xpu depends on triton-xpu>=3.8.0 — PyPI's own triton-xpu tops out at 3.3.0b1
+# (live-verified), so the xpu extra's triton must also come from the PyTorch xpu index.
+triton-xpu = [{ index = "pytorch-xpu", extra = "xpu" }]
+# torch==2.9.1+rocm6.4 depends on pytorch-triton-rocm==3.5.1, published only on the rocm index.
+pytorch-triton-rocm = [{ index = "pytorch-rocm64", extra = "rocm" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-xpu"
+url = "https://download.pytorch.org/whl/xpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-rocm64"
+url = "https://download.pytorch.org/whl/rocm6.4"
+explicit = true
 
 [tool.hatch.build.targets.wheel]
 # src/persona_forge only; src/export stays separate export-only tooling

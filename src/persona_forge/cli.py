@@ -45,6 +45,23 @@ def _probe_import(name: str) -> dict[str, Any]:
     return {"installed": True, "importable": True, "error": None}
 
 
+def _torch_runtime_device(torch_probe: dict[str, Any]) -> str | None:
+    """Best-effort ``device.auto_detect_device()`` — the unforced device torch itself would pick,
+    with zero env overrides applied. Deliberately distinct from ``accelerator.device``
+    (``resolve_device(environ)``, Task 3): that one is override-aware and reflects what the active
+    backend will actually run on; this one is the raw torch-capability signal underneath it, useful
+    for spotting e.g. a ``TTS_DEVICE`` override masking a torch build with no accelerator support at
+    all. ``None`` when torch isn't importable — this must never raise doctor's own report."""
+    if not torch_probe["importable"]:
+        return None
+    try:
+        from persona_forge.device import auto_detect_device
+
+        return auto_detect_device()
+    except Exception:  # pragma: no cover - depends on local torch/accelerator state
+        return None
+
+
 def _frontend_dist_dir(environ: paths.Environ) -> Path:
     return frontend.resolve_frontend_dir(environ)
 
@@ -84,13 +101,15 @@ def _resolved_backend(environ: paths.Environ) -> str:
 
 def _doctor_report(environ: paths.Environ | None = None) -> dict[str, Any]:
     environ = environ if environ is not None else os.environ
+    torch_probe = _probe_import("torch")
+    torch_probe["runtime_device"] = _torch_runtime_device(torch_probe)
     return {
         "platform": {
             "sys_platform": sys.platform,
             "python_version": sys.version,
         },
         "dependencies": {
-            "torch": _probe_import("torch"),
+            "torch": torch_probe,
             "openvino": _probe_import("openvino"),
             "transformers": _probe_import("transformers"),
         },

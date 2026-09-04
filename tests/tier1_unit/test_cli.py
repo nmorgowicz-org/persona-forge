@@ -76,6 +76,16 @@ class TestDoctor:
         result = cli._probe_import("definitely_not_a_real_module_xyz")
         assert result == {"installed": False, "importable": False, "error": None}
 
+    def test_torch_runtime_device_is_none_when_not_importable(self):
+        # Task 3: the generic torch-capability signal must be a distinct field from
+        # accelerator.device (the override-aware, active-backend effective device) and must
+        # never raise doctor's own report when torch isn't importable.
+        assert cli._torch_runtime_device({"importable": False}) is None
+
+    def test_doctor_report_torch_dependency_carries_runtime_device_key(self):
+        report = cli._doctor_report({})
+        assert "runtime_device" in report["dependencies"]["torch"]
+
 
 class TestSetup:
     def test_setup_creates_documented_directories_and_is_idempotent(self, tmp_path, monkeypatch):

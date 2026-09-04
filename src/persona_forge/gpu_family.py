@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import glob
 import os
+import subprocess
 import warnings
 from collections.abc import MutableMapping
 from typing import Callable, NamedTuple
@@ -64,11 +65,33 @@ def intel_pci_present() -> bool:
     return _pci_vendor_present(_PCI_VENDOR_INTEL)
 
 
+def nvidia_smi_capable() -> bool:
+    """True if ``nvidia-smi`` runs successfully and reports a driver version.
+
+    ``/dev/nvidia*`` and ``/sys/bus/pci`` are Linux-only — on Windows there is no sysfs and no
+    ``/dev``, so ``nvidia_pci_present``/``cuda_device_node_present`` are always False there even
+    with a real, driver-installed NVIDIA GPU. ``nvidia-smi`` ships with the driver on both Linux
+    and Windows, so a successful, parseable run is a real cross-platform capability signal, not
+    just presence — this is what lets ``auto`` pick ``cuda`` on Windows at all (Task 2).
+    """
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
 class Probes(NamedTuple):
     """Injectable presence/capability probes — unit-testable without hardware."""
 
     cuda_device_node: Callable[[], bool]
     nvidia_pci: Callable[[], bool]
+    nvidia_smi: Callable[[], bool]
     rocm_device_node: Callable[[], bool]
     amd_pci: Callable[[], bool]
     intel_device_node: Callable[[], bool]
@@ -79,6 +102,7 @@ def default_probes() -> Probes:
     return Probes(
         cuda_device_node=cuda_device_node_present,
         nvidia_pci=nvidia_pci_present,
+        nvidia_smi=nvidia_smi_capable,
         rocm_device_node=rocm_device_node_present,
         amd_pci=amd_pci_present,
         intel_device_node=intel_xpu_device_node_present,
@@ -89,12 +113,17 @@ def default_probes() -> Probes:
 def _detect_best(probes: Probes) -> tuple[str, bool, bool]:
     """Return (family, present, capable) for the highest-priority vendor whose PCI device is seen.
 
-    ``present`` = the vendor's PCI device is visible in sysfs (survives without device-node mapping).
-    ``capable`` = the matching device node is *also* present (i.e. actually usable right now). This
+    ``present`` = the vendor's PCI device is visible in sysfs, or (nvidia only) ``nvidia-smi``
+    reports a driver, so the Windows case still counts as present.
+    ``capable`` = the matching device node is *also* present (i.e. actually usable right now), or
+    (nvidia only) ``nvidia-smi`` itself already confirmed capability — sysfs device nodes don't
+    exist on Windows at all, so ``nvidia-smi``'s own success is the capability signal there. This
     is the exact present/capable split the A7c coach needs.
     """
     if probes.nvidia_pci():
         return "cuda", True, probes.cuda_device_node()
+    if probes.nvidia_smi():
+        return "cuda", True, True
     if probes.amd_pci():
         return "rocm", True, probes.rocm_device_node()
     if probes.intel_pci():
