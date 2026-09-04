@@ -61,7 +61,9 @@ def app_data_root(
     """Resolve the application-state root: ``PERSONA_FORGE_HOME`` else the platform default.
 
     Linux: ``$XDG_DATA_HOME/persona-forge`` else ``~/.local/share/persona-forge``.
-    macOS: ``~/Library/Application Support/persona-forge``.
+    macOS: ``~/.config/persona-forge`` (a homedir dotfile, matching Linux/Windows rather than
+    the platform's ``~/Library/Application Support`` bundle convention, for cross-platform
+    parity).
     Windows: ``%LOCALAPPDATA%/persona-forge`` else ``~/AppData/Local/persona-forge``.
     """
     home = home if home is not None else Path.home()
@@ -73,7 +75,7 @@ def app_data_root(
         base = Path(local_appdata) if local_appdata else home / "AppData" / "Local"
         root = base / "persona-forge"
     elif platform == "darwin":
-        root = home / "Library" / "Application Support" / "persona-forge"
+        root = home / ".config" / "persona-forge"
     else:
         xdg = _clean(environ, "XDG_DATA_HOME")
         base = Path(xdg) if xdg else home / ".local" / "share"

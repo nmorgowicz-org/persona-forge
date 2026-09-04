@@ -87,7 +87,7 @@ override it:
 
 | Path | Default (native) | Override |
 |---|---|---|
-| App data root | Linux: `$XDG_DATA_HOME/persona-forge` or `~/.local/share/persona-forge`; macOS: `~/Library/Application Support/persona-forge`; Windows: `%LOCALAPPDATA%/persona-forge` | `PERSONA_FORGE_HOME` |
+| App data root | Linux: `$XDG_DATA_HOME/persona-forge` or `~/.local/share/persona-forge`; macOS: `~/.config/persona-forge`; Windows: `%LOCALAPPDATA%/persona-forge` | `PERSONA_FORGE_HOME` |
 | Model cache | `<app data root>/models/huggingface/hub` | `MODEL_CACHE_DIR` (or `HF_HUB_CACHE` / `HF_HOME`) |
 | Pocket-TTS artifacts | `<model cache>/pocket-tts` | `POCKET_TTS_ARTIFACT_DIR` |
 | OpenVINO IR + cache | `<app data root>/ov` (+ `/cache`) | `OV_DATA_DIR` (+ `OV_CACHE_DIR`) |

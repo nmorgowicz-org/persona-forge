@@ -48,7 +48,7 @@ class TestAppDataRoot:
 
     def test_macos_default(self):
         result = paths.app_data_root({}, platform="darwin", home=MAC_HOME)
-        assert result == MAC_HOME / "Library" / "Application Support" / "persona-forge"
+        assert result == MAC_HOME / ".config" / "persona-forge"
 
     def test_windows_local_appdata(self):
         environ = {"LOCALAPPDATA": "C:/Users/nick/AppData/Local"}

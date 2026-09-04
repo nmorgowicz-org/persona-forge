@@ -34,7 +34,7 @@ port-conflict note below either way).
 The native app-data root itself (`PERSONA_FORGE_HOME` if set) defaults to:
 
 - Linux: `$XDG_DATA_HOME/persona-forge` or `~/.local/share/persona-forge`
-- macOS: `~/Library/Application Support/persona-forge`
+- macOS: `~/.config/persona-forge` (a homedir dotfile, for parity with Linux/Windows rather than the platform's Application Support bundle convention)
 - Windows: `%LOCALAPPDATA%/persona-forge` or `~/AppData/Local/persona-forge`
 
 Run `persona-forge doctor --json` (native) and look at the `paths` key for the exact resolved
