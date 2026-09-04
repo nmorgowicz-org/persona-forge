@@ -322,23 +322,18 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     shutdown_event = threading.Event()
     app_module._shutdown_hook = shutdown_event.set
 
-    if sys.platform.startswith("win"):
-        # Use the same WSGI server as the production Windows CLI. Werkzeug's threaded
-        # development server binds but does not reliably accept loopback requests on the
-        # self-hosted Windows runner, leaving every readiness probe stuck until timeout.
-        from waitress import create_server  # noqa: E402
+    if sys.platform.startswith("win") and port == 0:
+        # The NetworkService account on the self-hosted runner cannot connect to some
+        # OS-assigned loopback ports (WinError 10013). A fixed test port avoids that
+        # restricted dynamic-port range; the Windows packaging matrix is single-worker.
+        port = int(os.getenv("PERSONA_FORGE_WINDOWS_TEST_PORT", "18318"))
 
-        server = create_server(app_module.app, host="127.0.0.1", port=port, threads=4)
-        actual_port = server.socket.getsockname()[1]
-        serve = server.run
-        shutdown = server.close
-    else:
-        from werkzeug.serving import make_server  # noqa: E402
+    from werkzeug.serving import make_server  # noqa: E402
 
-        server = make_server("127.0.0.1", port, app_module.app, threaded=True)
-        actual_port = server.server_address[1]
-        serve = server.serve_forever
-        shutdown = server.shutdown
+    server = make_server("127.0.0.1", port, app_module.app, threaded=True)
+    actual_port = server.server_address[1]
+    serve = server.serve_forever
+    shutdown = server.shutdown
 
     def serve_until_stopped():
         try:
