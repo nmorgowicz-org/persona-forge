@@ -38,8 +38,10 @@ echo "[entrypoint] accelerator family resolved: ${_gpu_family}"
 # script exits (set -e) before the marker is written, so a failed install can never look done.
 _accel_venv_dir="${ACCEL_VENV_DIR:-/opt/accel-venv}"
 if [ "${_gpu_family}" != "cpu" ]; then
-    _accel_site_packages="${_accel_venv_dir}/${_gpu_family}/site-packages"
-    _accel_marker="${_accel_venv_dir}/${_gpu_family}/.installed"
+    _accel_prefix="${_accel_venv_dir}/${_gpu_family}"
+    _py_version="$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+    _accel_site_packages="${_accel_prefix}/lib/python${_py_version}/site-packages"
+    _accel_marker="${_accel_prefix}/.installed"
 
     if [ ! -f "${_accel_marker}" ]; then
         echo "[entrypoint] ${_gpu_family}: no cached torch install found at ${_accel_site_packages}, installing..."
@@ -80,12 +82,20 @@ print(p.torchaudio_version if p else '')
         fi
 
         # index URL/version are unvalidated on real hardware for cuda/rocm (only intel-xpu has
-        # been proven, on plexxie, per A6.1); override via ACCEL_TORCH_INDEX_URL/
+        # been proven, on docker-agent, per Gate 9C); override via ACCEL_TORCH_INDEX_URL/
         # ACCEL_TORCH_VERSION/ACCEL_TORCHAUDIO_VERSION if wrong.
-        pip install --target "${_accel_site_packages}" --no-cache-dir \
+        #
+        # --prefix, not --target: some accel wheels (e.g. intel-xpu's intel-sycl-rt) ship native
+        # runtime libraries via install-scheme "data" entries with ../-relative RECORD paths,
+        # meant to land at <prefix>/lib/*.so*. pip's --target mode has no destination for a path
+        # that resolves outside site-packages and silently drops those files -- torch then
+        # imports fine at install time but crashes at runtime with
+        # "ImportError: libsycl.so.9: cannot open shared object file" (found on real Intel
+        # iGPU hardware, Gate 9C). --prefix mode places them correctly.
+        pip install --prefix "${_accel_prefix}" --no-cache-dir \
             "torch==${_torch_version}" "torchaudio==${_torchaudio_version}" \
             --index-url "${_torch_index_url}"
-        pip install --target "${_accel_site_packages}" --no-cache-dir --no-deps \
+        pip install --prefix "${_accel_prefix}" --no-cache-dir --no-deps \
             "omnivoice==0.2.1"
 
         touch "${_accel_marker}"
@@ -95,6 +105,9 @@ print(p.torchaudio_version if p else '')
     fi
 
     export PYTHONPATH="${_accel_site_packages}:${PYTHONPATH:-}"
+    # --prefix (see above) also places native runtime libraries under <prefix>/lib, which the
+    # dynamic linker needs to find at import time (e.g. libsycl.so.9).
+    export LD_LIBRARY_PATH="${_accel_prefix}/lib:${LD_LIBRARY_PATH:-}"
 fi
 
 if [ "${_gpu_family}" = "intel-xpu" ]; then
