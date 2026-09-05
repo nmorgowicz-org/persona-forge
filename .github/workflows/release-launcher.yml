@@ -83,9 +83,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-musl
+          - target: x86_64-unknown-linux-gnu
             asset_stem: linux-x86_64
-            uv_target: x86_64-unknown-linux-musl
+            uv_target: x86_64-unknown-linux-gnu
           - target: x86_64-pc-windows-gnu
             asset_stem: windows-x86_64
             uv_target: x86_64-pc-windows-msvc # uv publishes no windows-gnu build; msvc binary runs fine standalone
@@ -161,7 +161,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-musl
+          - target: x86_64-unknown-linux-gnu
             asset_stem: linux-x86_64
             archive_suffix: .tar.gz
             runs-on: arc-general

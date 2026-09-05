@@ -12,7 +12,7 @@ TARGET="${1:?Usage: launcher_preflight.sh <target> [toolchain]}"
 RUST_TOOLCHAIN="${2:-${RUSTUP_TOOLCHAIN:-}}"
 
 case "$TARGET" in
-  x86_64-unknown-linux-musl|x86_64-pc-windows-gnu|aarch64-apple-darwin) ;;
+  x86_64-unknown-linux-gnu|x86_64-pc-windows-gnu|aarch64-apple-darwin) ;;
   *) echo "FAIL: unsupported launcher target: $TARGET"; exit 1 ;;
 esac
 
@@ -28,9 +28,9 @@ grep -qx "$TARGET" <<<"$installed_targets" \
   || { echo "FAIL: rustup target ${TARGET} not installed${RUST_TOOLCHAIN:+ for toolchain ${RUST_TOOLCHAIN}}"; exit 1; }
 
 case "$TARGET" in
-  x86_64-unknown-linux-musl)
-    command -v musl-gcc >/dev/null \
-      || { echo "FAIL: musl-gcc not found (needed for ${TARGET})"; exit 1; }
+  x86_64-unknown-linux-gnu)
+    command -v cc >/dev/null \
+      || { echo "FAIL: cc not found (needed for ${TARGET})"; exit 1; }
     ;;
   x86_64-pc-windows-gnu)
     command -v x86_64-w64-mingw32-gcc >/dev/null \

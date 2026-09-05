@@ -42,7 +42,7 @@ def inputs(tmp_path: Path) -> dict[str, Path]:
 def test_missing_launcher_binary_fails_closed(tmp_path: Path, inputs: dict[str, Path]) -> None:
     code = pla.main(
         [
-            "--target", "x86_64-unknown-linux-musl",
+            "--target", "x86_64-unknown-linux-gnu",
             "--version", "1.3.0",
             "--launcher-binary", str(tmp_path / "does-not-exist"),
             "--uv-binary", str(inputs["uv"]),
@@ -57,7 +57,7 @@ def test_missing_launcher_binary_fails_closed(tmp_path: Path, inputs: dict[str, 
 def test_missing_wheel_fails_closed(tmp_path: Path, inputs: dict[str, Path]) -> None:
     code = pla.main(
         [
-            "--target", "x86_64-unknown-linux-musl",
+            "--target", "x86_64-unknown-linux-gnu",
             "--version", "1.3.0",
             "--launcher-binary", str(inputs["launcher"]),
             "--uv-binary", str(inputs["uv"]),
@@ -74,7 +74,7 @@ def test_uv_pip_compile_failure_raises(tmp_path: Path, inputs: dict[str, Path], 
     with pytest.raises(SystemExit):
         pla.main(
             [
-                "--target", "x86_64-unknown-linux-musl",
+                "--target", "x86_64-unknown-linux-gnu",
                 "--version", "1.3.0",
                 "--launcher-binary", str(inputs["launcher"]),
                 "--uv-binary", str(inputs["uv"]),
@@ -88,7 +88,7 @@ def test_uv_pip_compile_failure_raises(tmp_path: Path, inputs: dict[str, Path], 
 @pytest.mark.parametrize(
     "target,expected_launcher,expected_uv,archive_suffix",
     [
-        ("x86_64-unknown-linux-musl", "persona-forge-launcher", "uv", ".tar.gz"),
+        ("x86_64-unknown-linux-gnu", "persona-forge-launcher", "uv", ".tar.gz"),
         ("x86_64-pc-windows-gnu", "persona-forge-launcher.exe", "uv.exe", ".zip"),
     ],
 )
@@ -154,7 +154,7 @@ def test_staging_dir_is_cleaned_up_on_success(tmp_path: Path, inputs: dict[str, 
 
     pla.main(
         [
-            "--target", "x86_64-unknown-linux-musl",
+            "--target", "x86_64-unknown-linux-gnu",
             "--version", "1.3.0",
             "--launcher-binary", str(inputs["launcher"]),
             "--uv-binary", str(inputs["uv"]),
@@ -164,4 +164,4 @@ def test_staging_dir_is_cleaned_up_on_success(tmp_path: Path, inputs: dict[str, 
         ]
     )
 
-    assert not (out_dir / ".staging-x86_64-unknown-linux-musl").exists()
+    assert not (out_dir / ".staging-x86_64-unknown-linux-gnu").exists()
