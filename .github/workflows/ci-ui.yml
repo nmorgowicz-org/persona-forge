@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   paths-filter:
-    runs-on: ubuntu-latest
+    runs-on: arc-general
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
