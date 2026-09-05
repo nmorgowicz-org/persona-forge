@@ -13,62 +13,170 @@ existing Docker deployment's data over, see [MIGRATION.md](MIGRATION.md).
 > are staged for verification but not yet confirmed on real hardware — treat native support on an
 > unlisted combination as best-effort until this note is updated.
 
-## Three ways to get it running
+## Recommended path: the release launcher
 
-### 1. Source checkout (`uv`) — for development or a git-managed install
+For most users who do not want Docker, download the platform launcher archive from the
+[Persona Forge releases](https://github.com/nmorgowicz-org/persona-forge/releases). Each archive
+contains the native launcher, Python 3.13-compatible application wheel, target-specific
+hash-locked requirements, a pinned `uv` binary, and a manifest. It does not contain the large ML
+dependency wheels or model weights.
 
-```bash
-git clone <this repo> && cd persona-forge
-uv sync                    # installs the main runtime set (OmniVoice, Pocket-TTS, torch, etc.)
-uv run persona-forge doctor         # read-only environment diagnostics
-uv run persona-forge setup          # create state directories (idempotent)
-uv run persona-forge build-ui       # build the frontend from source (skip for --no-ui / API-only)
-uv run persona-forge serve
-```
+The launcher is the native install and startup helper. It creates a per-user, versioned Python
+environment on first use, installs the bundled wheel and requirements, and reuses that environment
+on later runs. No preinstalled Python, `uv`, Node.js, administrator access, or repository checkout
+is required. Internet access is required on the first run to download Python and Python packages,
+and on the first server start to download model assets. Even `doctor` performs the initial
+environment bootstrap; after bootstrap, `doctor` itself is read-only.
 
-This is the same environment covered in depth in
-[dev/LOCAL_SETUP.md](dev/LOCAL_SETUP.md) (accelerator extras, the Qwen3-TTS opt-in engine,
-compat patches, etc.) — that document is written for iterating on the code; this one is written
-for just running it.
+### Supported release archives
 
-### 2. Installed wheel/sdist — for a pip/pipx-style install with no repo checkout
+| Operating system | Release asset | Notes |
+|---|---|---|
+| Linux x86-64 | `persona-forge-bootstrap-linux-x86_64.tar.gz` | Intel/AMD 64-bit Linux |
+| macOS Apple Silicon | `persona-forge-bootstrap-macos-aarch64.tar.gz` | M-series Macs |
+| Windows x86-64 | `persona-forge-bootstrap-windows-x86_64.zip` | 64-bit Intel/AMD Windows |
 
-```bash
-pip install persona-forge   # or: pipx install persona-forge
-persona-forge doctor
-persona-forge setup --no-ui        # or drop --no-ui once a frontend build is available to bundle
-persona-forge serve
-```
+There are currently no launcher archives for Linux ARM64, Intel Macs, or Windows ARM64. The
+launcher uses the default native dependency set; explicit CUDA, ROCm, Intel XPU, or Qwen3-TTS
+extras require the source-checkout path described below.
 
-The `persona-forge` console entry point (`persona_forge.cli:main`) is declared in
-`pyproject.toml`'s `[project.scripts]`. The published wheel targets Python `>=3.13,<3.14`
-(`pyproject.toml`'s `requires-python`) — install into a matching interpreter.
+### Download, verify, and run on Linux
 
-### 3. Launcher archive — for a host with no Python/uv preinstalled
-
-Download the platform-matching `persona-forge-bootstrap-<os>-<arch>` archive from a GitHub
-Release (see the launcher release workflow, Phase 7), extract it, and run:
+Replace `1.4.7` below with the release version you want to install.
 
 ```bash
-./persona-forge-launcher doctor
+VERSION=1.4.7
+ARCHIVE=persona-forge-bootstrap-linux-x86_64.tar.gz
+BASE_URL="https://github.com/nmorgowicz-org/persona-forge/releases/download/persona-forge-v${VERSION}"
+mkdir -p "persona-forge-${VERSION}" && cd "persona-forge-${VERSION}"
+curl -fL -o checksums.json "${BASE_URL}/checksums.json"
+curl -fL -o "${ARCHIVE}" "${BASE_URL}/${ARCHIVE}"
+EXPECTED=$(awk -F'"' -v name="${ARCHIVE}" '{for (i = 1; i <= NF; i++) if ($i == name) {print $(i + 2); exit}}' checksums.json)
+ACTUAL=$(sha256sum "${ARCHIVE}" | awk '{print $1}')
+[ -n "${EXPECTED}" ] && [ "${ACTUAL}" = "${EXPECTED}" ] || { echo "checksum verification failed" >&2; exit 1; }
+tar -xzf "${ARCHIVE}"
+chmod +x persona-forge-launcher
+./persona-forge-launcher doctor --json
 ./persona-forge-launcher setup
 ./persona-forge-launcher serve
 ```
 
-The launcher is a small native binary that provisions an application-managed Python environment
-(using the pinned `uv` binary bundled in the same archive) and installs the bundled wheel into
-it — it does not itself contain the ML stack. Model weights and accelerator wheels are still
-downloaded separately on first use.
+Open <http://127.0.0.1:8318> after the server starts. Stop it with `Ctrl-C`.
 
-On macOS, Gatekeeper may quarantine executables extracted from a browser download. After
-verifying the release checksum, run this from the extracted archive directory if the launcher is
-blocked:
+### Download, verify, and run on Apple Silicon macOS
+
+Use the same flow with the macOS archive. The `xattr` command is needed only when macOS
+quarantines the launcher extracted from a browser download.
 
 ```bash
-xattr -dr com.apple.quarantine .
+VERSION=1.4.7
+ARCHIVE=persona-forge-bootstrap-macos-aarch64.tar.gz
+BASE_URL="https://github.com/nmorgowicz-org/persona-forge/releases/download/persona-forge-v${VERSION}"
+mkdir -p "persona-forge-${VERSION}" && cd "persona-forge-${VERSION}"
+curl -fL -o checksums.json "${BASE_URL}/checksums.json"
+curl -fL -o "${ARCHIVE}" "${BASE_URL}/${ARCHIVE}"
+EXPECTED=$(awk -F'"' -v name="${ARCHIVE}" '{for (i = 1; i <= NF; i++) if ($i == name) {print $(i + 2); exit}}' checksums.json)
+ACTUAL=$(shasum -a 256 "${ARCHIVE}" | awk '{print $1}')
+[ -n "${EXPECTED}" ] && [ "${ACTUAL}" = "${EXPECTED}" ] || { echo "checksum verification failed" >&2; exit 1; }
+tar -xzf "${ARCHIVE}"
+chmod +x persona-forge-launcher
+xattr -dr com.apple.quarantine .  # only in this verified archive directory
+./persona-forge-launcher doctor --json
+./persona-forge-launcher setup
+./persona-forge-launcher serve
 ```
 
-Only run this in the directory created for the verified Persona Forge archive.
+Open <http://127.0.0.1:8318> after the server starts. Stop it with `Ctrl-C`.
+
+### Download, verify, and run on Windows
+
+Run this in Windows PowerShell. Replace `1.4.7` with the release version you want.
+
+```powershell
+$version = '1.4.7'
+$archive = 'persona-forge-bootstrap-windows-x86_64.zip'
+$baseUrl = "https://github.com/nmorgowicz-org/persona-forge/releases/download/persona-forge-v$version"
+$installDir = Join-Path (Get-Location) "persona-forge-$version"
+New-Item -ItemType Directory -Path $installDir -Force | Out-Null
+Set-Location $installDir
+Invoke-WebRequest -Uri "$baseUrl/checksums.json" -OutFile .\checksums.json
+Invoke-WebRequest -Uri "$baseUrl/$archive" -OutFile ".\$archive"
+$checksums = Get-Content .\checksums.json -Raw | ConvertFrom-Json
+$expected = $checksums.checksums.PSObject.Properties[$archive].Value
+$actual = (Get-FileHash ".\$archive" -Algorithm SHA256).Hash.ToLowerInvariant()
+if ([string]::IsNullOrEmpty($expected) -or $actual -ne $expected) { throw 'checksum verification failed' }
+Expand-Archive -LiteralPath ".\$archive" -DestinationPath . -Force
+.\persona-forge-launcher.exe doctor --json
+.\persona-forge-launcher.exe setup
+.\persona-forge-launcher.exe serve
+```
+
+Open <http://127.0.0.1:8318> after the server starts. Stop it with `Ctrl-C`.
+
+### Updating a launcher installation
+
+Download and verify the newer release archive in a new directory, then run its launcher. The
+launcher keeps application data and installed environments under the user data root, so voices,
+cached models, and settings are reused. It provisions the new application version alongside the
+old one and switches the `current` marker only after a successful install. The `uv` version is
+updated by downloading the newer release archive; users do not need to update `uv` separately.
+Keep the previous archive if you want a simple rollback.
+
+The launcher is intentionally a single executable rather than a separate shell or batch wrapper:
+it performs the same verified setup flow on every supported OS and avoids shell-policy,
+quoting, and executable-bit differences.
+
+## Other native installation paths
+
+### Source checkout (`uv`) — for development or a git-managed install
+
+This path is useful when you need explicit accelerator extras, Qwen3-TTS/OpenVINO, or source
+development. Install `uv` first using the instructions at <https://docs.astral.sh/uv/getting-started/>
+and install Node.js/npm if you want to build the UI from source.
+
+```bash
+git clone https://github.com/nmorgowicz-org/persona-forge.git
+cd persona-forge
+uv sync --locked
+uv run persona-forge doctor
+uv run persona-forge setup       # builds the UI; requires Node.js/npm
+uv run persona-forge serve
+```
+
+For an API-only source install, use `uv run persona-forge setup --no-ui`. This is the same
+environment covered in depth in [dev/LOCAL_SETUP.md](dev/LOCAL_SETUP.md).
+
+### Release wheel — for users who already manage Python
+
+The project currently attaches the wheel to GitHub Releases; it is not published to PyPI. Use a
+Python 3.13 interpreter (`>=3.13,<3.14`) and install the wheel from the release page. The wheel
+already contains the built web UI, so no Node.js installation or frontend build is needed.
+
+On macOS/Linux:
+
+```bash
+VERSION=1.4.7
+python3.13 -m venv .venv
+. .venv/bin/activate
+python -m pip install "https://github.com/nmorgowicz-org/persona-forge/releases/download/persona-forge-v${VERSION}/persona_forge-${VERSION}-py3-none-any.whl"
+persona-forge doctor
+persona-forge setup --no-ui
+persona-forge serve
+```
+
+On Windows PowerShell:
+
+```powershell
+$version = '1.4.7'
+py -3.13 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install "https://github.com/nmorgowicz-org/persona-forge/releases/download/persona-forge-v$version/persona_forge-$version-py3-none-any.whl"
+.\.venv\Scripts\persona-forge.exe doctor
+.\.venv\Scripts\persona-forge.exe setup --no-ui
+.\.venv\Scripts\persona-forge.exe serve
+```
+
+The wheel's dependencies are resolved from package indexes during installation. For a fully
+managed install with the target requirements and bundled `uv`, use the launcher path above.
 
 ## The CLI surface
 

@@ -30,18 +30,34 @@ TARGETS = {
 
 README_TEMPLATE = """Persona Forge bootstrap launcher ({target})
 
-This archive contains a thin native launcher that provisions an application-managed Python
-environment and runs Persona Forge - it does not bundle the ML stack itself.
+This archive is the recommended native install for Persona Forge. It contains:
+  - a native launcher
+  - the Persona Forge application wheel
+  - hash-locked requirements for this platform
+  - a pinned uv binary and an integrity-checked manifest
 
-Usage:
-  ./persona-forge-launcher doctor   (or persona-forge-launcher.exe on Windows)
+It does not contain the Python runtime, large ML dependency wheels, or model weights.
+Those are downloaded from their normal package/model sources on first use.
+
+Before running the launcher, verify this archive against checksums.json from the same
+GitHub Release. On macOS, if Gatekeeper blocks the extracted binary, first run:
+  xattr -dr com.apple.quarantine .
+Only run that command inside this verified archive directory.
+
+Usage on Linux/macOS:
+  ./persona-forge-launcher doctor --json
   ./persona-forge-launcher setup
   ./persona-forge-launcher serve
 
-The first run downloads and installs Persona Forge's Python dependencies into an
-app-managed environment under your user data directory; later runs reuse it. Model
-weights and accelerator wheels are downloaded separately on first use - none are
-bundled here.
+Usage on Windows PowerShell:
+  .\\persona-forge-launcher.exe doctor --json
+  .\\persona-forge-launcher.exe setup
+  .\\persona-forge-launcher.exe serve
+
+The first launcher command downloads Python and installs the application environment
+under your user data directory. The first server start downloads model assets. Later
+runs reuse the environment and cached data. To update, download the newer release
+archive and run its launcher; existing voices, settings, and model caches are retained.
 """
 
 

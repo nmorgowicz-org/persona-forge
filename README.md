@@ -120,10 +120,15 @@ below for pinned version/digest tags.
 > **Want the Qwen engine with OpenVINO acceleration?** Run the export step first and set
 > `TTS_BACKEND=openvino`. See [HOW_TO_RUN.md](docs/HOW_TO_RUN.md).
 
-> **Don't want Docker?** Persona Forge also runs natively — via a source checkout (`uv sync`), an
-> installed wheel (`pip install persona-forge`), or a self-contained launcher archive with no
-> Python preinstall required. See [RUN_LOCAL.md](docs/RUN_LOCAL.md); to move an existing Docker
-> deployment's data over, see [MIGRATION.md](docs/MIGRATION.md).
+> **Don't want Docker?** The recommended native path is the platform launcher archive from a
+> [GitHub Release](https://github.com/nmorgowicz-org/persona-forge/releases). It includes the
+> Persona Forge wheel, a pinned `uv`, and hash-locked dependency requirements, so users do not
+> need to preinstall Python, `uv`, or Node.js. The first run downloads Python and the runtime
+> dependencies; the first server start downloads model assets into the user's application-data
+> directory. Persona Forge can also be installed from a source checkout with `uv`; the release
+> wheel is a GitHub Release asset (we do not currently publish it to PyPI). See
+> [RUN_LOCAL.md](docs/RUN_LOCAL.md); to move an
+> existing Docker deployment's data over, see [MIGRATION.md](docs/MIGRATION.md).
 
 > On macOS, verify the release checksum first. If Gatekeeper blocks the extracted launcher, run
 > `xattr -dr com.apple.quarantine .` from that archive's directory. See [native setup](docs/RUN_LOCAL.md)
