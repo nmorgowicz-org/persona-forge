@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.4.3](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.2...persona-forge-v1.4.3) (2026-09-05)
+
+
+### Bug Fixes
+
+* **ci:** run UI path filter on ARC ([15e2ca8](https://github.com/nmorgowicz-org/persona-forge/commit/15e2ca8b23ab61293852e5dc989fa050fe87a695))
+* **ci:** use GNU Linux target for launcher release builds ([ea53dcc](https://github.com/nmorgowicz-org/persona-forge/commit/ea53dccc3ceff46fbc9ddb408ff0dd9433521e85))
+* **deps:** update rust crate sha2 to 0.11 ([#256](https://github.com/nmorgowicz-org/persona-forge/issues/256)) ([c26c0a9](https://github.com/nmorgowicz-org/persona-forge/commit/c26c0a95eb6255352876207f0a927b697d7a8b7b))
+* **renovate:** keep accelerator torch pins manual ([2850d87](https://github.com/nmorgowicz-org/persona-forge/commit/2850d875b7fd1706aba0d41b4598aefc90f220bb))
+
+
+### Miscellaneous Chores
+
+* **deps:** pin rust crate tempfile to =3.27.0 ([#253](https://github.com/nmorgowicz-org/persona-forge/issues/253)) ([2507665](https://github.com/nmorgowicz-org/persona-forge/commit/2507665c808fc1c9d693c3c9cb9021f7f6d7ef18))
+* **deps:** update softprops/action-gh-release digest to efb3536 ([#254](https://github.com/nmorgowicz-org/persona-forge/issues/254)) ([b124519](https://github.com/nmorgowicz-org/persona-forge/commit/b124519bb8c5acd176824e8735124b75f6433d68))
+
 ## [1.4.2](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.1...persona-forge-v1.4.2) (2026-09-05)
 
 
