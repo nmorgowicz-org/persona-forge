@@ -49,20 +49,12 @@ fn io_err(ctx: &str, e: io::Error) -> BootstrapError {
     BootstrapError::Io(ctx.to_string(), e)
 }
 
-fn venv_python(venv_dir: &Path) -> PathBuf {
+pub fn venv_python(venv_dir: &Path) -> PathBuf {
     let posix = venv_dir.join("bin").join("python");
     if posix.exists() {
         return posix;
     }
     venv_dir.join("Scripts").join("python.exe")
-}
-
-pub fn console_script(venv_dir: &Path) -> PathBuf {
-    let posix = venv_dir.join("bin").join("persona-forge");
-    if posix.exists() {
-        return posix;
-    }
-    venv_dir.join("Scripts").join("persona-forge.exe")
 }
 
 fn ready_marker(env_dir: &Path) -> PathBuf {
@@ -251,7 +243,7 @@ mod tests {
 
         let env_dir = ensure_env(&m, &bundle_dir, &uv_path, &versions_dir, &current_marker, &runner).unwrap();
 
-        assert!(console_script(&env_dir).exists());
+        assert!(venv_python(&env_dir).exists());
         assert_eq!(fs::read_to_string(&current_marker).unwrap(), "1.3.0");
         assert!(ready_marker(&env_dir).is_file());
         assert_eq!(fs::read_to_string(ready_marker(&env_dir)).unwrap(), "wheelsha");
@@ -288,7 +280,7 @@ mod tests {
         let old = manifest("1.2.0", "oldsha");
         let good_runner = FakeRunner::new(None);
         let old_env = ensure_env(&old, &bundle_dir, &uv_path, &versions_dir, &current_marker, &good_runner).unwrap();
-        assert!(console_script(&old_env).exists());
+        assert!(venv_python(&old_env).exists());
 
         let new = manifest("1.3.0", "newsha");
         let bad_runner = FakeRunner::new(Some("install"));
@@ -303,10 +295,10 @@ mod tests {
     }
 
     #[test]
-    fn console_script_finds_windows_layout() {
+    fn venv_python_finds_windows_layout() {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join("Scripts")).unwrap();
-        fs::write(dir.path().join("Scripts").join("persona-forge.exe"), b"").unwrap();
-        assert_eq!(console_script(dir.path()), dir.path().join("Scripts").join("persona-forge.exe"));
+        fs::write(dir.path().join("Scripts").join("python.exe"), b"").unwrap();
+        assert_eq!(venv_python(dir.path()), dir.path().join("Scripts").join("python.exe"));
     }
 }
