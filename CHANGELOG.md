@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.4](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.3...persona-forge-v1.4.4) (2026-09-05)
+
+
+### Bug Fixes
+
+* **ci:** use Rust 1.98 for launcher release builds ([3c5631d](https://github.com/nmorgowicz-org/persona-forge/commit/3c5631d765eacfebb3e06711545fe0631096908c))
+
+
+### Miscellaneous Chores
+
+* **deps:** track launcher Rust toolchain in Renovate ([3c5631d](https://github.com/nmorgowicz-org/persona-forge/commit/3c5631d765eacfebb3e06711545fe0631096908c))
+
 ## [1.4.3](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.2...persona-forge-v1.4.3) (2026-09-05)
 
 
