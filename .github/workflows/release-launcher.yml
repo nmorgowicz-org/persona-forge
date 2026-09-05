@@ -179,7 +179,8 @@ jobs:
           name: launcher-${{ matrix.asset_stem }}
           path: release-assets
 
-      - name: Smoke-test packaged launcher doctor --json
+      - name: Smoke-test packaged launcher doctor --json (Unix)
+        if: matrix.target != 'x86_64-pc-windows-gnu'
         shell: bash
         run: |
           set -euo pipefail
@@ -192,8 +193,27 @@ jobs:
             *) echo "unsupported launcher archive: $ARCHIVE" >&2; exit 1 ;;
           esac
           LAUNCHER_BIN="$SMOKE_DIR/persona-forge-launcher"
-          [ "${{ matrix.target }}" = "x86_64-pc-windows-gnu" ] && LAUNCHER_BIN="${LAUNCHER_BIN}.exe"
           PERSONA_FORGE_HOME="$SMOKE_DIR/state" "$LAUNCHER_BIN" doctor --json
+
+      - name: Smoke-test packaged launcher doctor --json (Windows)
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path 'release-assets' 'persona-forge-bootstrap-windows-x86_64.zip'
+          $smokeDir = Join-Path $env:RUNNER_TEMP "persona-forge-smoke-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          New-Item -ItemType Directory -Path $smokeDir -Force | Out-Null
+          try {
+            Expand-Archive -LiteralPath $archive -DestinationPath $smokeDir -Force
+            $launcherBin = Join-Path $smokeDir 'persona-forge-launcher.exe'
+            $env:PERSONA_FORGE_HOME = Join-Path $smokeDir 'state'
+            & $launcherBin doctor --json
+            if ($LASTEXITCODE -ne 0) {
+              throw "launcher doctor exited with code $LASTEXITCODE"
+            }
+          } finally {
+            Remove-Item -LiteralPath $smokeDir -Recurse -Force -ErrorAction SilentlyContinue
+          }
 
   release:
     name: release
