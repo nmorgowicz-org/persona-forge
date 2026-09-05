@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.8](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.7...persona-forge-v1.4.8) (2026-09-05)
+
+
+### Documentation
+
+* **native:** clarify release launcher installation ([cfd93ab](https://github.com/nmorgowicz-org/persona-forge/commit/cfd93abe9d3e3bede5c605481e07453bee95f8d7))
+
 ## [1.4.7](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.6...persona-forge-v1.4.7) (2026-09-05)
 
 
