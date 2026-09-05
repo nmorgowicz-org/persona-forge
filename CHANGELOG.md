@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.6](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.5...persona-forge-v1.4.6) (2026-09-05)
+
+
+### Bug Fixes
+
+* **ci:** use Windows PowerShell for launcher smoke ([c11a527](https://github.com/nmorgowicz-org/persona-forge/commit/c11a527bb3fe5b2a0556f7232165048eb17231b8))
+
 ## [1.4.5](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.4...persona-forge-v1.4.5) (2026-09-05)
 
 
