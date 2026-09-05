@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.7](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.6...persona-forge-v1.4.7) (2026-09-05)
+
+
+### Bug Fixes
+
+* **ci:** grant release job contents write permission ([8affc67](https://github.com/nmorgowicz-org/persona-forge/commit/8affc67226211745580e518791ba89d8d790d328))
+
 ## [1.4.6](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.5...persona-forge-v1.4.6) (2026-09-05)
 
 
