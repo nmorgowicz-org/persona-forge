@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.9](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.8...persona-forge-v1.4.9) (2026-09-05)
+
+
+### Documentation
+
+* **native:** add root README launcher quick start ([b6be7e4](https://github.com/nmorgowicz-org/persona-forge/commit/b6be7e419211dcaff622c8780c944b9fed417661))
+
 ## [1.4.8](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.7...persona-forge-v1.4.8) (2026-09-05)
 
 
