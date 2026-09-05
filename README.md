@@ -157,6 +157,13 @@ chmod +x persona-forge-launcher
 ./persona-forge-launcher serve
 ```
 
+On Apple Silicon macOS, if Gatekeeper blocks the extracted launcher, run the following from the
+verified archive directory before `doctor`:
+
+```bash
+xattr -dr com.apple.quarantine .
+```
+
 On Windows PowerShell:
 
 ```powershell
