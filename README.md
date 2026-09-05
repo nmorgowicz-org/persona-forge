@@ -134,6 +134,52 @@ below for pinned version/digest tags.
 > `xattr -dr com.apple.quarantine .` from that archive's directory. See [native setup](docs/RUN_LOCAL.md)
 > for the safety note.
 
+### Run natively (no Docker)
+
+The recommended native install is the launcher archive on the
+[latest release](https://github.com/nmorgowicz-org/persona-forge/releases). Choose the archive for
+your platform:
+
+| Platform | Archive |
+|---|---|
+| Linux x86-64 | `persona-forge-bootstrap-linux-x86_64.tar.gz` |
+| Apple Silicon macOS | `persona-forge-bootstrap-macos-aarch64.tar.gz` |
+| Windows x86-64 | `persona-forge-bootstrap-windows-x86_64.zip` |
+
+Download `checksums.json` and your archive from the same release, verify the archive's SHA-256
+against that file, then extract it. On Linux/macOS:
+
+```bash
+tar -xzf persona-forge-bootstrap-<platform>.tar.gz
+chmod +x persona-forge-launcher
+./persona-forge-launcher doctor --json
+./persona-forge-launcher setup
+./persona-forge-launcher serve
+```
+
+On Apple Silicon macOS, if Gatekeeper blocks the extracted launcher, run the following from the
+verified archive directory before `doctor`:
+
+```bash
+xattr -dr com.apple.quarantine .
+```
+
+On Windows PowerShell:
+
+```powershell
+Expand-Archive .\persona-forge-bootstrap-windows-x86_64.zip -DestinationPath .\persona-forge
+Set-Location .\persona-forge
+.\persona-forge-launcher.exe doctor --json
+.\persona-forge-launcher.exe setup
+.\persona-forge-launcher.exe serve
+```
+
+Open <http://127.0.0.1:8318>. The archive includes the app wheel, pinned `uv`, and locked
+requirements, so Python, `uv`, and Node.js do not need to be installed first. The first launcher
+command downloads Python and runtime dependencies; the first server start downloads model assets.
+For exact checksum commands, upgrades, source checkout, and release-wheel installation, see
+[the full native guide](docs/RUN_LOCAL.md).
+
 ---
 
 ## HTTP API
