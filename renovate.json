@@ -6,6 +6,14 @@
   "customManagers": [
     {
       "customType": "regex",
+      "managerFilePatterns": ["/^\\.github\\/workflows\\/release-launcher\\.yml$/"],
+      "matchStrings": ["RUST_VERSION:\\s*[\\\"'](?<currentValue>\\d+\\.\\d+)[\\\"']"],
+      "depNameTemplate": "rust-lang/rust",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "loose"
+    },
+    {
+      "customType": "regex",
       "managerFilePatterns": ["/^Dockerfile$/"],
       "matchStrings": ["ARG TORCH_VERSION=(?<currentValue>[^\\s]+)"],
       "depNameTemplate": "torch",
@@ -71,6 +79,14 @@
       "matchPackageNames": ["openvino", "optimum-intel", "nncf"],
       "groupName": "OpenVINO stack",
       "groupSlug": "openvino-stack",
+      "automerge": false
+    },
+    {
+      "description": "Track the Rust release toolchain used for launcher cross-builds, but require manual compatibility review for each stable release.",
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": ["rust-lang/rust"],
+      "groupName": "Rust launcher toolchain",
+      "groupSlug": "rust-launcher-toolchain",
       "automerge": false
     },
     {
