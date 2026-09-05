@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.2](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.1...persona-forge-v1.4.2) (2026-09-05)
+
+
+### Bug Fixes
+
+* **ci:** use arc-llama-monitor for launcher release cross-builds ([44c7e3b](https://github.com/nmorgowicz-org/persona-forge/commit/44c7e3bfbc33ce019ba117d9bdfdd5d64301f30e))
+* **ci:** validate launcher preflight for matrix target and Rust toolchain ([44c7e3b](https://github.com/nmorgowicz-org/persona-forge/commit/44c7e3bfbc33ce019ba117d9bdfdd5d64301f30e))
+
 ## [1.4.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.0...persona-forge-v1.4.1) (2026-09-05)
 
 
