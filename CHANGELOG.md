@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.0...persona-forge-v1.4.1) (2026-09-05)
+
+
+### Bug Fixes
+
+* **release:** install Node before building launcher artifacts ([15b5fea](https://github.com/nmorgowicz-org/persona-forge/commit/15b5fea1c90fff85c426be9936e49b3cc6eb0933))
+
 ## [1.4.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.3.0...persona-forge-v1.4.0) (2026-09-04)
 
 
