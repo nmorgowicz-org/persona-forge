@@ -220,6 +220,8 @@ jobs:
     needs: [build-wheel, build-launcher, smoke-launcher]
     runs-on: arc-general
     timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
       - name: Generate GitHub App token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
