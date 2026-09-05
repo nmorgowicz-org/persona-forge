@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.5](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.4...persona-forge-v1.4.5) (2026-09-05)
+
+
+### Bug Fixes
+
+* **ci:** run Windows launcher smoke test natively ([2eaa960](https://github.com/nmorgowicz-org/persona-forge/commit/2eaa960f24cd5f4a5197bb1f866daf004eac55a5))
+* **launcher:** invoke Python after venv promotion ([2eaa960](https://github.com/nmorgowicz-org/persona-forge/commit/2eaa960f24cd5f4a5197bb1f866daf004eac55a5))
+
 ## [1.4.4](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.3...persona-forge-v1.4.4) (2026-09-05)
 
 
