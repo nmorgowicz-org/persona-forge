@@ -197,7 +197,7 @@ jobs:
 
       - name: Smoke-test packaged launcher doctor --json (Windows)
         if: matrix.target == 'x86_64-pc-windows-gnu'
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $archive = Join-Path 'release-assets' 'persona-forge-bootstrap-windows-x86_64.zip'
