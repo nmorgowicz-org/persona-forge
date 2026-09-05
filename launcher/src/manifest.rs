@@ -136,11 +136,11 @@ mod tests {
                 "schema_version": 1,
                 "app": "persona-forge",
                 "version": "1.3.0",
-                "target": "x86_64-unknown-linux-musl",
+                "target": "x86_64-unknown-linux-gnu",
                 "python_constraint": "==3.13.*",
                 "wheel": {{"file": "persona_forge-1.3.0-py3-none-any.whl", "sha256": "{wheel_sha}"}},
                 "uv": {{"file": "uv", "sha256": "{uv_sha}", "version": "0.12.9"}},
-                "requirements_file": "requirements-x86_64-unknown-linux-musl.txt",
+                "requirements_file": "requirements-x86_64-unknown-linux-gnu.txt",
                 "requirements_sha256": "{req_sha}"
             }}"#
         )
@@ -151,11 +151,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_file(dir.path(), "persona_forge-1.3.0-py3-none-any.whl", b"wheel-bytes");
         write_file(dir.path(), "uv", b"uv-binary-bytes");
-        write_file(dir.path(), "requirements-x86_64-unknown-linux-musl.txt", b"foo==1.0\n");
+        write_file(dir.path(), "requirements-x86_64-unknown-linux-gnu.txt", b"foo==1.0\n");
 
         let wheel_sha = sha256_file(&dir.path().join("persona_forge-1.3.0-py3-none-any.whl")).unwrap();
         let uv_sha = sha256_file(&dir.path().join("uv")).unwrap();
-        let req_sha = sha256_file(&dir.path().join("requirements-x86_64-unknown-linux-musl.txt")).unwrap();
+        let req_sha = sha256_file(&dir.path().join("requirements-x86_64-unknown-linux-gnu.txt")).unwrap();
         write_file(
             dir.path(),
             "manifest.json",
@@ -210,7 +210,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_file(dir.path(), "persona_forge-1.3.0-py3-none-any.whl", b"wheel-bytes");
         write_file(dir.path(), "uv", b"uv-binary-bytes");
-        write_file(dir.path(), "requirements-x86_64-unknown-linux-musl.txt", b"foo==1.0\n");
+        write_file(dir.path(), "requirements-x86_64-unknown-linux-gnu.txt", b"foo==1.0\n");
         write_file(
             dir.path(),
             "manifest.json",

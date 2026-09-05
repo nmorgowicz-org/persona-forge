@@ -161,7 +161,7 @@ def check_release_workflow_contract(failures: list[str]) -> None:
         entry["target"] for entry in build_launcher.get("strategy", {}).get("matrix", {}).get("include", [])
     }
     expected_targets = {
-        "x86_64-unknown-linux-musl",
+        "x86_64-unknown-linux-gnu",
         "x86_64-pc-windows-gnu",
         "aarch64-apple-darwin",
     }

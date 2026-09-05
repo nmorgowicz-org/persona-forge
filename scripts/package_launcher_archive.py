@@ -23,7 +23,7 @@ from pathlib import Path
 
 # Rust build target -> (release asset stem, archive kind, uv --python-platform triple).
 TARGETS = {
-    "x86_64-unknown-linux-musl": ("linux-x86_64", "tar.gz", "x86_64-unknown-linux-gnu"),
+    "x86_64-unknown-linux-gnu": ("linux-x86_64", "tar.gz", "x86_64-unknown-linux-gnu"),
     "x86_64-pc-windows-gnu": ("windows-x86_64", "zip", "x86_64-pc-windows-msvc"),
     "aarch64-apple-darwin": ("macos-aarch64", "tar.gz", "aarch64-apple-darwin"),
 }

@@ -182,7 +182,7 @@ mod tests {
             schema_version: 1,
             app: "persona-forge".to_string(),
             version: version.to_string(),
-            target: "x86_64-unknown-linux-musl".to_string(),
+            target: "x86_64-unknown-linux-gnu".to_string(),
             python_constraint: "==3.13.*".to_string(),
             wheel: WheelEntry { file: "app.whl".to_string(), sha256: wheel_sha.to_string() },
             uv: UvEntry { file: "uv".to_string(), sha256: "uvsha".to_string(), version: "0.12.9".to_string() },

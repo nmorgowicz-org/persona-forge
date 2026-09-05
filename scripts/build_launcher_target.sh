@@ -12,9 +12,8 @@ MACOS_SDK=$(ls -d /opt/osxcross/target/SDK/MacOSX*.sdk 2>/dev/null \
   | sort -V | tail -1 | xargs -r basename)
 
 case "$TARGET" in
-  x86_64-unknown-linux-musl)
-    CC_x86_64_unknown_linux_musl=musl-gcc \
-      cargo build --release --manifest-path "$MANIFEST" --target x86_64-unknown-linux-musl
+  x86_64-unknown-linux-gnu)
+    cargo build --release --manifest-path "$MANIFEST" --target x86_64-unknown-linux-gnu
     ;;
   x86_64-pc-windows-gnu)
     CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc \
