@@ -2,7 +2,7 @@
 name = "persona-forge-launcher"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.85"
 license = "MIT"
 description = "Thin native bootstrap for Persona Forge release archives (docs/plans/20260829-no_more_docker_requirement.md Phase 7)"
 publish = false

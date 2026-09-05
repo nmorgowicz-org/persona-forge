@@ -35,7 +35,7 @@ env:
   UV_VERSION: "0.12.9"
   PYTHON_VERSION: "3.13"
   NODE_VERSION: "24"
-  RUST_VERSION: "1.80"
+  RUST_VERSION: "1.98"
 
 jobs:
   build-wheel:
