@@ -74,13 +74,13 @@ xpu = [
   # triton-xpu wheel above 3.7.2 is published for cp313 on the PyTorch xpu index — 2.14.0 is
   # therefore not installable on xpu at all right now. 2.13.0+xpu pins triton-xpu==3.7.2, which
   # the index does have, so xpu tracks that older torch until 3.8.x-compatible wheels land.
-  "torch==2.13.0; sys_platform == 'linux' or sys_platform == 'win32'",
+  "torch==2.14.0; sys_platform == 'linux' or sys_platform == 'win32'",
   "torchaudio==2.11.0; sys_platform == 'linux' or sys_platform == 'win32'",
   "triton-xpu==3.7.2; sys_platform == 'linux' or sys_platform == 'win32'",
 ]
 rocm = [
-  "torch==2.9.1; sys_platform == 'linux'",
-  "torchaudio==2.9.1; sys_platform == 'linux'",
+  "torch==2.14.0; sys_platform == 'linux'",
+  "torchaudio==2.11.0; sys_platform == 'linux'",
   "pytorch-triton-rocm==3.5.1; sys_platform == 'linux'",
 ]
 
