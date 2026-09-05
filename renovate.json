@@ -74,11 +74,19 @@
       "automerge": false
     },
     {
-      "description": "Track CPU Torch packages together and require compatibility review",
-      "matchManagers": ["custom.regex", "pep621", "uv"],
+      "description": "Track Dockerfile CPU Torch packages together and require compatibility review",
+      "matchManagers": ["custom.regex"],
+      "matchFileNames": ["Dockerfile"],
       "matchPackageNames": ["torch", "torchaudio"],
       "groupName": "PyTorch CPU stack",
       "automerge": false
+    },
+    {
+      "description": "Torch and torchaudio pins in the Python project and lockfile are accelerator-specific; update them manually after wheel-matrix and runtime validation",
+      "matchManagers": ["custom.regex", "pep621", "uv"],
+      "matchFileNames": ["pyproject.toml", "uv.lock"],
+      "matchPackageNames": ["torch", "torchaudio"],
+      "enabled": false
     },
     {
       "description": "Qwen package updates can change the custom generation contract",
