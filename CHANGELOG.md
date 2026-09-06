@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.9](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.8...persona-forge-v1.4.9) (2026-09-05)
+
+
+### Documentation
+
+* **native:** add root README launcher quick start ([b6be7e4](https://github.com/nmorgowicz-org/persona-forge/commit/b6be7e419211dcaff622c8780c944b9fed417661))
+
+
+### Miscellaneous Chores
+
+* **deps:** update frontend npm dependencies ([#271](https://github.com/nmorgowicz-org/persona-forge/issues/271)) ([d44385c](https://github.com/nmorgowicz-org/persona-forge/commit/d44385cdab359fe614849094b70709768c05abfe))
+
 ## [1.4.8](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.7...persona-forge-v1.4.8) (2026-09-05)
 
 
