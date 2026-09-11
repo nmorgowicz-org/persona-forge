@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.4.10](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.9...persona-forge-v1.4.10) (2026-09-11)
+
+
+### Miscellaneous Chores
+
+* **deps:** bump hono from 4.13.2 to 4.13.7 in /frontend ([#277](https://github.com/nmorgowicz-org/persona-forge/issues/277)) ([e07d369](https://github.com/nmorgowicz-org/persona-forge/commit/e07d369203174adae93ed3e89aa8d1c1cf99fb0a))
+* **deps:** bump js-yaml from 4.3.1 to 4.3.2 in /frontend ([#276](https://github.com/nmorgowicz-org/persona-forge/issues/276)) ([b5049b8](https://github.com/nmorgowicz-org/persona-forge/commit/b5049b8ef98e554b266e93f931edd57278080796))
+* **deps:** update astral-sh/setup-uv action to v10.1.0 ([#281](https://github.com/nmorgowicz-org/persona-forge/issues/281)) ([eccd6ce](https://github.com/nmorgowicz-org/persona-forge/commit/eccd6ce25c966c55ffb5ddc4c09b8bef5b593491))
+* **deps:** update dependency lucide-react to v1.43.0 ([#282](https://github.com/nmorgowicz-org/persona-forge/issues/282)) ([d8f2e15](https://github.com/nmorgowicz-org/persona-forge/commit/d8f2e15b84b22c5af19764162891a2a018331239))
+* **deps:** update frontend npm dependencies ([#272](https://github.com/nmorgowicz-org/persona-forge/issues/272)) ([3992e7c](https://github.com/nmorgowicz-org/persona-forge/commit/3992e7c6a5908a5e9d04d56a09c8648d1df57b53))
+* **deps:** update frontend npm dependencies ([#275](https://github.com/nmorgowicz-org/persona-forge/issues/275)) ([ca6e031](https://github.com/nmorgowicz-org/persona-forge/commit/ca6e03192a30e4b1cdef56e954474061eebc6693))
+* **deps:** update frontend npm dependencies ([#280](https://github.com/nmorgowicz-org/persona-forge/issues/280)) ([d9f5479](https://github.com/nmorgowicz-org/persona-forge/commit/d9f54791a7ee4eb1599092ce55e9244a9e752373))
+* **deps:** update github/codeql-action digest to b96794f ([#278](https://github.com/nmorgowicz-org/persona-forge/issues/278)) ([3914453](https://github.com/nmorgowicz-org/persona-forge/commit/39144535b2d88136a033ffd9f903670947692106))
+* **deps:** update node.js to 2fe369e ([#279](https://github.com/nmorgowicz-org/persona-forge/issues/279)) ([b9a0ac9](https://github.com/nmorgowicz-org/persona-forge/commit/b9a0ac914d44df3862ce94ad8772e4355c07ffbe))
+
 ## [1.4.9](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.8...persona-forge-v1.4.9) (2026-09-05)
 
 
