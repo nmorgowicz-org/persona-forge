@@ -6,7 +6,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^\\.github\\/workflows\\/release-launcher\\.yml$/"],
+      "fileMatch": ["/^\\.github\\/workflows\\/release-launcher\\.yml$/"],
       "matchStrings": ["RUST_VERSION:\\s*[\\\"'](?<currentValue>\\d+\\.\\d+)[\\\"']"],
       "depNameTemplate": "rust-lang/rust",
       "datasourceTemplate": "github-releases",
@@ -14,7 +14,7 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^Dockerfile$/"],
+      "fileMatch": ["/^Dockerfile$/"],
       "matchStrings": ["ARG TORCH_VERSION=(?<currentValue>[^\\s]+)"],
       "depNameTemplate": "torch",
       "datasourceTemplate": "pypi",
@@ -22,7 +22,7 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^Dockerfile$/"],
+      "fileMatch": ["/^Dockerfile$/"],
       "matchStrings": ["ARG TORCHAUDIO_VERSION=(?<currentValue>[^\\s]+)"],
       "depNameTemplate": "torchaudio",
       "datasourceTemplate": "pypi",
@@ -30,7 +30,7 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^pyproject\\.toml$/"],
+      "fileMatch": ["/^pyproject\\.toml$/"],
       "matchStrings": ["override-dependencies\\s*=\\s*\\[[\\s\\S]*?\\\"torch==(?<currentValue>[^\\\"\\s]+)\\\""],
       "depNameTemplate": "torch",
       "datasourceTemplate": "pypi",
@@ -38,7 +38,7 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["/^pyproject\\.toml$/"],
+      "fileMatch": ["/^pyproject\\.toml$/"],
       "matchStrings": ["override-dependencies\\s*=\\s*\\[[\\s\\S]*?\\\"torchaudio==(?<currentValue>[^\\\"\\s]+)\\\""],
       "depNameTemplate": "torchaudio",
       "datasourceTemplate": "pypi",
@@ -48,7 +48,7 @@
   "packageRules": [
     {
       "description": "Ecosystem grouping: collapse non-major Python dep bumps into one PR per Renovate run. Placed first so the stack-specific rules below (OpenVINO, PyTorch) can override groupName for the packages they name.",
-      "matchManagers": ["pep621", "pip_requirements", "pip-compile", "uv"],
+      "matchManagers": ["pep621", "pip_requirements", "pip-compile"],
       "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
       "groupName": "python dependencies",
       "groupSlug": "python-deps"
@@ -113,7 +113,7 @@
     },
     {
       "description": "Torch, torchaudio, and the accelerator triton pins (triton-xpu, triton-rocm) in pyproject.toml/uv.lock are wheel-matrix-specific: each is pinned to whatever its PyTorch index (cu126/cu130/xpu/rocm7.1) can actually satisfy, so the correct version is decided by a manual accelerator migration, never by PyPI. `enabled:false` alone does not stop this — the inherited preset extends `:enableVulnerabilityAlerts`, which raises [security] PRs for vulnerable deps and bypasses the per-package disable (renovatebot/renovate#40800/#42655), so `vulnerabilityAlerts` is disabled here too. ROCm migrated 6.4→7.1 on 2026-09-18 (torch 2.9.1→2.13.0); revisit this exclusion when an index ceiling moves to a newer torch.",
-      "matchManagers": ["custom.regex", "pep621", "uv"],
+      "matchManagers": ["custom.regex", "pep621"],
       "matchFileNames": ["pyproject.toml", "uv.lock"],
       "matchPackageNames": ["torch", "torchaudio", "triton-xpu", "triton-rocm"],
       "enabled": false,
