@@ -28,8 +28,8 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from persona_forge.accelerator_manifest import ACCELERATOR_PINS, AcceleratorPin  # noqa: E402
 
 # Substring, not exact tag: torch/torchaudio ship manylinux_2_28_x86_64 wheels, but
-# pytorch-triton-rocm on the same index ships plain linux_x86_64 — "_x86_64" matches both
-# (live-verified: rocm6.4's pytorch_triton_rocm-3.5.1-cp313-cp313-linux_x86_64.whl has no
+# triton-rocm on the same index ships plain linux_x86_64 — "_x86_64" matches both
+# (live-verified: rocm7.1's triton_rocm-3.7.1-cp313-cp313-linux_x86_64.whl has no
 # manylinux tag at all).
 _PLATFORM_TAGS = {
     "linux": "_x86_64",

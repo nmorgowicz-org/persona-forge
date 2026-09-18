@@ -1,17 +1,18 @@
 """Single source of truth for native accelerator wheel selection (Phase 4).
 
 docs/plans/20260829-no_more_docker_architecture.md §7 locks these exact pins after a live check
-against download.pytorch.org's real cp313 wheel index (2026-08-29; re-verified 2026-09-03 — see
-scripts/verify_torch_wheel_matrix.py for a live re-check). Both ``pyproject.toml``'s static
+against download.pytorch.org's real cp313 wheel index (2026-08-29; re-verified 2026-09-03; rocm
+re-pinned to the rocm7.1 index on 2026-09-18 — see scripts/verify_torch_wheel_matrix.py for a live
 ``[project.optional-dependencies]``/``[tool.uv.sources]``/``[[tool.uv.index]]`` entries (native
 ``uv sync --extra <name>`` installs) and ``scripts/entrypoint.sh``'s first-boot installer
 (container installs) read their defaults from here, so a version or index change is made once.
 
-``rocm`` and ``xpu`` cannot share the base project's ``torch==2.14.0`` pin: the rocm6.4 index has
-no 2.14.0 cp313 wheel at all, and 2.14.0+xpu declares ``triton-xpu~=3.8.0`` while the xpu index's
-newest cp313 triton-xpu build is 3.7.2 — both live-verified against the wheels' own METADATA, not
-just their filename listings. Each pins the newest version its index can actually satisfy end to
-end. This is a real, intentional per-extra version divergence, not index-only routing;
+``rocm`` and ``xpu`` cannot share the base project's ``torch==2.14.0`` pin: the rocm7.1 index's
+newest cp313 torch is 2.13.0 (no 2.14.0 cp313 wheel), and 2.14.0+xpu declares ``triton-xpu~=3.8.0``
+while the xpu index's newest cp313 triton-xpu build is 3.7.2 — both live-verified against the wheels'
+own METADATA, not just their filename listings. Each pins the newest version its index can actually
+satisfy end to end, so both land on ``torch==2.13.0`` while the default/CUDA stack stays on 2.14.0.
+This is a real, intentional per-extra version divergence, not index-only routing;
 ``pyproject.toml`` expresses it via a loose range in ``dependencies`` (wide enough to admit every
 extra's pin) narrowed by an exact pin in each extra, not via self-referential ``extra`` markers on
 the base dependency (untested, implementation-defined pip/uv behavior — not worth the risk here).
@@ -95,14 +96,16 @@ ACCELERATOR_PINS: dict[str, AcceleratorPin] = {
     "rocm": AcceleratorPin(
         extra="rocm",
         gpu_family="rocm",
-        index_name="pytorch-rocm64",
-        index_url="https://download.pytorch.org/whl/rocm6.4",
-        # rocm6.4 has no 2.14.0 cp313 wheel; 2.9.1 is the newest cp313 build that index carries
-        # (live-verified) — see the module docstring.
-        torch_version="2.9.1",
-        torchaudio_version="2.9.1",
+        index_name="pytorch-rocm71",
+        index_url="https://download.pytorch.org/whl/rocm7.1",
+        # rocm7.1 has no 2.14.0 cp313 wheel; 2.13.0 is the newest cp313 build that index carries
+        # (live-verified 2026-09-18). torch 2.13.0+rocm7.1 hard-pins triton-rocm==3.7.1 — the
+        # pytorch-triton-rocm package was renamed to triton-rocm for ROCm 7.x — see the module
+        # docstring.
+        torch_version="2.13.0",
+        torchaudio_version="2.11.0",
         platforms=("linux",),
-        extra_pins={"pytorch-triton-rocm": "3.5.1"},
+        extra_pins={"triton-rocm": "3.7.1"},
     ),
 }
 
