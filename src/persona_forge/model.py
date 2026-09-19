@@ -480,8 +480,15 @@ def load_model(profile: ModelProfile | None = None):
         eos_threshold = float(os.getenv("POCKET_TTS_EOS_THRESHOLD", "-4.0"))
         noise_clamp_raw = os.getenv("POCKET_TTS_NOISE_CLAMP", "").strip()
         noise_clamp = float(noise_clamp_raw) if noise_clamp_raw else None
-        frames_after_eos_raw = os.getenv("POCKET_TTS_FRAMES_AFTER_EOS", "8").strip()
-        frames_after_eos = int(frames_after_eos_raw) if frames_after_eos_raw else 8
+        frames_after_eos_raw = os.getenv(
+            "POCKET_TTS_FRAMES_AFTER_EOS",
+            str(pocket_tts_runtime.DEFAULT_POCKET_TTS_FRAMES_AFTER_EOS),
+        ).strip()
+        frames_after_eos = (
+            int(frames_after_eos_raw)
+            if frames_after_eos_raw
+            else pocket_tts_runtime.DEFAULT_POCKET_TTS_FRAMES_AFTER_EOS
+        )
         quantize = int(os.getenv("POCKET_TTS_QUANTIZE", "0"))
         model_source = (os.getenv("POCKET_TTS_MODEL_SOURCE") or "auto").strip() or "auto"
         # A null override persisted via /runtime/config arrives as the literal
@@ -1088,12 +1095,13 @@ def runtime_config_state() -> dict[str, Any]:
         from persona_forge import pocket_tts_runtime
 
         _ptts_noise = os.getenv("POCKET_TTS_NOISE_CLAMP", "").strip()
-        _ptts_frames = os.getenv("POCKET_TTS_FRAMES_AFTER_EOS", "4").strip()
+        _ptts_default_frames = pocket_tts_runtime.DEFAULT_POCKET_TTS_FRAMES_AFTER_EOS
+        _ptts_frames = os.getenv("POCKET_TTS_FRAMES_AFTER_EOS", str(_ptts_default_frames)).strip()
         live["POCKET_TTS_TEMP"] = float(os.getenv("POCKET_TTS_TEMP", "1.2"))
         live["POCKET_TTS_LSD_DECODE_STEPS"] = int(os.getenv("POCKET_TTS_LSD_DECODE_STEPS", "5"))
         live["POCKET_TTS_EOS_THRESHOLD"] = float(os.getenv("POCKET_TTS_EOS_THRESHOLD", "-4.0"))
         live["POCKET_TTS_NOISE_CLAMP"] = float(_ptts_noise) if _ptts_noise else None
-        live["POCKET_TTS_FRAMES_AFTER_EOS"] = int(_ptts_frames) if _ptts_frames else 4
+        live["POCKET_TTS_FRAMES_AFTER_EOS"] = int(_ptts_frames) if _ptts_frames else _ptts_default_frames
         # Artifact sourcing (model reload required to apply).
         live["POCKET_TTS_MODEL_SOURCE"] = (os.getenv("POCKET_TTS_MODEL_SOURCE") or "auto").strip() or "auto"
         _ptts_artifact_dir = os.getenv("POCKET_TTS_ARTIFACT_DIR", "").strip()
