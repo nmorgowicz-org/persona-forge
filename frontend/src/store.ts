@@ -71,6 +71,10 @@ export interface StitchPlanClip {
   sourceAudioBase64: string
   sampleRate: number
   durationMs?: number
+  /** Client-only provenance used to suggest a useful saved voice name. */
+  sourceLabel?: string
+  sourceProject?: string | null
+  sourceOrigin?: string | null
   trimStartMs: number
   trimEndMs: number
   fadeInMs: number

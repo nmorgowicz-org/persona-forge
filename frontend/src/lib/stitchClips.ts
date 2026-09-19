@@ -35,6 +35,11 @@ function appendStitchPlanClip(clip: StitchPlanClip) {
 // Public shared helpers — used by:
 // - OmniVoicePanel (via insertSegmentIntoStitchTimeline / insertVoiceIntoStitchTimeline)
 // - VoiceLibraryPage (directly, plus page nav and editor open)
+export function suggestedStitchVoiceName(clip: StitchPlanClip): string {
+  const source = [clip.sourceProject, clip.sourceLabel].filter(Boolean).join(' — ')
+  return [source || clip.text.trim(), clip.sourceOrigin].filter(Boolean).join(' · ') || 'Stitched voice'
+}
+
 export async function createStitchClipFromSegment(seg: SegmentMeta): Promise<StitchPlanClip> {
   let audioBase64 = seg.audio_base64
   if (!audioBase64) {
@@ -52,6 +57,9 @@ export async function createStitchClipFromSegment(seg: SegmentMeta): Promise<Sti
     text: seg.text,
     sourceAudioBase64: audioBase64,
     sampleRate: seg.sample_rate,
+    sourceLabel: seg.text,
+    sourceProject: seg.project_name ?? null,
+    sourceOrigin: seg.engine || seg.instruct || null,
     trimStartMs: 0,
     trimEndMs: 0,
     fadeInMs: 0,
@@ -82,6 +90,9 @@ export async function createStitchClipFromVoice(voice: VoiceMeta): Promise<Stitc
     ref: { voiceId: voice.voice_id },
     text: voice.description || voice.sample_text || voice.voice_id,
     sourceAudioBase64: audioBase64,
+    sourceLabel: voice.display_name || voice.description || voice.sample_text || voice.voice_id,
+    sourceProject: voice.project_name ?? null,
+    sourceOrigin: voice.source || 'Voice library',
     // Not returned by the voice-library list/get endpoints; harmless placeholder since
     // the backend resolves clip audio server-side and this field is otherwise unused.
     sampleRate: 24000,

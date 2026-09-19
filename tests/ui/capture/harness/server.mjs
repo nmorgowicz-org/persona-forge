@@ -21,6 +21,7 @@ export async function startFakeServer({ seedFixtures = true, port } = {}) {
       process.platform === 'win32' ? ';' : ':'
     ),
     VOICE_LIBRARY_DIR: voiceLibraryDir,
+    SEGMENT_LIBRARY_DIR: segmentLibraryDir,
     FRONTEND_DIST_DIR: join(REPO_ROOT, 'frontend', 'dist'),
     PERSONA_FORGE_TEST_PORT: String(port),
   }

@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion, Reorder } from 'motion/react'
-import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play, Pause, Scissors, Trash2, Volume2, VolumeX, Gauge } from 'lucide-react'
+import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play, Pause, Scissors, Trash2, Volume2, VolumeX, Gauge, RotateCcw } from 'lucide-react'
 import { useAppStore, type StitchPlanClip } from '@/store'
 import { base64ToBlob, cn } from '@/lib/utils'
 import {
@@ -228,6 +228,7 @@ function StitchTimelineClip({
   const clipAudioRef = useRef<HTMLAudioElement | null>(null)
   const clipAudioUrlRef = useRef<string | null>(null)
   const [editingText, setEditingText] = useState(false)
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [draftText, setDraftText] = useState(clip.text ?? '')
   const [selection, setSelection] = useState<{ startMs: number; endMs: number } | null>(null)
   const [gainDb, setGainDb] = useState(-3)
@@ -542,6 +543,15 @@ function StitchTimelineClip({
             <option value="auto">Repair auto</option>
             <option value="precise">Repair precise</option>
           </select>
+          <button
+            type="button"
+            className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+            onClick={() => setShowAdvanced((visible) => !visible)}
+            aria-expanded={showAdvanced}
+            data-testid="stitch-clip-edit-toggle"
+          >
+            {showAdvanced ? 'Hide edits' : 'Edit clip'}
+          </button>
           {isReordering && (
             <div className="flex items-center text-muted-foreground/60">
               <GripVertical className="size-3.5" />
@@ -651,45 +661,49 @@ function StitchTimelineClip({
         </div>
       </div>
 
-      <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1.5">
-        <MsStepper label="Trim start" value={clip.trimStartMs} min={0} max={durMs ?? 0} step={10} onChange={(v) => onUpdate(clip.clipId, { trimStartMs: clampTrimStart(v) })} />
-        <MsStepper label="Trim end" value={clip.trimEndMs} min={0} max={durMs ?? 0} step={10} onChange={(v) => onUpdate(clip.clipId, { trimEndMs: clampTrimEnd(v) })} />
-        <MsStepper label="Fade in" value={clip.fadeInMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeInMs: clampFade(v) })} />
-        <MsStepper label="Fade out" value={clip.fadeOutMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeOutMs: clampFade(v) })} />
-      </div>
-
-      <div className="mt-2 rounded-md border border-border/50 bg-black/20 p-2">
-        <div className="grid grid-cols-3 gap-1.5">
-          <MsStepper label="Region start" value={selectedRegion.startMs} min={0} max={effectiveDuration} step={10} onChange={(v) => setSelection(clampSelection(v, selectedRegion.endMs))} compact />
-          <MsStepper label="Region end" value={selectedRegion.endMs} min={0} max={effectiveDuration} step={10} onChange={(v) => setSelection(clampSelection(selectedRegion.startMs, v))} compact />
-          <span className="self-center text-[10px] font-mono text-muted-foreground">{selectedDuration}ms</span>
-          <MsStepper label="Gain" value={gainDb} min={-24} max={12} step={1} onChange={setGainDb} compact />
-          <MsStepper label="Fade in" value={regionFadeInMs} min={0} max={500} step={5} onChange={setRegionFadeInMs} compact />
-          <MsStepper label="Fade out" value={regionFadeOutMs} min={0} max={500} step={5} onChange={setRegionFadeOutMs} compact />
-        </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyGain} title="Apply gain to selected region"><Volume2 className="size-3" /> gain</button>
-          <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyMute} title="Mute selected region"><VolumeX className="size-3" /> mute</button>
-          <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyDelete} title="Delete selected region"><Trash2 className="size-3" /> delete</button>
-          <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyFade} title="Fade selected region"><ChevronUp className="size-3" /> fade</button>
-          <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => onSplitRegion(clip.clipId, selectedRegion.startMs, selectedRegion.endMs)} title="Split clip at selected region boundaries"><Scissors className="size-3" /> split</button>
-          <MsStepper label="Silence" value={silenceMs} min={20} max={2000} step={10} onChange={setSilenceMs} compact />
-          <button type="button" className="rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => insertSilenceAt('before')} title="Insert silence before selected region">+ before</button>
-          <button type="button" className="rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => insertSilenceAt('after')} title="Insert silence after selected region">+ after</button>
-        </div>
-        {regionEdits.length > 0 && (
-          <div className="mt-2 flex flex-col gap-1 border-t border-border/40 pt-2">
-            {regionEdits.map((edit) => (
-              <div key={edit.id} className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-                <span className="truncate">{describeEdit(edit)}</span>
-                <button type="button" className="shrink-0 rounded p-0.5 hover:bg-muted hover:text-foreground" onClick={() => onRemoveRegionEdit(clip.clipId, edit.id)} title="Remove edit">
-                  <X className="size-3" />
-                </button>
-              </div>
-            ))}
+      {showAdvanced && (
+        <>
+          <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1.5">
+            <MsStepper label="Trim start" value={clip.trimStartMs} min={0} max={durMs ?? 0} step={10} onChange={(v) => onUpdate(clip.clipId, { trimStartMs: clampTrimStart(v) })} />
+            <MsStepper label="Trim end" value={clip.trimEndMs} min={0} max={durMs ?? 0} step={10} onChange={(v) => onUpdate(clip.clipId, { trimEndMs: clampTrimEnd(v) })} />
+            <MsStepper label="Fade in" value={clip.fadeInMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeInMs: clampFade(v) })} />
+            <MsStepper label="Fade out" value={clip.fadeOutMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeOutMs: clampFade(v) })} />
           </div>
-        )}
-      </div>
+
+          <div className="mt-2 rounded-md border border-border/50 bg-black/20 p-2">
+            <div className="grid grid-cols-3 gap-1.5">
+              <MsStepper label="Region start" value={selectedRegion.startMs} min={0} max={effectiveDuration} step={10} onChange={(v) => setSelection(clampSelection(v, selectedRegion.endMs))} compact />
+              <MsStepper label="Region end" value={selectedRegion.endMs} min={0} max={effectiveDuration} step={10} onChange={(v) => setSelection(clampSelection(selectedRegion.startMs, v))} compact />
+              <span className="self-center text-[10px] font-mono text-muted-foreground">{selectedDuration}ms</span>
+              <MsStepper label="Gain" value={gainDb} min={-24} max={12} step={1} onChange={setGainDb} compact />
+              <MsStepper label="Fade in" value={regionFadeInMs} min={0} max={500} step={5} onChange={setRegionFadeInMs} compact />
+              <MsStepper label="Fade out" value={regionFadeOutMs} min={0} max={500} step={5} onChange={setRegionFadeOutMs} compact />
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyGain} title="Apply gain to selected region"><Volume2 className="size-3" /> gain</button>
+              <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyMute} title="Mute selected region"><VolumeX className="size-3" /> mute</button>
+              <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyDelete} title="Delete selected region"><Trash2 className="size-3" /> delete</button>
+              <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyFade} title="Fade selected region"><ChevronUp className="size-3" /> fade</button>
+              <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => onSplitRegion(clip.clipId, selectedRegion.startMs, selectedRegion.endMs)} title="Split clip at selected region boundaries"><Scissors className="size-3" /> split</button>
+              <MsStepper label="Silence" value={silenceMs} min={20} max={2000} step={10} onChange={setSilenceMs} compact />
+              <button type="button" className="rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => insertSilenceAt('before')} title="Insert silence before selected region">+ before</button>
+              <button type="button" className="rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => insertSilenceAt('after')} title="Insert silence after selected region">+ after</button>
+            </div>
+            {regionEdits.length > 0 && (
+              <div className="mt-2 flex flex-col gap-1 border-t border-border/40 pt-2">
+                {regionEdits.map((edit) => (
+                  <div key={edit.id} className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                    <span className="truncate">{describeEdit(edit)}</span>
+                    <button type="button" className="shrink-0 rounded p-0.5 hover:bg-muted hover:text-foreground" onClick={() => onRemoveRegionEdit(clip.clipId, edit.id)} title="Remove edit">
+                      <X className="size-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -1211,10 +1225,10 @@ export const StitchTimeline = memo(function StitchTimeline({
           axis="x"
           values={clips}
           onReorder={handleReorder}
-          className="mt-3 flex flex-1 items-start gap-0"
+          className="mt-3 flex w-max min-w-full items-start gap-0"
         >
           {clips.map((clip, i) => (
-            <div key={clip.clipId} className="flex items-start gap-4">
+            <div key={clip.clipId} className="flex shrink-0 items-start gap-4">
               {i > 0 && (
                 <GapControl gapIndex={i - 1} paddingMs={paddingMs[i - 1] || 0} onSetPadding={setPadding} />
               )}
@@ -1348,8 +1362,10 @@ interface StitchEditorBodyProps {
   voiceLibrary?: VoiceMeta[]
   onInsertVoiceFromLibrary?: (voice: VoiceMeta) => void
   /** Renders a close button in the header when set — the standalone Stitch Studio page has
-   * nothing to \"close\" back to, so it omits this. */
+   * nothing to "close" back to, so it omits this. */
   onClose?: () => void
+  /** Clears page-level naming/error state after the shared editor clears its timeline. */
+  onStartOver?: () => void
 }
 
 // Shared editor internals (timeline + DSP controls + live preview + render/save footer), with
@@ -1358,6 +1374,7 @@ interface StitchEditorBodyProps {
 // it as plain page content (used by the standalone Stitch Studio page).
 function StitchEditorBody({
   onClose,
+  onStartOver,
   onSave,
   library,
   onInsertFromLibrary,
@@ -1556,6 +1573,26 @@ function StitchEditorBody({
     }
   }, [clips, dsp, setClips, setPaddingMs])
 
+  const handleStartOver = useCallback(() => {
+    if (!clips.length || !window.confirm('Clear this timeline and start over?')) return
+    renderSeqRef.current++
+    if (debounceRef.current != null) {
+      clearTimeout(debounceRef.current)
+      debounceRef.current = null
+    }
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    lastHashRef.current = ''
+    setPreviewUrl(null)
+    setPreviewBlob(null)
+    setIsRendering(false)
+    setClips([])
+    setPaddingMs([])
+    setRegionEditsByClip({})
+    setStaleFlags(true)
+    setPreviewError(null)
+    onStartOver?.()
+  }, [clips.length, onStartOver, previewUrl, setClips, setIsRendering, setPaddingMs, setPreviewBlob, setPreviewUrl])
+
   const totalMs = useMemo(() => {
     let sum = 0
     for (const c of clips) {
@@ -1567,8 +1604,8 @@ function StitchEditorBody({
 
   return (
     <>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2.5">
           <span className="text-sm font-semibold uppercase tracking-wider text-foreground">Arrange your reference clip</span>
           <span className="text-xs text-muted-foreground/70">{clips.length} clip{clips.length !== 1 ? 's' : ''}</span>
           <button
@@ -1595,11 +1632,24 @@ function StitchEditorBody({
             </span>
           )}
         </div>
-        {onClose && (
-          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="Close editor">
-            <X className="size-4" />
-          </button>
-        )}
+        <div className="flex shrink-0 items-center gap-1.5">
+          {clips.length > 0 && (
+            <button
+              type="button"
+              data-testid="stitch-start-over"
+              onClick={handleStartOver}
+              className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-1 text-[10px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <RotateCcw className="size-3" />
+              Start over
+            </button>
+          )}
+          {onClose && (
+            <button type="button" onClick={onClose} className="rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="Close editor">
+              <X className="size-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       <StitchTimeline
