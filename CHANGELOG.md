@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.4.10](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.9...persona-forge-v1.4.10) (2026-09-19)
+
+
+### Bug Fixes
+
+* **runtime:** align Pocket TTS EOS default ([f940796](https://github.com/nmorgowicz-org/persona-forge/commit/f940796d0527a910e955cf4d6442f9f37fdd1df6))
+* **stitch:** prevent timeline clips from overlapping ([f940796](https://github.com/nmorgowicz-org/persona-forge/commit/f940796d0527a910e955cf4d6442f9f37fdd1df6))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump hono from 4.13.2 to 4.13.7 in /frontend ([#277](https://github.com/nmorgowicz-org/persona-forge/issues/277)) ([e07d369](https://github.com/nmorgowicz-org/persona-forge/commit/e07d369203174adae93ed3e89aa8d1c1cf99fb0a))
+* **deps:** bump js-yaml from 4.3.1 to 4.3.2 in /frontend ([#276](https://github.com/nmorgowicz-org/persona-forge/issues/276)) ([b5049b8](https://github.com/nmorgowicz-org/persona-forge/commit/b5049b8ef98e554b266e93f931edd57278080796))
+* **deps:** update astral-sh/setup-uv action to v10.1.0 ([#281](https://github.com/nmorgowicz-org/persona-forge/issues/281)) ([eccd6ce](https://github.com/nmorgowicz-org/persona-forge/commit/eccd6ce25c966c55ffb5ddc4c09b8bef5b593491))
+* **deps:** update dependency @types/node to v24.13.5 ([#292](https://github.com/nmorgowicz-org/persona-forge/issues/292)) ([9cb5894](https://github.com/nmorgowicz-org/persona-forge/commit/9cb58943a8b9b8be6f0da2aa1da12089d4727b4b))
+* **deps:** update dependency lucide-react to v1.43.0 ([#282](https://github.com/nmorgowicz-org/persona-forge/issues/282)) ([d8f2e15](https://github.com/nmorgowicz-org/persona-forge/commit/d8f2e15b84b22c5af19764162891a2a018331239))
+* **deps:** update dependency lucide-react to v1.45.0 ([#284](https://github.com/nmorgowicz-org/persona-forge/issues/284)) ([21edbb6](https://github.com/nmorgowicz-org/persona-forge/commit/21edbb657a5ca0a9c1d0807159ace2c04c7fce1a))
+* **deps:** update dependency tailwind-merge to v3.7.0 ([#286](https://github.com/nmorgowicz-org/persona-forge/issues/286)) ([bb1d40a](https://github.com/nmorgowicz-org/persona-forge/commit/bb1d40a2ec84e5780e2d437f9d323d33340367ef))
+* **deps:** update docker base images ([#293](https://github.com/nmorgowicz-org/persona-forge/issues/293)) ([c748c63](https://github.com/nmorgowicz-org/persona-forge/commit/c748c63272c2fe60a0cea338a3460d172fc8c324))
+* **deps:** update docker/setup-buildx-action digest to f87e599 ([#287](https://github.com/nmorgowicz-org/persona-forge/issues/287)) ([b57a1c0](https://github.com/nmorgowicz-org/persona-forge/commit/b57a1c0a588e4e269a5766329b10c99f8c7d8b8d))
+* **deps:** update frontend npm dependencies ([#272](https://github.com/nmorgowicz-org/persona-forge/issues/272)) ([3992e7c](https://github.com/nmorgowicz-org/persona-forge/commit/3992e7c6a5908a5e9d04d56a09c8648d1df57b53))
+* **deps:** update frontend npm dependencies ([#275](https://github.com/nmorgowicz-org/persona-forge/issues/275)) ([ca6e031](https://github.com/nmorgowicz-org/persona-forge/commit/ca6e03192a30e4b1cdef56e954474061eebc6693))
+* **deps:** update frontend npm dependencies ([#280](https://github.com/nmorgowicz-org/persona-forge/issues/280)) ([d9f5479](https://github.com/nmorgowicz-org/persona-forge/commit/d9f54791a7ee4eb1599092ce55e9244a9e752373))
+* **deps:** update frontend npm dependencies ([#283](https://github.com/nmorgowicz-org/persona-forge/issues/283)) ([a61c0ba](https://github.com/nmorgowicz-org/persona-forge/commit/a61c0ba35b29158ad56074d5a19ef8ce69337cc4))
+* **deps:** update frontend npm dependencies ([#289](https://github.com/nmorgowicz-org/persona-forge/issues/289)) ([c9eda52](https://github.com/nmorgowicz-org/persona-forge/commit/c9eda520b34212f8bc1244865f35db5516cde0d5))
+* **deps:** update github actions ([#285](https://github.com/nmorgowicz-org/persona-forge/issues/285)) ([2146402](https://github.com/nmorgowicz-org/persona-forge/commit/21464025eebf2c9316266828856b0f69bec97d13))
+* **deps:** update github/codeql-action digest to 1c5b675 ([#291](https://github.com/nmorgowicz-org/persona-forge/issues/291)) ([bd311ef](https://github.com/nmorgowicz-org/persona-forge/commit/bd311ef676d1313afe6bd1de2cdf59f4652ccd38))
+* **deps:** update github/codeql-action digest to b96794f ([#278](https://github.com/nmorgowicz-org/persona-forge/issues/278)) ([3914453](https://github.com/nmorgowicz-org/persona-forge/commit/39144535b2d88136a033ffd9f903670947692106))
+* **deps:** update node.js to 2fe369e ([#279](https://github.com/nmorgowicz-org/persona-forge/issues/279)) ([b9a0ac9](https://github.com/nmorgowicz-org/persona-forge/commit/b9a0ac914d44df3862ce94ad8772e4355c07ffbe))
+* **deps:** update openvino stack ([#288](https://github.com/nmorgowicz-org/persona-forge/issues/288)) ([c4c25fb](https://github.com/nmorgowicz-org/persona-forge/commit/c4c25fb35da1359313b5614cef64d19bec0528f3))
+* **renovate:** group related dependency updates ([1a7d6bd](https://github.com/nmorgowicz-org/persona-forge/commit/1a7d6bde428f75d2cf0e80208186cf5ede248e5f))
+
 ## [1.4.9](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.8...persona-forge-v1.4.9) (2026-09-05)
 
 
