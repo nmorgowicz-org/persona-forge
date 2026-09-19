@@ -720,14 +720,14 @@ const PROGRESS_POLL_MS = 700
         }
       }
       // Sync Pocket TTS voice-cloning status into the store whenever /health
-      // indicates the backend is pocket_tts — this is the single source of truth
-      // for PocketTTSWarningBanner and survives page navigations / refreshes.
+      // indicates the backend is pocket_tts, so runtime capability state survives
+      // page navigations and refreshes.
       if (resolvedBackend === 'pocket_tts') {
         const pt = (data as any).pocket_tts as
-          | { voice_cloning_available?: boolean; message?: string }
+          | { pocket_cloning_available?: boolean; voice_cloning_available?: boolean; message?: string }
           | null
         if (pt) {
-          const available = Boolean(pt.voice_cloning_available)
+          const available = (pt.pocket_cloning_available ?? pt.voice_cloning_available) ?? null
           const message = (pt.message || '').trim() || null
           if (available !== store.pocketTtsVoiceCloningAvailable || message !== store.pocketTtsVoiceCloningMessage) {
             useAppStore.setState({

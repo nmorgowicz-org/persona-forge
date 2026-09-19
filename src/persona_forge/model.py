@@ -1109,7 +1109,7 @@ def runtime_config_state() -> dict[str, Any]:
             None if not _ptts_artifact_dir or _ptts_artifact_dir.lower() == "none" else _ptts_artifact_dir
         )
 
-        cloning_ok = pocket_tts_runtime.pocket_tts_cloning_available
+        cloning_ok = pocket_tts_runtime.cloning_capability_available()
         cloning_msg = (pocket_tts_runtime.pocket_tts_cloning_status_message or "").strip()
 
         if not cloning_ok and not cloning_msg:

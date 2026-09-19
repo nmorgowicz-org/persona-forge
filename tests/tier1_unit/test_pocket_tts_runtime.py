@@ -87,6 +87,15 @@ def pocket_tts_runtime(monkeypatch):
     rt.unload_pocket_tts()
 
 
+class TestCloningCapability:
+    def test_model_provenance_does_not_require_default_voice_state(self, pocket_tts_runtime):
+        rt = pocket_tts_runtime
+        rt.pocket_tts_provenance = {"cloning_available": True}
+        rt.pocket_tts_cloning_available = False
+
+        assert rt.cloning_capability_available() is True
+
+
 class TestLoadPocketTtsModel:
     # Legacy-path (non-English) loads still forward plain language kwargs; the
     # English load goes through artifact resolution (see TestResolvedArtifactLoading).

@@ -66,6 +66,15 @@ pocket_tts_voice_state_cache: dict[str, Any] = {}
 pocket_tts_cloning_available: bool = False
 pocket_tts_cloning_status_message: str = ""
 
+
+def cloning_capability_available() -> bool:
+    """Return whether the loaded Pocket TTS model can encode reference audio."""
+    provenance = dict(pocket_tts_provenance or {})
+    available = provenance.get("cloning_available")
+    if available is None:
+        available = pocket_tts_cloning_available
+    return bool(available)
+
 # Artifact provenance for the current (or most recent) load: engine, model
 # source/revision/sha256, cloning status. Persists across idle-unload so /health
 # keeps reporting the verified identity of the cached artifacts.

@@ -80,37 +80,6 @@ function StudioNav({ page, setPage }: { page: Page; setPage: (page: Page) => voi
   })}</SidebarMenu>
 }
 
-function PocketTTSWarningBanner() {
-  const backend = useAppStore((s) => s.runtimeTtsBackend)
-  const cloningAvailable = useAppStore((s) => s.pocketTtsVoiceCloningAvailable)
-
-  const isPocketTTS = backend === 'pocket_tts'
-  const cloningOk = cloningAvailable === true
-  if (!isPocketTTS || cloningOk) return null
-
-  return (
-    <div className="flex flex-col border-b border-warning/50 bg-warning/10 px-4 py-2 text-warning">
-      <div className="flex items-center gap-2 text-[11px]">
-        <span className="inline-flex size-2 shrink-0 items-center justify-center rounded-full bg-warning animate-pulse" />
-        <span className="flex-1">
-          Pocket TTS is active, but voice cloning is unavailable until you accept the license on Hugging Face:{' '}
-          <a
-            href="https://huggingface.co/kyutai/pocket-tts"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline"
-          >
-            huggingface.co/kyutai/pocket-tts
-          </a>
-        </span>
-      </div>
-      <div className="mt-1 text-[10px] opacity-70">
-        Use the account that matches your HF_TOKEN, then restart the container after accepting.
-      </div>
-    </div>
-  )
-}
-
 function ThemePaletteBar() {
   const theme = useAppStore((s) => s.theme)
   const setTheme = useAppStore((s) => s.setTheme)
@@ -451,7 +420,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
         <UpdateAvailableBanner />
         <HealthStatusBanner />
-        <PocketTTSWarningBanner />
         <SwapBanner />
         <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
           <div className="w-full min-w-0 px-6 py-8">{children}</div>
