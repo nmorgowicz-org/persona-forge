@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.11](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.10...persona-forge-v1.4.11) (2026-09-19)
+
+
+### Bug Fixes
+
+* **accelerator:** migrate ROCm 6.4 to 7.1 Torch build ([5b42dcd](https://github.com/nmorgowicz-org/persona-forge/commit/5b42dcd906fe430d402e1f5f187109123bcbd138))
+* **security:** upgrade vulnerable Accelerate dependency ([5b42dcd](https://github.com/nmorgowicz-org/persona-forge/commit/5b42dcd906fe430d402e1f5f187109123bcbd138))
+
 ## [1.4.10](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.9...persona-forge-v1.4.10) (2026-09-19)
 
 
