@@ -54,17 +54,31 @@
       "groupSlug": "python-deps"
     },
     {
-      "description": "Ecosystem grouping: one PR for all non-major frontend npm bumps.",
+      "description": "Ecosystem grouping: one PR for all frontend and tooling npm bumps.",
       "matchManagers": ["npm"],
-      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
       "groupName": "frontend npm dependencies",
-      "groupSlug": "frontend-npm"
+      "groupSlug": "frontend-npm",
+      "separateMajorMinor": false,
+      "automerge": false,
+      "addLabels": ["npm"]
     },
     {
-      "description": "Ecosystem grouping: one PR for all GitHub Actions bumps, including the digest pins from config:best-practices.",
+      "description": "Ecosystem grouping: one PR for all GitHub Actions bumps, including digest pins.",
       "matchManagers": ["github-actions"],
-      "groupName": "github actions",
-      "groupSlug": "github-actions"
+      "groupName": "GitHub Actions",
+      "groupSlug": "github-actions",
+      "separateMajorMinor": false,
+      "automerge": false,
+      "addLabels": ["github-actions"]
+    },
+    {
+      "description": "Batch Rust dependency updates to avoid Cargo.lock conflicts.",
+      "matchManagers": ["cargo"],
+      "groupName": "Rust dependencies",
+      "groupSlug": "rust-dependencies",
+      "separateMajorMinor": false,
+      "automerge": false,
+      "addLabels": ["cargo"]
     },
     {
       "description": "Ecosystem grouping: one PR for base-image / Dockerfile bumps.",
