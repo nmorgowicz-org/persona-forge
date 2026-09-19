@@ -9,7 +9,7 @@ import {
   type StitchPlanPayload,
   type VoiceMeta,
 } from '@/lib/api'
-import { insertSegmentIntoStitchTimeline, insertVoiceIntoStitchTimeline } from '@/lib/stitchClips'
+import { insertSegmentIntoStitchTimeline, insertVoiceIntoStitchTimeline, suggestedStitchVoiceName } from '@/lib/stitchClips'
 
 const DELIVERY_VARIANTS = [
   { kind: 'natural', name: 'Natural', hint: 'Conversational and neutral' },
@@ -33,6 +33,7 @@ export function StitchStudioPage() {
   const setSavedVoiceId = useAppStore((s) => s.setOvSavedVoiceId)
   const setDeepLinkProsodyVoiceId = useAppStore((s) => s.setDeepLinkProsodyVoiceId)
   const setPage = useAppStore((s) => s.setPage)
+  const clips = useAppStore((s) => s.ovStitchPlanClips)
 
   const [library, setLibrary] = useState<SegmentMeta[]>([])
   const [name, setName] = useState('')
@@ -86,6 +87,12 @@ export function StitchStudioPage() {
     },
     [name, setSavedVoiceId, deliveryVariant, setDeepLinkProsodyVoiceId, setPage],
   )
+  const sourceName = clips[0] ? suggestedStitchVoiceName(clips[0]) : ''
+  const handleStartOver = useCallback(() => {
+    setName('')
+    setError(null)
+    setSavedVoiceId(null)
+  }, [setSavedVoiceId])
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -97,8 +104,20 @@ export function StitchStudioPage() {
         </p>
       </div>
 
-      <div className="flex flex-col gap-1.5 max-w-md">
-        <label className="text-xs font-medium text-muted-foreground">Name this voice</label>
+      <div className="flex max-w-md flex-col gap-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <label className="text-xs font-medium text-muted-foreground">Name this voice</label>
+          {sourceName && (
+            <button
+              type="button"
+              data-testid="stitch-use-source-name"
+              onClick={() => setName(sourceName)}
+              className="text-[10px] font-medium text-cyan-300 hover:text-cyan-200"
+            >
+              Use source name
+            </button>
+          )}
+        </div>
         <input
           type="text"
           data-testid="stitch-voice-name"
@@ -123,6 +142,7 @@ export function StitchStudioPage() {
         voiceLibrary={voices}
         onInsertVoiceFromLibrary={insertVoiceFromLibrary}
         onSave={handleSave}
+        onStartOver={handleStartOver}
       />
 
       {savedVoiceId && (

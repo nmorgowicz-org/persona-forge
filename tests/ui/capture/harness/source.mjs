@@ -12,22 +12,38 @@ import { REMOTE_SERVER } from './paths.mjs';
 // scenario runs and delete anything new afterward, so remote captures don't leave clutter behind
 // for someone to clean up by hand.
 async function fetchIds(baseURL, path, listKey, idKey) {
-    const res = await fetch(`${baseURL}${path}`);
-    if (!res.ok) return new Set();
-    const body = await res.json();
-    return new Set((body[listKey] || []).map((item) => item[idKey]));
+    try {
+        const res = await fetch(`${baseURL}${path}`);
+        if (!res.ok) return { ids: new Set(), ok: false };
+        const body = await res.json();
+        return { ids: new Set((body[listKey] || []).map((item) => item[idKey])), ok: true };
+    } catch {
+        return { ids: new Set(), ok: false };
+    }
 }
 
 export async function snapshotRemoteState(baseURL) {
-    const [voiceIds, segmentIds] = await Promise.all([
+    const [voices, segments] = await Promise.all([
         fetchIds(baseURL, '/voices', 'voices', 'voice_id'),
         fetchIds(baseURL, '/omnivoice/segments', 'segments', 'segment_id'),
     ]);
-    return { voiceIds, segmentIds };
+    return {
+        voiceIds: voices.ids,
+        segmentIds: segments.ids,
+        complete: voices.ok && segments.ok,
+    };
 }
 
 export async function cleanupRemoteState(baseURL, before) {
+    if (!before?.complete) {
+        console.warn('[CAPTURE] remote cleanup skipped: initial library snapshot was incomplete');
+        return;
+    }
     const after = await snapshotRemoteState(baseURL);
+    if (!after.complete) {
+        console.warn('[CAPTURE] remote cleanup skipped: final library snapshot was incomplete');
+        return;
+    }
     const newVoiceIds = [...after.voiceIds].filter((id) => !before.voiceIds.has(id));
     const newSegmentIds = [...after.segmentIds].filter((id) => !before.segmentIds.has(id));
     await Promise.all([

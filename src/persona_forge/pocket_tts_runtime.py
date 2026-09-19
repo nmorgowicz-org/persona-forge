@@ -74,9 +74,9 @@ pocket_tts_artifact_dir: str | None = None
 
 # Extra audio frames to keep after the last speech frame (post-EOS tail control).
 # 1 frame = 1/12.5 s of audio at 24 kHz (1920 samples), matching the Mimi codec's frame rate.
-# Controlled by POCKET_TTS_FRAMES_AFTER_EOS env var (default 8).
-pocket_tts_frames_after_eos: int = 8
-
+# Controlled by POCKET_TTS_FRAMES_AFTER_EOS env var.
+DEFAULT_POCKET_TTS_FRAMES_AFTER_EOS = 8
+pocket_tts_frames_after_eos: int = DEFAULT_POCKET_TTS_FRAMES_AFTER_EOS
 
 # ---------------------------------------------------------------------------
 # Model loading
@@ -390,7 +390,7 @@ def load_pocket_tts_model(
         pocket_tts_frames_after_eos = max(0, frames_after_eos)
         print(f"[pocket_tts] frames_after_eos set to {pocket_tts_frames_after_eos}")
     else:
-        pocket_tts_frames_after_eos = 8
+        pocket_tts_frames_after_eos = DEFAULT_POCKET_TTS_FRAMES_AFTER_EOS
         print(f"[pocket_tts] frames_after_eos defaulted to {pocket_tts_frames_after_eos}")
 
     print("[pocket_tts] Model loaded and ready.")

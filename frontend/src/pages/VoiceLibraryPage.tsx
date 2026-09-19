@@ -1852,6 +1852,9 @@ export function VoiceLibraryPage() {
             ref: { segmentId: c.segment_id },
             text: seg.text,
             sourceAudioBase64: b64,
+            sourceLabel: seg.text,
+            sourceProject: seg.project_name ?? null,
+            sourceOrigin: seg.engine || seg.instruct || null,
             sampleRate: seg.sample_rate ?? 24000,
             durationMs:
               typeof seg.duration_sec === 'number' && seg.duration_sec > 0
@@ -1873,6 +1876,9 @@ export function VoiceLibraryPage() {
             ref: { voiceId: c.voice_id },
             text: full.sample_text,
             sourceAudioBase64: full.audio_base64,
+            sourceLabel: full.display_name || full.description || full.sample_text || full.voice_id,
+            sourceProject: full.project_name ?? null,
+            sourceOrigin: full.source || 'Voice library',
             sampleRate: 24000,
             durationMs: 0,
             trimStartMs: c.trim_start_ms ?? 0,

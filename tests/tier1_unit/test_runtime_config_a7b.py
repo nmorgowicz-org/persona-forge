@@ -194,3 +194,17 @@ assert "POCKET_TTS_MODEL_SOURCE" not in os.environ, "rejected value must not be 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "REJECTED" in result.stdout
     assert "requires reload" not in result.stdout, result.stdout
+def test_pocket_frames_after_eos_runtime_default_matches_loader(tmp_path):
+    script = """
+import os
+from persona_forge import model
+
+model.TTS_BACKEND = "pocket_tts"
+os.environ.pop("POCKET_TTS_FRAMES_AFTER_EOS", None)
+state = model.runtime_config_state()
+assert state["live"]["POCKET_TTS_FRAMES_AFTER_EOS"] == 8
+print("OK")
+"""
+    result = _run(script, {"DATA_DIR": str(tmp_path), "TTS_BACKEND": "pytorch"})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "OK" in result.stdout

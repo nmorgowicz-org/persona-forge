@@ -153,3 +153,22 @@ test('snapshotRemoteState treats a failed fetch as an empty set rather than thro
     assert.deepEqual([...snapshot.voiceIds], []);
     assert.deepEqual([...snapshot.segmentIds], []);
 });
+test('cleanupRemoteState fails closed when the initial snapshot is incomplete', async (t) => {
+    const state = {
+        voices: new Set(['vd_existing']),
+        segments: new Set(['seg_created_during_unobserved_run']),
+        deletedVoices: [],
+        deletedSegments: [],
+    };
+    t.mock.method(globalThis, 'fetch', fakeFetch(state));
+
+    await cleanupRemoteState('http://remote', {
+        voiceIds: new Set(),
+        segmentIds: new Set(),
+        complete: false,
+    });
+
+    assert.deepEqual(state.deletedVoices, []);
+    assert.deepEqual(state.deletedSegments, []);
+    assert.ok(state.segments.has('seg_created_during_unobserved_run'));
+});
