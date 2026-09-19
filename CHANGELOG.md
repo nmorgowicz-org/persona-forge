@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.4.12](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.11...persona-forge-v1.4.12) (2026-09-19)
+
+
+### Miscellaneous Chores
+
+* **deps:** exclude torch and triton from renovate security updates ([606e4fc](https://github.com/nmorgowicz-org/persona-forge/commit/606e4fc70d91b6f5627f73b9781b17cbe074ea7b))
+* **deps:** update dependency motion to v13.4.0 ([#299](https://github.com/nmorgowicz-org/persona-forge/issues/299)) ([c028e03](https://github.com/nmorgowicz-org/persona-forge/commit/c028e03ab07bb08df0a43601e72739dfa3cc5c7c))
+* **deps:** update python:3.13-slim docker digest to 8d9d0b8 ([#298](https://github.com/nmorgowicz-org/persona-forge/issues/298)) ([85b50a5](https://github.com/nmorgowicz-org/persona-forge/commit/85b50a5b4aa70ef6dac9d5a924ed982b17aaca93))
+
 ## [1.4.11](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.10...persona-forge-v1.4.11) (2026-09-19)
 
 
