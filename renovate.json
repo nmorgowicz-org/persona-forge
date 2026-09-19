@@ -112,11 +112,12 @@
       "automerge": false
     },
     {
-      "description": "Torch and torchaudio pins in the Python project and lockfile are accelerator-specific; update them manually after wheel-matrix and runtime validation",
+      "description": "Torch, torchaudio, and the accelerator triton pins (triton-xpu, triton-rocm) in pyproject.toml/uv.lock are wheel-matrix-specific: each is pinned to whatever its PyTorch index (cu126/cu130/xpu/rocm7.1) can actually satisfy, so the correct version is decided by a manual accelerator migration, never by PyPI. `enabled:false` alone does not stop this — the inherited preset extends `:enableVulnerabilityAlerts`, which raises [security] PRs for vulnerable deps and bypasses the per-package disable (renovatebot/renovate#40800/#42655), so `vulnerabilityAlerts` is disabled here too. ROCm migrated 6.4→7.1 on 2026-09-18 (torch 2.9.1→2.13.0); revisit this exclusion when an index ceiling moves to a newer torch.",
       "matchManagers": ["custom.regex", "pep621", "uv"],
       "matchFileNames": ["pyproject.toml", "uv.lock"],
-      "matchPackageNames": ["torch", "torchaudio"],
-      "enabled": false
+      "matchPackageNames": ["torch", "torchaudio", "triton-xpu", "triton-rocm"],
+      "enabled": false,
+      "vulnerabilityAlerts": { "enabled": false }
     },
     {
       "description": "Qwen package updates can change the custom generation contract",
