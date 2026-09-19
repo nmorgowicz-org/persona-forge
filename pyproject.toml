@@ -21,12 +21,12 @@ dependencies = [
   "transformers==5.12.1",
   # Native accelerator selection (Phase 4, persona_forge.accelerator_manifest is the source of
   # truth for these numbers). The range must admit every accelerator extra's exact pin below
-  # (2.14.0 default down to rocm's 2.9.1 — rocm6.4 has no 2.14.0 cp313 wheel) because uv
+  # (2.14.0 default down to rocm/xpu's 2.13.0 — those cp313 indexes top out at 2.13.0) because uv
   # cannot conditionally replace a base dependency by selected extra. The universal lock records
   # the exact default and per-extra variants; scripts/check_torch_stack.py verifies that set so
   # this envelope cannot silently broaden an install.
-  "torch>=2.9.1,<2.15",
-  "torchaudio>=2.9.1,<2.12",
+  "torch>=2.13.0,<2.15",
+  "torchaudio>=2.11.0,<2.12",
   # OmniVoice (Persona Forge accent-design engine) — PyPI release, same pin as the
   # container image (Dockerfile / entrypoint.sh). Its declared torch/torchaudio/transformers
   # requirements are loose; the direct project pins and accelerator extras below constrain them.
@@ -59,7 +59,7 @@ qwen-tts = [
 # narrows the base torch/torchaudio range above to persona_forge.accelerator_manifest's exact
 # pin for that extra and redirects the install index via [tool.uv.sources]/[[tool.uv.index]].
 # cuda12/cuda13 are Windows+Linux; xpu is Windows+Linux (no macOS Xe/Arc wheel); rocm is
-# Linux-only (rocm6.4 has no Windows/macOS cp313 build) — the markers below keep those two off
+# Linux-only (rocm7.1 has no Windows/macOS cp313 build) — the markers below keep those two off
 # platforms with no matching wheel rather than letting them silently resolve to something else.
 cuda12 = [
   "torch==2.14.0; sys_platform == 'linux' or sys_platform == 'win32'",
@@ -79,9 +79,9 @@ xpu = [
   "triton-xpu==3.7.2; sys_platform == 'linux' or sys_platform == 'win32'",
 ]
 rocm = [
-  "torch==2.9.1; sys_platform == 'linux'",
-  "torchaudio==2.9.1; sys_platform == 'linux'",
-  "pytorch-triton-rocm==3.5.1; sys_platform == 'linux'",
+  "torch==2.13.0; sys_platform == 'linux'",
+  "torchaudio==2.11.0; sys_platform == 'linux'",
+  "triton-rocm==3.7.1; sys_platform == 'linux'",
 ]
 
 [dependency-groups]
@@ -114,6 +114,8 @@ environments = [
 ]
 override-dependencies = [
   "transformers==5.12.1",
+  # qwen-tts==0.1.1 constrains accelerate to vulnerable 1.12.0; use patched 1.15.0.
+  "accelerate==1.15.0",
 ]
 
 conflicts = [
@@ -130,19 +132,20 @@ torch = [
   { index = "pytorch-cu126", extra = "cuda12" },
   { index = "pytorch-cu130", extra = "cuda13" },
   { index = "pytorch-xpu", extra = "xpu" },
-  { index = "pytorch-rocm64", extra = "rocm" },
+  { index = "pytorch-rocm71", extra = "rocm" },
 ]
 torchaudio = [
   { index = "pytorch-cu126", extra = "cuda12" },
   { index = "pytorch-cu130", extra = "cuda13" },
   { index = "pytorch-xpu", extra = "xpu" },
-  { index = "pytorch-rocm64", extra = "rocm" },
+  { index = "pytorch-rocm71", extra = "rocm" },
 ]
 # torch==2.14.0+xpu depends on triton-xpu>=3.8.0 — PyPI's own triton-xpu tops out at 3.3.0b1
 # (live-verified), so the xpu extra's triton must also come from the PyTorch xpu index.
 triton-xpu = [{ index = "pytorch-xpu", extra = "xpu" }]
-# torch==2.9.1+rocm6.4 depends on pytorch-triton-rocm==3.5.1, published only on the rocm index.
-pytorch-triton-rocm = [{ index = "pytorch-rocm64", extra = "rocm" }]
+# torch==2.13.0+rocm7.1 depends on triton-rocm==3.7.1 (renamed from pytorch-triton-rocm for
+# ROCm 7.x), published only on the rocm index.
+triton-rocm = [{ index = "pytorch-rocm71", extra = "rocm" }]
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
@@ -160,8 +163,8 @@ url = "https://download.pytorch.org/whl/xpu"
 explicit = true
 
 [[tool.uv.index]]
-name = "pytorch-rocm64"
-url = "https://download.pytorch.org/whl/rocm6.4"
+name = "pytorch-rocm71"
+url = "https://download.pytorch.org/whl/rocm7.1"
 explicit = true
 
 [tool.hatch.build.targets.wheel]

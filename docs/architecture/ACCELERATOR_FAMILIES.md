@@ -62,8 +62,8 @@ Pocket-TTS is CPU-only and is unaffected by family selection.
        torchaudio `2.11.0`
      - `cuda` → `https://download.pytorch.org/whl/cu126`, torch `2.14.0`,
        torchaudio `2.11.0`
-     - `rocm` → `https://download.pytorch.org/whl/rocm6.4`, torch `2.9.1`,
-       torchaudio `2.9.1`
+     - `rocm` → `https://download.pytorch.org/whl/rocm7.1`, torch `2.13.0`,
+       torchaudio `2.11.0`
      Override the index with `ACCEL_TORCH_INDEX_URL`, the torch version with
      `ACCEL_TORCH_VERSION`, and the torchaudio version with the new
      `ACCEL_TORCHAUDIO_VERSION`. If `ACCEL_TORCHAUDIO_VERSION` is unset but
@@ -103,7 +103,7 @@ accelerator torch/torchaudio pins natively, routed to the matching PyTorch
 index via `[tool.uv.sources]`/`[[tool.uv.index]]` (`pyproject.toml`):
 `cuda12` (cu126) / `cuda13` (cu130) / `xpu` / `rocm`. All four are mutually
 exclusive (`[tool.uv.conflicts]`); `cuda12`/`cuda13`/`xpu` are Windows+Linux,
-`rocm` is Linux-only (no Windows/macOS rocm6.4 build). No macOS accelerator
+`rocm` is Linux-only (no Windows/macOS rocm7.1 build). No macOS accelerator
 extra exists — macOS installs use the base (unaccelerated-by-this-manifest)
 torch pin regardless of which extra is requested; requesting `rocm`/`xpu` on
 an unsupported platform is a known uv soft spot (see

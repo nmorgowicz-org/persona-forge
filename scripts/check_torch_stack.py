@@ -2,8 +2,8 @@
 """Check that the pinned Torch stack is internally consistent.
 
 The universal uv lock contains one exact wheel variant for each supported accelerator
-extra, so different package versions in the lock are expected: ROCm uses 2.9.1 and
-XPU uses 2.13.0 while the default/CUDA stack uses 2.14.0. This checks that those are
+extra, so different package versions in the lock are expected: ROCm and XPU both use 2.13.0
+while the default/CUDA stack uses 2.14.0. This checks that those are
 the only versions present, that the default resolution remains exact, and that the
 container defaults match the manifest. It does not claim runtime compatibility; the
 dependency-bump verifier still runs real Torch tests and image import smoke.
