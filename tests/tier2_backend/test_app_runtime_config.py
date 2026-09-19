@@ -15,6 +15,33 @@ class TestRuntimeConfigGet:
         assert "TTS_BACKEND" in live
         assert "IDLE_UNLOAD_SECONDS" in live
 
+    def test_pocket_tts_cloning_capability_does_not_require_default_voice(
+        self, client, rt
+    ):
+        orig_backend = rt.tts_backend
+        orig_live_backend = rt.live_config["TTS_BACKEND"]
+        orig_provenance = rt.pocket_provenance
+        orig_default_state = rt.pocket_default_voice_state
+        rt.tts_backend = "pocket_tts"
+        rt.live_config["TTS_BACKEND"] = "pocket_tts"
+        rt.pocket_provenance = {
+            "cloning_available": True,
+            "cloning_status": "ready",
+            "message": "",
+        }
+        rt.pocket_default_voice_state = None
+        try:
+            resp = client.get("/runtime/config")
+            assert resp.status_code == 200
+            live = resp.get_json()["live"]
+            assert live["pocket_tts_voice_cloning_available"] is True
+            assert live["pocket_tts_voice_cloning_message"] == ""
+        finally:
+            rt.tts_backend = orig_backend
+            rt.live_config["TTS_BACKEND"] = orig_live_backend
+            rt.pocket_provenance = orig_provenance
+            rt.pocket_default_voice_state = orig_default_state
+
     def test_get_not_live_section(self, client):
         resp = client.get("/runtime/config")
         data = resp.get_json()

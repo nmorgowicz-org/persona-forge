@@ -439,9 +439,17 @@ class FakeModelRuntime:
             return rt._reconfig_in_progress
 
         def runtime_config_state() -> Dict[str, Any]:
+            live = dict(rt._runtime_live)
+            if rt.tts_backend == "pocket_tts":
+                prov = dict(rt.pocket_provenance)
+                cloning_available = prov.get("cloning_available")
+                if cloning_available is None:
+                    cloning_available = rt.pocket_default_voice_state is not None
+                live["pocket_tts_voice_cloning_available"] = bool(cloning_available)
+                live["pocket_tts_voice_cloning_message"] = (prov.get("message") or "").strip()
             return {
                 "reconfig_in_progress": rt._reconfig_in_progress,
-                "live": dict(rt._runtime_live),
+                "live": live,
                 "read_only": dict(rt._runtime_read_only),
                 "not_live": dict(rt._runtime_not_live),
             }
