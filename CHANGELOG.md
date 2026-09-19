@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.13](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.12...persona-forge-v1.4.13) (2026-09-19)
+
+
+### Bug Fixes
+
+* **pocket-tts:** report actual cloning capability ([ad3da4e](https://github.com/nmorgowicz-org/persona-forge/commit/ad3da4ee31a7a47a89d17e7dacaae7e410884855))
+
 ## [1.4.12](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.11...persona-forge-v1.4.12) (2026-09-19)
 
 
