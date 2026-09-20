@@ -128,3 +128,94 @@ test.describe('Stitch Studio preview lifecycle', () => {
     expect(newPreviewUrl).not.toBe(previewUrl)
   })
 })
+
+test.describe('Stitch Studio quick-insert transaction', () => {
+  test('quick insert cancel preserves the committed stitch plan', async ({ page }) => {
+    await insertNSegments(page, 2)
+    await page.locator('button[data-app-tooltip="Add a gap between these clips"]').first().click()
+    const decreaseGap = page.locator('button[aria-label="Decrease gap"]').first()
+    for (let i = 0; i < 5; i++) await decreaseGap.click()
+    await expect(page.locator('div[data-app-tooltip$="ms gap"]')).toHaveAttribute('data-app-tooltip', '150ms gap')
+
+    await page.getByTestId('nav-voice-library').click()
+    await page.getByRole('button', { name: 'Insert into stitch editor' }).nth(2).click()
+    await expect(page.getByTestId('stitch-editor-dialog')).toBeVisible()
+    await expect(page.getByTestId('stitch-clip')).toHaveCount(3)
+
+    // Change something in the draft -- must never reach the committed plan.
+    await page.locator('button[data-app-tooltip="Add a gap between these clips"]').first().click()
+
+    await page.getByTestId('stitch-cancel-draft').click()
+    await expect(page.getByTestId('stitch-editor-dialog')).toBeHidden()
+
+    await page.getByTestId('nav-stitch-studio').click()
+    await expect(page.getByTestId('stitch-clip')).toHaveCount(2)
+    await expect(page.locator('div[data-app-tooltip$="ms gap"]')).toHaveAttribute('data-app-tooltip', '150ms gap')
+  })
+
+  test('region edits survive quick insert commit into Studio', async ({ page }) => {
+    await page.goto('/')
+    await page.getByTestId('nav-voice-library').click()
+    await page.getByRole('button', { name: 'Insert into stitch editor' }).first().click()
+    await expect(page.getByTestId('stitch-editor-dialog')).toBeVisible()
+    await expect(page.getByTestId('stitch-clip')).toHaveCount(1)
+
+    await page.getByTestId('stitch-clip-edit-toggle').first().click()
+    await page.locator('button[data-app-tooltip="Apply gain to selected region"]').click()
+    await expect(page.getByTestId('stitch-region-edit')).toHaveCount(1)
+
+    await page.getByTestId('stitch-open-studio').click()
+    await expect(page.getByTestId('stitch-editor-dialog')).toBeHidden()
+    await expect(page.getByTestId('stitch-clip')).toHaveCount(1)
+    await page.getByTestId('stitch-clip-edit-toggle').first().click()
+    await expect(
+      page.getByTestId('stitch-region-edit'),
+      'region edit made in the quick-insert draft must survive the commit into Studio',
+    ).toHaveCount(1)
+  })
+
+  test('quick insert X Escape and backdrop restore Voice Library focus', async ({ page }) => {
+    await page.goto('/')
+    await page.getByTestId('nav-voice-library').click()
+    const launchButtons = page.getByRole('button', { name: 'Insert into stitch editor' })
+
+    // Escape
+    const escapeLaunch = launchButtons.first()
+    await escapeLaunch.click()
+    await expect(page.getByTestId('stitch-editor-dialog')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('stitch-editor-dialog')).toBeHidden()
+    await expect(escapeLaunch).toBeFocused()
+
+    // Backdrop click
+    const backdropLaunch = launchButtons.nth(1)
+    await backdropLaunch.click()
+    await expect(page.getByTestId('stitch-editor-dialog')).toBeVisible()
+    await page.mouse.click(4, 4)
+    await expect(page.getByTestId('stitch-editor-dialog')).toBeHidden()
+    await expect(backdropLaunch).toBeFocused()
+
+    // X close button
+    const xLaunch = launchButtons.nth(2)
+    await xLaunch.click()
+    await expect(page.getByTestId('stitch-editor-dialog')).toBeVisible()
+    await page.getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(page.getByTestId('stitch-editor-dialog')).toBeHidden()
+    await expect(xLaunch).toBeFocused()
+  })
+
+  test('cancelled quick insert cannot replace Studio preview', async ({ page }) => {
+    await insertNSegments(page, 2)
+    await expect(page.getByTestId('stitch-preview-ready')).toBeVisible()
+    const committedHash = await page.getByTestId('stitch-preview-ready').getAttribute('data-plan-hash')
+
+    await page.getByTestId('nav-voice-library').click()
+    await page.getByRole('button', { name: 'Insert into stitch editor' }).nth(2).click()
+    await expect(page.getByTestId('stitch-editor-dialog')).toBeVisible()
+    await page.locator('button[data-app-tooltip="Add a gap between these clips"]').first().click()
+    await page.getByTestId('stitch-cancel-draft').click()
+
+    await page.getByTestId('nav-stitch-studio').click()
+    await expect(page.getByTestId('stitch-preview-ready')).toHaveAttribute('data-plan-hash', committedHash ?? '')
+  })
+})

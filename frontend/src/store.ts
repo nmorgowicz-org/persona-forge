@@ -325,6 +325,14 @@ interface StoreState {
   ovStitchPlanPaddingMs: number[]
   ovStitchPlanDsp: StitchPlanDsp
   ovStitchEditorOpen: boolean
+  /** Page to return focus/context to -- recorded at open time for future-proofing; neither
+   * quick-insert call site navigates away before opening, so no active navigation currently
+   * reads it back. */
+  ovStitchEditorReturnPage: Page | null
+  /** Single clip to splice into the quick-insert draft's initial plan, in addition to
+   * whatever is already in the store-backed plan. Null when the caller already wrote its own
+   * (possibly multi-clip) plan directly into the store before opening. */
+  ovStitchEditorIncomingClip: StitchPlanClip | null
   ovStitchRegionEditsByClip: StitchRegionEditsByClip
 
   setOvStitchPlanClips: (
@@ -342,8 +350,16 @@ interface StoreState {
   setOvStitchPlanPaddingAt: (gapIndex: number, ms: number) => void
   setOvStitchPlanPaddingMs: (v: number[]) => void
   setOvStitchPlanDsp: (patch: Partial<StitchPlanDsp>) => void
-  setOvStitchEditorOpen: (v: boolean) => void
+  /** Atomically opens the quick-insert modal with its return-page/incoming-clip metadata --
+   * the only supported way to open it (no bare boolean setter, so callers can't forget the
+   * metadata that makes the draft session correct). */
+  openOvStitchEditor: (opts: { returnPage: Page; incomingClip?: StitchPlanClip | null }) => void
+  closeOvStitchEditor: () => void
 }
+
+// Element to restore focus to when the quick-insert stitch editor closes (see
+// openOvStitchEditor/closeOvStitchEditor below).
+let lastFocusedBeforeStitchEditor: HTMLElement | null = null
 
 const initialTheme = loadStoredTheme()
 applyTheme(initialTheme)
@@ -542,6 +558,8 @@ export const useAppStore = create<StoreState>((set) => ({
       pauseOffsetMs: 0,
     },
     ovStitchEditorOpen: false,
+    ovStitchEditorReturnPage: null,
+    ovStitchEditorIncomingClip: null,
 
   setOvSelections: (updater) =>
     set((s) => ({
@@ -692,7 +710,30 @@ export const useAppStore = create<StoreState>((set) => ({
     set((s) => ({
       ovStitchPlanDsp: { ...s.ovStitchPlanDsp, ...patch },
     })),
-  setOvStitchEditorOpen: (v) => set({ ovStitchEditorOpen: v }),
+  openOvStitchEditor: (opts) => {
+    // Radix's own close-autofocus restore doesn't reliably fire when the whole modal subtree
+    // unmounts synchronously with the close (our editor is conditionally rendered, not kept
+    // mounted with a closed Dialog) -- capture/restore focus ourselves instead.
+    lastFocusedBeforeStitchEditor = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    set({
+      ovStitchEditorOpen: true,
+      ovStitchEditorReturnPage: opts.returnPage,
+      ovStitchEditorIncomingClip: opts.incomingClip ?? null,
+    })
+  },
+  closeOvStitchEditor: () => {
+    set({
+      ovStitchEditorOpen: false,
+      ovStitchEditorReturnPage: null,
+      ovStitchEditorIncomingClip: null,
+    })
+    // Deferred past the current tick: Radix's own FocusScope unmount cleanup runs a moment
+    // after this synchronous call (as the dialog subtree actually unmounts) and would
+    // otherwise steal focus back after we restore it.
+    const toFocus = lastFocusedBeforeStitchEditor
+    lastFocusedBeforeStitchEditor = null
+    setTimeout(() => toFocus?.focus(), 0)
+  },
 }))
 
 // ---- Store-level polling: survives unmounts ----

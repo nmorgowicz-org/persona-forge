@@ -1,8 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { createPortal } from 'react-dom'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { AnimatePresence, motion, Reorder } from 'motion/react'
 import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play, Pause, Scissors, Trash2, Volume2, VolumeX, Gauge, RotateCcw } from 'lucide-react'
-import { useAppStore, type StitchPlanClip } from '@/store'
+import { type StitchPlanClip, type StitchPlanDsp } from '@/store'
 import { base64ToBlob, cn } from '@/lib/utils'
 import {
   getStitchPacingTargets,
@@ -17,9 +17,9 @@ import {
   hashStitchPlan,
   type StitchPlanState,
   type StitchRegionEdit,
-  type StitchRegionEditsByClip,
 } from '@/lib/stitchPlan'
 import { getClipAudioAnalysis } from '@/lib/waveform'
+import { type StitchPlanSession } from '@/hooks/useStitchPlanSession'
 import { planStateToPayload } from '@/lib/stitchPreview'
 import { useStitchPreview } from '@/hooks/useStitchPreview'
 import { AudioPlayer } from './AudioPlayer'
@@ -42,7 +42,6 @@ const useReducedMotion = () => {
 /* ---------- helpers ---------- */
 
 type RegionEdit = StitchRegionEdit
-type RegionEditsByClip = StitchRegionEditsByClip
 
 
 function clampMs(v: number, min: number, max: number): number {
@@ -840,9 +839,7 @@ interface StitchTimelineProps {
   isPreviewStale: boolean
   library: SegmentMeta[]
   onInsertFromLibrary: (seg: SegmentMeta) => void
-  regionEditsByClip: RegionEditsByClip
-  onAddRegionEdit: (clipId: string, edit: RegionEdit) => void
-  onRemoveRegionEdit: (clipId: string, editId: string) => void
+  session: StitchPlanSession
   voiceLibrary?: VoiceMeta[]
   onInsertVoiceFromLibrary?: (voice: VoiceMeta) => void
 }
@@ -852,21 +849,19 @@ export const StitchTimeline = memo(function StitchTimeline({
   isPreviewStale: _isPreviewStale,
   library,
   onInsertFromLibrary,
-  regionEditsByClip,
-  onAddRegionEdit,
-  onRemoveRegionEdit,
+  session,
   voiceLibrary,
   onInsertVoiceFromLibrary,
 }: StitchTimelineProps) {
   const reducedMotion = useReducedMotion()
-  const clips = useAppStore((s) => s.ovStitchPlanClips)
-  const paddingMs = useAppStore((s) => s.ovStitchPlanPaddingMs)
-  const reorderClip = useAppStore((s) => s.reorderOvStitchPlanClip)
-  const removeClip = useAppStore((s) => s.removeOvStitchPlanClip)
-  const updateClip = useAppStore((s) => s.updateOvStitchPlanClip)
-  const setClips = useAppStore((s) => s.setOvStitchPlanClips)
-  const setPadding = useAppStore((s) => s.setOvStitchPlanPaddingAt)
-  const setPaddingMs = useAppStore((s) => s.setOvStitchPlanPaddingMs)
+  const { plan, reorderClip, removeClip, updateClip, setClips, setPaddingAt: setPadding, setPadding: setPaddingMs, setRegionEdits: onAddOrRemoveRegionEdit } = session
+  const { clips, paddingMs, regionEditsByClip } = plan
+  const onAddRegionEdit = useCallback((clipId: string, edit: RegionEdit) => {
+    onAddOrRemoveRegionEdit(clipId, [...(regionEditsByClip[clipId] ?? []), edit])
+  }, [onAddOrRemoveRegionEdit, regionEditsByClip])
+  const onRemoveRegionEdit = useCallback((clipId: string, editId: string) => {
+    onAddOrRemoveRegionEdit(clipId, (regionEditsByClip[clipId] ?? []).filter((edit) => edit.id !== editId))
+  }, [onAddOrRemoveRegionEdit, regionEditsByClip])
   const hasVoiceLibrary = (voiceLibrary?.length ?? 0) > 0 && !!onInsertVoiceFromLibrary
 
   const handleReorder = useCallback(
@@ -1105,10 +1100,18 @@ export const StitchTimeline = memo(function StitchTimeline({
 
 /* ---------- DSP controls panel ---------- */
 
-export function StitchDspControls({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+export function StitchDspControls({
+  open,
+  onToggle,
+  dsp,
+  onSetDsp: setDsp,
+}: {
+  open: boolean
+  onToggle: () => void
+  dsp: StitchPlanDsp
+  onSetDsp: (patch: Partial<StitchPlanDsp>) => void
+}) {
   const reducedMotion = useReducedMotion()
-  const dsp = useAppStore((s) => s.ovStitchPlanDsp)
-  const setDsp = useAppStore((s) => s.setOvStitchPlanDsp)
 
   return (
     <div className="mt-2 flex flex-col gap-2">
@@ -1188,73 +1191,53 @@ function SliderField({
 
 /* ---------- Editor shell ---------- */
 
-interface StitchEditorBodyProps {
-  /** Reference texts, in clip order, used as the transcript for the saved voice's cloning
-   * reference audio -- kept separate from onSave's plan payload because it's derived from the
-   * clips' (possibly user-edited) text, not from DSP/trim/fade params. */
-  onSave: (plan: StitchPlanPayload, segments: string[]) => Promise<void>
+interface StitchEditorCommonProps {
+  session: StitchPlanSession
   library: SegmentMeta[]
   onInsertFromLibrary: (seg: SegmentMeta) => void
   voiceLibrary?: VoiceMeta[]
   onInsertVoiceFromLibrary?: (voice: VoiceMeta) => void
-  /** Renders a close button in the header when set — the standalone Stitch Studio page has
-   * nothing to "close" back to, so it omits this. */
-  onClose?: () => void
-  /** Clears page-level naming/error state after the shared editor clears its timeline. */
-  onStartOver?: () => void
 }
 
-// Shared editor internals (timeline + DSP controls + live preview + render/save footer), with
-// no opinion on how it's framed — StitchEditorPanel wraps it in a full-screen modal (used from
-// the OmniVoice flow, popping over an existing workflow); StitchEditorInline renders
-// it as plain page content (used by the standalone Stitch Studio page).
-function StitchEditorBody({
-  onClose,
-  onStartOver,
-  onSave,
-  library,
-  onInsertFromLibrary,
-  voiceLibrary,
-  onInsertVoiceFromLibrary,
-}: StitchEditorBodyProps) {
-  const clips = useAppStore((s) => s.ovStitchPlanClips)
-  const paddingMs = useAppStore((s) => s.ovStitchPlanPaddingMs)
-  const dsp = useAppStore((s) => s.ovStitchPlanDsp)
-  const setPaddingMs = useAppStore((s) => s.setOvStitchPlanPaddingMs)
-  const setClips = useAppStore((s) => s.setOvStitchPlanClips)
-  const regionEditsByClip = useAppStore((s) => s.ovStitchRegionEditsByClip)
-  const setRegionEditsForClip = useAppStore((s) => s.setOvStitchRegionEdits)
+export type StitchEditorBodyProps =
+  | (StitchEditorCommonProps & {
+      surface: 'studio'
+      /** Reference texts, in clip order, used as the transcript for the saved voice's cloning
+       * reference audio -- kept separate from onSave's plan payload because it's derived from
+       * the clips' (possibly user-edited) text, not from DSP/trim/fade params. */
+      onSave: (plan: StitchPlanPayload, segments: string[]) => Promise<void>
+      onStartOver?: () => void
+    })
+  | (StitchEditorCommonProps & {
+      surface: 'quick-insert'
+      /** Atomically commits the draft plan into the store, then either stays on the calling
+       * page ('caller') or navigates to Stitch Studio ('studio'). */
+      onCommitDraft: (plan: StitchPlanState, destination: 'caller' | 'studio') => void
+      onCancelDraft: () => void
+    })
+
+// Shared editor internals (timeline + DSP controls + live preview + render/commit footer),
+// with no opinion on how it's framed -- StitchEditorPanel wraps it in a Radix dialog (the
+// quick-insert surface, hoisted once in App.tsx); StitchEditorInline renders it as plain page
+// content (the studio surface, used by the standalone Stitch Studio page). The two surfaces
+// never mix: quick-insert never renders a reference-voice save control, and studio never
+// renders the draft's commit/cancel footer.
+function StitchEditorBody(props: StitchEditorBodyProps) {
+  const { session, library, onInsertFromLibrary, voiceLibrary, onInsertVoiceFromLibrary } = props
+  const { plan } = session
+  const { clips, paddingMs, dsp } = plan
   const [showDsp, setShowDsp] = useState(false)
   const [isNormalizingPacing, setIsNormalizingPacing] = useState(false)
 
-  const plan = useMemo<StitchPlanState>(
-    () => ({ clips, paddingMs, dsp, regionEditsByClip }),
-    [clips, paddingMs, dsp, regionEditsByClip],
-  )
   const preview = useStitchPreview(plan)
   const planHash = useMemo(() => hashStitchPlan(plan), [plan])
 
-  const addRegionEdit = useCallback((clipId: string, edit: RegionEdit) => {
-    setRegionEditsForClip(clipId, [...(regionEditsByClip[clipId] ?? []), edit])
-  }, [regionEditsByClip, setRegionEditsForClip])
-
-  const removeRegionEdit = useCallback((clipId: string, editId: string) => {
-    const nextEdits = (regionEditsByClip[clipId] ?? []).filter((edit) => edit.id !== editId)
-    setRegionEditsForClip(clipId, nextEdits)
-  }, [regionEditsByClip, setRegionEditsForClip])
-
-  useEffect(() => {
-    const liveClipIds = new Set(clips.map((clip) => clip.clipId))
-    for (const clipId of Object.keys(regionEditsByClip)) {
-      if (!liveClipIds.has(clipId)) setRegionEditsForClip(clipId, [])
-    }
-  }, [clips, regionEditsByClip, setRegionEditsForClip])
-
   const handleSave = useCallback(async () => {
+    if (props.surface !== 'studio') return
     preview.cancel()
     const segments = clips.map((c) => c.text?.trim()).filter((t): t is string => !!t)
-    await onSave(planStateToPayload(plan), segments)
-  }, [plan, onSave, clips, preview])
+    await props.onSave(planStateToPayload(plan), segments)
+  }, [props, plan, clips, preview])
 
   const normalizePacing = useCallback(async () => {
     if (!clips.length) return
@@ -1266,23 +1249,34 @@ function StitchEditorBody({
         paceMultiplier: dsp.paceMultiplier,
         pauseOffsetMs: dsp.pauseOffsetMs,
       })
-      setPaddingMs(result.padding_ms)
-      setClips((current) => current.map((clip) => ({ ...clip, prosodyMode: 'auto' })))
+      session.setPadding(result.padding_ms)
+      session.setClips((current) => current.map((clip) => ({ ...clip, prosodyMode: 'auto' })))
     } catch {
       // Surfaced via the preview's own error state on the next render attempt.
     } finally {
       setIsNormalizingPacing(false)
     }
-  }, [clips, dsp, setClips, setPaddingMs])
+  }, [clips, dsp, session])
 
   const handleStartOver = useCallback(() => {
+    if (props.surface !== 'studio') return
     if (!clips.length || !window.confirm('Clear this timeline and start over?')) return
     preview.clear()
-    setClips([])
-    setPaddingMs([])
-    for (const clipId of Object.keys(regionEditsByClip)) setRegionEditsForClip(clipId, [])
-    onStartOver?.()
-  }, [clips.length, onStartOver, preview, regionEditsByClip, setClips, setPaddingMs, setRegionEditsForClip])
+    session.reset()
+    props.onStartOver?.()
+  }, [props, clips.length, preview, session])
+
+  const handleCommitDraft = useCallback((destination: 'caller' | 'studio') => {
+    if (props.surface !== 'quick-insert') return
+    preview.cancel()
+    props.onCommitDraft(plan, destination)
+  }, [props, plan, preview])
+
+  const handleCancelDraft = useCallback(() => {
+    if (props.surface !== 'quick-insert') return
+    preview.cancel()
+    props.onCancelDraft()
+  }, [props, preview])
 
   const totalMs = useMemo(() => {
     let sum = 0
@@ -1323,8 +1317,8 @@ function StitchEditorBody({
             </span>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {clips.length > 0 && (
+        {props.surface === 'studio' && clips.length > 0 && (
+          <div className="flex shrink-0 items-center gap-1.5">
             <button
               type="button"
               data-testid="stitch-start-over"
@@ -1334,13 +1328,8 @@ function StitchEditorBody({
               <RotateCcw className="size-3" />
               Start over
             </button>
-          )}
-          {onClose && (
-            <button type="button" onClick={onClose} className="rounded-full p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground" title="Close editor">
-              <X className="size-4" />
-            </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <StitchTimeline
@@ -1348,13 +1337,11 @@ function StitchEditorBody({
         isPreviewStale={preview.isStale}
         library={library}
         onInsertFromLibrary={onInsertFromLibrary}
-        regionEditsByClip={regionEditsByClip}
-        onAddRegionEdit={addRegionEdit}
-        onRemoveRegionEdit={removeRegionEdit}
+        session={session}
         voiceLibrary={voiceLibrary}
         onInsertVoiceFromLibrary={onInsertVoiceFromLibrary}
       />
-      <StitchDspControls open={showDsp} onToggle={() => setShowDsp((v) => !v)} />
+      <StitchDspControls open={showDsp} onToggle={() => setShowDsp((v) => !v)} dsp={dsp} onSetDsp={session.setDsp} />
 
       {clips.length > 0 && (
         <div
@@ -1384,51 +1371,78 @@ function StitchEditorBody({
       )}
 
       <div className="mt-1 flex items-center justify-between border-t border-border/60 pt-3">
-        <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            data-testid="stitch-save-voice"
-            onClick={handleSave}
-            disabled={preview.isRendering || clips.length === 0}
-            className="btn-brand inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-medium"
-            title="This will be used as a reusable cloning source for text-to-speech."
-          >
-            Save as reference voice
-          </button>
-        </div>
+        {props.surface === 'studio' ? (
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              data-testid="stitch-save-voice"
+              onClick={handleSave}
+              disabled={preview.isRendering || clips.length === 0}
+              className="btn-brand inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-medium"
+              title="This will be used as a reusable cloning source for text-to-speech."
+            >
+              Save as reference voice
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              data-testid="stitch-cancel-draft"
+              onClick={handleCancelDraft}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              data-testid="stitch-save-close"
+              onClick={() => handleCommitDraft('caller')}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+              title="Keep this segment in your Stitch Studio draft"
+            >
+              Save and close
+            </button>
+            <button
+              type="button"
+              data-testid="stitch-open-studio"
+              onClick={() => handleCommitDraft('studio')}
+              className="btn-brand inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-medium"
+            >
+              Open in Stitch Studio
+            </button>
+          </div>
+        )}
         <div className="text-[10px] text-muted-foreground">{(totalMs / 1000).toFixed(1)}s total</div>
       </div>
     </>
   )
 }
 
-export function StitchEditorPanel(props: StitchEditorBodyProps & { onClose: () => void }) {
-  return createPortal(
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) props.onClose()
-      }}
-    >
-      <motion.div
-        initial={{ opacity: 0, y: 12, scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 12, scale: 0.98 }}
-        className="flex max-h-[88vh] w-full max-w-5xl flex-col gap-4 overflow-y-auto rounded-2xl border border-border bg-background px-6 py-5 shadow-2xl"
+export function StitchEditorPanel(props: Extract<StitchEditorBodyProps, { surface: 'quick-insert' }>) {
+  const handleOpenChange = useCallback((open: boolean) => {
+    if (!open) props.onCancelDraft()
+  }, [props])
+
+  return (
+    <Dialog open onOpenChange={handleOpenChange}>
+      <DialogContent
+        data-testid="stitch-editor-dialog"
+        className="flex max-h-[88vh] w-full max-w-5xl flex-col gap-4 overflow-y-auto sm:max-w-5xl"
       >
+        <DialogTitle className="sr-only">Stitch Studio quick insert</DialogTitle>
+        <DialogDescription className="sr-only">
+          Arrange the inserted clip, then choose whether to open it in Stitch Studio or keep it in your draft.
+        </DialogDescription>
         <StitchEditorBody {...props} />
-      </motion.div>
-    </motion.div>,
-    document.body,
+      </DialogContent>
+    </Dialog>
   )
 }
 
-// Plain page content, no portal/backdrop/close button — used by the standalone Stitch Studio
+// Plain page content, no portal/backdrop/close button -- used by the standalone Stitch Studio
 // page, which is the editor's home rather than something popping over another workflow.
-export function StitchEditorInline(props: Omit<StitchEditorBodyProps, 'onClose'>) {
+export function StitchEditorInline(props: Extract<StitchEditorBodyProps, { surface: 'studio' }>) {
   return (
     <div className="flex min-w-0 flex-col gap-4 rounded-2xl border border-border bg-background/50 px-6 py-5">
       <StitchEditorBody {...props} />

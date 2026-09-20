@@ -78,7 +78,7 @@ import { hasChipSelections, type ChipSelections } from '@/lib/voiceDesignChips'
 import { MiniAudioDeck } from '@/components/audio/MiniAudioDeck'
 import { Button } from '@/components/ui/button'
 import { createStitchClipFromSegment } from '@/lib/stitchClips'
-import { useAppStore, type StitchPlanClip } from '@/store'
+import { useAppStore, type StitchPlanClip, type StitchPlanDsp } from '@/store'
 import { VariantCompare } from '@/components/VariantCompare'
 import { cn } from '@/lib/utils'
 import { InfoIcon } from '@/components/InfoIcon'
@@ -1738,10 +1738,8 @@ export function VoiceLibraryPage() {
   const setPage = useAppStore((s) => s.setPage)
   const setEditingVoice = useAppStore((s) => s.setEditingVoice)
   const setDesignEngine = useAppStore((s) => s.setDesignEngine)
-  const setOvStitchEditorOpen = useAppStore((s) => s.setOvStitchEditorOpen)
-  const setOvStitchPlanClips = useAppStore((s) => s.setOvStitchPlanClips)
-  const setOvStitchPlanPaddingMs = useAppStore((s) => s.setOvStitchPlanPaddingMs)
-  const setOvStitchPlanDsp = useAppStore((s) => s.setOvStitchPlanDsp)
+  const openOvStitchEditor = useAppStore((s) => s.openOvStitchEditor)
+  const replaceOvStitchPlan = useAppStore((s) => s.replaceOvStitchPlan)
   const deepLinkProsodyVoiceId = useAppStore((s) => s.deepLinkProsodyVoiceId)
   const setDeepLinkProsodyVoiceId = useAppStore((s) => s.setDeepLinkProsodyVoiceId)
   const voiceLibraryFocusVoiceId = useAppStore((s) => s.voiceLibraryFocusVoiceId)
@@ -1783,12 +1781,7 @@ export function VoiceLibraryPage() {
     setError(null)
     try {
       const clip = await createStitchClipFromSegment(seg)
-
-      setPage('voice-design')
-      setDesignEngine('omnivoice')
-
-      setOvStitchPlanClips((prev: any) => [...(prev ?? []), clip])
-      setOvStitchEditorOpen(true)
+      openOvStitchEditor({ returnPage: 'voice-library', incomingClip: clip })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -1898,20 +1891,27 @@ export function VoiceLibraryPage() {
         return
       }
 
-      setOvStitchPlanClips(rebuilt)
-      setOvStitchPlanPaddingMs(plan?.padding_ms ?? new Array(Math.max(0, rebuilt.length - 1)).fill(0))
-      setOvStitchPlanDsp({
-        crossfadeMs: plan?.crossfade_ms,
-        segmentTargetDbfs: plan?.segment_target_dbfs,
-        finalTargetDbfs: plan?.final_target_dbfs,
-        finalCeilingDb: plan?.final_ceiling_db,
+      const baseDsp = useAppStore.getState().ovStitchPlanDsp
+      const dsp: StitchPlanDsp = {
+        ...baseDsp,
+        crossfadeMs: plan?.crossfade_ms ?? baseDsp.crossfadeMs,
+        segmentTargetDbfs: plan?.segment_target_dbfs ?? baseDsp.segmentTargetDbfs,
+        finalTargetDbfs: plan?.final_target_dbfs ?? baseDsp.finalTargetDbfs,
+        finalCeilingDb: plan?.final_ceiling_db ?? baseDsp.finalCeilingDb,
         compressEnabled: plan?.compress != null,
-        compressThresholdDb: plan?.compress?.threshold_db,
-        compressRatio: plan?.compress?.ratio,
+        compressThresholdDb: plan?.compress?.threshold_db ?? baseDsp.compressThresholdDb,
+        compressRatio: plan?.compress?.ratio ?? baseDsp.compressRatio,
+      }
+      replaceOvStitchPlan({
+        clips: rebuilt,
+        paddingMs: plan?.padding_ms ?? new Array(Math.max(0, rebuilt.length - 1)).fill(0),
+        dsp,
+        regionEditsByClip: {},
       })
-      setDesignEngine('omnivoice')
-      setPage('voice-design')
-      setOvStitchEditorOpen(true)
+      // Rebuilding replaces the whole plan (not a single incoming clip like the quick-insert
+      // modal), so it commits straight to the real Stitch Studio page instead of opening the
+      // quick-insert draft -- there is no meaningful "decide where this goes" step here.
+      setPage('stitch-studio')
 
       if (skipped > 0) {
         setError(

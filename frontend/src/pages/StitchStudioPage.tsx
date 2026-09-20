@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAppStore } from '@/store'
 import { StitchEditorInline } from '@/components/StitchTimeline'
+import { useStoreStitchPlanSession } from '@/hooks/useStitchPlanSession'
 import {
   listOmniVoiceSegments,
   listVoices,
@@ -51,13 +52,15 @@ export function StitchStudioPage() {
     listVoices().then(setVoices).catch(() => {})
   }, [setVoices])
 
+  const session = useStoreStitchPlanSession()
+
   const insertFromLibrary = useCallback(async (seg: SegmentMeta) => {
-    await insertSegmentIntoStitchTimeline(seg, setError)
-  }, [])
+    await insertSegmentIntoStitchTimeline(seg, session, setError)
+  }, [session])
 
   const insertVoiceFromLibrary = useCallback(async (voice: VoiceMeta) => {
-    await insertVoiceIntoStitchTimeline(voice, setError)
-  }, [])
+    await insertVoiceIntoStitchTimeline(voice, session, setError)
+  }, [session])
 
   const handleSave = useCallback(
     async (plan: StitchPlanPayload, segments: string[]) => {
@@ -137,6 +140,8 @@ export function StitchStudioPage() {
       {isSaving && <p className="text-xs text-muted-foreground">Saving…</p>}
 
       <StitchEditorInline
+        surface="studio"
+        session={session}
         library={library}
         onInsertFromLibrary={insertFromLibrary}
         voiceLibrary={voices}

@@ -1,20 +1,20 @@
 // Shared "insert a library item into the stitch timeline" logic, used by both
 // OmniVoicePanel's stitch editor entry point and the standalone Stitch Studio page.
-import { useAppStore, type StitchPlanClip } from '@/store'
+import type { StitchPlanClip } from '@/store'
 import { getSegmentAudioBase64, getVoice, type SegmentMeta, type VoiceMeta } from '@/lib/api'
 import { getClipAudioAnalysis } from '@/lib/waveform'
+import type { StitchPlanSession } from '@/hooks/useStitchPlanSession'
 
-function appendStitchPlanClip(clip: StitchPlanClip) {
-  const { setOvStitchPlanClips, setOvStitchPlanPaddingAt } = useAppStore.getState()
-  setOvStitchPlanClips((prev) => {
-    const next = [...prev, clip]
-    const needed = Math.max(0, next.length - 1)
-    const current = useAppStore.getState().ovStitchPlanPaddingMs || []
-    for (let i = current.length; i < needed; i++) {
-      setOvStitchPlanPaddingAt(i, 0)
-    }
-    return next
-  })
+// Appends to whichever session is active (the store-backed Studio session or a quick-insert
+// draft) -- callers never write to zustand directly, so a quick-insert draft can never leak
+// into the live plan before it is explicitly committed.
+function appendStitchPlanClip(clip: StitchPlanClip, session: StitchPlanSession) {
+  const clipCountBefore = session.plan.clips.length
+  const paddingLenBefore = session.plan.paddingMs.length
+  session.setClips((prev) => [...prev, clip])
+  for (let i = paddingLenBefore; i < clipCountBefore; i++) {
+    session.setPaddingAt(i, 0)
+  }
 }
 
 // Public shared helpers — used by:
@@ -92,11 +92,12 @@ export async function createStitchClipFromVoice(voice: VoiceMeta): Promise<Stitc
 
 export async function insertSegmentIntoStitchTimeline(
   seg: SegmentMeta,
+  session: StitchPlanSession,
   onError: (msg: string) => void,
 ): Promise<void> {
   try {
     const clip = await createStitchClipFromSegment(seg)
-    appendStitchPlanClip(clip)
+    appendStitchPlanClip(clip, session)
   } catch (err) {
     onError(err instanceof Error ? err.message : String(err))
   }
@@ -104,11 +105,12 @@ export async function insertSegmentIntoStitchTimeline(
 
 export async function insertVoiceIntoStitchTimeline(
   voice: VoiceMeta,
+  session: StitchPlanSession,
   onError: (msg: string) => void,
 ): Promise<void> {
   try {
     const clip = await createStitchClipFromVoice(voice)
-    appendStitchPlanClip(clip)
+    appendStitchPlanClip(clip, session)
   } catch (err) {
     onError(err instanceof Error ? err.message : String(err))
   }
