@@ -52,8 +52,12 @@ export default async function (ctx) {
 
     const candidateDeadline = Date.now() + 180000;
     while (Date.now() < candidateDeadline) {
+        // $$eval (not $eval) is required here: $eval hands the callback the single
+        // matched element, which has no .length, so `els.length` was always undefined
+        // and this loop silently burned the full 180s deadline on every run regardless
+        // of how quickly a candidate actually rendered.
         const count = await page
-            .$eval('[data-testid="omnivoice-candidate-take"]', (els) => els.length)
+            .$$eval('[data-testid="omnivoice-candidate-take"]', (els) => els.length)
             .catch(() => 0);
         if (count >= 1) break;
         await new Promise((r) => setTimeout(r, 1500));
