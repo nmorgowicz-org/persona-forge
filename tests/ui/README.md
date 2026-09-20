@@ -52,6 +52,7 @@ from `tests/ui/fixtures/capture-data/` into disposable temp dirs on every run �
 - `segment-library-browse` — the saved-segments picker panel
 - `segment-browser-scale` — the segment/voice browser scrolled through a 250-row, five-project fixture library
 - `stitch-assembly` — two clips inserted into the timeline
+- `gap-editing` — always-visible seam controls, including a 0.00s seam next to a typed 250ms seam
 
 **Accent Design / OmniVoice**
 - `omnivoice-audition` — live candidate generation + stitched result (requires `--source real-local`)

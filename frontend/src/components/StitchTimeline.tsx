@@ -1,9 +1,8 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { AnimatePresence, motion, Reorder } from 'motion/react'
-import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play, Pause, Scissors, Trash2, Volume2, VolumeX, Gauge, RotateCcw } from 'lucide-react'
+import { ChevronUp, ChevronDown, Loader2, Play, Gauge, RotateCcw, Minus, Plus, Maximize2 } from 'lucide-react'
 import { type StitchPlanClip, type StitchPlanDsp } from '@/store'
-import { base64ToBlob, cn } from '@/lib/utils'
 import {
   getStitchPacingTargets,
   type StitchPlanPayload,
@@ -16,14 +15,14 @@ import {
   type StitchPlanState,
   type StitchRegionEdit,
 } from '@/lib/stitchPlan'
-import { getClipAudioAnalysis } from '@/lib/waveform'
-import { createTimeTicks } from '@/lib/timeAxis'
 import { useElementWidth } from '@/hooks/useElementWidth'
 import { type StitchPlanSession } from '@/hooks/useStitchPlanSession'
 import { planStateToPayload } from '@/lib/stitchPreview'
 import { useStitchPreview } from '@/hooks/useStitchPreview'
 import { SegmentBrowserModal } from './stitch/SegmentBrowserModal'
-import { WaveformLane } from './waveform/WaveformLane'
+import { TimelineRuler } from './stitch/TimelineRuler'
+import { GapControl } from './stitch/GapControl'
+import { StitchClipCard } from './stitch/StitchClipCard'
 
 // Helper for reduced motion
 const useReducedMotion = () => {
@@ -43,570 +42,24 @@ const useReducedMotion = () => {
 
 type RegionEdit = StitchRegionEdit
 
-
 function clampMs(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(v)))
 }
 
-function makeRegionEditId(type: RegionEdit['type']): string {
-  return `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+const MIN_PPS = 8
+const MAX_PPS = 400
+const DEFAULT_PPS = 60
+const MIN_CLIP_PX = 160
+const RAIL_PADDING_PX = 32
+
+function clampPps(v: number): number {
+  return Math.max(MIN_PPS, Math.min(MAX_PPS, v))
 }
 
-
-/* ---------- sub-components ---------- */
-
-function StitchTimelineClip({
-  clip,
-  onRemove,
-  onUpdate,
-  regionEdits,
-  onAddRegionEdit,
-  onRemoveRegionEdit,
-  onSplitRegion,
-  isReordering,
-  reducedMotion: _reducedMotion,
-}: {
-  clip: StitchPlanClip
-  onRemove: (clipId: string) => void
-  onUpdate: (clipId: string, patch: Partial<StitchPlanClip>) => void
-  regionEdits: RegionEdit[]
-  onAddRegionEdit: (clipId: string, edit: RegionEdit) => void
-  onRemoveRegionEdit: (clipId: string, editId: string) => void
-  onSplitRegion: (clipId: string, startMs: number, endMs: number) => void
-  isReordering?: boolean
-  reducedMotion: boolean
-}) {
-  const [peaks, setPeaks] = useState<number[] | null>(null)
-  const [durMs, setDurMs] = useState<number | null>(null)
-  const [clipPlaying, setClipPlaying] = useState(false)
-  const clipAudioRef = useRef<HTMLAudioElement | null>(null)
-  const clipAudioUrlRef = useRef<string | null>(null)
-  const [editingText, setEditingText] = useState(false)
-  const [showAdvanced, setShowAdvanced] = useState(false)
-  const [draftText, setDraftText] = useState(clip.text ?? '')
-  const [selection, setSelection] = useState<{ startMs: number; endMs: number } | null>(null)
-  const [gainDb, setGainDb] = useState(-3)
-  const [regionFadeInMs, setRegionFadeInMs] = useState(15)
-  const [regionFadeOutMs, setRegionFadeOutMs] = useState(35)
-  const [silenceMs, setSilenceMs] = useState(180)
-  const textInputRef = useRef<HTMLInputElement | null>(null)
-  const activeHandle = useRef<'leftTrim' | 'rightTrim' | 'leftFade' | 'rightFade' | null>(null)
-  const selectionDrag = useRef<{ startMs: number } | null>(null)
-  const laneRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (editingText) textInputRef.current?.focus()
-  }, [editingText])
-
-  const beginEditText = () => {
-    setDraftText(clip.text ?? '')
-    setEditingText(true)
-  }
-
-  const commitText = () => {
-    setEditingText(false)
-    const trimmed = draftText.trim()
-    if (trimmed !== (clip.text ?? '')) onUpdate(clip.clipId, { text: trimmed })
-  }
-
-  const cancelEditText = () => {
-    setEditingText(false)
-    setDraftText(clip.text ?? '')
-  }
-
-  useEffect(() => {
-    return () => {
-      clipAudioRef.current?.pause()
-      if (clipAudioUrlRef.current) URL.revokeObjectURL(clipAudioUrlRef.current)
-    }
-  }, [])
-
-  const toggleClipPlay = () => {
-    if (!clip.sourceAudioBase64) return
-    if (!clipAudioRef.current) {
-      const url = URL.createObjectURL(base64ToBlob(clip.sourceAudioBase64))
-      clipAudioUrlRef.current = url
-      const audio = new Audio(url)
-      audio.addEventListener('ended', () => setClipPlaying(false))
-      clipAudioRef.current = audio
-    }
-    if (clipPlaying) {
-      clipAudioRef.current.pause()
-      setClipPlaying(false)
-    } else {
-      void clipAudioRef.current.play()
-      setClipPlaying(true)
-    }
-  }
-
-  useEffect(() => {
-    let dead = false
-    if (!clip.sourceAudioBase64) return
-    const assetKey = `clip:${clip.clipId}:${clip.sourceAudioBase64.length}`
-    getClipAudioAnalysis(assetKey, clip.sourceAudioBase64, 48)
-      .then((analysis) => {
-        if (dead) return
-        setDurMs(analysis.durationMs)
-        setPeaks(analysis.peaks)
-      })
-      .catch(() => {
-        if (!dead) setPeaks([])
-      })
-    return () => { dead = true }
-  }, [clip.clipId, clip.sourceAudioBase64])
-
-  const effectiveDuration = clipEffectiveDurationMs(clip)
-
-  const clampTrimStart = useCallback((v: number) => {
-    const nv = Math.max(0, Math.min(v, (durMs ?? 0) - 20))
-    if (nv + clip.trimEndMs >= (durMs ?? 0)) return durMs ? durMs - 20 - clip.trimEndMs : 0
-    return nv
-  }, [clip.trimEndMs, durMs])
-  const clampTrimEnd = useCallback((v: number) => {
-    const nv = Math.max(0, Math.min(v, (durMs ?? 0) - 20))
-    if (nv + clip.trimStartMs >= (durMs ?? 0)) return durMs ? durMs - 20 - clip.trimStartMs : 0
-    return nv
-  }, [clip.trimStartMs, durMs])
-  const clampFade = useCallback((v: number) => {
-    const maxMs = Math.max(10, effectiveDuration - 10)
-    return Math.max(0, Math.min(v, maxMs))
-  }, [effectiveDuration])
-  const clampSelection = useCallback((startMs: number, endMs: number) => {
-    let start = clampMs(Math.min(startMs, endMs), 0, effectiveDuration)
-    let end = clampMs(Math.max(startMs, endMs), 0, effectiveDuration)
-    if (end - start < 10) {
-      if (end >= effectiveDuration) start = Math.max(0, end - 10)
-      else end = Math.min(effectiveDuration, start + 10)
-    }
-    return { startMs: start, endMs: end }
-  }, [effectiveDuration])
-  const selectedRegion = selection ?? { startMs: 0, endMs: Math.min(500, effectiveDuration) }
-  const selectedDuration = Math.max(10, selectedRegion.endMs - selectedRegion.startMs)
-  const regionPercent = (ms: number) => `${(ms / Math.max(1, effectiveDuration)) * 100}%`
-
-  const pointToMs = useCallback((clientX: number) => {
-    if (!laneRef.current) return 0
-    const rect = laneRef.current.getBoundingClientRect()
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
-    return ratio * effectiveDuration
-  }, [effectiveDuration])
-
-  const handleMouseMove = useCallback(
-    (e: MouseEvent) => {
-      if (!activeHandle.current || !laneRef.current || !durMs) return
-
-      const rect = laneRef.current.getBoundingClientRect()
-      const offsetX = e.clientX - rect.left
-      const width = rect.width
-      const msPerPx = effectiveDuration / width
-
-      const handle = activeHandle.current
-      if (handle === 'leftTrim') {
-        onUpdate(clip.clipId, { trimStartMs: clampTrimStart(clip.trimStartMs + offsetX * msPerPx) })
-      } else if (handle === 'rightTrim') {
-        onUpdate(clip.clipId, { trimEndMs: clampTrimEnd(clip.trimEndMs + (width - offsetX) * msPerPx) })
-      } else if (handle === 'leftFade') {
-        onUpdate(clip.clipId, { fadeInMs: clampFade(clip.fadeInMs + offsetX * msPerPx) })
-      } else if (handle === 'rightFade') {
-        onUpdate(clip.clipId, { fadeOutMs: clampFade(clip.fadeOutMs + (width - offsetX) * msPerPx) })
-      }
-    },
-    [clip, durMs, effectiveDuration, onUpdate, clampTrimStart, clampTrimEnd, clampFade],
-  )
-
-  const handleMouseUp = useCallback(() => {
-    activeHandle.current = null
-    window.removeEventListener('mousemove', handleMouseMove)
-    window.removeEventListener('mouseup', handleMouseUp)
-  }, [handleMouseMove])
-
-  const startDrag = (handle: 'leftTrim' | 'rightTrim' | 'leftFade' | 'rightFade') => {
-    activeHandle.current = handle
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-  }
-
-  const handleSelectionMove = useCallback(
-    (e: MouseEvent) => {
-      if (!selectionDrag.current) return
-      setSelection(clampSelection(selectionDrag.current.startMs, pointToMs(e.clientX)))
-    },
-    [clampSelection, pointToMs],
-  )
-
-  const handleSelectionUp = useCallback(() => {
-    selectionDrag.current = null
-    window.removeEventListener('mousemove', handleSelectionMove)
-    window.removeEventListener('mouseup', handleSelectionUp)
-  }, [handleSelectionMove])
-
-  const startSelection = (e: ReactMouseEvent<HTMLDivElement>) => {
-    if (!durMs) return
-    e.preventDefault()
-    e.stopPropagation()
-    const startMs = pointToMs(e.clientX)
-    selectionDrag.current = { startMs }
-    setSelection(clampSelection(startMs, startMs + 10))
-    window.addEventListener('mousemove', handleSelectionMove)
-    window.addEventListener('mouseup', handleSelectionUp)
-  }
-
-  const addRegionEdit = (edit: RegionEdit) => onAddRegionEdit(clip.clipId, edit)
-
-  const applyGain = () => {
-    addRegionEdit({
-      id: makeRegionEditId('gain'),
-      type: 'gain',
-      startMs: selectedRegion.startMs,
-      endMs: selectedRegion.endMs,
-      gainDb,
-      fadeInMs: regionFadeInMs,
-      fadeOutMs: regionFadeOutMs,
-    })
-  }
-
-  const applyMute = () => {
-    addRegionEdit({
-      id: makeRegionEditId('mute'),
-      type: 'mute',
-      startMs: selectedRegion.startMs,
-      endMs: selectedRegion.endMs,
-      fadeInMs: regionFadeInMs,
-      fadeOutMs: regionFadeOutMs,
-    })
-  }
-
-  const applyDelete = () => {
-    addRegionEdit({
-      id: makeRegionEditId('delete'),
-      type: 'delete',
-      startMs: selectedRegion.startMs,
-      endMs: selectedRegion.endMs,
-    })
-  }
-
-  const applyFade = () => {
-    addRegionEdit({
-      id: makeRegionEditId('fade'),
-      type: 'fade',
-      startMs: selectedRegion.startMs,
-      endMs: selectedRegion.endMs,
-      fadeInMs: regionFadeInMs,
-      fadeOutMs: regionFadeOutMs,
-    })
-  }
-
-  const insertSilenceAt = (placement: 'before' | 'after') => {
-    addRegionEdit({
-      id: makeRegionEditId('insert_silence'),
-      type: 'insert_silence',
-      atMs: placement === 'before' ? selectedRegion.startMs : selectedRegion.endMs,
-      durationMs: silenceMs,
-    })
-  }
-
-  const describeEdit = (edit: RegionEdit) => {
-    if (edit.type === 'insert_silence') return `silence ${edit.durationMs ?? 0}ms at ${edit.atMs ?? 0}ms`
-    if (edit.type === 'gain') return `gain ${edit.gainDb ?? 0}dB ${edit.startMs ?? 0}-${edit.endMs ?? 0}ms`
-    return `${edit.type} ${edit.startMs ?? 0}-${edit.endMs ?? 0}ms`
-  }
-
-  const fadeOverlay = (side: 'left' | 'right', ms: number) => {
-    if (!ms || ms <= 0) return null
-    const widthPct = Math.min(100, (ms / Math.max(1, effectiveDuration)) * 100)
-    return (
-      <div
-        data-testid={`stitch-fade-overlay-${side}`}
-        className={cn(
-          'pointer-events-none absolute inset-y-0',
-          side === 'left' ? 'left-0' : 'right-0',
-        )}
-        style={{
-          width: `${widthPct}%`,
-          background:
-            side === 'left'
-              ? 'linear-gradient(to right, rgba(0,0,0,0.7) 0%, transparent 100%)'
-              : 'linear-gradient(to left, rgba(0,0,0,0.7) 0%, transparent 100%)',
-        }}
-      />
-    )
-  }
-
-  return (
-    <div
-      className={cn(
-        "group relative flex w-full min-w-0 flex-col overflow-hidden rounded-lg border border-border/50 bg-muted/10 p-1.5",
-        isReordering && 'cursor-grab',
-      )}
-    >
-      <div className="flex items-center justify-between gap-2 px-1.5 pt-1 pb-1">
-        {editingText ? (
-          <input
-            ref={textInputRef}
-            type="text"
-            value={draftText}
-            onChange={(e) => setDraftText(e.target.value)}
-            onBlur={commitText}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                commitText()
-              } else if (e.key === 'Escape') {
-                e.preventDefault()
-                cancelEditText()
-              }
-            }}
-            className="min-w-0 flex-1 rounded border border-cyan-500/40 bg-muted/40 px-1.5 py-0.5 text-xs font-medium text-foreground outline-none"
-            aria-label="Edit clip text"
-          />
-        ) : (
-          <span
-            className="min-w-0 flex-1 cursor-text truncate text-xs font-medium text-foreground hover:text-cyan-400"
-            title={`${clip.text ?? ''}\\n(click to edit reference text)`}
-            onClick={beginEditText}
-          >
-            {clip.text || '(untitled — click to add reference text)'}
-          </span>
-        )}
-        <div className="flex shrink-0 items-center gap-1.5">
-          <select
-            value={clip.prosodyMode ?? 'auto'}
-            onChange={(event) => onUpdate(clip.clipId, { prosodyMode: event.currentTarget.value as StitchPlanClip['prosodyMode'] })}
-            onMouseDown={(event) => event.stopPropagation()}
-            className="rounded border border-border/50 bg-muted/50 px-1 py-0.5 text-[10px] text-muted-foreground"
-            aria-label="Internal pacing repair mode"
-            title="Repair internal blended sentence boundaries before stitching"
-          >
-            <option value="off">Repair off</option>
-            <option value="auto">Repair auto</option>
-            <option value="precise">Repair precise</option>
-          </select>
-          <button
-            type="button"
-            className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={() => setShowAdvanced((visible) => !visible)}
-            aria-expanded={showAdvanced}
-            data-testid="stitch-clip-edit-toggle"
-          >
-            {showAdvanced ? 'Hide edits' : 'Edit clip'}
-          </button>
-          {isReordering && (
-            <div className="flex items-center text-muted-foreground/60">
-              <GripVertical className="size-3.5" />
-            </div>
-          )}
-          <button
-            type="button"
-            className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-            onClick={toggleClipPlay}
-            disabled={!clip.sourceAudioBase64}
-            aria-label={clipPlaying ? "Pause clip playback" : "Play clip playback"}
-            title="Listen to just this segment"
-          >
-            {clipPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-          </button>
-          <button
-            type="button"
-            className="rounded p-0.5 text-muted-foreground hover:text-destructive"
-            onClick={() => onRemove(clip.clipId)}
-            aria-label="Remove clip"
-            title="Remove clip"
-          >
-            <X className="size-3.5" />
-          </button>
-        </div>
-      </div>
-
-      <div className="relative h-24 overflow-hidden rounded-md bg-black/40">
-        <div ref={laneRef} className="relative h-full w-full" onMouseDown={startSelection}>
-          <WaveformLane peaks={peaks} durMs={durMs} trimStartMs={clip.trimStartMs} trimEndMs={clip.trimEndMs} fadeInMs={clip.fadeInMs} fadeOutMs={clip.fadeOutMs} />
-          {fadeOverlay('left', clip.fadeInMs)}
-          {fadeOverlay('right', clip.fadeOutMs)}
-
-          {regionEdits.map((edit) => {
-            if (edit.type === 'insert_silence') {
-              return (
-                <div
-                  key={edit.id}
-                  className="pointer-events-none absolute inset-y-2 w-1 rounded-full bg-sky-300/70"
-                  style={{ left: regionPercent(edit.atMs ?? 0) }}
-                  title={describeEdit(edit)}
-                />
-              )
-            }
-            const left = regionPercent(edit.startMs ?? 0)
-            const width = regionPercent(Math.max(10, (edit.endMs ?? 0) - (edit.startMs ?? 0)))
-            return (
-              <div
-                key={edit.id}
-                className={cn(
-                  'pointer-events-none absolute inset-y-1 rounded-sm border',
-                  edit.type === 'delete' && 'border-destructive/60 bg-destructive/20',
-                  edit.type === 'mute' && 'border-zinc-300/40 bg-zinc-950/55',
-                  edit.type === 'gain' && 'border-warning/50 bg-warning/15',
-                  edit.type === 'fade' && 'border-cyan-300/50 bg-gradient-to-r from-transparent via-cyan-300/20 to-transparent',
-                )}
-                style={{ left, width }}
-                title={describeEdit(edit)}
-              />
-            )
-          })}
-
-          {selection && (
-            <div
-              className="pointer-events-none absolute inset-y-0 rounded-sm border border-cyan-300/80 bg-cyan-300/15"
-              style={{ left: regionPercent(selection.startMs), width: regionPercent(selection.endMs - selection.startMs) }}
-            >
-              <div className="absolute inset-y-0 left-0 w-1 bg-cyan-300" />
-              <div className="absolute inset-y-0 right-0 w-1 bg-cyan-300" />
-            </div>
-          )}
-
-          {durMs && (
-            <>
-              <div
-                className="absolute inset-y-0 left-0 w-[2px] cursor-ew-resize bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
-                onMouseDown={(e) => {
-                  e.stopPropagation()
-                  startDrag('leftTrim')
-                }}
-              />
-              <div
-                className="absolute inset-y-0 right-0 w-[2px] cursor-ew-resize bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
-                onMouseDown={(e) => {
-                  e.stopPropagation()
-                  startDrag('rightTrim')
-                }}
-              />
-              <div
-                className="absolute inset-y-0 w-[2px] cursor-ew-resize bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
-                style={{ left: `${(clip.fadeInMs / effectiveDuration) * 100}%` }}
-                onMouseDown={(e) => {
-                  e.stopPropagation()
-                  startDrag('leftFade')
-                }}
-              />
-              <div
-                className="absolute inset-y-0 w-[2px] cursor-ew-resize bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
-                style={{ right: `${(clip.fadeOutMs / effectiveDuration) * 100}%` }}
-                onMouseDown={(e) => {
-                  e.stopPropagation()
-                  startDrag('rightFade')
-                }}
-              />
-            </>
-          )}
-        </div>
-      </div>
-
-      {showAdvanced && (
-        <>
-          <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1.5">
-            <MsStepper label="Trim start" value={clip.trimStartMs} min={0} max={durMs ?? 0} step={10} onChange={(v) => onUpdate(clip.clipId, { trimStartMs: clampTrimStart(v) })} />
-            <MsStepper label="Trim end" value={clip.trimEndMs} min={0} max={durMs ?? 0} step={10} onChange={(v) => onUpdate(clip.clipId, { trimEndMs: clampTrimEnd(v) })} />
-            <MsStepper label="Fade in" value={clip.fadeInMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeInMs: clampFade(v) })} />
-            <MsStepper label="Fade out" value={clip.fadeOutMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeOutMs: clampFade(v) })} />
-          </div>
-
-          <div className="mt-2 rounded-md border border-border/50 bg-black/20 p-2">
-            <div className="grid grid-cols-3 gap-1.5">
-              <MsStepper label="Region start" value={selectedRegion.startMs} min={0} max={effectiveDuration} step={10} onChange={(v) => setSelection(clampSelection(v, selectedRegion.endMs))} compact />
-              <MsStepper label="Region end" value={selectedRegion.endMs} min={0} max={effectiveDuration} step={10} onChange={(v) => setSelection(clampSelection(selectedRegion.startMs, v))} compact />
-              <span className="self-center text-[10px] font-mono text-muted-foreground">{selectedDuration}ms</span>
-              <MsStepper label="Gain" value={gainDb} min={-24} max={12} step={1} onChange={setGainDb} compact />
-              <MsStepper label="Fade in" value={regionFadeInMs} min={0} max={500} step={5} onChange={setRegionFadeInMs} compact />
-              <MsStepper label="Fade out" value={regionFadeOutMs} min={0} max={500} step={5} onChange={setRegionFadeOutMs} compact />
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyGain} title="Apply gain to selected region"><Volume2 className="size-3" /> gain</button>
-              <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyMute} title="Mute selected region"><VolumeX className="size-3" /> mute</button>
-              <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyDelete} title="Delete selected region"><Trash2 className="size-3" /> delete</button>
-              <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyFade} title="Fade selected region"><ChevronUp className="size-3" /> fade</button>
-              <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => onSplitRegion(clip.clipId, selectedRegion.startMs, selectedRegion.endMs)} title="Split clip at selected region boundaries"><Scissors className="size-3" /> split</button>
-              <MsStepper label="Silence" value={silenceMs} min={20} max={2000} step={10} onChange={setSilenceMs} compact />
-              <button type="button" className="rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => insertSilenceAt('before')} title="Insert silence before selected region">+ before</button>
-              <button type="button" className="rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => insertSilenceAt('after')} title="Insert silence after selected region">+ after</button>
-            </div>
-            {regionEdits.length > 0 && (
-              <div className="mt-2 flex flex-col gap-1 border-t border-border/40 pt-2">
-                {regionEdits.map((edit) => (
-                  <div key={edit.id} data-testid="stitch-region-edit" className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-                    <span className="truncate">{describeEdit(edit)}</span>
-                    <button type="button" className="shrink-0 rounded p-0.5 hover:bg-muted hover:text-foreground" onClick={() => onRemoveRegionEdit(clip.clipId, edit.id)} title="Remove edit">
-                      <X className="size-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
-
-// Independent, always-visible control for the gap between two adjacent clips —
-// rendered between clips in the timeline (not nested inside either clip's card),
-// so it reads as belonging to \"the space between\" rather than to one clip.
-function GapControl({
-  gapIndex,
-  paddingMs,
-  onSetPadding,
-}: {
-  gapIndex: number
-  paddingMs: number
-  onSetPadding: (gapIndex: number, ms: number) => void
-}) {
-  if (paddingMs <= 0) {
-    return (
-      <button
-        type="button"
-        onClick={() => onSetPadding(gapIndex, 200)}
-        title="Add a gap between these clips"
-        className="mt-3 flex h-24 w-8 shrink-0 items-center justify-center rounded border border-dashed border-border/40 text-sm text-muted-foreground/50 hover:border-cyan-500/50 hover:text-cyan-400"
-      >
-        +
-      </button>
-    )
-  }
-  return (
-    <div
-      className="mt-3 flex h-24 shrink-0 flex-col items-center justify-center gap-1.5 rounded border border-dashed border-cyan-500/40 bg-cyan-500/5 px-1.5"
-      style={{ flex: `${Math.max(1, paddingMs)} 0 auto`, minWidth: 56 }}
-      title={`${paddingMs}ms gap`}
-    >
-      <span className="text-[10px] uppercase text-muted-foreground">gap</span>
-      <MsStepper label="gap" value={paddingMs} min={0} max={3000} step={10} onChange={(v) => onSetPadding(gapIndex, v)} compact />
-    </div>
-  )
-}
-
-function MsStepper({
-  label,
-  value,
-  min,
-  max,
-  step,
-  onChange,
-  compact,
-}: {
-  label: string
-  value: number
-  min: number
-  max: number
-  step: number
-  onChange: (v: number) => void
-  compact?: boolean
-}) {
-  return (
-    <div className={cn('flex min-w-0 items-center gap-1', compact && 'gap-0.5')} title={label}>
-      {!compact && <span className="min-w-0 flex-1 truncate text-[10px] uppercase text-muted-foreground/70">{label}</span>}
-      <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" aria-label={`Decrease ${label}`} onClick={() => onChange(Math.max(min, value - step))}>−</button>
-      <span className="inline-flex min-w-[28px] shrink-0 justify-center text-xs font-mono tabular-nums text-foreground">{value}</span>
-      <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" aria-label={`Increase ${label}`} onClick={() => onChange(Math.min(max, value + step))}>+</button>
-    </div>
-  )
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
 }
 
 
@@ -631,7 +84,6 @@ export const StitchTimeline = memo(function StitchTimeline({
   voiceLibrary,
   onInsertVoiceFromLibrary,
 }: StitchTimelineProps) {
-  const reducedMotion = useReducedMotion()
   const { plan, reorderClip, removeClip, updateClip, setClips, setPaddingAt: setPadding, setPadding: setPaddingMs, setRegionEdits: onAddOrRemoveRegionEdit } = session
   const { clips, paddingMs, regionEditsByClip } = plan
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null)
@@ -650,24 +102,14 @@ export const StitchTimeline = memo(function StitchTimeline({
     if (selectedClipId && !clips.some((c) => c.clipId === selectedClipId)) setSelectedClipId(null)
   }, [clips, selectedClipId])
 
-  const handleReorder = useCallback(
-    (next: StitchPlanClip[]) => {
-      const newIndices: number[] = []
-      for (const c of next) {
-        const idx = clips.findIndex((oc) => oc.clipId === c.clipId)
-        if (idx !== -1) newIndices.push(idx)
-      }
-      // Build a mapping: for each new position, find the original index
-      for (let i = 0; i < next.length; i++) {
-        const from = clips.findIndex((oc) => oc.clipId === next[i].clipId)
-        if (from !== i) {
-          reorderClip(from, i)
-          break
-        }
-      }
-    },
-    [clips, reorderClip],
-  )
+  // A single Reorder.Group drag always moves exactly one item (Framer Motion decomposes any
+  // drag into a sequence of `next` arrays); the plan's domain layer (reorderStitchPlan) already
+  // keeps gaps positional (indexed by seam, not by which clips flank them), so the correct and
+  // simplest reconciliation for *any* permutation -- not just an adjacent one -- is to replace
+  // the clip order outright rather than searching for a single (from, to) pair to hand to
+  // reorderClip. The previous "find the first index that differs" search silently misattributed
+  // which clip moved whenever a drag crossed more than one neighbor in a single gesture.
+  const handleReorder = useCallback((next: StitchPlanClip[]) => setClips(next), [setClips])
 
   const moveClip = useCallback(
     (index: number, direction: 'left' | 'right') => {
@@ -721,7 +163,7 @@ export const StitchTimeline = memo(function StitchTimeline({
   )
 
   // Hooks must run unconditionally on every render — this used to sit after an early return
-  // for the empty-timeline case, which threw \"rendered more hooks than previous render\" (React
+  // for the empty-timeline case, which threw "rendered more hooks than previous render" (React
   // error #310) the instant a first clip was inserted (0 clips -> hook skipped, 1+ clips -> hook
   // ran), crashing the page. Stitch Studio hits the empty state on first load, so it surfaced
   // this immediately; OmniVoice's editor rarely opened with zero clips, so it went unnoticed.
@@ -743,7 +185,71 @@ export const StitchTimeline = memo(function StitchTimeline({
     }))
   }, [clips, setPaddingMs])
 
-  const [rulerRef, rulerWidthPx] = useElementWidth<HTMLDivElement>()
+  // Zoom state: `manualPps === null` means "auto-fit" (pixelsPerSecond recomputed from the
+  // scroll container's own visible width every time content changes) -- this preserves the
+  // original always-fits behavior until the user explicitly zooms, at which point the Fit
+  // button is the only way back to auto mode.
+  const [scrollRef, containerWidthPx] = useElementWidth<HTMLDivElement>()
+  const [manualPps, setManualPps] = useState<number | null>(null)
+  const totalSeconds = effectiveTotalMs / 1000
+  const autoFitPps = useMemo(() => {
+    if (containerWidthPx <= 0 || totalSeconds <= 0) return DEFAULT_PPS
+    return clampPps((containerWidthPx - RAIL_PADDING_PX) / totalSeconds)
+  }, [containerWidthPx, totalSeconds])
+  const pixelsPerSecond = manualPps ?? autoFitPps
+  const zoomIn = useCallback(() => setManualPps(clampPps(pixelsPerSecond * 1.25)), [pixelsPerSecond])
+  const zoomOut = useCallback(() => setManualPps(clampPps(pixelsPerSecond / 1.25)), [pixelsPerSecond])
+  const zoomFit = useCallback(() => setManualPps(null), [])
+  const onWheelZoom = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      e.preventDefault()
+      setManualPps(clampPps(pixelsPerSecond * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))
+    },
+    [pixelsPerSecond],
+  )
+  const contentWidthPx = totalSeconds * pixelsPerSecond
+
+  // Keyboard shortcuts for selection, reorder, removal, and trim nudging -- scoped to this
+  // component's lifetime and unconditionally skipped whenever the event target is an editable
+  // control, so typing in a clip's text field, a gap's typed-value input, etc. is never
+  // hijacked by these bindings.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return
+      if (!selectedClipId) return
+      const index = clips.findIndex((c) => c.clipId === selectedClipId)
+      if (index === -1) return
+      if (e.key === 'ArrowRight' && !e.shiftKey) {
+        e.preventDefault()
+        const next = clips[index + 1]
+        if (next) setSelectedClipId(next.clipId)
+      } else if (e.key === 'ArrowLeft' && !e.shiftKey) {
+        e.preventDefault()
+        const prev = clips[index - 1]
+        if (prev) setSelectedClipId(prev.clipId)
+      } else if (e.key === 'ArrowRight' && e.shiftKey) {
+        e.preventDefault()
+        moveClip(index, 'right')
+      } else if (e.key === 'ArrowLeft' && e.shiftKey) {
+        e.preventDefault()
+        moveClip(index, 'left')
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        removeClip(selectedClipId)
+      } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault()
+        const clip = clips[index]
+        if (!clip.durationMs) return
+        const delta = (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 100 : 10)
+        const maxStart = Math.max(0, clip.durationMs - 20 - clip.trimEndMs)
+        const nextTrimStart = Math.max(0, Math.min(maxStart, clip.trimStartMs + delta))
+        updateClip(selectedClipId, { trimStartMs: nextTrimStart })
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [selectedClipId, clips, moveClip, removeClip, updateClip])
 
   if (!clips.length) {
     return (
@@ -768,11 +274,23 @@ export const StitchTimeline = memo(function StitchTimeline({
     <div className="relative flex min-w-0 flex-col gap-2">
       {/* Library insert bar */}
       {(library.length > 0 || hasVoiceLibrary) && (
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">
             Drag to reorder clips, trim edges, and adjust gaps to build your 10–15s reference voice.
           </span>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1 rounded border border-border bg-background px-1">
+              <button type="button" data-testid="stitch-zoom-out" className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={zoomOut} aria-label="Zoom out">
+                <Minus className="size-3.5" />
+              </button>
+              <button type="button" data-testid="stitch-zoom-fit" className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={zoomFit} aria-label="Fit timeline to view" title="Fit timeline to view">
+                <Maximize2 className="size-3.5" />
+              </button>
+              <button type="button" data-testid="stitch-zoom-in" className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={zoomIn} aria-label="Zoom in">
+                <Plus className="size-3.5" />
+              </button>
+              <span data-testid="stitch-zoom-level" className="px-1 text-[10px] font-mono text-muted-foreground/70">{Math.round(pixelsPerSecond)}px/s</span>
+            </div>
             <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted" onClick={autoPace}>
               <Gauge className="size-3.5" /> Auto-pace
             </button>
@@ -790,75 +308,66 @@ export const StitchTimeline = memo(function StitchTimeline({
       )}
 
       {/* Timeline */}
-      <div className="relative flex items-stretch gap-0 overflow-x-auto overflow-y-visible pl-5" style={{ minWidth: 0 }}>
-        {effectiveTotalMs > 0 && (
-          <div ref={rulerRef} className="pointer-events-none absolute inset-x-5 top-0 flex h-4 items-start border-b border-border/30">
-            {(rulerWidthPx > 0
-              ? createTimeTicks({
-                  durationSeconds: effectiveTotalMs / 1000,
-                  pixelsPerSecond: rulerWidthPx / (effectiveTotalMs / 1000),
-                  widthPx: rulerWidthPx,
-                })
-              : []
-            ).map((tick) => (
-              <div
-                key={tick.seconds}
-                data-testid="stitch-ruler-tick"
-                data-seconds={tick.seconds}
-                className="absolute text-[10px] font-mono text-muted-foreground/50"
-                style={{ left: `${(tick.x / rulerWidthPx) * 100}%`, transform: 'translateX(-50%)' }}
-              >
-                {tick.label}
-              </div>
-            ))}
-          </div>
+      <div
+        ref={scrollRef}
+        onWheel={onWheelZoom}
+        className="relative flex items-stretch gap-0 overflow-x-auto overflow-y-visible pl-5"
+        style={{ minWidth: 0 }}
+      >
+        {contentWidthPx > 0 && (
+          <TimelineRuler durationSeconds={totalSeconds} pixelsPerSecond={pixelsPerSecond} widthPx={contentWidthPx} laneHeightPx={140} />
         )}
 
         <Reorder.Group
           axis="x"
           values={clips}
           onReorder={handleReorder}
-          className="mt-3 flex w-max min-w-full items-start gap-0"
+          className="relative z-[1] mt-5 flex w-max min-w-full items-start gap-0"
         >
-          {clips.map((clip, i) => (
-            <div key={clip.clipId} className="flex shrink-0 items-start gap-4">
-              {i > 0 && (
-                <GapControl gapIndex={i - 1} paddingMs={paddingMs[i - 1] || 0} onSetPadding={setPadding} />
-              )}
-              <Reorder.Item
-                value={clip}
-                data-testid="stitch-clip"
-                data-clip-id={clip.clipId}
-                onClick={() => setSelectedClipId((prev) => (prev === clip.clipId ? null : clip.clipId))}
-                className={cn(
-                  'group relative flex flex-col rounded-md',
-                  selectedClipId === clip.clipId && 'ring-2 ring-cyan-500/70',
+          {clips.map((clip, i) => {
+            const clipSeconds = clipEffectiveDurationMs(clip) / 1000
+            const naturalWidthPx = clipSeconds * pixelsPerSecond
+            const clipWidthPx = Math.max(MIN_CLIP_PX, naturalWidthPx)
+            const isClipClamped = naturalWidthPx < MIN_CLIP_PX
+            return (
+              <div key={clip.clipId} className="flex shrink-0 items-start gap-4">
+                {i > 0 && (
+                  <GapControl gapIndex={i - 1} paddingMs={paddingMs[i - 1] || 0} onSetPadding={setPadding} pixelsPerSecond={pixelsPerSecond} />
                 )}
-                style={{ flex: `${Math.max(300, clipEffectiveDurationMs(clip))} 0 auto`, minWidth: 320 }}
-              >
-                {/* Keyboard-accessible reorder buttons */}
-                <div className="absolute -left-5 top-6 flex flex-col gap-0.5 opacity-40 group-hover:opacity-100 z-10">
-                  <button type="button" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'left')} title="Move left">
-                    <ChevronUp className="size-3" />
-                  </button>
-                  <button type="button" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'right')} title="Move right">
-                    <ChevronDown className="size-3" />
-                  </button>
-                </div>
-                <StitchTimelineClip
-                  clip={clip}
-                  onRemove={removeClip}
-                  onUpdate={updateClip}
-                  regionEdits={regionEditsByClip[clip.clipId] ?? []}
-                  onAddRegionEdit={onAddRegionEdit}
-                  onRemoveRegionEdit={onRemoveRegionEdit}
-                  onSplitRegion={splitRegion}
-                  isReordering
-                  reducedMotion={reducedMotion}
-                />
-              </Reorder.Item>
-            </div>
-          ))}
+                <Reorder.Item
+                  value={clip}
+                  data-testid="stitch-clip"
+                  data-clip-id={clip.clipId}
+                  data-selected={selectedClipId === clip.clipId ? 'true' : 'false'}
+                  onClick={() => setSelectedClipId((prev) => (prev === clip.clipId ? null : clip.clipId))}
+                  className="group relative flex flex-col rounded-md"
+                  style={{ width: clipWidthPx, minWidth: MIN_CLIP_PX }}
+                >
+                  {/* Keyboard-accessible reorder buttons */}
+                  <div className="absolute -left-5 top-6 flex flex-col gap-0.5 opacity-40 group-hover:opacity-100 z-10">
+                    <button type="button" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'left')} title="Move left">
+                      <ChevronUp className="size-3" />
+                    </button>
+                    <button type="button" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'right')} title="Move right">
+                      <ChevronDown className="size-3" />
+                    </button>
+                  </div>
+                  <StitchClipCard
+                    clip={clip}
+                    onRemove={removeClip}
+                    onUpdate={updateClip}
+                    regionEdits={regionEditsByClip[clip.clipId] ?? []}
+                    onAddRegionEdit={onAddRegionEdit}
+                    onRemoveRegionEdit={onRemoveRegionEdit}
+                    onSplitRegion={splitRegion}
+                    isReordering
+                    isSelected={selectedClipId === clip.clipId}
+                    isWidthClamped={isClipClamped}
+                  />
+                </Reorder.Item>
+              </div>
+            )
+          })}
         </Reorder.Group>
       </div>
     </div>

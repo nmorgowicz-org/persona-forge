@@ -37,10 +37,11 @@ test.describe('Stitch Studio durable plan domain', () => {
   test('removing a middle clip keeps later gap values on their seams', async ({ page }) => {
     await insertNSegments(page, 3)
 
-    // Materialize both gaps (they start at 0ms / hidden behind a "+" affordance).
-    const addGapButtons = page.locator('button[data-app-tooltip="Add a gap between these clips"]')
-    await addGapButtons.nth(0).click() // seam 0 -> 200ms
-    await addGapButtons.nth(0).click() // seam 1 (now first remaining "+") -> 200ms
+    // Gap controls are always rendered now (including 0.00s seams) -- materialize both
+    // gaps to 200ms via the always-present stepper instead of a "+" affordance.
+    const increaseButtons = page.locator('button[aria-label="Increase gap"]')
+    for (let i = 0; i < 20; i++) await increaseButtons.nth(0).click() // seam 0 -> 200ms
+    for (let i = 0; i < 20; i++) await increaseButtons.nth(1).click() // seam 1 -> 200ms
 
     // Give the two seams distinct values: seam 0 -> 150ms, seam 1 stays 200ms.
     const decreaseSeam0 = page.locator('button[aria-label="Decrease gap"]').nth(0)
@@ -86,7 +87,7 @@ test.describe('Stitch Studio preview lifecycle', () => {
     })
 
     // First change: materializes seam 0 at 200ms, scheduling a render ~700ms later.
-    await page.locator('button[data-app-tooltip="Add a gap between these clips"]').first().click()
+    for (let i = 0; i < 20; i++) await page.locator('button[aria-label="Increase gap"]').first().click()
 
     // Second change, fired after the first request has gone out but while it is still
     // held open -- the resulting render must abort the first in-flight request.
@@ -133,7 +134,7 @@ test.describe('Stitch Studio preview lifecycle', () => {
 test.describe('Stitch Studio quick-insert transaction', () => {
   test('quick insert cancel preserves the committed stitch plan', async ({ page }) => {
     await insertNSegments(page, 2)
-    await page.locator('button[data-app-tooltip="Add a gap between these clips"]').first().click()
+    for (let i = 0; i < 20; i++) await page.locator('button[aria-label="Increase gap"]').first().click()
     const decreaseGap = page.locator('button[aria-label="Decrease gap"]').first()
     for (let i = 0; i < 5; i++) await decreaseGap.click()
     await expect(page.locator('div[data-app-tooltip$="ms gap"]')).toHaveAttribute('data-app-tooltip', '150ms gap')
@@ -145,7 +146,7 @@ test.describe('Stitch Studio quick-insert transaction', () => {
     await expect(page.getByTestId('stitch-clip')).toHaveCount(3)
 
     // Change something in the draft -- must never reach the committed plan.
-    await page.locator('button[data-app-tooltip="Add a gap between these clips"]').first().click()
+    for (let i = 0; i < 20; i++) await page.locator('button[aria-label="Increase gap"]').first().click()
 
     await page.getByTestId('stitch-cancel-draft').click()
     await expect(page.getByTestId('stitch-editor-dialog')).toBeHidden()
@@ -217,7 +218,7 @@ test.describe('Stitch Studio quick-insert transaction', () => {
     await page.getByTestId('voice-library-tab-segments').click()
     await page.getByRole('button', { name: 'Insert into stitch editor' }).nth(2).click()
     await expect(page.getByTestId('stitch-editor-dialog')).toBeVisible()
-    await page.locator('button[data-app-tooltip="Add a gap between these clips"]').first().click()
+    for (let i = 0; i < 20; i++) await page.locator('button[aria-label="Increase gap"]').first().click()
     await page.getByTestId('stitch-cancel-draft').click()
 
     await page.getByTestId('nav-stitch-studio').click()
@@ -375,5 +376,166 @@ test.describe('Stitch Studio shared visual primitives', () => {
     }
     const widthAt800ms = (await fadeOverlay.boundingBox())?.width ?? 0
     expect(widthAt800ms).toBeGreaterThan(widthAt400ms)
+  })
+})
+
+test.describe('Stitch Studio pointer-safe editing and timeline geometry', () => {
+  test('trim drag uses pointer delta without acceleration', async ({ page }) => {
+    await insertNSegments(page, 2)
+    await page.getByTestId('stitch-clip-edit-toggle').nth(0).click()
+    await page.getByTestId('stitch-clip-edit-toggle').nth(1).click()
+
+    const handles = page.getByTestId('stitch-trim-handle-left')
+    const boxA = await handles.nth(0).boundingBox()
+    const boxB = await handles.nth(1).boundingBox()
+    expect(boxA).toBeTruthy()
+    expect(boxB).toBeTruthy()
+
+    // Same 40px drag distance, delivered as one big jump vs many intermediate pointermove
+    // events -- a delta computed fresh from the frozen gesture-start position on every move
+    // (correct) lands on the same final value either way. A handler that instead adds the
+    // per-event offset onto the live value (the pre-Packet-6 bug) compounds with each extra
+    // pointermove and drifts further with more steps -- "acceleration" from event count alone.
+    await page.mouse.move(boxA.x + boxA.width / 2, boxA.y + boxA.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(boxA.x + boxA.width / 2 + 40, boxA.y + boxA.height / 2, { steps: 3 })
+    await page.mouse.up()
+
+    await page.mouse.move(boxB.x + boxB.width / 2, boxB.y + boxB.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(boxB.x + boxB.width / 2 + 40, boxB.y + boxB.height / 2, { steps: 25 })
+    await page.mouse.up()
+
+    const valueA = Number(await page.getByTestId('stitch-stepper-trim-start-value').nth(0).textContent())
+    const valueB = Number(await page.getByTestId('stitch-stepper-trim-start-value').nth(1).textContent())
+    expect(valueA).toBeGreaterThan(0)
+    expect(Math.abs(valueA - valueB)).toBeLessThanOrEqual(10)
+  })
+
+  test('multi-position reorder applies the full permutation', async ({ page }) => {
+    await insertNSegments(page, 3)
+    const clipsBefore = await page.getByTestId('stitch-clip').evaluateAll((els) => els.map((el) => el.dataset.clipId))
+    expect(clipsBefore).toHaveLength(3)
+
+    // Drag clip 0 past clip 1 AND clip 2 in one continuous gesture, landing after clip 2 --
+    // this only exercises the bug if the drag moves the item more than one position. A pause
+    // between intermediate stops (not just many `steps`) gives Framer Motion's PanSession a
+    // render frame to recompute layout and register each threshold crossing in turn --
+    // otherwise a single fast synthetic gesture can land only one swap instead of both.
+    const firstClip = page.getByTestId('stitch-clip').nth(0)
+    const lastClip = page.getByTestId('stitch-clip').nth(2)
+    const fromBox = await firstClip.boundingBox()
+    const toBox = await lastClip.boundingBox()
+    await page.mouse.move(fromBox.x + fromBox.width / 2, fromBox.y + 10)
+    await page.mouse.down()
+    const midX = (fromBox.x + toBox.x) / 2
+    await page.mouse.move(midX, toBox.y + 10, { steps: 10 })
+    await page.waitForTimeout(150)
+    await page.mouse.move(toBox.x + toBox.width - 5, toBox.y + 10, { steps: 10 })
+    await page.waitForTimeout(150)
+    await page.mouse.up()
+
+    const clipsAfter = await page.getByTestId('stitch-clip').evaluateAll((els) => els.map((el) => el.dataset.clipId))
+    expect(clipsAfter).toEqual([clipsBefore[1], clipsBefore[2], clipsBefore[0]])
+  })
+
+  test('gaps accept 200, 0.2s, and 200ms and preserve seam semantics after reorder', async ({ page }) => {
+    await insertNSegments(page, 3)
+    const gapControls = page.getByTestId('stitch-gap-control')
+    await expect(gapControls).toHaveCount(2)
+
+    const typeIntoGap = async (index, text) => {
+      // The typed-value input only exists once editing starts -- click the always-visible
+      // value button to enter edit mode first.
+      await gapControls.nth(index).getByRole('button', { name: /^Gap between clip/ }).click()
+      const input = gapControls.nth(index).locator('input')
+      await input.fill(text)
+      await input.press('Enter')
+    }
+
+    for (const text of ['200', '0.2s', '200ms']) {
+      await typeIntoGap(0, text)
+      await expect(gapControls.nth(0)).toHaveAttribute('data-gap-ms', '200')
+    }
+    await typeIntoGap(1, '400')
+    await expect(gapControls.nth(1)).toHaveAttribute('data-gap-ms', '400')
+
+    // Reorder clips -- seam values are keyed by seam position, not by which clips flank
+    // them, matching the locked "gaps live at plan level, indexed by seam" contract.
+    const firstClip = page.getByTestId('stitch-clip').nth(0)
+    const lastClip = page.getByTestId('stitch-clip').nth(2)
+    const fromBox = await firstClip.boundingBox()
+    const toBox = await lastClip.boundingBox()
+    await page.mouse.move(fromBox.x + fromBox.width / 2, fromBox.y + 10)
+    await page.mouse.down()
+    const midX = (fromBox.x + toBox.x) / 2
+    await page.mouse.move(midX, toBox.y + 10, { steps: 10 })
+    await page.waitForTimeout(150)
+    await page.mouse.move(toBox.x + toBox.width - 5, toBox.y + 10, { steps: 10 })
+    await page.waitForTimeout(150)
+    await page.mouse.up()
+
+    await expect(gapControls.nth(0)).toHaveAttribute('data-gap-ms', '200')
+    await expect(gapControls.nth(1)).toHaveAttribute('data-gap-ms', '400')
+  })
+
+  test('zero gap remains visible and distinguishable from non-zero gap', async ({ page }) => {
+    await insertNSegments(page, 2)
+    const gap = page.getByTestId('stitch-gap-control').first()
+    await expect(gap).toBeVisible()
+    await expect(gap).toHaveAttribute('data-gap-zero', 'true')
+    const zeroWidth = (await gap.boundingBox())?.width ?? 0
+
+    for (let i = 0; i < 20; i++) await page.locator('button[aria-label="Increase gap"]').first().click()
+    await expect(gap).toHaveAttribute('data-gap-zero', 'false')
+    const nonZeroWidth = (await gap.boundingBox())?.width ?? 0
+    expect(nonZeroWidth).toBeGreaterThan(zeroWidth)
+  })
+
+  test('keyboard selects, reorders, removes, and nudges trim, but never fires inside an input', async ({ page }) => {
+    await insertNSegments(page, 3)
+    const clips = page.getByTestId('stitch-clip')
+    const idsBefore = await clips.evaluateAll((els) => els.map((el) => el.dataset.clipId))
+
+    await clips.nth(0).click()
+    await expect(clips.nth(0)).toHaveAttribute('data-selected', 'true')
+    await page.keyboard.press('ArrowRight')
+    await expect(clips.nth(1)).toHaveAttribute('data-selected', 'true')
+    await expect(clips.nth(0)).toHaveAttribute('data-selected', 'false')
+
+    // Reorder the selected clip (index 1) one step left.
+    await page.keyboard.press('Shift+ArrowLeft')
+    const idsAfterReorder = await clips.evaluateAll((els) => els.map((el) => el.dataset.clipId))
+    expect(idsAfterReorder).toEqual([idsBefore[1], idsBefore[0], idsBefore[2]])
+
+    // Trim nudging on the (still) selected clip -- it's already selected from the reorder
+    // above (selection follows clipId, not position), so re-clicking it here would toggle it
+    // off instead.
+    await expect(clips.nth(0)).toHaveAttribute('data-selected', 'true')
+    await page.getByTestId('stitch-clip-edit-toggle').nth(0).click()
+    const before = Number(await page.getByTestId('stitch-stepper-trim-start-value').nth(0).textContent())
+    await page.keyboard.press('ArrowUp')
+    const after10 = Number(await page.getByTestId('stitch-stepper-trim-start-value').nth(0).textContent())
+    expect(after10 - before).toBe(10)
+    await page.keyboard.press('Shift+ArrowUp')
+    const after110 = Number(await page.getByTestId('stitch-stepper-trim-start-value').nth(0).textContent())
+    expect(after110 - after10).toBe(100)
+
+    // Removal.
+    const countBefore = await clips.count()
+    await page.keyboard.press('Delete')
+    await expect(clips).toHaveCount(countBefore - 1)
+
+    // None of these shortcuts fire while focus is inside an editable control.
+    await clips.nth(0).click()
+    const textSpan = page.locator('span.cursor-text').first()
+    await textSpan.click()
+    const input = page.locator('input[aria-label="Edit clip text"]')
+    await expect(input).toBeFocused()
+    const countBeforeGuard = await clips.count()
+    await page.keyboard.press('Delete')
+    await page.keyboard.press('ArrowRight')
+    await expect(clips).toHaveCount(countBeforeGuard)
+    await page.keyboard.press('Escape')
   })
 })
