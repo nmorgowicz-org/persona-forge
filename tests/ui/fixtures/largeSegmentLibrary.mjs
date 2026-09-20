@@ -5,11 +5,11 @@
 // tiny, valid, generated-in-memory WAV body.
 const PROJECT_NAMES = ['Narration', 'Commercials', 'Podcast Intros', 'IVR Prompts', 'Audiobook'];
 
-/** A minimal valid 24kHz mono 16-bit PCM WAV: ~50ms of silence. Generated at call time so no
- * binary fixture lives in the repo. */
-export function makeTinyWavBuffer() {
+/** A minimal valid 24kHz mono 16-bit PCM WAV, `durationSec` long (default ~50ms of silence).
+ * Generated at call time so no binary fixture lives in the repo. */
+export function makeTinyWavBuffer(durationSec = 0.05) {
   const sampleRate = 24000;
-  const numSamples = Math.round(sampleRate * 0.05);
+  const numSamples = Math.round(sampleRate * durationSec);
   const dataSize = numSamples * 2;
   const buffer = Buffer.alloc(44 + dataSize);
   buffer.write('RIFF', 0);

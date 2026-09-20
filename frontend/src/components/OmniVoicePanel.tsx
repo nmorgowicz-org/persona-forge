@@ -1341,7 +1341,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     await ctx.close()
 
     if (clips.length === 0) {
-      setError('Select at least one take before opening the stitch editor.')
+      setError('Select at least one take before opening Stitch Studio.')
       return
     }
 
@@ -1351,7 +1351,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     }
 
     setStitchPlanClips(clips as StitchPlanClip[])
-    openStitchEditorModal({ returnPage: 'voice-design' })
+    openStitchEditorModal({})
   }, [
     segmentRack,
     setError,
@@ -2360,7 +2360,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
                 className="shrink-0 inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px]"
               >
                 <Scissors className="h-3 w-3" />
-                Open stitch editor
+                Open in Stitch Studio
               </Button>
               <span className="self-center text-[9px] text-muted-foreground/70">
                 trim, reorder, add gaps

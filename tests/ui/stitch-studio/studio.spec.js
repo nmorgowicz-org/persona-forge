@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { installLargeSegmentLibrary } from '../fixtures/largeSegmentLibrary.mjs'
+import { installLargeSegmentLibrary, makeTinyWavBuffer } from '../fixtures/largeSegmentLibrary.mjs'
 
 async function insertNSegments(page, n) {
   await page.goto('/')
@@ -148,7 +148,7 @@ test.describe('Stitch Studio quick-insert transaction', () => {
 
     await page.getByTestId('nav-voice-library').click()
     await page.getByTestId('voice-library-tab-segments').click()
-    await page.getByRole('button', { name: 'Insert into stitch editor' }).nth(2).click()
+    await page.getByRole('button', { name: 'Insert into Stitch Studio' }).nth(2).click()
     await expect(page.getByTestId('stitch-editor-dialog')).toBeVisible()
     await expect(page.getByTestId('stitch-clip')).toHaveCount(3)
 
@@ -167,7 +167,7 @@ test.describe('Stitch Studio quick-insert transaction', () => {
     await page.goto('/')
     await page.getByTestId('nav-voice-library').click()
     await page.getByTestId('voice-library-tab-segments').click()
-    await page.getByRole('button', { name: 'Insert into stitch editor' }).first().click()
+    await page.getByRole('button', { name: 'Insert into Stitch Studio' }).first().click()
     await expect(page.getByTestId('stitch-editor-dialog')).toBeVisible()
     await expect(page.getByTestId('stitch-clip')).toHaveCount(1)
 
@@ -185,11 +185,29 @@ test.describe('Stitch Studio quick-insert transaction', () => {
     ).toHaveCount(1)
   })
 
+  test('quick insert Save and close commits the draft without navigating away from the caller page', async ({ page }) => {
+    await page.goto('/')
+    await page.getByTestId('nav-voice-library').click()
+    await page.getByTestId('voice-library-tab-segments').click()
+    await page.getByRole('button', { name: 'Insert into Stitch Studio' }).first().click()
+    await expect(page.getByTestId('stitch-editor-dialog')).toBeVisible()
+    await expect(page.getByTestId('stitch-clip')).toHaveCount(1)
+
+    await page.getByTestId('stitch-save-close').click()
+    await expect(page.getByTestId('stitch-editor-dialog')).toBeHidden()
+    // Unlike "Open in Stitch Studio", Save and close must not navigate away.
+    await expect(page.getByTestId('nav-voice-library')).toHaveAttribute('data-active', 'true')
+    await expect(page.getByTestId('nav-stitch-studio')).toHaveAttribute('data-active', 'false')
+
+    await page.getByTestId('nav-stitch-studio').click()
+    await expect(page.getByTestId('stitch-clip')).toHaveCount(1)
+  })
+
   test('quick insert X Escape and backdrop restore Voice Library focus', async ({ page }) => {
     await page.goto('/')
     await page.getByTestId('nav-voice-library').click()
     await page.getByTestId('voice-library-tab-segments').click()
-    const launchButtons = page.getByRole('button', { name: 'Insert into stitch editor' })
+    const launchButtons = page.getByRole('button', { name: 'Insert into Stitch Studio' })
 
     // Escape
     const escapeLaunch = launchButtons.first()
@@ -223,7 +241,7 @@ test.describe('Stitch Studio quick-insert transaction', () => {
 
     await page.getByTestId('nav-voice-library').click()
     await page.getByTestId('voice-library-tab-segments').click()
-    await page.getByRole('button', { name: 'Insert into stitch editor' }).nth(2).click()
+    await page.getByRole('button', { name: 'Insert into Stitch Studio' }).nth(2).click()
     await expect(page.getByTestId('stitch-editor-dialog')).toBeVisible()
     for (let i = 0; i < 20; i++) await page.locator('button[aria-label="Increase gap"]').first().click()
     await page.getByTestId('stitch-cancel-draft').click()
@@ -305,6 +323,117 @@ test.describe('Voice Library discoverability and segment browser scale', () => {
     await auditionButtons.nth(1).click()
     await expect.poll(() => audioRequests.length).toBe(2)
     await expect(auditionButtons.nth(0)).toHaveAttribute('data-playing', 'false')
+  })
+
+  test('rapid audition clicks on different rows never let a slower request steal playback', async ({ page }) => {
+    const { audioRequests } = await installLargeSegmentLibrary(page)
+    let sawFirstRequest = false
+    // A multi-second WAV -- the shared fixture's ~50ms clip would naturally finish playing
+    // (firing 'ended') well inside this test's observation window, confounding the assertion.
+    const longWav = makeTinyWavBuffer(3)
+    await page.route('**/omnivoice/segments/*/audio', async (route) => {
+      audioRequests.push(route.request().url())
+      // The first row's fetch resolves slowly; the second row's must not be clobbered by it.
+      if (!sawFirstRequest) {
+        sawFirstRequest = true
+        await new Promise((r) => setTimeout(r, 700))
+      }
+      await route.fulfill({ status: 200, contentType: 'audio/wav', body: longWav })
+    })
+    await page.goto('/')
+    await page.getByTestId('nav-stitch-studio').click()
+    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await expect(page.getByTestId('segment-browser-dialog')).toBeVisible()
+    await expect(page.getByTestId('stitch-picker-item-segments').first()).toBeVisible()
+
+    const auditionButtons = page.getByTestId('segment-browser-audio')
+    await auditionButtons.nth(0).click()
+    await auditionButtons.nth(1).click()
+    await expect.poll(() => audioRequests.length).toBe(2)
+    await expect(auditionButtons.nth(1)).toHaveAttribute('data-playing', 'true')
+
+    // Let row 0's slow, now-stale fetch resolve; it must not steal playback from row 1.
+    await new Promise((r) => setTimeout(r, 900))
+    await expect(auditionButtons.nth(1)).toHaveAttribute('data-playing', 'true')
+    await expect(auditionButtons.nth(0)).toHaveAttribute('data-playing', 'false')
+  })
+  test('closing the segment browser cancels an in-flight audition fetch', async ({ page }) => {
+    // togglePlay uses a plain `new Audio()` instance, not a rendered <audio> element, so
+    // querying the DOM can't observe it -- instrument the constructor instead to record every
+    // play() call and when it happened relative to the dialog closing.
+    await page.addInitScript(() => {
+      window.__playCalls = []
+      const OriginalAudio = window.Audio
+      window.Audio = new Proxy(OriginalAudio, {
+        construct(target, args) {
+          const instance = new target(...args)
+          const originalPlay = instance.play.bind(instance)
+          instance.play = (...playArgs) => {
+            window.__playCalls.push(Date.now())
+            return originalPlay(...playArgs)
+          }
+          return instance
+        },
+      })
+    })
+    await installLargeSegmentLibrary(page)
+    await page.route('**/omnivoice/segments/*/audio', async (route) => {
+      await new Promise((r) => setTimeout(r, 700))
+      await route.fulfill({ status: 200, contentType: 'audio/wav', body: makeTinyWavBuffer() })
+    })
+    await page.goto('/')
+    await page.getByTestId('nav-stitch-studio').click()
+    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await expect(page.getByTestId('segment-browser-dialog')).toBeVisible()
+    await expect(page.getByTestId('stitch-picker-item-segments').first()).toBeVisible()
+
+    await page.getByTestId('segment-browser-audio').first().click()
+    const closeTime = Date.now()
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('segment-browser-dialog')).toBeHidden()
+
+    // Give the in-flight fetch time to resolve after close; play() must never fire afterward.
+    await new Promise((r) => setTimeout(r, 900))
+    const playCallsAfterClose = await page.evaluate(
+      (since) => (window.__playCalls ?? []).filter((t) => t >= since).length,
+      closeTime,
+    )
+    expect(playCallsAfterClose).toBe(0)
+  })
+})
+
+test.describe('Stitch Studio audio decode edge cases', () => {
+  test('a segment whose audio fails to decode shows the No waveform fallback without crashing', async ({ page }) => {
+    await installLargeSegmentLibrary(page)
+    // Not valid audio -- decodeAudioData will reject, exercising the decode-failure path.
+    await page.route('**/omnivoice/segments/*/audio', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'audio/wav', body: Buffer.from('not a real wav file') })
+    })
+    await insertNSegments(page, 1)
+    await page.getByTestId('stitch-clip-edit-toggle').first().click()
+    await expect(page.getByText('No waveform')).toBeVisible()
+    // A failed decode must not poison later inserts for a *different* asset key.
+    await expect(page.getByTestId('stitch-clip')).toHaveCount(1)
+  })
+
+  test('a clip trimmed to zero effective duration renders without NaN or negative widths', async ({ page }) => {
+    await insertNSegments(page, 1)
+    await page.getByTestId('stitch-clip-edit-toggle').first().click()
+    const handle = page.getByTestId('stitch-trim-handle-left').first()
+    const box = await handle.boundingBox()
+    if (!box) throw new Error('trim handle has no bounding box')
+    // Drag the left trim handle far past the clip's own width to fully trim it.
+    await page.mouse.move(box.x + 1, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + 4000, box.y + box.height / 2)
+    await page.mouse.up()
+
+    const clipWidth = await page.getByTestId('stitch-clip').first().evaluate((el) => el.getBoundingClientRect().width)
+    expect(Number.isFinite(clipWidth)).toBe(true)
+    expect(clipWidth).toBeGreaterThanOrEqual(0)
+    const laneWidth = await page.getByTestId('stitch-waveform-canvas').first().evaluate((el) => el.getBoundingClientRect().width)
+    expect(Number.isFinite(laneWidth)).toBe(true)
+    expect(laneWidth).toBeGreaterThanOrEqual(0)
   })
 })
 
@@ -446,6 +575,44 @@ test.describe('Stitch Studio pointer-safe editing and timeline geometry', () => 
     expect(clipsAfter).toEqual([clipsBefore[1], clipsBefore[2], clipsBefore[0]])
   })
 
+  test('reorder then remove keeps the correct surviving seam value', async ({ page }) => {
+    await insertNSegments(page, 3)
+    const gapControls = page.getByTestId('stitch-gap-control')
+    const typeIntoGap = async (index, text) => {
+      await gapControls.nth(index).getByRole('button', { name: /^Gap between clip/ }).click()
+      const input = gapControls.nth(index).locator('input')
+      await input.fill(text)
+      await input.press('Enter')
+    }
+    await typeIntoGap(0, '150')
+    await typeIntoGap(1, '400')
+
+    // Reorder first: seams are seam-indexed, not clip-identity-tied, so they must stay
+    // 150ms/400ms after the permutation (same contract as the reorder-only test above).
+    const firstClip = page.getByTestId('stitch-clip').nth(0)
+    const lastClip = page.getByTestId('stitch-clip').nth(2)
+    const fromBox = await firstClip.boundingBox()
+    const toBox = await lastClip.boundingBox()
+    await page.mouse.move(fromBox.x + fromBox.width / 2, fromBox.y + 10)
+    await page.mouse.down()
+    const midX = (fromBox.x + toBox.x) / 2
+    await page.mouse.move(midX, toBox.y + 10, { steps: 10 })
+    await page.waitForTimeout(150)
+    await page.mouse.move(toBox.x + toBox.width - 5, toBox.y + 10, { steps: 10 })
+    await page.waitForTimeout(150)
+    await page.mouse.up()
+    await expect(gapControls.nth(0)).toHaveAttribute('data-gap-ms', '150')
+    await expect(gapControls.nth(1)).toHaveAttribute('data-gap-ms', '400')
+
+    // Now remove the middle clip (position 1) -- the removal contract drops the seam that
+    // followed the removed clip, so the surviving seam must be the leading one (150ms),
+    // exercised together with a prior reorder rather than in isolation.
+    await page.getByTestId('stitch-clip').nth(1).locator('[aria-label="Remove clip"]').click()
+    await expect(page.getByTestId('stitch-clip')).toHaveCount(2)
+    await expect(gapControls).toHaveCount(1)
+    await expect(gapControls.first()).toHaveAttribute('data-gap-ms', '150')
+  })
+
   test('gaps accept 200, 0.2s, and 200ms and preserve seam semantics after reorder', async ({ page }) => {
     await insertNSegments(page, 3)
     const gapControls = page.getByTestId('stitch-gap-control')
@@ -500,27 +667,40 @@ test.describe('Stitch Studio pointer-safe editing and timeline geometry', () => 
     expect(nonZeroWidth).toBeGreaterThan(zeroWidth)
   })
 
-  test('keyboard selects, reorders, removes, and nudges trim, but never fires inside an input', async ({ page }) => {
+  test('keyboard selects clips and moves selection with arrow keys', async ({ page }) => {
     await insertNSegments(page, 3)
     const clips = page.getByTestId('stitch-clip')
-    const idsBefore = await clips.evaluateAll((els) => els.map((el) => el.dataset.clipId))
 
     await clips.nth(0).click()
     await expect(clips.nth(0)).toHaveAttribute('data-selected', 'true')
     await page.keyboard.press('ArrowRight')
     await expect(clips.nth(1)).toHaveAttribute('data-selected', 'true')
     await expect(clips.nth(0)).toHaveAttribute('data-selected', 'false')
+  })
+
+  test('keyboard reorders the selected clip with Shift+Arrow', async ({ page }) => {
+    await insertNSegments(page, 3)
+    const clips = page.getByTestId('stitch-clip')
+    const idsBefore = await clips.evaluateAll((els) => els.map((el) => el.dataset.clipId))
+
+    await clips.nth(0).click()
+    await page.keyboard.press('ArrowRight')
+    await expect(clips.nth(1)).toHaveAttribute('data-selected', 'true')
 
     // Reorder the selected clip (index 1) one step left.
     await page.keyboard.press('Shift+ArrowLeft')
     const idsAfterReorder = await clips.evaluateAll((els) => els.map((el) => el.dataset.clipId))
     expect(idsAfterReorder).toEqual([idsBefore[1], idsBefore[0], idsBefore[2]])
-
-    // Trim nudging on the (still) selected clip -- it's already selected from the reorder
-    // above (selection follows clipId, not position), so re-clicking it here would toggle it
-    // off instead.
+    // Selection follows clipId, not position.
     await expect(clips.nth(0)).toHaveAttribute('data-selected', 'true')
+  })
+
+  test('keyboard nudges trim start with Arrow and Shift+Arrow', async ({ page }) => {
+    await insertNSegments(page, 3)
+    const clips = page.getByTestId('stitch-clip')
+    await clips.nth(0).click()
     await page.getByTestId('stitch-clip-edit-toggle').nth(0).click()
+
     const before = Number(await page.getByTestId('stitch-stepper-trim-start-value').nth(0).textContent())
     await page.keyboard.press('ArrowUp')
     const after10 = Number(await page.getByTestId('stitch-stepper-trim-start-value').nth(0).textContent())
@@ -528,13 +708,20 @@ test.describe('Stitch Studio pointer-safe editing and timeline geometry', () => 
     await page.keyboard.press('Shift+ArrowUp')
     const after110 = Number(await page.getByTestId('stitch-stepper-trim-start-value').nth(0).textContent())
     expect(after110 - after10).toBe(100)
+  })
 
-    // Removal.
+  test('keyboard removes the selected clip with Delete', async ({ page }) => {
+    await insertNSegments(page, 3)
+    const clips = page.getByTestId('stitch-clip')
+    await clips.nth(0).click()
     const countBefore = await clips.count()
     await page.keyboard.press('Delete')
     await expect(clips).toHaveCount(countBefore - 1)
+  })
 
-    // None of these shortcuts fire while focus is inside an editable control.
+  test('keyboard shortcuts never fire while focus is inside an editable control', async ({ page }) => {
+    await insertNSegments(page, 3)
+    const clips = page.getByTestId('stitch-clip')
     await clips.nth(0).click()
     const textSpan = page.locator('span.cursor-text').first()
     await textSpan.click()
@@ -694,6 +881,31 @@ test.describe('Stitch Studio readiness and save outcomes', () => {
     await setGap(page, 0, '5s')
     await setGap(page, 1, '5s')
     await expect(page.getByTestId('stitch-reference-readiness')).toHaveAttribute('data-readiness-state', 'overlong')
+  })
+
+  test('warning state with a name filled in shows exactly one primary action', async ({ page }) => {
+    await insertNSegments(page, 3)
+    await expect(page.getByTestId('stitch-preview-ready')).toBeVisible()
+    await page.getByTestId('stitch-voice-name').fill('Warning state reference')
+    await expect(page.getByTestId('stitch-reference-readiness')).toHaveAttribute('data-readiness-state', 'warning')
+
+    // Punctuation-derived gap suggestions can retrigger the preview's 700ms debounced
+    // re-render shortly after insert; clear that window so isPreviewRendering has settled
+    // before reading button classes, or the assertion below can catch a transient mid-render
+    // frame instead of the sustained steady state this test targets.
+    await page.waitForTimeout(900)
+    await expect(page.getByTestId('stitch-preview-ready')).toBeVisible()
+
+    const saveButton = page.getByTestId('stitch-save-voice')
+    const guidanceButton = page.getByTestId('stitch-guidance-primary')
+    await expect(saveButton).toBeEnabled()
+    await expect(guidanceButton).toBeVisible()
+    // Capture both classes from the same DOM snapshot per poll -- two independently
+    // polled assertions can each observe a different intermediate render and falsely agree.
+    await expect.poll(async () => ({
+      saveIsBrand: /btn-brand/.test((await saveButton.getAttribute('class')) ?? ''),
+      guidanceIsBrand: /btn-brand/.test((await guidanceButton.getAttribute('class')) ?? ''),
+    }), { timeout: 5000 }).toEqual({ saveIsBrand: false, guidanceIsBrand: true })
   })
 
   test('missing name disables save and focuses the name step', async ({ page }) => {

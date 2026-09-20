@@ -81,7 +81,8 @@ export function ReferenceReadiness({
           {state}
         </span>
         <p className="text-xs font-mono tabular-nums text-foreground">
-          {seconds(durations.sourceMaterialMs)} clips + {seconds(durations.spacingMs)} spacing = {seconds(durations.renderedMs)} rendered
+          <span data-testid="stitch-source-duration">{seconds(durations.sourceMaterialMs)} clips</span>
+          {' + '}{seconds(durations.spacingMs)} spacing = <span data-testid="stitch-rendered-duration">{seconds(durations.renderedMs)} rendered</span>
         </p>
       </div>
 
@@ -105,7 +106,7 @@ export function ReferenceReadiness({
           data-testid="stitch-save-voice"
           onClick={onSave}
           disabled={!canSave}
-          className={canSave
+          className={canSave && action === 'save'
             ? 'btn-brand inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-medium'
             : 'inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-1.5 text-xs font-medium text-muted-foreground disabled:opacity-50'}
           title="This will be used as a reusable cloning source for text-to-speech."

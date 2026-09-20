@@ -101,6 +101,7 @@ export function useStitchPreview(plan: StitchPlanState): StitchPreviewState {
     clearTimer()
     abortRef.current?.abort()
     seqRef.current++ // invalidate any response that was already in flight
+    setIsRendering(false)
   }, [clearTimer])
 
   const clear = useCallback(() => {

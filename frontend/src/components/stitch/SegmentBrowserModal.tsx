@@ -89,11 +89,16 @@ export function SegmentBrowserModal({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const audioUrlRef = useRef<string | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
+  // Bumped on every new audition click and on close, so a slower in-flight fetch/decode/play
+  // can detect it has been superseded and bail out instead of clobbering newer playback state
+  // or resuming audio after the dialog has closed.
+  const playbackTokenRef = useRef(0)
 
   const hasVoices = (voices?.length ?? 0) > 0 && !!onInsertVoices
 
   useEffect(() => {
     if (!open) {
+      playbackTokenRef.current += 1
       audioRef.current?.pause()
       setPlayingId(null)
     }
@@ -189,16 +194,19 @@ export function SegmentBrowserModal({
       setPlayingId(null)
       return
     }
+    const token = ++playbackTokenRef.current
     audioRef.current?.pause()
     setLoadingAudioId(row.id)
     try {
       const b64 = await row.fetchAudioBase64()
+      if (token !== playbackTokenRef.current) return // superseded by another click or a close
       if (!b64) return
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
       const url = URL.createObjectURL(base64ToBlob(b64))
       audioUrlRef.current = url
       if (!peaksById[row.id]) {
         const analysis = await getClipAudioAnalysis(`browser:${row.id}:${b64.length}`, b64, 32)
+        if (token !== playbackTokenRef.current) return
         setPeaksById((prev) => ({ ...prev, [row.id]: analysis.peaks }))
       }
       if (!audioRef.current) {
@@ -212,9 +220,13 @@ export function SegmentBrowserModal({
       audioRef.current.src = url
       setProgress(0)
       await audioRef.current.play()
+      if (token !== playbackTokenRef.current) {
+        audioRef.current.pause()
+        return
+      }
       setPlayingId(row.id)
     } finally {
-      setLoadingAudioId(null)
+      if (token === playbackTokenRef.current) setLoadingAudioId(null)
     }
   }, [playingId, peaksById])
 

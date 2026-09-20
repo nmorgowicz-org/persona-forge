@@ -1256,7 +1256,7 @@ export function VoiceLibraryPage() {
     setError(null)
     try {
       const clip = await createStitchClipFromSegment(seg)
-      openOvStitchEditor({ returnPage: 'voice-library', incomingClip: clip })
+      openOvStitchEditor({ incomingClip: clip })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -1741,7 +1741,7 @@ export function VoiceLibraryPage() {
           onClick={() => insertSegmentIntoStitchEditor(seg)}
         >
           <Plus className="size-3.5" />
-          Insert into stitch editor
+          Insert into Stitch Studio
         </Button>
         <Select
           value={seg.project_id || UNGROUPED_VALUE}
@@ -1931,7 +1931,7 @@ export function VoiceLibraryPage() {
                   Saved segments ({segments.length})
                 </h2>
                 <p className="text-[10px] text-muted-foreground">
-                  Individual takes you can hear, reuse, and insert into the stitch editor.
+                  Individual takes you can hear, reuse, and insert into Stitch Studio.
                 </p>
               </div>
               <div className="flex items-center gap-2">

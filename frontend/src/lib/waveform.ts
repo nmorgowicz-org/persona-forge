@@ -14,17 +14,9 @@ function bucketsForDuration(duration: number): number {
   return Math.max(24, Math.min(target, 120))
 }
 
-export async function computePeaks(blob: Blob, buckets?: number): Promise<number[]> {
-  const arrayBuffer = await blob.arrayBuffer()
-  const ctx = getAudioContext()
-  const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
+function peaksFromBuffer(audioBuffer: AudioBuffer, buckets?: number): number[] {
   const channel = audioBuffer.getChannelData(0)
-
-  const count =
-    buckets != null
-      ? buckets
-      : bucketsForDuration(audioBuffer.duration)
-
+  const count = buckets ?? bucketsForDuration(audioBuffer.duration)
   const bucketSize = Math.max(1, Math.floor(channel.length / count))
   const peaks: number[] = []
   for (let i = 0; i < count; i++) {
@@ -39,6 +31,13 @@ export async function computePeaks(blob: Blob, buckets?: number): Promise<number
   }
   const overallMax = Math.max(...peaks, 0.01)
   return peaks.map((p) => p / overallMax)
+}
+
+export async function computePeaks(blob: Blob, buckets?: number): Promise<number[]> {
+  const arrayBuffer = await blob.arrayBuffer()
+  const ctx = getAudioContext()
+  const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
+  return peaksFromBuffer(audioBuffer, buckets)
 }
 
 // ---- Shared clip-audio-analysis cache (locked contract: docs/plans/20260920- ----
@@ -103,25 +102,10 @@ export async function getClipAudioAnalysis(
     return { durationMs: 0, sampleRate: ctx.sampleRate, peaks: [] }
   }
 
-  const channel = audioBuffer.getChannelData(0)
-  const count = buckets ?? bucketsForDuration(audioBuffer.duration)
-  const bucketSize = Math.max(1, Math.floor(channel.length / count))
-  const peaks: number[] = []
-  for (let i = 0; i < count; i++) {
-    const start = i * bucketSize
-    const end = Math.min(start + bucketSize, channel.length)
-    let max = 0
-    for (let j = start; j < end; j++) {
-      const abs = Math.abs(channel[j])
-      if (abs > max) max = abs
-    }
-    peaks.push(max)
-  }
-  const overallMax = Math.max(...peaks, 0.01)
   const analysis: ClipAudioAnalysis = {
     durationMs: Math.round(audioBuffer.duration * 1000),
     sampleRate: audioBuffer.sampleRate,
-    peaks: peaks.map((p) => p / overallMax),
+    peaks: peaksFromBuffer(audioBuffer, buckets),
   }
   touchCache(cacheKey, analysis)
   return analysis
