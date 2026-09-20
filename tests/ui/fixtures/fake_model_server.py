@@ -219,8 +219,13 @@ def _patch_save_voice(app_module, rt):
 
     app_module.voice_library._is_valid_voice_id = _fake_is_valid_voice_id
     app_module.voice_library._voice_dir = _fake_voice_dir
+    def _fake_get_prosody_adjusted_wav(_voice_id: str, *_args, **_kwargs):
+        # One second of deterministic silence is enough for the UI to render an adjusted lane.
+        return np.zeros(_SAMPLE_RATE, dtype=np.float32), _SAMPLE_RATE, []
+
     app_module.voice_library._load_variants_meta = _fake_load_variants_meta
     app_module.voice_library.save_prosody_variant = _fake_save_prosody_variant
+    app_module.voice_library.get_prosody_adjusted_wav = _fake_get_prosody_adjusted_wav
 
 
 def _seed_fake_voice_library(rt):
