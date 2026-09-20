@@ -83,14 +83,14 @@ reference clip:
 
 **Voice Edit** — save and promote prosody variants without leaving the workspace
 
-![Voice Edit](docs/screenshots/artifacts/prosody/voice-edit--neutral--workspace.png)
+![Voice Edit](docs/screenshots/voice-edit--neutral--workspace.png)
 
 </td>
 <td width="50%">
 
 **Stitch readiness** — source duration, spacing, and save guidance stay explicit
 
-![Stitch readiness](docs/screenshots/artifacts/stitch-studio/readiness-states--neutral--ideal.png)
+![Stitch readiness](docs/screenshots/readiness-states--neutral--ideal.png)
 
 </td>
 </tr>
