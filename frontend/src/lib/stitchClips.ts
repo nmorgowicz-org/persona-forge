@@ -2,22 +2,7 @@
 // OmniVoicePanel's stitch editor entry point and the standalone Stitch Studio page.
 import { useAppStore, type StitchPlanClip } from '@/store'
 import { getSegmentAudioBase64, getVoice, type SegmentMeta, type VoiceMeta } from '@/lib/api'
-
-async function decodeAudioDurationMs(audioBase64: string): Promise<number> {
-  if (typeof window === 'undefined' || !window.AudioContext) return 0
-  const ctx = new AudioContext()
-  try {
-    const byteStr = atob(audioBase64)
-    const bytes = new Uint8Array(byteStr.length)
-    for (let i = 0; i < byteStr.length; i++) bytes[i] = byteStr.charCodeAt(i)
-    const audioBuffer = await ctx.decodeAudioData(bytes.buffer.slice(0) as ArrayBuffer)
-    return Math.round(audioBuffer.duration * 1000)
-  } catch {
-    return 0
-  } finally {
-    await ctx.close()
-  }
-}
+import { getClipAudioAnalysis } from '@/lib/waveform'
 
 function appendStitchPlanClip(clip: StitchPlanClip) {
   const { setOvStitchPlanClips, setOvStitchPlanPaddingAt } = useAppStore.getState()
@@ -49,7 +34,7 @@ export async function createStitchClipFromSegment(seg: SegmentMeta): Promise<Sti
       throw new Error('No audio available for this segment')
     }
   }
-  const durationMs = await decodeAudioDurationMs(audioBase64)
+  const durationMs = (await getClipAudioAnalysis(`segment:${seg.segment_id}:${audioBase64.length}`, audioBase64)).durationMs
 
   return {
     clipId: seg.segment_id + '-insert-' + Date.now(),
@@ -83,7 +68,7 @@ export async function createStitchClipFromVoice(voice: VoiceMeta): Promise<Stitc
     throw new Error('No audio available for this voice')
   }
 
-  const durationMs = await decodeAudioDurationMs(audioBase64)
+  const durationMs = (await getClipAudioAnalysis(`voice:${voice.voice_id}:${voice.sha256 ?? audioBase64.length}`, audioBase64)).durationMs
 
   return {
     clipId: voice.voice_id + '-insert-' + Date.now(),

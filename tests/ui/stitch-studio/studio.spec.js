@@ -63,3 +63,68 @@ test.describe('Stitch Studio durable plan domain', () => {
     await expect(survivingSeams.first()).toHaveAttribute('data-app-tooltip', '150ms gap')
   })
 })
+
+test.describe('Stitch Studio preview lifecycle', () => {
+  test('superseded preview render is aborted', async ({ page }) => {
+    await insertNSegments(page, 2)
+    await expect(page.getByTestId('stitch-preview-ready')).toBeVisible()
+
+    const abortedRequests = []
+    let requestCount = 0
+    await page.route('**/omnivoice/stitch', async (route) => {
+      requestCount += 1
+      if (requestCount === 1) {
+        // Hold the soon-to-be-superseded request open well past the second change's
+        // debounce window, so it is still in flight when the newer render must abort it.
+        await new Promise((resolve) => setTimeout(resolve, 2500))
+      }
+      await route.continue()
+    })
+    page.on('requestfailed', (req) => {
+      if (req.url().includes('/omnivoice/stitch')) abortedRequests.push(req.failure()?.errorText ?? '')
+    })
+
+    // First change: materializes seam 0 at 200ms, scheduling a render ~700ms later.
+    await page.locator('button[data-app-tooltip="Add a gap between these clips"]').first().click()
+
+    // Second change, fired after the first request has gone out but while it is still
+    // held open -- the resulting render must abort the first in-flight request.
+    await page.waitForTimeout(900)
+    await page.locator('button[aria-label="Decrease gap"]').first().click()
+
+    await expect(page.getByTestId('stitch-preview-ready')).toHaveAttribute('data-plan-hash', /.+/, { timeout: 5000 })
+    const hashAfterSecondChange = await page.getByTestId('stitch-preview-ready').getAttribute('data-plan-hash')
+
+    // Give the stale first request time to resolve, if it were never aborted, and confirm
+    // it never clobbers the fresher preview that the second render already applied.
+    await page.waitForTimeout(2000)
+    await expect(page.getByTestId('stitch-preview-ready')).toHaveAttribute('data-plan-hash', hashAfterSecondChange ?? '')
+    expect(abortedRequests.some((reason) => /abort/i.test(reason))).toBe(true)
+  })
+
+  test('Studio preview URL is revoked on page unmount', async ({ page }) => {
+    await insertNSegments(page, 1)
+    await expect(page.getByTestId('stitch-preview-ready')).toBeVisible()
+    const previewUrl = await page.locator('[data-testid="stitch-preview-ready"] audio').getAttribute('src')
+    expect(previewUrl).toMatch(/^blob:/)
+
+    await page.getByTestId('nav-speak').click()
+
+    const fetchResult = await page.evaluate(async (url) => {
+      try {
+        await fetch(url)
+        return 'ok'
+      } catch {
+        return 'rejected'
+      }
+    }, previewUrl)
+    expect(fetchResult).toBe('rejected')
+
+    await page.getByTestId('nav-stitch-studio').click()
+    await expect(page.getByTestId('stitch-clip')).toHaveCount(1)
+    await expect(page.getByTestId('stitch-preview-ready')).toBeVisible()
+    const newPreviewUrl = await page.locator('[data-testid="stitch-preview-ready"] audio').getAttribute('src')
+    expect(newPreviewUrl).toMatch(/^blob:/)
+    expect(newPreviewUrl).not.toBe(previewUrl)
+  })
+})

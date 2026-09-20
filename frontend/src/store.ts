@@ -325,9 +325,6 @@ interface StoreState {
   ovStitchPlanPaddingMs: number[]
   ovStitchPlanDsp: StitchPlanDsp
   ovStitchEditorOpen: boolean
-  ovStitchPreviewUrl: string | null
-  ovStitchPreviewBlob: Blob | null
-  ovIsRenderingPreview: boolean
   ovStitchRegionEditsByClip: StitchRegionEditsByClip
 
   setOvStitchPlanClips: (
@@ -346,9 +343,6 @@ interface StoreState {
   setOvStitchPlanPaddingMs: (v: number[]) => void
   setOvStitchPlanDsp: (patch: Partial<StitchPlanDsp>) => void
   setOvStitchEditorOpen: (v: boolean) => void
-  setOvStitchPreviewUrl: (v: string | null) => void
-  setOvStitchPreviewBlob: (v: Blob | null) => void
-  setOvIsRenderingPreview: (v: boolean) => void
 }
 
 const initialTheme = loadStoredTheme()
@@ -548,9 +542,6 @@ export const useAppStore = create<StoreState>((set) => ({
       pauseOffsetMs: 0,
     },
     ovStitchEditorOpen: false,
-    ovStitchPreviewUrl: null,
-    ovStitchPreviewBlob: null,
-    ovIsRenderingPreview: false,
 
   setOvSelections: (updater) =>
     set((s) => ({
@@ -702,9 +693,6 @@ export const useAppStore = create<StoreState>((set) => ({
       ovStitchPlanDsp: { ...s.ovStitchPlanDsp, ...patch },
     })),
   setOvStitchEditorOpen: (v) => set({ ovStitchEditorOpen: v }),
-  setOvStitchPreviewUrl: (v) => set({ ovStitchPreviewUrl: v }),
-  setOvStitchPreviewBlob: (v) => set({ ovStitchPreviewBlob: v }),
-  setOvIsRenderingPreview: (v) => set({ ovIsRenderingPreview: v }),
 }))
 
 // ---- Store-level polling: survives unmounts ----

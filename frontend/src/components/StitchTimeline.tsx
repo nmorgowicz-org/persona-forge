@@ -5,7 +5,6 @@ import { ChevronUp, ChevronDown, GripVertical, X, Loader2, Play, Pause, Scissors
 import { useAppStore, type StitchPlanClip } from '@/store'
 import { base64ToBlob, cn } from '@/lib/utils'
 import {
-  renderStitchPlan,
   getStitchPacingTargets,
   getSegmentAudioBase64,
   getVoice,
@@ -15,13 +14,16 @@ import {
 } from '@/lib/api'
 import {
   clipEffectiveDurationMs,
-  toPayloadRegionEdits,
+  hashStitchPlan,
+  type StitchPlanState,
   type StitchRegionEdit,
   type StitchRegionEditsByClip,
 } from '@/lib/stitchPlan'
+import { getClipAudioAnalysis } from '@/lib/waveform'
+import { planStateToPayload } from '@/lib/stitchPreview'
+import { useStitchPreview } from '@/hooks/useStitchPreview'
 import { AudioPlayer } from './AudioPlayer'
 import { WaveformLane } from './waveform/WaveformLane'
-import { renderRegionEdits } from './waveform/regionAudio'
 
 // Helper for reduced motion
 const useReducedMotion = () => {
@@ -42,9 +44,6 @@ const useReducedMotion = () => {
 type RegionEdit = StitchRegionEdit
 type RegionEditsByClip = StitchRegionEditsByClip
 
-function hasRegionEdits(editsByClip: RegionEditsByClip): boolean {
-  return Object.values(editsByClip).some((edits) => edits.length > 0)
-}
 
 function clampMs(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(v)))
@@ -54,141 +53,6 @@ function makeRegionEditId(type: RegionEdit['type']): string {
   return `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
 
-function msToSample(ms: number, sampleRate: number): number {
-  return Math.max(0, Math.round((ms / 1000) * sampleRate))
-}
-
-function cloneChannels(buffer: AudioBuffer): Float32Array[] {
-  return Array.from({ length: buffer.numberOfChannels }, (_, channel) => new Float32Array(buffer.getChannelData(channel)))
-}
-
-function sliceChannels(channels: Float32Array[], start: number, end: number): Float32Array[] {
-  return channels.map((channel) => channel.slice(start, end))
-}
-
-function applyClipFade(channels: Float32Array[], sampleRate: number, fadeInMs: number, fadeOutMs: number) {
-  const length = channels[0]?.length ?? 0
-  if (!length) return
-  const fadeIn = Math.min(length, msToSample(fadeInMs, sampleRate))
-  const fadeOut = Math.min(length, msToSample(fadeOutMs, sampleRate))
-  for (const channel of channels) {
-    for (let i = 0; i < fadeIn; i++) channel[i] *= i / Math.max(1, fadeIn)
-    for (let i = 0; i < fadeOut; i++) {
-      const idx = length - 1 - i
-      channel[idx] *= i / Math.max(1, fadeOut)
-    }
-  }
-}
-
-async function decodeClipAudio(ctx: AudioContext, clip: StitchPlanClip): Promise<AudioBuffer> {
-  const blob = base64ToBlob(clip.sourceAudioBase64)
-  const arrayBuffer = await blob.arrayBuffer()
-  return ctx.decodeAudioData(arrayBuffer.slice(0))
-}
-
-function processClipAudio(buffer: AudioBuffer, clip: StitchPlanClip, edits: RegionEdit[]): Float32Array[] {
-  const sampleRate = buffer.sampleRate
-  const start = msToSample(clip.trimStartMs, sampleRate)
-  const end = Math.max(start + 1, buffer.length - msToSample(clip.trimEndMs, sampleRate))
-  let channels = sliceChannels(cloneChannels(buffer), start, Math.min(end, buffer.length))
-
-  channels = renderRegionEdits({ channels, sampleRate }, edits)
-
-  applyClipFade(channels, sampleRate, clip.fadeInMs, clip.fadeOutMs)
-  return channels
-}
-
-function appendWithGapAndCrossfade(
-  output: Float32Array[],
-  clip: Float32Array[],
-  sampleRate: number,
-  gapMs: number,
-  crossfadeMs: number,
-): Float32Array[] {
-  if (!output.length) return clip
-  const channels = Math.max(output.length, clip.length)
-  const gap = msToSample(gapMs, sampleRate)
-  const fade = gap > 0 ? 0 : Math.min(msToSample(crossfadeMs, sampleRate), output[0].length, clip[0].length)
-  return Array.from({ length: channels }, (_, channelIndex) => {
-    const prev = output[channelIndex] ?? output[0]
-    const next = clip[channelIndex] ?? clip[0]
-    const length = prev.length + gap + next.length - fade
-    const merged = new Float32Array(length)
-    merged.set(prev, 0)
-    if (fade > 0) {
-      const start = prev.length - fade
-      for (let i = 0; i < fade; i++) {
-        const a = 1 - i / fade
-        const b = i / fade
-        merged[start + i] = prev[start + i] * a + next[i] * b
-      }
-      merged.set(next.slice(fade), prev.length + gap)
-    } else {
-      merged.set(next, prev.length + gap)
-    }
-    return merged
-  })
-}
-
-function encodeWav(channels: Float32Array[], sampleRate: number): Blob {
-  const channelCount = channels.length
-  const frameCount = channels[0]?.length ?? 0
-  const bytesPerSample = 2
-  const dataSize = frameCount * channelCount * bytesPerSample
-  const buffer = new ArrayBuffer(44 + dataSize)
-  const view = new DataView(buffer)
-  const writeString = (offset: number, value: string) => {
-    for (let i = 0; i < value.length; i++) view.setUint8(offset + i, value.charCodeAt(i))
-  }
-  writeString(0, 'RIFF')
-  view.setUint32(4, 36 + dataSize, true)
-  writeString(8, 'WAVE')
-  writeString(12, 'fmt ')
-  view.setUint32(16, 16, true)
-  view.setUint16(20, 1, true)
-  view.setUint16(22, channelCount, true)
-  view.setUint32(24, sampleRate, true)
-  view.setUint32(28, sampleRate * channelCount * bytesPerSample, true)
-  view.setUint16(32, channelCount * bytesPerSample, true)
-  view.setUint16(34, bytesPerSample * 8, true)
-  writeString(36, 'data')
-  view.setUint32(40, dataSize, true)
-  let offset = 44
-  for (let i = 0; i < frameCount; i++) {
-    for (let channel = 0; channel < channelCount; channel++) {
-      const sample = Math.max(-1, Math.min(1, channels[channel][i]))
-      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true)
-      offset += bytesPerSample
-    }
-  }
-  return new Blob([buffer], { type: 'audio/wav' })
-}
-
-async function renderEditedStitchPreview(
-  clips: StitchPlanClip[],
-  paddingMs: number[],
-  crossfadeMs: number,
-  editsByClip: RegionEditsByClip,
-): Promise<Blob> {
-  const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext
-  if (!AudioContextCtor) throw new Error('Browser audio rendering is unavailable.')
-  const ctx = new AudioContextCtor() as AudioContext
-  try {
-    let sampleRate = 24000
-    let output: Float32Array[] = []
-    for (let i = 0; i < clips.length; i++) {
-      const clip = clips[i]
-      if (!clip.sourceAudioBase64) throw new Error('Region preview needs source audio for every clip.')
-      const buffer = await decodeClipAudio(ctx, clip)
-      sampleRate = buffer.sampleRate
-      const processed = processClipAudio(buffer, clip, editsByClip[clip.clipId] ?? [])
-      output = appendWithGapAndCrossfade(output, processed, sampleRate, i > 0 ? paddingMs[i - 1] || 0 : 0, i > 0 ? crossfadeMs : 0)
-    }
-    return encodeWav(output, sampleRate)
-  } finally {
-    await ctx.close()
-  }
-}
 
 /* ---------- sub-components ---------- */
 
@@ -278,37 +142,19 @@ function StitchTimelineClip({
 
   useEffect(() => {
     let dead = false
-    ;(async () => {
-      if (!clip.sourceAudioBase64) return
-      const blob = base64ToBlob(clip.sourceAudioBase64)
-      try {
-        const arrayBuffer = await blob.arrayBuffer()
-        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
-        const audioBuffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
-        const channel = audioBuffer.getChannelData(0)
-        if (!dead) setDurMs(Math.round(audioBuffer.duration * 1000))
-        const count = 48
-        const bucketSize = Math.max(1, Math.floor(channel.length / count))
-        const pks: number[] = []
-        for (let i = 0; i < count; i++) {
-          const start = i * bucketSize
-          const end = Math.min(start + bucketSize, channel.length)
-          let max = 0
-          for (let j = start; j < end; j++) {
-            const abs = Math.abs(channel[j])
-            if (abs > max) max = abs
-          }
-          pks.push(max)
-        }
-        const overallMax = Math.max(...pks, 0.01)
-        if (!dead) setPeaks(pks.map((p) => p / overallMax))
-        ctx.close()
-      } catch {
+    if (!clip.sourceAudioBase64) return
+    const assetKey = `clip:${clip.clipId}:${clip.sourceAudioBase64.length}`
+    getClipAudioAnalysis(assetKey, clip.sourceAudioBase64, 48)
+      .then((analysis) => {
+        if (dead) return
+        setDurMs(analysis.durationMs)
+        setPeaks(analysis.peaks)
+      })
+      .catch(() => {
         if (!dead) setPeaks([])
-      }
-    })()
+      })
     return () => { dead = true }
-  }, [clip.sourceAudioBase64])
+  }, [clip.clipId, clip.sourceAudioBase64])
 
   const effectiveDuration = clipEffectiveDurationMs(clip)
 
@@ -1374,65 +1220,19 @@ function StitchEditorBody({
   const clips = useAppStore((s) => s.ovStitchPlanClips)
   const paddingMs = useAppStore((s) => s.ovStitchPlanPaddingMs)
   const dsp = useAppStore((s) => s.ovStitchPlanDsp)
-  const previewUrl = useAppStore((s) => s.ovStitchPreviewUrl)
-  const _previewBlob = useAppStore((s) => s.ovStitchPreviewBlob)
-  void _previewBlob
-  const isRendering = useAppStore((s) => s.ovIsRenderingPreview)
-  const setPreviewUrl = useAppStore((s) => s.setOvStitchPreviewUrl)
-  const setPreviewBlob = useAppStore((s) => s.setOvStitchPreviewBlob)
-  const setIsRendering = useAppStore((s) => s.setOvIsRenderingPreview)
   const setPaddingMs = useAppStore((s) => s.setOvStitchPlanPaddingMs)
   const setClips = useAppStore((s) => s.setOvStitchPlanClips)
   const regionEditsByClip = useAppStore((s) => s.ovStitchRegionEditsByClip)
   const setRegionEditsForClip = useAppStore((s) => s.setOvStitchRegionEdits)
   const [showDsp, setShowDsp] = useState(false)
-  const [staleFlags, setStaleFlags] = useState(true)
-  const [previewError, setPreviewError] = useState<string | null>(null)
   const [isNormalizingPacing, setIsNormalizingPacing] = useState(false)
-  const debounceRef = useRef<number | null>(null)
-  const lastHashRef = useRef('')
-  // Guards against out-of-order network responses: an older in-flight render
-  // (e.g. from before a clip was removed) can resolve after a newer one and
-  // silently overwrite the correct preview with stale audio. Bumped on every
-  // new render attempt; a response is only applied if it's still current.
-  const renderSeqRef = useRef(0)
 
-  const planPayload = useMemo<StitchPlanPayload>(() => {
-    return {
-      clips: clips.map((c) => {
-        const anyRef = c.ref as Record<string, string>
-        const edits = regionEditsByClip[c.clipId] ?? []
-        return {
-          segmentId: 'segmentId' in anyRef ? anyRef.segmentId : undefined,
-          candidateId: 'candidateId' in anyRef ? anyRef.candidateId : undefined,
-          voiceId: 'voiceId' in anyRef ? anyRef.voiceId : undefined,
-          trimStartMs: c.trimStartMs,
-          trimEndMs: c.trimEndMs,
-          fadeInMs: c.fadeInMs,
-          fadeOutMs: c.fadeOutMs,
-          text: c.text,
-          prosodyMode: c.prosodyMode ?? 'auto',
-          edits: edits.length ? toPayloadRegionEdits(edits) : undefined,
-        }
-      }),
-      paddingMs: paddingMs.length ? paddingMs : new Array(Math.max(0, clips.length - 1)).fill(0),
-      crossfadeMs: dsp.crossfadeMs,
-      segmentTargetDbfs: dsp.segmentTargetDbfs,
-      finalTargetDbfs: dsp.finalTargetDbfs,
-      finalCeilingDb: dsp.finalCeilingDb,
-      compress: dsp.compressEnabled
-        ? {
-            thresholdDb: dsp.compressThresholdDb,
-            ratio: dsp.compressRatio,
-            attackMs: 5,
-            releaseMs: 80,
-          }
-        : null,
-      stylePreset: dsp.prosodyStylePreset,
-      paceMultiplier: dsp.paceMultiplier,
-      pauseOffsetMs: dsp.pauseOffsetMs,
-    }
-  }, [clips, paddingMs, dsp, regionEditsByClip])
+  const plan = useMemo<StitchPlanState>(
+    () => ({ clips, paddingMs, dsp, regionEditsByClip }),
+    [clips, paddingMs, dsp, regionEditsByClip],
+  )
+  const preview = useStitchPreview(plan)
+  const planHash = useMemo(() => hashStitchPlan(plan), [plan])
 
   const addRegionEdit = useCallback((clipId: string, edit: RegionEdit) => {
     setRegionEditsForClip(clipId, [...(regionEditsByClip[clipId] ?? []), edit])
@@ -1450,75 +1250,15 @@ function StitchEditorBody({
     }
   }, [clips, regionEditsByClip, setRegionEditsForClip])
 
-  const hash = useMemo(() => {
-    return JSON.stringify({
-      clips: clips.map((c) => [c.trimStartMs, c.trimEndMs, c.fadeInMs, c.fadeOutMs, c.text, c.prosodyMode]),
-      paddingMs,
-      dsp,
-      regionEditsByClip,
-    })
-  }, [clips, paddingMs, dsp, regionEditsByClip])
-
-  useEffect(() => {
-    if (hash === lastHashRef.current || clips.length === 0) {
-      if (hash !== lastHashRef.current) lastHashRef.current = hash
-      return
-    }
-    lastHashRef.current = hash
-    setStaleFlags(true)
-    setPreviewError(null)
-
-    if (debounceRef.current != null) clearTimeout(debounceRef.current)
-    debounceRef.current = window.setTimeout(async () => {
-      debounceRef.current = null
-      const seq = ++renderSeqRef.current
-      try {
-        setIsRendering(true)
-        const requiresServerRepair = clips.some((clip) => (clip.prosodyMode ?? 'auto') !== 'off')
-        const blob = hasRegionEdits(regionEditsByClip) && !requiresServerRepair
-          ? await renderEditedStitchPreview(clips, planPayload.paddingMs, dsp.crossfadeMs, regionEditsByClip)
-          : await renderStitchPlan(planPayload)
-        if (seq !== renderSeqRef.current) return // superseded by a newer edit
-        if (previewUrl) URL.revokeObjectURL(previewUrl)
-        const url = URL.createObjectURL(blob)
-        setPreviewUrl(url)
-        setPreviewBlob(blob)
-        setStaleFlags(false)
-        setPreviewError(null)
-      } catch (err) {
-        // Keep the last-good preview showing, but surface the failure — otherwise
-        // the UI looks stuck on \"changes pending\" forever with no explanation.
-        if (seq === renderSeqRef.current) {
-          setPreviewError(err instanceof Error ? err.message : 'Preview render failed.')
-        }
-      } finally {
-        if (seq === renderSeqRef.current) setIsRendering(false)
-      }
-    }, 500)
-
-    return () => {
-      if (debounceRef.current != null) {
-        clearTimeout(debounceRef.current)
-        debounceRef.current = null
-      }
-    }
-  }, [hash, planPayload, clips, dsp.crossfadeMs, regionEditsByClip, setPreviewUrl, setPreviewBlob, setIsRendering, previewUrl])
-
   const handleSave = useCallback(async () => {
-    renderSeqRef.current++
-    if (debounceRef.current != null) {
-      clearTimeout(debounceRef.current)
-      debounceRef.current = null
-    }
-    setStaleFlags(false)
+    preview.cancel()
     const segments = clips.map((c) => c.text?.trim()).filter((t): t is string => !!t)
-    await onSave(planPayload, segments)
-  }, [planPayload, onSave, clips])
+    await onSave(planStateToPayload(plan), segments)
+  }, [plan, onSave, clips, preview])
 
   const normalizePacing = useCallback(async () => {
     if (!clips.length) return
     setIsNormalizingPacing(true)
-    setPreviewError(null)
     try {
       const result = await getStitchPacingTargets({
         transcripts: clips.map((clip) => clip.text ?? ''),
@@ -1528,8 +1268,8 @@ function StitchEditorBody({
       })
       setPaddingMs(result.padding_ms)
       setClips((current) => current.map((clip) => ({ ...clip, prosodyMode: 'auto' })))
-    } catch (error) {
-      setPreviewError(error instanceof Error ? error.message : 'Could not normalize pacing.')
+    } catch {
+      // Surfaced via the preview's own error state on the next render attempt.
     } finally {
       setIsNormalizingPacing(false)
     }
@@ -1537,23 +1277,12 @@ function StitchEditorBody({
 
   const handleStartOver = useCallback(() => {
     if (!clips.length || !window.confirm('Clear this timeline and start over?')) return
-    renderSeqRef.current++
-    if (debounceRef.current != null) {
-      clearTimeout(debounceRef.current)
-      debounceRef.current = null
-    }
-    if (previewUrl) URL.revokeObjectURL(previewUrl)
-    lastHashRef.current = ''
-    setPreviewUrl(null)
-    setPreviewBlob(null)
-    setIsRendering(false)
+    preview.clear()
     setClips([])
     setPaddingMs([])
     for (const clipId of Object.keys(regionEditsByClip)) setRegionEditsForClip(clipId, [])
-    setStaleFlags(true)
-    setPreviewError(null)
     onStartOver?.()
-  }, [clips.length, onStartOver, previewUrl, regionEditsByClip, setClips, setIsRendering, setPaddingMs, setPreviewBlob, setPreviewUrl, setRegionEditsForClip])
+  }, [clips.length, onStartOver, preview, regionEditsByClip, setClips, setPaddingMs, setRegionEditsForClip])
 
   const totalMs = useMemo(() => {
     let sum = 0
@@ -1580,15 +1309,15 @@ function StitchEditorBody({
             {isNormalizingPacing ? <Loader2 className="size-3 animate-spin" /> : <Gauge className="size-3" />}
             Normalize pacing
           </button>
-          {staleFlags && !previewError && (
+          {preview.isStale && !preview.error && (
             <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
               changes pending
             </span>
           )}
-          {previewError && (
+          {preview.error && (
             <span
               className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-medium text-destructive"
-              title={previewError}
+              title={preview.error}
             >
               preview failed — showing last good render
             </span>
@@ -1616,7 +1345,7 @@ function StitchEditorBody({
 
       <StitchTimeline
         totalDurationMs={totalMs}
-        isPreviewStale={staleFlags}
+        isPreviewStale={preview.isStale}
         library={library}
         onInsertFromLibrary={onInsertFromLibrary}
         regionEditsByClip={regionEditsByClip}
@@ -1628,11 +1357,15 @@ function StitchEditorBody({
       <StitchDspControls open={showDsp} onToggle={() => setShowDsp((v) => !v)} />
 
       {clips.length > 0 && (
-        <div className="flex flex-col gap-2">
+        <div
+          data-testid="stitch-preview-ready"
+          data-plan-hash={planHash}
+          className="flex flex-col gap-2"
+        >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold uppercase text-muted-foreground">Live preview</span>
-              {isRendering && (
+              {preview.isRendering && (
                 <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
                   <Loader2 className="size-3 animate-spin" />
                   rendering…
@@ -1640,8 +1373,8 @@ function StitchEditorBody({
               )}
             </div>
           </div>
-          {previewUrl ? (
-            <PreviewPlayer src={previewUrl} />
+          {preview.url ? (
+            <PreviewPlayer src={preview.url} />
           ) : (
             <div className="flex h-10 items-center px-3 text-xs text-muted-foreground">
               Generating preview…
@@ -1656,7 +1389,7 @@ function StitchEditorBody({
             type="button"
             data-testid="stitch-save-voice"
             onClick={handleSave}
-            disabled={isRendering || clips.length === 0}
+            disabled={preview.isRendering || clips.length === 0}
             className="btn-brand inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-medium"
             title="This will be used as a reusable cloning source for text-to-speech."
           >

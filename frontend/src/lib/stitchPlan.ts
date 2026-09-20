@@ -131,3 +131,25 @@ export function removeClipFromStitchPlan(plan: StitchPlanState, clipId: string):
 export function toPayloadRegionEdits(edits: StitchRegionEdit[]): StitchPlanRegionEdit[] {
   return edits.map(({ id: _id, ...rest }) => rest)
 }
+
+/** Deterministic fingerprint of everything that changes rendered audio: clip audio
+ * identity/trims/fades/text/prosody, seam padding, DSP, and region edits. Used to decide
+ * when a live preview must re-render and to tag the rendered preview for automation
+ * (`stitch-preview-ready`'s `data-plan-hash`). Not a security hash -- collisions are
+ * acceptable only in the sense that two structurally-identical plans should collide. */
+export function hashStitchPlan(plan: StitchPlanState): string {
+  return JSON.stringify({
+    clips: plan.clips.map((c) => [
+      c.clipId,
+      c.trimStartMs,
+      c.trimEndMs,
+      c.fadeInMs,
+      c.fadeOutMs,
+      c.text,
+      c.prosodyMode,
+    ]),
+    paddingMs: plan.paddingMs,
+    dsp: plan.dsp,
+    regionEditsByClip: plan.regionEditsByClip,
+  })
+}
