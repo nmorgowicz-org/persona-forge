@@ -539,3 +539,87 @@ test.describe('Stitch Studio pointer-safe editing and timeline geometry', () => 
     await page.keyboard.press('Escape')
   })
 })
+
+test.describe('Stitch Studio unified transport', () => {
+  test('Space toggles arrangement playback outside editable controls', async ({ page }) => {
+    await insertNSegments(page, 1)
+    await expect(page.getByTestId('stitch-preview-ready')).toBeVisible()
+    await expect(page.locator('[data-testid="stitch-preview-ready"] audio')).toHaveAttribute('src', /^blob:/)
+
+    const toggle = page.getByTestId('stitch-transport-toggle')
+    await expect(toggle).toHaveAttribute('aria-label', 'Play')
+
+    await page.locator('body').click()
+    await page.keyboard.press('Space')
+    await expect(toggle).toHaveAttribute('aria-label', 'Pause')
+    await page.keyboard.press('Space')
+    await expect(toggle).toHaveAttribute('aria-label', 'Play')
+
+    // Guard: Space typed into an editable control must type a space, not toggle playback.
+    const textSpan = page.locator('span.cursor-text').first()
+    await textSpan.click()
+    const input = page.locator('input[aria-label="Edit clip text"]')
+    await expect(input).toBeFocused()
+    const before = await input.inputValue()
+    await page.keyboard.press('Space')
+    await expect(input).toHaveValue(`${before} `)
+    await expect(toggle).toHaveAttribute('aria-label', 'Play')
+    await page.keyboard.press('Escape')
+  })
+
+  test('clicking the ruler seeks the preview and moves the playhead', async ({ page }) => {
+    await insertNSegments(page, 2)
+    await expect(page.getByTestId('stitch-preview-ready')).toBeVisible()
+    await expect(page.locator('[data-testid="stitch-preview-ready"] audio')).toHaveAttribute('src', /^blob:/)
+    await expect(page.getByTestId('stitch-transport-playhead')).toHaveCount(1)
+
+    const ruler = page.getByTestId('stitch-timeline-ruler')
+    const box = await ruler.boundingBox()
+    if (!box) throw new Error('ruler has no bounding box')
+
+    const transformBefore = await page.getByTestId('stitch-transport-playhead').evaluate((el) => el.style.transform)
+    await page.mouse.click(box.x + box.width * 0.6, box.y + 8)
+
+    await expect
+      .poll(() => page.getByTestId('stitch-transport-playhead').evaluate((el) => el.style.transform))
+      .not.toBe(transformBefore)
+
+    const audioTimeAfterSeek = await page.locator('[data-testid="stitch-preview-ready"] audio').evaluate((el) => el.currentTime)
+    expect(audioTimeAfterSeek).toBeGreaterThan(0)
+  })
+
+  test('clip play scopes playback to the clip span but uses the shared transport', async ({ page }) => {
+    await insertNSegments(page, 2)
+    await expect(page.getByTestId('stitch-preview-ready')).toBeVisible()
+    await expect(page.locator('[data-testid="stitch-preview-ready"] audio')).toHaveAttribute('src', /^blob:/)
+
+    const audioCountBefore = await page.locator('audio').count()
+    const clipPlayButton = page.locator('[aria-label="Play clip playback"]').first()
+    await clipPlayButton.click()
+    await expect(page.locator('[aria-label="Pause clip playback"]').first()).toBeVisible()
+
+    // No second Audio instance was created -- the same <audio> element the ruler/toggle use
+    // is the one now playing.
+    expect(await page.locator('audio').count()).toBe(audioCountBefore)
+    const isPaused = await page.locator('[data-testid="stitch-preview-ready"] audio').evaluate((el) => el.paused)
+    expect(isPaused).toBe(false)
+
+    // The shared arrangement toggle reflects the same transport as the per-clip range play.
+    await expect(page.getByTestId('stitch-transport-toggle')).toHaveAttribute('aria-label', 'Pause')
+  })
+
+  test('reduced motion removes travel animations without hiding state', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await insertNSegments(page, 2)
+
+    const wrapper = page.locator('[data-testid="stitch-clip-wrapper"]').first()
+    await expect(wrapper).toBeVisible()
+    const transitionDuration = await wrapper.evaluate((el) => getComputedStyle(el).transitionDuration)
+    expect(transitionDuration).toBe('0s')
+
+    // State still updates correctly even with travel animations disabled.
+    const countBefore = await page.getByTestId('stitch-clip').count()
+    await page.getByTestId('stitch-clip').first().locator('[aria-label="Remove clip"]').click()
+    await expect(page.getByTestId('stitch-clip')).toHaveCount(countBefore - 1)
+  })
+})

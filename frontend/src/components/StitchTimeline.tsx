@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
-import { AnimatePresence, motion, Reorder } from 'motion/react'
+import { AnimatePresence, motion, MotionConfig, Reorder } from 'motion/react'
 import { ChevronUp, ChevronDown, Loader2, Play, Gauge, RotateCcw, Minus, Plus, Maximize2 } from 'lucide-react'
 import { type StitchPlanClip, type StitchPlanDsp } from '@/store'
 import {
@@ -11,12 +11,14 @@ import {
 } from '@/lib/api'
 import {
   clipEffectiveDurationMs,
+  computeClipRangesMs,
   hashStitchPlan,
   type StitchPlanState,
   type StitchRegionEdit,
 } from '@/lib/stitchPlan'
 import { useElementWidth } from '@/hooks/useElementWidth'
 import { type StitchPlanSession } from '@/hooks/useStitchPlanSession'
+import { useStitchTransport, type StitchTransport } from '@/hooks/useStitchTransport'
 import { planStateToPayload } from '@/lib/stitchPreview'
 import { useStitchPreview } from '@/hooks/useStitchPreview'
 import { SegmentBrowserModal } from './stitch/SegmentBrowserModal'
@@ -73,6 +75,7 @@ interface StitchTimelineProps {
   session: StitchPlanSession
   voiceLibrary?: VoiceMeta[]
   onInsertVoiceFromLibrary?: (voices: VoiceMeta[], afterClipId: string | null) => void
+  transport: StitchTransport
 }
 
 export const StitchTimeline = memo(function StitchTimeline({
@@ -83,6 +86,7 @@ export const StitchTimeline = memo(function StitchTimeline({
   session,
   voiceLibrary,
   onInsertVoiceFromLibrary,
+  transport,
 }: StitchTimelineProps) {
   const { plan, reorderClip, removeClip, updateClip, setClips, setPaddingAt: setPadding, setPadding: setPaddingMs, setRegionEdits: onAddOrRemoveRegionEdit } = session
   const { clips, paddingMs, regionEditsByClip } = plan
@@ -176,6 +180,17 @@ export const StitchTimeline = memo(function StitchTimeline({
     return Math.max(1, sum)
   }, [clips, paddingMs])
 
+  // Each clip's approximate span in the rendered arrangement (Packet 7), scaled onto the
+  // shared transport's actual measured audio duration -- the client-side estimate and the
+  // backend's real render can differ slightly (crossfade/DSP), so this keeps seek and
+  // clip-range playback from drifting past the end of the real audio.
+  const clipRanges = useMemo(() => computeClipRangesMs(plan), [plan])
+  const previewScale = transport.durationSec > 0 && effectiveTotalMs > 0
+    ? (transport.durationSec * 1000) / effectiveTotalMs
+    : 1
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const reducedMotion = useReducedMotion()
+
   const autoPace = useCallback(() => {
     setPaddingMs(clips.slice(0, -1).map((clip) => {
       const text = (clip.text ?? '').trim()
@@ -210,13 +225,28 @@ export const StitchTimeline = memo(function StitchTimeline({
   )
   const contentWidthPx = totalSeconds * pixelsPerSecond
 
-  // Keyboard shortcuts for selection, reorder, removal, and trim nudging -- scoped to this
-  // component's lifetime and unconditionally skipped whenever the event target is an editable
-  // control, so typing in a clip's text field, a gap's typed-value input, etc. is never
-  // hijacked by these bindings.
+  const handleSeek = useCallback(
+    (arrangementSec: number) => transport.seek(arrangementSec * previewScale),
+    [transport, previewScale],
+  )
+
+  // Keyboard shortcuts for playback, selection, reorder, removal, and trim nudging -- scoped
+  // to this component's lifetime and unconditionally skipped whenever the event target is an
+  // editable control, so typing in a clip's text field, a gap's typed-value input, etc. is
+  // never hijacked by these bindings. Space and `?` don't require a selected clip; the rest do.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (isEditableTarget(e.target)) return
+      if ((e.code === 'Space' || e.key === ' ') && !e.repeat) {
+        e.preventDefault()
+        transport.toggle()
+        return
+      }
+      if (e.key === '?' && !e.repeat) {
+        e.preventDefault()
+        setShortcutsOpen(true)
+        return
+      }
       if (!selectedClipId) return
       const index = clips.findIndex((c) => c.clipId === selectedClipId)
       if (index === -1) return
@@ -249,7 +279,7 @@ export const StitchTimeline = memo(function StitchTimeline({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selectedClipId, clips, moveClip, removeClip, updateClip])
+  }, [selectedClipId, clips, moveClip, removeClip, updateClip, transport])
 
   if (!clips.length) {
     return (
@@ -271,6 +301,7 @@ export const StitchTimeline = memo(function StitchTimeline({
   }
 
   return (
+    <>
     <div className="relative flex min-w-0 flex-col gap-2">
       {/* Library insert bar */}
       {(library.length > 0 || hasVoiceLibrary) && (
@@ -294,6 +325,9 @@ export const StitchTimeline = memo(function StitchTimeline({
             <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted" onClick={autoPace}>
               <Gauge className="size-3.5" /> Auto-pace
             </button>
+            <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted" onClick={() => setShortcutsOpen(true)} title="Keyboard shortcuts (?)">
+              Shortcuts
+            </button>
             {(library.length > 0 || hasVoiceLibrary) && (
               <SegmentBrowserModal
                 segments={library}
@@ -315,22 +349,45 @@ export const StitchTimeline = memo(function StitchTimeline({
         style={{ minWidth: 0 }}
       >
         {contentWidthPx > 0 && (
-          <TimelineRuler durationSeconds={totalSeconds} pixelsPerSecond={pixelsPerSecond} widthPx={contentWidthPx} laneHeightPx={140} />
+          <TimelineRuler
+            durationSeconds={totalSeconds}
+            pixelsPerSecond={pixelsPerSecond}
+            widthPx={contentWidthPx}
+            laneHeightPx={140}
+            transport={transport}
+            previewScale={previewScale}
+            onSeekSeconds={handleSeek}
+          />
         )}
 
+        <MotionConfig reducedMotion={reducedMotion ? 'always' : 'never'}>
         <Reorder.Group
           axis="x"
           values={clips}
           onReorder={handleReorder}
           className="relative z-[1] mt-5 flex w-max min-w-full items-start gap-0"
         >
+          <AnimatePresence initial={false}>
           {clips.map((clip, i) => {
             const clipSeconds = clipEffectiveDurationMs(clip) / 1000
             const naturalWidthPx = clipSeconds * pixelsPerSecond
             const clipWidthPx = Math.max(MIN_CLIP_PX, naturalWidthPx)
             const isClipClamped = naturalWidthPx < MIN_CLIP_PX
+            const range = clipRanges[i]
+            const previewStartSec = range ? (range.startMs * previewScale) / 1000 : 0
+            const previewEndSec = range ? (range.endMs * previewScale) / 1000 : 0
+            const isRangePlaying = transport.activeRangeId === clip.clipId
             return (
-              <div key={clip.clipId} className="flex shrink-0 items-start gap-4">
+              <motion.div
+                key={clip.clipId}
+                data-testid="stitch-clip-wrapper"
+                layout
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                transition={{ duration: reducedMotion ? 0 : 0.18, ease: 'easeOut' }}
+                className="flex shrink-0 items-start gap-4 transition-transform duration-150 ease-out motion-reduce:transition-none motion-reduce:duration-0"
+              >
                 {i > 0 && (
                   <GapControl gapIndex={i - 1} paddingMs={paddingMs[i - 1] || 0} onSetPadding={setPadding} pixelsPerSecond={pixelsPerSecond} />
                 )}
@@ -363,14 +420,20 @@ export const StitchTimeline = memo(function StitchTimeline({
                     isReordering
                     isSelected={selectedClipId === clip.clipId}
                     isWidthClamped={isClipClamped}
+                    isRangePlaying={isRangePlaying}
+                    onPlayRange={() => transport.playRange(clip.clipId, previewStartSec, previewEndSec)}
                   />
                 </Reorder.Item>
-              </div>
+              </motion.div>
             )
           })}
+          </AnimatePresence>
         </Reorder.Group>
+        </MotionConfig>
       </div>
     </div>
+    <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+    </>
   )
 })
 
@@ -506,6 +569,7 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
   const [isNormalizingPacing, setIsNormalizingPacing] = useState(false)
 
   const preview = useStitchPreview(plan)
+  const transport = useStitchTransport(preview.url)
   const planHash = useMemo(() => hashStitchPlan(plan), [plan])
 
   const handleSave = useCallback(async () => {
@@ -616,6 +680,7 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
         session={session}
         voiceLibrary={voiceLibrary}
         onInsertVoiceFromLibrary={onInsertVoiceFromLibrary}
+        transport={transport}
       />
       <StitchDspControls open={showDsp} onToggle={() => setShowDsp((v) => !v)} dsp={dsp} onSetDsp={session.setDsp} />
 
@@ -637,7 +702,10 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
             </div>
           </div>
           {preview.url ? (
-            <PreviewPlayer src={preview.url} />
+            <>
+              <TransportBar transport={transport} />
+              <audio ref={transport.audioRef} src={preview.url} preload="auto" data-testid="stitch-transport-audio" />
+            </>
           ) : (
             <div className="flex h-10 items-center px-3 text-xs text-muted-foreground">
               Generating preview…
@@ -726,47 +794,75 @@ export function StitchEditorInline(props: Extract<StitchEditorBodyProps, { surfa
   )
 }
 
-/* ---------- minimal preview player ---------- */
+/* ---------- shared transport bar ---------- */
 
-function PreviewPlayer({ src }: { src: string }) {
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const [playing, setPlaying] = useState(false)
-  const [progress, setProgress] = useState(0)
+// Replaces the old PreviewPlayer, which owned its own <audio> element and local playing/
+// progress state -- Packet 7 requires exactly one audio element for the whole arrangement, so
+// the toggle button and progress rail here are driven entirely by the shared transport passed
+// down from StitchEditorBody. The progress fill is pushed via RAF through `subscribeTime`
+// (never React state per frame), the same pattern the ruler's playhead uses.
+function TransportBar({ transport }: { transport: StitchTransport }) {
+  const fillRef = useRef<HTMLDivElement>(null)
+  const { subscribeTime, getCurrentTime, durationSec } = transport
 
   useEffect(() => {
-    const a = audioRef.current
-    if (!a) return
-    const onEnd = () => { setPlaying(false); setProgress(0) }
-    const onTimeUpdate = () => {
-      if (a.duration && isFinite(a.duration)) setProgress(a.currentTime / a.duration)
+    const el = fillRef.current
+    if (!el) return
+    const apply = (sec: number) => {
+      const pct = durationSec > 0 ? Math.min(100, Math.max(0, (sec / durationSec) * 100)) : 0
+      el.style.width = `${pct}%`
     }
-    a.addEventListener('ended', onEnd)
-    a.addEventListener('timeupdate', onTimeUpdate)
-    return () => {
-      a.removeEventListener('ended', onEnd)
-      a.removeEventListener('timeupdate', onTimeUpdate)
-    }
-  }, [src])
-
-  const togglePlay = async () => {
-    const a = audioRef.current
-    if (!a) return
-    if (playing) a.pause()
-    else await a.play()
-    setPlaying(!playing)
-  }
+    apply(getCurrentTime())
+    return subscribeTime(apply)
+  }, [subscribeTime, getCurrentTime, durationSec])
 
   return (
     <div className="flex items-center gap-2">
-      <button type="button" onClick={togglePlay} className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground hover:text-foreground">
-        {playing
+      <button
+        type="button"
+        data-testid="stitch-transport-toggle"
+        onClick={transport.toggle}
+        aria-label={transport.isPlaying ? 'Pause' : 'Play'}
+        className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground hover:text-foreground"
+      >
+        {transport.isPlaying
           ? <div className="flex gap-[3px]"><div className="h-3 w-[2px] bg-current" /><div className="h-3 w-[2px] bg-current" /></div>
           : <Play className="size-3" />}
       </button>
       <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-black/40">
-        <div className="absolute inset-y-0 left-0 bg-gradient-to-r from-cyan-500/50 to-fuchsia-500/40" style={{ width: `${progress * 100}%` }} />
+        <div ref={fillRef} className="absolute inset-y-0 left-0 bg-gradient-to-r from-cyan-500/50 to-fuchsia-500/40" style={{ width: '0%' }} />
       </div>
-      <audio ref={audioRef} src={src} preload="auto" />
     </div>
+  )
+}
+
+/* ---------- shortcuts dialog ---------- */
+
+const SHORTCUTS: Array<[string, string]> = [
+  ['Space', 'Play/pause the arrangement'],
+  ['Click ruler', 'Seek the arrangement'],
+  ['←/→', 'Select the previous/next clip'],
+  ['Shift+←/→', 'Reorder the selected clip'],
+  ['↑/↓', 'Nudge trim start by 10ms (Shift = 100ms)'],
+  ['Delete/Backspace', 'Remove the selected clip'],
+  ['?', 'Show this dialog'],
+]
+
+function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent data-testid="stitch-shortcuts-dialog" className="max-w-sm">
+        <DialogTitle>Keyboard shortcuts</DialogTitle>
+        <DialogDescription className="sr-only">Stitch Studio keyboard shortcuts</DialogDescription>
+        <dl className="flex flex-col gap-2 text-xs">
+          {SHORTCUTS.map(([key, desc]) => (
+            <div key={key} className="flex items-center justify-between gap-4">
+              <dt className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">{key}</dt>
+              <dd className="text-muted-foreground">{desc}</dd>
+            </div>
+          ))}
+        </dl>
+      </DialogContent>
+    </Dialog>
   )
 }

@@ -92,6 +92,30 @@ export function suggestedPaddingForClips(clips: StitchPlanClip[]): number[] {
   return clips.slice(0, -1).map((clip) => suggestedGapMs(clip.text ?? ''))
 }
 
+export interface StitchClipRangeMs {
+  clipId: string
+  startMs: number
+  endMs: number
+}
+
+/** Each clip's approximate [startMs, endMs) span within the *rendered* arrangement, derived
+ * client-side from trims, gaps, and the flat per-seam crossfade duration -- the same terms
+ * `computeStitchDurations` already uses for `renderedMs`. This is an approximation, not a
+ * sample-accurate readout of the backend's actual render (the backend's DSP chain can shift
+ * boundaries by effects this module intentionally never models); callers scale it against the
+ * real rendered preview's measured duration before using it to seek/bound playback. */
+export function computeClipRangesMs(plan: StitchPlanState): StitchClipRangeMs[] {
+  const crossfadeMs = Math.max(0, plan.dsp?.crossfadeMs ?? 0)
+  let cursor = 0
+  return plan.clips.map((clip, i) => {
+    if (i > 0) cursor += (plan.paddingMs[i - 1] ?? 0) - crossfadeMs
+    const startMs = Math.max(0, cursor)
+    const endMs = startMs + clipEffectiveDurationMs(clip)
+    cursor = endMs
+    return { clipId: clip.clipId, startMs, endMs }
+  })
+}
+
 /** Moves the clip at `from` to `to`. Seam semantics are preserved: padding values stay
  * attached to their timeline boundary (index), not to the clip pair that originally sat
  * there, so reordering clips changes clip order without moving gaps. */

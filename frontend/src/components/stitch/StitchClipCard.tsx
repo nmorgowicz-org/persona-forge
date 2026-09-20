@@ -7,10 +7,10 @@
 // on every pointermove -- only the final value does. Using pointer events (not mouse events)
 // means touch and pen produce the same gesture, and setPointerCapture keeps receiving
 // move/up even if the cursor leaves the handle mid-drag.
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useState, useRef, type PointerEvent as ReactPointerEvent } from 'react'
 import { ChevronUp, GripVertical, X, Play, Pause, Scissors, Trash2, Volume2, VolumeX } from 'lucide-react'
 import { type StitchPlanClip } from '@/store'
-import { base64ToBlob, cn } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { clipEffectiveDurationMs, type StitchRegionEdit } from '@/lib/stitchPlan'
 import { getClipAudioAnalysis } from '@/lib/waveform'
 import { WaveformLane } from '../waveform/WaveformLane'
@@ -66,6 +66,8 @@ export function StitchClipCard({
   isReordering,
   isSelected,
   isWidthClamped,
+  isRangePlaying,
+  onPlayRange,
 }: {
   clip: StitchPlanClip
   onRemove: (clipId: string) => void
@@ -77,12 +79,13 @@ export function StitchClipCard({
   isReordering?: boolean
   isSelected?: boolean
   isWidthClamped?: boolean
+  /** Whether this clip's bounded range is the one currently playing on the shared transport. */
+  isRangePlaying: boolean
+  /** Plays/pauses this clip's span on the shared transport -- never creates its own Audio. */
+  onPlayRange: () => void
 }) {
   const [peaks, setPeaks] = useState<number[] | null>(null)
   const [durMs, setDurMs] = useState<number | null>(null)
-  const [clipPlaying, setClipPlaying] = useState(false)
-  const clipAudioRef = useRef<HTMLAudioElement | null>(null)
-  const clipAudioUrlRef = useRef<string | null>(null)
   const [editingText, setEditingText] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [draftText, setDraftText] = useState(clip.text ?? '')
@@ -120,31 +123,6 @@ export function StitchClipCard({
   const cancelEditText = () => {
     setEditingText(false)
     setDraftText(clip.text ?? '')
-  }
-
-  useEffect(() => {
-    return () => {
-      clipAudioRef.current?.pause()
-      if (clipAudioUrlRef.current) URL.revokeObjectURL(clipAudioUrlRef.current)
-    }
-  }, [])
-
-  const toggleClipPlay = () => {
-    if (!clip.sourceAudioBase64) return
-    if (!clipAudioRef.current) {
-      const url = URL.createObjectURL(base64ToBlob(clip.sourceAudioBase64))
-      clipAudioUrlRef.current = url
-      const audio = new Audio(url)
-      audio.addEventListener('ended', () => setClipPlaying(false))
-      clipAudioRef.current = audio
-    }
-    if (clipPlaying) {
-      clipAudioRef.current.pause()
-      setClipPlaying(false)
-    } else {
-      void clipAudioRef.current.play()
-      setClipPlaying(true)
-    }
   }
 
   useEffect(() => {
@@ -399,12 +377,12 @@ export function StitchClipCard({
           <button
             type="button"
             className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-            onClick={toggleClipPlay}
+            onClick={onPlayRange}
             disabled={!clip.sourceAudioBase64}
-            aria-label={clipPlaying ? 'Pause clip playback' : 'Play clip playback'}
+            aria-label={isRangePlaying ? 'Pause clip playback' : 'Play clip playback'}
             title="Listen to just this segment"
           >
-            {clipPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+            {isRangePlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
           </button>
           <button
             type="button"
