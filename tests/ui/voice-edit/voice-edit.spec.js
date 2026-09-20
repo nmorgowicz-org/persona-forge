@@ -43,4 +43,11 @@ test.describe('Voice Edit workspace', () => {
     await page.getByTestId('nav-voice-library').click()
     await expect(page.getByTestId('voice-card').first().getByRole('button', { name: /Adjust prosody/i })).toBeVisible()
   })
+
+  test('Voice Library uses the shared compact prosody panel', async ({ page }) => {
+    await page.goto('/')
+    await page.getByTestId('nav-voice-library').click()
+    await page.getByTestId('voice-card').first().getByRole('button', { name: /Adjust prosody/i }).click()
+    await expect(page.getByTestId('prosody-editor-panel')).toHaveAttribute('data-layout', 'compact')
+  })
 })

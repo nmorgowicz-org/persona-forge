@@ -31,6 +31,8 @@ export function VoiceEditPage() {
     if (!selectedId && voices.length) setSelectedId(voices[0].voice_id)
   }, [selectedId, voices])
 
+  const selectedVoice = voices.find((voice) => voice.voice_id === selectedId) ?? null
+
   return (
     <div data-testid="voice-edit-page" className="flex min-w-0 flex-col gap-6">
       <header>
@@ -38,7 +40,7 @@ export function VoiceEditPage() {
         <p className="text-sm text-muted-foreground">Create, compare, and promote prosody variants without leaving the voice workflow.</p>
       </header>
       <SavedVoicePicker voices={voices} selectedId={selectedId} onChange={setSelectedId} search={search} onSearchChange={setSearch} />
-      {selectedId ? <ProsodyEditorPanel voiceId={selectedId} layout="page" onChanged={refresh} /> : <p className="text-sm text-muted-foreground">Save a reference voice before editing its prosody.</p>}
+      {selectedVoice ? <ProsodyEditorPanel voice={selectedVoice} layout="page" onChanged={refresh} /> : <p className="text-sm text-muted-foreground">Save a reference voice before editing its prosody.</p>}
     </div>
   )
 }
