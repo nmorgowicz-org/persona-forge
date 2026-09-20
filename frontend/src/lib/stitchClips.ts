@@ -2,6 +2,7 @@
 // OmniVoicePanel's stitch editor entry point and the standalone Stitch Studio page.
 import type { StitchPlanClip } from '@/store'
 import { getSegmentAudioBase64, getVoice, type SegmentMeta, type VoiceMeta } from '@/lib/api'
+import { suggestedGapMs, suggestedPaddingForClips } from '@/lib/stitchPlan'
 import { getClipAudioAnalysis } from '@/lib/waveform'
 import type { StitchPlanSession } from '@/hooks/useStitchPlanSession'
 
@@ -25,7 +26,13 @@ function spliceStitchPlanClips(clips: StitchPlanClip[], session: StitchPlanSessi
   })
 
   if (clipsBefore.length === 0) {
-    session.setPadding(new Array(Math.max(0, clips.length - 1)).fill(0))
+    session.setPadding(suggestedPaddingForClips(clips))
+    return
+  }
+  if (insertAt === clipsBefore.length) {
+    const appendedSeams = [clipsBefore.at(-1), ...clips.slice(0, -1)]
+      .map((clip) => suggestedGapMs(clip?.text ?? ''))
+    session.setPadding([...paddingBefore, ...appendedSeams])
     return
   }
   const splitAt = Math.max(0, insertAt - 1)

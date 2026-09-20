@@ -32,6 +32,7 @@ import segmentLibraryBrowse from './scenarios/stitch-studio/segment-library-brow
 import segmentBrowserScale from './scenarios/stitch-studio/segment-browser-scale.mjs';
 import gapEditing from './scenarios/stitch-studio/gap-editing.mjs';
 import transportPlayback from './scenarios/stitch-studio/transport-playback.mjs';
+import readinessStates from './scenarios/stitch-studio/readiness-states.mjs';
 import stitchAssembly from './scenarios/stitch-studio/assembly.mjs';
 import omnivoiceAudition from './scenarios/omnivoice/audition.mjs';
 import omnivoiceCandidates from './scenarios/omnivoice/candidates.mjs';
@@ -193,6 +194,20 @@ export const SCENARIOS = {
         contract: {
             intent: 'Show one shared transport driving the ruler playhead, arrangement toggle, and a per-clip range play button together.',
             expectedOutputs: ['transport-playback--neutral--playback.png'],
+        },
+    },
+    'readiness-states': {
+        run: readinessStates,
+        category: 'stitch-studio',
+        runtime: 'neutral',
+        contract: {
+            intent: 'Show blocked, warning, ideal, and overlong reference-readiness states with source material distinct from spacing.',
+            expectedOutputs: [
+                'readiness-states--neutral--blocked.png',
+                'readiness-states--neutral--warning.png',
+                'readiness-states--neutral--ideal.png',
+                'readiness-states--neutral--overlong.png',
+            ],
         },
     },
     'stitch-assembly': {

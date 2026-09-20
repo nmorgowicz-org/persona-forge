@@ -13,6 +13,22 @@ async function insertNSegments(page, n) {
   await page.getByTestId('stitch-picker-insert-segments').click()
   await expect(page.getByTestId('stitch-clip')).toHaveCount(n)
 }
+async function appendPickerItems(page, tab, count) {
+  await page.getByTestId('stitch-picker-toggle-segments').click()
+  if (tab === 'voices') await page.getByRole('tab', { name: 'Reference voices' }).click()
+  const items = page.getByTestId(`stitch-picker-item-${tab}`)
+  await expect(items.first()).toBeVisible()
+  for (let i = 0; i < count; i++) await items.nth(i).click()
+  await page.getByTestId(`stitch-picker-insert-${tab}`).click()
+}
+
+async function setGap(page, index, value) {
+  const gap = page.getByTestId('stitch-gap-control').nth(index)
+  await gap.getByRole('button', { name: /Gap between clip/ }).click()
+  const input = gap.getByRole('textbox', { name: /Gap between clip/ })
+  await input.fill(value)
+  await input.press('Enter')
+}
 
 test.describe('Stitch Studio durable plan domain', () => {
   test('region edits survive Stitch Studio unmount and remount', async ({ page }) => {
@@ -37,17 +53,10 @@ test.describe('Stitch Studio durable plan domain', () => {
   test('removing a middle clip keeps later gap values on their seams', async ({ page }) => {
     await insertNSegments(page, 3)
 
-    // Gap controls are always rendered now (including 0.00s seams) -- materialize both
-    // gaps to 200ms via the always-present stepper instead of a "+" affordance.
-    const increaseButtons = page.locator('button[aria-label="Increase gap"]')
-    for (let i = 0; i < 20; i++) await increaseButtons.nth(0).click() // seam 0 -> 200ms
-    for (let i = 0; i < 20; i++) await increaseButtons.nth(1).click() // seam 1 -> 200ms
-
-    // Give the two seams distinct values: seam 0 -> 150ms, seam 1 stays 200ms.
-    const decreaseSeam0 = page.locator('button[aria-label="Decrease gap"]').nth(0)
-    for (let i = 0; i < 5; i++) {
-      await decreaseSeam0.click()
-    }
+    // Suggested punctuation gaps are defaults, not the values this positional-seam test is
+    // about. Type explicit values before removing a clip.
+    await setGap(page, 0, '150ms')
+    await setGap(page, 1, '200ms')
 
     const seams = page.locator('div[data-app-tooltip$="ms gap"]')
     await expect(seams).toHaveCount(2)
@@ -134,9 +143,7 @@ test.describe('Stitch Studio preview lifecycle', () => {
 test.describe('Stitch Studio quick-insert transaction', () => {
   test('quick insert cancel preserves the committed stitch plan', async ({ page }) => {
     await insertNSegments(page, 2)
-    for (let i = 0; i < 20; i++) await page.locator('button[aria-label="Increase gap"]').first().click()
-    const decreaseGap = page.locator('button[aria-label="Decrease gap"]').first()
-    for (let i = 0; i < 5; i++) await decreaseGap.click()
+    await setGap(page, 0, '150ms')
     await expect(page.locator('div[data-app-tooltip$="ms gap"]')).toHaveAttribute('data-app-tooltip', '150ms gap')
 
     await page.getByTestId('nav-voice-library').click()
@@ -483,6 +490,7 @@ test.describe('Stitch Studio pointer-safe editing and timeline geometry', () => 
     await insertNSegments(page, 2)
     const gap = page.getByTestId('stitch-gap-control').first()
     await expect(gap).toBeVisible()
+    await setGap(page, 0, '0')
     await expect(gap).toHaveAttribute('data-gap-zero', 'true')
     const zeroWidth = (await gap.boundingBox())?.width ?? 0
 
@@ -621,5 +629,112 @@ test.describe('Stitch Studio unified transport', () => {
     const countBefore = await page.getByTestId('stitch-clip').count()
     await page.getByTestId('stitch-clip').first().locator('[aria-label="Remove clip"]').click()
     await expect(page.getByTestId('stitch-clip')).toHaveCount(countBefore - 1)
+  })
+})
+
+test.describe('Stitch Studio readiness and save outcomes', () => {
+  test('first clip names an untouched voice field and later clips never overwrite user input', async ({ page }) => {
+    await insertNSegments(page, 1)
+
+    const name = page.getByTestId('stitch-voice-name')
+    await expect(name).not.toHaveValue('')
+    await name.fill('My deliberate reference name')
+
+    await appendPickerItems(page, 'segments', 1)
+    await expect(page.getByTestId('stitch-clip')).toHaveCount(2)
+    await expect(name).toHaveValue('My deliberate reference name')
+  })
+
+  test('punctuation creates visible suggested gaps and manual values are not overwritten', async ({ page }) => {
+    await insertNSegments(page, 1)
+    await appendPickerItems(page, 'segments', 1)
+
+    const firstGap = page.getByTestId('stitch-gap-control').first()
+    await expect(firstGap).toHaveAttribute('data-gap-ms', '520')
+    await expect(page.getByTestId('stitch-gap-suggestion')).toContainText('Suggested from punctuation')
+
+    await setGap(page, 0, '250ms')
+    await expect(firstGap).toHaveAttribute('data-gap-ms', '250')
+
+    await appendPickerItems(page, 'segments', 1)
+    await expect(page.getByTestId('stitch-gap-control').first()).toHaveAttribute('data-gap-ms', '250')
+    await expect(page.getByTestId('stitch-gap-control').nth(1)).toHaveAttribute('data-gap-ms', '520')
+  })
+
+  test('five seconds of gaps cannot satisfy the five-second source-material minimum', async ({ page }) => {
+    await insertNSegments(page, 2)
+    await page.getByTestId('stitch-voice-name').fill('Insufficient source material')
+
+    // Leave only a sliver of the first source clip audible, then add the maximum permitted gap.
+    const handle = page.getByTestId('stitch-trim-handle-left').first()
+    const box = await handle.boundingBox()
+    if (!box) throw new Error('trim handle has no bounding box')
+    await page.mouse.move(box.x + 1, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + 190, box.y + box.height / 2)
+    await page.mouse.up()
+
+    await setGap(page, 0, '5s')
+    await expect(page.getByTestId('stitch-gap-control').first()).toHaveAttribute('data-gap-ms', '5000')
+    await expect(page.getByTestId('stitch-save-voice')).toBeDisabled()
+  })
+
+  test('readiness distinguishes blocked, warning, ideal, and overlong states', async ({ page }) => {
+    await page.goto('/')
+    await page.getByTestId('nav-stitch-studio').click()
+    await expect(page.getByTestId('stitch-reference-readiness')).toHaveAttribute('data-readiness-state', 'blocked')
+
+    await appendPickerItems(page, 'segments', 3)
+    await expect(page.getByTestId('stitch-reference-readiness')).toHaveAttribute('data-readiness-state', 'warning')
+
+    await setGap(page, 0, '2s')
+    await setGap(page, 1, '2s')
+    await expect(page.getByTestId('stitch-reference-readiness')).toHaveAttribute('data-readiness-state', 'ideal')
+
+    await setGap(page, 0, '5s')
+    await setGap(page, 1, '5s')
+    await expect(page.getByTestId('stitch-reference-readiness')).toHaveAttribute('data-readiness-state', 'overlong')
+  })
+
+  test('missing name disables save and focuses the name step', async ({ page }) => {
+    await insertNSegments(page, 3)
+    await setGap(page, 0, '2s')
+    await setGap(page, 1, '2s')
+
+    await expect(page.getByTestId('stitch-save-voice')).toBeDisabled()
+    await page.getByTestId('stitch-guidance-primary').click()
+    await expect(page.getByTestId('stitch-voice-name')).toBeFocused()
+  })
+
+  test('plain save does not activate the API default', async ({ page }) => {
+    let activationRequests = 0
+    await page.route('**/voices/*/activate', async (route) => {
+      activationRequests += 1
+      await route.continue()
+    })
+    await insertNSegments(page, 3)
+    await page.getByTestId('stitch-voice-name').fill('Plain saved reference')
+    await expect(page.getByTestId('stitch-save-voice')).toBeEnabled()
+    await page.getByTestId('stitch-save-voice').click()
+
+    await expect(page.getByText('Saved to voice library as')).toBeVisible()
+    expect(activationRequests).toBe(0)
+  })
+
+  test('API default activation failure preserves the saved voice and offers retry', async ({ page }) => {
+    let activationRequests = 0
+    await page.route('**/voices/*/activate', async (route) => {
+      activationRequests += 1
+      await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'activation unavailable' }) })
+    })
+    await insertNSegments(page, 3)
+    await page.getByTestId('stitch-voice-name').fill('Default saved reference')
+    await page.getByTestId('stitch-use-as-api-default').check()
+    await expect(page.getByTestId('stitch-save-voice')).toHaveText('Save & use as API default')
+    await page.getByTestId('stitch-save-voice').click()
+
+    await expect(page.getByText('Saved, not activated')).toBeVisible()
+    await expect(page.getByTestId('stitch-retry-api-activation')).toBeVisible()
+    expect(activationRequests).toBe(1)
   })
 })

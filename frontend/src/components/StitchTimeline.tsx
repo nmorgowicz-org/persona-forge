@@ -13,6 +13,7 @@ import {
   clipEffectiveDurationMs,
   computeClipRangesMs,
   hashStitchPlan,
+  suggestedGapMs,
   type StitchPlanState,
   type StitchRegionEdit,
 } from '@/lib/stitchPlan'
@@ -25,6 +26,7 @@ import { SegmentBrowserModal } from './stitch/SegmentBrowserModal'
 import { TimelineRuler } from './stitch/TimelineRuler'
 import { GapControl } from './stitch/GapControl'
 import { StitchClipCard } from './stitch/StitchClipCard'
+import { ReferenceReadiness } from './stitch/ReferenceReadiness'
 
 // Helper for reduced motion
 const useReducedMotion = () => {
@@ -546,6 +548,10 @@ export type StitchEditorBodyProps =
        * the clips' (possibly user-edited) text, not from DSP/trim/fade params. */
       onSave: (plan: StitchPlanPayload, segments: string[]) => Promise<void>
       onStartOver?: () => void
+      name: string
+      saveLabel: string
+      isSaving: boolean
+      onFocusName: () => void
     })
   | (StitchEditorCommonProps & {
       surface: 'quick-insert'
@@ -565,6 +571,9 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
   const { session, library, onInsertFromLibrary, voiceLibrary, onInsertVoiceFromLibrary } = props
   const { plan } = session
   const { clips, paddingMs, dsp } = plan
+  const hasSuggestedGap = paddingMs.some(
+    (padding, index) => padding === suggestedGapMs(clips[index]?.text ?? ''),
+  )
   const [showDsp, setShowDsp] = useState(false)
   const [isNormalizingPacing, setIsNormalizingPacing] = useState(false)
 
@@ -578,6 +587,10 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
     const segments = clips.map((c) => c.text?.trim()).filter((t): t is string => !!t)
     await props.onSave(planStateToPayload(plan), segments)
   }, [props, plan, clips, preview])
+
+  const requestAddClips = useCallback(() => {
+    document.querySelector<HTMLButtonElement>('[data-testid="stitch-picker-toggle-segments"]')?.click()
+  }, [])
 
   const normalizePacing = useCallback(async () => {
     if (!clips.length) return
@@ -643,6 +656,11 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
             {isNormalizingPacing ? <Loader2 className="size-3 animate-spin" /> : <Gauge className="size-3" />}
             Normalize pacing
           </button>
+          {hasSuggestedGap && (
+            <span data-testid="stitch-gap-suggestion" className="text-[10px] text-muted-foreground">
+              Suggested from punctuation
+            </span>
+          )}
           {preview.isStale && !preview.error && (
             <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
               changes pending
@@ -714,21 +732,19 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
         </div>
       )}
 
-      <div className="mt-1 flex items-center justify-between border-t border-border/60 pt-3">
-        {props.surface === 'studio' ? (
-          <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              data-testid="stitch-save-voice"
-              onClick={handleSave}
-              disabled={preview.isRendering || clips.length === 0}
-              className="btn-brand inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-medium"
-              title="This will be used as a reusable cloning source for text-to-speech."
-            >
-              Save as reference voice
-            </button>
-          </div>
-        ) : (
+      {props.surface === 'studio' ? (
+        <ReferenceReadiness
+          plan={plan}
+          name={props.name}
+          isSaving={props.isSaving}
+          isPreviewRendering={preview.isRendering}
+          saveLabel={props.saveLabel}
+          onSave={handleSave}
+          onFocusName={props.onFocusName}
+          onAddClips={requestAddClips}
+        />
+      ) : (
+        <div className="mt-1 flex items-center justify-between border-t border-border/60 pt-3">
           <div className="flex items-center gap-2.5">
             <button
               type="button"
@@ -756,9 +772,9 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
               Open in Stitch Studio
             </button>
           </div>
-        )}
-        <div className="text-[10px] text-muted-foreground">{(totalMs / 1000).toFixed(1)}s total</div>
-      </div>
+          <div className="text-[10px] text-muted-foreground">{(totalMs / 1000).toFixed(1)}s total</div>
+        </div>
+      )}
     </>
   )
 }

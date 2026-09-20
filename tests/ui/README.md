@@ -54,6 +54,7 @@ from `tests/ui/fixtures/capture-data/` into disposable temp dirs on every run �
 - `stitch-assembly` — two clips inserted into the timeline
 - `gap-editing` — always-visible seam controls, including a 0.00s seam next to a typed 250ms seam
 - `transport-playback` — one shared transport driving the ruler playhead, arrangement toggle, and a per-clip range play button together
+- `readiness-states` — blocked, warning, ideal, and overlong reference-readiness states; source speech remains distinct from spacing
 
 **Accent Design / OmniVoice**
 - `omnivoice-audition` — live candidate generation + stitched result (requires `--source real-local`)
