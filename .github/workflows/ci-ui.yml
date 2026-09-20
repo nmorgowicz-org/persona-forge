@@ -136,12 +136,13 @@ jobs:
       - name: Start fake_model_server
         if: needs.paths-filter.outputs.code == 'true'
         run: |
-          # Start in background; use a wrapper to ensure we get the PID and logs
-          python tests/ui/fixtures/fake_model_server.py > fake_model_server.log 2>&1 &
+          # Use the Node harness so CI gets the same disposable seeded voice/segment
+          # fixtures as local Playwright runs. The Python server alone creates empty
+          # library directories, which makes Stitch Studio's picker render "No matches".
+          node tests/ui/run-server.mjs 8319 > fake_model_server.log 2>&1 &
           SERVER_PID=$!
           echo "fake_model_server PID=$SERVER_PID"
 
-          # Give it time to start (up to 10s, polling every 1s)
           echo "=== Waiting for fake_model_server to become healthy ==="
           deadline=$((SECONDS + 10))
           while [ $SECONDS -lt $deadline ]; do
@@ -159,20 +160,12 @@ jobs:
             fi
           done
 
-          # If we get here, it did not become healthy; dump diagnostics
           echo "=== fake_model_server did not become healthy ==="
           echo "Server PID alive?"
           kill -0 "$SERVER_PID" 2>/dev/null && echo "YES" || echo "NO"
-
           echo "--- fake_model_server logs (full) ---"
           cat fake_model_server.log || echo "(empty or unreadable)"
           echo "--- end logs ---"
-
-          # Try running it directly for 5s to capture any crash output
-          echo "=== Direct run attempt (5s timeout) ==="
-          timeout 5 python tests/ui/fixtures/fake_model_server.py || true
-          echo "=== end direct run ==="
-
           exit 1
 
       - name: Run Playwright E2E tests
