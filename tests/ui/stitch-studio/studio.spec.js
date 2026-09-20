@@ -299,3 +299,81 @@ test.describe('Voice Library discoverability and segment browser scale', () => {
     await expect(auditionButtons.nth(0)).toHaveAttribute('data-playing', 'false')
   })
 })
+
+test.describe('Stitch Studio shared visual primitives', () => {
+  test('timeline ruler labels remain aligned at Fit and two zoom levels', async ({ page }) => {
+    await insertNSegments(page, 1)
+    const ticksAt1 = await page.getByTestId('stitch-ruler-tick').all()
+    expect(ticksAt1.length).toBeGreaterThanOrEqual(2)
+    const secondsAt1 = await Promise.all(ticksAt1.map((t) => t.getAttribute('data-seconds').then(Number)))
+    for (let i = 1; i < secondsAt1.length; i++) {
+      expect(secondsAt1[i]).toBeGreaterThan(secondsAt1[i - 1])
+    }
+
+    // Insert two more segments: same "Fit" ruler now spans a longer duration, i.e. a
+    // different effective seconds-per-pixel scale, without any explicit zoom control yet.
+    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await page.getByTestId('stitch-picker-item-segments').nth(1).click()
+    await page.getByTestId('stitch-picker-insert-segments').click()
+    await expect(page.getByTestId('stitch-clip')).toHaveCount(2)
+
+    const ticksAt2 = await page.getByTestId('stitch-ruler-tick').all()
+    expect(ticksAt2.length).toBeGreaterThanOrEqual(2)
+    const secondsAt2 = await Promise.all(ticksAt2.map((t) => t.getAttribute('data-seconds').then(Number)))
+    for (let i = 1; i < secondsAt2.length; i++) {
+      expect(secondsAt2[i]).toBeGreaterThan(secondsAt2[i - 1])
+    }
+    // The two scales must genuinely differ: the ruler for the 2-clip plan spans a longer
+    // duration than the 1-clip plan.
+    expect(secondsAt2[secondsAt2.length - 1]).toBeGreaterThan(secondsAt1[secondsAt1.length - 1])
+  })
+
+  test('waveform canvas backing store follows device pixel ratio', async ({ page, browser }) => {
+    await insertNSegments(page, 1)
+    await page.getByTestId('stitch-clip-edit-toggle').first().click()
+    const canvas = page.getByTestId('stitch-waveform-canvas').first()
+    await expect(canvas).toBeVisible()
+    const ratioAt1x = await canvas.evaluate((el) => {
+      const rect = el.getBoundingClientRect()
+      return el.width / rect.width
+    })
+    const dpr1 = await page.evaluate(() => window.devicePixelRatio ?? 1)
+    expect(ratioAt1x).toBeCloseTo(dpr1, 0)
+
+    const hiDpiContext = await browser.newContext({ deviceScaleFactor: 2 })
+    const hiDpiPage = await hiDpiContext.newPage()
+    await insertNSegments(hiDpiPage, 1)
+    await hiDpiPage.getByTestId('stitch-clip-edit-toggle').first().click()
+    const hiDpiCanvas = hiDpiPage.getByTestId('stitch-waveform-canvas').first()
+    await expect(hiDpiCanvas).toBeVisible()
+    const ratioAt2x = await hiDpiCanvas.evaluate((el) => {
+      const rect = el.getBoundingClientRect()
+      return el.width / rect.width
+    })
+    expect(ratioAt2x).toBeGreaterThan(ratioAt1x)
+    expect(ratioAt2x).toBeCloseTo(2, 0)
+    await hiDpiContext.close()
+  })
+
+  test('fade overlays are visible and change width when fade values change', async ({ page }) => {
+    await insertNSegments(page, 1)
+    await page.getByTestId('stitch-clip-edit-toggle').first().click()
+
+    const fadeOverlay = page.getByTestId('stitch-fade-overlay-left')
+    await expect(fadeOverlay, 'no fade applied yet -- overlay must not render').toHaveCount(0)
+
+    const increaseFadeIn = page.locator('button[aria-label="Increase Fade in"]').first()
+    for (let i = 0; i < 40; i++) {
+      await increaseFadeIn.click()
+    }
+    await expect(fadeOverlay).toBeVisible()
+    const widthAt400ms = (await fadeOverlay.boundingBox())?.width ?? 0
+    expect(widthAt400ms).toBeGreaterThan(0)
+
+    for (let i = 0; i < 40; i++) {
+      await increaseFadeIn.click()
+    }
+    const widthAt800ms = (await fadeOverlay.boundingBox())?.width ?? 0
+    expect(widthAt800ms).toBeGreaterThan(widthAt400ms)
+  })
+})

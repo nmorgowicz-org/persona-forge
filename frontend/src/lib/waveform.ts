@@ -133,3 +133,27 @@ export function invalidateClipAudioAnalysis(assetKey: string): void {
     if (key === assetKey || key.startsWith(`${assetKey}::`)) analysisCache.delete(key)
   }
 }
+
+// ---- Shared waveform meter/playhead palette (locked contract: docs/plans/20260920- ----
+// stitch_studio_ux_execution_plan.md "Task 5.2"). One canonical color language for every bar
+// waveform in the app -- Waveform.tsx's playback deck and WaveformLane's clip-editing canvas --
+// instead of each consumer recomputing its own `hsl(...)` from a peak value.
+
+/** A dedicated meter palette, independent of the app's neutral (grayscale) theme -- real
+ * DAW/VST meters use their own color language rather than the plugin chrome. Quiet material
+ * reads cool cyan/teal, loud peaks push into hot magenta, like a level meter. `played` renders
+ * the brighter, more saturated "already heard" state. */
+export function waveformBarColor(peak: number, played = false): string {
+  const hue = 190 + peak * 140 // 190 = cyan, 330 = magenta
+  if (played) {
+    const light = 58 + peak * 14
+    const alpha = 0.55 + peak * 0.45
+    return `hsl(${hue} 90% ${light}% / ${alpha})`
+  }
+  const light = 40 + peak * 10
+  const alpha = 0.28 + peak * 0.22
+  return `hsl(${hue} 45% ${light}% / ${alpha})`
+}
+
+/** Warm amber cursor color, pops against the cool waveform palette. */
+export const WAVEFORM_PLAYHEAD_COLOR = 'hsl(38 95% 62%)'

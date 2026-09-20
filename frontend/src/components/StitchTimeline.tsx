@@ -17,6 +17,8 @@ import {
   type StitchRegionEdit,
 } from '@/lib/stitchPlan'
 import { getClipAudioAnalysis } from '@/lib/waveform'
+import { createTimeTicks } from '@/lib/timeAxis'
+import { useElementWidth } from '@/hooks/useElementWidth'
 import { type StitchPlanSession } from '@/hooks/useStitchPlanSession'
 import { planStateToPayload } from '@/lib/stitchPreview'
 import { useStitchPreview } from '@/hooks/useStitchPreview'
@@ -311,13 +313,16 @@ function StitchTimelineClip({
 
   const fadeOverlay = (side: 'left' | 'right', ms: number) => {
     if (!ms || ms <= 0) return null
+    const widthPct = Math.min(100, (ms / Math.max(1, effectiveDuration)) * 100)
     return (
       <div
+        data-testid={`stitch-fade-overlay-${side}`}
         className={cn(
-          'pointer-events-none absolute inset-y-0 w-[32px]',
+          'pointer-events-none absolute inset-y-0',
           side === 'left' ? 'left-0' : 'right-0',
         )}
         style={{
+          width: `${widthPct}%`,
           background:
             side === 'left'
               ? 'linear-gradient(to right, rgba(0,0,0,0.7) 0%, transparent 100%)'
@@ -738,6 +743,8 @@ export const StitchTimeline = memo(function StitchTimeline({
     }))
   }, [clips, setPaddingMs])
 
+  const [rulerRef, rulerWidthPx] = useElementWidth<HTMLDivElement>()
+
   if (!clips.length) {
     return (
       <div className="flex h-24 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
@@ -785,20 +792,25 @@ export const StitchTimeline = memo(function StitchTimeline({
       {/* Timeline */}
       <div className="relative flex items-stretch gap-0 overflow-x-auto overflow-y-visible pl-5" style={{ minWidth: 0 }}>
         {effectiveTotalMs > 0 && (
-          <div className="pointer-events-none absolute inset-x-5 top-0 flex h-4 items-start border-b border-border/30">
-            {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-              const ms = ratio * effectiveTotalMs
-              const sec = ms / 1000
-              return (
-                <div
-                  key={ratio}
-                  className="absolute text-[10px] font-mono text-muted-foreground/50"
-                  style={{ left: `${ratio * 100}%`, transform: 'translateX(-50%)' }}
-                >
-                  {sec < 10 ? `${sec.toFixed(1)}s` : `${Math.floor(sec / 60)}:${(sec % 60).toFixed(0).padStart(2, '0')}`}
-                </div>
-              )
-            })}
+          <div ref={rulerRef} className="pointer-events-none absolute inset-x-5 top-0 flex h-4 items-start border-b border-border/30">
+            {(rulerWidthPx > 0
+              ? createTimeTicks({
+                  durationSeconds: effectiveTotalMs / 1000,
+                  pixelsPerSecond: rulerWidthPx / (effectiveTotalMs / 1000),
+                  widthPx: rulerWidthPx,
+                })
+              : []
+            ).map((tick) => (
+              <div
+                key={tick.seconds}
+                data-testid="stitch-ruler-tick"
+                data-seconds={tick.seconds}
+                className="absolute text-[10px] font-mono text-muted-foreground/50"
+                style={{ left: `${(tick.x / rulerWidthPx) * 100}%`, transform: 'translateX(-50%)' }}
+              >
+                {tick.label}
+              </div>
+            ))}
           </div>
         )}
 
