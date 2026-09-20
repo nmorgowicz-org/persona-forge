@@ -98,6 +98,7 @@ export default async function (ctx) {
     const items = await page.$$('[data-testid="stitch-picker-item-segments"]');
     await items[0].click();
     if (items[1]) await items[1].click();
+    if (items[2]) await items[2].click();
     await page.click('[data-testid="stitch-picker-insert-segments"]');
     await page.waitForSelector('[data-testid="stitch-clip"]');
     // Dwell here: the segment(s) have just landed in the Stitch Studio
@@ -117,7 +118,9 @@ export default async function (ctx) {
         { timeout: 30000 }
     );
     await page.click('[data-testid="stitch-save-voice"]');
-    await page.waitForSelector('[data-testid="voice-card"]', { timeout: 60000 });
+    await page.waitForSelector('[data-testid="stitch-adjust-prosody"]', { timeout: 60000 });
+    await page.click('[data-testid="stitch-adjust-prosody"]');
+    await page.waitForSelector('[data-testid="voice-edit-page"]', { timeout: 60000 });
     // Dwell here: end on the saved-voice confirmation so the viewer has time
     // to register the outcome instead of the GIF just stopping mid-beat.
     await hold(recorder, page, 3);
