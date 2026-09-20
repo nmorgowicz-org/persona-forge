@@ -12,7 +12,7 @@ import { RuntimeConfigPage } from '@/pages/RuntimeConfigPage'
 import { Glossary } from '@/components/audio/Glossary'
 import { StitchEditorPanel } from '@/components/StitchTimeline'
 import { useDraftStitchPlanSession } from '@/hooks/useStitchPlanSession'
-import { insertSegmentIntoStitchTimeline, insertVoiceIntoStitchTimeline } from '@/lib/stitchClips'
+import { insertSegmentsIntoStitchTimeline, insertVoicesIntoStitchTimeline } from '@/lib/stitchClips'
 import type { StitchPlanState } from '@/lib/stitchPlan'
 import type { SegmentMeta, VoiceMeta } from '@/lib/api'
 
@@ -55,11 +55,11 @@ function QuickInsertStitchEditor() {
   }, [closeOvStitchEditor])
 
   const [insertError, setInsertError] = useState<string | null>(null)
-  const onInsertFromLibrary = useCallback((seg: SegmentMeta) => {
-    void insertSegmentIntoStitchTimeline(seg, session, setInsertError)
+  const onInsertFromLibrary = useCallback((segs: SegmentMeta[], afterClipId: string | null) => {
+    void insertSegmentsIntoStitchTimeline(segs, session, setInsertError, afterClipId)
   }, [session])
-  const onInsertVoiceFromLibrary = useCallback((voice: VoiceMeta) => {
-    void insertVoiceIntoStitchTimeline(voice, session, setInsertError)
+  const onInsertVoiceFromLibrary = useCallback((voices: VoiceMeta[], afterClipId: string | null) => {
+    void insertVoicesIntoStitchTimeline(voices, session, setInsertError, afterClipId)
   }, [session])
 
   return (

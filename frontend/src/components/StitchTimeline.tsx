@@ -6,8 +6,6 @@ import { type StitchPlanClip, type StitchPlanDsp } from '@/store'
 import { base64ToBlob, cn } from '@/lib/utils'
 import {
   getStitchPacingTargets,
-  getSegmentAudioBase64,
-  getVoice,
   type StitchPlanPayload,
   type SegmentMeta,
   type VoiceMeta,
@@ -22,7 +20,7 @@ import { getClipAudioAnalysis } from '@/lib/waveform'
 import { type StitchPlanSession } from '@/hooks/useStitchPlanSession'
 import { planStateToPayload } from '@/lib/stitchPreview'
 import { useStitchPreview } from '@/hooks/useStitchPreview'
-import { AudioPlayer } from './AudioPlayer'
+import { SegmentBrowserModal } from './stitch/SegmentBrowserModal'
 import { WaveformLane } from './waveform/WaveformLane'
 
 // Helper for reduced motion
@@ -606,231 +604,6 @@ function MsStepper({
   )
 }
 
-// Generic multi-select library picker: filter, per-item checkboxes, select-all toggle,
-// and a single bulk \"Insert selected\" action — used for both the segment library and the
-// voice library (each saved voice inserts as one whole clip, same shape as a segment clip).
-function LibraryPickerButton<T>({
-  label,
-  testidPrefix,
-  items,
-  getId,
-  getLabel,
-  getMeta,
-  getDurationSec,
-  getAudioBase64,
-  onInsertMany,
-}: {
-  label: string
-  /** Distinguishes the "Saved segments" vs "Voice library" instances for capture-harness testids. */
-  testidPrefix: string
-  items: T[]
-  getId: (item: T) => string
-  getLabel: (item: T) => string
-  /** Optional secondary line under the label (accent/tags for segments, language/sample text
-   * for voices) — the whole point is to give enough context to choose without inserting blind. */
-  getMeta?: (item: T) => string | null
-  getDurationSec?: (item: T) => number | null | undefined
-  /** Lazily resolves full audio for the inline preview player — list endpoints omit audio for
-   * payload size, so this is only called once, on first preview, and cached per item. */
-  getAudioBase64?: (item: T) => Promise<string | null>
-  onInsertMany: (items: T[]) => void
-}) {
-  const reducedMotion = useReducedMotion()
-  const [open, setOpen] = useState(false)
-  const [filter, setFilter] = useState('')
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [loadingId, setLoadingId] = useState<string | null>(null)
-  const [audioCache, setAudioCache] = useState<Record<string, { url: string; blob: Blob }>>({})
-
-  useEffect(() => {
-    return () => {
-      Object.values(audioCache).forEach((a) => URL.revokeObjectURL(a.url))
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  const filtered = useMemo(() => {
-    const q = filter.trim().toLowerCase()
-    if (!q) return items
-    return items.filter((it) => getLabel(it).toLowerCase().includes(q))
-  }, [items, filter, getLabel])
-
-  const toggle = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  const allFilteredSelected = filtered.length > 0 && filtered.every((it) => selected.has(getId(it)))
-
-  const toggleSelectAll = () => {
-    setSelected((prev) => {
-      if (allFilteredSelected) {
-        const next = new Set(prev)
-        for (const it of filtered) next.delete(getId(it))
-        return next
-      }
-      const next = new Set(prev)
-      for (const it of filtered) next.add(getId(it))
-      return next
-    })
-  }
-
-  const handleInsert = () => {
-    const chosen = items.filter((it) => selected.has(getId(it)))
-    if (chosen.length === 0) return
-    onInsertMany(chosen)
-    setSelected(new Set())
-    setOpen(false)
-    setFilter('')
-  }
-
-  const togglePreview = async (item: T) => {
-    const id = getId(item)
-    if (expandedId === id) {
-      setExpandedId(null)
-      return
-    }
-    setExpandedId(id)
-    if (!audioCache[id] && getAudioBase64) {
-      setLoadingId(id)
-      try {
-        const b64 = await getAudioBase64(item)
-        if (b64) {
-          const blob = base64ToBlob(b64)
-          const url = URL.createObjectURL(blob)
-          setAudioCache((prev) => ({ ...prev, [id]: { url, blob } }))
-        }
-      } finally {
-        setLoadingId(null)
-      }
-    }
-  }
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        data-testid={`stitch-picker-toggle-${testidPrefix}`}
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted"
-      >
-        {open ? `Hide ${label.toLowerCase()}` : `Add ${label.toLowerCase()}`}
-      </button>
-
-      <AnimatePresence>
-        {open && (
-       <motion.div
-          initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: reducedMotion ? 0 : 0 }}
-          exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
-          className="absolute right-0 top-9 z-30 flex max-h-96 w-96 flex-col gap-1.5 overflow-hidden rounded-lg border border-border bg-background p-2 shadow-lg"
-        >
-
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] uppercase text-muted-foreground">{label}</span>
-              <button
-                type="button"
-                onClick={toggleSelectAll}
-                disabled={filtered.length === 0}
-                className="shrink-0 text-[10px] text-muted-foreground underline decoration-dotted hover:text-foreground disabled:opacity-40"
-              >
-                {allFilteredSelected ? 'Deselect all' : 'Select all'}
-              </button>
-            </div>
-            <input
-              type="text"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter…"
-              className="rounded-md border border-border bg-muted/40 px-2 py-1 text-xs text-foreground outline-none focus:border-cyan-500/50"
-            />
-            <div className="flex flex-col gap-1 overflow-y-auto">
-              {filtered.length === 0 && (
-                <span className="px-2 py-1 text-xs text-muted-foreground/60">No matches</span>
-              )}
-              {filtered.map((it) => {
-                const id = getId(it)
-                const checked = selected.has(id)
-                const meta = getMeta?.(it)
-                const duration = getDurationSec?.(it)
-                const isExpanded = expandedId === id
-                const cached = audioCache[id]
-                return (
-                  <div
-                    key={id}
-                    className="rounded-md border border-transparent hover:border-border hover:bg-muted"
-                  >
-                    <label className="flex cursor-pointer items-center gap-2 px-2 py-1 text-xs text-foreground">
-                      <input
-                        type="checkbox"
-                        data-testid={`stitch-picker-item-${testidPrefix}`}
-                        checked={checked}
-                        onChange={() => toggle(id)}
-                        className="size-3.5 shrink-0 accent-cyan-500"
-                      />
-                      {getAudioBase64 && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault()
-                            void togglePreview(it)
-                          }}
-                          title="Preview"
-                          className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
-                        >
-                          {loadingId === id ? (
-                            <Loader2 className="size-3.5 animate-spin" />
-                          ) : isExpanded ? (
-                            <Pause className="size-3.5" />
-                          ) : (
-                            <Play className="size-3.5" />
-                          )}
-                        </button>
-                      )}
-                      <span
-                        className="min-w-0 flex-1"
-                        title={meta ? `${getLabel(it)}\\n${meta}` : getLabel(it)}
-                      >
-                        <span className="block truncate">{getLabel(it)}</span>
-                        {meta && (
-                          <span className="block truncate text-[10px] text-muted-foreground">{meta}</span>
-                        )}
-                      </span>
-                      {duration != null && (
-                        <span className="shrink-0 text-[10px] text-muted-foreground">
-                          {duration.toFixed(1)}s
-                        </span>
-                      )}
-                    </label>
-                    {isExpanded && cached && (
-                      <div className="px-2 pb-1.5">
-                        <AudioPlayer src={cached.url} blob={cached.blob} autoPlay />
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-            <button
-              type="button"
-              data-testid={`stitch-picker-insert-${testidPrefix}`}
-              onClick={handleInsert}
-              disabled={selected.size === 0}
-              className="mt-1 rounded-md bg-cyan-500/90 px-2 py-1 text-xs font-medium text-background hover:bg-cyan-500 disabled:opacity-40"
-            >
-              Insert selected ({selected.size})
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  )
-}
 
 /* ---------- main component ---------- */
 
@@ -838,10 +611,10 @@ interface StitchTimelineProps {
   totalDurationMs: number
   isPreviewStale: boolean
   library: SegmentMeta[]
-  onInsertFromLibrary: (seg: SegmentMeta) => void
+  onInsertFromLibrary: (segs: SegmentMeta[], afterClipId: string | null) => void
   session: StitchPlanSession
   voiceLibrary?: VoiceMeta[]
-  onInsertVoiceFromLibrary?: (voice: VoiceMeta) => void
+  onInsertVoiceFromLibrary?: (voices: VoiceMeta[], afterClipId: string | null) => void
 }
 
 export const StitchTimeline = memo(function StitchTimeline({
@@ -856,6 +629,7 @@ export const StitchTimeline = memo(function StitchTimeline({
   const reducedMotion = useReducedMotion()
   const { plan, reorderClip, removeClip, updateClip, setClips, setPaddingAt: setPadding, setPadding: setPaddingMs, setRegionEdits: onAddOrRemoveRegionEdit } = session
   const { clips, paddingMs, regionEditsByClip } = plan
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null)
   const onAddRegionEdit = useCallback((clipId: string, edit: RegionEdit) => {
     onAddOrRemoveRegionEdit(clipId, [...(regionEditsByClip[clipId] ?? []), edit])
   }, [onAddOrRemoveRegionEdit, regionEditsByClip])
@@ -863,6 +637,13 @@ export const StitchTimeline = memo(function StitchTimeline({
     onAddOrRemoveRegionEdit(clipId, (regionEditsByClip[clipId] ?? []).filter((edit) => edit.id !== editId))
   }, [onAddOrRemoveRegionEdit, regionEditsByClip])
   const hasVoiceLibrary = (voiceLibrary?.length ?? 0) > 0 && !!onInsertVoiceFromLibrary
+
+  // The selected clip may have been removed/reordered away; drop a selection that no longer
+  // resolves so "insert after selection" silently falls back to "append at the end" instead of
+  // silently targeting a stale id.
+  useEffect(() => {
+    if (selectedClipId && !clips.some((c) => c.clipId === selectedClipId)) setSelectedClipId(null)
+  }, [clips, selectedClipId])
 
   const handleReorder = useCallback(
     (next: StitchPlanClip[]) => {
@@ -962,33 +743,13 @@ export const StitchTimeline = memo(function StitchTimeline({
       <div className="flex h-24 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
         <span>No clips in timeline</span>
         <div className="flex items-center gap-2">
-          {library.length > 0 && (
-            <LibraryPickerButton
-              label="Saved segments"
-              testidPrefix="segments"
-              items={library}
-              getId={(seg) => seg.segment_id}
-              getLabel={(seg) => seg.text}
-              getMeta={(seg) => [seg.language, ...(seg.tags ?? [])].filter(Boolean).join(' · ') || null}
-              getDurationSec={(seg) => seg.duration_sec ?? null}
-              getAudioBase64={async (seg) => seg.audio_base64 ?? (await getSegmentAudioBase64(seg.segment_id))}
-              onInsertMany={(segs) => segs.forEach(onInsertFromLibrary)}
-            />
-          )}
-          {hasVoiceLibrary && (
-            <LibraryPickerButton
-              label="Voice library"
-              testidPrefix="voices"
-              items={voiceLibrary!}
-              getId={(v) => v.voice_id}
-              getLabel={(v) => v.description || v.voice_id}
-              getMeta={(v) =>
-                [v.language, v.sample_text ? `Sample: ${v.sample_text.slice(0, 60)}${v.sample_text.length > 60 ? '…' : ''}` : null]
-                  .filter(Boolean)
-                  .join(' · ') || null
-              }
-              getAudioBase64={async (v) => v.audio_base64 ?? (await getVoice(v.voice_id)).audio_base64 ?? null}
-              onInsertMany={(vs) => vs.forEach(onInsertVoiceFromLibrary!)}
+          {(library.length > 0 || hasVoiceLibrary) && (
+            <SegmentBrowserModal
+              segments={library}
+              onInsertSegments={onInsertFromLibrary}
+              voices={voiceLibrary}
+              onInsertVoices={onInsertVoiceFromLibrary}
+              insertAfterClipId={null}
             />
           )}
         </div>
@@ -1008,24 +769,13 @@ export const StitchTimeline = memo(function StitchTimeline({
             <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted" onClick={autoPace}>
               <Gauge className="size-3.5" /> Auto-pace
             </button>
-            {library.length > 0 && (
-              <LibraryPickerButton
-                label="Saved segments"
-                testidPrefix="segments"
-                items={library}
-                getId={(seg) => seg.segment_id}
-                getLabel={(seg) => seg.text}
-                onInsertMany={(segs) => segs.forEach(onInsertFromLibrary)}
-              />
-            )}
-            {hasVoiceLibrary && (
-              <LibraryPickerButton
-                label="Voice library"
-                testidPrefix="voices"
-                items={voiceLibrary!}
-                getId={(v) => v.voice_id}
-                getLabel={(v) => v.description || v.voice_id}
-                onInsertMany={(vs) => vs.forEach(onInsertVoiceFromLibrary!)}
+            {(library.length > 0 || hasVoiceLibrary) && (
+              <SegmentBrowserModal
+                segments={library}
+                onInsertSegments={onInsertFromLibrary}
+                voices={voiceLibrary}
+                onInsertVoices={onInsertVoiceFromLibrary}
+                insertAfterClipId={selectedClipId}
               />
             )}
           </div>
@@ -1066,7 +816,12 @@ export const StitchTimeline = memo(function StitchTimeline({
               <Reorder.Item
                 value={clip}
                 data-testid="stitch-clip"
-                className="group relative flex flex-col"
+                data-clip-id={clip.clipId}
+                onClick={() => setSelectedClipId((prev) => (prev === clip.clipId ? null : clip.clipId))}
+                className={cn(
+                  'group relative flex flex-col rounded-md',
+                  selectedClipId === clip.clipId && 'ring-2 ring-cyan-500/70',
+                )}
                 style={{ flex: `${Math.max(300, clipEffectiveDurationMs(clip))} 0 auto`, minWidth: 320 }}
               >
                 {/* Keyboard-accessible reorder buttons */}
@@ -1194,9 +949,9 @@ function SliderField({
 interface StitchEditorCommonProps {
   session: StitchPlanSession
   library: SegmentMeta[]
-  onInsertFromLibrary: (seg: SegmentMeta) => void
+  onInsertFromLibrary: (segs: SegmentMeta[], afterClipId: string | null) => void
   voiceLibrary?: VoiceMeta[]
-  onInsertVoiceFromLibrary?: (voice: VoiceMeta) => void
+  onInsertVoiceFromLibrary?: (voices: VoiceMeta[], afterClipId: string | null) => void
 }
 
 export type StitchEditorBodyProps =

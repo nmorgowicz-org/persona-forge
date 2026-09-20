@@ -294,4 +294,14 @@ html {
   .status-tone-info { --status: var(--info); }
   .status-tone-danger { --status: var(--destructive); }
   .status-tone-neutral { --status: var(--muted-foreground); }
+
+  /* Segment/voice browser row (frontend/src/components/stitch/SegmentBrowserModal.tsx).
+     content-visibility skips layout/paint for off-screen rows in long (100s-row) lists
+     without unmounting them, so keyboard/Playwright interaction by index still works and no
+     virtualization dependency is needed. contain-intrinsic-size estimates row height up front
+     so the scrollbar doesn't jump as rows scroll in and out of view. */
+  .segment-browser-row {
+    content-visibility: auto;
+    contain-intrinsic-size: 0 52px;
+  }
 }

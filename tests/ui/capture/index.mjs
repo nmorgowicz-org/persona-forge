@@ -29,6 +29,7 @@ import voicesList from './scenarios/voice-library/list.mjs';
 import alignmentCompare from './scenarios/prosody/alignment-compare.mjs';
 import prosodyAdjustment from './scenarios/prosody/prosody-adjustment.mjs';
 import segmentLibraryBrowse from './scenarios/stitch-studio/segment-library-browse.mjs';
+import segmentBrowserScale from './scenarios/stitch-studio/segment-browser-scale.mjs';
 import stitchAssembly from './scenarios/stitch-studio/assembly.mjs';
 import omnivoiceAudition from './scenarios/omnivoice/audition.mjs';
 import omnivoiceCandidates from './scenarios/omnivoice/candidates.mjs';
@@ -163,6 +164,15 @@ export const SCENARIOS = {
         contract: {
             intent: 'Browse the segment library picker in Stitch Studio.',
             expectedOutputs: ['segment-library-browse--neutral--segment-library-browse.png'],
+        },
+    },
+    'segment-browser-scale': {
+        run: segmentBrowserScale,
+        category: 'stitch-studio',
+        runtime: 'neutral',
+        contract: {
+            intent: 'Show the segment browser scrolled through a 250-row, five-project library.',
+            expectedOutputs: ['segment-browser-scale--neutral--scale.png'],
         },
     },
     'stitch-assembly': {

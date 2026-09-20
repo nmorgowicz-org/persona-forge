@@ -10,7 +10,7 @@ import {
   type StitchPlanPayload,
   type VoiceMeta,
 } from '@/lib/api'
-import { insertSegmentIntoStitchTimeline, insertVoiceIntoStitchTimeline, suggestedStitchVoiceName } from '@/lib/stitchClips'
+import { insertSegmentsIntoStitchTimeline, insertVoicesIntoStitchTimeline, suggestedStitchVoiceName } from '@/lib/stitchClips'
 
 const DELIVERY_VARIANTS = [
   { kind: 'natural', name: 'Natural', hint: 'Conversational and neutral' },
@@ -54,12 +54,12 @@ export function StitchStudioPage() {
 
   const session = useStoreStitchPlanSession()
 
-  const insertFromLibrary = useCallback(async (seg: SegmentMeta) => {
-    await insertSegmentIntoStitchTimeline(seg, session, setError)
+  const insertFromLibrary = useCallback((segs: SegmentMeta[], afterClipId: string | null) => {
+    void insertSegmentsIntoStitchTimeline(segs, session, setError, afterClipId)
   }, [session])
 
-  const insertVoiceFromLibrary = useCallback(async (voice: VoiceMeta) => {
-    await insertVoiceIntoStitchTimeline(voice, session, setError)
+  const insertVoiceFromLibrary = useCallback((voices: VoiceMeta[], afterClipId: string | null) => {
+    void insertVoicesIntoStitchTimeline(voices, session, setError, afterClipId)
   }, [session])
 
   const handleSave = useCallback(

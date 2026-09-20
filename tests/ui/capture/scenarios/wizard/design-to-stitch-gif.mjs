@@ -78,10 +78,11 @@ export default async function (ctx) {
     await recorder.snap(page);
 
     await page.click('[data-testid="stitch-picker-toggle-segments"]');
+    await page.waitForSelector('[data-testid="segment-browser-dialog"]');
     await page.waitForSelector('[data-testid="stitch-picker-item-segments"]');
     await page.waitForFunction(
         () => {
-            const el = document.querySelector('[data-testid="stitch-picker-item-segments"]')?.closest('.shadow-lg');
+            const el = document.querySelector('[data-testid="segment-browser-dialog"]');
             return el && getComputedStyle(el).opacity === '1';
         },
         { timeout: 5000 }

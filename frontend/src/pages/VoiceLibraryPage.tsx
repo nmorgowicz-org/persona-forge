@@ -86,6 +86,7 @@ import { Badge } from '@/components/ui/badge'
 import { RegionEditor } from '@/components/waveform/RegionEditor'
 import { AlignmentCompare } from '@/components/waveform/AlignmentCompare'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 // Radix Select forbids an empty-string item value, so "Ungrouped" needs a placeholder token
@@ -1733,6 +1734,14 @@ export function VoiceLibraryPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [groupByProject, setGroupByProject] = useState(false)
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
+  const [activeTab, setActiveTab] = useState<'voices' | 'segments'>(() => {
+    if (typeof window === 'undefined') return 'voices'
+    const stored = localStorage.getItem('voice-library-tab')
+    return stored === 'segments' ? 'segments' : 'voices'
+  })
+  useEffect(() => {
+    localStorage.setItem('voice-library-tab', activeTab)
+  }, [activeTab])
   const setVoiceId = useAppStore((s) => s.setVoiceId)
 
   const setPage = useAppStore((s) => s.setPage)
@@ -2358,7 +2367,12 @@ export function VoiceLibraryPage() {
           </Button>
         </div>
       ) : (
-        <>
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v === 'segments' ? 'segments' : 'voices')}>
+          <TabsList>
+            <TabsTrigger value="voices" data-testid="voice-library-tab-voices">Reference voices</TabsTrigger>
+            <TabsTrigger value="segments" data-testid="voice-library-tab-segments">Segments</TabsTrigger>
+          </TabsList>
+          <TabsContent value="voices" className="flex flex-col gap-6">
           {voices.length > 0 && (
             <section className="flex flex-col gap-3">
                <div className="flex items-center justify-between">
@@ -2455,7 +2469,9 @@ export function VoiceLibraryPage() {
 
             </section>
           )}
+          </TabsContent>
 
+          <TabsContent value="segments" className="flex flex-col gap-6">
           {/* Saved segments */}
           <section className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
@@ -2535,7 +2551,8 @@ export function VoiceLibraryPage() {
               </p>
             ) : null}
           </section>
-        </>
+          </TabsContent>
+        </Tabs>
       )}
     </div>
   )

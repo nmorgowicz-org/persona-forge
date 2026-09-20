@@ -5,16 +5,32 @@ import { getSegmentAudioBase64, getVoice, type SegmentMeta, type VoiceMeta } fro
 import { getClipAudioAnalysis } from '@/lib/waveform'
 import type { StitchPlanSession } from '@/hooks/useStitchPlanSession'
 
-// Appends to whichever session is active (the store-backed Studio session or a quick-insert
-// draft) -- callers never write to zustand directly, so a quick-insert draft can never leak
-// into the live plan before it is explicitly committed.
-function appendStitchPlanClip(clip: StitchPlanClip, session: StitchPlanSession) {
-  const clipCountBefore = session.plan.clips.length
-  const paddingLenBefore = session.plan.paddingMs.length
-  session.setClips((prev) => [...prev, clip])
-  for (let i = paddingLenBefore; i < clipCountBefore; i++) {
-    session.setPaddingAt(i, 0)
+// Splices `clips` into the session's plan as one atomic clips+padding update -- appending at
+// the end (afterClipId null/omitted) or inserting immediately after a specific existing clip.
+// Takes a single snapshot of the pre-insert plan, so a multi-item batch (e.g. "Insert
+// selected" with several checked rows) can never race itself the way calling this once per
+// item against a stale snapshot would (each item would independently recompute the same
+// pre-batch clip/padding counts and stomp on each other's padding-array writes).
+function spliceStitchPlanClips(clips: StitchPlanClip[], session: StitchPlanSession, afterClipId?: string | null) {
+  if (clips.length === 0) return
+  const clipsBefore = session.plan.clips
+  const paddingBefore = session.plan.paddingMs
+  const afterIndex = afterClipId ? clipsBefore.findIndex((c) => c.clipId === afterClipId) : -1
+  const insertAt = afterIndex === -1 ? clipsBefore.length : afterIndex + 1
+
+  session.setClips((prev) => {
+    const next = [...prev]
+    next.splice(insertAt, 0, ...clips)
+    return next
+  })
+
+  if (clipsBefore.length === 0) {
+    session.setPadding(new Array(Math.max(0, clips.length - 1)).fill(0))
+    return
   }
+  const splitAt = Math.max(0, insertAt - 1)
+  const zeros = new Array(clips.length).fill(0)
+  session.setPadding([...paddingBefore.slice(0, splitAt), ...zeros, ...paddingBefore.slice(splitAt)])
 }
 
 // Public shared helpers — used by:
@@ -90,27 +106,29 @@ export async function createStitchClipFromVoice(voice: VoiceMeta): Promise<Stitc
   }
 }
 
-export async function insertSegmentIntoStitchTimeline(
-  seg: SegmentMeta,
+export async function insertSegmentsIntoStitchTimeline(
+  segs: SegmentMeta[],
   session: StitchPlanSession,
   onError: (msg: string) => void,
+  afterClipId?: string | null,
 ): Promise<void> {
   try {
-    const clip = await createStitchClipFromSegment(seg)
-    appendStitchPlanClip(clip, session)
+    const clips = await Promise.all(segs.map((seg) => createStitchClipFromSegment(seg)))
+    spliceStitchPlanClips(clips, session, afterClipId)
   } catch (err) {
     onError(err instanceof Error ? err.message : String(err))
   }
 }
 
-export async function insertVoiceIntoStitchTimeline(
-  voice: VoiceMeta,
+export async function insertVoicesIntoStitchTimeline(
+  voices: VoiceMeta[],
   session: StitchPlanSession,
   onError: (msg: string) => void,
+  afterClipId?: string | null,
 ): Promise<void> {
   try {
-    const clip = await createStitchClipFromVoice(voice)
-    appendStitchPlanClip(clip, session)
+    const clips = await Promise.all(voices.map((voice) => createStitchClipFromVoice(voice)))
+    spliceStitchPlanClips(clips, session, afterClipId)
   } catch (err) {
     onError(err instanceof Error ? err.message : String(err))
   }

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { installLargeSegmentLibrary } from '../fixtures/largeSegmentLibrary.mjs'
 
 async function insertNSegments(page, n) {
   await page.goto('/')
@@ -138,6 +139,7 @@ test.describe('Stitch Studio quick-insert transaction', () => {
     await expect(page.locator('div[data-app-tooltip$="ms gap"]')).toHaveAttribute('data-app-tooltip', '150ms gap')
 
     await page.getByTestId('nav-voice-library').click()
+    await page.getByTestId('voice-library-tab-segments').click()
     await page.getByRole('button', { name: 'Insert into stitch editor' }).nth(2).click()
     await expect(page.getByTestId('stitch-editor-dialog')).toBeVisible()
     await expect(page.getByTestId('stitch-clip')).toHaveCount(3)
@@ -156,6 +158,7 @@ test.describe('Stitch Studio quick-insert transaction', () => {
   test('region edits survive quick insert commit into Studio', async ({ page }) => {
     await page.goto('/')
     await page.getByTestId('nav-voice-library').click()
+    await page.getByTestId('voice-library-tab-segments').click()
     await page.getByRole('button', { name: 'Insert into stitch editor' }).first().click()
     await expect(page.getByTestId('stitch-editor-dialog')).toBeVisible()
     await expect(page.getByTestId('stitch-clip')).toHaveCount(1)
@@ -177,6 +180,7 @@ test.describe('Stitch Studio quick-insert transaction', () => {
   test('quick insert X Escape and backdrop restore Voice Library focus', async ({ page }) => {
     await page.goto('/')
     await page.getByTestId('nav-voice-library').click()
+    await page.getByTestId('voice-library-tab-segments').click()
     const launchButtons = page.getByRole('button', { name: 'Insert into stitch editor' })
 
     // Escape
@@ -210,6 +214,7 @@ test.describe('Stitch Studio quick-insert transaction', () => {
     const committedHash = await page.getByTestId('stitch-preview-ready').getAttribute('data-plan-hash')
 
     await page.getByTestId('nav-voice-library').click()
+    await page.getByTestId('voice-library-tab-segments').click()
     await page.getByRole('button', { name: 'Insert into stitch editor' }).nth(2).click()
     await expect(page.getByTestId('stitch-editor-dialog')).toBeVisible()
     await page.locator('button[data-app-tooltip="Add a gap between these clips"]').first().click()
@@ -217,5 +222,80 @@ test.describe('Stitch Studio quick-insert transaction', () => {
 
     await page.getByTestId('nav-stitch-studio').click()
     await expect(page.getByTestId('stitch-preview-ready')).toHaveAttribute('data-plan-hash', committedHash ?? '')
+  })
+})
+
+test.describe('Voice Library discoverability and segment browser scale', () => {
+  test('Voice Library switches between Reference voices and Segments without scrolling', async ({ page }) => {
+    await page.goto('/')
+    await page.getByTestId('nav-voice-library').click()
+
+    await expect(page.getByTestId('voice-library-tab-voices')).toBeVisible()
+    await expect(page.getByRole('heading', { name: /^Saved voices/ })).toBeVisible()
+    await expect(page.getByRole('heading', { name: /^Saved segments/ })).toBeHidden()
+
+    await page.getByTestId('voice-library-tab-segments').click()
+    await expect(page.getByRole('heading', { name: /^Saved segments/ })).toBeVisible()
+    await expect(page.getByRole('heading', { name: /^Saved voices/ })).toBeHidden()
+
+    // Persists across reload.
+    await page.reload()
+    await page.getByTestId('nav-voice-library').click()
+    await expect(page.getByRole('heading', { name: /^Saved segments/ })).toBeVisible()
+  })
+
+  test('segment browser filters by project and inserts selected assets after the selected clip', async ({ page }) => {
+    const { projectNames } = await installLargeSegmentLibrary(page)
+    await page.goto('/')
+    await page.getByTestId('nav-stitch-studio').click()
+
+    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await expect(page.getByTestId('segment-browser-dialog')).toBeVisible()
+    const allItems = page.getByTestId('stitch-picker-item-segments')
+    await allItems.nth(0).click()
+    await allItems.nth(1).click()
+    await page.getByTestId('stitch-picker-insert-segments').click()
+    await expect(page.getByTestId('stitch-clip')).toHaveCount(2)
+
+    const firstClipId = await page.getByTestId('stitch-clip').first().getAttribute('data-clip-id')
+
+    // Select the first clip, then insert a third via a project-filtered search -- it must
+    // land right after the selected clip, not appended at the very end.
+    await page.getByTestId('stitch-clip').first().click()
+
+    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await expect(page.getByTestId('segment-browser-dialog')).toBeVisible()
+    await page.getByTestId('segment-browser-project-filter').selectOption({ label: projectNames[2] })
+    const filtered = page.getByTestId('stitch-picker-item-segments')
+    await expect(filtered.first()).toBeVisible()
+    const filteredCount = await filtered.count()
+    expect(filteredCount).toBeGreaterThan(0)
+    expect(filteredCount).toBeLessThan(250)
+    await filtered.first().click()
+    await page.getByTestId('stitch-picker-insert-segments').click()
+
+    const clips = page.getByTestId('stitch-clip')
+    await expect(clips).toHaveCount(3)
+    await expect(clips.nth(0)).toHaveAttribute('data-clip-id', firstClipId ?? '')
+    await expect(clips.nth(1)).toContainText('Segment number')
+  })
+
+  test('segment browser auditions only one row and does not eagerly request audio', async ({ page }) => {
+    const { audioRequests } = await installLargeSegmentLibrary(page)
+    await page.goto('/')
+    await page.getByTestId('nav-stitch-studio').click()
+    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await expect(page.getByTestId('segment-browser-dialog')).toBeVisible()
+    await expect(page.getByTestId('stitch-picker-item-segments').first()).toBeVisible()
+
+    expect(audioRequests.length).toBe(0)
+
+    const auditionButtons = page.getByTestId('segment-browser-audio')
+    await auditionButtons.nth(0).click()
+    await expect.poll(() => audioRequests.length).toBe(1)
+
+    await auditionButtons.nth(1).click()
+    await expect.poll(() => audioRequests.length).toBe(2)
+    await expect(auditionButtons.nth(0)).toHaveAttribute('data-playing', 'false')
   })
 })
