@@ -10,10 +10,15 @@ import {
   getSegmentAudioBase64,
   getVoice,
   type StitchPlanPayload,
-  type StitchPlanRegionEdit,
   type SegmentMeta,
   type VoiceMeta,
 } from '@/lib/api'
+import {
+  clipEffectiveDurationMs,
+  toPayloadRegionEdits,
+  type StitchRegionEdit,
+  type StitchRegionEditsByClip,
+} from '@/lib/stitchPlan'
 import { AudioPlayer } from './AudioPlayer'
 import { WaveformLane } from './waveform/WaveformLane'
 import { renderRegionEdits } from './waveform/regionAudio'
@@ -34,22 +39,8 @@ const useReducedMotion = () => {
 
 /* ---------- helpers ---------- */
 
-/* ---------- helpers ---------- */
-
-function clipEffectiveDurationMs(clip: StitchPlanClip): number {
-  const base = clip.durationMs ?? 0
-  if (!base) return 0
-  return Math.max(10, base - clip.trimStartMs - clip.trimEndMs)
-}
-
-type RegionEdit =
-  | { id: string; type: 'gain'; startMs: number; endMs: number; gainDb: number; fadeInMs: number; fadeOutMs: number }
-  | { id: string; type: 'mute'; startMs: number; endMs: number; fadeInMs: number; fadeOutMs: number }
-  | { id: string; type: 'delete'; startMs: number; endMs: number }
-  | { id: string; type: 'fade'; startMs: number; endMs: number; fadeInMs: number; fadeOutMs: number }
-  | { id: string; type: 'insert_silence'; atMs: number; durationMs: number; placement: 'before' | 'after' }
-
-type RegionEditsByClip = Record<string, RegionEdit[]>
+type RegionEdit = StitchRegionEdit
+type RegionEditsByClip = StitchRegionEditsByClip
 
 function hasRegionEdits(editsByClip: RegionEditsByClip): boolean {
   return Object.values(editsByClip).some((edits) => edits.length > 0)
@@ -466,14 +457,13 @@ function StitchTimelineClip({
       type: 'insert_silence',
       atMs: placement === 'before' ? selectedRegion.startMs : selectedRegion.endMs,
       durationMs: silenceMs,
-      placement,
     })
   }
 
   const describeEdit = (edit: RegionEdit) => {
-    if (edit.type === 'insert_silence') return `silence ${edit.durationMs}ms ${edit.placement} ${edit.atMs}ms`
-    if (edit.type === 'gain') return `gain ${edit.gainDb}dB ${edit.startMs}-${edit.endMs}ms`
-    return `${edit.type} ${edit.startMs}-${edit.endMs}ms`
+    if (edit.type === 'insert_silence') return `silence ${edit.durationMs ?? 0}ms at ${edit.atMs ?? 0}ms`
+    if (edit.type === 'gain') return `gain ${edit.gainDb ?? 0}dB ${edit.startMs ?? 0}-${edit.endMs ?? 0}ms`
+    return `${edit.type} ${edit.startMs ?? 0}-${edit.endMs ?? 0}ms`
   }
 
   const fadeOverlay = (side: 'left' | 'right', ms: number) => {
@@ -591,13 +581,13 @@ function StitchTimelineClip({
                 <div
                   key={edit.id}
                   className="pointer-events-none absolute inset-y-2 w-1 rounded-full bg-sky-300/70"
-                  style={{ left: regionPercent(edit.atMs) }}
+                  style={{ left: regionPercent(edit.atMs ?? 0) }}
                   title={describeEdit(edit)}
                 />
               )
             }
-            const left = regionPercent(edit.startMs)
-            const width = regionPercent(Math.max(10, edit.endMs - edit.startMs))
+            const left = regionPercent(edit.startMs ?? 0)
+            const width = regionPercent(Math.max(10, (edit.endMs ?? 0) - (edit.startMs ?? 0)))
             return (
               <div
                 key={edit.id}
@@ -692,7 +682,7 @@ function StitchTimelineClip({
             {regionEdits.length > 0 && (
               <div className="mt-2 flex flex-col gap-1 border-t border-border/40 pt-2">
                 {regionEdits.map((edit) => (
-                  <div key={edit.id} className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                  <div key={edit.id} data-testid="stitch-region-edit" className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
                     <span className="truncate">{describeEdit(edit)}</span>
                     <button type="button" className="shrink-0 rounded p-0.5 hover:bg-muted hover:text-foreground" onClick={() => onRemoveRegionEdit(clip.clipId, edit.id)} title="Remove edit">
                       <X className="size-3" />
@@ -1393,11 +1383,12 @@ function StitchEditorBody({
   const setIsRendering = useAppStore((s) => s.setOvIsRenderingPreview)
   const setPaddingMs = useAppStore((s) => s.setOvStitchPlanPaddingMs)
   const setClips = useAppStore((s) => s.setOvStitchPlanClips)
+  const regionEditsByClip = useAppStore((s) => s.ovStitchRegionEditsByClip)
+  const setRegionEditsForClip = useAppStore((s) => s.setOvStitchRegionEdits)
   const [showDsp, setShowDsp] = useState(false)
   const [staleFlags, setStaleFlags] = useState(true)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [isNormalizingPacing, setIsNormalizingPacing] = useState(false)
-  const [regionEditsByClip, setRegionEditsByClip] = useState<RegionEditsByClip>({})
   const debounceRef = useRef<number | null>(null)
   const lastHashRef = useRef('')
   // Guards against out-of-order network responses: an older in-flight render
@@ -1421,22 +1412,7 @@ function StitchEditorBody({
           fadeOutMs: c.fadeOutMs,
           text: c.text,
           prosodyMode: c.prosodyMode ?? 'auto',
-          edits: edits.length
-            ? edits.map((e): StitchPlanRegionEdit => {
-                switch (e.type) {
-                  case 'gain':
-                    return { type: 'gain', startMs: e.startMs, endMs: e.endMs, gainDb: e.gainDb, fadeInMs: e.fadeInMs, fadeOutMs: e.fadeOutMs }
-                  case 'mute':
-                    return { type: 'mute', startMs: e.startMs, endMs: e.endMs, fadeInMs: e.fadeInMs, fadeOutMs: e.fadeOutMs }
-                  case 'fade':
-                    return { type: 'fade', startMs: e.startMs, endMs: e.endMs, fadeInMs: e.fadeInMs, fadeOutMs: e.fadeOutMs }
-                  case 'delete':
-                    return { type: 'delete', startMs: e.startMs, endMs: e.endMs }
-                  case 'insert_silence':
-                    return { type: 'insert_silence', atMs: e.atMs, durationMs: e.durationMs }
-                }
-              })
-            : undefined,
+          edits: edits.length ? toPayloadRegionEdits(edits) : undefined,
         }
       }),
       paddingMs: paddingMs.length ? paddingMs : new Array(Math.max(0, clips.length - 1)).fill(0),
@@ -1459,34 +1435,20 @@ function StitchEditorBody({
   }, [clips, paddingMs, dsp, regionEditsByClip])
 
   const addRegionEdit = useCallback((clipId: string, edit: RegionEdit) => {
-    setRegionEditsByClip((prev) => ({
-      ...prev,
-      [clipId]: [...(prev[clipId] ?? []), edit],
-    }))
-  }, [])
+    setRegionEditsForClip(clipId, [...(regionEditsByClip[clipId] ?? []), edit])
+  }, [regionEditsByClip, setRegionEditsForClip])
 
   const removeRegionEdit = useCallback((clipId: string, editId: string) => {
-    setRegionEditsByClip((prev) => {
-      const nextEdits = (prev[clipId] ?? []).filter((edit) => edit.id !== editId)
-      const next = { ...prev }
-      if (nextEdits.length) next[clipId] = nextEdits
-      else delete next[clipId]
-      return next
-    })
-  }, [])
+    const nextEdits = (regionEditsByClip[clipId] ?? []).filter((edit) => edit.id !== editId)
+    setRegionEditsForClip(clipId, nextEdits)
+  }, [regionEditsByClip, setRegionEditsForClip])
 
   useEffect(() => {
     const liveClipIds = new Set(clips.map((clip) => clip.clipId))
-    setRegionEditsByClip((prev) => {
-      let changed = false
-      const next: RegionEditsByClip = {}
-      for (const [clipId, edits] of Object.entries(prev)) {
-        if (liveClipIds.has(clipId)) next[clipId] = edits
-        else changed = true
-      }
-      return changed ? next : prev
-    })
-  }, [clips])
+    for (const clipId of Object.keys(regionEditsByClip)) {
+      if (!liveClipIds.has(clipId)) setRegionEditsForClip(clipId, [])
+    }
+  }, [clips, regionEditsByClip, setRegionEditsForClip])
 
   const hash = useMemo(() => {
     return JSON.stringify({
@@ -1587,11 +1549,11 @@ function StitchEditorBody({
     setIsRendering(false)
     setClips([])
     setPaddingMs([])
-    setRegionEditsByClip({})
+    for (const clipId of Object.keys(regionEditsByClip)) setRegionEditsForClip(clipId, [])
     setStaleFlags(true)
     setPreviewError(null)
     onStartOver?.()
-  }, [clips.length, onStartOver, previewUrl, setClips, setIsRendering, setPaddingMs, setPreviewBlob, setPreviewUrl])
+  }, [clips.length, onStartOver, previewUrl, regionEditsByClip, setClips, setIsRendering, setPaddingMs, setPreviewBlob, setPreviewUrl, setRegionEditsForClip])
 
   const totalMs = useMemo(() => {
     let sum = 0

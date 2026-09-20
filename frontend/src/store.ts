@@ -15,6 +15,13 @@ import {
 } from './lib/experienceLevel'
 import type { ChipSelections } from './lib/voiceDesignChips'
 import type { OmniVoiceSelections } from './lib/omnivoiceChips'
+import {
+  reorderStitchPlan,
+  removeClipFromStitchPlan,
+  type StitchPlanState,
+  type StitchRegionEdit,
+  type StitchRegionEditsByClip,
+} from './lib/stitchPlan'
 
 export type Page = 'wizard' | 'speak' | 'voice-design' | 'voice-library' | 'stitch-studio' | 'integrations' | 'runtime'
 export type DesignEngine = 'qwen' | 'omnivoice'
@@ -321,6 +328,7 @@ interface StoreState {
   ovStitchPreviewUrl: string | null
   ovStitchPreviewBlob: Blob | null
   ovIsRenderingPreview: boolean
+  ovStitchRegionEditsByClip: StitchRegionEditsByClip
 
   setOvStitchPlanClips: (
     updater:
@@ -330,6 +338,10 @@ interface StoreState {
   reorderOvStitchPlanClip: (fromIndex: number, toIndex: number) => void
   updateOvStitchPlanClip: (clipId: string, patch: Partial<StitchPlanClip>) => void
   removeOvStitchPlanClip: (clipId: string) => void
+  /** Atomically replaces the entire durable plan (clips + padding + DSP + region edits)
+   * in one zustand `set` call -- used by session commits and Start Over. */
+  replaceOvStitchPlan: (plan: StitchPlanState) => void
+  setOvStitchRegionEdits: (clipId: string, edits: StitchRegionEdit[]) => void
   setOvStitchPlanPaddingAt: (gapIndex: number, ms: number) => void
   setOvStitchPlanPaddingMs: (v: number[]) => void
   setOvStitchPlanDsp: (patch: Partial<StitchPlanDsp>) => void
@@ -522,6 +534,7 @@ export const useAppStore = create<StoreState>((set) => ({
     // Stitch editor
     ovStitchPlanClips: [],
     ovStitchPlanPaddingMs: [],
+    ovStitchRegionEditsByClip: {},
     ovStitchPlanDsp: {
       segmentTargetDbfs: -20,
       finalTargetDbfs: -18,
@@ -628,10 +641,17 @@ export const useAppStore = create<StoreState>((set) => ({
     })),
   reorderOvStitchPlanClip: (fromIndex, toIndex) =>
     set((s) => {
-      const clips = [...s.ovStitchPlanClips]
-      const [moved] = clips.splice(fromIndex, 1)
-      clips.splice(toIndex, 0, moved)
-      return { ovStitchPlanClips: clips }
+      const next = reorderStitchPlan(
+        {
+          clips: s.ovStitchPlanClips,
+          paddingMs: s.ovStitchPlanPaddingMs,
+          dsp: s.ovStitchPlanDsp,
+          regionEditsByClip: s.ovStitchRegionEditsByClip,
+        },
+        fromIndex,
+        toIndex,
+      )
+      return { ovStitchPlanClips: next.clips }
     }),
   updateOvStitchPlanClip: (clipId, patch) =>
     set((s) => ({
@@ -641,17 +661,34 @@ export const useAppStore = create<StoreState>((set) => ({
     })),
   removeOvStitchPlanClip: (clipId) =>
     set((s) => {
-      const idx = s.ovStitchPlanClips.findIndex((c) => c.clipId === clipId)
-      if (idx === -1) return {}
-      const clips = s.ovStitchPlanClips.filter((c) => c.clipId !== clipId)
-      // Removing a clip merges its two adjacent gaps into one — drop the gap that
-      // followed it (or, if it was last, the one that preceded it) so the padding
-      // array stays aligned to clips.length - 1; otherwise every later gap index
-      // silently points at the wrong boundary.
-      const pad = [...s.ovStitchPlanPaddingMs]
-      if (idx < pad.length) pad.splice(idx, 1)
-      else if (idx - 1 >= 0) pad.splice(idx - 1, 1)
-      return { ovStitchPlanClips: clips, ovStitchPlanPaddingMs: pad }
+      const next = removeClipFromStitchPlan(
+        {
+          clips: s.ovStitchPlanClips,
+          paddingMs: s.ovStitchPlanPaddingMs,
+          dsp: s.ovStitchPlanDsp,
+          regionEditsByClip: s.ovStitchRegionEditsByClip,
+        },
+        clipId,
+      )
+      return {
+        ovStitchPlanClips: next.clips,
+        ovStitchPlanPaddingMs: next.paddingMs,
+        ovStitchRegionEditsByClip: next.regionEditsByClip,
+      }
+    }),
+  setOvStitchRegionEdits: (clipId, edits) =>
+    set((s) => {
+      const next = { ...s.ovStitchRegionEditsByClip }
+      if (edits.length) next[clipId] = edits
+      else delete next[clipId]
+      return { ovStitchRegionEditsByClip: next }
+    }),
+  replaceOvStitchPlan: (plan) =>
+    set({
+      ovStitchPlanClips: plan.clips,
+      ovStitchPlanPaddingMs: plan.paddingMs,
+      ovStitchPlanDsp: plan.dsp,
+      ovStitchRegionEditsByClip: plan.regionEditsByClip,
     }),
   setOvStitchPlanPaddingAt: (gapIndex, ms) =>
     set((s) => {
