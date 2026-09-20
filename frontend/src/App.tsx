@@ -7,6 +7,7 @@ import { SpeakPage } from '@/pages/SpeakPage'
 import { VoiceDesignPage } from '@/pages/VoiceDesignPage'
 import { VoiceLibraryPage } from '@/pages/VoiceLibraryPage'
 import { StitchStudioPage } from '@/pages/StitchStudioPage'
+import { VoiceEditPage } from '@/pages/VoiceEditPage'
 import { IntegrationsPage } from '@/pages/IntegrationsPage'
 import { RuntimeConfigPage } from '@/pages/RuntimeConfigPage'
 import { Glossary } from '@/components/audio/Glossary'
@@ -99,6 +100,7 @@ export default function App() {
           {page === 'speak' && <SpeakPage />}
           {page === 'voice-design' && <VoiceDesignPage />}
           {page === 'voice-library' && <VoiceLibraryPage />}
+          {page === 'voice-edit' && <VoiceEditPage />}
           {page === 'stitch-studio' && <StitchStudioPage />}
           {page === 'integrations' && <IntegrationsPage />}
           {page === 'runtime' && <RuntimeConfigPage />}

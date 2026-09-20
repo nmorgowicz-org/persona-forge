@@ -200,8 +200,27 @@ def _patch_save_voice(app_module, rt):
         d = _fake_dir_parent / voice_id
         d.mkdir(parents=True, exist_ok=True)
         return d
+    variants_meta: dict[str, dict[str, dict[str, object]]] = {}
+
+    def _fake_load_variants_meta(voice_id: str) -> dict[str, dict[str, object]]:
+        return variants_meta.get(voice_id, {})
+
+    def _fake_save_prosody_variant(voice_id: str, *, style_preset: str, **_kwargs):
+        if voice_id not in fake_library.voices:
+            return None
+        slug = f"{style_preset.lower()}-{len(variants_meta.get(voice_id, {})) + 1}"
+        variants_meta.setdefault(voice_id, {})[slug] = {
+            "filename": f"{slug}.wav",
+            "label": f"{style_preset} variant",
+            "source": "prosody",
+            "created_at": time.time(),
+        }
+        return {**fake_library.voices[voice_id], "variant_id": f"{voice_id}.{slug}", "variant_slug": slug}
+
     app_module.voice_library._is_valid_voice_id = _fake_is_valid_voice_id
     app_module.voice_library._voice_dir = _fake_voice_dir
+    app_module.voice_library._load_variants_meta = _fake_load_variants_meta
+    app_module.voice_library.save_prosody_variant = _fake_save_prosody_variant
 
 
 def _seed_fake_voice_library(rt):

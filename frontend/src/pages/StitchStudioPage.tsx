@@ -34,6 +34,7 @@ export function StitchStudioPage() {
   const savedVoiceId = useAppStore((s) => s.ovSavedVoiceId)
   const setSavedVoiceId = useAppStore((s) => s.setOvSavedVoiceId)
   const setDeepLinkProsodyVoiceId = useAppStore((s) => s.setDeepLinkProsodyVoiceId)
+  const setPage = useAppStore((s) => s.setPage)
   const clips = useAppStore((s) => s.ovStitchPlanClips)
 
   const [library, setLibrary] = useState<SegmentMeta[]>([])
@@ -227,6 +228,14 @@ export function StitchStudioPage() {
             {activationError ? 'Saved, not activated' : 'Saved to voice library as'}{' '}
             <span className="font-mono text-foreground">{savedVoiceId}</span>.
           </p>
+          <button
+            type="button"
+            data-testid="stitch-adjust-prosody"
+            onClick={() => { setDeepLinkProsodyVoiceId(savedVoiceId); setPage('voice-edit') }}
+            className="font-medium text-primary hover:underline"
+          >
+            Adjust prosody
+          </button>
           {activationError && (
             <button
               type="button"

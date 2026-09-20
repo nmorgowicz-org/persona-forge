@@ -28,6 +28,7 @@ import accentProjectGrouping from './scenarios/voice-library/project-grouping.mj
 import voicesList from './scenarios/voice-library/list.mjs';
 import alignmentCompare from './scenarios/prosody/alignment-compare.mjs';
 import prosodyAdjustment from './scenarios/prosody/prosody-adjustment.mjs';
+import voiceEdit from './scenarios/prosody/voice-edit.mjs';
 import segmentLibraryBrowse from './scenarios/stitch-studio/segment-library-browse.mjs';
 import segmentBrowserScale from './scenarios/stitch-studio/segment-browser-scale.mjs';
 import gapEditing from './scenarios/stitch-studio/gap-editing.mjs';
@@ -158,6 +159,16 @@ export const SCENARIOS = {
                 'prosody-adjustment--pocket-tts--preset-selected.png',
                 'prosody-adjustment--pocket-tts--calm-adjusted.png',
             ],
+        },
+    },
+    'voice-edit': {
+        run: voiceEdit,
+        category: 'prosody',
+        runtime: 'neutral',
+        source: 'fake',
+        contract: {
+            intent: 'Show the dedicated Voice Edit workspace with its shared prosody controls.',
+            expectedOutputs: ['voice-edit--neutral--workspace.png'],
         },
     },
     'segment-library-browse': {

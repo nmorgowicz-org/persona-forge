@@ -48,6 +48,9 @@ from `tests/ui/fixtures/capture-data/` into disposable temp dirs on every run �
   `docs/plans/20260709-app_roadmap_backlog.md` §8.4b for the tracked follow-up that would add an
   ADJUSTED-lane scenario and unblock the held GIF variant)
 
+**Voice Edit**
+- `voice-edit` — dedicated saved-voice prosody workspace with variant save/promote controls
+
 **Stitch Studio**
 - `segment-library-browse` — the saved-segments picker panel
 - `segment-browser-scale` — the segment/voice browser scrolled through a 250-row, five-project fixture library

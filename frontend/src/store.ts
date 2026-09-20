@@ -23,7 +23,7 @@ import {
   type StitchRegionEditsByClip,
 } from './lib/stitchPlan'
 
-export type Page = 'wizard' | 'speak' | 'voice-design' | 'voice-library' | 'stitch-studio' | 'integrations' | 'runtime'
+export type Page = 'wizard' | 'speak' | 'voice-design' | 'voice-library' | 'voice-edit' | 'stitch-studio' | 'integrations' | 'runtime'
 export type DesignEngine = 'qwen' | 'omnivoice'
 
 export interface ActivityStatus {

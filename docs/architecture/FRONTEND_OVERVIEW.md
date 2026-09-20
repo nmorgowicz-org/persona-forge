@@ -36,6 +36,7 @@ Routing is stateless: App.tsx switches between pages based on useAppStore((s) =>
 - SpeakPage (speak)
 - VoiceDesignPage (voice-design)
 - VoiceLibraryPage (voice-library)
+- VoiceEditPage (voice-edit)
 - StitchStudioPage (stitch-studio)
 - IntegrationsPage (integrations)
 - RuntimeConfigPage (runtime)
@@ -103,6 +104,15 @@ Key behaviors:
       - ClipPlayerUrl plays the audio.
       - "Insert into stitch editor" navigates to OmniVoice StitchTimeline and inserts clip.
 
+### VoiceEditPage
+
+Primary purpose: create, preview, save, and promote prosody variants for one saved voice.
+
+Key behaviors:
+- Selects only saved voice-library entries; it does not create voices or expose Pocket built-ins.
+- Reuses the prosody preview, variant-save, and activation endpoints already used by Voice Library.
+- A Stitch Studio save can deep-link directly here. The one-shot target is consumed only after the saved voice has been selected.
+
 ### StitchStudioPage
 
 Primary purpose: assemble reference voices from saved segments and existing voices, without needing an OmniVoice audition first.
@@ -116,7 +126,8 @@ Key behaviors:
     - Insert saved voices from the voice library.
     - Reorder clips, adjust trim/fade, gaps.
     - Live preview with renderStitchPlan.
-  - Save as reference voice → POST /omnivoice/save with stitch_plan.
+  - Save as reference voice → POST /omnivoice/save with stitch_plan; plain saving does not activate the API default.
+  - “Adjust prosody” opens Voice Edit with the saved voice preselected.
 
 ### IntegrationsPage
 
@@ -233,7 +244,13 @@ From StitchStudioPage:
      - instruct = name.
      - segments = clip texts.
      - stitchPlan = serialized plan.
-   - Sets ovSavedVoiceId in store; StitchStudioPage displays confirmation.
+   - Sets ovSavedVoiceId in store; StitchStudioPage displays confirmation, optional API activation outcome, and an Adjust prosody handoff.
+
+### 3.5 Voice Edit
+
+1. Choose a saved voice; a Stitch Studio deep link chooses it automatically.
+2. Preview an adjustment, save it as a non-active variant, then promote it explicitly when ready.
+3. Voice Library and Voice Edit read the same persisted variant list.
 
 ## 4. Global state and key stores (store.ts)
 

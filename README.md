@@ -36,7 +36,7 @@ reference clip:
 | 🌏 | **Accent design** | OmniVoice generates candidates per segment across accents. Audition them, cherry-pick the best takes, stitch the winners into a reference voice. |
 | ✂️ | **Stitch Studio** | Drag segments onto a timeline. Per-clip trim, fade, gain, and DSP, with live preview. |
 | 📚 | **Voice Library** | Prosody fingerprints (LUFS, speech rate, pause ratio, peak dBFS) for every saved voice. Fork, edit, compare variants. |
-| 🎵 | **Prosody Adjustment** | Precise control over pause placement — choose style presets (Calm, Energetic, etc.), see word-level pause markers, and preview before saving. |
+| 🎵 | **Voice Edit** | A dedicated prosody workspace: preview pacing, save a non-active variant, then explicitly promote it. |
 | 🔌 | **OpenAI-compatible API** | `POST /v1/audio/speech` — a drop-in TTS endpoint for any OpenAI SDK client. |
 | ⚡ | **CPU-first** | The default pocket-tts backend runs on any CPU. Qwen3-TTS (PyTorch or OpenVINO) is opt-in. |
 | 🎛️ | **Live runtime config** | Change backend, idle-unload timer, and DSP knobs from the UI. No restart. |
@@ -75,6 +75,22 @@ reference clip:
 **Stitch Studio** — assemble clips into a new reference voice
 
 ![Stitch Studio](docs/screenshots/stitch-assembly--neutral--assembly.png)
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Voice Edit** — save and promote prosody variants without leaving the workspace
+
+![Voice Edit](docs/screenshots/artifacts/prosody/voice-edit--neutral--workspace.png)
+
+</td>
+<td width="50%">
+
+**Stitch readiness** — source duration, spacing, and save guidance stay explicit
+
+![Stitch readiness](docs/screenshots/artifacts/stitch-studio/readiness-states--neutral--ideal.png)
 
 </td>
 </tr>
