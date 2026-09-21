@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  adjustVoiceReferencePauses,
   cancelVoiceAlignment,
   deleteVoiceVariant,
   getVoiceAlignmentStatus,
@@ -59,6 +58,7 @@ export interface ProsodyEditor {
   setAutoTriagePrecise: (value: boolean) => void
   entries: VoiceVariantEntry[]
   activeFilename: string
+  variantsReady: boolean
   alignBusy: boolean
   alignBoundaries: AlignmentBoundary[] | null
   alignError: string | null
@@ -109,9 +109,18 @@ export function useProsodyEditor(
   const [preview, setPreview] = useState<ProsodyPreviewState | null>(null)
   const [previewMetrics, setPreviewMetrics] = useState<ReferenceMetrics | null>(null)
   const [targetOverrides, setTargetOverrides] = useState<Record<string, number>>({})
+  // Latest voiceId, readable from async continuations whose closure captured a stale
+  // value across a voice switch (alignment commits, preview responses).
+  const voiceIdRef = useRef(voiceId)
+  const previewSeq = useRef(0)
+  const [variantsReady, setVariantsReady] = useState(false)
+  useEffect(() => {
+    voiceIdRef.current = voiceId
+  }, [voiceId])
 
   const [previewingVariant, setPreviewingVariant] = useState<string | null>(null)
   const variantPreviewAudioRef = useRef<HTMLAudioElement | null>(null)
+  const variantPreviewUrlRef = useRef<string | null>(null)
   const [variantBusy, setVariantBusy] = useState<string | null>(null)
   const [savingVariantBusy, setSavingVariantBusy] = useState(false)
   const [promoteBusy, setPromoteBusy] = useState(false)
@@ -123,10 +132,14 @@ export function useProsodyEditor(
     const data = await getVoiceVariants(voiceId)
     setEntries(data.entries)
     setActiveFilename(data.active_filename)
+    setVariantsReady(true)
   }, [voiceId])
 
   useEffect(() => {
-    setPreview(null)
+    setPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url)
+      return null
+    })
     setPreviewMetrics(null)
     setTargetOverrides({})
     setError(null)
@@ -141,9 +154,22 @@ export function useProsodyEditor(
     setAlignWarning(null)
   }, [voiceId, voice.sample_text, voice.sha256])
 
+  // Voice switch / unmount: stop any variant preview playback and release its object
+  // URL, drop the main preview (revoking its URL), and reset the per-variant state that
+  // would otherwise linger as a phantom "playing" row or stale busy flag.
   useEffect(() => () => {
     variantPreviewAudioRef.current?.pause()
     variantPreviewAudioRef.current = null
+    if (variantPreviewUrlRef.current) {
+      URL.revokeObjectURL(variantPreviewUrlRef.current)
+      variantPreviewUrlRef.current = null
+    }
+    setPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url)
+      return null
+    })
+    setPreviewingVariant(null)
+    setVariantBusy(null)
   }, [voiceId])
 
   // Whether Auto mode should resolve to Precise for this clip. Voice Library derives
@@ -157,17 +183,26 @@ export function useProsodyEditor(
     setAlignBusy(true)
     setAlignError(null)
     setAlignWarning(null)
+    let inflight: { jobId: string; cancelled: boolean } | null = null
     try {
       const job = await startVoiceAlignment(voiceId)
-      alignJobRef.current = { jobId: job.job_id, cancelled: false }
+      // Capture this poller's own record: a later trigger (voice switch, re-run)
+      // overwrites alignJobRef, and polling the live ref would hide this poller's
+      // cancel flag.
+      inflight = { jobId: job.job_id, cancelled: false }
+      alignJobRef.current = inflight
       let current = job
       while (current.status === 'queued' || current.status === 'running') {
-        if (alignJobRef.current?.cancelled) return
+        if (inflight.cancelled) return
         await sleep(500)
-        if (alignJobRef.current?.cancelled) return
+        if (inflight.cancelled) return
         current = await getVoiceAlignmentStatus(voiceId, job.job_id)
       }
-      if (alignJobRef.current?.cancelled) return
+      if (inflight.cancelled) return
+      // The session may have moved to another voice while we polled (the start
+      // response can land after the switch already ran) — never commit a result
+      // that no longer describes the current voice.
+      if (current.voice_id !== voiceIdRef.current) return
       if (current.status === 'completed') {
         setAlignBoundaries(current.result?.boundaries ?? [])
         if (current.within_latency_budget === false) {
@@ -180,15 +215,22 @@ export function useProsodyEditor(
         setAlignBoundaries([])
       }
     } catch (err) {
-      setAlignError(err instanceof Error ? err.message : String(err))
+      if (voiceIdRef.current === voiceId) {
+        setAlignError(err instanceof Error ? err.message : String(err))
+      }
     } finally {
-      alignJobRef.current = null
+      // Only clear the shared ref if it still points at this poller — a newer one
+      // may have taken it over in the meantime.
+      if (inflight && alignJobRef.current === inflight) alignJobRef.current = null
       setAlignBusy(false)
     }
   }, [alignBusy, hasTranscript, voiceId])
 
   // Trigger alignment lazily the first time Precise resolves for this clip, and cancel
-  // any in-flight job on unmount / clip change.
+  // any in-flight job on unmount / clip change. Keyed on voiceId so a switch cancels
+  // the previous voice's job under its own id and re-evaluates for the new voice;
+  // keyed on alignBusy so a switch mid-alignment re-triggers once the superseded
+  // poller releases its busy flag.
   useEffect(() => {
     if (resolvedPrecise && hasTranscript && alignBoundaries === null && !alignBusy) {
       void runAlignment()
@@ -201,14 +243,19 @@ export function useProsodyEditor(
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedPrecise, hasTranscript, alignBoundaries])
+  }, [resolvedPrecise, hasTranscript, alignBoundaries, voiceId, alignBusy])
 
   // One place to render a prosody preview, so the Preview button and per-marker nudges
   // stay in sync. Passing an explicit overrides map avoids stale-state races on rapid drags.
   const runPreview = useCallback(async (overrides: Record<string, number>) => {
+    // A newer preview request or a voice switch supersedes this one; its response
+    // must not write state or allocate object URLs in the current session.
+    const seq = ++previewSeq.current
+    const capturedVoiceId = voiceId
     setPreviewBusy(true)
     try {
-      const data = await previewVoiceProsody(voiceId, stylePreset, paceMultiplier, pauseOffset, mode, overrides)
+      const data = await previewVoiceProsody(capturedVoiceId, stylePreset, paceMultiplier, pauseOffset, mode, overrides)
+      if (previewSeq.current !== seq || voiceIdRef.current !== capturedVoiceId) return
       const blob = new Blob([Uint8Array.from(atob(data.audio_base64), (c) => c.charCodeAt(0))], { type: 'audio/wav' })
       const url = URL.createObjectURL(blob)
       setPreview((prev) => {
@@ -217,9 +264,10 @@ export function useProsodyEditor(
       })
       setPreviewMetrics(data.metrics)
     } catch (err) {
+      if (previewSeq.current !== seq || voiceIdRef.current !== capturedVoiceId) return
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setPreviewBusy(false)
+      if (previewSeq.current === seq) setPreviewBusy(false)
     }
   }, [mode, paceMultiplier, pauseOffset, stylePreset, voiceId])
 
@@ -240,23 +288,21 @@ export function useProsodyEditor(
   }, [])
 
   // Merge an incremental target delta for one boundary and immediately re-preview.
+  // The next map is computed here rather than inside the updater — React 18 dev
+  // double-invokes updaters, which would double the preview request.
   const nudgeTarget = useCallback((key: string, deltaMs: number) => {
-    setTargetOverrides((prev) => {
-      const next = { ...prev, [key]: (prev[key] ?? 0) + deltaMs }
-      void runPreview(next)
-      return next
-    })
-  }, [runPreview])
+    const next = { ...targetOverrides, [key]: (targetOverrides[key] ?? 0) + deltaMs }
+    setTargetOverrides(next)
+    void runPreview(next)
+  }, [runPreview, targetOverrides])
 
   const resetTarget = useCallback((key: string) => {
-    setTargetOverrides((prev) => {
-      if (!(key in prev)) return prev
-      const next = { ...prev }
-      delete next[key]
-      void runPreview(next)
-      return next
-    })
-  }, [runPreview])
+    if (!(key in targetOverrides)) return
+    const next = { ...targetOverrides }
+    delete next[key]
+    setTargetOverrides(next)
+    void runPreview(next)
+  }, [runPreview, targetOverrides])
 
   const saveVariant = useCallback(async () => {
     setSavingVariantBusy(true)
@@ -273,19 +319,31 @@ export function useProsodyEditor(
   }, [mode, onChanged, paceMultiplier, pauseOffset, refresh, stylePreset, targetOverrides, voiceId])
 
   // Bake this take and immediately promote it to the primary variant served by the API.
+  // Two steps because adjust-pauses cannot express per-boundary target overrides:
+  // persist the exact previewed take as a variant, then promote that variant.
   const savePromote = useCallback(async () => {
     setPromoteBusy(true)
     setError(null)
+    let stage: 'save' | 'promote' | 'done' = 'save'
     try {
-      await adjustVoiceReferencePauses(voiceId, stylePreset, paceMultiplier, pauseOffset, mode)
+      const created = await saveVoiceProsodyVariant(voiceId, stylePreset, paceMultiplier, pauseOffset, mode, targetOverrides)
+      stage = 'promote'
+      const variantFilename = `prosody_${created.variant_slug}.wav`
+      await setActiveVoiceVariant(voiceId, variantFilename)
+      stage = 'done'
       await refresh()
       await onChanged?.()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      setError(
+        stage === 'promote'
+          ? `Saved as a variant, but promotion failed: ${message} — you can promote it from the Prosody Variants list.`
+          : message,
+      )
     } finally {
       setPromoteBusy(false)
     }
-  }, [mode, onChanged, paceMultiplier, pauseOffset, refresh, stylePreset, voiceId])
+  }, [mode, onChanged, paceMultiplier, pauseOffset, refresh, stylePreset, targetOverrides, voiceId])
 
   // Explicit, first-class "promote to API reference". Confirms first when this voice_id
   // is also the persisted global API default, since the swap changes the live default
@@ -317,11 +375,20 @@ export function useProsodyEditor(
     if (previewingVariant === entry.filename) {
       variantPreviewAudioRef.current?.pause()
       variantPreviewAudioRef.current = null
+      if (variantPreviewUrlRef.current) {
+        URL.revokeObjectURL(variantPreviewUrlRef.current)
+        variantPreviewUrlRef.current = null
+      }
       setPreviewingVariant(null)
       setPreviewMetrics(null)
       return
     }
+    const capturedVoiceId = voiceId
     variantPreviewAudioRef.current?.pause()
+    if (variantPreviewUrlRef.current) {
+      URL.revokeObjectURL(variantPreviewUrlRef.current)
+      variantPreviewUrlRef.current = null
+    }
     setVariantBusy(entry.filename)
     setError(null)
     try {
@@ -329,19 +396,30 @@ export function useProsodyEditor(
         getVoiceVariantAudio(voiceId, entry.filename),
         getVoiceVariantMetrics(voiceId, entry.filename).catch(() => null),
       ])
+      // Voice switched while fetching — don't start playback or allocate an object
+      // URL in the new session.
+      if (voiceIdRef.current !== capturedVoiceId) return
       const bytes = Uint8Array.from(atob(audio_base64), (c) => c.charCodeAt(0))
       const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }))
+      variantPreviewUrlRef.current = url
       const el = new Audio(url)
       variantPreviewAudioRef.current = el
       setPreviewingVariant(entry.filename)
-      if (metricsResult) setPreviewMetrics(metricsResult.metrics)
-      el.addEventListener('ended', () => setPreviewingVariant(null))
+      setPreviewMetrics(metricsResult ? metricsResult.metrics : null)
+      el.addEventListener('ended', () => {
+        setPreviewingVariant(null)
+        if (variantPreviewUrlRef.current === url) {
+          URL.revokeObjectURL(url)
+          variantPreviewUrlRef.current = null
+        }
+      })
       await el.play()
     } catch (err) {
+      if (voiceIdRef.current !== capturedVoiceId) return
       setError(err instanceof Error ? err.message : String(err))
       setPreviewingVariant(null)
     } finally {
-      setVariantBusy(null)
+      if (voiceIdRef.current === capturedVoiceId) setVariantBusy(null)
     }
   }, [previewingVariant, voiceId])
 
@@ -373,7 +451,7 @@ export function useProsodyEditor(
   return {
     stylePreset, setStylePreset, paceMultiplier, setPaceMultiplier, pauseOffset, setPauseOffset,
     mode, setMode, hasTranscript, resolvedPrecise, setAutoTriagePrecise,
-    entries, activeFilename,
+    entries, activeFilename, variantsReady,
     alignBusy, alignBoundaries, alignError, alignWarning,
     preview, previewMetrics, previewBusy, targetOverrides, nudgeTarget, resetTarget,
     togglePreview, clearPreview,

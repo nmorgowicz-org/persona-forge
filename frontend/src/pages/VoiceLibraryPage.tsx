@@ -1112,11 +1112,12 @@ function VoiceCard({
            <PopoverContent align="start" side="bottom" collisionPadding={16} className="w-72 max-h-[min(80vh,34rem)] overflow-y-auto">
              <p className="text-xs font-medium mb-2">Prosody Settings</p>
              <div data-testid="prosody-editor-panel" data-layout="compact">
-               <ProsodyControls
-                 editor={editor}
-                 layout="compact"
-                 triage={triage ? { mode: triage.mode, reasons: triage.reasons, gapsDetected: triage.gaps_detected, boundariesExpected: triage.boundaries_expected } : null}
-               />
+              <ProsodyControls
+                editor={editor}
+                layout="compact"
+                busy={busy}
+                triage={triage ? { mode: triage.mode, reasons: triage.reasons, gapsDetected: triage.gaps_detected, boundariesExpected: triage.boundaries_expected } : null}
+              />
              </div>
            </PopoverContent>
          </Popover>

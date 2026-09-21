@@ -28,6 +28,9 @@ interface ProsodyControlsProps {
   editor: ProsodyEditor
   layout: 'compact' | 'page'
   triage?: ProsodyTriageHint | null
+  // Page-level busy for this voice (normalize/trim/transcribe/region-edit in
+  // flight) — gates the action buttons alongside the editor's own busy state.
+  busy?: boolean
 }
 
 const MODE_TITLES: Record<ProsodyMode, (hasTranscript: boolean) => string> = {
@@ -43,7 +46,7 @@ const MODE_TITLES: Record<ProsodyMode, (hasTranscript: boolean) => string> = {
 // actions. Shared verbatim between Voice Library's compact popover and the Voice Edit
 // page; the surrounding variants list and alignment comparison are composed by the caller
 // so each surface can place them where its layout needs.
-export function ProsodyControls({ editor, layout, triage }: ProsodyControlsProps) {
+export function ProsodyControls({ editor, layout, triage, busy }: ProsodyControlsProps) {
   const sentenceBoundaries = (editor.alignBoundaries ?? []).filter((b) => b.kind === 'sentence_split')
   const clauseBoundaries = (editor.alignBoundaries ?? []).filter((b) => b.kind !== 'sentence_split' && b.owns_clause)
   const shapedBoundaryCount = sentenceBoundaries.length + clauseBoundaries.length
@@ -67,7 +70,7 @@ export function ProsodyControls({ editor, layout, triage }: ProsodyControlsProps
                 key={m}
                 size="sm"
                 variant={editor.mode === m ? 'default' : 'outline'}
-                disabled={disabled}
+                disabled={disabled || editor.previewBusy}
                 className="h-7 px-1 text-[10px] capitalize"
                 title={MODE_TITLES[m](editor.hasTranscript)}
                 onClick={() => editor.setMode(m)}
@@ -125,7 +128,7 @@ export function ProsodyControls({ editor, layout, triage }: ProsodyControlsProps
 
       <div className="flex flex-col gap-1.5">
         <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Style Preset</label>
-        <Select value={editor.stylePreset} onValueChange={(val) => { editor.setStylePreset(val); editor.clearPreview() }}>
+        <Select value={editor.stylePreset} disabled={editor.previewBusy} onValueChange={(val) => { editor.setStylePreset(val); editor.clearPreview() }}>
           <SelectTrigger size="sm" className="w-full h-7 px-2 text-xs">
             <SelectValue />
           </SelectTrigger>
@@ -156,6 +159,7 @@ export function ProsodyControls({ editor, layout, triage }: ProsodyControlsProps
           type="range" min="0.5" max="2.0" step="0.1"
           value={editor.paceMultiplier}
           onChange={(e) => editor.setPaceMultiplier(parseFloat(e.target.value))}
+          disabled={editor.previewBusy}
           className="w-full accent-cyan-500"
         />
       </div>
@@ -172,6 +176,7 @@ export function ProsodyControls({ editor, layout, triage }: ProsodyControlsProps
           type="range" min="-500" max="500" step="10"
           value={editor.pauseOffset}
           onChange={(e) => editor.setPauseOffset(parseInt(e.target.value, 10))}
+          disabled={editor.previewBusy}
           className="w-full accent-cyan-500"
         />
       </div>
@@ -182,7 +187,7 @@ export function ProsodyControls({ editor, layout, triage }: ProsodyControlsProps
         <Button
           size="sm"
           variant="outline"
-          disabled={editor.busy}
+          disabled={editor.busy || busy}
           onClick={() => void editor.togglePreview()}
         >
           {editor.preview ? <Undo2 className="size-3.5" /> : <Play className="size-3.5" />} {editor.preview ? 'Reset Preview' : 'Preview'}
@@ -190,7 +195,7 @@ export function ProsodyControls({ editor, layout, triage }: ProsodyControlsProps
         <Button
           size="sm"
           variant="outline"
-          disabled={editor.busy}
+          disabled={editor.busy || busy}
           title="Bake and save this take as a new, independently-addressable variant — does not change what's currently served"
           onClick={() => void editor.saveVariant()}
           data-testid="voice-edit-save-variant"
@@ -200,7 +205,7 @@ export function ProsodyControls({ editor, layout, triage }: ProsodyControlsProps
         <Button
           size="sm"
           variant={layout === 'page' ? 'default' : 'outline'}
-          disabled={editor.busy}
+          disabled={editor.busy || busy}
           title="Bake this take and immediately promote it to the primary variant served by the API"
           onClick={() => void editor.savePromote()}
         >

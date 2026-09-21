@@ -10,8 +10,14 @@ interface SavedVoicePickerProps {
 
 export function SavedVoicePicker({ voices, selectedId, onChange, search, onSearchChange }: SavedVoicePickerProps) {
   const query = search.trim().toLowerCase()
+  // Always keep the currently selected voice in the matches, even when the search
+  // query filters it out, so the select doesn't blank to the placeholder while the
+  // editor below is still editing it.
   const matches = query
-    ? voices.filter((voice) => [voice.voice_id, voice.display_name, voice.description].some((value) => value?.toLowerCase().includes(query)))
+    ? voices.filter((voice) =>
+        voice.voice_id === selectedId ||
+        [voice.voice_id, voice.display_name, voice.description].some((value) => value?.toLowerCase().includes(query)),
+      )
     : voices
 
   return (

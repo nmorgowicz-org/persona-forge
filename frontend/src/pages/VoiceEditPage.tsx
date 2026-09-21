@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react'
+import { Loader2 } from 'lucide-react'
 import { SavedVoicePicker } from '@/components/voice/SavedVoicePicker'
 import { ProsodyEditorPanel } from '@/components/prosody/ProsodyEditorPanel'
 import { listVoices, type VoiceMeta } from '@/lib/api'
 import { useAppStore } from '@/store'
 
 export function VoiceEditPage() {
-  const storeVoices = useAppStore((state) => state.voices)
   const setVoices = useAppStore((state) => state.setVoices)
   const deepLinkVoiceId = useAppStore((state) => state.deepLinkProsodyVoiceId)
   const consumeDeepLink = useAppStore((state) => state.setDeepLinkProsodyVoiceId)
-  const [voices, setLocalVoices] = useState<VoiceMeta[]>(storeVoices)
+  const [voices, setLocalVoices] = useState<VoiceMeta[]>(() => useAppStore.getState().voices)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const refresh = async (): Promise<void> => {
     const next = await listVoices()
@@ -19,17 +21,31 @@ export function VoiceEditPage() {
     setVoices(next)
   }
 
-  useEffect(() => { void refresh() }, [])
-
   useEffect(() => {
-    if (!deepLinkVoiceId || !voices.some((voice) => voice.voice_id === deepLinkVoiceId)) return
-    setSelectedId(deepLinkVoiceId)
-    consumeDeepLink(null)
-  }, [consumeDeepLink, deepLinkVoiceId, voices])
+    const load = async () => {
+      try {
+        await refresh()
+        setLoadError(null)
+      } catch (err) {
+        setLoadError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setLoading(false)
+      }
+    }
+    void load()
+  }, [])
 
+  // Deep link and auto-select share one effect so the deep-linked voice always wins:
+  // two effects in the same commit raced on setSelectedId, and the auto-select
+  // (voices[0]) clobbered the deep link before it was consumed.
   useEffect(() => {
-    if (!selectedId && voices.length) setSelectedId(voices[0].voice_id)
-  }, [selectedId, voices])
+    if (deepLinkVoiceId && voices.some((voice) => voice.voice_id === deepLinkVoiceId)) {
+      setSelectedId(deepLinkVoiceId)
+      consumeDeepLink(null)
+    } else if (!selectedId && !deepLinkVoiceId && voices.length) {
+      setSelectedId(voices[0].voice_id)
+    }
+  }, [consumeDeepLink, deepLinkVoiceId, selectedId, voices])
 
   const selectedVoice = voices.find((voice) => voice.voice_id === selectedId) ?? null
 
@@ -39,8 +55,21 @@ export function VoiceEditPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Voice Edit</h1>
         <p className="text-sm text-muted-foreground">Create, compare, and promote prosody variants without leaving the voice workflow.</p>
       </header>
+      {loadError && (
+        <p data-testid="voice-edit-load-error" className="status-badge status-tone-danger px-3 py-1.5 text-xs font-medium">
+          {loadError}
+        </p>
+      )}
       <SavedVoicePicker voices={voices} selectedId={selectedId} onChange={setSelectedId} search={search} onSearchChange={setSearch} />
-      {selectedVoice ? <ProsodyEditorPanel voice={selectedVoice} layout="page" onChanged={refresh} /> : <p className="text-sm text-muted-foreground">Save a reference voice before editing its prosody.</p>}
+      {selectedVoice ? (
+        <ProsodyEditorPanel voice={selectedVoice} layout="page" onChanged={refresh} />
+      ) : loading ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> Loading voices…
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">Save a reference voice before editing its prosody.</p>
+      )}
     </div>
   )
 }
