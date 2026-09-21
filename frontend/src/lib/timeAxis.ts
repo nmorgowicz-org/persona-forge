@@ -1,4 +1,4 @@
-// Shared time-axis math (locked contract: docs/plans/20260920-stitch_studio_ux_execution_plan.md
+// Shared time-axis math (locked contract: docs/archive/stitch-studio/20260920-stitch_studio_ux_execution_plan.md
 // "Time-axis contract"). Every ruler in the app -- Waveform.tsx, waveform/TimeRuler.tsx, and
 // Stitch Timeline's top ruler -- computes tick spacing and labels through this module so their
 // "nice number" step choice and time formatting cannot drift into three different dialects.

@@ -1,7 +1,7 @@
 // Client-side stitch-preview rendering: turns a durable StitchPlanState into an audio Blob,
 // either by asking the server (no region edits, no manual-prosody-repair clips) or by
 // mixing it locally in WebAudio (region edits present). Moved out of StitchTimeline.tsx per
-// docs/plans/20260920-stitch_studio_ux_execution_plan.md Packet 2, so frontend/src/hooks/
+// docs/archive/stitch-studio/20260920-stitch_studio_ux_execution_plan.md Packet 2, so frontend/src/hooks/
 // useStitchPreview.ts can own the render lifecycle without importing component code.
 import { base64ToBlob } from '@/lib/utils'
 import { renderStitchPlan, type StitchPlanPayload } from '@/lib/api'

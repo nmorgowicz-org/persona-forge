@@ -1,7 +1,7 @@
 // StitchPlanSession: the interface StitchEditorBody edits through, so it behaves identically
 // whether the plan being edited is the live durable Studio session (zustand-backed) or a local
 // draft (quick-insert modal) that never touches the store until explicitly committed. See
-// docs/plans/20260920-stitch_studio_ux_execution_plan.md "Session contract" -- later packets
+// docs/archive/stitch-studio/20260920-stitch_studio_ux_execution_plan.md "Session contract" -- later packets
 // depend on these exact names/signatures.
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useAppStore, type StitchPlanClip, type StitchPlanDsp } from '@/store'

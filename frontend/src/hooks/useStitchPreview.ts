@@ -1,6 +1,6 @@
 // Owns the Stitch Studio live-preview lifecycle: debounced render scheduling, request
 // abort/supersede guarding, and object-URL cleanup. Zustand owns none of this -- see
-// docs/plans/20260920-stitch_studio_ux_execution_plan.md "Preview contract". A hook instance
+// docs/archive/stitch-studio/20260920-stitch_studio_ux_execution_plan.md "Preview contract". A hook instance
 // is scoped to whichever editor mounts it (StitchEditorBody), so unmounting an editor
 // (navigating away, closing quick insert) always revokes its preview URL and aborts any
 // in-flight render.

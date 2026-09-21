@@ -1,7 +1,7 @@
 // Shared, real-pixel-scale time ruler for the Stitch Studio timeline. Renders tick labels
 // through the top of the row and thin gridlines that extend down behind the clip row, both
 // computed from lib/timeAxis.ts so tick spacing/labels never drift from Waveform.tsx or
-// waveform/TimeRuler.tsx (locked contract: docs/plans/20260920-stitch_studio_ux_execution_plan.md
+// waveform/TimeRuler.tsx (locked contract: docs/archive/stitch-studio/20260920-stitch_studio_ux_execution_plan.md
 // "Time-axis contract"). `widthPx` is the real content width (durationSeconds * pixelsPerSecond),
 // not the visible viewport -- ticks must cover content that scrolls off-screen, not just the fold.
 //

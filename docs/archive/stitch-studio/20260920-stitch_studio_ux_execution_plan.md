@@ -8,7 +8,7 @@
 
 **Tech Stack:** React 19, TypeScript 7, Zustand 5, Tailwind CSS 4, Motion 13, Radix UI, Playwright, Puppeteer capture harness, Flask fake-model server.
 
-**Spec:** `docs/plans/20260920-stitch_studio_ux_overhaul.md`
+**Spec:** `docs/archive/stitch-studio/20260920-stitch_studio_ux_overhaul.md`
 
 ## Global constraints
 

@@ -2,7 +2,7 @@
 // and the quick-insert draft session (frontend/src/hooks/useStitchPlanSession.ts). No React,
 // no zustand: every function here takes a plan and returns a new plan (or derived value).
 //
-// See docs/plans/20260920-stitch_studio_ux_execution_plan.md "Locked interfaces" for the
+// See docs/archive/stitch-studio/20260920-stitch_studio_ux_execution_plan.md "Locked interfaces" for the
 // contract this module implements; later packets depend on these exact names/signatures.
 import type { StitchPlanClip, StitchPlanDsp } from '@/store'
 import type { StitchPlanRegionEdit } from '@/lib/api'
