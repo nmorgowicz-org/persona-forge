@@ -117,6 +117,24 @@ export function GapControl({
     setDragValue(null)
   }, [handlePointerMove, commitValue])
 
+  // The gesture listeners live on window and are normally removed by the end handlers, so
+  // unmounting mid-drag (e.g. the clip gets removed) would leak them and leave a pending
+  // rAF callback. Tear everything down on unmount -- and whenever the callback identities
+  // change, since the window holds the instances captured by whichever render started the
+  // gesture.
+  useEffect(() => {
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', endDrag)
+      window.removeEventListener('pointercancel', endDrag)
+      dragStateRef.current = null
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
+    }
+  }, [handlePointerMove, endDrag])
+
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (editing) return
     event.preventDefault()
@@ -132,13 +150,23 @@ export function GapControl({
     window.addEventListener('pointercancel', endDrag)
   }
 
-  const nudge = (deltaMs: number) => commitValue(paddingMs + deltaMs)
+  const nudge = (deltaMs: number) => {
+    // A nudge while the value is being typed would commit a stale base and fight the
+    // pending text; ignore it until the edit commits or cancels.
+    if (editing) return
+    commitValue(paddingMs + deltaMs)
+  }
 
   const handleKeyDown = (event: ReactKeyboardEvent) => {
-    if (event.key === 'ArrowUp') {
+    if (event.key === 'ArrowUp' && !editing) {
+      // The focused gap button is not an editable target, so the timeline's global
+      // shortcut would also see this event and silently trim the selected clip.
+      // Stop propagation so it never reaches the window handler.
+      event.stopPropagation()
       event.preventDefault()
       nudge(event.shiftKey ? 100 : 10)
-    } else if (event.key === 'ArrowDown') {
+    } else if (event.key === 'ArrowDown' && !editing) {
+      event.stopPropagation()
       event.preventDefault()
       nudge(event.shiftKey ? -100 : -10)
     } else if (event.key === 'Enter' && editing) {
@@ -167,7 +195,7 @@ export function GapControl({
       title={`${Math.round(paddingMs)}ms gap`}
       onPointerDown={startDrag}
       className={cn(
-        'group relative mt-3 flex h-24 shrink-0 flex-col items-center justify-center gap-1 rounded px-1 select-none',
+        'group relative mt-3 flex h-24 shrink-0 flex-col items-center justify-center gap-1 rounded px-1 select-none touch-none',
         isZero
           ? 'border border-dashed border-border/40 hover:border-cyan-500/50'
           : 'border border-cyan-500/40 bg-cyan-500/5',
