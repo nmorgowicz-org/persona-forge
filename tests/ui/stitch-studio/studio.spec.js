@@ -30,6 +30,23 @@ async function setGap(page, index, value) {
   await input.press('Enter')
 }
 
+// Mid-gesture pause for multi-segment drags: Framer Motion needs a render frame to
+// recompute layout and register each threshold crossing. Waiting until the clip row's
+// bounding boxes hold still across two consecutive animation frames is the settled
+// end state itself -- a fixed 150ms sleep only guessed at how long that takes.
+async function waitForDragLayoutSettled(page) {
+  await page.waitForFunction(() => new Promise((resolve) => {
+    const read = () => Array.from(document.querySelectorAll('[data-testid="stitch-clip"]'))
+      .map((el) => {
+        const r = el.getBoundingClientRect()
+        return `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)}`
+      })
+      .join('|')
+    const first = read()
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve(read() === first)))
+  }), { timeout: 5000 })
+}
+
 test.describe('Stitch Studio durable plan domain', () => {
   test('region edits survive Stitch Studio unmount and remount', async ({ page }) => {
     await insertNSegments(page, 1)
@@ -649,9 +666,9 @@ test.describe('Stitch Studio pointer-safe editing and timeline geometry', () => 
     await page.mouse.down()
     const midX = (fromBox.x + toBox.x) / 2
     await page.mouse.move(midX, toBox.y + 10, { steps: 10 })
-    await page.waitForTimeout(150)
+    await waitForDragLayoutSettled(page)
     await page.mouse.move(toBox.x + toBox.width - 5, toBox.y + 10, { steps: 10 })
-    await page.waitForTimeout(150)
+    await waitForDragLayoutSettled(page)
     await page.mouse.up()
 
     const clipsAfter = await page.getByTestId('stitch-clip').evaluateAll((els) => els.map((el) => el.dataset.clipId))
@@ -680,9 +697,9 @@ test.describe('Stitch Studio pointer-safe editing and timeline geometry', () => 
     await page.mouse.down()
     const midX = (fromBox.x + toBox.x) / 2
     await page.mouse.move(midX, toBox.y + 10, { steps: 10 })
-    await page.waitForTimeout(150)
+    await waitForDragLayoutSettled(page)
     await page.mouse.move(toBox.x + toBox.width - 5, toBox.y + 10, { steps: 10 })
-    await page.waitForTimeout(150)
+    await waitForDragLayoutSettled(page)
     await page.mouse.up()
     await expect(gapControls.nth(0)).toHaveAttribute('data-gap-ms', '150')
     await expect(gapControls.nth(1)).toHaveAttribute('data-gap-ms', '400')
@@ -727,9 +744,9 @@ test.describe('Stitch Studio pointer-safe editing and timeline geometry', () => 
     await page.mouse.down()
     const midX = (fromBox.x + toBox.x) / 2
     await page.mouse.move(midX, toBox.y + 10, { steps: 10 })
-    await page.waitForTimeout(150)
+    await waitForDragLayoutSettled(page)
     await page.mouse.move(toBox.x + toBox.width - 5, toBox.y + 10, { steps: 10 })
-    await page.waitForTimeout(150)
+    await waitForDragLayoutSettled(page)
     await page.mouse.up()
 
     await expect(gapControls.nth(0)).toHaveAttribute('data-gap-ms', '200')

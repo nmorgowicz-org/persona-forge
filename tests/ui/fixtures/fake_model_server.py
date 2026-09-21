@@ -247,6 +247,52 @@ def _patch_save_voice(app_module, rt):
     app_module.voice_library._load_variants_meta = _fake_load_variants_meta
     app_module.voice_library.save_prosody_variant = _fake_save_prosody_variant
     app_module.voice_library.get_prosody_adjusted_wav = _fake_get_prosody_adjusted_wav
+    def _write_silent_wav(path: pathlib.Path, seconds: float = 0.25) -> None:
+        samples = np.zeros(int(_SAMPLE_RATE * seconds), dtype=np.int16)
+        with wave.open(str(path), "wb") as wav_writer:
+            wav_writer.setnchannels(1)
+            wav_writer.setsampwidth(2)
+            wav_writer.setframerate(_SAMPLE_RATE)
+            wav_writer.writeframes(samples.tobytes())
+
+    def _fake_set_active_variant(voice_id: str, variant_filename: str | None = None) -> bool:
+        # Mirrors the real promote semantics (voice_library.set_active_variant) against
+        # the in-memory library + fake voice dir, so the /set-active-variant endpoint,
+        # the variants list's current.wav resolution, and the metrics refresh all
+        # behave like production instead of raising KeyError inside the real
+        # analyze_reference (real get_voice is patched out and has no wav_path).
+        if voice_id not in fake_library.voices:
+            return False
+        voice_dir = _fake_voice_dir(voice_id)
+        original = voice_dir / "original.wav"
+        if not original.is_file():
+            _write_silent_wav(original)
+        current = voice_dir / "current.wav"
+        try:
+            if current.exists() or current.is_symlink():
+                current.unlink()
+            target = voice_dir / variant_filename if variant_filename else original
+            if not target.is_file():
+                return False
+            current.symlink_to(target)
+        except OSError:
+            return False
+        meta = fake_library.voices[voice_id]
+        meta["metrics"] = {}
+        meta["quality_score"] = 100.0
+        meta["quality_warnings"] = []
+        meta["needs_review"] = False
+        return True
+
+    def _fake_analyze_reference(voice_id: str):
+        meta = fake_library.voices.get(voice_id)
+        if meta is None:
+            return None
+        meta.setdefault("metrics", {})
+        return meta
+
+    app_module.voice_library.set_active_variant = _fake_set_active_variant
+    app_module.voice_library.analyze_reference = _fake_analyze_reference
 
 
 def _seed_fake_voice_library(rt):

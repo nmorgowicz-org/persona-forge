@@ -187,8 +187,13 @@ export const StitchTimeline = memo(function StitchTimeline({
       sum += clipEffectiveDurationMs(c)
     }
     sum += (paddingMs || []).reduce((a, b) => a + b, 0)
+    // Subtract per-seam crossfade overlap so the ruler total, clip ranges, and the
+    // readiness bar's renderedMs (computeStitchDurations) agree on the same terms.
+    const seamCount = Math.max(0, clips.length - 1)
+    const crossfadeMs = Math.max(0, plan.dsp?.crossfadeMs ?? 0)
+    sum -= seamCount > 0 ? crossfadeMs * seamCount : 0
     return Math.max(1, sum)
-  }, [clips, paddingMs])
+  }, [clips, paddingMs, plan.dsp?.crossfadeMs])
 
   // Each clip's approximate span in the rendered arrangement (Packet 7), scaled onto the
   // shared transport's actual measured audio duration -- the client-side estimate and the

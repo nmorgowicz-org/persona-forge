@@ -131,12 +131,14 @@ export function useStitchPreview(plan: StitchPlanState): StitchPreviewState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hash])
 
-  // Unmount: revoke the object URL and abort any in-flight render so it can never resolve
-  // into a component instance that no longer exists.
+  // Unmount: revoke the object URL, abort any in-flight server render, and bump the
+  // sequence counter so even a non-cancellable local WebAudio render that resolves
+  // afterwards fails the supersede check and never allocates a new object URL.
   useEffect(() => {
     return () => {
       clearTimer()
       abortRef.current?.abort()
+      seqRef.current++
       if (urlRef.current) URL.revokeObjectURL(urlRef.current)
     }
   }, [clearTimer])

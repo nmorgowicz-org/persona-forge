@@ -305,28 +305,30 @@ export function useProsodyEditor(
   }, [runPreview, targetOverrides])
 
   const saveVariant = useCallback(async () => {
+    const capturedVoiceId = voiceId
     setSavingVariantBusy(true)
     setError(null)
     try {
       await saveVoiceProsodyVariant(voiceId, stylePreset, paceMultiplier, pauseOffset, mode, targetOverrides)
+      if (voiceIdRef.current !== capturedVoiceId) return
       await refresh()
       await onChanged?.()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (voiceIdRef.current === capturedVoiceId) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
     } finally {
-      setSavingVariantBusy(false)
+      if (voiceIdRef.current === capturedVoiceId) setSavingVariantBusy(false)
     }
   }, [mode, onChanged, paceMultiplier, pauseOffset, refresh, stylePreset, targetOverrides, voiceId])
-
-  // Bake this take and immediately promote it to the primary variant served by the API.
-  // Two steps because adjust-pauses cannot express per-boundary target overrides:
-  // persist the exact previewed take as a variant, then promote that variant.
   const savePromote = useCallback(async () => {
+    const capturedVoiceId = voiceId
     setPromoteBusy(true)
     setError(null)
     let stage: 'save' | 'promote' | 'done' = 'save'
     try {
       const created = await saveVoiceProsodyVariant(voiceId, stylePreset, paceMultiplier, pauseOffset, mode, targetOverrides)
+      if (voiceIdRef.current !== capturedVoiceId) return
       stage = 'promote'
       const variantFilename = `prosody_${created.variant_slug}.wav`
       await setActiveVoiceVariant(voiceId, variantFilename)
@@ -335,13 +337,14 @@ export function useProsodyEditor(
       await onChanged?.()
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      if (voiceIdRef.current !== capturedVoiceId) return
       setError(
         stage === 'promote'
           ? `Saved as a variant, but promotion failed: ${message} — you can promote it from the Prosody Variants list.`
           : message,
       )
     } finally {
-      setPromoteBusy(false)
+      if (voiceIdRef.current === capturedVoiceId) setPromoteBusy(false)
     }
   }, [mode, onChanged, paceMultiplier, pauseOffset, refresh, stylePreset, targetOverrides, voiceId])
 
@@ -356,16 +359,20 @@ export function useProsodyEditor(
       )
       if (!ok) return
     }
+    const capturedVoiceId = voiceId
     setVariantBusy(entry.filename)
     setError(null)
     try {
       await setActiveVoiceVariant(voiceId, entry.filename)
+      if (voiceIdRef.current !== capturedVoiceId) return
       setActiveFilename(entry.filename)
       await onChanged?.()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (voiceIdRef.current === capturedVoiceId) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
     } finally {
-      setVariantBusy(null)
+      if (voiceIdRef.current === capturedVoiceId) setVariantBusy(null)
     }
   }, [onChanged, voice.api_active, voiceId])
 
@@ -425,26 +432,31 @@ export function useProsodyEditor(
 
   const forkVariant = useCallback(async (entry: VoiceVariantEntry) => {
     if (!onFork) return
+    const capturedVoiceId = voiceId
     setVariantBusy(entry.filename)
     try {
       await onFork(entry)
     } finally {
-      setVariantBusy(null)
+      if (voiceIdRef.current === capturedVoiceId) setVariantBusy(null)
     }
-  }, [onFork])
+  }, [onFork, voiceId])
 
   const deleteVariant = useCallback(async (entry: VoiceVariantEntry) => {
     if (!window.confirm(`Delete variant "${entry.label}"? This cannot be undone.`)) return
+    const capturedVoiceId = voiceId
     setVariantBusy(entry.filename)
     setError(null)
     try {
       await deleteVoiceVariant(voiceId, entry.filename)
+      if (voiceIdRef.current !== capturedVoiceId) return
       await refresh()
       await onChanged?.()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (voiceIdRef.current === capturedVoiceId) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
     } finally {
-      setVariantBusy(null)
+      if (voiceIdRef.current === capturedVoiceId) setVariantBusy(null)
     }
   }, [onChanged, refresh, voiceId])
 

@@ -134,7 +134,9 @@ export function useStitchTransport(src: string | null): StitchTransport {
     if (!audio) return
     rangeEndRef.current = null
     setActiveRangeId(null)
-    void audio.play()
+    // play() rejects on interrupt (src swap mid-click) or autoplay-policy denial;
+    // playback state is event-driven, so the rejection carries no state to recover.
+    audio.play().catch(() => {})
   }, [])
 
   const pause = useCallback(() => { elRef.current?.pause() }, [])
@@ -145,7 +147,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
     if (audio.paused) {
       rangeEndRef.current = null
       setActiveRangeId(null)
-      void audio.play()
+      audio.play().catch(() => {})
     } else {
       audio.pause()
     }
@@ -172,7 +174,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
     audio.currentTime = Math.max(0, startSec)
     rangeEndRef.current = endSec
     setActiveRangeId(id)
-    void audio.play()
+    audio.play().catch(() => {})
   }, [activeRangeId])
 
   return {

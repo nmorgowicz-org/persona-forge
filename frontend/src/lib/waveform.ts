@@ -111,12 +111,6 @@ export async function getClipAudioAnalysis(
   return analysis
 }
 
-/** Drops every cached analysis for `assetKey` (all bucket-count variants). */
-export function invalidateClipAudioAnalysis(assetKey: string): void {
-  for (const key of analysisCache.keys()) {
-    if (key === assetKey || key.startsWith(`${assetKey}::`)) analysisCache.delete(key)
-  }
-}
 
 // ---- Shared waveform meter/playhead palette (locked contract: docs/plans/20260920- ----
 // stitch_studio_ux_execution_plan.md "Task 5.2"). One canonical color language for every bar
