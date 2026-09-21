@@ -6,5 +6,8 @@ export default async function ({ page, baseURL }) {
   await page.click('[data-testid="nav-voice-edit"]');
   await page.waitForSelector('[data-testid="voice-edit-page"]');
   await page.waitForSelector('[data-testid="voice-edit-picker"]');
+  // Wait for the voice list to populate and the auto-selected voice's variant list
+  // to render before the shot -- the capture must not race the auto-select.
+  await page.waitForSelector('[data-testid="voice-edit-variant"]', { timeout: 15000 });
   await captureShot(page, 'voice-edit-workspace.png', { fullPage: true });
 }

@@ -303,7 +303,12 @@ test.describe('Voice Library discoverability and segment browser scale', () => {
     const clips = page.getByTestId('stitch-clip')
     await expect(clips).toHaveCount(3)
     await expect(clips.nth(0)).toHaveAttribute('data-clip-id', firstClipId ?? '')
-    await expect(clips.nth(1)).toContainText('Segment number')
+    // Distinguishing text: the inserted row is the newest Podcast-Intros fixture
+    // ("Segment number 248"); it can only sit at index 1 if the splice happened right
+    // after the selected clip rather than appending at the very end. The original
+    // second clip ("Segment number 250", the newest overall fixture) must remain last.
+    await expect(clips.nth(1)).toContainText('Segment number 248')
+    await expect(clips.nth(2)).toContainText('Segment number 250')
   })
 
   test('segment browser auditions only one row and does not eagerly request audio', async ({ page }) => {
@@ -357,7 +362,7 @@ test.describe('Voice Library discoverability and segment browser scale', () => {
     await expect(auditionButtons.nth(1)).toHaveAttribute('data-playing', 'true')
     await expect(auditionButtons.nth(0)).toHaveAttribute('data-playing', 'false')
   })
-  test('closing the segment browser cancels an in-flight audition fetch', async ({ page }) => {
+  test('closing the segment browser cannot start playback from a fetch that resolved late', async ({ page }) => {
     // togglePlay uses a plain `new Audio()` instance, not a rendered <audio> element, so
     // querying the DOM can't observe it -- instrument the constructor instead to record every
     // play() call and when it happened relative to the dialog closing.
@@ -400,6 +405,46 @@ test.describe('Voice Library discoverability and segment browser scale', () => {
     )
     expect(playCallsAfterClose).toBe(0)
   })
+
+  test('segment browser Enter and double-click insert; Enter on a checkbox does not', async ({ page }) => {
+    await installLargeSegmentLibrary(page)
+    await page.goto('/')
+    await page.getByTestId('nav-stitch-studio').click()
+    const dialog = page.getByTestId('segment-browser-dialog')
+    const items = page.getByTestId('stitch-picker-item-segments')
+    const clips = page.getByTestId('stitch-clip')
+    const openDialog = async () => {
+      await page.getByTestId('stitch-picker-toggle-segments').click()
+      await expect(dialog).toBeVisible()
+      await expect(items.first()).toBeVisible()
+    }
+
+    // (a) Enter with a selection and focus on the dialog surface (not on a row
+    // control) inserts the selection.
+    await openDialog()
+    await items.nth(0).click()
+    await dialog.focus()
+    await page.keyboard.press('Enter')
+    await expect(clips).toHaveCount(1)
+    await expect(dialog).toBeHidden()
+
+    // (b) Double-clicking a row inserts that row.
+    await openDialog()
+    const rows = page.locator('.segment-browser-row')
+    await rows.nth(1).locator('p').first().dblclick()
+    await expect(clips).toHaveCount(2)
+    await expect(dialog).toBeHidden()
+
+    // (c) Enter while a row checkbox is focused must not insert: the checkbox is an
+    // interactive target the dialog's Enter handler does not intercept.
+    await openDialog()
+    await items.nth(2).click()
+    await expect(items.nth(2)).toBeChecked()
+    await page.keyboard.press('Enter')
+    await expect(clips).toHaveCount(2)
+    await expect(dialog).toBeVisible()
+    await expect(items.nth(2)).toBeChecked()
+  })
 })
 
 test.describe('Stitch Studio audio decode edge cases', () => {
@@ -412,7 +457,7 @@ test.describe('Stitch Studio audio decode edge cases', () => {
     await insertNSegments(page, 1)
     await page.getByTestId('stitch-clip-edit-toggle').first().click()
     await expect(page.getByText('No waveform')).toBeVisible()
-    // A failed decode must not poison later inserts for a *different* asset key.
+    // No crash: the clip still renders after the failed decode.
     await expect(page.getByTestId('stitch-clip')).toHaveCount(1)
   })
 
@@ -463,6 +508,22 @@ test.describe('Stitch Studio shared visual primitives', () => {
     // The two scales must genuinely differ: the ruler for the 2-clip plan spans a longer
     // duration than the 1-clip plan.
     expect(secondsAt2[secondsAt2.length - 1]).toBeGreaterThan(secondsAt1[secondsAt1.length - 1])
+
+    // Two explicit zoom-in steps from the 2-clip Fit: each must land on a genuinely
+    // new scale, and the ruler labels must stay strictly increasing (no duplicate
+    // adjacent labels) at every zoom level, not only under auto-Fit.
+    for (let zoomStep = 1; zoomStep <= 2; zoomStep++) {
+      const zoomLevelBefore = await page.getByTestId('stitch-zoom-level').textContent()
+      await page.getByTestId('stitch-zoom-in').click()
+      await expect(page.getByTestId('stitch-zoom-level')).not.toHaveText(zoomLevelBefore)
+
+      const ticks = await page.getByTestId('stitch-ruler-tick').all()
+      expect(ticks.length).toBeGreaterThanOrEqual(2)
+      const seconds = await Promise.all(ticks.map((t) => t.getAttribute('data-seconds').then(Number)))
+      for (let i = 1; i < seconds.length; i++) {
+        expect(seconds[i]).toBeGreaterThan(seconds[i - 1])
+      }
+    }
   })
 
   test('waveform canvas backing store follows device pixel ratio', async ({ page, browser }) => {
@@ -523,9 +584,7 @@ test.describe('Stitch Studio pointer-safe editing and timeline geometry', () => 
 
     const handles = page.getByTestId('stitch-trim-handle-left')
     const boxA = await handles.nth(0).boundingBox()
-    const boxB = await handles.nth(1).boundingBox()
     expect(boxA).toBeTruthy()
-    expect(boxB).toBeTruthy()
 
     // Same 40px drag distance, delivered as one big jump vs many intermediate pointermove
     // events -- a delta computed fresh from the frozen gesture-start position on every move
@@ -536,6 +595,23 @@ test.describe('Stitch Studio pointer-safe editing and timeline geometry', () => 
     await page.mouse.down()
     await page.mouse.move(boxA.x + boxA.width / 2 + 40, boxA.y + boxA.height / 2, { steps: 3 })
     await page.mouse.up()
+
+    // The committed left-trim on clip A reflows the timeline (the Fit-zoom recompute
+    // shifts card B and its trim handle ~20px), so a box captured before the drag is
+    // stale: the second gesture's mouse.down would land in card B's waveform lane
+    // (starting a region selection) instead of on the handle. Wait for the handle's
+    // layout to settle, then re-query it.
+    await page.waitForFunction(() => {
+      const handle = document.querySelectorAll('[data-testid="stitch-trim-handle-left"]')[1]
+      if (!handle) return false
+      const rect = handle.getBoundingClientRect()
+      const key = `${rect.x}|${rect.y}|${rect.width}|${rect.height}`
+      if (window.__settledTrimHandleBox === key) return true
+      window.__settledTrimHandleBox = key
+      return false
+    }, { timeout: 5000 })
+    const boxB = await handles.nth(1).boundingBox()
+    expect(boxB).toBeTruthy()
 
     await page.mouse.move(boxB.x + boxB.width / 2, boxB.y + boxB.height / 2)
     await page.mouse.down()

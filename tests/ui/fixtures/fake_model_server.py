@@ -207,13 +207,28 @@ def _patch_save_voice(app_module, rt):
     def _fake_load_variants_meta(voice_id: str) -> dict[str, dict[str, object]]:
         return variants_meta.get(voice_id, {})
 
-    def _fake_save_prosody_variant(voice_id: str, *, style_preset: str, **_kwargs):
+    def _fake_save_prosody_variant(voice_id: str, *, style_preset: str, pace_multiplier: float = 1.0, **_kwargs):
         if voice_id not in fake_library.voices:
             return None
         slug = f"{style_preset.lower()}-{len(variants_meta.get(voice_id, {})) + 1}"
+        variant_filename = f"prosody_{slug}.wav"
+        # Persist a real variant file so the existing variant-audio GET / promote /
+        # delete / variants-list endpoints resolve it exactly as they do for the real
+        # library (they all read _voice_dir(voice_id) / variant_filename). The fake
+        # tier fabricates audio everywhere, so a deterministic tiny silent WAV is the
+        # honest stand-in for the baked prosody output.
+        voice_dir = _fake_voice_dir(voice_id)
+        variant_file = voice_dir / variant_filename
+        if not variant_file.is_file():
+            samples = np.zeros(_SAMPLE_RATE // 4, dtype=np.int16)
+            with wave.open(str(variant_file), "wb") as wav_writer:
+                wav_writer.setnchannels(1)
+                wav_writer.setsampwidth(2)
+                wav_writer.setframerate(_SAMPLE_RATE)
+                wav_writer.writeframes(samples.tobytes())
         variants_meta.setdefault(voice_id, {})[slug] = {
-            "filename": f"{slug}.wav",
-            "label": f"{style_preset} variant",
+            "filename": variant_filename,
+            "label": f"{style_preset} {pace_multiplier}x",
             "source": "prosody",
             "created_at": time.time(),
         }
@@ -222,9 +237,13 @@ def _patch_save_voice(app_module, rt):
     app_module.voice_library._is_valid_voice_id = _fake_is_valid_voice_id
     app_module.voice_library._voice_dir = _fake_voice_dir
     def _fake_get_prosody_adjusted_wav(_voice_id: str, *_args, **_kwargs):
-        # One second of deterministic silence is enough for the UI to render an adjusted lane.
-        return np.zeros(_SAMPLE_RATE, dtype=np.float32), _SAMPLE_RATE, []
-
+        # One second of deterministic silence is enough for the UI to render an adjusted
+        # lane. Honor the real signature's return_plan flag: 2-tuple by default,
+        # 3-tuple (with plan) when the caller asks for one.
+        wav = np.zeros(_SAMPLE_RATE, dtype=np.float32)
+        if _kwargs.get("return_plan"):
+            return wav, _SAMPLE_RATE, []
+        return wav, _SAMPLE_RATE
     app_module.voice_library._load_variants_meta = _fake_load_variants_meta
     app_module.voice_library.save_prosody_variant = _fake_save_prosody_variant
     app_module.voice_library.get_prosody_adjusted_wav = _fake_get_prosody_adjusted_wav

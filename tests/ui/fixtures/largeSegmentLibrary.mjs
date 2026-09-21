@@ -35,7 +35,7 @@ export function generateLargeSegmentLibrary(count = 250) {
   for (let i = 0; i < count; i++) {
     const projectIndex = i % PROJECT_NAMES.length;
     rows.push({
-      segment_id: `seg_large_${String(i).padStart(4, '0')}`,
+      segment_id: `seg_${i.toString(16).padStart(12, '0')}`,
       text: `Segment number ${i + 1} for scale testing.`,
       instruct: 'Neutral narrator',
       tags: [],

@@ -93,7 +93,7 @@ export default async function (ctx) {
     );
     await recorder.snap(page);
 
-    // Pick two segments so the viewer sees what a multi-clip timeline looks
+    // Pick three segments so the viewer sees what a multi-clip timeline looks
     // like, not just a single lonely clip.
     const items = await page.$$('[data-testid="stitch-picker-item-segments"]');
     await items[0].click();

@@ -19,8 +19,9 @@ export default async function (ctx) {
         { timeout: 5000 }
     );
 
-    // Three clips -> two seams, so the shot shows one seam left at its 0.00s default next to
-    // one that's been typed to a real value -- the two states side by side in one frame.
+    // Three clips -> two seams, both arriving at the punctuation-suggested 520ms.
+    // The shot pairs a typed 250ms seam with a seam typed down to 0, so the
+    // zero-state and the nonzero state sit side by side in one frame.
     const items = await page.$$('[data-testid="stitch-picker-item-segments"]');
     await items[0].click();
     if (items[1]) await items[1].click();
@@ -49,7 +50,25 @@ export default async function (ctx) {
         { timeout: 5000 }
     );
 
-
+    // Both seams start at the punctuation-suggested 520ms, so type the second one
+    // down to 0 as well -- the zero-state dashed box must be part of the shot.
+    const valueButton1 = await gapControls[1].$('button');
+    await valueButton1.click();
+    await page.waitForFunction(
+        () => document.querySelectorAll('[data-testid="stitch-gap-control"]')[1]?.querySelector('input') !== null,
+        { timeout: 5000 }
+    );
+    const input1 = await gapControls[1].$('input');
+    await input1.evaluate((el, val) => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(el, val);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+    }, '0');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(
+        () => document.querySelectorAll('[data-testid="stitch-gap-control"]')[1]?.getAttribute('data-gap-ms') === '0',
+        { timeout: 5000 }
+    );
     // INTENT: One zero-width seam and one typed 250ms seam visible in the same frame, plus
     // the zoom controls that make the timeline's real time-scale geometry legible.
     await captureShot(page, 'gap-editing-gap-editing.png', {
