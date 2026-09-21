@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import shutil
 import logging
 import os
 import random
@@ -244,6 +245,17 @@ def _seed_fake_voice_library(rt):
             continue
     rt.voice_library.seed(metas)
 
+def _seed_fake_segment_library() -> None:
+    """Seed disposable segment metadata/audio for every fake-server launcher."""
+    source_dir = Path(__file__).resolve().parent / "capture-data" / "segments"
+    target_dir = Path(os.environ["SEGMENT_LIBRARY_DIR"])
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if not source_dir.is_dir():
+        return
+    for entry in source_dir.iterdir():
+        if entry.is_dir() and not (target_dir / entry.name).exists():
+            shutil.copytree(entry, target_dir / entry.name)
+
 
 
 def _install_test_controls(app_module, rt):
@@ -323,6 +335,7 @@ def main() -> None:
     # Ensure library dirs before importing app (uses segment_library which defaults to /segments).
     os.environ.setdefault("VOICE_LIBRARY_DIR", tempfile.mkdtemp(prefix="persona-forge-e2e-voices-"))
     os.environ.setdefault("SEGMENT_LIBRARY_DIR", tempfile.mkdtemp(prefix="persona-forge-e2e-segments-"))
+    _seed_fake_segment_library()
 
     rt = _install_fake_runtime()
     _patch_generate_for_slow_async(rt)
@@ -365,6 +378,7 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     seg_dir = tempfile.mkdtemp(prefix="persona-forge-e2e-segments-")
     os.environ.setdefault("VOICE_LIBRARY_DIR", lib_dir)
     os.environ.setdefault("SEGMENT_LIBRARY_DIR", seg_dir)
+    _seed_fake_segment_library()
 
     rt = _install_fake_runtime()
     _patch_generate_for_slow_async(rt)
