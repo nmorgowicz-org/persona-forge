@@ -1,48 +1,45 @@
-// Shared "insert a library item into the stitch timeline" logic, used by both
-// OmniVoicePanel's stitch editor entry point and the standalone Stitch Studio page.
+// Shared "insert a library item into the stitch timeline" logic, used by the quick-insert
+// modal (App.tsx QuickInsertStitchEditor) and the standalone Stitch Studio page
+// (StitchStudioPage.tsx); VoiceLibraryPage.tsx builds an incoming clip directly.
 import type { StitchPlanClip } from '@/store'
 import { getSegmentAudioBase64, getVoice, type SegmentMeta, type VoiceMeta } from '@/lib/api'
-import { suggestedGapMs, suggestedPaddingForClips } from '@/lib/stitchPlan'
 import { getClipAudioAnalysis } from '@/lib/waveform'
 import type { StitchPlanSession } from '@/hooks/useStitchPlanSession'
 
-// Splices `clips` into the session's plan as one atomic clips+padding update -- appending at
-// the end (afterClipId null/omitted) or inserting immediately after a specific existing clip.
-// Takes a single snapshot of the pre-insert plan, so a multi-item batch (e.g. "Insert
-// selected" with several checked rows) can never race itself the way calling this once per
-// item against a stale snapshot would (each item would independently recompute the same
-// pre-batch clip/padding counts and stomp on each other's padding-array writes).
+// Delegates to the session's atomic `insertClips`, which splices `clips` into the plan and
+// resizes `paddingMs` in a single state write (afterClipId null/omitted appends at the end).
+// Resolving the seam index inside that write is what keeps a multi-item batch from racing
+// itself or stomping on a concurrent clip/padding edit made while the batch's fetches and
+// decodes are in flight.
 function spliceStitchPlanClips(clips: StitchPlanClip[], session: StitchPlanSession, afterClipId?: string | null) {
   if (clips.length === 0) return
-  const clipsBefore = session.plan.clips
-  const paddingBefore = session.plan.paddingMs
-  const afterIndex = afterClipId ? clipsBefore.findIndex((c) => c.clipId === afterClipId) : -1
-  const insertAt = afterIndex === -1 ? clipsBefore.length : afterIndex + 1
+  session.insertClips(clips, afterClipId)
+}
 
-  session.setClips((prev) => {
-    const next = [...prev]
-    next.splice(insertAt, 0, ...clips)
-    return next
-  })
+// Runs `fn` over `items` with at most `limit` in flight, preserving input order in the
+// result. A batch insert must not fire N parallel audio fetches and N concurrent Web Audio
+// decodes at once: the 64-entry analysis LRU caches results but does not cap in-flight work.
+const INSERT_BATCH_CONCURRENCY = 3
 
-  if (clipsBefore.length === 0) {
-    session.setPadding(suggestedPaddingForClips(clips))
-    return
+async function mapInsertBatch<T, U>(items: T[], fn: (item: T) => Promise<U>): Promise<U[]> {
+  const results = new Array<U>(items.length)
+  let next = 0
+  const worker = async () => {
+    while (true) {
+      const index = next++
+      if (index >= items.length) return
+      results[index] = await fn(items[index])
+    }
   }
-  if (insertAt === clipsBefore.length) {
-    const appendedSeams = [clipsBefore.at(-1), ...clips.slice(0, -1)]
-      .map((clip) => suggestedGapMs(clip?.text ?? ''))
-    session.setPadding([...paddingBefore, ...appendedSeams])
-    return
-  }
-  const splitAt = Math.max(0, insertAt - 1)
-  const zeros = new Array(clips.length).fill(0)
-  session.setPadding([...paddingBefore.slice(0, splitAt), ...zeros, ...paddingBefore.slice(splitAt)])
+  const workerCount = Math.min(INSERT_BATCH_CONCURRENCY, items.length)
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  return results
 }
 
 // Public shared helpers — used by:
-// - OmniVoicePanel (via insertSegmentIntoStitchTimeline / insertVoiceIntoStitchTimeline)
-// - VoiceLibraryPage (directly, plus page nav and editor open)
+// - App.tsx (QuickInsertStitchEditor, via insertSegmentsIntoStitchTimeline / insertVoicesIntoStitchTimeline)
+// - StitchStudioPage.tsx (same insert helpers, plus suggestedStitchVoiceName)
+// - VoiceLibraryPage.tsx (createStitchClipFromSegment directly, to build the incoming clip)
 export function suggestedStitchVoiceName(clip: StitchPlanClip): string {
   const source = [clip.sourceProject, clip.sourceLabel].filter(Boolean).join(' — ')
   return [source || clip.text.trim(), clip.sourceOrigin].filter(Boolean).join(' · ') || 'Stitched voice'
@@ -60,7 +57,7 @@ export async function createStitchClipFromSegment(seg: SegmentMeta): Promise<Sti
   const durationMs = (await getClipAudioAnalysis(`segment:${seg.segment_id}:${audioBase64.length}`, audioBase64)).durationMs
 
   return {
-    clipId: seg.segment_id + '-insert-' + Date.now(),
+    clipId: seg.segment_id + '-insert-' + Date.now() + '-' + crypto.randomUUID().slice(0, 8),
     ref: { segmentId: seg.segment_id },
     text: seg.text,
     sourceAudioBase64: audioBase64,
@@ -94,7 +91,7 @@ export async function createStitchClipFromVoice(voice: VoiceMeta): Promise<Stitc
   const durationMs = (await getClipAudioAnalysis(`voice:${voice.voice_id}:${voice.sha256 ?? audioBase64.length}`, audioBase64)).durationMs
 
   return {
-    clipId: voice.voice_id + '-insert-' + Date.now(),
+    clipId: voice.voice_id + '-insert-' + Date.now() + '-' + crypto.randomUUID().slice(0, 8),
     ref: { voiceId: voice.voice_id },
     text: voice.description || voice.sample_text || voice.voice_id,
     sourceAudioBase64: audioBase64,
@@ -120,7 +117,7 @@ export async function insertSegmentsIntoStitchTimeline(
   afterClipId?: string | null,
 ): Promise<void> {
   try {
-    const clips = await Promise.all(segs.map((seg) => createStitchClipFromSegment(seg)))
+    const clips = await mapInsertBatch(segs, (seg) => createStitchClipFromSegment(seg))
     spliceStitchPlanClips(clips, session, afterClipId)
   } catch (err) {
     onError(err instanceof Error ? err.message : String(err))
@@ -134,7 +131,7 @@ export async function insertVoicesIntoStitchTimeline(
   afterClipId?: string | null,
 ): Promise<void> {
   try {
-    const clips = await Promise.all(voices.map((voice) => createStitchClipFromVoice(voice)))
+    const clips = await mapInsertBatch(voices, (voice) => createStitchClipFromVoice(voice))
     spliceStitchPlanClips(clips, session, afterClipId)
   } catch (err) {
     onError(err instanceof Error ? err.message : String(err))

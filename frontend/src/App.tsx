@@ -57,9 +57,13 @@ function QuickInsertStitchEditor() {
 
   const [insertError, setInsertError] = useState<string | null>(null)
   const onInsertFromLibrary = useCallback((segs: SegmentMeta[], afterClipId: string | null) => {
+    // Clear any banner left over from an earlier failed insert so a successful one
+    // doesn't sit under a stale red banner.
+    setInsertError(null)
     void insertSegmentsIntoStitchTimeline(segs, session, setInsertError, afterClipId)
   }, [session])
   const onInsertVoiceFromLibrary = useCallback((voices: VoiceMeta[], afterClipId: string | null) => {
+    setInsertError(null)
     void insertVoicesIntoStitchTimeline(voices, session, setInsertError, afterClipId)
   }, [session])
 

@@ -697,6 +697,10 @@ export const useAppStore = create<StoreState>((set) => ({
   setOvStitchPlanPaddingAt: (gapIndex, ms) =>
     set((s) => {
       const pad = [...s.ovStitchPlanPaddingMs]
+      // Grow a short padding array with 0s first: a direct assignment to an out-of-range
+      // index would leave a sparse array ([,,250]) whose holes serialize as null in the
+      // stitch payload, which the backend rejects.
+      while (pad.length <= gapIndex) pad.push(0)
       pad[gapIndex] = ms
       return { ovStitchPlanPaddingMs: pad }
     }),

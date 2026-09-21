@@ -1192,6 +1192,12 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
   ])
 
   const handleSave = useCallback(async () => {
+    // By design this saves the *rack*, not the studio plan: the reference-voice payload is
+    // built from the currently selected takes (zero padding, default DSP, per-take tempo).
+    // Edits made in the quick-insert modal or Stitch Studio live in the durable studio
+    // session and are persisted through the studio page's reference save -- the centralized
+    // save path in the execution plan doc (quick insert is only a draft that commits via
+    // replaceOvStitchPlan; it never renders a reference-voice save control).
     if (segmentRack.length === 0 || isSaving) return
 
     const selectedRows = segmentRack.filter(

@@ -9,6 +9,7 @@ import {
   cloneStitchPlanState,
   removeClipFromStitchPlan,
   reorderStitchPlan,
+  spliceStitchPlanClips,
   type StitchPlanState,
   type StitchRegionEdit,
 } from '@/lib/stitchPlan'
@@ -19,6 +20,7 @@ export interface StitchPlanSession {
   updateClip(clipId: string, patch: Partial<StitchPlanClip>): void
   removeClip(clipId: string): void
   reorderClip(from: number, to: number): void
+  insertClips(clips: StitchPlanClip[], afterClipId?: string | null): void
   setPaddingAt(index: number, milliseconds: number): void
   setPadding(values: number[]): void
   setDsp(patch: Partial<StitchPlanDsp>): void
@@ -55,6 +57,25 @@ export function useStoreStitchPlanSession(): StitchPlanSession {
     }
   }, [setClipsStore, setPaddingStore, setRegionEditsStore])
 
+  const insertClips = useCallback((clips: StitchPlanClip[], afterClipId?: string | null) => {
+    // One zustand set so the clip splice and the padding resize commit together: the seam
+    // index is resolved against the freshest state inside the set, so a clip or padding edit
+    // landing between a batch insert's fetches and its commit is never silently overwritten.
+    useAppStore.setState((s) => {
+      const next = spliceStitchPlanClips(
+        {
+          clips: s.ovStitchPlanClips,
+          paddingMs: s.ovStitchPlanPaddingMs,
+          dsp: s.ovStitchPlanDsp,
+          regionEditsByClip: s.ovStitchRegionEditsByClip,
+        },
+        clips,
+        afterClipId,
+      )
+      return { ovStitchPlanClips: next.clips, ovStitchPlanPaddingMs: next.paddingMs }
+    })
+  }, [])
+
   return useMemo<StitchPlanSession>(
     () => ({
       plan,
@@ -62,13 +83,14 @@ export function useStoreStitchPlanSession(): StitchPlanSession {
       updateClip: updateClipStore,
       removeClip: removeClipStore,
       reorderClip: reorderClipStore,
+      insertClips,
       setPaddingAt: setPaddingAtStore,
       setPadding: setPaddingStore,
       setDsp: setDspStore,
       setRegionEdits: setRegionEditsStore,
       reset,
     }),
-    [plan, setClipsStore, updateClipStore, removeClipStore, reorderClipStore, setPaddingAtStore, setPaddingStore, setDspStore, setRegionEditsStore, reset],
+    [plan, setClipsStore, updateClipStore, removeClipStore, reorderClipStore, insertClips, setPaddingAtStore, setPaddingStore, setDspStore, setRegionEditsStore, reset],
   )
 }
 
@@ -99,6 +121,11 @@ export function useDraftStitchPlanSession(initial: StitchPlanState): StitchPlanS
     setPlan((prev) => reorderStitchPlan(prev, from, to))
   }, [])
 
+  const insertClips = useCallback((clips: StitchPlanClip[], afterClipId?: string | null) => {
+    // One local setState so clips and padding commit together in the draft as well.
+    setPlan((prev) => spliceStitchPlanClips(prev, clips, afterClipId))
+  }, [])
+
   const setPaddingAt = useCallback((index: number, milliseconds: number) => {
     setPlan((prev) => {
       const next = [...prev.paddingMs]
@@ -116,10 +143,12 @@ export function useDraftStitchPlanSession(initial: StitchPlanState): StitchPlanS
   }, [])
 
   const setRegionEdits = useCallback((clipId: string, edits: StitchRegionEdit[]) => {
-    setPlan((prev) => ({
-      ...prev,
-      regionEditsByClip: { ...prev.regionEditsByClip, [clipId]: edits },
-    }))
+    setPlan((prev) => {
+      const next = { ...prev.regionEditsByClip }
+      if (edits.length) next[clipId] = edits
+      else delete next[clipId]
+      return { ...prev, regionEditsByClip: next }
+    })
   }, [])
 
   const reset = useCallback(() => {
@@ -127,7 +156,7 @@ export function useDraftStitchPlanSession(initial: StitchPlanState): StitchPlanS
   }, [])
 
   return useMemo<StitchPlanSession>(
-    () => ({ plan, setClips, updateClip, removeClip, reorderClip, setPaddingAt, setPadding, setDsp, setRegionEdits, reset }),
-    [plan, setClips, updateClip, removeClip, reorderClip, setPaddingAt, setPadding, setDsp, setRegionEdits, reset],
+    () => ({ plan, setClips, updateClip, removeClip, reorderClip, insertClips, setPaddingAt, setPadding, setDsp, setRegionEdits, reset }),
+    [plan, setClips, updateClip, removeClip, reorderClip, insertClips, setPaddingAt, setPadding, setDsp, setRegionEdits, reset],
   )
 }

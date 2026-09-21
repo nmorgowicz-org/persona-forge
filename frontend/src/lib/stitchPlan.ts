@@ -36,7 +36,7 @@ export interface StitchDurations {
  * committed store state (or vice versa). */
 export function cloneStitchPlanState(plan: StitchPlanState): StitchPlanState {
   return {
-    clips: plan.clips.map((clip) => ({ ...clip })),
+    clips: plan.clips.map((clip) => ({ ...clip, ref: { ...clip.ref } })),
     paddingMs: [...plan.paddingMs],
     dsp: { ...plan.dsp },
     regionEditsByClip: Object.fromEntries(
@@ -49,7 +49,9 @@ export function cloneStitchPlanState(plan: StitchPlanState): StitchPlanState {
 }
 
 /** A clip's audible duration after trims -- never negative, never below a 10ms floor so a
- * fully-trimmed clip still occupies a nonzero, selectable span. */
+ * fully-trimmed clip still occupies a nonzero, selectable span. The floor is a UI-
+ * selectability minimum, not an audio readout: a fully-trimmed clip feeds 10 ms of
+ * nonexistent material into renderedMs and preview-scale math. */
 export function clipEffectiveDurationMs(clip: StitchPlanClip): number {
   const base = clip.durationMs ?? 0
   if (!base) return 0
@@ -108,7 +110,7 @@ export function computeClipRangesMs(plan: StitchPlanState): StitchClipRangeMs[] 
   const crossfadeMs = Math.max(0, plan.dsp?.crossfadeMs ?? 0)
   let cursor = 0
   return plan.clips.map((clip, i) => {
-    if (i > 0) cursor += (plan.paddingMs[i - 1] ?? 0) - crossfadeMs
+    if (i > 0) cursor += Math.max(0, plan.paddingMs[i - 1] ?? 0) - crossfadeMs
     const startMs = Math.max(0, cursor)
     const endMs = startMs + clipEffectiveDurationMs(clip)
     cursor = endMs
@@ -135,9 +137,10 @@ export function reorderStitchPlan(plan: StitchPlanState, from: number, to: numbe
   return { ...plan, clips }
 }
 
-/** Removes a clip and merges its two adjacent gaps into one: drops the seam that followed
- * it, or (when removing the final clip) the seam that preceded it, so the padding array
- * stays aligned to clips.length - 1. Also drops that clip's region edits. */
+/** Removes a clip and drops exactly one seam: the seam that followed it, or (when removing
+ * the final clip) the seam that preceded it, so the padding array stays aligned to
+ * clips.length - 1. The surviving gap keeps its value untouched. Also drops that clip's
+ * region edits. */
 export function removeClipFromStitchPlan(plan: StitchPlanState, clipId: string): StitchPlanState {
   const idx = plan.clips.findIndex((clip) => clip.clipId === clipId)
   if (idx === -1) return plan
@@ -148,6 +151,35 @@ export function removeClipFromStitchPlan(plan: StitchPlanState, clipId: string):
   const regionEditsByClip = { ...plan.regionEditsByClip }
   delete regionEditsByClip[clipId]
   return { ...plan, clips, paddingMs, regionEditsByClip }
+}
+
+/** Splices `clips` into the plan immediately after the clip with `afterClipId`, or at the
+ * end when `afterClipId` is null/omitted or names no clip. Resizes `paddingMs` to
+ * `newClips.length - 1`: a seam opened in the middle of the plan starts at 0, seams opened
+ * by appending get a punctuation-suggested gap, and an empty plan gets one suggested gap
+ * per seam. Existing seams keep their values and stay attached to their index. Returns a
+ * new plan; the caller performs the single state write so clips and padding commit together. */
+export function spliceStitchPlanClips(
+  plan: StitchPlanState,
+  clips: StitchPlanClip[],
+  afterClipId?: string | null,
+): StitchPlanState {
+  if (clips.length === 0) return plan
+  const before = plan.clips
+  const afterIndex = afterClipId ? before.findIndex((c) => c.clipId === afterClipId) : -1
+  const insertAt = afterIndex === -1 ? before.length : afterIndex + 1
+  const nextClips = [...before.slice(0, insertAt), ...clips, ...before.slice(insertAt)]
+  let nextPadding: number[]
+  if (before.length === 0) {
+    nextPadding = suggestedPaddingForClips(clips)
+  } else if (insertAt === before.length) {
+    const appendedSeams = [before.at(-1), ...clips.slice(0, -1)].map((clip) => suggestedGapMs(clip?.text ?? ''))
+    nextPadding = [...plan.paddingMs, ...appendedSeams]
+  } else {
+    const splitAt = Math.max(0, insertAt - 1)
+    nextPadding = [...plan.paddingMs.slice(0, splitAt), ...new Array(clips.length).fill(0), ...plan.paddingMs.slice(splitAt)]
+  }
+  return { ...plan, clips: nextClips, paddingMs: nextPadding }
 }
 
 /** Strips the UI-only `id` field so durable region edits can be serialized into a
@@ -165,6 +197,7 @@ export function hashStitchPlan(plan: StitchPlanState): string {
   return JSON.stringify({
     clips: plan.clips.map((c) => [
       c.clipId,
+      JSON.stringify(c.ref),
       c.trimStartMs,
       c.trimEndMs,
       c.fadeInMs,
@@ -174,6 +207,8 @@ export function hashStitchPlan(plan: StitchPlanState): string {
     ]),
     paddingMs: plan.paddingMs,
     dsp: plan.dsp,
-    regionEditsByClip: plan.regionEditsByClip,
+    regionEditsByClip: Object.fromEntries(
+      Object.entries(plan.regionEditsByClip).map(([clipId, edits]) => [clipId, toPayloadRegionEdits(edits)]),
+    ),
   })
 }
