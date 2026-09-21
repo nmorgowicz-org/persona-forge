@@ -35,18 +35,30 @@ export function niceTimeStep(secondsPerPixel: number, minimumTickPx = 60): numbe
 }
 
 /** Formats a duration for ruler labels: short (< 10s) durations get one decimal of seconds;
- * longer durations switch to m:ss so labels stay compact at any scale. */
-export function formatTimelineTime(seconds: number): string {
+ * longer durations switch to m:ss so labels stay compact at any scale. When the tick step is
+ * sub-second, the m:ss form keeps a tenths-of-a-second digit so adjacent ticks (less than a
+ * second apart) never collapse into identical labels. */
+export function formatTimelineTime(seconds: number, stepSeconds = 1): string {
   if (!isFinite(seconds) || seconds < 0) return '0.0s'
   if (seconds < 10) return `${seconds.toFixed(1)}s`
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}:${s.toString().padStart(2, '0')}`
+  if (stepSeconds >= 1) {
+    const m = Math.floor(seconds / 60)
+    const s = Math.floor(seconds % 60)
+    return `${m}:${s.toString().padStart(2, '0')}`
+  }
+  // Sub-second steps: round to integer tenths first so float wobble (3 * 0.1 =
+  // 0.30000000000000004) can't mislabel a tick, and the carry rolls into the minutes.
+  const tenths = Math.round(seconds * 10)
+  const m = Math.floor(tenths / 600)
+  const sWhole = Math.floor((tenths % 600) / 10)
+  const d = tenths % 10
+  return `${m}:${sWhole.toString().padStart(2, '0')}.${d}`
 }
 
 /** Builds evenly-spaced ticks from 0 through `durationSeconds`, choosing a "nice" step so
- * labels don't collide, and always includes a final tick at the exact duration even if it
- * falls short of the next evenly-spaced step. */
+ * labels don't collide. Grid ticks stop strictly before the exact duration; the final tick is
+ * always appended at exactly `durationSeconds`, dropping any last grid tick whose label would
+ * be identical to it or that sits within a label-width of it. */
 export function createTimeTicks({
   durationSeconds,
   pixelsPerSecond,
@@ -70,18 +82,31 @@ export function createTimeTicks({
   const secondsPerPixel = 1 / pixelsPerSecond
   const step = niceTimeStep(secondsPerPixel)
   const ticks: TimeTick[] = []
-  for (let seconds = 0; seconds <= durationSeconds + step * 0.02; seconds += step) {
-    ticks.push({ seconds, x: seconds * pixelsPerSecond, label: formatTimelineTime(seconds) })
+  // Index-based so float error doesn't accumulate across iterations. The epsilon only absorbs
+  // float noise, so grid ticks stay strictly below the exact duration and can never overshoot
+  // it and replace the exact-duration label.
+  const epsilon = 1e-9
+  for (let k = 0; ; k++) {
+    const seconds = k * step
+    if (seconds >= durationSeconds - epsilon) break
+    ticks.push({ seconds, x: seconds * pixelsPerSecond, label: formatTimelineTime(seconds, step) })
   }
 
-  const last = ticks[ticks.length - 1]
-  if (!last || durationSeconds - last.seconds > step * 0.02) {
-    ticks.push({
-      seconds: durationSeconds,
-      x: durationSeconds * pixelsPerSecond,
-      label: formatTimelineTime(durationSeconds),
-    })
+  const finalTick: TimeTick = {
+    seconds: durationSeconds,
+    x: durationSeconds * pixelsPerSecond,
+    label: formatTimelineTime(durationSeconds, step),
   }
+  // Drop the last grid ticks that would collide with the final one: identical labels, or
+  // closer than the widest rendered label (~6 mono chars at 10px), so the right edge never
+  // shows two equal labels or a crowding pair.
+  const MIN_FINAL_TICK_GAP_PX = 36
+  while (ticks.length > 0) {
+    const last = ticks[ticks.length - 1]
+    if (last.label !== finalTick.label && finalTick.x - last.x >= MIN_FINAL_TICK_GAP_PX) break
+    ticks.pop()
+  }
+  ticks.push(finalTick)
 
   return ticks
 }

@@ -85,6 +85,10 @@ export function useStitchTransport(src: string | null): StitchTransport {
     audio.addEventListener('ended', onEnded)
     audio.addEventListener('timeupdate', onTimeUpdate)
     return () => {
+      // Pause before detaching: this cleanup also runs when the element unmounts (leaving the
+      // studio), and an in-memory blob URL keeps playing without its DOM node. The captured
+      // element is still a live object once detached, so pause() works and can't throw.
+      audio.pause()
       audio.removeEventListener('loadedmetadata', onLoadedMetadata)
       audio.removeEventListener('play', onPlay)
       audio.removeEventListener('pause', onPause)
@@ -103,7 +107,10 @@ export function useStitchTransport(src: string | null): StitchTransport {
       if (cancelled) return
       const audio = elRef.current
       if (audio) {
-        for (const cb of subscribersRef.current) cb(audio.currentTime)
+        // Clamp at the exact audio duration: on the final frames before 'ended', currentTime
+        // can overshoot it, which would push the playhead past the exact-duration tick.
+        const t = durationSec > 0 ? Math.min(audio.currentTime, durationSec) : audio.currentTime
+        for (const cb of subscribersRef.current) cb(t)
       }
       rafRef.current = requestAnimationFrame(tick)
     }
@@ -113,7 +120,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
       rafRef.current = null
     }
-  }, [isPlaying])
+  }, [isPlaying, durationSec])
 
   const subscribeTime = useCallback((cb: (sec: number) => void) => {
     subscribersRef.current.add(cb)
