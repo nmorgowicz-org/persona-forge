@@ -217,11 +217,18 @@ test.describe('Stitch Studio quick-insert transaction', () => {
     await expect(page.getByTestId('stitch-editor-dialog')).toBeHidden()
     await expect(escapeLaunch).toBeFocused()
 
-    // Backdrop click
+    // Backdrop click. Target the overlay element rather than a raw viewport coordinate: a
+    // coordinate click can land before the overlay has settled (and that corner sits over the
+    // sidebar, so a miss is not self-evident), leaving the dialog open. Wait for the overlay's
+    // own enter animation first, so the outside-interaction is not swallowed mid-transition.
     const backdropLaunch = launchButtons.nth(1)
     await backdropLaunch.click()
     await expect(page.getByTestId('stitch-editor-dialog')).toBeVisible()
-    await page.mouse.click(4, 4)
+    const overlay = page.locator('[data-slot="dialog-overlay"]')
+    await overlay.evaluate((el) =>
+      Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => {}))),
+    )
+    await overlay.click({ position: { x: 4, y: 4 } })
     await expect(page.getByTestId('stitch-editor-dialog')).toBeHidden()
     await expect(backdropLaunch).toBeFocused()
 
