@@ -23,4 +23,31 @@ test.describe('voice design', () => {
     await page.getByTestId('nav-voice-design').click()
     await expect(page.getByTestId('voice-design-generate-button')).toBeDisabled()
   })
+
+  test('stitched preview is discarded when a take changes so Save cannot persist an unauditioned plan', async ({ page }) => {
+    await page.goto('/')
+    await page.getByTestId('nav-voice-design').click()
+    await page.getByTestId('engine-omnivoice').click()
+    await page.getByTestId('accent-bank-au').click()
+    await page.getByTestId('omnivoice-script').fill('The quick brown fox jumps over the lazy dog.')
+    await page.getByTestId('omnivoice-audition-button').click()
+
+    const takes = page.getByTestId('omnivoice-candidate-take')
+    await expect(takes.nth(2)).toBeVisible({ timeout: 30000 })
+
+    await page.getByTestId('omnivoice-stitch-button').click()
+    await expect(page.getByTestId('omnivoice-result')).toBeVisible({ timeout: 30000 })
+    await expect(page.getByTestId('omnivoice-save-button')).toBeVisible()
+
+    // Save persists the plan built from the current rack, so switching takes must discard the
+    // preview (and its Save control) rather than leaving a render of the previous selection
+    // next to a Save button that would persist a different one.
+    await takes.nth(1).getByRole('button', { name: 'T2' }).click()
+    await expect(page.getByTestId('omnivoice-result')).toHaveCount(0)
+    await expect(page.getByTestId('omnivoice-save-button')).toHaveCount(0)
+
+    // The invalidation is a reset, not a dead end: re-stitching the new selection works.
+    await page.getByTestId('omnivoice-stitch-button').click()
+    await expect(page.getByTestId('omnivoice-result')).toBeVisible({ timeout: 30000 })
+  })
 })

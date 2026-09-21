@@ -35,9 +35,10 @@ interface BrowserRow {
 
 function segmentToRow(seg: SegmentMeta): BrowserRow {
   const id = seg.segment_id
-  // Segment list metadata carries no audio digest (unlike VoiceMeta.sha256); created_at is
-  // the only per-asset revision available without fetching audio, so it stands in for the
-  // content revision in the cache key.
+  // Segment audio is immutable per segment_id: save_segment writes clip.wav exactly once and
+  // no endpoint rewrites it (a segment is only deleted or re-assigned to a project), so the id
+  // already identifies the audio and created_at is a defensive revision. If segments ever become
+  // editable, this needs a real content digest instead (as VoiceMeta.sha256 is for voices).
   return {
     id,
     kind: 'segment',

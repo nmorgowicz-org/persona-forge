@@ -372,9 +372,20 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
   // plan as a real time-stretch (audio_post.stitch_segments' `tempos` kwarg), not just the
   // discardable local playbackRate preview AudioDeck used before this.
   const [candidateSpeeds, setCandidateSpeeds] = useState<Record<string, number>>({})
+  // The stitched preview is the panel's contract with Save: "Save to library" persists the plan
+  // built from the *current* rack, so every plan input (take selection, segment text, per-take
+  // tempo) must discard the previous render -- otherwise Save could persist a plan other than
+  // the one the user just auditioned. Revokes the object URL, not only the store ref.
+  const clearStitchResult = useCallback(() => {
+    const current = useAppStore.getState().ovStitchedUrl
+    if (current) URL.revokeObjectURL(current)
+    setStitchedUrl(null)
+    setStitchedBlob(null)
+  }, [setStitchedUrl, setStitchedBlob])
   const onCandidateSpeedChange = useCallback((candidateId: string, speed: number) => {
+    clearStitchResult()
     setCandidateSpeeds((prev) => ({ ...prev, [candidateId]: speed }))
-  }, [])
+  }, [clearStitchResult])
   // Rolling avg_seconds-per-candidate from the most recent job, used to give Regen a rough
   // "~Ns" cost estimate up front rather than only ever showing progress after the fact.
   const [lastAvgCandidateSeconds, setLastAvgCandidateSeconds] = useState<number | null>(null)
@@ -892,6 +903,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
 
   const selectTake = useCallback(
     (segmentId: string, index: number) => {
+      clearStitchResult()
       setSegmentRack((prev) =>
         prev.map((row) => {
           if (row.segmentId !== segmentId) return row
@@ -901,11 +913,12 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         }),
       )
     },
-    [setSegmentRack],
+    [clearStitchResult, setSegmentRack],
   )
 
   const editSegmentText = useCallback(
     (segmentId: string, newText: string) => {
+      clearStitchResult()
       setSegmentRack((prev) =>
         prev.map((row) =>
           row.segmentId === segmentId
@@ -914,7 +927,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         ),
       )
     },
-    [setSegmentRack],
+    [clearStitchResult, setSegmentRack],
   )
 
   // Flips back to a previously-regenerated candidate batch instead of losing it — swaps the
