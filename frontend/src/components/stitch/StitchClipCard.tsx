@@ -323,31 +323,33 @@ export function StitchClipCard({
           className="pointer-events-none absolute inset-0 z-10 rounded-lg bg-[repeating-linear-gradient(45deg,rgba(6,182,212,0.12),rgba(6,182,212,0.12)_4px,transparent_4px,transparent_8px)]"
         />
       )}
-      <div className="flex items-center justify-between gap-2 px-1.5 pt-1 pb-1" onClick={(e) => e.stopPropagation()}>
-        {editingText ? (
-          <input
-            ref={textInputRef}
-            type="text"
-            value={draftText}
-            onChange={(e) => setDraftText(e.target.value)}
-            onBlur={commitText}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') { e.preventDefault(); commitText() }
-              else if (e.key === 'Escape') { e.preventDefault(); cancelEditText() }
-            }}
-            className="min-w-0 flex-1 rounded border border-cyan-500/40 bg-muted/40 px-1.5 py-0.5 text-xs font-medium text-foreground outline-none"
-            aria-label="Edit clip text"
-          />
-        ) : (
-          <span
-            className="min-w-0 flex-1 cursor-text truncate text-xs font-medium text-foreground hover:text-cyan-400"
-            title={`${clip.text ?? ''}\n(click to edit reference text)`}
-            onClick={beginEditText}
-          >
-            {clip.text || '(untitled — click to add reference text)'}
-          </span>
-        )}
-        <div className="flex shrink-0 items-center gap-1.5">
+      <div className="flex flex-col gap-1 px-1.5 pt-1 pb-1" onClick={(e) => e.stopPropagation()}>
+        <div className="min-w-0">
+          {editingText ? (
+            <input
+              ref={textInputRef}
+              type="text"
+              value={draftText}
+              onChange={(e) => setDraftText(e.target.value)}
+              onBlur={commitText}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commitText() }
+                else if (e.key === 'Escape') { e.preventDefault(); cancelEditText() }
+              }}
+              className="w-full min-w-0 rounded border border-cyan-500/40 bg-muted/40 px-1.5 py-0.5 text-xs font-medium text-foreground outline-none"
+              aria-label="Edit clip text"
+            />
+          ) : (
+            <span
+              className="block min-w-0 cursor-text truncate text-xs font-medium text-foreground hover:text-cyan-400"
+              title={`${clip.text ?? ''}\n(click to edit reference text)`}
+              onClick={beginEditText}
+            >
+              {clip.text || '(untitled — click to add reference text)'}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center justify-end gap-1.5">
           <select
             value={clip.prosodyMode ?? 'auto'}
             onChange={(event) => onUpdate(clip.clipId, { prosodyMode: event.currentTarget.value as StitchPlanClip['prosodyMode'] })}
