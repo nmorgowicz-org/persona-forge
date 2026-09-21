@@ -21,8 +21,9 @@ from __future__ import annotations
 
 import http.client
 import json
-import shutil
 import logging
+import shutil
+import wave
 import os
 import random
 import secrets
@@ -253,8 +254,19 @@ def _seed_fake_segment_library() -> None:
     if not source_dir.is_dir():
         return
     for entry in source_dir.iterdir():
-        if entry.is_dir() and not (target_dir / entry.name).exists():
-            shutil.copytree(entry, target_dir / entry.name)
+        if not entry.is_dir():
+            continue
+        target_entry = target_dir / entry.name
+        if not target_entry.exists():
+            shutil.copytree(entry, target_entry)
+        audio_path = target_entry / "clip.wav"
+        if not audio_path.is_file():
+            samples = np.zeros(_SAMPLE_RATE, dtype=np.int16)
+            with wave.open(str(audio_path), "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(_SAMPLE_RATE)
+                wav_file.writeframes(samples.tobytes())
 
 
 
