@@ -255,8 +255,7 @@ def _seed_fake_segment_library() -> None:
         if not entry.is_dir():
             continue
         target_entry = target_dir / entry.name
-        if not target_entry.exists():
-            shutil.copytree(entry, target_entry)
+        shutil.copytree(entry, target_entry, dirs_exist_ok=True)
         audio_path = target_entry / "clip.wav"
         if not audio_path.is_file():
             duration_sec = 1.0
