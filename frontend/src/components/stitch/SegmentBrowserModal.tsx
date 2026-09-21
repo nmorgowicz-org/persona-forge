@@ -6,7 +6,7 @@
 // via the shared bounded cache) is fetched only when a row is actually auditioned, and only one
 // row plays at a time. Rows use content-visibility (see index.css .segment-browser-row) so a
 // 250-row library scrolls smoothly without a virtualization dependency.
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { Loader2, Pause, Play, Plus } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -20,31 +20,45 @@ type SortMode = 'newest' | 'duration' | 'name'
 
 interface BrowserRow {
   id: string
+  /** Identity domain: segment ids and voice ids are separate namespaces and can collide. */
+  kind: 'segment' | 'voice'
   label: string
   meta: string | null
   durationSec: number | null
   projectId: string | null
   projectName: string | null
   createdAt: number
+  /** Shared waveform cache key and peaks-state key: `<kind>:<persistent-id>:<revision>`. */
+  assetKey: string
   fetchAudioBase64: () => Promise<string | null>
 }
 
 function segmentToRow(seg: SegmentMeta): BrowserRow {
+  const id = seg.segment_id
+  // Segment list metadata carries no audio digest (unlike VoiceMeta.sha256); created_at is
+  // the only per-asset revision available without fetching audio, so it stands in for the
+  // content revision in the cache key.
   return {
-    id: seg.segment_id,
+    id,
+    kind: 'segment',
     label: seg.text,
     meta: [seg.language, ...(seg.tags ?? [])].filter(Boolean).join(' · ') || null,
     durationSec: seg.duration_sec ?? null,
     projectId: seg.project_id ?? null,
     projectName: seg.project_name ?? null,
     createdAt: seg.created_at,
-    fetchAudioBase64: async () => seg.audio_base64 ?? (await getSegmentAudioBase64(seg.segment_id)),
+    assetKey: `segment:${id}:${seg.created_at}`,
+    fetchAudioBase64: async () => seg.audio_base64 ?? (await getSegmentAudioBase64(id)),
   }
 }
 
 function voiceToRow(voice: VoiceMeta): BrowserRow {
+  const id = voice.voice_id
+  // Voices expose a real content digest; fall back to created_at for metadata without one.
+  const revision = voice.sha256 ?? String(voice.created_at)
   return {
-    id: voice.voice_id,
+    id,
+    kind: 'voice',
     label: voice.description || voice.voice_id,
     meta:
       [voice.language, voice.sample_text ? `Sample: ${voice.sample_text.slice(0, 60)}${voice.sample_text.length > 60 ? '…' : ''}` : null]
@@ -54,9 +68,82 @@ function voiceToRow(voice: VoiceMeta): BrowserRow {
     projectId: voice.project_id ?? null,
     projectName: voice.project_name ?? null,
     createdAt: voice.created_at,
-    fetchAudioBase64: async () => voice.audio_base64 ?? (await getVoice(voice.voice_id)).audio_base64 ?? null,
+    assetKey: `voice:${id}:${revision}`,
+    fetchAudioBase64: async () => voice.audio_base64 ?? (await getVoice(id)).audio_base64 ?? null,
   }
 }
+
+interface BrowserRowItemProps {
+  row: BrowserRow
+  checked: boolean
+  isPlaying: boolean
+  isLoading: boolean
+  progress: number
+  peaks: number[] | null
+  onToggleSelect: (id: string) => void
+  onTogglePlay: (row: BrowserRow) => void
+  onDoubleClickInsert: (row: BrowserRow) => void
+}
+
+/** One browser row, memoized so playback progress re-renders only the active row, never the
+ * whole (up to 250-row) list. */
+const BrowserRowItem = memo(function BrowserRowItem({
+  row,
+  checked,
+  isPlaying,
+  isLoading,
+  progress,
+  peaks,
+  onToggleSelect,
+  onTogglePlay,
+  onDoubleClickInsert,
+}: BrowserRowItemProps) {
+  return (
+    <div
+      className="segment-browser-row flex items-center gap-2 py-2"
+      onDoubleClick={() => onDoubleClickInsert(row)}
+    >
+      <input
+        type="checkbox"
+        data-testid={`stitch-picker-item-${row.kind === 'segment' ? 'segments' : 'voices'}`}
+        checked={checked}
+        onChange={() => onToggleSelect(row.id)}
+        aria-label={row.label}
+        className="size-3.5 shrink-0 accent-cyan-500"
+      />
+      <button
+        type="button"
+        data-testid="segment-browser-audio"
+        data-playing={isPlaying}
+        onClick={() => void onTogglePlay(row)}
+        title="Audition"
+        aria-label={`Audition ${row.label}`}
+        className="shrink-0 rounded p-1 text-muted-foreground hover:text-foreground"
+      >
+        {isLoading ? (
+          <Loader2 className="size-3.5 animate-spin" />
+        ) : isPlaying ? (
+          <Pause className="size-3.5" />
+        ) : (
+          <Play className="size-3.5" />
+        )}
+      </button>
+      <div className="min-w-0 flex-1" title={row.meta ? `${row.label}\n${row.meta}` : row.label}>
+        <p className="truncate text-xs text-foreground">{row.label}</p>
+        {row.meta && <p className="truncate text-[10px] text-muted-foreground">{row.meta}</p>}
+      </div>
+      <SegmentPreviewRail peaks={peaks} progress={isPlaying ? progress : 0} isPlaying={isPlaying} />
+      {row.durationSec != null && (
+        <span className="shrink-0 text-[10px] text-muted-foreground">{row.durationSec.toFixed(1)}s</span>
+      )}
+      {row.projectName && (
+        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">
+          {row.projectName}
+        </span>
+      )}
+    </div>
+  )
+})
 
 export interface SegmentBrowserModalController {
   /** Opens the picker dialog programmatically (e.g. from the studio's "Add clips" guidance). */
@@ -89,9 +176,20 @@ export function SegmentBrowserModal({
   const [sortMode, setSortMode] = useState<SortMode>('newest')
   const [selectedSegmentIds, setSelectedSegmentIds] = useState<Set<string>>(new Set())
   const [selectedVoiceIds, setSelectedVoiceIds] = useState<Set<string>>(new Set())
-  const [playingId, setPlayingId] = useState<string | null>(null)
+  const [playingId, setPlayingIdState] = useState<string | null>(null)
+  // Ref mirror so togglePlay stays referentially stable across play/stop (memoized rows must
+  // not re-render just because playback started or stopped).
+  const playingIdRef = useRef<string | null>(null)
+  const setPlayingId = useCallback((id: string | null) => {
+    playingIdRef.current = id
+    setPlayingIdState(id)
+  }, [])
   const [progress, setProgress] = useState(0)
-  const [peaksById, setPeaksById] = useState<Record<string, number[]>>({})
+  // Peaks keyed by asset identity (`<kind>:<persistent-id>:<revision>`), never a bare row id:
+  // segment and voice ids are separate identity domains that can collide, and a revision bump
+  // must drop a row back to the neutral rail. A superseded entry is unreachable (no row carries
+  // its key anymore) -- that is the invalidation.
+  const [peaksByKey, setPeaksByKey] = useState<Record<string, number[]>>({})
   const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null)
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -109,8 +207,15 @@ export function SegmentBrowserModal({
       playbackTokenRef.current += 1
       audioRef.current?.pause()
       setPlayingId(null)
+      // Close leaves no audition state behind: a late in-flight resolve must not re-show a
+      // spinner on reopen, and the object URL must not survive close/reopen cycles.
+      setLoadingAudioId(null)
+      if (audioUrlRef.current) {
+        URL.revokeObjectURL(audioUrlRef.current)
+        audioUrlRef.current = null
+      }
     }
-  }, [open])
+  }, [open, setPlayingId])
 
   useEffect(() => {
     return () => {
@@ -207,7 +312,7 @@ export function SegmentBrowserModal({
   }, [commitInsert])
 
   const togglePlay = useCallback(async (row: BrowserRow) => {
-    if (playingId === row.id) {
+    if (playingIdRef.current === row.id) {
       audioRef.current?.pause()
       setPlayingId(null)
       return
@@ -215,17 +320,31 @@ export function SegmentBrowserModal({
     const token = ++playbackTokenRef.current
     audioRef.current?.pause()
     setLoadingAudioId(row.id)
+    // A superseded in-flight audition (a newer click or a close) must not clobber newer state;
+    // at most it clears its own row's spinner if one is still showing.
+    const dropStaleLoading = () => {
+      setLoadingAudioId((cur) => (cur === row.id ? null : cur))
+    }
     try {
       const b64 = await row.fetchAudioBase64()
-      if (token !== playbackTokenRef.current) return // superseded by another click or a close
+      if (token !== playbackTokenRef.current) {
+        dropStaleLoading()
+        return // superseded by another click or a close
+      }
       if (!b64) return
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
       const url = URL.createObjectURL(base64ToBlob(b64))
       audioUrlRef.current = url
-      if (!peaksById[row.id]) {
-        const analysis = await getClipAudioAnalysis(`browser:${row.id}:${b64.length}`, b64, 32)
-        if (token !== playbackTokenRef.current) return
-        setPeaksById((prev) => ({ ...prev, [row.id]: analysis.peaks }))
+      if (!peaksByKey[row.assetKey]) {
+        const analysis = await getClipAudioAnalysis(row.assetKey, b64, 32)
+        if (token !== playbackTokenRef.current) {
+          // Superseded mid-decode: release the object URL this stale audition just allocated.
+          URL.revokeObjectURL(url)
+          if (audioUrlRef.current === url) audioUrlRef.current = null
+          dropStaleLoading()
+          return
+        }
+        setPeaksByKey((prev) => ({ ...prev, [row.assetKey]: analysis.peaks }))
       }
       if (!audioRef.current) {
         const audio = new Audio()
@@ -246,13 +365,17 @@ export function SegmentBrowserModal({
     } finally {
       if (token === playbackTokenRef.current) setLoadingAudioId(null)
     }
-  }, [playingId, peaksById])
+  }, [peaksByKey, setPlayingId])
 
   const handleKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Enter' && e.target !== searchInputRef.current) {
-      e.preventDefault()
-      handleInsertSelected()
-    }
+    if (e.key !== 'Enter') return
+    // Only the dialog/row surface commits the selection. Enter from an interactive control
+    // (checkbox, audition button, selects, tabs, footer buttons, search input) keeps that
+    // control's native behavior instead of triggering an insert.
+    const target = e.target as HTMLElement | null
+    if (target?.closest('input, button, select, textarea, a')) return
+    e.preventDefault()
+    handleInsertSelected()
   }, [handleInsertSelected])
 
   return (
@@ -267,9 +390,14 @@ export function SegmentBrowserModal({
       </button>
 
       <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetPickerState() }}>
+        {/* DialogContent is programmatically focusable (not in the Tab order) so the dialog
+            surface itself can be the Enter target: clicking the padding focuses it, and Enter
+            commits the current selection. Radix initial-focus still lands on the first real
+            control. */}
         <DialogContent
           data-testid="segment-browser-dialog"
           className="flex max-h-[85vh] w-full max-w-2xl flex-col gap-3 sm:max-w-2xl"
+          tabIndex={-1}
           onKeyDown={handleKeyDown}
         >
           <DialogTitle className="text-sm font-semibold">Add to timeline</DialogTitle>
@@ -277,7 +405,15 @@ export function SegmentBrowserModal({
             Browse saved segments and reference voices to insert into the stitch timeline.
           </DialogDescription>
 
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v === 'voices' ? 'voices' : 'segments')}>
+          <Tabs
+            value={activeTab}
+            onValueChange={(v) => {
+              // Project ids are per-tab identity domains; a filter valid on one tab can filter
+              // the other tab's rows to nothing ("No matches"). Reset it on every tab switch.
+              setActiveTab(v === 'voices' ? 'voices' : 'segments')
+              setProjectFilter('all')
+            }}
+          >
             <TabsList>
               <TabsTrigger value="segments">Segments</TabsTrigger>
               {hasVoices && <TabsTrigger value="voices">Reference voices</TabsTrigger>}
@@ -328,58 +464,20 @@ export function SegmentBrowserModal({
             {filteredSorted.length === 0 && (
               <p className="px-1 py-4 text-center text-xs text-muted-foreground">No matches</p>
             )}
-            {filteredSorted.map((row) => {
-              const checked = selectedIds.has(row.id)
-              const isPlaying = playingId === row.id
-              return (
-                <div
-                  key={row.id}
-                  className="segment-browser-row flex items-center gap-2 py-2"
-                  onDoubleClick={() => handleDoubleClickInsert(row)}
-                >
-                  <input
-                    type="checkbox"
-                    data-testid={`stitch-picker-item-${activeTab}`}
-                    checked={checked}
-                    onChange={() => toggleSelected(row.id)}
-                    className="size-3.5 shrink-0 accent-cyan-500"
-                  />
-                  <button
-                    type="button"
-                    data-testid="segment-browser-audio"
-                    data-playing={isPlaying}
-                    onClick={() => void togglePlay(row)}
-                    title="Audition"
-                    className="shrink-0 rounded p-1 text-muted-foreground hover:text-foreground"
-                  >
-                    {loadingAudioId === row.id ? (
-                      <Loader2 className="size-3.5 animate-spin" />
-                    ) : isPlaying ? (
-                      <Pause className="size-3.5" />
-                    ) : (
-                      <Play className="size-3.5" />
-                    )}
-                  </button>
-                  <div className="min-w-0 flex-1" title={row.meta ? `${row.label}\n${row.meta}` : row.label}>
-                    <p className="truncate text-xs text-foreground">{row.label}</p>
-                    {row.meta && <p className="truncate text-[10px] text-muted-foreground">{row.meta}</p>}
-                  </div>
-                  <SegmentPreviewRail
-                    peaks={peaksById[row.id] ?? null}
-                    progress={isPlaying ? progress : 0}
-                    isPlaying={isPlaying}
-                  />
-                  {row.durationSec != null && (
-                    <span className="shrink-0 text-[10px] text-muted-foreground">{row.durationSec.toFixed(1)}s</span>
-                  )}
-                  {row.projectName && (
-                    <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">
-                      {row.projectName}
-                    </span>
-                  )}
-                </div>
-              )
-            })}
+            {filteredSorted.map((row) => (
+              <BrowserRowItem
+                key={row.id}
+                row={row}
+                checked={selectedIds.has(row.id)}
+                isPlaying={playingId === row.id}
+                isLoading={loadingAudioId === row.id}
+                progress={progress}
+                peaks={peaksByKey[row.assetKey] ?? null}
+                onToggleSelect={toggleSelected}
+                onTogglePlay={togglePlay}
+                onDoubleClickInsert={handleDoubleClickInsert}
+              />
+            ))}
           </div>
 
           <div className={cn('flex items-center justify-between border-t border-border pt-2')}>
