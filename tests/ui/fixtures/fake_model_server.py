@@ -251,8 +251,6 @@ def _seed_fake_segment_library() -> None:
     source_dir = Path(__file__).resolve().parent / "capture-data" / "segments"
     target_dir = Path(os.environ["SEGMENT_LIBRARY_DIR"])
     target_dir.mkdir(parents=True, exist_ok=True)
-    if not source_dir.is_dir():
-        return
     for entry in source_dir.iterdir():
         if not entry.is_dir():
             continue
@@ -261,14 +259,18 @@ def _seed_fake_segment_library() -> None:
             shutil.copytree(entry, target_entry)
         audio_path = target_entry / "clip.wav"
         if not audio_path.is_file():
-            samples = np.zeros(_SAMPLE_RATE, dtype=np.int16)
+            duration_sec = 1.0
+            try:
+                metadata = json.loads((target_entry / "meta.json").read_text(encoding="utf-8"))
+                duration_sec = max(0.1, float(metadata.get("duration_sec") or duration_sec))
+            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                pass
+            samples = np.zeros(round(_SAMPLE_RATE * duration_sec), dtype=np.int16)
             with wave.open(str(audio_path), "wb") as wav_file:
                 wav_file.setnchannels(1)
                 wav_file.setsampwidth(2)
                 wav_file.setframerate(_SAMPLE_RATE)
                 wav_file.writeframes(samples.tobytes())
-
-
 
 def _install_test_controls(app_module, rt):
     """Test-only runtime state controls for E2E specs.
