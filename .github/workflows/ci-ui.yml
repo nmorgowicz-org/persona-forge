@@ -34,7 +34,7 @@ jobs:
     needs: paths-filter
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: arc-general
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       PYTHONPATH: src:src/export
     steps:
@@ -136,10 +136,19 @@ jobs:
       - name: Start fake_model_server
         if: needs.paths-filter.outputs.code == 'true'
         run: |
-          # Use the Node harness so CI gets the same disposable seeded voice/segment
-          # fixtures as local Playwright runs. The Python server alone creates empty
-          # library directories, which makes Stitch Studio's picker render "No matches".
-          node tests/ui/run-server.mjs 8319 > fake_model_server.log 2>&1 &
+          # Seed the same disposable libraries used by local E2E, then launch the
+          # fake-only Python server. This avoids relying on child-process environment
+          # propagation from the Node harness on the self-hosted runner.
+          E2E_DATA_DIR="$(mktemp -d)"
+          mkdir -p "$E2E_DATA_DIR/voices" "$E2E_DATA_DIR/segments"
+          cp -R tests/ui/fixtures/capture-data/voices/. "$E2E_DATA_DIR/voices/"
+          cp -R tests/ui/fixtures/capture-data/segments/. "$E2E_DATA_DIR/segments/"
+          export VOICE_LIBRARY_DIR="$E2E_DATA_DIR/voices"
+          export SEGMENT_LIBRARY_DIR="$E2E_DATA_DIR/segments"
+          export FRONTEND_DIST_DIR="$PWD/frontend/dist"
+          export PERSONA_FORGE_TEST_PORT=8319
+
+          python tests/ui/fixtures/fake_model_server.py > fake_model_server.log 2>&1 &
           SERVER_PID=$!
           echo "fake_model_server PID=$SERVER_PID"
 
