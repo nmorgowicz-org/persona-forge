@@ -33,6 +33,7 @@ Build and integration:
 
 Routing is stateless: App.tsx switches between pages based on useAppStore((s) => s.page). Pages:
 
+- PersonaWizardPage (wizard)
 - SpeakPage (speak)
 - VoiceDesignPage (voice-design)
 - VoiceLibraryPage (voice-library)

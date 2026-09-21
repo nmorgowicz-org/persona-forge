@@ -1,7 +1,7 @@
 # Stitch Studio UX Overhaul: Segment Flow, Timeline Craft, Voice Edit
 
 Date: 2026-09-20
-Status: **READY** after GPT-5.6 architecture/UX audit; awaiting user approval
+Status: **COMPLETE** — fully implemented; review-fix pass complete (2026-09-21)
 Branch: `fix/stitch-studio-ux-overhaul-20260920`
 
 Fixes the chain of UX/naming/navigation bugs in how voice segments flow
