@@ -7,7 +7,7 @@
 // on every pointermove -- only the final value does. Using pointer events (not mouse events)
 // means touch and pen produce the same gesture, and setPointerCapture keeps receiving
 // move/up even if the cursor leaves the handle mid-drag.
-import { useCallback, useEffect, useState, useRef, type PointerEvent as ReactPointerEvent } from 'react'
+import { memo, useCallback, useEffect, useState, useRef, type PointerEvent as ReactPointerEvent } from 'react'
 import { ChevronUp, GripVertical, X, Play, Pause, Scissors, Trash2, Volume2, VolumeX } from 'lucide-react'
 import { type StitchPlanClip } from '@/store'
 import { cn } from '@/lib/utils'
@@ -55,7 +55,7 @@ export function MsStepper({
   )
 }
 
-export function StitchClipCard({
+export const StitchClipCard = memo(function StitchClipCard({
   clip,
   onRemove,
   onUpdate,
@@ -81,8 +81,10 @@ export function StitchClipCard({
   isWidthClamped?: boolean
   /** Whether this clip's bounded range is the one currently playing on the shared transport. */
   isRangePlaying: boolean
-  /** Plays/pauses this clip's span on the shared transport -- never creates its own Audio. */
-  onPlayRange: () => void
+  /** Plays/pauses this clip's span on the shared transport -- never creates its own Audio.
+   * The card supplies its own clipId at click time so the timeline can pass one stable
+   * callback to every memoized card. */
+  onPlayRange: (clipId: string) => void
 }) {
   const [peaks, setPeaks] = useState<number[] | null>(null)
   const [durMs, setDurMs] = useState<number | null>(null)
@@ -104,6 +106,10 @@ export function StitchClipCard({
   const dragStateRef = useRef<{ pointerId: number; kind: HandleKind; startClientX: number; startValue: number; msPerPx: number } | null>(null)
   const rafRef = useRef<number | null>(null)
   const selectionDragRef = useRef<{ pointerId: number } | null>(null)
+  // Last trim/fade/selection gesture that actually moved, tagged by pointer and timestamp:
+  // a click arriving right after such a gesture must not bubble to Reorder.Item and flip the
+  // clip selection off mid-edit, while plain clicks (no move) keep selecting.
+  const movedGestureRef = useRef<{ pointerId: number; at: number } | null>(null)
 
   useEffect(() => {
     if (editingText) textInputRef.current?.focus()
@@ -142,6 +148,18 @@ export function StitchClipCard({
   }, [clip.clipId, clip.sourceAudioBase64])
 
   const effectiveDuration = clipEffectiveDurationMs(clip)
+
+  // A committed trim can shrink the effective window below an existing selection; clamp the
+  // stored selection back into [0, effectiveDuration] so the region panel and its edits
+  // never target audio outside the kept window.
+  useEffect(() => {
+    setSelection((prev) => {
+      if (!prev) return prev
+      const start = clampMs(Math.min(prev.startMs, prev.endMs), 0, effectiveDuration)
+      const end = clampMs(Math.max(prev.startMs, prev.endMs), 0, effectiveDuration)
+      return start === prev.startMs && end === prev.endMs ? prev : { startMs: start, endMs: end }
+    })
+  }, [effectiveDuration])
 
   const clampTrimStart = useCallback((v: number) => {
     const nv = Math.max(0, Math.min(v, (durMs ?? 0) - 20))
@@ -196,7 +214,8 @@ export function StitchClipCard({
 
   const handlePointerMove = useCallback((e: PointerEvent) => {
     const state = dragStateRef.current
-    if (!state) return
+    if (!state || state.pointerId !== e.pointerId) return
+    movedGestureRef.current = { pointerId: state.pointerId, at: performance.now() }
     const deltaMs = (e.clientX - state.startClientX) * state.msPerPx
     // Right-side handles (rightTrim/rightFade) invert the sign: dragging the right edge
     // rightward means *less* is trimmed/faded from the end.
@@ -248,7 +267,8 @@ export function StitchClipCard({
   }
 
   const handleSelectionPointerMove = useCallback((e: PointerEvent) => {
-    if (!selectionDragRef.current) return
+    if (!selectionDragRef.current || selectionDragRef.current.pointerId !== e.pointerId) return
+    movedGestureRef.current = { pointerId: e.pointerId, at: performance.now() }
     setSelection((prev) => clampSelection(prev?.startMs ?? pointToMs(e.clientX), pointToMs(e.clientX)))
   }, [clampSelection, pointToMs])
 
@@ -258,6 +278,28 @@ export function StitchClipCard({
     window.removeEventListener('pointermove', handleSelectionPointerMove)
     window.removeEventListener('pointerup', endSelectionDrag)
   }, [handleSelectionPointerMove])
+
+  // The gesture listeners live on window and are normally removed by the end handlers, so
+  // unmounting mid-drag (e.g. the clip gets removed) would leak them and leave a pending
+  // rAF callback. Tear everything down on unmount -- and whenever the callback identities
+  // change, since the window holds the instances captured by whichever render started the
+  // gesture.
+  useEffect(() => {
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', endDrag)
+      window.removeEventListener('pointercancel', endDrag)
+      window.removeEventListener('pointermove', handleSelectionPointerMove)
+      window.removeEventListener('pointerup', endSelectionDrag)
+      dragStateRef.current = null
+      selectionDragRef.current = null
+      movedGestureRef.current = null
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
+    }
+  }, [handlePointerMove, endDrag, handleSelectionPointerMove, endSelectionDrag])
 
   const startSelection = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (!durMs) return
@@ -379,7 +421,7 @@ export function StitchClipCard({
           <button
             type="button"
             className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-            onClick={onPlayRange}
+            onClick={() => onPlayRange(clip.clipId)}
             disabled={!clip.sourceAudioBase64}
             aria-label={isRangePlaying ? 'Pause clip playback' : 'Play clip playback'}
             title="Listen to just this segment"
@@ -399,7 +441,19 @@ export function StitchClipCard({
       </div>
 
       <div className="relative h-24 overflow-hidden rounded-md bg-black/40">
-        <div ref={laneRef} className="relative h-full w-full" onPointerDown={startSelection}>
+        <div
+          ref={laneRef}
+          className="relative h-full w-full"
+          onPointerDown={startSelection}
+          onLostPointerCapture={(e) => endSelectionDrag(e.nativeEvent)}
+          onClick={(e) => {
+            const gesture = movedGestureRef.current
+            if (gesture && gesture.pointerId === (e.nativeEvent as PointerEvent).pointerId && performance.now() - gesture.at < 500) {
+              e.stopPropagation()
+              movedGestureRef.current = null
+            }
+          }}
+        >
           <WaveformLane peaks={peaks} durMs={durMs} trimStartMs={trimStartMs} trimEndMs={trimEndMs} fadeInMs={fadeInMs} fadeOutMs={fadeOutMs} />
           {fadeOverlay('left', fadeInMs)}
           {fadeOverlay('right', fadeOutMs)}
@@ -444,11 +498,13 @@ export function StitchClipCard({
                 data-testid="stitch-trim-handle-left"
                 className="absolute inset-y-0 left-0 z-20 w-2 cursor-ew-resize touch-none bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
                 onPointerDown={startDrag('leftTrim')}
+                onLostPointerCapture={(e) => endDrag(e.nativeEvent)}
               />
               <div
                 data-testid="stitch-trim-handle-right"
                 className="absolute inset-y-0 right-0 z-20 w-2 cursor-ew-resize touch-none bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
                 onPointerDown={startDrag('rightTrim')}
+                onLostPointerCapture={(e) => endDrag(e.nativeEvent)}
               />
               {/* Trim handles render with a higher z-index than fade handles: at the default
                   fadeInMs/fadeOutMs = 0, a fade handle sits at the exact same pixel position as
@@ -460,12 +516,14 @@ export function StitchClipCard({
                 className="absolute inset-y-0 z-10 w-2 cursor-ew-resize touch-none bg-warning/50 hover:bg-warning transition-colors"
                 style={{ left: `${(fadeInMs / effectiveDuration) * 100}%` }}
                 onPointerDown={startDrag('leftFade')}
+                onLostPointerCapture={(e) => endDrag(e.nativeEvent)}
               />
               <div
                 data-testid="stitch-fade-handle-right"
                 className="absolute inset-y-0 z-10 w-2 cursor-ew-resize touch-none bg-warning/50 hover:bg-warning transition-colors"
                 style={{ right: `${(fadeOutMs / effectiveDuration) * 100}%` }}
                 onPointerDown={startDrag('rightFade')}
+                onLostPointerCapture={(e) => endDrag(e.nativeEvent)}
               />
             </>
           )}
@@ -474,14 +532,14 @@ export function StitchClipCard({
 
       {showAdvanced && (
         <>
-          <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1.5">
+          <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1.5" onClick={(e) => e.stopPropagation()}>
             <MsStepper testId="stitch-stepper-trim-start-value" label="Trim start" value={clip.trimStartMs} min={0} max={durMs ?? 0} step={10} onChange={(v) => onUpdate(clip.clipId, { trimStartMs: clampTrimStart(v) })} />
             <MsStepper testId="stitch-stepper-trim-end-value" label="Trim end" value={clip.trimEndMs} min={0} max={durMs ?? 0} step={10} onChange={(v) => onUpdate(clip.clipId, { trimEndMs: clampTrimEnd(v) })} />
             <MsStepper testId="stitch-stepper-fade-in-value" label="Fade in" value={clip.fadeInMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeInMs: clampFade(v) })} />
             <MsStepper testId="stitch-stepper-fade-out-value" label="Fade out" value={clip.fadeOutMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeOutMs: clampFade(v) })} />
           </div>
 
-          <div className="mt-2 rounded-md border border-border/50 bg-black/20 p-2">
+          <div className="mt-2 rounded-md border border-border/50 bg-black/20 p-2" onClick={(e) => e.stopPropagation()}>
             <div className="grid grid-cols-3 gap-1.5">
               <MsStepper label="Region start" value={selectedRegion.startMs} min={0} max={effectiveDuration} step={10} onChange={(v) => setSelection(clampSelection(v, selectedRegion.endMs))} compact />
               <MsStepper label="Region end" value={selectedRegion.endMs} min={0} max={effectiveDuration} step={10} onChange={(v) => setSelection(clampSelection(selectedRegion.startMs, v))} compact />
@@ -517,4 +575,4 @@ export function StitchClipCard({
       )}
     </div>
   )
-}
+})

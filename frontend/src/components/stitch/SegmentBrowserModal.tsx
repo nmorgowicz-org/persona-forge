@@ -58,6 +58,11 @@ function voiceToRow(voice: VoiceMeta): BrowserRow {
   }
 }
 
+export interface SegmentBrowserModalController {
+  /** Opens the picker dialog programmatically (e.g. from the studio's "Add clips" guidance). */
+  open: () => void
+}
+
 export interface SegmentBrowserModalProps {
   segments: SegmentMeta[]
   onInsertSegments: (segs: SegmentMeta[], afterClipId: string | null) => void
@@ -65,6 +70,8 @@ export interface SegmentBrowserModalProps {
   onInsertVoices?: (voices: VoiceMeta[], afterClipId: string | null) => void
   /** Clip to splice newly-inserted assets after; null appends at the end of the timeline. */
   insertAfterClipId: string | null
+  /** Optional controller the parent uses to open the dialog without a DOM click. */
+  controllerRef?: { current: SegmentBrowserModalController | null }
 }
 
 export function SegmentBrowserModal({
@@ -73,6 +80,7 @@ export function SegmentBrowserModal({
   voices,
   onInsertVoices,
   insertAfterClipId,
+  controllerRef,
 }: SegmentBrowserModalProps) {
   const [open, setOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<BrowserTab>('segments')
@@ -110,6 +118,16 @@ export function SegmentBrowserModal({
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
     }
   }, [])
+
+  // Optional controller: expose open() to the parent without changing how the dialog is
+  // otherwise driven (the trigger button keeps working as before).
+  useEffect(() => {
+    if (!controllerRef) return
+    controllerRef.current = { open: () => setOpen(true) }
+    return () => {
+      controllerRef.current = null
+    }
+  }, [controllerRef])
 
   const resetPickerState = useCallback(() => {
     setSelectedSegmentIds(new Set())

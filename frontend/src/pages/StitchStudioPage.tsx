@@ -41,6 +41,7 @@ export function StitchStudioPage() {
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [isActivating, setIsActivating] = useState(false)
   const [deliveryVariantKind, setDeliveryVariantKind] =
     useState<DeliveryVariantKind>('natural')
   const [useAsApiDefault, setUseAsApiDefault] = useState(false)
@@ -122,13 +123,13 @@ export function StitchStudioPage() {
   const retryActivation = useCallback(async () => {
     if (!savedVoiceId) return
     try {
-      setIsSaving(true)
+      setIsActivating(true)
       await activateVoiceForApi(savedVoiceId)
       setActivationError(null)
     } catch (activationErr) {
       setActivationError(activationErr instanceof Error ? activationErr.message : String(activationErr))
     } finally {
-      setIsSaving(false)
+      setIsActivating(false)
     }
   }, [savedVoiceId])
   const handleStartOver = useCallback(() => {
@@ -219,6 +220,7 @@ export function StitchStudioPage() {
         name={name}
         saveLabel={useAsApiDefault ? 'Save & use as API default' : 'Save as reference voice'}
         isSaving={isSaving}
+        isActivating={isActivating}
         onFocusName={() => nameInputRef.current?.focus()}
       />
 

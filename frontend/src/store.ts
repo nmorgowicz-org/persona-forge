@@ -554,7 +554,6 @@ export const useAppStore = create<StoreState>((set) => ({
       pauseOffsetMs: 0,
     },
     ovStitchEditorOpen: false,
-    ovStitchEditorReturnPage: null,
     ovStitchEditorIncomingClip: null,
 
   setOvSelections: (updater) =>

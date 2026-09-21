@@ -42,58 +42,34 @@ export const WaveformLane = memo(function WaveformLane({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, width, height)
 
-      const trimStartRatio = Math.max(0, Math.min(1, trimStartMs / durMs))
-      const trimEndRatio = Math.max(0, Math.min(1, trimEndMs / durMs))
-      const trimStartX = trimStartRatio * width
-      const trimEndX = (1 - trimEndRatio) * width
-
-      // Draw every peak across the clip's full duration (truthful geometry: trimmed material
-      // stays visible, just dimmed) rather than slicing peaks out of the array, which used to
-      // silently rescale the remaining bars to fill the lane.
-      const barWidth = width / peaks.length
+      // The lane renders the clip's kept (effective) window [trimStartMs, durMs - trimEndMs]:
+      // peaks are sliced to that window and rescaled so the slice spans the full lane width.
+      // The card sizes itself from the same effective duration at the timeline's single
+      // pixels-per-second scale, so one lane pixel here equals one effective millisecond and
+      // one ruler pixel, and every interactive boundary (trim/fade handles, selection,
+      // region overlays) sits on the same coordinate as the waveform.
       const effectiveDuration = Math.max(1, durMs - trimStartMs - trimEndMs)
-      peaks.forEach((peak, index) => {
+      const keepStartMs = Math.max(0, Math.min(trimStartMs, durMs))
+      const keepEndMs = Math.max(keepStartMs, Math.min(durMs - trimEndMs, durMs))
+      const startIdx = Math.floor((keepStartMs / durMs) * peaks.length)
+      const endIdx = Math.max(startIdx + 1, Math.ceil((keepEndMs / durMs) * peaks.length))
+      const keptPeaks = peaks.slice(startIdx, Math.min(peaks.length, endIdx))
+
+      const barWidth = width / keptPeaks.length
+      keptPeaks.forEach((peak, index) => {
         const x = index * barWidth
         const barHeight = Math.max(1, peak * height)
         const y = (height - barHeight) / 2
-        const trimmedOut = x + barWidth <= trimStartX || x >= trimEndX
         ctx.fillStyle = waveformBarColor(peak, false)
-        ctx.globalAlpha = trimmedOut ? 0.22 : 1
         ctx.fillRect(x, y, Math.max(1, barWidth - 1), barHeight)
-        ctx.globalAlpha = 1
       })
 
-      // Fade gain ramps: a linear gain-vs-time wedge drawn over the kept (untrimmed) region,
-      // so trimming and fading read as one truthful picture instead of a flat DOM gradient
-      // guessing at width.
-      const drawFadeRamp = (fadeMs: number, direction: 'in' | 'out') => {
-        if (fadeMs <= 0) return
-        const fadeRatio = Math.min(1, fadeMs / effectiveDuration)
-        const fadeWidth = fadeRatio * (trimEndX - trimStartX)
-        if (fadeWidth <= 0) return
-        ctx.beginPath()
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'
-        if (direction === 'in') {
-          ctx.moveTo(trimStartX, 0)
-          ctx.lineTo(trimStartX + fadeWidth, 0)
-          ctx.lineTo(trimStartX, height)
-          ctx.closePath()
-        } else {
-          ctx.moveTo(trimEndX, 0)
-          ctx.lineTo(trimEndX - fadeWidth, 0)
-          ctx.lineTo(trimEndX, height)
-          ctx.closePath()
-        }
-        ctx.fill()
-      }
-      drawFadeRamp(fadeInMs, 'in')
-      drawFadeRamp(fadeOutMs, 'out')
-
       if (pauseIntervals) {
+        // Pause intervals are in source time; shift them into the effective window.
         ctx.fillStyle = 'rgba(0, 0, 0, 0.18)'
         pauseIntervals.forEach(([startSec, endSec]) => {
-          const startX = Math.max(0, Math.min(1, (startSec * 1000) / durMs)) * width
-          const endX = Math.max(0, Math.min(1, (endSec * 1000) / durMs)) * width
+          const startX = Math.max(0, Math.min(1, (startSec * 1000 - keepStartMs) / effectiveDuration)) * width
+          const endX = Math.max(0, Math.min(1, (endSec * 1000 - keepStartMs) / effectiveDuration)) * width
           ctx.fillRect(startX, 0, Math.max(1, endX - startX), height)
         })
       }
@@ -106,7 +82,7 @@ export const WaveformLane = memo(function WaveformLane({
     const observer = new ResizeObserver(draw)
     observer.observe(canvas)
     return () => observer.disconnect()
-  }, [peaks, durMs, trimStartMs, trimEndMs, fadeInMs, fadeOutMs, pauseIntervals])
+  }, [peaks, durMs, trimStartMs, trimEndMs, pauseIntervals])
 
   if (!peaks || !durMs) {
     return <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground/60">No waveform</div>
@@ -115,8 +91,8 @@ export const WaveformLane = memo(function WaveformLane({
   return (
     <div className="relative flex h-full items-center overflow-hidden px-0.5">
       <canvas ref={canvasRef} className="block h-full w-full" data-testid="stitch-waveform-canvas" />
-      {/* Trim/fade values stay readable as text even though the canvas also draws them --
-          canvas is never the sole information channel. */}
+      {/* Trim/fade values stay readable as text -- the canvas is never the sole information
+          channel. */}
       <span className="sr-only">
         Trim start {trimStartMs}ms, trim end {trimEndMs}ms, fade in {fadeInMs}ms, fade out {fadeOutMs}ms.
       </span>

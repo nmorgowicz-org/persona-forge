@@ -20,6 +20,7 @@ export function ReferenceReadiness({
   plan,
   name,
   isSaving,
+  isActivating,
   isPreviewRendering,
   saveLabel,
   onSave,
@@ -29,6 +30,8 @@ export function ReferenceReadiness({
   plan: StitchPlanState
   name: string
   isSaving: boolean
+  /** API-default activation in flight: the bar shows "Activating…" but Save stays enabled. */
+  isActivating?: boolean
   isPreviewRendering: boolean
   saveLabel: string
   onSave: () => void
@@ -113,6 +116,11 @@ export function ReferenceReadiness({
         >
           {saveLabel}
         </button>
+        {isActivating && (
+          <span className="text-[10px] font-medium text-info" data-testid="stitch-activating">
+            Activating…
+          </span>
+        )}
         {action === 'add-clips' && (
           <button type="button" data-testid="stitch-guidance-primary" onClick={onAddClips} className="btn-brand inline-flex rounded-full px-4 py-1.5 text-xs font-medium">
             {durations.sourceMaterialMs < 5000 ? 'Add clips' : 'Reach 10–15s'}

@@ -22,7 +22,7 @@ import { type StitchPlanSession } from '@/hooks/useStitchPlanSession'
 import { useStitchTransport, type StitchTransport } from '@/hooks/useStitchTransport'
 import { planStateToPayload } from '@/lib/stitchPreview'
 import { useStitchPreview } from '@/hooks/useStitchPreview'
-import { SegmentBrowserModal } from './stitch/SegmentBrowserModal'
+import { SegmentBrowserModal, type SegmentBrowserModalController } from './stitch/SegmentBrowserModal'
 import { TimelineRuler } from './stitch/TimelineRuler'
 import { GapControl } from './stitch/GapControl'
 import { StitchClipCard } from './stitch/StitchClipCard'
@@ -66,6 +66,10 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
 }
 
+// Shared empty array so cards with no region edits receive a stable prop and their
+// React.memo comparison holds across plain re-renders.
+const EMPTY_REGION_EDITS: RegionEdit[] = []
+
 
 /* ---------- main component ---------- */
 
@@ -78,6 +82,9 @@ interface StitchTimelineProps {
   voiceLibrary?: VoiceMeta[]
   onInsertVoiceFromLibrary?: (voices: VoiceMeta[], afterClipId: string | null) => void
   transport: StitchTransport
+  /** Controller handle for the mounted segment-browser modal(s); the editor body uses it
+   * to open the picker from the readiness guidance instead of a DOM click. */
+  pickerRef?: { current: SegmentBrowserModalController | null }
 }
 
 export const StitchTimeline = memo(function StitchTimeline({
@@ -89,6 +96,7 @@ export const StitchTimeline = memo(function StitchTimeline({
   voiceLibrary,
   onInsertVoiceFromLibrary,
   transport,
+  pickerRef,
 }: StitchTimelineProps) {
   const { plan, reorderClip, removeClip, updateClip, setClips, setPaddingAt: setPadding, setPadding: setPaddingMs, setRegionEdits: onAddOrRemoveRegionEdit } = session
   const { clips, paddingMs, regionEditsByClip } = plan
@@ -232,6 +240,17 @@ export const StitchTimeline = memo(function StitchTimeline({
     [transport, previewScale],
   )
 
+  // One stable playback callback shared by every card: the card supplies its own clipId at
+  // click time, so memoized cards receive an identical function across plain re-renders
+  // (only a real preview/range change, or the range becoming active, changes identity).
+  const { playRange } = transport
+  const handlePlayRange = useCallback((clipId: string) => {
+    const index = clips.findIndex((c) => c.clipId === clipId)
+    const range = index >= 0 ? clipRanges[index] : undefined
+    if (!range) return
+    playRange(clipId, (range.startMs * previewScale) / 1000, (range.endMs * previewScale) / 1000)
+  }, [playRange, clips, clipRanges, previewScale])
+
   // Keyboard shortcuts for playback, selection, reorder, removal, and trim nudging -- scoped
   // to this component's lifetime and unconditionally skipped whenever the event target is an
   // editable control, so typing in a clip's text field, a gap's typed-value input, etc. is
@@ -240,6 +259,9 @@ export const StitchTimeline = memo(function StitchTimeline({
     const onKeyDown = (e: KeyboardEvent) => {
       if (isEditableTarget(e.target)) return
       if ((e.code === 'Space' || e.key === ' ') && !e.repeat) {
+        // The shortcuts dialog is open on a non-editable surface; Space there would
+        // otherwise toggle arrangement playback behind the dialog.
+        if (shortcutsOpen) return
         e.preventDefault()
         transport.toggle()
         return
@@ -281,7 +303,7 @@ export const StitchTimeline = memo(function StitchTimeline({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selectedClipId, clips, moveClip, removeClip, updateClip, transport])
+  }, [selectedClipId, clips, moveClip, removeClip, updateClip, transport, shortcutsOpen])
 
   if (!clips.length) {
     return (
@@ -295,6 +317,7 @@ export const StitchTimeline = memo(function StitchTimeline({
               voices={voiceLibrary}
               onInsertVoices={onInsertVoiceFromLibrary}
               insertAfterClipId={null}
+              controllerRef={pickerRef}
             />
           )}
         </div>
@@ -337,6 +360,7 @@ export const StitchTimeline = memo(function StitchTimeline({
                 voices={voiceLibrary}
                 onInsertVoices={onInsertVoiceFromLibrary}
                 insertAfterClipId={selectedClipId}
+                controllerRef={pickerRef}
               />
             )}
           </div>
@@ -375,9 +399,6 @@ export const StitchTimeline = memo(function StitchTimeline({
             const naturalWidthPx = clipSeconds * pixelsPerSecond
             const clipWidthPx = Math.max(MIN_CLIP_PX, naturalWidthPx)
             const isClipClamped = naturalWidthPx < MIN_CLIP_PX
-            const range = clipRanges[i]
-            const previewStartSec = range ? (range.startMs * previewScale) / 1000 : 0
-            const previewEndSec = range ? (range.endMs * previewScale) / 1000 : 0
             const isRangePlaying = transport.activeRangeId === clip.clipId
             return (
               <motion.div
@@ -415,7 +436,7 @@ export const StitchTimeline = memo(function StitchTimeline({
                     clip={clip}
                     onRemove={removeClip}
                     onUpdate={updateClip}
-                    regionEdits={regionEditsByClip[clip.clipId] ?? []}
+                    regionEdits={regionEditsByClip[clip.clipId] ?? EMPTY_REGION_EDITS}
                     onAddRegionEdit={onAddRegionEdit}
                     onRemoveRegionEdit={onRemoveRegionEdit}
                     onSplitRegion={splitRegion}
@@ -423,7 +444,7 @@ export const StitchTimeline = memo(function StitchTimeline({
                     isSelected={selectedClipId === clip.clipId}
                     isWidthClamped={isClipClamped}
                     isRangePlaying={isRangePlaying}
-                    onPlayRange={() => transport.playRange(clip.clipId, previewStartSec, previewEndSec)}
+                    onPlayRange={handlePlayRange}
                   />
                 </Reorder.Item>
               </motion.div>
@@ -551,6 +572,7 @@ export type StitchEditorBodyProps =
       name: string
       saveLabel: string
       isSaving: boolean
+      isActivating: boolean
       onFocusName: () => void
     })
   | (StitchEditorCommonProps & {
@@ -576,6 +598,8 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
   )
   const [showDsp, setShowDsp] = useState(false)
   const [isNormalizingPacing, setIsNormalizingPacing] = useState(false)
+  const [normalizeError, setNormalizeError] = useState<string | null>(null)
+  const pickerRef = useRef<SegmentBrowserModalController | null>(null)
 
   const preview = useStitchPreview(plan)
   const transport = useStitchTransport(preview.url)
@@ -589,12 +613,13 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
   }, [props, plan, clips, preview])
 
   const requestAddClips = useCallback(() => {
-    document.querySelector<HTMLButtonElement>('[data-testid="stitch-picker-toggle-segments"]')?.click()
+    pickerRef.current?.open()
   }, [])
 
   const normalizePacing = useCallback(async () => {
     if (!clips.length) return
     setIsNormalizingPacing(true)
+    setNormalizeError(null)
     try {
       const result = await getStitchPacingTargets({
         transcripts: clips.map((clip) => clip.text ?? ''),
@@ -604,8 +629,11 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
       })
       session.setPadding(result.padding_ms)
       session.setClips((current) => current.map((clip) => ({ ...clip, prosodyMode: 'auto' })))
-    } catch {
-      // Surfaced via the preview's own error state on the next render attempt.
+      setNormalizeError(null)
+    } catch (err) {
+      // The pacing call failed and no plan state changed, so no re-render would otherwise
+      // surface it -- track it locally and show it next to the button.
+      setNormalizeError(err instanceof Error ? err.message : String(err))
     } finally {
       setIsNormalizingPacing(false)
     }
@@ -656,6 +684,11 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
             {isNormalizingPacing ? <Loader2 className="size-3 animate-spin" /> : <Gauge className="size-3" />}
             Normalize pacing
           </button>
+          {normalizeError && (
+            <span className="status-badge status-tone-danger px-2 py-0.5 text-[10px] font-medium" title={normalizeError}>
+              normalize failed
+            </span>
+          )}
           {hasSuggestedGap && (
             <span data-testid="stitch-gap-suggestion" className="text-[10px] text-muted-foreground">
               Suggested from punctuation
@@ -699,6 +732,7 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
         voiceLibrary={voiceLibrary}
         onInsertVoiceFromLibrary={onInsertVoiceFromLibrary}
         transport={transport}
+        pickerRef={pickerRef}
       />
       <StitchDspControls open={showDsp} onToggle={() => setShowDsp((v) => !v)} dsp={dsp} onSetDsp={session.setDsp} />
 
@@ -737,6 +771,7 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
           plan={plan}
           name={props.name}
           isSaving={props.isSaving}
+          isActivating={props.isActivating}
           isPreviewRendering={preview.isRendering}
           saveLabel={props.saveLabel}
           onSave={handleSave}
