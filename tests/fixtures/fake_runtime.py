@@ -5,12 +5,18 @@ import random
 import sys
 import threading
 import time
+from pathlib import Path
 import types
 import wave
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
+
+_repo_root = str(Path(__file__).resolve().parents[2])
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+from tests.fixtures.audio import decode_pcm16_wav_to_float32, encode_pcm16_wav  # noqa: E402
 
 
 def _make_silent_wav(num_samples: int = 2400, sr: int = 24000) -> bytes:
@@ -548,21 +554,34 @@ class FakeModelRuntime:
         ) -> Any:
             if not rt.stream_vocoder_enabled:
                 raise RuntimeError("streaming requires the FP32 OpenVINO vocoder")
-            chunk1 = np.zeros(600, dtype=np.float32)
-            chunk2 = np.zeros(600, dtype=np.float32)
-            chunk3 = np.zeros(300, dtype=np.float32)
-            on_audio_chunk(chunk1)
-            on_audio_chunk(chunk2)
-            on_audio_chunk(chunk3, is_final=True)
-            all_pcm = chunk1.tobytes() + chunk2.tobytes() + chunk3.tobytes()
+            wav = rt.stand_in_audio()
+            sr = 24000
+            n = min(wav.size, 1500)
+            boundaries = (n * 2 // 5, n * 4 // 5, n)
+            # Emit the real fixture signal in three chunks so any capture of the
+            # streaming path draws actual audio, not the flat line this fake used
+            # to fabricate.
+            cuts = (n * 2 // 5, n * 4 // 5)
+            previous = 0
+            chunks = []
+            for cut in cuts + (n,):
+                if cut > previous:
+                    chunks.append(wav[previous:cut])
+                    previous = cut
+            for i, chunk in enumerate(chunks):
+                if i == len(chunks) - 1:
+                    on_audio_chunk(chunk, is_final=True)
+                else:
+                    on_audio_chunk(chunk)
+            all_pcm = b"".join(c.tobytes() for c in chunks)
             return (
-                np.zeros(1500, dtype=np.float32),
-                24000,
+                wav[:n],
+                sr,
                 all_pcm,
                 {
                     "elapsed_seconds": 0.05,
                     "reference_frames": 0,
-                    "decode_boundaries": [600, 1200, 1500],
+                    "decode_boundaries": list(b for b in cuts + (n,) if b > 0),
                     "generated_frames": 60,
                 },
             )
@@ -737,41 +756,15 @@ class FakeModelRuntime:
         for wav_bytes in self.voice_library.wav_bytes.values():
             if not wav_bytes:
                 continue
-            try:
-                with wave.open(io.BytesIO(wav_bytes), "rb") as reader:
-                    frames = reader.readframes(reader.getnframes())
-                    channels = reader.getnchannels()
-                    width = reader.getsampwidth()
-                    rate = reader.getframerate()
-            except (OSError, wave.Error):
-                continue
-            if width != 2 or not frames:
-                continue
-            samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
-            if channels > 1:
-                samples = samples.reshape(-1, channels).mean(axis=1)
-            if rate != 24000:
-                target_len = max(1, int(round(samples.size * 24000 / rate)))
-                samples = np.interp(
-                    np.linspace(0.0, samples.size - 1.0, target_len),
-                    np.arange(samples.size),
-                    samples,
-                ).astype(np.float32)
-            if samples.size >= min_samples:
+            samples = decode_pcm16_wav_to_float32(wav_bytes)
+            if samples is not None and samples.size >= min_samples:
                 return samples
         return np.zeros(min_samples, dtype=np.float32)
 
     def stand_in_wav_bytes(self, min_samples: int = 480) -> bytes:
         """``stand_in_audio`` as PCM16 WAV bytes, for the job paths that store bytes."""
         samples = self.stand_in_audio(min_samples=min_samples)
-        pcm = np.clip(samples, -1.0, 1.0)
-        buf = io.BytesIO()
-        with wave.open(buf, "wb") as writer:
-            writer.setnchannels(1)
-            writer.setsampwidth(2)
-            writer.setframerate(24000)
-            writer.writeframes((pcm * 32767.0).astype(np.int16).tobytes())
-        return buf.getvalue()
+        return encode_pcm16_wav(samples)
 
     def load_model(self, profile: Optional[str] = None) -> None:
         self.load_model_calls.append({"profile": profile})

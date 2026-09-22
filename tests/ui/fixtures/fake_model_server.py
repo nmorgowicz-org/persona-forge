@@ -23,7 +23,6 @@ import http.client
 import json
 import logging
 import shutil
-import wave
 import os
 import random
 import secrets
@@ -31,11 +30,14 @@ import sys
 import tempfile
 import threading
 import time
+import wave
 import types
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
+
+from tests.fixtures.audio import decode_pcm16_wav_to_float32  # noqa: E402
 
 _SAMPLE_RATE = 24000
 _MAX_SEED = 2**32
@@ -148,8 +150,6 @@ def _load_segment_clips() -> list[tuple[str, np.ndarray]]:
     downstream surface built on it — the take's waveform, the stitched preview, the
     saved reference voice — renders flat, and a capture of the flow proves nothing.
     """
-    import wave as _wave
-
     target_dir = os.environ.get("SEGMENT_LIBRARY_DIR")
     if not target_dir:
         return []
@@ -161,26 +161,11 @@ def _load_segment_clips() -> list[tuple[str, np.ndarray]]:
             continue
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            with _wave.open(str(clip_path), "rb") as reader:
-                frames = reader.readframes(reader.getnframes())
-                channels = reader.getnchannels()
-                width = reader.getsampwidth()
-                rate = reader.getframerate()
-        except (OSError, ValueError, json.JSONDecodeError, _wave.Error):
+        except (OSError, ValueError, json.JSONDecodeError):
             continue
-        if width != 2:
+        samples = decode_pcm16_wav_to_float32(clip_path.read_bytes())
+        if samples is None:
             continue
-        samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
-        if channels > 1:
-            samples = samples.reshape(-1, channels).mean(axis=1)
-        if rate != _SAMPLE_RATE:
-            # Linear resample is enough for a fixture stand-in; keep the duration honest.
-            target_len = max(1, int(round(samples.size * _SAMPLE_RATE / rate)))
-            samples = np.interp(
-                np.linspace(0.0, samples.size - 1.0, target_len),
-                np.arange(samples.size),
-                samples,
-            ).astype(np.float32)
         clips.append((str(meta.get("text") or "").strip(), samples))
     return clips
 
