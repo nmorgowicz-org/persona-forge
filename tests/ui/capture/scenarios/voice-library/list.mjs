@@ -5,6 +5,8 @@ export default async function (ctx) {
     const { page, baseURL } = ctx;
     await page.goto(baseURL, { waitUntil: 'networkidle0' });
     await page.click('[data-testid="nav-voice-design"]');
+    // OmniVoice is the default engine; this scenario exercises the Qwen VoiceDesign panel.
+    await page.click('[data-testid="engine-qwen"]');
     await page.waitForSelector('[data-testid="voice-design-description"]');
     await page.type('[data-testid="voice-design-description"]', 'Bright, energetic assistant voice.');
     await page.type('[data-testid="voice-design-sample-text"]', 'This is a short sample line.');

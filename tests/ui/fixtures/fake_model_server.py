@@ -140,6 +140,51 @@ def _set_module_attr(module_name, attr, value):
     setattr(sys.modules.get(module_name), attr, value)
 
 
+def _load_segment_clips() -> list[tuple[str, np.ndarray]]:
+    """Read the seeded segment library's real clips as (text, float32 mono) pairs.
+
+    The fake tier fabricates *inference*, not audio: a candidate that stands in for a
+    synthesized take should carry the segment's actual recorded signal, otherwise every
+    downstream surface built on it — the take's waveform, the stitched preview, the
+    saved reference voice — renders flat, and a capture of the flow proves nothing.
+    """
+    import wave as _wave
+
+    target_dir = os.environ.get("SEGMENT_LIBRARY_DIR")
+    if not target_dir:
+        return []
+    clips: list[tuple[str, np.ndarray]] = []
+    for entry in sorted(Path(target_dir).iterdir()):
+        meta_path = entry / "meta.json"
+        clip_path = entry / "clip.wav"
+        if not (meta_path.is_file() and clip_path.is_file()):
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            with _wave.open(str(clip_path), "rb") as reader:
+                frames = reader.readframes(reader.getnframes())
+                channels = reader.getnchannels()
+                width = reader.getsampwidth()
+                rate = reader.getframerate()
+        except (OSError, ValueError, json.JSONDecodeError, _wave.Error):
+            continue
+        if width != 2:
+            continue
+        samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+        if channels > 1:
+            samples = samples.reshape(-1, channels).mean(axis=1)
+        if rate != _SAMPLE_RATE:
+            # Linear resample is enough for a fixture stand-in; keep the duration honest.
+            target_len = max(1, int(round(samples.size * _SAMPLE_RATE / rate)))
+            samples = np.interp(
+                np.linspace(0.0, samples.size - 1.0, target_len),
+                np.arange(samples.size),
+                samples,
+            ).astype(np.float32)
+        clips.append((str(meta.get("text") or "").strip(), samples))
+    return clips
+
+
 def _patch_omnivoice_run_job(app_module):
     def fake_run_omnivoice_job(
         segments,
@@ -158,14 +203,24 @@ def _patch_omnivoice_run_job(app_module):
         cancel_event=None,
     ):
         time.sleep(0.15)
- 
+        clips = _load_segment_clips()
+
+        def _audio_for(text: str, seg_idx: int) -> np.ndarray:
+            wanted = (text or "").strip()
+            for clip_text, samples in clips:
+                if clip_text and clip_text == wanted:
+                    return samples
+            if clips:
+                return clips[seg_idx % len(clips)][1]
+            return np.zeros(int(_SAMPLE_RATE * 0.3), dtype=np.float32)
+
         for seg_idx, text in enumerate(segments):
             if cancel_event is not None and cancel_event.is_set():
                 break
             for cand_idx in range(candidates_per_segment):
                 if cancel_event is not None and cancel_event.is_set():
                     break
-                wav = np.zeros(int(_SAMPLE_RATE * 0.3), dtype=np.float32)
+                wav = _audio_for(text, seg_idx)
                 candidate = (
                     wav,
                     _SAMPLE_RATE,
@@ -201,6 +256,18 @@ def _patch_save_voice(app_module, rt):
     def _fake_voice_dir(voice_id: str) -> pathlib.Path:
         d = _fake_dir_parent / voice_id
         d.mkdir(parents=True, exist_ok=True)
+        # Materialize the voice's reference audio on disk. The real forced-alignment
+        # and prosody paths resolve their master through _voice_dir()/_load_master_wav(),
+        # so a directory with metadata but no audio would blank the word boundaries
+        # and the adjusted lane instead of exercising those paths for real.
+        master = d / "original.wav"
+        if not master.is_file():
+            audio = fake_library.wav_bytes.get(voice_id)
+            if audio:
+                try:
+                    master.write_bytes(audio)
+                except OSError:
+                    pass
         return d
     variants_meta: dict[str, dict[str, dict[str, object]]] = {}
 
@@ -214,18 +281,22 @@ def _patch_save_voice(app_module, rt):
         variant_filename = f"prosody_{slug}.wav"
         # Persist a real variant file so the existing variant-audio GET / promote /
         # delete / variants-list endpoints resolve it exactly as they do for the real
-        # library (they all read _voice_dir(voice_id) / variant_filename). The fake
-        # tier fabricates audio everywhere, so a deterministic tiny silent WAV is the
-        # honest stand-in for the baked prosody output.
+        # library (they all read _voice_dir(voice_id) / variant_filename). Copy the
+        # voice's own reference audio so the variant's waveform and metrics describe
+        # real signal; only fall back to silence when the voice has no audio at all.
         voice_dir = _fake_voice_dir(voice_id)
         variant_file = voice_dir / variant_filename
         if not variant_file.is_file():
-            samples = np.zeros(_SAMPLE_RATE // 4, dtype=np.int16)
-            with wave.open(str(variant_file), "wb") as wav_writer:
-                wav_writer.setnchannels(1)
-                wav_writer.setsampwidth(2)
-                wav_writer.setframerate(_SAMPLE_RATE)
-                wav_writer.writeframes(samples.tobytes())
+            master_audio = fake_library.wav_bytes.get(voice_id)
+            if master_audio:
+                variant_file.write_bytes(master_audio)
+            else:
+                samples = np.zeros(_SAMPLE_RATE // 4, dtype=np.int16)
+                with wave.open(str(variant_file), "wb") as wav_writer:
+                    wav_writer.setnchannels(1)
+                    wav_writer.setsampwidth(2)
+                    wav_writer.setframerate(_SAMPLE_RATE)
+                    wav_writer.writeframes(samples.tobytes())
         variants_meta.setdefault(voice_id, {})[slug] = {
             "filename": variant_filename,
             "label": f"{style_preset} {pace_multiplier}x",
@@ -236,17 +307,13 @@ def _patch_save_voice(app_module, rt):
 
     app_module.voice_library._is_valid_voice_id = _fake_is_valid_voice_id
     app_module.voice_library._voice_dir = _fake_voice_dir
-    def _fake_get_prosody_adjusted_wav(_voice_id: str, *_args, **_kwargs):
-        # One second of deterministic silence is enough for the UI to render an adjusted
-        # lane. Honor the real signature's return_plan flag: 2-tuple by default,
-        # 3-tuple (with plan) when the caller asks for one.
-        wav = np.zeros(_SAMPLE_RATE, dtype=np.float32)
-        if _kwargs.get("return_plan"):
-            return wav, _SAMPLE_RATE, []
-        return wav, _SAMPLE_RATE
+    # get_prosody_adjusted_wav is deliberately NOT patched: it is pure audio_post +
+    # forced alignment over the voice's own master audio, so with real fixture audio
+    # materialized in _fake_voice_dir it runs for real — producing a genuine adjusted
+    # waveform and a genuine pause plan (markers, manufactured gaps) instead of the
+    # fabricated silence + empty plan the UI previously had nothing to render from.
     app_module.voice_library._load_variants_meta = _fake_load_variants_meta
     app_module.voice_library.save_prosody_variant = _fake_save_prosody_variant
-    app_module.voice_library.get_prosody_adjusted_wav = _fake_get_prosody_adjusted_wav
     def _write_silent_wav(path: pathlib.Path, seconds: float = 0.25) -> None:
         samples = np.zeros(int(_SAMPLE_RATE * seconds), dtype=np.int16)
         with wave.open(str(path), "wb") as wav_writer:
@@ -296,20 +363,35 @@ def _patch_save_voice(app_module, rt):
 
 
 def _seed_fake_voice_library(rt):
-    """Load the capture-data voice fixtures into the in-memory fake library."""
+    """Load the capture-data voice fixtures into the in-memory fake library.
+
+    Each fixture directory ships its real ``original.wav`` alongside ``meta.json``;
+    those bytes are loaded too, so the fake tier serves genuine audio to the
+    waveform/alignment/prosody surfaces instead of fabricating silence.
+    """
     fixtures_dir = Path(__file__).resolve().parent / "capture-data" / "voices"
     if not fixtures_dir.is_dir():
         return
     metas = []
+    audio_by_voice_id: dict[str, bytes] = {}
     for entry in sorted(fixtures_dir.iterdir()):
         meta_path = entry / "meta.json"
         if not meta_path.is_file():
             continue
         try:
-            metas.append(json.loads(meta_path.read_text(encoding="utf-8")))
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-    rt.voice_library.seed(metas)
+        metas.append(meta)
+        for name in ("original.wav", "current.wav", "reference.wav"):
+            wav_path = entry / name
+            if wav_path.is_file():
+                try:
+                    audio_by_voice_id[meta["voice_id"]] = wav_path.read_bytes()
+                except OSError:
+                    pass
+                break
+    rt.voice_library.seed(metas, audio_by_voice_id)
 
 def _seed_fake_segment_library() -> None:
     """Seed disposable segment metadata/audio for every fake-server launcher."""

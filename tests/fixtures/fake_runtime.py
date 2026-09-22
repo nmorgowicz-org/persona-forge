@@ -137,12 +137,20 @@ class FakeVoiceLibrary:
             sibling["is_default"] = sibling["voice_id"] == voice_id
         return meta
 
-    def seed(self, metas):
-        """Pre-populate the in-memory library from fixture metadata (dicts)."""
+    def seed(self, metas, audio_by_voice_id=None):
+        """Pre-populate the in-memory library from fixture metadata (dicts).
+
+        ``audio_by_voice_id`` carries the real reference WAV bytes for each seeded
+        voice. Silence is only the last-resort stand-in: waveform lanes, forced
+        alignment and prosody planning all read this audio, so fabricating silence
+        for a voice that ships real fixture audio blanks every downstream surface
+        (empty waveform, zero-length word boundaries, no pause markers).
+        """
         for meta in metas:
             voice_id = meta["voice_id"]
             self.voices[voice_id] = dict(meta)
-            self.wav_bytes[voice_id] = _make_silent_wav()
+            audio = (audio_by_voice_id or {}).get(voice_id)
+            self.wav_bytes[voice_id] = audio if audio else _make_silent_wav()
 
     def __len__(self):
         return len(self.voices)
@@ -258,6 +266,14 @@ class FakeModelRuntime:
     _active_jobs: Dict[str, _FakeJobState]
     _active_jobs_lock: threading.Lock
     executor: ThreadPoolExecutor
+
+    # Reported by health_state() the way model.get_app_version() reports the real one;
+    # tests may override it to exercise the sidebar's version badge.
+    app_version: str
+
+    # Installed on this instance by install() (bound onto the _FakeModule proxy as well),
+    # so it exists only after install() has run — declared here for static checkers.
+    get_job_progress: Callable[[str], Optional[Dict[str, Any]]]
  
     def __init__(
         self,
@@ -281,6 +297,7 @@ class FakeModelRuntime:
         self._startup_error: Optional[str] = (
             "fake startup error" if startup_failed else None
         )
+        self.app_version = "0.0.0-fake"
         self.omnivoice_engine = FakeOmniVoiceEngine()
         self.voice_library = FakeVoiceLibrary()
  
@@ -394,6 +411,11 @@ class FakeModelRuntime:
                 "model_loaded": rt._model_loaded,
                 "base_load_in_progress": rt._base_load_in_progress,
                 "backend": rt.tts_backend,
+                # Parity with model.health_state(): the sidebar's version badge reads
+                # this field and renders the literal "vLoading..." placeholder without
+                # it, so every captured screenshot showed a loading string instead of a
+                # version. Real deployments report APP_VERSION / a dev SHA / __version__.
+                "version": rt.app_version,
             }
             # app.py reads model._service_started and adds loading_message itself,
             # but we include it here for direct model-level callers.
@@ -492,7 +514,7 @@ class FakeModelRuntime:
             })
             if rt.generate_should_fail:
                 raise RuntimeError("fake generate error")
-            wav = np.zeros(480, dtype=np.float32)
+            wav = rt.stand_in_audio()
             job_id = kwargs.get("job_id")
             created_here = job_id is None
             if created_here:
@@ -573,10 +595,14 @@ class FakeModelRuntime:
             if rt.async_jobs_complete_immediately:
                 job.status = "completed"
                 job.frames_generated = 60
+                # The audio endpoint serves job.wav (the _FakeJobState), not this progress
+                # dict — leaving it at the zero-length default made every async generation
+                # render as a 0.0s flat waveform no matter what this dict held.
+                job.wav = rt.stand_in_audio()
                 rt.jobs[job_id]["status"] = "completed"
                 rt.jobs[job_id]["frames_generated"] = 60
                 rt.jobs[job_id]["progress_pct"] = 100.0
-                rt.jobs[job_id]["wav"] = _make_silent_wav(2400)
+                rt.jobs[job_id]["wav"] = rt.stand_in_wav_bytes()
 
             return job
 
@@ -700,6 +726,53 @@ class FakeModelRuntime:
         self._model_loaded = False
         self.model = None
 
+    def stand_in_audio(self, min_samples: int = 480) -> np.ndarray:
+        """Real fixture audio standing in for synthesized speech.
+
+        The fake tier fabricates *inference*, not signal: returning zeros made every
+        generated take render as a flat, zero-length waveform, so a capture of the
+        Speak result showed nothing while claiming to show generated audio. Falls back
+        to silence only when no fixture audio has been seeded.
+        """
+        for wav_bytes in self.voice_library.wav_bytes.values():
+            if not wav_bytes:
+                continue
+            try:
+                with wave.open(io.BytesIO(wav_bytes), "rb") as reader:
+                    frames = reader.readframes(reader.getnframes())
+                    channels = reader.getnchannels()
+                    width = reader.getsampwidth()
+                    rate = reader.getframerate()
+            except (OSError, wave.Error):
+                continue
+            if width != 2 or not frames:
+                continue
+            samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+            if channels > 1:
+                samples = samples.reshape(-1, channels).mean(axis=1)
+            if rate != 24000:
+                target_len = max(1, int(round(samples.size * 24000 / rate)))
+                samples = np.interp(
+                    np.linspace(0.0, samples.size - 1.0, target_len),
+                    np.arange(samples.size),
+                    samples,
+                ).astype(np.float32)
+            if samples.size >= min_samples:
+                return samples
+        return np.zeros(min_samples, dtype=np.float32)
+
+    def stand_in_wav_bytes(self, min_samples: int = 480) -> bytes:
+        """``stand_in_audio`` as PCM16 WAV bytes, for the job paths that store bytes."""
+        samples = self.stand_in_audio(min_samples=min_samples)
+        pcm = np.clip(samples, -1.0, 1.0)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as writer:
+            writer.setnchannels(1)
+            writer.setsampwidth(2)
+            writer.setframerate(24000)
+            writer.writeframes((pcm * 32767.0).astype(np.int16).tobytes())
+        return buf.getvalue()
+
     def load_model(self, profile: Optional[str] = None) -> None:
         self.load_model_calls.append({"profile": profile})
         self._model_loaded = True
@@ -731,10 +804,13 @@ class FakeModelRuntime:
             self.jobs[job_id]["status"] = status
         if status == "completed":
             job.frames_generated = 60
+            # job.wav is what /generate/job/<id>/audio serves; keep it in step with the
+            # progress dict so a completed job is never a zero-length flat render.
+            job.wav = self.stand_in_audio()
             if job_id in self.jobs:
                 self.jobs[job_id]["frames_generated"] = 60
                 self.jobs[job_id]["progress_pct"] = 100.0
-                self.jobs[job_id]["wav"] = _make_silent_wav(2400)
+                self.jobs[job_id]["wav"] = self.stand_in_wav_bytes()
         return True
 
 

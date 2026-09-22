@@ -193,6 +193,7 @@ export default async function (ctx) {
 
     // INTENT: Show the hero result — Original vs Adjusted waveforms with
     // pause markers (cyan diamonds and teal shaded regions) and word labels
-    // on the original lane showing where pauses were placed.
-    await captureShot(page, 'prosody-adjustment-calm-adjusted.png', { scrollToSelector: '[data-testid="voice-card"]' });
+    // on the original lane showing where pauses were placed. Centered on the
+    // A/B strip itself, since the lanes + ruler + markers are the subject.
+    await captureShot(page, 'prosody-adjustment-calm-adjusted.png', { scrollToSelector: '[data-testid="alignment-compare"]' });
 }

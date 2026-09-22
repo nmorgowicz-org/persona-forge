@@ -25,19 +25,21 @@ export function ProsodyEditorPanel({ voice, layout, onChanged }: ProsodyEditorPa
         </div>
       </div>
       <ProsodyVariantsList editor={editor} layout={layout} />
-      {editor.preview && (
-        <AlignmentCompare
-          voiceId={voice.voice_id}
-          adjustedBase64={editor.preview.audioBase64}
-          adjustedSampleCount={editor.preview.sampleCount}
-          boundaryPlan={editor.preview.plan}
-          boundaries={editor.alignBoundaries}
-          overrides={editor.targetOverrides}
-          onNudgeTarget={editor.previewBusy ? undefined : editor.nudgeTarget}
-          onResetTarget={editor.previewBusy ? undefined : editor.resetTarget}
-          stylePreset={editor.stylePreset}
-        />
-      )}
+      {/* Mounted unconditionally: with no preview yet this renders the ORIGINAL lane
+          alone (waveform, transport, word labels), so the workspace is a waveform
+          surface from the moment a voice is selected instead of only after Preview.
+          Matches VoiceLibraryPage's always-visible strip. */}
+      <AlignmentCompare
+        voiceId={voice.voice_id}
+        adjustedBase64={editor.preview?.audioBase64 ?? null}
+        adjustedSampleCount={editor.preview?.sampleCount ?? null}
+        boundaryPlan={editor.preview?.plan ?? []}
+        boundaries={editor.alignBoundaries}
+        overrides={editor.targetOverrides}
+        onNudgeTarget={editor.previewBusy ? undefined : editor.nudgeTarget}
+        onResetTarget={editor.previewBusy ? undefined : editor.resetTarget}
+        stylePreset={editor.preview ? editor.stylePreset : undefined}
+      />
       <ProsodyControls editor={editor} layout={layout} />
     </section>
   )

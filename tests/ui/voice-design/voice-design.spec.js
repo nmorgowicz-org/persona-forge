@@ -4,6 +4,8 @@ test.describe('voice design', () => {
   test('describing and generating a voice saves it to the library', async ({ page }) => {
     await page.goto('/')
     await page.getByTestId('nav-voice-design').click()
+    // OmniVoice is the default engine; this flow exercises the Qwen VoiceDesign panel.
+    await page.getByTestId('engine-qwen').click()
 
     await page.getByTestId('voice-design-description').fill('Warm, calm narrator with a slight British accent.')
     await page.getByTestId('voice-design-sample-text').fill('This is a short sample line for the voice.')
@@ -21,7 +23,27 @@ test.describe('voice design', () => {
   test('generate button is disabled until both description and sample text are set', async ({ page }) => {
     await page.goto('/')
     await page.getByTestId('nav-voice-design').click()
+    await page.getByTestId('engine-qwen').click()
     await expect(page.getByTestId('voice-design-generate-button')).toBeDisabled()
+  })
+
+  test('OmniVoice is the default engine on a Qwen backend', async ({ page }) => {
+    // The design engine is a voice-design concern, not a serving-backend one: pocket-tts
+    // stays the default for cloning/serving, while voice design always opens on OmniVoice
+    // (the only accent-capable engine). A Qwen backend must not pull the default back to
+    // Qwen VoiceDesign.
+    await page.route('**/health', async (route) => {
+      const response = await route.fetch()
+      const body = await response.json()
+      await route.fulfill({
+        response,
+        json: { ...body, backend: 'pytorch', resolved_backend: 'pytorch' },
+      })
+    })
+    await page.goto('/')
+    await page.getByTestId('nav-voice-design').click()
+    await expect(page.getByTestId('omnivoice-instruct')).toBeVisible({ timeout: 15000 })
+    await expect(page.getByTestId('voice-design-description')).toHaveCount(0)
   })
 
   test('stitched preview is discarded when a take changes so Save cannot persist an unauditioned plan', async ({ page }) => {

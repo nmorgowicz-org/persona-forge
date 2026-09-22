@@ -68,6 +68,9 @@ Primary purpose: design a new voice using either:
 
 Key behaviors:
 - EngineSelector toggles between qwen / omnivoice.
+- Default engine is always **OmniVoice**: voice design is a design-time concern, not a serving
+  concern, so it is not coupled to `TTS_BACKEND` (`pocket_tts` stays the default for
+  cloning/serving). A user's explicit choice persists for the session.
 - On mount:
   - If an EditingVoice is set in store (from VoiceLibraryPage "Edit"), consumes it once into the panel, then clears from store.
 - Qwen panel (VoiceDesignPanel):
@@ -250,8 +253,13 @@ From StitchStudioPage:
 ### 3.5 Voice Edit
 
 1. Choose a saved voice; a Stitch Studio deep link chooses it automatically.
-2. Preview an adjustment, save it as a non-active variant, then promote it explicitly when ready.
-3. Voice Library and Voice Edit read the same persisted variant list.
+2. The `AlignmentCompare` A/B strip mounts as soon as a voice is selected — with no preview yet
+   it renders the ORIGINAL lane alone (waveform, transport, word labels), so the workspace is a
+   waveform surface from the start rather than a bare form.
+3. Preview an adjustment: the ADJUSTED lane appears below ORIGINAL, with cut markers and the
+   manufactured-pause band, on one shared time ruler.
+4. Save the take as a non-active variant, then promote it explicitly when ready.
+5. Voice Library and Voice Edit read the same persisted variant list.
 
 ## 4. Global state and key stores (store.ts)
 

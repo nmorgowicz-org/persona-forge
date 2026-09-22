@@ -94,6 +94,22 @@ reference clip:
 
 </td>
 </tr>
+<tr>
+<td width="50%">
+
+**Voice Edit prosody A/B** — original and adjusted takes on one ruler, with pause markers you can drag
+
+![Voice Edit prosody A/B](docs/screenshots/voice-edit--neutral--prosody-ab.png)
+
+</td>
+<td width="50%">
+
+**Accent audition** — compare takes per segment before stitching
+
+![OmniVoice candidates](docs/screenshots/omnivoice-audition--omnivoice--audition-candidates.png)
+
+</td>
+</tr>
 </table>
 
 ---
