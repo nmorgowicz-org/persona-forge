@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.5.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.13...persona-forge-v1.5.0) (2026-09-22)
+
+
+### Features
+
+* **stitch-studio:** overhaul Stitch Studio, Voice Library, and Voice Edit UX ([471a97c](https://github.com/nmorgowicz-org/persona-forge/commit/471a97cffa8f1deab9037258e67125e21fc9680b))
+
+
+### Bug Fixes
+
+* **frontend:** resolve dual-blind review findings for Stitch Studio ([471a97c](https://github.com/nmorgowicz-org/persona-forge/commit/471a97cffa8f1deab9037258e67125e21fc9680b))
+* **frontend:** resolve round-2 dual-blind review findings ([471a97c](https://github.com/nmorgowicz-org/persona-forge/commit/471a97cffa8f1deab9037258e67125e21fc9680b))
+
+
+### Documentation
+
+* regenerate README screenshots for the Stitch Studio overhaul ([471a97c](https://github.com/nmorgowicz-org/persona-forge/commit/471a97cffa8f1deab9037258e67125e21fc9680b))
+
+
+### Miscellaneous Chores
+
+* **deps:** update astral-sh/setup-uv action to v10.2.0 ([#308](https://github.com/nmorgowicz-org/persona-forge/issues/308)) ([f7f0f7f](https://github.com/nmorgowicz-org/persona-forge/commit/f7f0f7fa43d296b80883cfbe8458086ef0a99c6f))
+* **deps:** update dependency @types/node to v24.13.6 ([#309](https://github.com/nmorgowicz-org/persona-forge/issues/309)) ([e00abef](https://github.com/nmorgowicz-org/persona-forge/commit/e00abef911b1f1d64b16b5ad80ef05e2ad63aa37))
+* **deps:** update dependency lucide-react to v1.47.0 ([#305](https://github.com/nmorgowicz-org/persona-forge/issues/305)) ([1c29efe](https://github.com/nmorgowicz-org/persona-forge/commit/1c29efef667aff016d8a4f77609d38ca9e85d724))
+
 ## [1.4.13](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.12...persona-forge-v1.4.13) (2026-09-19)
 
 
