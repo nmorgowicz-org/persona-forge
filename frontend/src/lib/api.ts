@@ -1035,11 +1035,12 @@ export async function getStitchPacingTargets(params: {
   return res.json()
 }
 
-export async function renderStitchPlan(plan: StitchPlanPayload): Promise<Blob> {
+export async function renderStitchPlan(plan: StitchPlanPayload, signal?: AbortSignal): Promise<Blob> {
   const res = await fetch('/omnivoice/stitch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ stitch_plan: serializeStitchPlan(plan) }),
+    signal,
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.blob()

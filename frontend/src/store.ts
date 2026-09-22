@@ -15,8 +15,15 @@ import {
 } from './lib/experienceLevel'
 import type { ChipSelections } from './lib/voiceDesignChips'
 import type { OmniVoiceSelections } from './lib/omnivoiceChips'
+import {
+  reorderStitchPlan,
+  removeClipFromStitchPlan,
+  type StitchPlanState,
+  type StitchRegionEdit,
+  type StitchRegionEditsByClip,
+} from './lib/stitchPlan'
 
-export type Page = 'wizard' | 'speak' | 'voice-design' | 'voice-library' | 'stitch-studio' | 'integrations' | 'runtime'
+export type Page = 'wizard' | 'speak' | 'voice-design' | 'voice-library' | 'voice-edit' | 'stitch-studio' | 'integrations' | 'runtime'
 export type DesignEngine = 'qwen' | 'omnivoice'
 
 export interface ActivityStatus {
@@ -318,9 +325,11 @@ interface StoreState {
   ovStitchPlanPaddingMs: number[]
   ovStitchPlanDsp: StitchPlanDsp
   ovStitchEditorOpen: boolean
-  ovStitchPreviewUrl: string | null
-  ovStitchPreviewBlob: Blob | null
-  ovIsRenderingPreview: boolean
+  /** Single clip to splice into the quick-insert draft's initial plan, in addition to
+   * whatever is already in the store-backed plan. Null when the caller already wrote its own
+   * (possibly multi-clip) plan directly into the store before opening. */
+  ovStitchEditorIncomingClip: StitchPlanClip | null
+  ovStitchRegionEditsByClip: StitchRegionEditsByClip
 
   setOvStitchPlanClips: (
     updater:
@@ -330,14 +339,23 @@ interface StoreState {
   reorderOvStitchPlanClip: (fromIndex: number, toIndex: number) => void
   updateOvStitchPlanClip: (clipId: string, patch: Partial<StitchPlanClip>) => void
   removeOvStitchPlanClip: (clipId: string) => void
+  /** Atomically replaces the entire durable plan (clips + padding + DSP + region edits)
+   * in one zustand `set` call -- used by session commits and Start Over. */
+  replaceOvStitchPlan: (plan: StitchPlanState) => void
+  setOvStitchRegionEdits: (clipId: string, edits: StitchRegionEdit[]) => void
   setOvStitchPlanPaddingAt: (gapIndex: number, ms: number) => void
   setOvStitchPlanPaddingMs: (v: number[]) => void
   setOvStitchPlanDsp: (patch: Partial<StitchPlanDsp>) => void
-  setOvStitchEditorOpen: (v: boolean) => void
-  setOvStitchPreviewUrl: (v: string | null) => void
-  setOvStitchPreviewBlob: (v: Blob | null) => void
-  setOvIsRenderingPreview: (v: boolean) => void
+  /** Atomically opens the quick-insert modal with its incoming-clip metadata -- the only
+   * supported way to open it (no bare boolean setter, so callers can't forget the metadata
+   * that makes the draft session correct). */
+  openOvStitchEditor: (opts: { incomingClip?: StitchPlanClip | null }) => void
+  closeOvStitchEditor: () => void
 }
+
+// Element to restore focus to when the quick-insert stitch editor closes (see
+// openOvStitchEditor/closeOvStitchEditor below).
+let lastFocusedBeforeStitchEditor: HTMLElement | null = null
 
 const initialTheme = loadStoredTheme()
 applyTheme(initialTheme)
@@ -522,6 +540,7 @@ export const useAppStore = create<StoreState>((set) => ({
     // Stitch editor
     ovStitchPlanClips: [],
     ovStitchPlanPaddingMs: [],
+    ovStitchRegionEditsByClip: {},
     ovStitchPlanDsp: {
       segmentTargetDbfs: -20,
       finalTargetDbfs: -18,
@@ -535,9 +554,7 @@ export const useAppStore = create<StoreState>((set) => ({
       pauseOffsetMs: 0,
     },
     ovStitchEditorOpen: false,
-    ovStitchPreviewUrl: null,
-    ovStitchPreviewBlob: null,
-    ovIsRenderingPreview: false,
+    ovStitchEditorIncomingClip: null,
 
   setOvSelections: (updater) =>
     set((s) => ({
@@ -628,10 +645,17 @@ export const useAppStore = create<StoreState>((set) => ({
     })),
   reorderOvStitchPlanClip: (fromIndex, toIndex) =>
     set((s) => {
-      const clips = [...s.ovStitchPlanClips]
-      const [moved] = clips.splice(fromIndex, 1)
-      clips.splice(toIndex, 0, moved)
-      return { ovStitchPlanClips: clips }
+      const next = reorderStitchPlan(
+        {
+          clips: s.ovStitchPlanClips,
+          paddingMs: s.ovStitchPlanPaddingMs,
+          dsp: s.ovStitchPlanDsp,
+          regionEditsByClip: s.ovStitchRegionEditsByClip,
+        },
+        fromIndex,
+        toIndex,
+      )
+      return { ovStitchPlanClips: next.clips }
     }),
   updateOvStitchPlanClip: (clipId, patch) =>
     set((s) => ({
@@ -641,21 +665,42 @@ export const useAppStore = create<StoreState>((set) => ({
     })),
   removeOvStitchPlanClip: (clipId) =>
     set((s) => {
-      const idx = s.ovStitchPlanClips.findIndex((c) => c.clipId === clipId)
-      if (idx === -1) return {}
-      const clips = s.ovStitchPlanClips.filter((c) => c.clipId !== clipId)
-      // Removing a clip merges its two adjacent gaps into one — drop the gap that
-      // followed it (or, if it was last, the one that preceded it) so the padding
-      // array stays aligned to clips.length - 1; otherwise every later gap index
-      // silently points at the wrong boundary.
-      const pad = [...s.ovStitchPlanPaddingMs]
-      if (idx < pad.length) pad.splice(idx, 1)
-      else if (idx - 1 >= 0) pad.splice(idx - 1, 1)
-      return { ovStitchPlanClips: clips, ovStitchPlanPaddingMs: pad }
+      const next = removeClipFromStitchPlan(
+        {
+          clips: s.ovStitchPlanClips,
+          paddingMs: s.ovStitchPlanPaddingMs,
+          dsp: s.ovStitchPlanDsp,
+          regionEditsByClip: s.ovStitchRegionEditsByClip,
+        },
+        clipId,
+      )
+      return {
+        ovStitchPlanClips: next.clips,
+        ovStitchPlanPaddingMs: next.paddingMs,
+        ovStitchRegionEditsByClip: next.regionEditsByClip,
+      }
+    }),
+  setOvStitchRegionEdits: (clipId, edits) =>
+    set((s) => {
+      const next = { ...s.ovStitchRegionEditsByClip }
+      if (edits.length) next[clipId] = edits
+      else delete next[clipId]
+      return { ovStitchRegionEditsByClip: next }
+    }),
+  replaceOvStitchPlan: (plan) =>
+    set({
+      ovStitchPlanClips: plan.clips,
+      ovStitchPlanPaddingMs: plan.paddingMs,
+      ovStitchPlanDsp: plan.dsp,
+      ovStitchRegionEditsByClip: plan.regionEditsByClip,
     }),
   setOvStitchPlanPaddingAt: (gapIndex, ms) =>
     set((s) => {
       const pad = [...s.ovStitchPlanPaddingMs]
+      // Grow a short padding array with 0s first: a direct assignment to an out-of-range
+      // index would leave a sparse array ([,,250]) whose holes serialize as null in the
+      // stitch payload, which the backend rejects.
+      while (pad.length <= gapIndex) pad.push(0)
       pad[gapIndex] = ms
       return { ovStitchPlanPaddingMs: pad }
     }),
@@ -664,10 +709,28 @@ export const useAppStore = create<StoreState>((set) => ({
     set((s) => ({
       ovStitchPlanDsp: { ...s.ovStitchPlanDsp, ...patch },
     })),
-  setOvStitchEditorOpen: (v) => set({ ovStitchEditorOpen: v }),
-  setOvStitchPreviewUrl: (v) => set({ ovStitchPreviewUrl: v }),
-  setOvStitchPreviewBlob: (v) => set({ ovStitchPreviewBlob: v }),
-  setOvIsRenderingPreview: (v) => set({ ovIsRenderingPreview: v }),
+  openOvStitchEditor: (opts) => {
+    // Radix's own close-autofocus restore doesn't reliably fire when the whole modal subtree
+    // unmounts synchronously with the close (our editor is conditionally rendered, not kept
+    // mounted with a closed Dialog) -- capture/restore focus ourselves instead.
+    lastFocusedBeforeStitchEditor = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    set({
+      ovStitchEditorOpen: true,
+      ovStitchEditorIncomingClip: opts.incomingClip ?? null,
+    })
+  },
+  closeOvStitchEditor: () => {
+    set({
+      ovStitchEditorOpen: false,
+      ovStitchEditorIncomingClip: null,
+    })
+    // Deferred past the current tick: Radix's own FocusScope unmount cleanup runs a moment
+    // after this synchronous call (as the dialog subtree actually unmounts) and would
+    // otherwise steal focus back after we restore it.
+    const toFocus = lastFocusedBeforeStitchEditor
+    lastFocusedBeforeStitchEditor = null
+    setTimeout(() => toFocus?.focus(), 0)
+  },
 }))
 
 // ---- Store-level polling: survives unmounts ----

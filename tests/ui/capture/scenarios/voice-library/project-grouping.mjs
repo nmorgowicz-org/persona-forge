@@ -7,8 +7,8 @@ export default async function (ctx) {
     await page.click('[data-testid="nav-voice-library"]');
     await page.waitForSelector('[data-testid="voice-library-group-by-project"]');
     await page.click('[data-testid="voice-library-group-by-project"]');
+    await page.click('[data-testid="voice-library-tab-segments"]');
     await page.waitForSelector('[data-testid="segment-project-group"]');
-    await page.waitForSelector('[data-testid="alignment-compare"]');
     const group = await page.$('[data-testid="segment-project-group"]');
     await page.evaluate((el) => el.scrollIntoView({ block: 'center', behavior: 'instant' }), group);
     await page.waitForFunction(

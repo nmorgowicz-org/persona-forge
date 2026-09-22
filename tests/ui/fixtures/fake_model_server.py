@@ -22,6 +22,8 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+import shutil
+import wave
 import os
 import random
 import secrets
@@ -200,8 +202,97 @@ def _patch_save_voice(app_module, rt):
         d = _fake_dir_parent / voice_id
         d.mkdir(parents=True, exist_ok=True)
         return d
+    variants_meta: dict[str, dict[str, dict[str, object]]] = {}
+
+    def _fake_load_variants_meta(voice_id: str) -> dict[str, dict[str, object]]:
+        return variants_meta.get(voice_id, {})
+
+    def _fake_save_prosody_variant(voice_id: str, *, style_preset: str, pace_multiplier: float = 1.0, **_kwargs):
+        if voice_id not in fake_library.voices:
+            return None
+        slug = f"{style_preset.lower()}-{len(variants_meta.get(voice_id, {})) + 1}"
+        variant_filename = f"prosody_{slug}.wav"
+        # Persist a real variant file so the existing variant-audio GET / promote /
+        # delete / variants-list endpoints resolve it exactly as they do for the real
+        # library (they all read _voice_dir(voice_id) / variant_filename). The fake
+        # tier fabricates audio everywhere, so a deterministic tiny silent WAV is the
+        # honest stand-in for the baked prosody output.
+        voice_dir = _fake_voice_dir(voice_id)
+        variant_file = voice_dir / variant_filename
+        if not variant_file.is_file():
+            samples = np.zeros(_SAMPLE_RATE // 4, dtype=np.int16)
+            with wave.open(str(variant_file), "wb") as wav_writer:
+                wav_writer.setnchannels(1)
+                wav_writer.setsampwidth(2)
+                wav_writer.setframerate(_SAMPLE_RATE)
+                wav_writer.writeframes(samples.tobytes())
+        variants_meta.setdefault(voice_id, {})[slug] = {
+            "filename": variant_filename,
+            "label": f"{style_preset} {pace_multiplier}x",
+            "source": "prosody",
+            "created_at": time.time(),
+        }
+        return {**fake_library.voices[voice_id], "variant_id": f"{voice_id}.{slug}", "variant_slug": slug}
+
     app_module.voice_library._is_valid_voice_id = _fake_is_valid_voice_id
     app_module.voice_library._voice_dir = _fake_voice_dir
+    def _fake_get_prosody_adjusted_wav(_voice_id: str, *_args, **_kwargs):
+        # One second of deterministic silence is enough for the UI to render an adjusted
+        # lane. Honor the real signature's return_plan flag: 2-tuple by default,
+        # 3-tuple (with plan) when the caller asks for one.
+        wav = np.zeros(_SAMPLE_RATE, dtype=np.float32)
+        if _kwargs.get("return_plan"):
+            return wav, _SAMPLE_RATE, []
+        return wav, _SAMPLE_RATE
+    app_module.voice_library._load_variants_meta = _fake_load_variants_meta
+    app_module.voice_library.save_prosody_variant = _fake_save_prosody_variant
+    app_module.voice_library.get_prosody_adjusted_wav = _fake_get_prosody_adjusted_wav
+    def _write_silent_wav(path: pathlib.Path, seconds: float = 0.25) -> None:
+        samples = np.zeros(int(_SAMPLE_RATE * seconds), dtype=np.int16)
+        with wave.open(str(path), "wb") as wav_writer:
+            wav_writer.setnchannels(1)
+            wav_writer.setsampwidth(2)
+            wav_writer.setframerate(_SAMPLE_RATE)
+            wav_writer.writeframes(samples.tobytes())
+
+    def _fake_set_active_variant(voice_id: str, variant_filename: str | None = None) -> bool:
+        # Mirrors the real promote semantics (voice_library.set_active_variant) against
+        # the in-memory library + fake voice dir, so the /set-active-variant endpoint,
+        # the variants list's current.wav resolution, and the metrics refresh all
+        # behave like production instead of raising KeyError inside the real
+        # analyze_reference (real get_voice is patched out and has no wav_path).
+        if voice_id not in fake_library.voices:
+            return False
+        voice_dir = _fake_voice_dir(voice_id)
+        original = voice_dir / "original.wav"
+        if not original.is_file():
+            _write_silent_wav(original)
+        current = voice_dir / "current.wav"
+        try:
+            if current.exists() or current.is_symlink():
+                current.unlink()
+            target = voice_dir / variant_filename if variant_filename else original
+            if not target.is_file():
+                return False
+            current.symlink_to(target)
+        except OSError:
+            return False
+        meta = fake_library.voices[voice_id]
+        meta["metrics"] = {}
+        meta["quality_score"] = 100.0
+        meta["quality_warnings"] = []
+        meta["needs_review"] = False
+        return True
+
+    def _fake_analyze_reference(voice_id: str):
+        meta = fake_library.voices.get(voice_id)
+        if meta is None:
+            return None
+        meta.setdefault("metrics", {})
+        return meta
+
+    app_module.voice_library.set_active_variant = _fake_set_active_variant
+    app_module.voice_library.analyze_reference = _fake_analyze_reference
 
 
 def _seed_fake_voice_library(rt):
@@ -220,7 +311,30 @@ def _seed_fake_voice_library(rt):
             continue
     rt.voice_library.seed(metas)
 
-
+def _seed_fake_segment_library() -> None:
+    """Seed disposable segment metadata/audio for every fake-server launcher."""
+    source_dir = Path(__file__).resolve().parent / "capture-data" / "segments"
+    target_dir = Path(os.environ["SEGMENT_LIBRARY_DIR"])
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for entry in source_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        target_entry = target_dir / entry.name
+        shutil.copytree(entry, target_entry, dirs_exist_ok=True)
+        audio_path = target_entry / "clip.wav"
+        if not audio_path.is_file():
+            duration_sec = 1.0
+            try:
+                metadata = json.loads((target_entry / "meta.json").read_text(encoding="utf-8"))
+                duration_sec = max(0.1, float(metadata.get("duration_sec") or duration_sec))
+            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                pass
+            samples = np.zeros(round(_SAMPLE_RATE * duration_sec), dtype=np.int16)
+            with wave.open(str(audio_path), "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(_SAMPLE_RATE)
+                wav_file.writeframes(samples.tobytes())
 
 def _install_test_controls(app_module, rt):
     """Test-only runtime state controls for E2E specs.
@@ -299,6 +413,7 @@ def main() -> None:
     # Ensure library dirs before importing app (uses segment_library which defaults to /segments).
     os.environ.setdefault("VOICE_LIBRARY_DIR", tempfile.mkdtemp(prefix="persona-forge-e2e-voices-"))
     os.environ.setdefault("SEGMENT_LIBRARY_DIR", tempfile.mkdtemp(prefix="persona-forge-e2e-segments-"))
+    _seed_fake_segment_library()
 
     rt = _install_fake_runtime()
     _patch_generate_for_slow_async(rt)
@@ -341,6 +456,7 @@ def start_server(port: int = 18318, frontend_enabled: bool = False):
     seg_dir = tempfile.mkdtemp(prefix="persona-forge-e2e-segments-")
     os.environ.setdefault("VOICE_LIBRARY_DIR", lib_dir)
     os.environ.setdefault("SEGMENT_LIBRARY_DIR", seg_dir)
+    _seed_fake_segment_library()
 
     rt = _install_fake_runtime()
     _patch_generate_for_slow_async(rt)

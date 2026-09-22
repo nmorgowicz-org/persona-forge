@@ -52,8 +52,12 @@ export default async function (ctx) {
 
     const candidateDeadline = Date.now() + 180000;
     while (Date.now() < candidateDeadline) {
+        // $$eval (not $eval) is required here: $eval hands the callback the single
+        // matched element, which has no .length, so `els.length` was always undefined
+        // and this loop silently burned the full 180s deadline on every run regardless
+        // of how quickly a candidate actually rendered.
         const count = await page
-            .$eval('[data-testid="omnivoice-candidate-take"]', (els) => els.length)
+            .$$eval('[data-testid="omnivoice-candidate-take"]', (els) => els.length)
             .catch(() => 0);
         if (count >= 1) break;
         await new Promise((r) => setTimeout(r, 1500));
@@ -78,21 +82,23 @@ export default async function (ctx) {
     await recorder.snap(page);
 
     await page.click('[data-testid="stitch-picker-toggle-segments"]');
+    await page.waitForSelector('[data-testid="segment-browser-dialog"]');
     await page.waitForSelector('[data-testid="stitch-picker-item-segments"]');
     await page.waitForFunction(
         () => {
-            const el = document.querySelector('[data-testid="stitch-picker-item-segments"]')?.closest('.shadow-lg');
+            const el = document.querySelector('[data-testid="segment-browser-dialog"]');
             return el && getComputedStyle(el).opacity === '1';
         },
         { timeout: 5000 }
     );
     await recorder.snap(page);
 
-    // Pick two segments so the viewer sees what a multi-clip timeline looks
+    // Pick three segments so the viewer sees what a multi-clip timeline looks
     // like, not just a single lonely clip.
     const items = await page.$$('[data-testid="stitch-picker-item-segments"]');
     await items[0].click();
     if (items[1]) await items[1].click();
+    if (items[2]) await items[2].click();
     await page.click('[data-testid="stitch-picker-insert-segments"]');
     await page.waitForSelector('[data-testid="stitch-clip"]');
     // Dwell here: the segment(s) have just landed in the Stitch Studio
@@ -112,7 +118,9 @@ export default async function (ctx) {
         { timeout: 30000 }
     );
     await page.click('[data-testid="stitch-save-voice"]');
-    await page.waitForSelector('[data-testid="voice-card"]', { timeout: 60000 });
+    await page.waitForSelector('[data-testid="stitch-adjust-prosody"]', { timeout: 60000 });
+    await page.click('[data-testid="stitch-adjust-prosody"]');
+    await page.waitForSelector('[data-testid="voice-edit-page"]', { timeout: 60000 });
     // Dwell here: end on the saved-voice confirmation so the viewer has time
     // to register the outcome instead of the GIF just stopping mid-beat.
     await hold(recorder, page, 3);

@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/store'
 import { StitchEditorInline } from '@/components/StitchTimeline'
+import { useStoreStitchPlanSession } from '@/hooks/useStitchPlanSession'
 import {
+  activateVoiceForApi,
   listOmniVoiceSegments,
   listVoices,
   saveOmniVoice,
@@ -9,7 +11,7 @@ import {
   type StitchPlanPayload,
   type VoiceMeta,
 } from '@/lib/api'
-import { insertSegmentIntoStitchTimeline, insertVoiceIntoStitchTimeline, suggestedStitchVoiceName } from '@/lib/stitchClips'
+import { insertSegmentsIntoStitchTimeline, insertVoicesIntoStitchTimeline, suggestedStitchVoiceName } from '@/lib/stitchClips'
 
 const DELIVERY_VARIANTS = [
   { kind: 'natural', name: 'Natural', hint: 'Conversational and neutral' },
@@ -39,8 +41,15 @@ export function StitchStudioPage() {
   const [name, setName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [isActivating, setIsActivating] = useState(false)
   const [deliveryVariantKind, setDeliveryVariantKind] =
     useState<DeliveryVariantKind>('natural')
+  const [useAsApiDefault, setUseAsApiDefault] = useState(false)
+  const [activationError, setActivationError] = useState<string | null>(null)
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const namePristineRef = useRef(true)
+  const previousClipCountRef = useRef(clips.length)
+  const sourceName = clips[0] ? suggestedStitchVoiceName(clips[0]) : ''
 
   const deliveryVariant = DELIVERY_VARIANTS.find(
     (variant) => variant.kind === deliveryVariantKind,
@@ -51,18 +60,33 @@ export function StitchStudioPage() {
     listVoices().then(setVoices).catch(() => {})
   }, [setVoices])
 
-  const insertFromLibrary = useCallback(async (seg: SegmentMeta) => {
-    await insertSegmentIntoStitchTimeline(seg, setError)
-  }, [])
+  useEffect(() => {
+    if (
+      previousClipCountRef.current === 0
+      && clips.length === 1
+      && namePristineRef.current
+      && sourceName
+    ) {
+      setName(sourceName)
+    }
+    previousClipCountRef.current = clips.length
+  }, [clips.length, sourceName])
 
-  const insertVoiceFromLibrary = useCallback(async (voice: VoiceMeta) => {
-    await insertVoiceIntoStitchTimeline(voice, setError)
-  }, [])
+  const session = useStoreStitchPlanSession()
+
+  const insertFromLibrary = useCallback((segs: SegmentMeta[], afterClipId: string | null) => {
+    void insertSegmentsIntoStitchTimeline(segs, session, setError, afterClipId)
+  }, [session])
+
+  const insertVoiceFromLibrary = useCallback((voices: VoiceMeta[], afterClipId: string | null) => {
+    void insertVoicesIntoStitchTimeline(voices, session, setError, afterClipId)
+  }, [session])
 
   const handleSave = useCallback(
     async (plan: StitchPlanPayload, segments: string[]) => {
       if (!name.trim()) {
         setError('Give this voice a name before saving.')
+        nameInputRef.current?.focus()
         return
       }
       try {
@@ -78,19 +102,43 @@ export function StitchStudioPage() {
         })
         setSavedVoiceId(result.voice_id)
         setDeepLinkProsodyVoiceId(result.voice_id)
-        setPage('voice-library')
+        if (useAsApiDefault) {
+          try {
+            await activateVoiceForApi(result.voice_id)
+            setActivationError(null)
+          } catch (activationErr) {
+            setActivationError(activationErr instanceof Error ? activationErr.message : String(activationErr))
+          }
+        } else {
+          setActivationError(null)
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
       } finally {
         setIsSaving(false)
       }
     },
-    [name, setSavedVoiceId, deliveryVariant, setDeepLinkProsodyVoiceId, setPage],
+    [name, setSavedVoiceId, deliveryVariant, setDeepLinkProsodyVoiceId, useAsApiDefault],
   )
-  const sourceName = clips[0] ? suggestedStitchVoiceName(clips[0]) : ''
+  const retryActivation = useCallback(async () => {
+    if (!savedVoiceId) return
+    try {
+      setIsActivating(true)
+      await activateVoiceForApi(savedVoiceId)
+      setActivationError(null)
+    } catch (activationErr) {
+      setActivationError(activationErr instanceof Error ? activationErr.message : String(activationErr))
+    } finally {
+      setIsActivating(false)
+    }
+  }, [savedVoiceId])
   const handleStartOver = useCallback(() => {
     setName('')
+    namePristineRef.current = true
+    previousClipCountRef.current = 0
     setError(null)
+    setActivationError(null)
+    setUseAsApiDefault(false)
     setSavedVoiceId(null)
   }, [setSavedVoiceId])
 
@@ -106,23 +154,33 @@ export function StitchStudioPage() {
 
       <div className="flex max-w-md flex-col gap-1.5">
         <div className="flex items-center justify-between gap-2">
-          <label className="text-xs font-medium text-muted-foreground">Name this voice</label>
+          <label htmlFor="stitch-voice-name" className="text-xs font-medium text-muted-foreground">Name this voice</label>
           {sourceName && (
-            <button
-              type="button"
-              data-testid="stitch-use-source-name"
-              onClick={() => setName(sourceName)}
-              className="text-[10px] font-medium text-cyan-300 hover:text-cyan-200"
-            >
-              Use source name
-            </button>
+            <span className="text-[10px] text-muted-foreground">
+              Suggested from first clip
+              {name !== sourceName && (
+                <button
+                  type="button"
+                  data-testid="stitch-revert-source-name"
+                  onClick={() => setName(sourceName)}
+                  className="ml-2 font-medium text-primary hover:underline"
+                >
+                  Revert to suggestion
+                </button>
+              )}
+            </span>
           )}
         </div>
         <input
+          ref={nameInputRef}
+          id="stitch-voice-name"
           type="text"
           data-testid="stitch-voice-name"
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => {
+            namePristineRef.current = false
+            setName(e.target.value)
+          }}
           placeholder="e.g. Narrator — warm AU accent"
           className="rounded-md border border-border bg-muted/40 px-3 py-1.5 text-sm text-foreground outline-none focus:border-cyan-500/50"
         />
@@ -133,22 +191,64 @@ export function StitchStudioPage() {
         onChange={setDeliveryVariantKind}
       />
 
+      <label className="flex max-w-md items-start gap-2 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          data-testid="stitch-use-as-api-default"
+          checked={useAsApiDefault}
+          onChange={(event) => setUseAsApiDefault(event.currentTarget.checked)}
+          className="mt-0.5 size-3.5 accent-primary"
+        />
+        <span>
+          Use as default for API calls
+          <span className="block text-[10px]">Saves the reference first, then activates it for API requests.</span>
+        </span>
+      </label>
+
       {error && <p className="text-xs text-destructive">{error}</p>}
       {isSaving && <p className="text-xs text-muted-foreground">Saving…</p>}
 
       <StitchEditorInline
+        surface="studio"
+        session={session}
         library={library}
         onInsertFromLibrary={insertFromLibrary}
         voiceLibrary={voices}
         onInsertVoiceFromLibrary={insertVoiceFromLibrary}
         onSave={handleSave}
         onStartOver={handleStartOver}
+        name={name}
+        saveLabel={useAsApiDefault ? 'Save & use as API default' : 'Save as reference voice'}
+        isSaving={isSaving}
+        isActivating={isActivating}
+        onFocusName={() => nameInputRef.current?.focus()}
       />
 
       {savedVoiceId && (
-        <p className="text-xs text-muted-foreground">
-          Saved to voice library as <span className="font-mono text-foreground">{savedVoiceId}</span>.
-        </p>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <p>
+            {activationError ? 'Saved, not activated' : 'Saved to voice library as'}{' '}
+            <span className="font-mono text-foreground">{savedVoiceId}</span>.
+          </p>
+          <button
+            type="button"
+            data-testid="stitch-adjust-prosody"
+            onClick={() => { setDeepLinkProsodyVoiceId(savedVoiceId); setPage('voice-edit') }}
+            className="font-medium text-primary hover:underline"
+          >
+            Adjust prosody
+          </button>
+          {activationError && (
+            <button
+              type="button"
+              data-testid="stitch-retry-api-activation"
+              onClick={() => void retryActivation()}
+              className="font-medium text-primary hover:underline"
+            >
+              Retry activation
+            </button>
+          )}
+        </div>
       )}
     </div>
   )

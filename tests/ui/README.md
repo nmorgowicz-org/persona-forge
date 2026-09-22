@@ -47,19 +47,27 @@ from `tests/ui/fixtures/capture-data/` into disposable temp dirs on every run �
   (ORIGINAL lane only — no adjustment is driven yet; see
   `docs/plans/20260709-app_roadmap_backlog.md` §8.4b for the tracked follow-up that would add an
   ADJUSTED-lane scenario and unblock the held GIF variant)
+- `prosody-adjustment` — Precise-mode Calm-preset adjustment: A/B of original vs. adjusted waveform with pause markers
+
+**Voice Edit**
+- `voice-edit` — dedicated saved-voice prosody workspace with variant save/promote controls
 
 **Stitch Studio**
 - `segment-library-browse` — the saved-segments picker panel
+- `segment-browser-scale` — the segment/voice browser scrolled through a 250-row, five-project fixture library
 - `stitch-assembly` — two clips inserted into the timeline
+- `gap-editing` — always-visible seam controls, including a 0.00s seam next to a typed 250ms seam
+- `transport-playback` — one shared transport driving the ruler playhead, arrangement toggle, and a per-clip range play button together
+- `readiness-states` — blocked, warning, ideal, and overlong reference-readiness states; source speech remains distinct from spacing
 
 **Accent Design / OmniVoice**
-- `omnivoice-audition` — live candidate generation + stitched result (requires `--source real-local`)
+- `omnivoice-audition` — live candidate generation + stitched result
 - `omnivoice-candidates` — multi-candidate grid with 2 candidates/segment
 - `omnivoice-audition-gif` — GIF of a live audition, script → generating → stitched result
 
 **Wizard (GIF)**
 - `design-to-stitch-gif` — full walkthrough: Voice Design → OmniVoice accent/script →
-  live audition → lock segment → Stitch Studio → name + insert clips → save → Voice Library
+  live audition → lock segment → Stitch Studio → name + insert clips → save → Voice Edit
 
 **Hero**
 - `hero-speak-filled` — Speak page with text entered, pre-generation

@@ -1,40 +1,45 @@
-// Shared "insert a library item into the stitch timeline" logic, used by both
-// OmniVoicePanel's stitch editor entry point and the standalone Stitch Studio page.
-import { useAppStore, type StitchPlanClip } from '@/store'
+// Shared "insert a library item into the stitch timeline" logic, used by the quick-insert
+// modal (App.tsx QuickInsertStitchEditor) and the standalone Stitch Studio page
+// (StitchStudioPage.tsx); VoiceLibraryPage.tsx builds an incoming clip directly.
+import type { StitchPlanClip } from '@/store'
 import { getSegmentAudioBase64, getVoice, type SegmentMeta, type VoiceMeta } from '@/lib/api'
+import { getClipAudioAnalysis } from '@/lib/waveform'
+import type { StitchPlanSession } from '@/hooks/useStitchPlanSession'
 
-async function decodeAudioDurationMs(audioBase64: string): Promise<number> {
-  if (typeof window === 'undefined' || !window.AudioContext) return 0
-  const ctx = new AudioContext()
-  try {
-    const byteStr = atob(audioBase64)
-    const bytes = new Uint8Array(byteStr.length)
-    for (let i = 0; i < byteStr.length; i++) bytes[i] = byteStr.charCodeAt(i)
-    const audioBuffer = await ctx.decodeAudioData(bytes.buffer.slice(0) as ArrayBuffer)
-    return Math.round(audioBuffer.duration * 1000)
-  } catch {
-    return 0
-  } finally {
-    await ctx.close()
-  }
+// Delegates to the session's atomic `insertClips`, which splices `clips` into the plan and
+// resizes `paddingMs` in a single state write (afterClipId null/omitted appends at the end).
+// Resolving the seam index inside that write is what keeps a multi-item batch from racing
+// itself or stomping on a concurrent clip/padding edit made while the batch's fetches and
+// decodes are in flight.
+function spliceStitchPlanClips(clips: StitchPlanClip[], session: StitchPlanSession, afterClipId?: string | null) {
+  if (clips.length === 0) return
+  session.insertClips(clips, afterClipId)
 }
 
-function appendStitchPlanClip(clip: StitchPlanClip) {
-  const { setOvStitchPlanClips, setOvStitchPlanPaddingAt } = useAppStore.getState()
-  setOvStitchPlanClips((prev) => {
-    const next = [...prev, clip]
-    const needed = Math.max(0, next.length - 1)
-    const current = useAppStore.getState().ovStitchPlanPaddingMs || []
-    for (let i = current.length; i < needed; i++) {
-      setOvStitchPlanPaddingAt(i, 0)
+// Runs `fn` over `items` with at most `limit` in flight, preserving input order in the
+// result. A batch insert must not fire N parallel audio fetches and N concurrent Web Audio
+// decodes at once: the 64-entry analysis LRU caches results but does not cap in-flight work.
+const INSERT_BATCH_CONCURRENCY = 3
+
+async function mapInsertBatch<T, U>(items: T[], fn: (item: T) => Promise<U>): Promise<U[]> {
+  const results = new Array<U>(items.length)
+  let next = 0
+  const worker = async () => {
+    while (true) {
+      const index = next++
+      if (index >= items.length) return
+      results[index] = await fn(items[index])
     }
-    return next
-  })
+  }
+  const workerCount = Math.min(INSERT_BATCH_CONCURRENCY, items.length)
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  return results
 }
 
 // Public shared helpers — used by:
-// - OmniVoicePanel (via insertSegmentIntoStitchTimeline / insertVoiceIntoStitchTimeline)
-// - VoiceLibraryPage (directly, plus page nav and editor open)
+// - App.tsx (QuickInsertStitchEditor, via insertSegmentsIntoStitchTimeline / insertVoicesIntoStitchTimeline)
+// - StitchStudioPage.tsx (same insert helpers, plus suggestedStitchVoiceName)
+// - VoiceLibraryPage.tsx (createStitchClipFromSegment directly, to build the incoming clip)
 export function suggestedStitchVoiceName(clip: StitchPlanClip): string {
   const source = [clip.sourceProject, clip.sourceLabel].filter(Boolean).join(' — ')
   return [source || clip.text.trim(), clip.sourceOrigin].filter(Boolean).join(' · ') || 'Stitched voice'
@@ -49,10 +54,10 @@ export async function createStitchClipFromSegment(seg: SegmentMeta): Promise<Sti
       throw new Error('No audio available for this segment')
     }
   }
-  const durationMs = await decodeAudioDurationMs(audioBase64)
+  const durationMs = (await getClipAudioAnalysis(`segment:${seg.segment_id}:${audioBase64.length}`, audioBase64)).durationMs
 
   return {
-    clipId: seg.segment_id + '-insert-' + Date.now(),
+    clipId: seg.segment_id + '-insert-' + Date.now() + '-' + crypto.randomUUID().slice(0, 8),
     ref: { segmentId: seg.segment_id },
     text: seg.text,
     sourceAudioBase64: audioBase64,
@@ -83,10 +88,10 @@ export async function createStitchClipFromVoice(voice: VoiceMeta): Promise<Stitc
     throw new Error('No audio available for this voice')
   }
 
-  const durationMs = await decodeAudioDurationMs(audioBase64)
+  const durationMs = (await getClipAudioAnalysis(`voice:${voice.voice_id}:${voice.sha256 ?? audioBase64.length}`, audioBase64)).durationMs
 
   return {
-    clipId: voice.voice_id + '-insert-' + Date.now(),
+    clipId: voice.voice_id + '-insert-' + Date.now() + '-' + crypto.randomUUID().slice(0, 8),
     ref: { voiceId: voice.voice_id },
     text: voice.description || voice.sample_text || voice.voice_id,
     sourceAudioBase64: audioBase64,
@@ -105,25 +110,29 @@ export async function createStitchClipFromVoice(voice: VoiceMeta): Promise<Stitc
   }
 }
 
-export async function insertSegmentIntoStitchTimeline(
-  seg: SegmentMeta,
+export async function insertSegmentsIntoStitchTimeline(
+  segs: SegmentMeta[],
+  session: StitchPlanSession,
   onError: (msg: string) => void,
+  afterClipId?: string | null,
 ): Promise<void> {
   try {
-    const clip = await createStitchClipFromSegment(seg)
-    appendStitchPlanClip(clip)
+    const clips = await mapInsertBatch(segs, (seg) => createStitchClipFromSegment(seg))
+    spliceStitchPlanClips(clips, session, afterClipId)
   } catch (err) {
     onError(err instanceof Error ? err.message : String(err))
   }
 }
 
-export async function insertVoiceIntoStitchTimeline(
-  voice: VoiceMeta,
+export async function insertVoicesIntoStitchTimeline(
+  voices: VoiceMeta[],
+  session: StitchPlanSession,
   onError: (msg: string) => void,
+  afterClipId?: string | null,
 ): Promise<void> {
   try {
-    const clip = await createStitchClipFromVoice(voice)
-    appendStitchPlanClip(clip)
+    const clips = await mapInsertBatch(voices, (voice) => createStitchClipFromVoice(voice))
+    spliceStitchPlanClips(clips, session, afterClipId)
   } catch (err) {
     onError(err instanceof Error ? err.message : String(err))
   }

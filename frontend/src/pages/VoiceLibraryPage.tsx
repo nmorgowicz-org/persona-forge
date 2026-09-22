@@ -3,19 +3,15 @@ import { motion } from 'motion/react'
 import {
   AlertTriangle,
   AudioWaveform,
-  Check,
   CheckCircle2,
   ChevronDown,
   FoldHorizontal,
   GitFork,
   Layers,
-  Loader2,
   Mic2,
   MoreHorizontal,
-  Pause,
   Pencil,
   Plus,
-  Play,
   Radio,
   Scissors,
   SlidersHorizontal,
@@ -37,25 +33,14 @@ import {
   activateVoiceForApi,
   warmVoice,
   analyzeVoiceReference,
-  adjustVoiceReferencePauses,
   applyVoiceReferenceRegionEdits,
-  startVoiceAlignment,
-  getVoiceAlignmentStatus,
-  cancelVoiceAlignment,
-  previewVoiceProsody,
   deleteOmniVoiceSegment,
   deleteVoice,
-  deleteVoiceVariant,
   duplicateVoice,
   getVoice,
-  getVoiceVariantAudio,
-  getVoiceVariantMetrics,
-  getVoiceVariants,
-  saveVoiceProsodyVariant,
   listOmniVoiceSegments,
   listVoices,
   normalizeVoiceReference,
-  setActiveVoiceVariant,
   setDefaultVoiceVariant,
   trimVoiceReferenceSilence,
   transcribeVoiceReference,
@@ -68,17 +53,13 @@ import {
   type SegmentMeta,
   type StitchPlanRegionEdit,
   type VoiceMeta,
-  type ProsodyMode,
-  type VoiceVariantEntry,
-  type AlignmentBoundary,
-  type ProsodyPausePlanEntry,
   type Project,
 } from '@/lib/api'
 import { hasChipSelections, type ChipSelections } from '@/lib/voiceDesignChips'
 import { MiniAudioDeck } from '@/components/audio/MiniAudioDeck'
 import { Button } from '@/components/ui/button'
 import { createStitchClipFromSegment } from '@/lib/stitchClips'
-import { useAppStore, type StitchPlanClip } from '@/store'
+import { useAppStore, type StitchPlanClip, type StitchPlanDsp } from '@/store'
 import { VariantCompare } from '@/components/VariantCompare'
 import { cn } from '@/lib/utils'
 import { InfoIcon } from '@/components/InfoIcon'
@@ -86,7 +67,11 @@ import { Badge } from '@/components/ui/badge'
 import { RegionEditor } from '@/components/waveform/RegionEditor'
 import { AlignmentCompare } from '@/components/waveform/AlignmentCompare'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useProsodyEditor } from '@/components/prosody/useProsodyEditor'
+import { ProsodyControls } from '@/components/prosody/ProsodyControls'
+import { ProsodyVariantsList } from '@/components/prosody/ProsodyVariantsList'
 
 // Radix Select forbids an empty-string item value, so "Ungrouped" needs a placeholder token
 // that gets translated back to a null project_id at the call site.
@@ -152,14 +137,6 @@ function isMountedRef(voice: VoiceMeta): boolean {
   return (voice as VoiceMeta & { source?: string }).source === MOUNTED_REF_SOURCE
 }
 
-const STYLE_DESCRIPTIONS: Record<string, string> = {
-  Neutral: 'Standard natural pacing and pauses for balanced speech.',
-  Storyteller: 'Slower, more dramatic pacing with extended pauses for narrative effect.',
-  Calm: 'Relaxed, steady pace with longer, soothing gaps between phrases.',
-  Energetic: 'Fast-paced, tight gaps and rapid delivery for a high-energy feel.',
-  Broadcast: 'Professional, clear pacing typical of news or radio announcements.',
-  Clean: 'Tight, efficient pacing that removes unnecessary gaps for a crisp result.',
-}
 
 // needs_review is set from the audio quality gate (quality_warnings) for regular saves and
 // from ASR severity for the mounted reference voice -- keep the transcript badge scoped to
@@ -780,7 +757,6 @@ function VoiceCard({
   onTrimSilence,
   onFixAll,
   onSetDefault,
-  onAdjustPauses,
   onActivateForApi,
   onApplyReferenceEdits,
   onAnalyze,
@@ -810,7 +786,6 @@ function VoiceCard({
   onTrimSilence: (voiceId: string) => Promise<void>
   onFixAll: () => void
   onSetDefault: (() => void) | null
-  onAdjustPauses: (voiceId: string, stylePreset: string, paceMultiplier: number, pauseOffset: number, mode: ProsodyMode) => Promise<void>
   onActivateForApi: () => void
   onApplyReferenceEdits: (voiceId: string, edits: StitchPlanRegionEdit[]) => Promise<void>
   onAnalyze: () => void
@@ -839,43 +814,6 @@ function VoiceCard({
   const [editingAudio, setEditingAudio] = useState(false)
   const [editorAudio, setEditorAudio] = useState<string | null>(null)
   const [regionEdits, setRegionEdits] = useState<StitchPlanRegionEdit[]>([])
-  const [stylePreset, setStylePreset] = useState('Neutral')
-  const [paceMultiplier, setPaceMultiplier] = useState(1.0)
-  const [pauseOffset, setPauseOffset] = useState(0)
-  // Processing-mode override. Auto follows triage; Natural keeps the fast energy
-  // path; Precise forces forced-alignment-directed surgical insertion (§5.5/§5.6).
-  const [processingMode, setProcessingMode] = useState<ProsodyMode>('auto')
-  // Latency-masked alignment (§5.6): the forced-alignment pass is async, so we poll
-  // a job and surface a boundary badge once it lands. `alignBoundaries === null`
-  // means "not yet run"; an empty array means "ran, no usable boundaries".
-  const [alignBusy, setAlignBusy] = useState(false)
-  const [alignBoundaries, setAlignBoundaries] = useState<AlignmentBoundary[] | null>(null)
-  const [alignError, setAlignError] = useState<string | null>(null)
-  const [alignWarning, setAlignWarning] = useState<string | null>(null)
-  const alignJobRef = useRef<{ jobId: string; cancelled: boolean } | null>(null)
-  // Original + every saved prosody variant, in one selectable list (§4/§5: the master
-  // reference is a first-class, always-visible row, not hidden behind a separate action).
-  const [entries, setEntries] = useState<VoiceVariantEntry[]>([])
-  const [activeFilename, setActiveFilename] = useState<string>('original.wav')
-  // Which variant is playing a Preview clip right now, plus the Audio element itself so a
-  // second click on the same variant stops it instead of overlapping playback.
-  const [previewingVariant, setPreviewingVariant] = useState<string | null>(null)
-  const variantPreviewAudioRef = useRef<HTMLAudioElement | null>(null)
-  const [variantBusy, setVariantBusy] = useState<string | null>(null)
-  const [prosodyBusy, setProsodyBusy] = useState(false)
-  const [savingVariantBusy, setSavingVariantBusy] = useState(false)
-  const [previewBusy, setPreviewBusy] = useState(false)
-  const [previewAudio, setPreviewAudio] = useState<{
-    url: string
-    blob: Blob
-    audioBase64: string
-    sampleCount: number
-    plan: ProsodyPausePlanEntry[]
-  } | null>(null)
-  const [previewMetrics, setPreviewMetrics] = useState<VoiceReferenceMetrics | null>(null)
-  // Per-boundary target deltas (ms) keyed by rounded at_ms — set by dragging a manufactured
-  // pause's trailing edge in the A/B view. Cleared when the preview is reset or the voice changes.
-  const [targetOverrides, setTargetOverrides] = useState<Record<string, number>>({})
   // Whether one of this card's own popovers (Adjust prosody / More actions) is open. The popover
   // content is portaled to <body> and visually overlaps the card, which steals the pointer's
   // hit-test target and makes framer-motion's whileHover think the card was left — collapsing the
@@ -909,43 +847,6 @@ function VoiceCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusOnMount])
 
-  // One place to render a prosody preview, so the Preview button and per-marker nudges
-  // stay in sync. Passing an explicit overrides map avoids stale-state races on rapid drags.
-  const runPreview = async (overrides: Record<string, number>) => {
-    setPreviewBusy(true)
-    try {
-      const data = await previewVoiceProsody(
-        voice.voice_id, stylePreset, paceMultiplier, pauseOffset, processingMode, overrides,
-      )
-      const blob = new Blob([Uint8Array.from(atob(data.audio_base64), (c) => c.charCodeAt(0))], { type: 'audio/wav' })
-      const url = URL.createObjectURL(blob)
-      setPreviewAudio({ url, blob, audioBase64: data.audio_base64, sampleCount: data.sample_count, plan: data.plan })
-      setPreviewMetrics(data.metrics)
-    } catch (err) {
-      console.error('Prosody preview failed:', err)
-    } finally {
-      setPreviewBusy(false)
-    }
-  }
-
-  // Merge an incremental target delta for one boundary and immediately re-preview.
-  const nudgeTarget = (key: string, deltaMs: number) => {
-    setTargetOverrides((prev) => {
-      const next = { ...prev, [key]: (prev[key] ?? 0) + deltaMs }
-      void runPreview(next)
-      return next
-    })
-  }
-  const resetTarget = (key: string) => {
-    setTargetOverrides((prev) => {
-      if (!(key in prev)) return prev
-      const next = { ...prev }
-      delete next[key]
-      void runPreview(next)
-      return next
-    })
-  }
-
   const [analysisExpanded, setAnalysisExpanded] = useState(() => localStorage.getItem('voice-library-analysis-expanded') !== 'false')
   const [preserveOriginal, setPreserveOriginal] = useState(true)
   const [editorVoiceId, setEditorVoiceId] = useState(voice.voice_id)
@@ -960,103 +861,27 @@ function VoiceCard({
       ? 'Review the transcript before using Qwen backends.'
       : 'Transcript is ready for Qwen backends.')
 
-  const hasTranscript = Boolean((voice.sample_text || '').trim())
   const hasWhisperReplacement = Boolean(
     whisperTranscript && whisperTranscript !== voice.sample_text.trim(),
   )
+  // Triage-derived hint for whether Auto mode will resolve to Precise for this clip —
+  // computed here (it needs Voice Library's own reference-analysis metrics) and handed
+  // to the shared prosody editor/controls below.
   const triage = metrics?.triage ?? null
-  // Whether the current mode will actually attempt forced alignment: explicit Precise,
-  // or Auto when triage judged the clip blended. Natural never aligns.
-  const resolvedPrecise =
-    processingMode === 'precise' || (processingMode === 'auto' && triage?.mode === 'precise')
-  // Boundaries the surgical pass acts on: sentence splits own the big sentence-end
-  // pause; clause owners own comma-scale pauses. Plain/uncertain words are skipped.
-  const sentenceBoundaries = (alignBoundaries ?? []).filter((b) => b.kind === 'sentence_split')
-  const clauseBoundaries = (alignBoundaries ?? []).filter(
-    (b) => b.kind !== 'sentence_split' && b.owns_clause,
+
+  // Single source of truth for this card's prosody session: settings, alignment,
+  // preview, and the variant list. Shared verbatim with the Voice Edit page via
+  // useProsodyEditor/ProsodyControls/ProsodyVariantsList.
+  const editor = useProsodyEditor(
+    voice,
+    onRefresh,
+    (entry) => onDuplicate(entry.is_original ? undefined : entry.filename),
   )
-  const shapedBoundaryCount = sentenceBoundaries.length + clauseBoundaries.length
 
-  // Run (or reuse) an async forced-alignment pass, masking the 1–5 s latency with a
-  // polled progress state. Cancellable on unmount / mode change via alignJobRef.
-  const runAlignment = async () => {
-    if (!hasTranscript || alignBusy) return
-    setAlignBusy(true)
-    setAlignError(null)
-    setAlignWarning(null)
-    try {
-      const job = await startVoiceAlignment(voice.voice_id)
-      alignJobRef.current = { jobId: job.job_id, cancelled: false }
-      let current = job
-      while (current.status === 'queued' || current.status === 'running') {
-        if (alignJobRef.current?.cancelled) return
-        await new Promise((r) => setTimeout(r, 500))
-        if (alignJobRef.current?.cancelled) return
-        current = await getVoiceAlignmentStatus(voice.voice_id, job.job_id)
-      }
-      if (alignJobRef.current?.cancelled) return
-      if (current.status === 'completed') {
-        setAlignBoundaries(current.result?.boundaries ?? [])
-        if (current.within_latency_budget === false) {
-          setAlignWarning(
-            `Alignment took ${current.duration_seconds?.toFixed(1) ?? '?'}s, above the ${current.latency_budget_seconds.toFixed(1)}s budget. The result is usable; consider a faster provider or shorter clip.`,
-          )
-        }
-      } else if (current.status === 'failed') {
-        setAlignError(current.error || 'Alignment failed')
-        setAlignBoundaries([])
-      }
-    } catch (err) {
-      setAlignError(err instanceof Error ? err.message : String(err))
-    } finally {
-      alignJobRef.current = null
-      setAlignBusy(false)
-    }
-  }
-
-  // Reset any cached boundaries when the clip identity or its transcript changes —
-  // the old alignment no longer describes this audio/text.
   useEffect(() => {
-    setAlignBoundaries(null)
-    setAlignError(null)
-    setAlignWarning(null)
-  }, [voice.voice_id, voice.sample_text, voice.sha256])
-
-  // Trigger alignment lazily the first time Precise resolves for this clip, and cancel
-  // any in-flight job on unmount.
-  useEffect(() => {
-    if (resolvedPrecise && hasTranscript && alignBoundaries === null && !alignBusy) {
-      void runAlignment()
-    }
-    return () => {
-      const inflight = alignJobRef.current
-      if (inflight && !inflight.cancelled) {
-        inflight.cancelled = true
-        void cancelVoiceAlignment(voice.voice_id, inflight.jobId).catch(() => {})
-      }
-    }
+    editor.setAutoTriagePrecise(triage?.mode === 'precise')
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolvedPrecise, hasTranscript, alignBoundaries])
-
-  useEffect(() => {
-    async function loadVariants() {
-      try {
-        const data = await getVoiceVariants(voice.voice_id)
-        setEntries(data.entries)
-        setActiveFilename(data.active_filename)
-      } catch (err) {
-        console.error(`Failed to load variants for ${voice.voice_id}:`, err)
-      }
-    }
-    loadVariants()
-  }, [voice.voice_id])
-
-  useEffect(() => {
-    return () => {
-      variantPreviewAudioRef.current?.pause()
-      variantPreviewAudioRef.current = null
-    }
-  }, [voice.voice_id])
+  }, [triage?.mode])
 
   const commit = async () => {
     const trimmed = draft.trim()
@@ -1094,92 +919,6 @@ function VoiceCard({
     if (targetId) await action(targetId)
   }
 
-  // "Promote to API reference" — explicit, first-class version of the implicit
-  // "click the pill" interaction (§2.1). Confirms first when this voice_id is also the
-  // persisted global API default, since the swap changes what the live default sounds
-  // like immediately.
-  const promoteVariant = async (entry: VoiceVariantEntry) => {
-    if (voice.api_active) {
-      const ok = window.confirm(
-        'This voice is the live API default. Promoting this variant will change what the ' +
-        'default API voice sounds like immediately. Continue?',
-      )
-      if (!ok) return
-    }
-    setVariantBusy(entry.filename)
-    try {
-      // set-active-variant treats a null filename as "reset to original.wav" — pass the
-      // literal filename either way, both resolve correctly.
-      await setActiveVoiceVariant(voice.voice_id, entry.filename)
-      setActiveFilename(entry.filename)
-      await onRefresh()
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setVariantBusy(null)
-    }
-  }
-
-  // Also reflects the previewed take's stats into the large card via previewMetrics, so
-  // clicking a variant/Original compares against whatever is currently active (§5).
-  const previewVariant = async (entry: VoiceVariantEntry) => {
-    if (previewingVariant === entry.filename) {
-      variantPreviewAudioRef.current?.pause()
-      variantPreviewAudioRef.current = null
-      setPreviewingVariant(null)
-      setPreviewMetrics(null)
-      return
-    }
-    variantPreviewAudioRef.current?.pause()
-    setVariantBusy(entry.filename)
-    try {
-      const [{ audio_base64 }, metricsResult] = await Promise.all([
-        getVoiceVariantAudio(voice.voice_id, entry.filename),
-        getVoiceVariantMetrics(voice.voice_id, entry.filename).catch((err) => {
-          console.error('Variant metrics fetch failed:', err)
-          return null
-        }),
-      ])
-      const bytes = Uint8Array.from(atob(audio_base64), (c) => c.charCodeAt(0))
-      const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }))
-      const el = new Audio(url)
-      variantPreviewAudioRef.current = el
-      setPreviewingVariant(entry.filename)
-      if (metricsResult) setPreviewMetrics(metricsResult.metrics)
-      el.addEventListener('ended', () => setPreviewingVariant(null))
-      await el.play()
-    } catch (err) {
-      console.error(err)
-      setPreviewingVariant(null)
-    } finally {
-      setVariantBusy(null)
-    }
-  }
-
-  const forkVariant = async (entry: VoiceVariantEntry) => {
-    setVariantBusy(entry.filename)
-    try {
-      await onDuplicate(entry.is_original ? undefined : entry.filename)
-    } finally {
-      setVariantBusy(null)
-    }
-  }
-
-  const deleteVariant = async (entry: VoiceVariantEntry) => {
-    if (!window.confirm(`Delete variant "${entry.label}"? This cannot be undone.`)) return
-    setVariantBusy(entry.filename)
-    try {
-      await deleteVoiceVariant(voice.voice_id, entry.filename)
-      const data = await getVoiceVariants(voice.voice_id)
-      setEntries(data.entries)
-      setActiveFilename(data.active_filename)
-      await onRefresh()
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setVariantBusy(null)
-    }
-  }
 
   return (
     <motion.div
@@ -1196,77 +935,8 @@ function VoiceCard({
       )}
     >
 
-      <div className="space-y-1.5">
-        <div className="flex flex-col gap-2 overflow-hidden rounded-lg border border-border/60 bg-muted/10 p-2">
-         <div className="flex items-center justify-between px-1">
-           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Prosody Variants</p>
-           <div className="flex items-center gap-1">
-             <span className="text-[10px] text-muted-foreground">
-               {entries.length} total{entries.length > 1 ? ` (${entries.length - 1} variant${entries.length - 1 === 1 ? '' : 's'})` : ''}
-             </span>
-           </div>
-         </div>
-         <div className="max-h-28 overflow-y-auto space-y-1 px-1">
-           {entries.map(entry => (
-             <div key={entry.id} className="flex items-center justify-between gap-1">
-               <span
-                 className={cn(
-                   "min-w-0 flex-1 truncate text-[11px] py-0.5 px-1 rounded",
-                   activeFilename === entry.filename ? "bg-cyan-500/20 text-cyan-300" : "text-muted-foreground"
-                 )}
-                 title={entry.id}
-               >
-                 {entry.label}
-               </span>
-               {activeFilename === entry.filename && (
-                 <span className="flex shrink-0 items-center gap-0.5 text-[9px] font-medium uppercase tracking-wide text-cyan-400">
-                   <Check className="size-3" /> Primary
-                 </span>
-               )}
-               <div className="flex shrink-0 items-center gap-0.5">
-                 {activeFilename !== entry.filename && (
-                   <button
-                     onClick={() => promoteVariant(entry)}
-                     disabled={variantBusy === entry.filename}
-                     title="Make this the primary variant — served by the API and shown as the main waveform for this voice_id"
-                     className="rounded p-0.5 text-muted-foreground hover:bg-cyan-500/20 hover:text-cyan-300"
-                   >
-                     <Star className="size-3" />
-                   </button>
-                 )}
-                 <button
-                   onClick={() => previewVariant(entry)}
-                   disabled={variantBusy === entry.filename && previewingVariant !== entry.filename}
-                   title={previewingVariant === entry.filename ? 'Stop preview' : 'Preview this variant'}
-                   className="rounded p-0.5 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-                 >
-                   {previewingVariant === entry.filename ? <Pause className="size-3" /> : <Play className="size-3" />}
-                 </button>
-                 {!entry.is_original && (
-                   <>
-                     <button
-                       onClick={() => forkVariant(entry)}
-                       disabled={variantBusy === entry.filename}
-                       title="Fork this variant to an independent voice_id"
-                       className="rounded p-0.5 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-                     >
-                       <GitFork className="size-3" />
-                     </button>
-                     <button
-                       onClick={() => deleteVariant(entry)}
-                       disabled={variantBusy === entry.filename}
-                       title="Delete this variant"
-                       className="rounded p-0.5 text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
-                     >
-                       <Trash2 className="size-3" />
-                     </button>
-                   </>
-                 )}
-               </div>
-             </div>
-           ))}
-         </div>
-       </div>
+  <div className="space-y-1.5">
+        <ProsodyVariantsList editor={editor} layout="compact" />
 
        <div className="flex flex-wrap items-center gap-2">
           <p className="min-w-0 break-all text-sm font-medium">{voice.voice_id}</p>
@@ -1315,7 +985,7 @@ function VoiceCard({
               Reference text
             </p>
             <div className="flex shrink-0 items-center gap-2">
-              {(!hasTranscript || hasWhisperReplacement) && !editing && (
+              {(!editor.hasTranscript || hasWhisperReplacement) && !editing && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -1398,7 +1068,7 @@ function VoiceCard({
          onFixAll={onFixAll}
        />
 
-          <VoiceMetricsPanel metrics={metrics} busy={busy} onAnalyze={onAnalyze} expanded={analysisExpanded} onToggle={() => setAnalysisExpanded((value) => { localStorage.setItem('voice-library-analysis-expanded', String(!value)); return !value })} previewMetrics={previewMetrics} layoutMode={layoutMode} />
+          <VoiceMetricsPanel metrics={metrics} busy={busy} onAnalyze={onAnalyze} expanded={analysisExpanded} onToggle={() => setAnalysisExpanded((value) => { localStorage.setItem('voice-library-analysis-expanded', String(!value)); return !value })} previewMetrics={editor.previewMetrics} layoutMode={layoutMode} />
 
 
 
@@ -1406,25 +1076,21 @@ function VoiceCard({
         <div className="relative group space-y-1">
           <div className="rounded border border-border/60 bg-muted/10 p-2 pt-3">
             <AlignmentCompare
-              key={activeFilename}
+              key={editor.activeFilename}
               voiceId={voice.voice_id}
-              adjustedBase64={previewAudio?.audioBase64}
-              adjustedSampleCount={previewAudio?.sampleCount}
-              boundaryPlan={previewAudio?.plan ?? []}
-              boundaries={alignBoundaries}
-              overrides={targetOverrides}
-              onNudgeTarget={previewBusy ? undefined : nudgeTarget}
-              onResetTarget={previewBusy ? undefined : resetTarget}
-              stylePreset={previewAudio ? stylePreset : undefined}
+              adjustedBase64={editor.preview?.audioBase64}
+              adjustedSampleCount={editor.preview?.sampleCount}
+              boundaryPlan={editor.preview?.plan ?? []}
+              boundaries={editor.alignBoundaries}
+              overrides={editor.targetOverrides}
+              onNudgeTarget={editor.previewBusy ? undefined : editor.nudgeTarget}
+              onResetTarget={editor.previewBusy ? undefined : editor.resetTarget}
+              stylePreset={editor.preview ? editor.stylePreset : undefined}
             />
           </div>
-          {previewAudio && (
+          {editor.preview && (
             <button
-              onClick={() => {
-                URL.revokeObjectURL(previewAudio.url)
-                setPreviewAudio(null)
-                setTargetOverrides({})
-              }}
+              onClick={() => editor.clearPreview()}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded bg-background/80 p-1 text-[10px] hover:bg-background opacity-0 group-hover:opacity-100 transition-opacity"
             >
               Clear
@@ -1445,211 +1111,13 @@ function VoiceCard({
            </PopoverTrigger>
            <PopoverContent align="start" side="bottom" collisionPadding={16} className="w-72 max-h-[min(80vh,34rem)] overflow-y-auto">
              <p className="text-xs font-medium mb-2">Prosody Settings</p>
-             <div className="space-y-3">
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Processing mode</label>
-                    {(() => {
-                      const t = getVoiceMetrics(voice)?.triage
-                      if (!t?.mode) return null
-                      return (
-                        <span
-                          className="text-[9px] text-muted-foreground"
-                          title={(t.reasons ?? []).filter(Boolean).join('\n')}
-                        >
-                          triage: {t.mode}
-                        </span>
-                      )
-                    })()}
-                  </div>
-                  <div className="grid grid-cols-3 gap-1">
-                    {(['auto', 'natural', 'precise'] as const).map((m) => {
-                      // Precise needs a transcript to align against; disable it (with a
-                      // reason) when the clip has none.
-                      const disabled = m === 'precise' && !hasTranscript
-                      const title =
-                        m === 'precise'
-                          ? hasTranscript
-                            ? 'Force forced-alignment-directed surgical pauses'
-                            : 'Add reference text to enable forced alignment'
-                          : m === 'natural'
-                            ? 'Fast energy path — never re-aligns'
-                            : 'Let triage decide: align blended clips, keep clean clips fast'
-                      return (
-                        <Button
-                          key={m}
-                          size="sm"
-                          variant={processingMode === m ? 'default' : 'outline'}
-                          disabled={disabled}
-                          className="h-7 px-1 text-[10px] capitalize"
-                          title={title}
-                          onClick={() => setProcessingMode(m)}
-                        >
-                          {m}
-                        </Button>
-                      )
-                    })}
-                  </div>
-                  {/* Latency masking + boundary badge (§5.6): only meaningful when the
-                      resolved mode actually aligns. */}
-                  {resolvedPrecise && (
-                    alignBusy ? (
-                      <div className="flex items-center gap-1.5 text-[10px] text-cyan-400">
-                        <Loader2 className="size-3 animate-spin" />
-                        Finding linguistic boundaries…
-                      </div>
-                    ) : alignError ? (
-                      <div className="flex items-center gap-1 text-[10px] text-warning" title={alignError}>
-                        <AlertTriangle className="size-3" /> Alignment unavailable — using safe fallback
-                      </div>
-                    ) : alignWarning ? (
-                      <div className="flex items-center gap-1 text-[10px] text-warning" title={alignWarning}>
-                        <AlertTriangle className="size-3" /> Alignment exceeded latency budget
-                      </div>
-                    ) : alignBoundaries !== null ? (
-                      shapedBoundaryCount > 0 ? (
-                        <div
-                          className="flex items-center gap-1"
-                          title={[
-                            `${sentenceBoundaries.length} sentence boundary${sentenceBoundaries.length === 1 ? '' : 'ies'} (manufactured sentence-end pauses)`,
-                            `${clauseBoundaries.length} clause boundary${clauseBoundaries.length === 1 ? '' : 'ies'} (comma-scale pauses)`,
-                          ].join('\n')}
-                        >
-                          <Badge variant="outline" className="h-4 gap-1 px-1.5 text-[9px] font-medium text-cyan-400 border-cyan-500/40">
-                            <AudioWaveform className="size-2.5" />
-                            Aligned · {shapedBoundaryCount} boundar{shapedBoundaryCount === 1 ? 'y' : 'ies'}
-                          </Badge>
-                        </div>
-                      ) : (
-                        <div className="text-[10px] text-muted-foreground">Aligned · no surgical pauses needed</div>
-                      )
-                    ) : null
-                  )}
-                  <p className="text-[10px] text-muted-foreground italic leading-tight">
-                    {!hasTranscript
-                      ? 'No transcript on this clip — Precise (forced alignment) needs reference text.'
-                      : triage?.mode === 'precise'
-                        ? `${triage.gaps_detected ?? '?'} gaps detected, ${triage.boundaries_expected ?? '?'} sentence boundaries expected → blended speech; Auto escalates to alignment.`
-                        : triage?.mode === 'natural'
-                          ? 'Gaps line up with sentence boundaries → clean; Auto keeps the fast energy path.'
-                          : 'Auto follows triage: blended clips escalate to forced alignment, clean clips keep the fast path.'}
-                  </p>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Style Preset</label>
-                   <Select 
-                     value={stylePreset} 
-                     onValueChange={(val) => {
-                       setStylePreset(val)
-                       setPreviewAudio(null)
-                     }}
-                   >
-                     <SelectTrigger size="sm" className="w-full h-7 px-2 text-xs">
-                       <SelectValue />
-                     </SelectTrigger>
-                     <SelectContent>
-                       <SelectGroup>
-                         {Object.keys(STYLE_DESCRIPTIONS).map(s => (
-                           <SelectItem key={s} value={s}>
-                             <div className="flex flex-col text-left">
-                               <span className="font-medium">{s}</span>
-                               <span className="text-[10px] opacity-60 leading-tight">{STYLE_DESCRIPTIONS[s]}</span>
-                             </div>
-                           </SelectItem>
-                         ))}
-                       </SelectGroup>
-                     </SelectContent>
-                     </Select>
-                 </div>
-                 <div className="flex flex-col gap-1.5">
-                  <div className="flex justify-between items-center">
-                    <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Global Pace Scale</label>
-                    <span className="font-mono text-[10px]">{paceMultiplier.toFixed(1)}x</span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground italic leading-tight mb-1">
-                    Scales all pauses proportionally (e.g., 1.2x increases all gaps by 20%).
-                  </p>
-                  <input
-                    type="range" min="0.5" max="2.0" step="0.1"
-                    value={paceMultiplier}
-                    onChange={(e) => setPaceMultiplier(parseFloat(e.target.value))}
-                    className="w-full accent-cyan-500"
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex justify-between items-center">
-                    <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Pause Offset</label>
-                    <span className="font-mono text-[10px]">{pauseOffset > 0 ? `+${pauseOffset}` : pauseOffset}ms</span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground italic leading-tight mb-1">
-                    Shifts all gaps by a flat amount (e.g., +100ms adds 100ms to every pause).
-                  </p>
-                  <input
-                    type="range" min="-500" max="500" step="10"
-                    value={pauseOffset}
-                    onChange={(e) => setPauseOffset(parseInt(e.target.value))}
-                    className="w-full accent-cyan-500"
-                  />
-                </div>
-                <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busy || prosodyBusy || previewBusy}
-                       onClick={() => {
-                         // Preview / Reset Preview both re-render from the sliders and clear
-                         // any per-marker nudges, so this is always a clean baseline.
-                         setTargetOverrides({})
-                         void runPreview({})
-                       }}
-                    >
-                      {previewAudio ? <Undo2 className="size-3.5" /> : <Play className="size-3.5" />} {previewAudio ? 'Reset Preview' : 'Preview'}
-                    </Button>
-                   <Button
-                     size="sm"
-                     variant="outline"
-                     disabled={busy || savingVariantBusy || prosodyBusy || previewBusy}
-                     title="Bake and save this take as a new, independently-addressable variant — does not change what's currently served"
-                     onClick={async () => {
-                       setSavingVariantBusy(true)
-                       try {
-                         await saveVoiceProsodyVariant(
-                           voice.voice_id, stylePreset, paceMultiplier, pauseOffset, processingMode, targetOverrides,
-                         )
-                         const data = await getVoiceVariants(voice.voice_id)
-                         setEntries(data.entries)
-                         setActiveFilename(data.active_filename)
-                       } catch (err) {
-                         console.error(err)
-                       } finally {
-                         setSavingVariantBusy(false)
-                       }
-                     }}
-                   >
-                     <Wand2 className="size-3.5" /> Save as Variant
-                   </Button>
-                   <Button
-                     size="sm"
-                     variant="outline"
-                     disabled={busy || prosodyBusy || previewBusy}
-                     title="Bake this take and immediately promote it to the primary variant served by the API"
-                     onClick={async () => {
-                       setProsodyBusy(true)
-                       try {
-                         await onAdjustPauses(voice.voice_id, stylePreset, paceMultiplier, pauseOffset, processingMode)
-                         const data = await getVoiceVariants(voice.voice_id)
-                         setEntries(data.entries)
-                         setActiveFilename(data.active_filename)
-                       } finally {
-                         setProsodyBusy(false)
-                       }
-                     }}
-                   >
-                     <Star className="size-3.5" /> Save &amp; Promote
-                   </Button>
-                 </div>
-
-
+             <div data-testid="prosody-editor-panel" data-layout="compact">
+              <ProsodyControls
+                editor={editor}
+                layout="compact"
+                busy={busy}
+                triage={triage ? { mode: triage.mode, reasons: triage.reasons, gapsDetected: triage.gaps_detected, boundariesExpected: triage.boundaries_expected } : null}
+              />
              </div>
            </PopoverContent>
          </Popover>
@@ -1733,15 +1201,21 @@ export function VoiceLibraryPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [groupByProject, setGroupByProject] = useState(false)
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
+  const [activeTab, setActiveTab] = useState<'voices' | 'segments'>(() => {
+    if (typeof window === 'undefined') return 'voices'
+    const stored = localStorage.getItem('voice-library-tab')
+    return stored === 'segments' ? 'segments' : 'voices'
+  })
+  useEffect(() => {
+    localStorage.setItem('voice-library-tab', activeTab)
+  }, [activeTab])
   const setVoiceId = useAppStore((s) => s.setVoiceId)
 
   const setPage = useAppStore((s) => s.setPage)
   const setEditingVoice = useAppStore((s) => s.setEditingVoice)
   const setDesignEngine = useAppStore((s) => s.setDesignEngine)
-  const setOvStitchEditorOpen = useAppStore((s) => s.setOvStitchEditorOpen)
-  const setOvStitchPlanClips = useAppStore((s) => s.setOvStitchPlanClips)
-  const setOvStitchPlanPaddingMs = useAppStore((s) => s.setOvStitchPlanPaddingMs)
-  const setOvStitchPlanDsp = useAppStore((s) => s.setOvStitchPlanDsp)
+  const openOvStitchEditor = useAppStore((s) => s.openOvStitchEditor)
+  const replaceOvStitchPlan = useAppStore((s) => s.replaceOvStitchPlan)
   const deepLinkProsodyVoiceId = useAppStore((s) => s.deepLinkProsodyVoiceId)
   const setDeepLinkProsodyVoiceId = useAppStore((s) => s.setDeepLinkProsodyVoiceId)
   const voiceLibraryFocusVoiceId = useAppStore((s) => s.voiceLibraryFocusVoiceId)
@@ -1783,12 +1257,7 @@ export function VoiceLibraryPage() {
     setError(null)
     try {
       const clip = await createStitchClipFromSegment(seg)
-
-      setPage('voice-design')
-      setDesignEngine('omnivoice')
-
-      setOvStitchPlanClips((prev: any) => [...(prev ?? []), clip])
-      setOvStitchEditorOpen(true)
+      openOvStitchEditor({ incomingClip: clip })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -1898,20 +1367,27 @@ export function VoiceLibraryPage() {
         return
       }
 
-      setOvStitchPlanClips(rebuilt)
-      setOvStitchPlanPaddingMs(plan?.padding_ms ?? new Array(Math.max(0, rebuilt.length - 1)).fill(0))
-      setOvStitchPlanDsp({
-        crossfadeMs: plan?.crossfade_ms,
-        segmentTargetDbfs: plan?.segment_target_dbfs,
-        finalTargetDbfs: plan?.final_target_dbfs,
-        finalCeilingDb: plan?.final_ceiling_db,
+      const baseDsp = useAppStore.getState().ovStitchPlanDsp
+      const dsp: StitchPlanDsp = {
+        ...baseDsp,
+        crossfadeMs: plan?.crossfade_ms ?? baseDsp.crossfadeMs,
+        segmentTargetDbfs: plan?.segment_target_dbfs ?? baseDsp.segmentTargetDbfs,
+        finalTargetDbfs: plan?.final_target_dbfs ?? baseDsp.finalTargetDbfs,
+        finalCeilingDb: plan?.final_ceiling_db ?? baseDsp.finalCeilingDb,
         compressEnabled: plan?.compress != null,
-        compressThresholdDb: plan?.compress?.threshold_db,
-        compressRatio: plan?.compress?.ratio,
+        compressThresholdDb: plan?.compress?.threshold_db ?? baseDsp.compressThresholdDb,
+        compressRatio: plan?.compress?.ratio ?? baseDsp.compressRatio,
+      }
+      replaceOvStitchPlan({
+        clips: rebuilt,
+        paddingMs: plan?.padding_ms ?? new Array(Math.max(0, rebuilt.length - 1)).fill(0),
+        dsp,
+        regionEditsByClip: {},
       })
-      setDesignEngine('omnivoice')
-      setPage('voice-design')
-      setOvStitchEditorOpen(true)
+      // Rebuilding replaces the whole plan (not a single incoming clip like the quick-insert
+      // modal), so it commits straight to the real Stitch Studio page instead of opening the
+      // quick-insert draft -- there is no meaningful "decide where this goes" step here.
+      setPage('stitch-studio')
 
       if (skipped > 0) {
         setError(
@@ -2008,18 +1484,6 @@ export function VoiceLibraryPage() {
     }
   }
 
-  async function adjustPauses(voiceId: string, stylePreset: string, paceMultiplier: number, pauseOffset: number, mode: ProsodyMode) {
-    setBusyVoiceId(voiceId)
-    setError(null)
-    try {
-      await adjustVoiceReferencePauses(voiceId, stylePreset, paceMultiplier, pauseOffset, mode)
-      await refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusyVoiceId(null)
-    }
-  }
 
   async function activateForApi(voiceId: string) {
     setBusyVoiceId(voiceId)
@@ -2218,9 +1682,6 @@ export function VoiceLibraryPage() {
       onTrimSilence={async (voiceId) => { await trimVoiceReferenceSilence(voiceId); await refresh() }}
       onFixAll={() => fixAll(voice.voice_id)}
       onSetDefault={voice.family_id ? () => setDefault(voice.voice_id) : null}
-      onAdjustPauses={(voiceId, stylePreset, paceMultiplier, pauseOffset, mode) =>
-        adjustPauses(voiceId, stylePreset, paceMultiplier, pauseOffset, mode)
-      }
       onActivateForApi={() => activateForApi(voice.voice_id)}
       onApplyReferenceEdits={(voiceId, edits) => applyReferenceEdits(voiceId, edits)}
       onAnalyze={() => analyze(voice.voice_id)}
@@ -2281,7 +1742,7 @@ export function VoiceLibraryPage() {
           onClick={() => insertSegmentIntoStitchEditor(seg)}
         >
           <Plus className="size-3.5" />
-          Insert into stitch editor
+          Insert into Stitch Studio
         </Button>
         <Select
           value={seg.project_id || UNGROUPED_VALUE}
@@ -2358,7 +1819,12 @@ export function VoiceLibraryPage() {
           </Button>
         </div>
       ) : (
-        <>
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v === 'segments' ? 'segments' : 'voices')}>
+          <TabsList>
+            <TabsTrigger value="voices" data-testid="voice-library-tab-voices">Reference voices</TabsTrigger>
+            <TabsTrigger value="segments" data-testid="voice-library-tab-segments">Segments</TabsTrigger>
+          </TabsList>
+          <TabsContent value="voices" className="flex flex-col gap-6">
           {voices.length > 0 && (
             <section className="flex flex-col gap-3">
                <div className="flex items-center justify-between">
@@ -2455,7 +1921,9 @@ export function VoiceLibraryPage() {
 
             </section>
           )}
+          </TabsContent>
 
+          <TabsContent value="segments" className="flex flex-col gap-6">
           {/* Saved segments */}
           <section className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
@@ -2464,7 +1932,7 @@ export function VoiceLibraryPage() {
                   Saved segments ({segments.length})
                 </h2>
                 <p className="text-[10px] text-muted-foreground">
-                  Individual takes you can hear, reuse, and insert into the stitch editor.
+                  Individual takes you can hear, reuse, and insert into Stitch Studio.
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -2535,7 +2003,8 @@ export function VoiceLibraryPage() {
               </p>
             ) : null}
           </section>
-        </>
+          </TabsContent>
+        </Tabs>
       )}
     </div>
   )

@@ -18,8 +18,6 @@ import {
   saveOmniVoice,
   type OmniVoiceCandidateSegment,
   type StitchPlanPayload,
-  type SegmentMeta,
-  type VoiceMeta,
 } from '@/lib/api'
 import {
   ACCENT_BANK,
@@ -40,8 +38,6 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useAppStore, type StitchPlanClip } from '@/store'
 import * as Tooltip from '@/components/ui/tooltip'
-import { StitchEditorPanel } from '@/components/StitchTimeline'
-import { insertSegmentIntoStitchTimeline, insertVoiceIntoStitchTimeline } from '@/lib/stitchClips'
 import { ClipPlayer } from './OmniVoice/ClipPlayer'
 import { InfoIcon } from './OmniVoice/InfoIcon'
 import { AccentChipPanel } from './OmniVoice/AccentChipPanel'
@@ -265,21 +261,20 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
   const setLibrarySelection = useAppStore(
     (s) => s.setOvLibrarySelection,
   )
-  const stitchEditorOpen = useAppStore(
-    (s) => s.ovStitchEditorOpen,
-  )
   const setStitchPlanClips = useAppStore(
     (s) => s.setOvStitchPlanClips,
   )
-  const voices = useAppStore((s) => s.voices)
   const setStitchPlanPaddingAt = useAppStore(
     (s) => s.setOvStitchPlanPaddingAt,
   )
   const setStitchPlanPaddingMs = useAppStore(
     (s) => s.setOvStitchPlanPaddingMs,
   )
-  const setStitchEditorOpen = useAppStore(
-    (s) => s.setOvStitchEditorOpen,
+  const openStitchEditorModal = useAppStore(
+    (s) => s.openOvStitchEditor,
+  )
+  const closeStitchEditorModal = useAppStore(
+    (s) => s.closeOvStitchEditor,
   )
 
   // -- Init --
@@ -377,9 +372,20 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
   // plan as a real time-stretch (audio_post.stitch_segments' `tempos` kwarg), not just the
   // discardable local playbackRate preview AudioDeck used before this.
   const [candidateSpeeds, setCandidateSpeeds] = useState<Record<string, number>>({})
+  // The stitched preview is the panel's contract with Save: "Save to library" persists the plan
+  // built from the *current* rack, so every plan input (take selection, segment text, per-take
+  // tempo) must discard the previous render -- otherwise Save could persist a plan other than
+  // the one the user just auditioned. Revokes the object URL, not only the store ref.
+  const clearStitchResult = useCallback(() => {
+    const current = useAppStore.getState().ovStitchedUrl
+    if (current) URL.revokeObjectURL(current)
+    setStitchedUrl(null)
+    setStitchedBlob(null)
+  }, [setStitchedUrl, setStitchedBlob])
   const onCandidateSpeedChange = useCallback((candidateId: string, speed: number) => {
+    clearStitchResult()
     setCandidateSpeeds((prev) => ({ ...prev, [candidateId]: speed }))
-  }, [])
+  }, [clearStitchResult])
   // Rolling avg_seconds-per-candidate from the most recent job, used to give Regen a rough
   // "~Ns" cost estimate up front rather than only ever showing progress after the fact.
   const [lastAvgCandidateSeconds, setLastAvgCandidateSeconds] = useState<number | null>(null)
@@ -897,6 +903,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
 
   const selectTake = useCallback(
     (segmentId: string, index: number) => {
+      clearStitchResult()
       setSegmentRack((prev) =>
         prev.map((row) => {
           if (row.segmentId !== segmentId) return row
@@ -906,11 +913,12 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         }),
       )
     },
-    [setSegmentRack],
+    [clearStitchResult, setSegmentRack],
   )
 
   const editSegmentText = useCallback(
     (segmentId: string, newText: string) => {
+      clearStitchResult()
       setSegmentRack((prev) =>
         prev.map((row) =>
           row.segmentId === segmentId
@@ -919,7 +927,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         ),
       )
     },
-    [setSegmentRack],
+    [clearStitchResult, setSegmentRack],
   )
 
   // Flips back to a previously-regenerated candidate batch instead of losing it — swaps the
@@ -1197,6 +1205,12 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
   ])
 
   const handleSave = useCallback(async () => {
+    // By design this saves the *rack*, not the studio plan: the reference-voice payload is
+    // built from the currently selected takes (zero padding, default DSP, per-take tempo).
+    // Edits made in the quick-insert modal or Stitch Studio live in the durable studio
+    // session and are persisted through the studio page's reference save -- the centralized
+    // save path in the execution plan doc (quick insert is only a draft that commits via
+    // replaceOvStitchPlan; it never renders a reference-voice save control).
     if (segmentRack.length === 0 || isSaving) return
 
     const selectedRows = segmentRack.filter(
@@ -1346,7 +1360,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     await ctx.close()
 
     if (clips.length === 0) {
-      setError('Select at least one take before opening the stitch editor.')
+      setError('Select at least one take before opening Stitch Studio.')
       return
     }
 
@@ -1356,13 +1370,13 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     }
 
     setStitchPlanClips(clips as StitchPlanClip[])
-    setStitchEditorOpen(true)
+    openStitchEditorModal({})
   }, [
     segmentRack,
     setError,
     setStitchPlanClips,
     setStitchPlanPaddingAt,
-    setStitchEditorOpen,
+    openStitchEditorModal,
   ])
 
   const handleResetSegments = useCallback(() => {
@@ -1378,7 +1392,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     setSegmentRack([])
     setStitchPlanClips([])
     setStitchPlanPaddingMs([])
-    setStitchEditorOpen(false)
+    closeStitchEditorModal()
     setStitchedUrl(null)
     setStitchedBlob(null)
     setError(null)
@@ -1391,7 +1405,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     setSegmentRack,
     setStitchPlanClips,
     setStitchPlanPaddingMs,
-    setStitchEditorOpen,
+    closeStitchEditorModal,
     setStitchedUrl,
     setStitchedBlob,
     setError,
@@ -1399,20 +1413,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     setJobTotalSegments,
     setJobStatus,
   ])
-
-  const insertFromLibraryToTimeline = useCallback(
-    async (seg: SegmentMeta) => {
-      await insertSegmentIntoStitchTimeline(seg, setError)
-    },
-    [setError],
-  )
-
-  const insertVoiceToTimeline = useCallback(
-    async (voice: VoiceMeta) => {
-      await insertVoiceIntoStitchTimeline(voice, setError)
-    },
-    [setError],
-  )
 
   const toggleLibrarySelection = useCallback(
     (segmentId: string) => {
@@ -2379,7 +2379,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
                 className="shrink-0 inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px]"
               >
                 <Scissors className="h-3 w-3" />
-                Open stitch editor
+                Open in Stitch Studio
               </Button>
               <span className="self-center text-[9px] text-muted-foreground/70">
                 trim, reorder, add gaps
@@ -2439,45 +2439,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
         )}
       </AnimatePresence>
 
-      {/* Stitch editor (timeline) */}
-      <AnimatePresence>
-        {stitchEditorOpen && (
-          <StitchEditorPanel
-            onClose={() => setStitchEditorOpen(false)}
-            library={library}
-            onInsertFromLibrary={insertFromLibraryToTimeline}
-            voiceLibrary={voices}
-            onInsertVoiceFromLibrary={insertVoiceToTimeline}
-            onSave={async (plan: StitchPlanPayload, segments: string[]) => {
-              try {
-                setIsSaving(true)
-                setError(null)
-                const result = await saveOmniVoice({
-                  instruct,
-                  segments,
-                  accentId:
-                    matchedAccentBankEntry?.id ?? null,
-                  stitchPlan: plan,
-                  familyId: useAppStore.getState().targetFamilyId,
-                  variantName: deliveryVariant.name,
-                  variantKind: deliveryVariant.kind,
-                })
-                setSavedVoiceId(result.voice_id)
-                onVoiceCreated?.(result.voice_id)
-                setStitchEditorOpen(false)
-              } catch (err) {
-                setError(
-                  err instanceof Error
-                    ? err.message
-                    : String(err),
-                )
-              } finally {
-                setIsSaving(false)
-              }
-            }}
-          />
-        )}
-      </AnimatePresence>
 
       {/* Segment library */}
       <div className="flex flex-col gap-2 rounded-lg border border-border p-3">

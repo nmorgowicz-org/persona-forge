@@ -1,6 +1,9 @@
 import { useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { cn } from '@/lib/utils'
+import { createTimeTicks } from '@/lib/timeAxis'
+import { waveformBarColor, WAVEFORM_PLAYHEAD_COLOR } from '@/lib/waveform'
+import { useElementWidth } from '@/hooks/useElementWidth'
 
 // A highlighted region of the waveform, expressed as 0..1 fractions of the clip.
 export interface WaveformRegion {
@@ -21,36 +24,6 @@ interface WaveformProps {
   selection?: WaveformRegion | null
   onSelectRegion?: (region: WaveformRegion | null) => void
 }
-
-function formatTime(sec: number): string {
-  if (sec < 0 || !isFinite(sec)) return '0.0s'
-  // For short clips (< 10s) or small intervals, prefer compact seconds with decimals.
-  // For longer clips, use m:ss.
-  const isShort = sec < 10
-  if (isShort) {
-    return `${sec.toFixed(1)}s`
-  }
-  const m = Math.floor(sec / 60)
-  const s = Math.floor(sec % 60)
-  return `${m}:${s.toString().padStart(2, '0')}`
-}
-
-// A dedicated meter palette, independent of the app's neutral (grayscale) theme —
-// real DAW/VST meters use their own color language rather than the plugin chrome.
-// Quiet material reads cool cyan/teal, loud peaks push into hot magenta, like a level meter.
-function barColor(peak: number, played: boolean) {
-  const hue = 190 + peak * 140 // 190 = cyan, 330 = magenta
-  if (played) {
-    const light = 58 + peak * 14
-    const alpha = 0.55 + peak * 0.45
-    return `hsl(${hue} 90% ${light}% / ${alpha})`
-  }
-  const light = 40 + peak * 10
-  const alpha = 0.28 + peak * 0.22
-  return `hsl(${hue} 45% ${light}% / ${alpha})`
-}
-
-const PLAYHEAD_COLOR = 'hsl(38 95% 62%)' // warm amber cursor, pops against the cool waveform
 
 export function Waveform({ peaks, progress = 0, isActive = false, duration = null, className, onClick, selection = null, onSelectRegion }: WaveformProps) {
   const playheadPct = Math.min(100, Math.max(0, progress * 100))
@@ -99,56 +72,21 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
   const band = dragBand ?? selection
 
 
-  // Compute time ticks: simple, evenly spaced, 3-7 labels.
-  // For short clips (< 5s) use small step (0.2–1s) and decimal labels.
-  // For longer clips use m:ss labels.
-  const ticks = hasTimeAxis
-    ? (() => {
-        const dur = duration as number
-        const isShort = dur < 5
-        const isVeryShort = dur < 3
-        // Decide target number of ticks — very short clips get fewer, wider-spaced labels
-        // so they don't overlap in a narrow card.
-        const targetTicks = isVeryShort ? 3 : isShort ? 5 : 4
-        // Compute ideal step
-        const idealStep = dur / targetTicks
+  const [containerRef, widthPx] = useElementWidth<HTMLDivElement>()
 
-        const niceShort = [0.2, 0.3, 0.5, 1]
-        const niceLong = [1, 2, 3, 5, 10, 15, 20]
-        const scale = isShort ? niceShort : niceLong
-
-        let step = idealStep
-        let bestDiff = Infinity
-        for (const s of scale) {
-          const diff = Math.abs(s - idealStep)
-          if (diff < bestDiff) {
-            bestDiff = diff
-            step = s
-          }
-        }
-
-        const n = Math.max(2, Math.round(dur / step))
-        const labels: { pos: number; text: string }[] = []
-        for (let i = 0; i <= n; i++) {
-          const t = i * step
-          if (t > dur + 0.001) break
-          labels.push({
-            pos: (i / n) * 100,
-            text: formatTime(t),
-          })
-        }
-        // Always show the clip's exact total duration at the far right, even if
-        // the last evenly-spaced tick landed short of it.
-        const lastLabel = labels[labels.length - 1]
-        if (!lastLabel || lastLabel.pos < 99.5) {
-          labels.push({ pos: 100, text: formatTime(dur) })
-        }
-        return labels
-      })()
-    : null
+  // Compute time ticks via the shared time-axis module, using the container's real measured
+  // width so density adapts to how much room the ruler actually has.
+  const ticks =
+    hasTimeAxis && widthPx > 0
+      ? createTimeTicks({ durationSeconds: duration as number, pixelsPerSecond: widthPx / (duration as number), widthPx }).map((t) => ({
+          pos: (t.x / widthPx) * 100,
+          text: t.label,
+        }))
+      : null
 
   return (
     <div
+      ref={containerRef}
       className={cn(
         'relative overflow-hidden rounded-md bg-gradient-to-b from-black/30 to-transparent px-0.5 select-none',
         interactive ? 'cursor-ew-resize' : onClick ? 'cursor-pointer' : '',
@@ -186,7 +124,7 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
         {peaks.map((peak, i) => {
           const played = (i / peaks.length) * 100 <= playheadPct
           const height = Math.max(0.06, peak)
-          const color = barColor(height, played)
+          const color = waveformBarColor(height, played)
 
           return (
             <motion.div
@@ -214,13 +152,13 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
       {progress > 0 && (
         <motion.div
           className="pointer-events-none absolute top-0 h-full w-px"
-          style={{ background: PLAYHEAD_COLOR, boxShadow: `0 0 8px 1px ${PLAYHEAD_COLOR}` }}
+          style={{ background: WAVEFORM_PLAYHEAD_COLOR, boxShadow: `0 0 8px 1px ${WAVEFORM_PLAYHEAD_COLOR}` }}
           animate={{ left: `${playheadPct}%` }}
           transition={{ type: 'tween', ease: 'linear', duration: 0.1 }}
         >
           <span
             className="absolute -top-0.5 -left-[3px] size-[7px] rounded-full"
-            style={{ background: PLAYHEAD_COLOR, boxShadow: `0 0 6px 1px ${PLAYHEAD_COLOR}` }}
+            style={{ background: WAVEFORM_PLAYHEAD_COLOR, boxShadow: `0 0 6px 1px ${WAVEFORM_PLAYHEAD_COLOR}` }}
           />
         </motion.div>
       )}

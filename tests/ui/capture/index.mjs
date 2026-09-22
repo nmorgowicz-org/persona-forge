@@ -28,7 +28,12 @@ import accentProjectGrouping from './scenarios/voice-library/project-grouping.mj
 import voicesList from './scenarios/voice-library/list.mjs';
 import alignmentCompare from './scenarios/prosody/alignment-compare.mjs';
 import prosodyAdjustment from './scenarios/prosody/prosody-adjustment.mjs';
+import voiceEdit from './scenarios/prosody/voice-edit.mjs';
 import segmentLibraryBrowse from './scenarios/stitch-studio/segment-library-browse.mjs';
+import segmentBrowserScale from './scenarios/stitch-studio/segment-browser-scale.mjs';
+import gapEditing from './scenarios/stitch-studio/gap-editing.mjs';
+import transportPlayback from './scenarios/stitch-studio/transport-playback.mjs';
+import readinessStates from './scenarios/stitch-studio/readiness-states.mjs';
 import stitchAssembly from './scenarios/stitch-studio/assembly.mjs';
 import omnivoiceAudition from './scenarios/omnivoice/audition.mjs';
 import omnivoiceCandidates from './scenarios/omnivoice/candidates.mjs';
@@ -156,6 +161,16 @@ export const SCENARIOS = {
             ],
         },
     },
+    'voice-edit': {
+        run: voiceEdit,
+        category: 'prosody',
+        runtime: 'neutral',
+        source: 'fake',
+        contract: {
+            intent: 'Show the dedicated Voice Edit workspace with its shared prosody controls.',
+            expectedOutputs: ['voice-edit--neutral--workspace.png'],
+        },
+    },
     'segment-library-browse': {
         run: segmentLibraryBrowse,
         category: 'stitch-studio',
@@ -163,6 +178,47 @@ export const SCENARIOS = {
         contract: {
             intent: 'Browse the segment library picker in Stitch Studio.',
             expectedOutputs: ['segment-library-browse--neutral--segment-library-browse.png'],
+        },
+    },
+    'segment-browser-scale': {
+        run: segmentBrowserScale,
+        category: 'stitch-studio',
+        runtime: 'neutral',
+        contract: {
+            intent: 'Show the segment browser scrolled through a 250-row, five-project library.',
+            expectedOutputs: ['segment-browser-scale--neutral--scale.png'],
+        },
+    },
+    'gap-editing': {
+        run: gapEditing,
+        category: 'stitch-studio',
+        runtime: 'neutral',
+        contract: {
+            intent: 'Show gap controls as always-visible, first-class timeline elements, including a 0.00s seam.',
+            expectedOutputs: ['gap-editing--neutral--gap-editing.png'],
+        },
+    },
+    'transport-playback': {
+        run: transportPlayback,
+        category: 'stitch-studio',
+        runtime: 'neutral',
+        contract: {
+            intent: 'Show one shared transport driving the ruler playhead, arrangement toggle, and a per-clip range play button together.',
+            expectedOutputs: ['transport-playback--neutral--playback.png'],
+        },
+    },
+    'readiness-states': {
+        run: readinessStates,
+        category: 'stitch-studio',
+        runtime: 'neutral',
+        contract: {
+            intent: 'Show blocked, warning, ideal, and overlong reference-readiness states with source material distinct from spacing.',
+            expectedOutputs: [
+                'readiness-states--neutral--blocked.png',
+                'readiness-states--neutral--warning.png',
+                'readiness-states--neutral--ideal.png',
+                'readiness-states--neutral--overlong.png',
+            ],
         },
     },
     'stitch-assembly': {

@@ -61,6 +61,7 @@ const NAV_ITEMS: { page: Page; label: string; icon: typeof Mic2; description: st
   { page: 'speak', label: 'Speak', icon: AudioLines, description: 'Text to speech' },
   { page: 'voice-design', label: 'Voice Design', icon: Sparkles, description: 'Craft a new voice' },
   { page: 'voice-library', label: 'Voice Library', icon: Mic2, description: 'Saved voices' },
+  { page: 'voice-edit', label: 'Voice Edit', icon: AudioLines, description: 'Prosody & variants' },
   { page: 'stitch-studio', label: 'Stitch Studio', icon: Layers, description: 'Arrange clips into a voice' },
   { page: 'integrations', label: 'Integrations', icon: Plug, description: 'API & apps' },
   { page: 'runtime', label: 'Runtime', icon: Settings2, description: 'Live server config' },

@@ -22,6 +22,7 @@ test.describe('performance', () => {
       'nav-speak',
       'nav-voice-design',
       'nav-voice-library',
+      'nav-voice-edit',
       'nav-stitch-studio',
       'nav-integrations',
       'nav-runtime',
