@@ -12,8 +12,9 @@ import { ChevronUp, GripVertical, X, Play, Pause, Scissors, Trash2, Volume2, Vol
 import { type StitchPlanClip } from '@/store'
 import { cn } from '@/lib/utils'
 import { clipEffectiveDurationMs, type StitchRegionEdit } from '@/lib/stitchPlan'
+import { formatMsValue } from '@/lib/timeAxis'
 import { getClipAudioAnalysis } from '@/lib/waveform'
-import { useDragScrubValue } from '@/hooks/useDragScrubValue'
+import { NUMERIC_CONTROL_FOCUS_CLASS, NUMERIC_CONTROL_UNIT_CLASS, useDragScrubValue } from '@/hooks/useDragScrubValue'
 import { WaveformLane } from '../waveform/WaveformLane'
 
 type RegionEdit = StitchRegionEdit
@@ -36,6 +37,7 @@ export function MsStepper({
   compact,
   testId,
   defaultValue,
+  controlName,
 }: {
   label: string
   value: number
@@ -47,6 +49,9 @@ export function MsStepper({
   testId?: string
   /** N1 double-click reset target. */
   defaultValue?: number
+  /** Shared numeric-control grammar (S4): names the control for the tab-order/focus-ring
+   * contract, so trim/fade pairs group as `trim` and `fade` in the tab walk. */
+  controlName?: 'trim' | 'fade'
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const {
@@ -71,6 +76,7 @@ export function MsStepper({
     defaultValue,
     wheel: true,
   })
+  const unit = formatMsValue(displayValue)
 
   // Native capture-phase pointerdown: the stepper sits inside the clip's Reorder.Item,
   // whose own drag listener is a native bubble-phase listener on the card element. A React
@@ -101,12 +107,21 @@ export function MsStepper({
         wheelTargetRef.current = node
       }}
       data-testid={testId ? `${testId}-row` : undefined}
-      className={cn('flex min-w-0 cursor-ew-resize touch-none select-none items-center gap-1', compact && 'gap-0.5')}
+      data-numeric-control={controlName}
+      tabIndex={0}
+      role="group"
+      aria-label={label}
+      className={cn(
+        'flex min-w-0 cursor-ew-resize touch-none select-none items-center gap-1 rounded',
+        compact && 'gap-0.5',
+        NUMERIC_CONTROL_FOCUS_CLASS,
+      )}
       title={label}
+      onKeyDown={handleKeyDown}
       onDoubleClick={handleDoubleClick}
     >
       {!compact && <span className="min-w-0 flex-1 truncate text-[10px] uppercase text-muted-foreground/70">{label}</span>}
-      <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" aria-label={`Decrease ${label}`} onClick={() => nudge(-step)} onPointerDown={(e) => e.stopPropagation()}>−</button>
+      <button type="button" tabIndex={-1} className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" aria-label={`Decrease ${label}`} onClick={() => nudge(-step)} onPointerDown={(e) => e.stopPropagation()}>−</button>
       {editing ? (
         <input
           type="text"
@@ -116,20 +131,24 @@ export function MsStepper({
           aria-label={label}
           onChange={(event) => setDraftText(event.target.value)}
           onBlur={commitEdit}
-          onKeyDown={handleKeyDown}
           onPointerDown={(event) => event.stopPropagation()}
           className="w-12 rounded border border-cyan-500/40 bg-muted/40 px-1 text-center font-mono tabular-nums text-foreground outline-none"
           autoFocus
         />
       ) : (
-        <span
-          data-testid={testId}
-          className="inline-flex min-w-[28px] shrink-0 justify-center font-mono tabular-nums text-foreground"
-        >
-          {displayValue}
-        </span>
+        <>
+          <span
+            data-testid={testId}
+            className="inline-flex min-w-[28px] shrink-0 justify-center font-mono tabular-nums text-foreground"
+          >
+            {unit.text}
+          </span>
+          <span data-testid={testId ? `${testId}-unit` : undefined} className={NUMERIC_CONTROL_UNIT_CLASS}>
+            {unit.unit}
+          </span>
+        </>
       )}
-      <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" aria-label={`Increase ${label}`} onClick={() => nudge(step)} onPointerDown={(e) => e.stopPropagation()}>+</button>
+      <button type="button" tabIndex={-1} className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" aria-label={`Increase ${label}`} onClick={() => nudge(step)} onPointerDown={(e) => e.stopPropagation()}>+</button>
     </div>
   )
 }
@@ -612,10 +631,10 @@ export const StitchClipCard = memo(function StitchClipCard({
       {showAdvanced && (
         <>
           <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1.5" onClick={(e) => e.stopPropagation()}>
-            <MsStepper testId="stitch-stepper-trim-start-value" label="Trim start" value={clip.trimStartMs} min={0} max={durMs ?? 0} step={10} defaultValue={0} onChange={(v) => onUpdate(clip.clipId, { trimStartMs: clampTrimStart(v) })} />
-            <MsStepper testId="stitch-stepper-trim-end-value" label="Trim end" value={clip.trimEndMs} min={0} max={durMs ?? 0} step={10} defaultValue={0} onChange={(v) => onUpdate(clip.clipId, { trimEndMs: clampTrimEnd(v) })} />
-            <MsStepper testId="stitch-stepper-fade-in-value" label="Fade in" value={clip.fadeInMs} min={0} max={2000} step={10} defaultValue={0} onChange={(v) => onUpdate(clip.clipId, { fadeInMs: clampFade(v) })} />
-            <MsStepper testId="stitch-stepper-fade-out-value" label="Fade out" value={clip.fadeOutMs} min={0} max={2000} step={10} defaultValue={0} onChange={(v) => onUpdate(clip.clipId, { fadeOutMs: clampFade(v) })} />
+            <MsStepper testId="stitch-stepper-trim-start-value" controlName="trim" label="Trim start" value={clip.trimStartMs} min={0} max={durMs ?? 0} step={10} defaultValue={0} onChange={(v) => onUpdate(clip.clipId, { trimStartMs: clampTrimStart(v) })} />
+            <MsStepper testId="stitch-stepper-trim-end-value" controlName="trim" label="Trim end" value={clip.trimEndMs} min={0} max={durMs ?? 0} step={10} defaultValue={0} onChange={(v) => onUpdate(clip.clipId, { trimEndMs: clampTrimEnd(v) })} />
+            <MsStepper testId="stitch-stepper-fade-in-value" controlName="fade" label="Fade in" value={clip.fadeInMs} min={0} max={2000} step={10} defaultValue={0} onChange={(v) => onUpdate(clip.clipId, { fadeInMs: clampFade(v) })} />
+            <MsStepper testId="stitch-stepper-fade-out-value" controlName="fade" label="Fade out" value={clip.fadeOutMs} min={0} max={2000} step={10} defaultValue={0} onChange={(v) => onUpdate(clip.clipId, { fadeOutMs: clampFade(v) })} />
           </div>
 
           <div className="mt-2 rounded-md border border-border/50 bg-black/20 p-2" onClick={(e) => e.stopPropagation()}>

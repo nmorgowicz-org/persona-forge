@@ -42,6 +42,15 @@ export function parseNumericText(raw: string): number | null {
   return n
 }
 
+/** The house focus ring (the same utilities Button/Input use), shared by every numeric
+ * control so trim, fade, and gap cannot drift into three different focus affordances. The
+ * controls are one tab stop each (WAI-ARIA spinbutton model): the root is focusable and
+ * arrow keys adjust the value, so the −/+ buttons stay out of the tab order. */
+export const NUMERIC_CONTROL_FOCUS_CLASS = 'outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50'
+
+/** Shared styling for the unit label that follows a numeric control's value. */
+export const NUMERIC_CONTROL_UNIT_CLASS = 'shrink-0 font-mono text-[10px] text-muted-foreground/70'
+
 export interface UseDragScrubValueOptions {
   value: number
   min: number

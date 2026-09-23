@@ -15,7 +15,8 @@
 // file only supplies the gap-specific snap ladder, clamps, and rendering.
 import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
-import { useDragScrubValue } from '@/hooks/useDragScrubValue'
+import { formatMsValue } from '@/lib/timeAxis'
+import { NUMERIC_CONTROL_FOCUS_CLASS, NUMERIC_CONTROL_UNIT_CLASS, useDragScrubValue } from '@/hooks/useDragScrubValue'
 
 const SNAP_MS = [0, 80, 150, 250, 400, 600, 900]
 const MAX_GAP_MS = 5000
@@ -83,19 +84,26 @@ export function GapControl({
   const widthPx = isZero ? ZERO_BOX_PX : Math.max(MIN_NONZERO_BOX_PX, naturalWidthPx)
   const isClamped = !isZero && naturalWidthPx < MIN_NONZERO_BOX_PX
   const ariaLabel = `Gap between clip ${gapIndex + 1} and clip ${gapIndex + 2}`
+  const unit = formatMsValue(displayMs)
 
   return (
     <div
       data-testid="stitch-gap-control"
+      data-numeric-control="gap"
       data-gap-index={gapIndex}
       data-gap-ms={Math.round(paddingMs)}
       data-gap-zero={isZero ? 'true' : 'false'}
       data-gap-clamped={isClamped ? 'true' : 'false'}
       title={`${Math.round(paddingMs)}ms gap`}
+      tabIndex={0}
+      role="group"
+      aria-label={ariaLabel}
+      onKeyDown={handleKeyDown}
       onPointerDown={(e) => beginScrub(e.nativeEvent, e.currentTarget)}
       onDoubleClick={handleDoubleClick}
       className={cn(
         'group relative mt-3 flex h-24 shrink-0 flex-col items-center justify-center gap-1 rounded px-1 select-none touch-none',
+        NUMERIC_CONTROL_FOCUS_CLASS,
         isZero
           ? 'border border-dashed border-border/40 hover:border-cyan-500/50'
           : 'border border-cyan-500/40 bg-cyan-500/5',
@@ -115,25 +123,29 @@ export function GapControl({
           aria-label={ariaLabel}
           onChange={(event) => setDraftText(event.target.value)}
           onBlur={commitEdit}
-          onKeyDown={handleKeyDown}
           onPointerDown={(event) => event.stopPropagation()}
           className="w-14 rounded border border-cyan-500/40 bg-muted/40 px-1 py-0.5 text-center text-[10px] font-mono text-foreground outline-none"
         />
       ) : (
         <button
           type="button"
+          tabIndex={-1}
+          data-testid="stitch-gap-value"
           aria-label={ariaLabel}
           onClick={beginEdit}
           onPointerDown={(event) => event.stopPropagation()}
-          onKeyDown={handleKeyDown}
           className="inline-flex min-w-[24px] justify-center rounded px-1 text-xs font-mono tabular-nums text-foreground hover:bg-muted/70"
         >
-          {Math.round(displayMs)}
+          {unit.text}
         </button>
       )}
+      <span data-testid="stitch-gap-unit" className={NUMERIC_CONTROL_UNIT_CLASS}>
+        {unit.unit}
+      </span>
       <div className="flex items-center gap-0.5">
         <button
           type="button"
+          tabIndex={-1}
           className="inline-flex size-4 items-center justify-center rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted"
           aria-label="Decrease gap"
           onClick={() => nudge(-10)}
@@ -143,6 +155,7 @@ export function GapControl({
         </button>
         <button
           type="button"
+          tabIndex={-1}
           className="inline-flex size-4 items-center justify-center rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted"
           aria-label="Increase gap"
           onClick={() => nudge(10)}
@@ -153,7 +166,8 @@ export function GapControl({
       </div>
       {isClamped && (
         <span className="absolute -bottom-4 whitespace-nowrap text-[9px] font-mono text-cyan-400/80">
-          {Math.round(displayMs)}ms
+          {unit.text}
+          {unit.unit}
         </span>
       )}
     </div>

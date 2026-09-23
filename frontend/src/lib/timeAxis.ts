@@ -9,6 +9,19 @@ export interface TimeTick {
   label: string
 }
 
+/** One display grammar for every millisecond-valued control (clip trim/fade, seam gaps):
+ * below a second the number is shown in whole milliseconds, at or above a second it is
+ * shown in seconds with trailing zeros stripped. The number and its unit are returned
+ * separately so a control can keep the number itself machine-readable (tests, aria) while
+ * still showing the unit -- see `parseGapText` for the matching input grammar, which
+ * accepts a bare number, `ms`, or `s`. */
+export function formatMsValue(ms: number): { text: string; unit: 'ms' | 's' } {
+  if (!isFinite(ms)) return { text: '0', unit: 'ms' }
+  const rounded = Math.round(ms)
+  if (Math.abs(rounded) < 1000) return { text: String(rounded), unit: 'ms' }
+  return { text: String(Number((rounded / 1000).toFixed(3))), unit: 's' }
+}
+
 // A 1-2-5 "nice number" ladder in seconds, covering sub-second waveform zooms through
 // hour-scale timelines.
 const NICE_SECONDS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]

@@ -23,9 +23,11 @@ interface WaveformProps {
   // highlight; while dragging, the live band is shown regardless.
   selection?: WaveformRegion | null
   onSelectRegion?: (region: WaveformRegion | null) => void
+  /** Test hook for the waveform surface; also names the selection band `${testId}-selection`. */
+  testId?: string
 }
 
-export function Waveform({ peaks, progress = 0, isActive = false, duration = null, className, onClick, selection = null, onSelectRegion }: WaveformProps) {
+export function Waveform({ peaks, progress = 0, isActive = false, duration = null, className, onClick, selection = null, onSelectRegion, testId }: WaveformProps) {
   const playheadPct = Math.min(100, Math.max(0, progress * 100))
   const hasTimeAxis = duration != null && duration > 0 && isFinite(duration)
 
@@ -41,25 +43,34 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
 
   // Drag-to-select: track the gesture in a ref (no re-render churn) and mirror the live band
   // into `dragBand` state so it paints while dragging. A gesture that barely moves is a click.
-  const dragRef = useRef<{ start: number; end: number; moved: boolean } | null>(null)
+  //
+  // The gesture is owned by the waveform itself (pointer capture), not by whatever happens to
+  // be under the pointer: a drag that wanders off the control -- up to the transport, out of
+  // the window -- keeps tracking and still commits on release, and a pointercancel (touch
+  // scroll takeover, browser gesture) ends it without selecting anything.
+  const dragRef = useRef<{ pointerId: number; start: number; end: number; moved: boolean } | null>(null)
   const [dragBand, setDragBand] = useState<WaveformRegion | null>(null)
 
-  const onDown = (e: React.MouseEvent) => {
+  const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
     const start = fracAt(e.clientX, e.currentTarget)
-    dragRef.current = { start, end: start, moved: false }
+    dragRef.current = { pointerId: e.pointerId, start, end: start, moved: false }
+    e.currentTarget.setPointerCapture(e.pointerId)
   }
-  const onMove = (e: React.MouseEvent) => {
+  const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const d = dragRef.current
-    if (!d) return
+    if (!d || d.pointerId !== e.pointerId) return
     d.end = fracAt(e.clientX, e.currentTarget)
     if (Math.abs(d.end - d.start) > 0.01) d.moved = true
     setDragBand({ start: Math.min(d.start, d.end), end: Math.max(d.start, d.end) })
   }
-  const finishDrag = () => {
+  const finishDrag = (e: React.PointerEvent<HTMLDivElement>) => {
     const d = dragRef.current
+    if (!d || d.pointerId !== e.pointerId) return
     dragRef.current = null
     setDragBand(null)
-    if (!d) return
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+    if (e.type === 'pointercancel') return
     if (!d.moved) {
       onSelectRegion?.(null)
       onClick?.(d.start)
@@ -87,6 +98,7 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
   return (
     <div
       ref={containerRef}
+      data-testid={testId}
       className={cn(
         'relative overflow-hidden rounded-md bg-gradient-to-b from-black/30 to-transparent px-0.5 select-none',
         interactive ? 'cursor-ew-resize' : onClick ? 'cursor-pointer' : '',
@@ -94,10 +106,11 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
         className,
       )}
       onClick={interactive ? undefined : handleWaveformClick}
-      onMouseDown={interactive ? onDown : undefined}
-      onMouseMove={interactive ? onMove : undefined}
-      onMouseUp={interactive ? finishDrag : undefined}
-      onMouseLeave={interactive ? finishDrag : undefined}
+      onPointerDown={interactive ? onDown : undefined}
+      onPointerMove={interactive ? onMove : undefined}
+      onPointerUp={interactive ? finishDrag : undefined}
+      onPointerCancel={interactive ? finishDrag : undefined}
+      style={{ touchAction: interactive ? 'none' : undefined }}
     >
       {/* center track line, like a DAW lane */}
       <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-border/60" />
@@ -105,6 +118,7 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
       {/* drag/loop selection band */}
       {band && band.end > band.start && (
         <div
+          data-testid={testId ? `${testId}-selection` : undefined}
           className="pointer-events-none absolute inset-y-0 z-10 border-x border-warning/60 bg-warning/15"
           style={{ left: `${band.start * 100}%`, width: `${(band.end - band.start) * 100}%` }}
         />

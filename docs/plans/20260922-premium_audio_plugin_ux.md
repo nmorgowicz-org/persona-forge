@@ -359,10 +359,10 @@ same coordinate-mapping work and completes the transport story.
 
 | Phase | Gate result | Commit | Notes |
 | --- | --- | --- | --- |
-| 0 baseline | | | |
-| 1 S1 drag-scrub + N1 + N2 | | | |
-| 2 S2 zoom+hover | | | |
-| 3 S3+S4 waveform+grammar | | | |
+| 0 baseline | PASS 2026-09-23 | b7180f1 | Suite 68/68 on `--source fake`; 11 capture scenarios saved as the before-set. Zoom was button-only + unanchored Ctrl-wheel; no context menu; drag-scrub only in GapControl. |
+| 1 S1 drag-scrub + N1 + N2 | PASS 2026-09-23 | 9f6d4cc | `useDragScrubValue` extracted from GapControl (zero-change refactor), then MsStepper / SpeedStepper / SliderField migrated: drag-scrub, click-to-type, double-click reset, opt-in wheel. drag-scrub.spec 5/5; full suite 73/73. |
+| 2 S2 zoom+hover | PASS 2026-09-23 | 783d9d5 | Cursor-anchored zoom (layout-effect scroll correction) + imperative hover time guide. zoom-hover.spec 3/3; full suite 76/76. |
+| 3 S3+S4 waveform+grammar | PASS 2026-09-23 | (this commit) | Waveform moved to Pointer Events with capture (drag survives leaving the control; release outside still commits); one ms display/parse grammar across trim/fade/gap; one tab stop per control with the shared house focus ring. waveform-pointer.spec 3/3; suite result below. |
 | 4 M1 loop brace + N6 | | | |
 | 5 M2 context menu + N5 | | | |
 | 6 T2 undo/redo | | | |

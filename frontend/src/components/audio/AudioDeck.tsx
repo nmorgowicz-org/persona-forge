@@ -248,6 +248,7 @@ export function AudioDeck({
             onClick={handleSeek}
             selection={region}
             onSelectRegion={handleSelectRegion}
+            testId="deck-waveform"
           />
           <div className="flex flex-wrap items-center gap-1">
             <Button
@@ -329,6 +330,7 @@ export function AudioDeck({
               onClick={handleSeek}
               selection={region}
               onSelectRegion={handleSelectRegion}
+              testId="deck-waveform"
             />
             {!compact && showSpectralAccent && <SpectralAccent peaks={peaks} className="mt-2" />}
           </div>
