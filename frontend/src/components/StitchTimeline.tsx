@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { AnimatePresence, motion, MotionConfig, Reorder } from 'motion/react'
-import { ChevronUp, ChevronDown, Loader2, Play, Gauge, RotateCcw, Minus, Plus, Maximize2 } from 'lucide-react'
+import { ChevronUp, ChevronDown, Loader2, Play, Gauge, RotateCcw, Minus, Plus, Maximize2, Redo2, Undo2 } from 'lucide-react'
 import { type StitchPlanClip, type StitchPlanDsp } from '@/store'
 import {
   getStitchPacingTargets,
@@ -22,6 +22,7 @@ import { type StitchPlanSession } from '@/hooks/useStitchPlanSession'
 import { useStitchTransport, type StitchTransport } from '@/hooks/useStitchTransport'
 import { planStateToPayload } from '@/lib/stitchPreview'
 import { useStitchPreview } from '@/hooks/useStitchPreview'
+import { useStitchHistory, type StitchHistory } from '@/hooks/useStitchHistory'
 import { SegmentBrowserModal, type SegmentBrowserModalController } from './stitch/SegmentBrowserModal'
 import { useDragScrubValue, parseNumericText } from '@/hooks/useDragScrubValue'
 import { HOVER_TIME_GUIDE_LABEL_CLASS, HOVER_TIME_GUIDE_LINE_CLASS, useHoverTimeGuide } from '@/hooks/useHoverTimeGuide'
@@ -74,6 +75,42 @@ function isEditableTarget(target: EventTarget | null): boolean {
 const EMPTY_REGION_EDITS: RegionEdit[] = []
 
 
+/* ---------- history controls ---------- */
+
+/** Undo/redo for the committed plan. Rendered in the insert bar and in the empty state: an
+ * empty plan is exactly what undoing the first insert produces, so stranding the redo there
+ * would make the last step of history unreachable. */
+function HistoryControls({ history }: { history: StitchHistory }) {
+  return (
+    <div className="flex items-center gap-1 rounded border border-border bg-background px-1">
+      <button
+        type="button"
+        data-testid="stitch-undo"
+        data-history-depth={history.depth}
+        disabled={!history.canUndo}
+        onClick={history.undo}
+        aria-label="Undo"
+        title={history.canUndo ? `Undo (${history.depth} step${history.depth === 1 ? '' : 's'})` : 'Nothing to undo'}
+        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
+      >
+        <Undo2 className="size-3.5" />
+      </button>
+      <button
+        type="button"
+        data-testid="stitch-redo"
+        data-redo-depth={history.redoDepth}
+        disabled={!history.canRedo}
+        onClick={history.redo}
+        aria-label="Redo"
+        title={history.canRedo ? `Redo (${history.redoDepth} step${history.redoDepth === 1 ? '' : 's'})` : 'Nothing to redo'}
+        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
+      >
+        <Redo2 className="size-3.5" />
+      </button>
+    </div>
+  )
+}
+
 /* ---------- main component ---------- */
 
 interface StitchTimelineProps {
@@ -88,6 +125,10 @@ interface StitchTimelineProps {
   /** Controller handle for the mounted segment-browser modal(s); the editor body uses it
    * to open the picker from the readiness guidance instead of a DOM click. */
   pickerRef?: { current: SegmentBrowserModalController | null }
+  /** Undo/redo controls and their shortcuts. Off for the quick-insert draft surface: the
+   * draft is local state with no history of its own, and offering the studio's there would
+   * silently rewind the committed plan behind the dialog. */
+  historyEnabled?: boolean
 }
 
 export const StitchTimeline = memo(function StitchTimeline({
@@ -100,9 +141,12 @@ export const StitchTimeline = memo(function StitchTimeline({
   onInsertVoiceFromLibrary,
   transport,
   pickerRef,
+  historyEnabled = true,
 }: StitchTimelineProps) {
   const { plan, reorderClip, removeClip, updateClip, setClips, setPaddingAt: setPadding, setPadding: setPaddingMs, setRegionEdits: onAddOrRemoveRegionEdit } = session
   const { clips, paddingMs, regionEditsByClip } = plan
+  const history = useStitchHistory()
+  const { undo: undoHistory, redo: redoHistory } = history
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null)
   const onAddRegionEdit = useCallback((clipId: string, edit: RegionEdit) => {
     onAddOrRemoveRegionEdit(clipId, [...(regionEditsByClip[clipId] ?? []), edit])
@@ -361,7 +405,15 @@ export const StitchTimeline = memo(function StitchTimeline({
   // never hijacked by these bindings. Space and `?` don't require a selected clip; the rest do.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      // The focus guard above every other binding: Cmd/Ctrl+Z while typing belongs to the
+      // text field (the browser's own undo), never to the plan.
       if (isEditableTarget(e.target)) return
+      if (historyEnabled && (e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault()
+        if (e.shiftKey) redoHistory()
+        else undoHistory()
+        return
+      }
       if ((e.code === 'Space' || e.key === ' ') && !e.repeat) {
         // The shortcuts dialog is open on a non-editable surface; Space there would
         // otherwise toggle arrangement playback behind the dialog.
@@ -407,13 +459,14 @@ export const StitchTimeline = memo(function StitchTimeline({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selectedClipId, clips, moveClip, removeClip, updateClip, transport, shortcutsOpen])
+  }, [selectedClipId, clips, moveClip, removeClip, updateClip, transport, shortcutsOpen, historyEnabled, undoHistory, redoHistory])
 
   if (!clips.length) {
     return (
       <div className="flex h-24 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
         <span>No clips in timeline</span>
         <div className="flex items-center gap-2">
+          {historyEnabled && <HistoryControls history={history} />}
           {(library.length > 0 || hasVoiceLibrary) && (
             <SegmentBrowserModal
               segments={library}
@@ -439,6 +492,7 @@ export const StitchTimeline = memo(function StitchTimeline({
             Drag to reorder clips, trim edges, and adjust gaps to build your 10–15s reference voice.
           </span>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {historyEnabled && <HistoryControls history={history} />}
             <div className="flex items-center gap-1 rounded border border-border bg-background px-1">
               <button type="button" data-testid="stitch-zoom-out" className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={zoomOut} aria-label="Zoom out">
                 <Minus className="size-3.5" />
@@ -894,6 +948,7 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
         onInsertVoiceFromLibrary={onInsertVoiceFromLibrary}
         transport={transport}
         pickerRef={pickerRef}
+        historyEnabled={props.surface === 'studio'}
       />
       <StitchDspControls open={showDsp} onToggle={() => setShowDsp((v) => !v)} dsp={dsp} onSetDsp={session.setDsp} />
 
@@ -1057,6 +1112,7 @@ const SHORTCUTS: Array<[string, string]> = [
   ['Shift+←/→', 'Reorder the selected clip'],
   ['↑/↓', 'Nudge trim start by 10ms (Shift = 100ms)'],
   ['Delete/Backspace', 'Remove the selected clip'],
+  ['Cmd/Ctrl+Z', 'Undo the last plan change (Shift to redo)'],
   ['?', 'Show this dialog'],
 ]
 
