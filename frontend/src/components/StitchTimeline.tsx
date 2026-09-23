@@ -251,7 +251,7 @@ export const StitchTimeline = memo(function StitchTimeline({
   const wheelHandlerRef = useRef<((e: WheelEvent) => void) | null>(null)
   const hoverHandlerRef = useRef<((e: PointerEvent) => void) | null>(null)
   const leaveHandlerRef = useRef<(() => void) | null>(null)
-  const guide = useHoverTimeGuide({ pixelsPerSecond })
+  const guide = useHoverTimeGuide()
   const attachTimelineEl = useCallback((node: HTMLDivElement | null) => {
     scrollRef(node)
     const prev = scrollElRef.current
@@ -286,7 +286,7 @@ export const StitchTimeline = memo(function StitchTimeline({
       const rulerViewportX = rulerEl.getBoundingClientRect().left
       const sec = (e.clientX - rulerViewportX) / ppsRef.current
       if (sec < 0 || sec > totalSecondsRef.current) return
-      guide.show(`${sec * ppsRef.current}px`, sec, totalSecondsRef.current > 0 ? sec / totalSecondsRef.current : 0)
+      guide.show(`${sec * ppsRef.current}px`, sec, totalSecondsRef.current > 0 ? sec / totalSecondsRef.current : 0, ppsRef.current)
     }
     const onLeave = () => guide.hide()
     node.addEventListener('wheel', onWheel, { passive: false })

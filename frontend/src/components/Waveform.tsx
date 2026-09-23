@@ -37,7 +37,7 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
   const hasTimeAxis = duration != null && duration > 0 && isFinite(duration)
   const [containerRef, widthPx] = useElementWidth<HTMLDivElement>()
   const pixelsPerSecond = hasTimeAxis && widthPx > 0 ? widthPx / (duration as number) : 0
-  const guide = useHoverTimeGuide({ pixelsPerSecond })
+  const guide = useHoverTimeGuide()
 
   const fracAt = (clientX: number, el: Element) => {
     const rect = el.getBoundingClientRect()
@@ -74,7 +74,7 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
     const frac = fracAt(e.clientX, e.currentTarget)
     // The readout tracks the pointer whether or not a gesture is in flight. Written straight
     // to the DOM, so a hover sweep never re-renders the waveform.
-    if (pixelsPerSecond > 0 && e.pointerType !== 'touch') guide.show(`${frac * 100}%`, frac * (duration as number), frac)
+    if (pixelsPerSecond > 0 && e.pointerType !== 'touch') guide.show(`${frac * 100}%`, frac * (duration as number), frac, pixelsPerSecond)
     const d = dragRef.current
     if (!d || d.pointerId !== e.pointerId) return
     if (d.mode === 'scrub') {

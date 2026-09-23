@@ -18,26 +18,23 @@ export interface HoverTimeGuide {
   /** Attach to the label inside the guide. */
   labelRef: React.RefObject<HTMLSpanElement | null>
   /** `left` is the CSS position the caller's own geometry produced; `fraction` (0..1 across
-   * the surface) only decides which way the label flips at the edges so it stays inside. */
-  show: (left: string, seconds: number, fraction: number) => void
+   * the surface) only decides which way the label flips at the edges so it stays inside;
+   * `pixelsPerSecond` picks the ruler's tick step for the label. */
+  show: (left: string, seconds: number, fraction: number, pixelsPerSecond: number) => void
   hide: () => void
 }
 
-export function useHoverTimeGuide({ pixelsPerSecond }: { pixelsPerSecond: number }): HoverTimeGuide {
+export function useHoverTimeGuide(): HoverTimeGuide {
   const guideRef = useRef<HTMLDivElement | null>(null)
   const labelRef = useRef<HTMLSpanElement | null>(null)
-  // Read at call time so a re-render never invalidates the callbacks (they stay
-  // identity-stable, like the drag-scrub hook's gesture callbacks).
-  const ppsRef = useRef(pixelsPerSecond)
-  ppsRef.current = pixelsPerSecond
 
-  const show = useCallback((left: string, seconds: number, fraction: number) => {
+  const show = useCallback((left: string, seconds: number, fraction: number, pixelsPerSecond: number) => {
     const guide = guideRef.current
     const label = labelRef.current
     if (!guide || !label) return
     guide.style.display = ''
     guide.style.left = left
-    label.textContent = formatHoverTime(seconds, ppsRef.current)
+    label.textContent = formatHoverTime(seconds, pixelsPerSecond)
     // Keep the label inside the surface at its edges instead of letting it hang off.
     label.style.transform = fraction <= 0.06 ? 'translateX(0)' : fraction >= 0.94 ? 'translateX(-100%)' : 'translateX(-50%)'
   }, [])
