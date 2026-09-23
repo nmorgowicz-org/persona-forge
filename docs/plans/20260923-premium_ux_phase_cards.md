@@ -782,7 +782,15 @@ every image README embeds exists and was regenerated this phase
 3. Preflight + `git diff --check`; commit; push.
 4. Draft the PR title and body (Conventional Commit title; Release Please
    override block with one line per phase commit; scorecard; before/after
-   index from `_gates/A-0` vs published). **Show the draft to the owner and
-   STOP** — the owner approves before `gh pr create` is run.
+   index from `_gates/A-0` vs published). **MAJOR bump (owner addendum
+   2026-09-23, R §6 step 4):** the first override entry must be
+   `feat(ui)!: luminous instrument redesign and Signal Crucible rebrand`
+   (the `!` carries the breaking marker — with an override block, Release
+   Please reads the block, not the PR title), plus a `BREAKING CHANGE:`
+   footer inside the block; keep all other entries plain. When Release
+   Please opens the release PR, verify it proposes Y.0.0 (current major + 1)
+   before merge; if not, add a `Release-As: Y.0.0` trailer to that PR.
+   **Show the draft to the owner and STOP** — the owner approves before
+   `gh pr create` is run.
 
 **Commit:** `chore: archive luminous-instrument planning docs`

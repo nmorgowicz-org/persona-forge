@@ -223,6 +223,33 @@ FAIL / N/A-with-reason. Owning phase in brackets.
    (`feat(ui):` per craft phase, `docs:` for P11, `test(ui):` for P0) — so
    the changelog tells the whole story. PR body carries the scorecard and the
    capture before/after index (A-0 "before" set vs P11 "after" set).
+4. **Version bump = MAJOR (owner addendum 2026-09-23).** This arc bundles a
+   semi-rebrand (Signal Crucible identity, D7) with a large UI/UX overhaul,
+   so the release must land as Y.0.0. Release Please mechanics (AGENTS.md
+   "Version bump rules", squash-merge, one PR = one evaluated commit):
+   - Because the PR body carries a `BEGIN_COMMIT_OVERRIDE` block, Release
+     Please evaluates **the block's entries, not the PR title**, for both
+     the changelog and the version bump (the override fully replaces the
+     commit history it would otherwise read — including the squash title).
+     So the breaking marker must live **inside the block**:
+     - First override entry: `feat(ui)!: luminous instrument redesign and
+       Signal Crucible rebrand` — the `!` after the scope is the breaking
+       marker; the remaining craft phases follow as plain `feat(ui):`
+       entries.
+     - Belt-and-braces: end the block with a `BREAKING CHANGE: <summary>`
+       footer paragraph (blank line before it, as a conventional-commit
+       footer). Either signal alone triggers major; both cost nothing.
+     - Do NOT put `!` on the other override entries.
+   - The PR title itself should still be a valid Conventional Commit
+     (`feat(ui): …` or `feat(ui)!: …` — the local hook validates it), but it
+     is not what Release Please reads once the override block is present.
+   - **Most reliable final check:** when Release Please opens its release
+     PR, the executor verifies the proposed version is Y.0.0 before it is
+     merged; if it is not, add a `Release-As: Y.0.0` trailer to the release
+     PR (or hand to the owner). `Release-As` is checked before any
+     breaking/feat heuristic, so it forces the exact version regardless.
+   - Executors do not invent Y: it is current major + 1, read from the
+     latest release tag/changelog at B-P12 time.
 
 ## 7. Ledger (appended during execution)
 
@@ -239,7 +266,8 @@ FAIL / N/A-with-reason. Owning phase in brackets.
 | CP0b D1 look | B | **Obsidian** 2026-09-23 | — | lookdev-board |
 | CP0b D7 brand identity | B | **Signal Crucible**; lightning-centered identity rejected 2026-09-23 | — | selected finalist under `hero-v2/finalists/signal-crucible/` |
 | CP0b D9 signal palette | B | **S-c hybrid** 2026-09-23 | — | lookdev-board signal board |
-| B-P0 look-dev + brand board | B | PASS 2026-09-23 | abfe76e | + CP0b refinement commit |
+| B-P0 look-dev + brand board | B | PASS 2026-09-23 | abfe76e | + CP0b refinement commit 7fc9f4e (Signal Crucible) |
+| Owner addendum: release version | R | **MAJOR (Y.0.0)** decided 2026-09-23 | — | semi-rebrand + UX overhaul; `feat(ui)!:` first override entry + `BREAKING CHANGE:` footer; verify release PR proposes Y.0.0, else `Release-As:` — §6 step 4 |
 | A-0 baseline | A | | | |
 | A-1 S1 drag-scrub + N1 + N2 | A | | | |
 | A-2 S2 zoom + hover | A | | | |
