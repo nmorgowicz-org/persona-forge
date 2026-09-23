@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { claimPlayback, releasePlayback } from '@/lib/playbackFocus'
 import {
   cancelVoiceAlignment,
   deleteVoiceVariant,
@@ -120,6 +121,9 @@ export function useProsodyEditor(
 
   const [previewingVariant, setPreviewingVariant] = useState<string | null>(null)
   const variantPreviewAudioRef = useRef<HTMLAudioElement | null>(null)
+  // This editor's identity in the playback-focus registry (N6): previewing a variant
+  // silences whatever else is sounding, and vice versa.
+  const focusId = useId()
   const variantPreviewUrlRef = useRef<string | null>(null)
   const [variantBusy, setVariantBusy] = useState<string | null>(null)
   const [savingVariantBusy, setSavingVariantBusy] = useState(false)
@@ -382,6 +386,7 @@ export function useProsodyEditor(
     if (previewingVariant === entry.filename) {
       variantPreviewAudioRef.current?.pause()
       variantPreviewAudioRef.current = null
+      releasePlayback(focusId)
       if (variantPreviewUrlRef.current) {
         URL.revokeObjectURL(variantPreviewUrlRef.current)
         variantPreviewUrlRef.current = null
@@ -413,8 +418,13 @@ export function useProsodyEditor(
       variantPreviewAudioRef.current = el
       setPreviewingVariant(entry.filename)
       setPreviewMetrics(metricsResult ? metricsResult.metrics : null)
+      claimPlayback(focusId, () => {
+        el.pause()
+        setPreviewingVariant(null)
+      })
       el.addEventListener('ended', () => {
         setPreviewingVariant(null)
+        releasePlayback(focusId)
         if (variantPreviewUrlRef.current === url) {
           URL.revokeObjectURL(url)
           variantPreviewUrlRef.current = null
