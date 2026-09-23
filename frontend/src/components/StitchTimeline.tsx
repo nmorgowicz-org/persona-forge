@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { AnimatePresence, motion, MotionConfig, Reorder } from 'motion/react'
 import { ChevronUp, ChevronDown, Loader2, Play, Gauge, RotateCcw, Minus, Plus, Maximize2 } from 'lucide-react'
@@ -232,14 +232,94 @@ export const StitchTimeline = memo(function StitchTimeline({
   const zoomIn = useCallback(() => setManualPps(clampPps(pixelsPerSecond * 1.25)), [pixelsPerSecond])
   const zoomOut = useCallback(() => setManualPps(clampPps(pixelsPerSecond / 1.25)), [pixelsPerSecond])
   const zoomFit = useCallback(() => setManualPps(null), [])
-  const onWheelZoom = useCallback(
-    (e: React.WheelEvent<HTMLDivElement>) => {
+  // Cursor-anchored zoom (S2): after a Ctrl/Cmd-wheel zoom the arrangement time under the
+  // pointer must not move. The ruler's content origin sits at scrollLeft 0 (absolute left-0),
+  // so pointerTime = (pointerViewportX - rulerViewportX) / pps; preserving that time means
+  // the new scrollLeft must place pointerTime * newPps at the same viewport offset.
+  //
+  // The wheel listener is native and non-passive: React's synthetic onWheel is registered
+  // passive, so preventDefault() (which must stop the browser's own pinch-zoom) would be a
+  const zoomAnchorRef = useRef<{ pointerViewportX: number; pointerTimeSec: number } | null>(null)
+  const scrollElRef = useRef<HTMLDivElement | null>(null)
+  const ppsRef = useRef(pixelsPerSecond)
+  ppsRef.current = pixelsPerSecond
+  // The wheel zoom and hover guide listeners are attached imperatively from the scroll
+  // container's ref callback: the timeline only mounts once clips exist, so an empty-deps
+  // effect would run before the element exists and never bind. Both read live values
+  // through refs, so the bindings themselves are one-shot.
+  const wheelHandlerRef = useRef<((e: WheelEvent) => void) | null>(null)
+  const hoverHandlerRef = useRef<((e: PointerEvent) => void) | null>(null)
+  const leaveHandlerRef = useRef<(() => void) | null>(null)
+  const guideElRef = useRef<HTMLDivElement | null>(null)
+  const attachTimelineEl = useCallback((node: HTMLDivElement | null) => {
+    scrollRef(node)
+    const prev = scrollElRef.current
+    if (prev && prev !== node) {
+      if (wheelHandlerRef.current) prev.removeEventListener('wheel', wheelHandlerRef.current)
+      if (hoverHandlerRef.current) prev.removeEventListener('pointermove', hoverHandlerRef.current)
+      if (leaveHandlerRef.current) prev.removeEventListener('pointerleave', leaveHandlerRef.current)
+      wheelHandlerRef.current = hoverHandlerRef.current = leaveHandlerRef.current = null
+    }
+    scrollElRef.current = node
+    if (!node) return
+    const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
-      setManualPps(clampPps(pixelsPerSecond * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))
-    },
-    [pixelsPerSecond],
-  )
+      const rulerEl = node.querySelector<HTMLElement>('[data-testid="stitch-timeline-ruler"]')
+      if (rulerEl) {
+        const rulerViewportX = rulerEl.getBoundingClientRect().left
+        zoomAnchorRef.current = {
+          pointerViewportX: e.clientX,
+          pointerTimeSec: Math.max(0, (e.clientX - rulerViewportX) / ppsRef.current),
+        }
+      }
+      setManualPps(clampPps(ppsRef.current * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))
+    }
+    // The hover guide is written straight to the DOM (never React state) so pointer
+    // movement cannot re-render the timeline mid-gesture -- the same discipline the
+    // ruler's playhead uses for playback position.
+    const onHover = (e: PointerEvent) => {
+      const guide = guideElRef.current
+      const rulerEl = node.querySelector<HTMLElement>('[data-testid="stitch-timeline-ruler"]')
+      if (!guide || !rulerEl || ppsRef.current <= 0) return
+      const rulerViewportX = rulerEl.getBoundingClientRect().left
+      const sec = (e.clientX - rulerViewportX) / ppsRef.current
+      if (sec < 0 || sec > totalSecondsRef.current) return
+      guide.style.display = ''
+      guide.style.left = `${sec * ppsRef.current}px`
+      const label = guide.querySelector('span')
+      if (label) label.textContent = `${sec.toFixed(2)}s`
+    }
+    const onLeave = () => {
+      const guide = guideElRef.current
+      if (guide) guide.style.display = 'none'
+    }
+    node.addEventListener('wheel', onWheel, { passive: false })
+    node.addEventListener('pointermove', onHover)
+    node.addEventListener('pointerleave', onLeave)
+    wheelHandlerRef.current = onWheel
+    hoverHandlerRef.current = onHover
+    leaveHandlerRef.current = onLeave
+  }, [scrollRef])
+  // The scroll correction runs in a layout effect after React committed the new scale, and
+  // clamps against the expected content width (totalSeconds * newPps + rail padding), not
+  // the DOM's current scrollWidth: Framer's layout animations can lag the scrollable range
+  // by a frame, which would clamp the correction to 0.
+  const totalSecondsRef = useRef(totalSeconds)
+  totalSecondsRef.current = totalSeconds
+  useLayoutEffect(() => {
+    const anchor = zoomAnchorRef.current
+    const scrollEl = scrollElRef.current
+    if (!anchor || !scrollEl || manualPps === null) return
+    zoomAnchorRef.current = null
+    const rulerEl = scrollEl.querySelector<HTMLElement>('[data-testid="stitch-timeline-ruler"]')
+    if (!rulerEl) return
+    const rulerViewportX = rulerEl.getBoundingClientRect().left
+    const pointerContentX = anchor.pointerTimeSec * manualPps
+    const desired = scrollEl.scrollLeft + pointerContentX - (anchor.pointerViewportX - rulerViewportX)
+    const maxScroll = Math.max(scrollEl.scrollWidth, totalSecondsRef.current * manualPps + RAIL_PADDING_PX) - scrollEl.clientWidth
+    scrollEl.scrollLeft = Math.max(0, Math.min(desired, maxScroll))
+  }, [manualPps])
   const contentWidthPx = totalSeconds * pixelsPerSecond
 
   const handleSeek = useCallback(
@@ -373,14 +453,23 @@ export const StitchTimeline = memo(function StitchTimeline({
           </div>
         </div>
       )}
-
-      {/* Timeline */}
       <div
-        ref={scrollRef}
-        onWheel={onWheelZoom}
+        ref={attachTimelineEl}
         className="relative flex items-stretch gap-0 overflow-x-auto overflow-y-visible pl-5"
         style={{ minWidth: 0 }}
       >
+        {contentWidthPx > 0 && (
+          <div
+            ref={guideElRef}
+            data-testid="timeline-hover-guide"
+            className="pointer-events-none absolute inset-y-0 z-20 w-px bg-cyan-400/60"
+            style={{ left: 0, display: 'none' }}
+          >
+            <span className="absolute top-0 -translate-x-1/2 whitespace-nowrap rounded bg-background/90 px-1 text-[9px] font-mono tabular-nums text-cyan-300 shadow-sm">
+              0.00s
+            </span>
+          </div>
+        )}
         {contentWidthPx > 0 && (
           <TimelineRuler
             durationSeconds={totalSeconds}
