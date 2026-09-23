@@ -37,8 +37,6 @@ from pathlib import Path
 
 import numpy as np
 
-from tests.fixtures.audio import decode_pcm16_wav_to_float32  # noqa: E402
-
 _SAMPLE_RATE = 24000
 _MAX_SEED = 2**32
 
@@ -153,6 +151,9 @@ def _load_segment_clips() -> list[tuple[str, np.ndarray]]:
     target_dir = os.environ.get("SEGMENT_LIBRARY_DIR")
     if not target_dir:
         return []
+    # Imported here, not at module top: _setup_pythonpath() must run first to put
+    # the repo root on sys.path (CI runs with PYTHONPATH=src:src/export only).
+    from tests.fixtures.audio import decode_pcm16_wav_to_float32
     clips: list[tuple[str, np.ndarray]] = []
     for entry in sorted(Path(target_dir).iterdir()):
         meta_path = entry / "meta.json"
