@@ -12,7 +12,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pause, Play } from 'lucide-react'
 import { create } from 'zustand'
 import { useAppStore } from '@/store'
-import { cloneStitchPlanState, hashStitchPlan, type StitchPlanState } from '@/lib/stitchPlan'
+import {
+  cloneStitchPlanState,
+  computeStitchDurations,
+  hashStitchPlan,
+  type StitchPlanState,
+} from '@/lib/stitchPlan'
 import { useAudioSource } from '@/hooks/useAudioTransport'
 import { useStitchPreview } from '@/hooks/useStitchPreview'
 import { cn } from '@/lib/utils'
@@ -81,6 +86,16 @@ export function StitchABBar() {
 
   // Each snapshot audition is one audio source in the transport coordinator (T1).
   const source = useAudioSource('ab-snapshot', 'A/B snapshot')
+  // What each slot holds, in the same terms the readiness strip uses. Two slots that both
+  // read "A" and "B" and nothing else are indistinguishable, which is how a plan gets
+  // overwritten by someone who only wanted to look at it.
+  const summaryFor = (snapshot: Snapshot | null) => {
+    if (!snapshot) return 'empty'
+    const { renderedMs } = computeStitchDurations(snapshot.plan)
+    const clips = snapshot.plan.clips.length
+    return `${clips} clip${clips === 1 ? '' : 's'} · ${(renderedMs / 1000).toFixed(1)}s`
+  }
+
   const audioARef = useRef<HTMLAudioElement | null>(null)
   const audioBRef = useRef<HTMLAudioElement | null>(null)
   const [playingSlot, setPlayingSlot] = useState<Slot | null>(null)
@@ -115,7 +130,12 @@ export function StitchABBar() {
       data-testid="stitch-ab-bar"
       className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2"
     >
-      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">A/B snapshots</span>
+      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+        A/B snapshots
+        <span className="ml-2 font-normal normal-case tracking-normal text-muted-foreground/70">
+          Save the current plan into a slot, then switch between them to compare.
+        </span>
+      </span>
       {(['a', 'b'] as Slot[]).map((slot) => {
         const snapshot = slot === 'a' ? a : b
         const preview = previewFor[slot]
@@ -140,6 +160,12 @@ export function StitchABBar() {
               className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-[11px] font-medium text-foreground hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent"
             >
               <span className="font-mono uppercase">{slot}</span>
+              <span
+                data-testid={`stitch-ab-summary-${slot}`}
+                className={cn('text-[10px] tabular-nums', snapshot ? 'text-muted-foreground' : 'text-muted-foreground/50')}
+              >
+                {summaryFor(snapshot)}
+              </span>
               {isActive && (
                 <span className="rounded bg-cyan-500/20 px-1 text-[9px] uppercase tracking-wide text-cyan-200">
                   {editedSince ? 'active · edited' : 'active'}
@@ -150,11 +176,22 @@ export function StitchABBar() {
               type="button"
               data-testid={`stitch-ab-capture-${slot}`}
               disabled={!clips.length}
-              onClick={() => capture(slot, plan)}
-              title={`Capture the current plan as ${upper}`}
+              onClick={() => {
+                // Overwriting is the one destructive thing here, and it used to sit exactly
+                // where "show me this slot" would be. Same confirm the timeline uses to clear.
+                if (snapshot && !window.confirm(`Overwrite snapshot ${upper}? The plan stored in it is replaced.`)) {
+                  return
+                }
+                capture(slot, plan)
+              }}
+              title={
+                snapshot
+                  ? `Replace what is stored in ${upper} with the current plan`
+                  : `Store the current plan in ${upper}`
+              }
               className="rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
             >
-              {snapshot ? `Re-capture ${upper}` : `Capture ${upper}`}
+              {snapshot ? `Overwrite ${upper}…` : `Save as ${upper}`}
             </button>
             <button
               type="button"

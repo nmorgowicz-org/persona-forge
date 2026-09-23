@@ -30,6 +30,14 @@ async function setGap(page, index, value) {
   await input.press('Enter')
 }
 
+async function addOneClip(page) {
+  await page.getByTestId('stitch-picker-toggle-segments').click()
+  const items = page.getByTestId('stitch-picker-item-segments')
+  await expect(items.first()).toBeVisible()
+  await items.nth(0).click()
+  await page.getByTestId('stitch-picker-insert-segments').click()
+}
+
 const gapMs = (page, index) => page.getByTestId('stitch-gap-control').nth(index).getAttribute('data-gap-ms')
 const depth = (page) => page.getByTestId('stitch-undo').getAttribute('data-history-depth')
 const paused = (page, testId) => page.getByTestId(testId).evaluate((el) => el.paused)
@@ -129,5 +137,45 @@ test.describe('A-8: A/B plan snapshots', () => {
     await expect(page.getByTestId('stitch-ab-bar')).toBeVisible()
     await expect(page.getByTestId('stitch-ab-slot-a')).toBeDisabled()
     await expect(page.getByTestId('stitch-ab-slot-b')).toBeDisabled()
+  })
+  test('a filled slot says what it holds, so A and B are tellable apart', async ({ page }) => {
+    // CP1 finding (owner, 2026-09-23): "i got confused once and accidentally overwrote my A
+    // clip". Two slots that both read "A" and "B" and nothing else give no way to tell which
+    // plan is in which, and the control that overwrites sat where the control that shows it
+    // should be.
+    await insertSegments(page, 2)
+    await page.getByTestId('stitch-ab-capture-a').click()
+    await addOneClip(page)
+    await page.getByTestId('stitch-ab-capture-b').click()
+
+    await expect(page.getByTestId('stitch-ab-slot-a')).toContainText('2 clips')
+    await expect(page.getByTestId('stitch-ab-slot-b')).toContainText('3 clips')
+    // The rendered length, not just the count: two plans can hold the same clips at
+    // different gaps, which is exactly what an A/B comparison is for.
+    await expect(page.getByTestId('stitch-ab-slot-a')).toContainText(/\d+\.\ds/)
+    await expect(page.getByTestId('stitch-ab-slot-b')).toContainText(/\d+\.\ds/)
+    await expect(page.getByTestId('stitch-ab-slot-a')).not.toContainText('empty')
+    await expect(page.getByTestId('stitch-ab-slot-b')).not.toContainText('empty')
+  })
+
+  test('overwriting a slot asks first, and declining keeps the stored plan', async ({ page }) => {
+    await insertSegments(page, 2)
+    await page.getByTestId('stitch-ab-capture-a').click()
+    const storedGap = await gapMs(page, 0)
+    await setGap(page, 0, '900')
+
+    page.once('dialog', (dialog) => dialog.dismiss())
+    await page.getByTestId('stitch-ab-capture-a').click()
+    await page.getByTestId('stitch-ab-slot-a').click()
+    expect(await gapMs(page, 0)).toBe(storedGap)
+
+    // Accepting it replaces the snapshot with the live plan. The plan is moved off A's
+    // content first, so "A now holds what was live" is distinguishable from "A never moved".
+    await setGap(page, 0, '900')
+    page.once('dialog', (dialog) => dialog.accept())
+    await page.getByTestId('stitch-ab-capture-a').click()
+    await setGap(page, 0, '300')
+    await page.getByTestId('stitch-ab-slot-a').click()
+    expect(await gapMs(page, 0)).toBe('900')
   })
 })
