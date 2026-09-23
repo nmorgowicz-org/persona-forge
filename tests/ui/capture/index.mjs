@@ -43,6 +43,8 @@ import heroSpeakFilled from './scenarios/hero/speak-filled.mjs';
 import heroSpeakResult from './scenarios/hero/speak-result.mjs';
 import heroVoiceDesign from './scenarios/hero/voice-design.mjs';
 import heroLibrary from './scenarios/hero/library.mjs';
+import lookdevBoard, { LOOKDEV_BOARD_OUTPUTS } from './scenarios/lookdev/board.mjs';
+import lookdevBrand, { LOOKDEV_BRAND_OUTPUTS } from './scenarios/lookdev/brand.mjs';
 
 export const SCENARIOS = {
     health: {
@@ -310,6 +312,26 @@ export const SCENARIOS = {
         contract: {
             intent: 'Hero candidate — the Voice Library with prosody fingerprints.',
             expectedOutputs: ['hero-library--neutral--panel.png'],
+        },
+    },
+    'lookdev-board': {
+        run: lookdevBoard,
+        category: 'lookdev',
+        runtime: 'neutral',
+        source: 'fake',
+        contract: {
+            intent: 'B-P0 look-dev board: four candidate looks x two accents on four hero surfaces, contact sheets, and the D9 signal-palette board.',
+            expectedOutputs: LOOKDEV_BOARD_OUTPUTS,
+        },
+    },
+    'lookdev-brand': {
+        run: lookdevBrand,
+        category: 'lookdev',
+        runtime: 'neutral',
+        source: 'fake',
+        contract: {
+            intent: 'B-P0 brand board: mark drafts at every size and the Option E hero art in context.',
+            expectedOutputs: LOOKDEV_BRAND_OUTPUTS,
         },
     },
 };

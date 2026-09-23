@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <!-- M-b "Ring + spark" draft (B-P0, luminous instrument plan). Option E's forge ring with an
+       original angular spark at its core. The spark polygon is new geometry, not the Vite bolt
+       path currently shipped as the favicon. -->
+  <defs>
+    <linearGradient id="mb-ring" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9b6bff"/>
+      <stop offset="1" stop-color="#47bfff"/>
+    </linearGradient>
+    <linearGradient id="mb-spark" x1="26" y1="12" x2="38" y2="52" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ede6ff"/>
+      <stop offset="1" stop-color="#9b6bff"/>
+    </linearGradient>
+    <radialGradient id="mb-core" cx="32" cy="32" r="18" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3a1f8f" stop-opacity=".9"/>
+      <stop offset="1" stop-color="#140d33" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="mb-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="1.6" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <circle cx="32" cy="32" r="18" fill="url(#mb-core)"/>
+  <circle cx="32" cy="32" r="22" stroke="url(#mb-ring)" stroke-width="6" stroke-dasharray="31.56 3" transform="rotate(-45 32 32)"/>
+  <g transform="translate(32 32) scale(.7) translate(-32 -32)" filter="url(#mb-glow)">
+    <path d="M36 12 21 35h9l-4 17 17-25h-9l5-15z" fill="url(#mb-spark)"/>
+  </g>
+</svg>

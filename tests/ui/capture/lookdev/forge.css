@@ -1,0 +1,27 @@
+/* L4 Forge — derived from the Option E hero art (assets/brand/concepts/persona-forge/): deep
+   indigo neutrals, violet-tinted edges, the strongest glow of the four. Board candidate only
+   (B-P0). The amber-accent shot exists to prove the tinted neutrals do not fight non-violet
+   themes. */
+html.dark {
+  --background: oklch(0.13 0.028 278);
+  --card: oklch(0.178 0.034 278);
+  --popover: oklch(0.19 0.036 278);
+  --secondary: oklch(0.228 0.036 278);
+  --muted: oklch(0.228 0.036 278);
+  --accent: oklch(0.25 0.04 280);
+  --muted-foreground: oklch(0.73 0.03 285);
+  --surface-1: oklch(0.16 0.032 278);
+  --sidebar: oklch(0.148 0.031 278);
+  --sidebar-accent: oklch(0.228 0.036 278);
+  --border: oklch(0.8 0.08 285 / 11%);
+  --sidebar-border: oklch(0.8 0.08 285 / 11%);
+  --input: oklch(0.8 0.08 285 / 16%);
+  --radius: 0.45rem;
+
+  --ld-panel-shadow: inset 0 1px 0 oklch(0.85 0.1 290 / 9%), 0 1px 2px oklch(0.05 0.03 278 / 55%), 0 14px 34px -16px oklch(0.05 0.05 278 / 80%);
+  --ld-panel-sheen: linear-gradient(180deg, oklch(0.7 0.15 290 / 4.5%), transparent 42%);
+  --ld-well-shadow: inset 0 1px 4px oklch(0.04 0.03 278 / 65%), inset 0 -1px 0 oklch(0.85 0.1 290 / 5%);
+  --ld-chrome-edge: inset -1px 0 0 oklch(0.8 0.12 290 / 10%);
+  --ld-glow-blur: 22px;
+  --ld-glow-mix: 48%;
+}

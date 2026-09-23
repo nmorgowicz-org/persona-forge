@@ -153,7 +153,11 @@ scale; see P1 for the token list):
   must show it with the amber accent too, to prove the tinted neutrals don't
   fight non-violet themes.
 
-**Signal palette variants (decision D9)** — each look is also shot with:
+**Signal palette variants (decision D9)** — shown on a dedicated signal board
+(the app's palette is compiled into `waveformBarColor`, so CSS injection
+cannot swap it without a production edit). The board decodes a real fixture
+voice and draws the P2/P3/P4 designs — true-scale waveform, STFT
+spectrogram, dBFS meter with peak-hold — on every look's surfaces, with:
 S-a the current cyan→magenta `waveformBarColor` grammar, and S-b a
 brand-aligned ramp taken from the hero's ribbons (electric blue → violet →
 pale lavender `#ede6ff` at peaks). Signal stays fixed across accents either
@@ -175,13 +179,17 @@ Plus a wordmark lockup ("Persona Forge", Geist, tracked) for each. If none
 lands, the owner may commission a designer instead; P6 wires whatever is
 picked.
 
-**Acceptance:** 4 looks × 2 signal palettes × 4 surfaces × 2 themes
-(violet, amber) on one board, plus the brand board; owner records D1, D7,
-D9 in the runbook ledger (CP0b).
-**Files:** `tests/ui/capture/lookdev/{graphite,obsidian,machined,forge}.css`,
-`tests/ui/capture/lookdev/signal-{current,brand}.css`, new scenario
-`tests/ui/capture/scenarios/lookdev/board.mjs`, draft marks under
+**Acceptance:** 4 looks × 4 surfaces × 2 themes (violet, amber) shot on the
+real app via token injection; per-look and accent-check contact sheets; the
+signal board (4 looks × 2 palettes); the brand board (marks + context); owner
+records D1, D7, D9 in the runbook ledger (CP0b).
+**Files:** `tests/ui/capture/lookdev/{common,graphite,obsidian,machined,forge}.css`,
+`tests/ui/capture/lookdev/pages.mjs`, scenarios
+`tests/ui/capture/scenarios/lookdev/{board,brand}.mjs` (registered as
+`lookdev-board` / `lookdev-brand`), draft marks under
 `assets/brand/concepts/persona-forge/mark-drafts/`. No `frontend/src` edits.
+Run: `node tests/ui/capture/index.mjs --scenario lookdev-board --source fake`
+(and `lookdev-brand`); outputs land in `docs/screenshots/artifacts/lookdev/`.
 Commit: `test(ui): look-dev and brand-mark capture boards`.
 
 ### P1 — Material + token layer (the foundation everything sits on)
@@ -484,7 +492,7 @@ consumes its tokens; P2 before P3/P4 — both consume its envelope and clock.
 
 | Phase | Gate result | Commit | Notes |
 | --- | --- | --- | --- |
-| P0 look-dev + brand board | | | D1 = , D7 = , D9 = |
+| P0 look-dev + brand board | PASS 2026-09-23 (38 + 2 outputs, receipts green; capture self-tests 15/15) | | D1 = , D7 = , D9 = (awaiting owner at CP0b) |
 | P1 tokens | | | D3 = follow accent |
 | P2 waveform renderer | | | |
 | P3 spectrogram | | | D4 = accepted |

@@ -1,0 +1,25 @@
+/* L2 Obsidian — near-black neutrals, crisp hairline edges, tight ~5/7 px radii, strongest
+   contrast for signal. Xfer-adjacent. Board candidate only (B-P0). */
+html.dark {
+  --background: oklch(0.118 0.004 270);
+  --card: oklch(0.158 0.005 270);
+  --popover: oklch(0.168 0.005 270);
+  --secondary: oklch(0.205 0.006 270);
+  --muted: oklch(0.205 0.006 270);
+  --accent: oklch(0.225 0.007 270);
+  --muted-foreground: oklch(0.69 0.008 270);
+  --surface-1: oklch(0.14 0.005 270);
+  --sidebar: oklch(0.13 0.005 270);
+  --sidebar-accent: oklch(0.205 0.006 270);
+  --border: oklch(1 0 0 / 7.5%);
+  --sidebar-border: oklch(1 0 0 / 7.5%);
+  --input: oklch(1 0 0 / 12%);
+  --radius: 0.3rem;
+
+  --ld-panel-shadow: inset 0 1px 0 oklch(1 0 0 / 4%), 0 0 0 1px oklch(0 0 0 / 55%), 0 12px 30px -16px oklch(0 0 0 / 70%);
+  --ld-panel-sheen: none;
+  --ld-well-shadow: inset 0 0 0 1px oklch(0 0 0 / 45%), inset 0 1px 2px oklch(0 0 0 / 60%);
+  --ld-chrome-edge: inset -1px 0 0 oklch(1 0 0 / 6%);
+  --ld-glow-blur: 18px;
+  --ld-glow-mix: 42%;
+}
