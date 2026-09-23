@@ -3,6 +3,7 @@ import { Pause, Play, Repeat, X } from 'lucide-react'
 import type { AlignmentBoundary, ProsodyPausePlanEntry } from '@/lib/api'
 import { getVoice } from '@/lib/api'
 import { base64ToBlob } from '@/lib/utils'
+import { envelopeFromChannels, type AudioEnvelope } from '@/lib/waveform'
 import { formatHoverTime } from '@/lib/timeAxis'
 import { useAudioSource } from '@/hooks/useAudioTransport'
 import { useShortcutScope, type ShortcutCommand } from '@/hooks/useGlobalShortcuts'
@@ -16,7 +17,7 @@ import { TimeRuler } from './TimeRuler'
 // boundaries are in original time); cut markers + inserted-gap shading ride the ADJUSTED
 // lane (cut positions are in rendered/adjusted sample space).
 
-type Decoded = { peaks: number[]; durationMs: number; sampleCount: number }
+type Decoded = { envelope: AudioEnvelope; durationMs: number; sampleCount: number }
 
 function useDecodedPeaks(base64: string | null, perSec = 48): Decoded | null {
   const [decoded, setDecoded] = useState<Decoded | null>(null)
@@ -34,15 +35,9 @@ function useDecodedPeaks(base64: string | null, perSec = 48): Decoded | null {
         if (cancelled) return
         const channel = buffer.getChannelData(0)
         const durationMs = (buffer.length / buffer.sampleRate) * 1000
-        const count = Math.max(24, Math.round((durationMs / 1000) * perSec))
-        const width = Math.max(1, Math.floor(channel.length / count))
-        const values = Array.from({ length: count }, (_, index) => {
-          let peak = 0
-          for (let i = index * width; i < Math.min(channel.length, (index + 1) * width); i++) peak = Math.max(peak, Math.abs(channel[i]))
-          return peak
-        })
-        const max = Math.max(...values, 0.01)
-        setDecoded({ peaks: values.map((value) => value / max), durationMs, sampleCount: buffer.length })
+        // A true-scale envelope from the samples already in hand: the lane needs absolute
+        // level, and re-decoding to get it would be work for nothing (B-P2).
+        setDecoded({ envelope: envelopeFromChannels([channel], buffer.sampleRate), durationMs, sampleCount: buffer.length })
       })
       .catch(() => {
         if (!cancelled) setDecoded(null)
@@ -126,6 +121,11 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
   const adjAudio = useLaneAudio(adjustedBase64)
 
   const hasAdjusted = adjustedBase64 != null
+  const sharedScaleAbs = useMemo(() => {
+    const peaks = [original?.envelope.peakAbs ?? 0, adjusted?.envelope.peakAbs ?? 0].filter((value) => value > 0)
+    return peaks.length ? Math.max(...peaks) : null
+  }, [original, adjusted])
+
   const maxDurMs = Math.max(original?.durationMs ?? 0, adjusted?.durationMs ?? 0, 1)
   const pct = (ms: number) => `${Math.max(0, Math.min(100, (ms / maxDurMs) * 100))}%`
   const cutMs = (sample: number) => (adjusted && adjustedSampleCount ? (sample / Math.max(1, adjustedSampleCount)) * adjusted.durationMs : 0)
@@ -432,7 +432,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
           onMouseDown={onLaneDown('original')}
         >
           <div className="absolute inset-y-0 left-0 opacity-80" style={{ width: pct(original?.durationMs ?? 0) }}>
-            <WaveformLane peaks={original?.peaks ?? null} durMs={original?.durationMs ?? null} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
+            <WaveformLane envelope={original?.envelope ?? null} scaleAbs={sharedScaleAbs} durMs={original?.durationMs ?? null} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
           </div>
           {selection && (
             <div className="pointer-events-none absolute inset-y-0 z-0 border-x border-warning/60 bg-warning/15" style={{ left: pct(selection.start), width: selWidth }} />
@@ -476,7 +476,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
           onMouseDown={onLaneDown('adjusted')}
         >
           <div className="absolute inset-y-0 left-0" style={{ width: pct(adjusted.durationMs) }}>
-            <WaveformLane peaks={adjusted.peaks} durMs={adjusted.durationMs} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
+            <WaveformLane envelope={adjusted.envelope} scaleAbs={sharedScaleAbs} durMs={adjusted.durationMs} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
           </div>
           {selection && (
             <div className="pointer-events-none absolute inset-y-0 z-0 border-x border-warning/60 bg-warning/15" style={{ left: pct(selection.start), width: selWidth }} />

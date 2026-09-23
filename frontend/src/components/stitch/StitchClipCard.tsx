@@ -13,7 +13,7 @@ import { type StitchPlanClip } from '@/store'
 import { cn } from '@/lib/utils'
 import { clipEffectiveDurationMs, type StitchRegionEdit } from '@/lib/stitchPlan'
 import { formatMsValue } from '@/lib/timeAxis'
-import { getClipAudioAnalysis } from '@/lib/waveform'
+import { getClipAudioAnalysis, type AudioEnvelope } from '@/lib/waveform'
 import { NUMERIC_CONTROL_FOCUS_CLASS, NUMERIC_CONTROL_UNIT_CLASS, useDragScrubValue } from '@/hooks/useDragScrubValue'
 import { WaveformLane } from '../waveform/WaveformLane'
 import * as ContextMenu from '../ui/context-menu'
@@ -189,6 +189,8 @@ export const StitchClipCard = memo(function StitchClipCard({
   isRangePlaying,
   onPlayRange,
   rangePlayReady = true,
+  scaleAbs = null,
+  showPeakReadout = false,
 }: {
   clip: StitchPlanClip
   onRemove: (clipId: string) => void
@@ -209,8 +211,15 @@ export const StitchClipCard = memo(function StitchClipCard({
   /** False until the shared transport has an audio element that knows its duration: before
    * that a range play would either silently do nothing or start a degenerate range. */
   rangePlayReady?: boolean
+  /** Absolute amplitude at full lane height, shared by every clip on the timeline (B-P2), so a
+   * quiet segment looks quiet next to its neighbours. */
+  scaleAbs?: number | null
+  /** Set when this is the only lane on screen: it then auto-fits, and the readout keeps the
+   * fit from being mistaken for level. */
+  showPeakReadout?: boolean
 }) {
-  const [peaks, setPeaks] = useState<number[] | null>(null)
+  const [envelope, setEnvelope] = useState<AudioEnvelope | null>(null)
+  const [decodeFailed, setDecodeFailed] = useState(false)
   const [durMs, setDurMs] = useState<number | null>(null)
   const [editingText, setEditingText] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -291,10 +300,14 @@ export const StitchClipCard = memo(function StitchClipCard({
       .then((analysis) => {
         if (dead) return
         setDurMs(analysis.durationMs)
-        setPeaks(analysis.peaks)
+        setEnvelope(analysis.envelope)
+        setDecodeFailed(analysis.decodeFailed)
       })
       .catch(() => {
-        if (!dead) setPeaks([])
+        if (!dead) {
+          setEnvelope(null)
+          setDecodeFailed(true)
+        }
       })
     return () => { dead = true }
   }, [clip.clipId, clip.sourceAudioBase64])
@@ -611,7 +624,7 @@ export const StitchClipCard = memo(function StitchClipCard({
                 }
               }}
             >
-              <WaveformLane peaks={peaks} durMs={durMs} trimStartMs={trimStartMs} trimEndMs={trimEndMs} fadeInMs={fadeInMs} fadeOutMs={fadeOutMs} timeGuideTestId="stitch-lane-time" />
+              <WaveformLane envelope={envelope} scaleAbs={scaleAbs} showPeakReadout={showPeakReadout} failed={decodeFailed} durMs={durMs} trimStartMs={trimStartMs} trimEndMs={trimEndMs} fadeInMs={fadeInMs} fadeOutMs={fadeOutMs} timeGuideTestId="stitch-lane-time" />
               {fadeOverlay('left', fadeInMs)}
               {fadeOverlay('right', fadeOutMs)}
 

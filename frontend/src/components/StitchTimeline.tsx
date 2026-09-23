@@ -21,6 +21,7 @@ import { useElementWidth } from '@/hooks/useElementWidth'
 import { type StitchPlanSession } from '@/hooks/useStitchPlanSession'
 import { useStitchTransport, type StitchTransport } from '@/hooks/useStitchTransport'
 import { planStateToPayload } from '@/lib/stitchPreview'
+import { getClipAudioAnalysis } from '@/lib/waveform'
 import { useStitchPreview } from '@/hooks/useStitchPreview'
 import { useStitchHistory, type StitchHistory } from '@/hooks/useStitchHistory'
 import {
@@ -146,6 +147,36 @@ export const StitchTimeline = memo(function StitchTimeline({
 }: StitchTimelineProps) {
   const { plan, reorderClip, removeClip, updateClip, setClips, setPaddingAt: setPadding, setPadding: setPaddingMs, setRegionEdits: onAddOrRemoveRegionEdit } = session
   const { clips, paddingMs, regionEditsByClip } = plan
+
+  // One vertical scale for every clip on screen, so a quiet segment looks quiet next to its
+  // neighbours. Read from the shared analysis cache the clip cards already fill -- a cache hit,
+  // never a second decode. With a single clip the lane auto-fits, and the card is told to show
+  // the peak readout so the fit is not mistaken for level.
+  const [scaleAbs, setScaleAbs] = useState<number | null>(null)
+  useEffect(() => {
+    let dead = false
+    const withAudio = clips.filter((clip) => clip.sourceAudioBase64)
+    if (withAudio.length === 0) {
+      setScaleAbs(null)
+      return
+    }
+    Promise.all(
+      withAudio.map((clip) =>
+        getClipAudioAnalysis(`clip:${clip.clipId}:${clip.sourceAudioBase64.length}`, clip.sourceAudioBase64, 48),
+      ),
+    )
+      .then((analyses) => {
+        if (dead) return
+        const peaks = analyses.map((analysis) => analysis.envelope?.peakAbs ?? 0).filter((value) => value > 0)
+        setScaleAbs(peaks.length ? Math.max(...peaks) : null)
+      })
+      .catch(() => {
+        if (!dead) setScaleAbs(null)
+      })
+    return () => {
+      dead = true
+    }
+  }, [clips])
   const history = useStitchHistory()
   const { undo: undoHistory, redo: redoHistory } = history
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null)
@@ -621,6 +652,8 @@ export const StitchTimeline = memo(function StitchTimeline({
                   </div>
                   <StitchClipCard
                     clip={clip}
+                    scaleAbs={scaleAbs}
+                    showPeakReadout={clips.length === 1}
                     onRemove={removeClip}
                     onUpdate={updateClip}
                     regionEdits={regionEditsByClip[clip.clipId] ?? EMPTY_REGION_EDITS}

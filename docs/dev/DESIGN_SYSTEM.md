@@ -68,7 +68,7 @@ ever disagree, the board is the reference and one of them is a bug.
   analyzer stays readable under any skin. `SIGNAL_RAMP` (blue → violet → magenta
   → near-white), `SIGNAL_PLAYHEAD` (amber), `SPECTRO_STOPS`, the meter scale, and
   `heat()` (dBFS, not linear amplitude — linear never reaches the hot end for
-  speech peaking at −6 dBFS). `waveformBarColor` is a view onto it.
+  speech peaking at −6 dBFS). Every waveform draws through `WaveformCanvas` (B-P2), which feeds `signalColor(heat(...))` from an absolute-unit envelope — the transition shim `waveformBarColor` was deleted once its last caller moved.
 
 Semantic status tokens stay a third, separate role.
 

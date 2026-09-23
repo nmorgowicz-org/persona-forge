@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { computePeaks } from '@/lib/waveform'
+import { computeEnvelope, type AudioEnvelope } from '@/lib/waveform'
 import { generateSpeechWithMetrics, listVoices, type ReferenceMetrics, type VoiceMeta } from '@/lib/api'
 import { AudioStatsStrip } from './waveform/AudioStatsStrip'
 import { useAudioSource } from '@/hooks/useAudioTransport'
@@ -19,7 +19,7 @@ import { WaveformLane } from './waveform/WaveformLane'
 interface CompareResult {
   audioUrl: string
   metrics: ReferenceMetrics
-  peaks: number[]
+  envelope: AudioEnvelope | null
   durationMs: number
 }
 
@@ -79,16 +79,23 @@ export function VariantCompare() {
     }
   }
 
+  // A and B are the same text through two voices: sharing a vertical scale is what makes the
+  // louder of the two visibly louder (B-P2).
+  const sharedScaleAbs = useMemo(() => {
+    const peaks = [resultA, resultB].map((result) => result?.envelope?.peakAbs ?? 0).filter((value) => value > 0)
+    return peaks.length ? Math.max(...peaks) : null
+  }, [resultA, resultB])
+
   const fetchAudio = async (voiceId: string): Promise<CompareResult> => {
     const { blob, metrics } = await generateSpeechWithMetrics({ text, voiceId })
-    const [peaks, durationSeconds] = await Promise.all([computePeaks(blob), decodeAudio(blob)])
+    const [envelope, durationSeconds] = await Promise.all([computeEnvelope(blob), decodeAudio(blob)])
     const audioUrl = URL.createObjectURL(blob)
     objectUrlsRef.current.push(audioUrl)
 
     return {
       audioUrl,
       metrics: { duration_seconds: durationSeconds, ...metrics },
-      peaks,
+      envelope,
       durationMs: Math.round(durationSeconds * 1000),
     }
   }
@@ -223,7 +230,8 @@ export function VariantCompare() {
               </div>
               <div className="relative h-16 overflow-hidden rounded-md border border-border bg-muted/20">
                 <WaveformLane
-                  peaks={res.peaks}
+                  envelope={res.envelope}
+                  scaleAbs={sharedScaleAbs}
                   durMs={res.durationMs}
                   trimStartMs={0}
                   trimEndMs={0}

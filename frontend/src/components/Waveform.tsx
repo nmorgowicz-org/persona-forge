@@ -1,8 +1,8 @@
-import { useRef, useState } from 'react'
-import { motion } from 'motion/react'
+import { useRef, useState, type RefObject } from 'react'
 import { cn } from '@/lib/utils'
 import { createTimeTicks } from '@/lib/timeAxis'
-import { waveformBarColor, WAVEFORM_PLAYHEAD_COLOR } from '@/lib/waveform'
+import type { AudioEnvelope } from '@/lib/waveform'
+import { WaveformCanvas } from '@/components/waveform/WaveformCanvas'
 import { useElementWidth } from '@/hooks/useElementWidth'
 import { HOVER_TIME_GUIDE_LABEL_CLASS, HOVER_TIME_GUIDE_LINE_CLASS, useHoverTimeGuide } from '@/hooks/useHoverTimeGuide'
 
@@ -13,9 +13,15 @@ export interface WaveformRegion {
 }
 
 interface WaveformProps {
-  peaks: number[]
-  progress?: number // 0..1, how much of the waveform is "played"
-  isActive?: boolean // pulses idle bars gently while audio is loading/generating
+  /** True-scale envelope (absolute units). Null while the audio is still decoding, which
+   * renders the designed skeleton rather than invented signal. */
+  envelope: AudioEnvelope | null
+  /** The audio could not be decoded -- shown as a fallback, not as endless loading. */
+  failed?: boolean
+  /** Element whose `currentTime` drives the playhead at display rate. */
+  mediaRef?: RefObject<HTMLMediaElement | null> | null
+  playing?: boolean
+  progress?: number // 0..1, static playhead for surfaces with no element of their own
   duration?: number | null // total audio duration in seconds, drives time axis
   className?: string
   onClick?: (progress: number) => void
@@ -32,8 +38,20 @@ interface WaveformProps {
   testId?: string
 }
 
-export function Waveform({ peaks, progress = 0, isActive = false, duration = null, className, onClick, selection = null, onSelectRegion, onScrub, testId }: WaveformProps) {
-  const playheadPct = Math.min(100, Math.max(0, progress * 100))
+export function Waveform({
+  envelope,
+  failed = false,
+  mediaRef = null,
+  playing = false,
+  progress = 0,
+  duration = null,
+  className,
+  onClick,
+  selection = null,
+  onSelectRegion,
+  onScrub,
+  testId,
+}: WaveformProps) {
   const hasTimeAxis = duration != null && duration > 0 && isFinite(duration)
   const [containerRef, widthPx] = useElementWidth<HTMLDivElement>()
   const pixelsPerSecond = hasTimeAxis && widthPx > 0 ? widthPx / (duration as number) : 0
@@ -164,48 +182,18 @@ export function Waveform({ peaks, progress = 0, isActive = false, duration = nul
           />
         ))}
 
-      <div className="relative -m-px flex h-full items-center">
-        {peaks.map((peak, i) => {
-          const played = (i / peaks.length) * 100 <= playheadPct
-          const height = Math.max(0.06, peak)
-          const color = waveformBarColor(height, played)
-
-          return (
-            <motion.div
-              key={i}
-              className="h-full min-w-[1px] flex-1 rounded-full"
-              style={{
-                transformOrigin: 'center',
-                background: color,
-                filter: played && height > 0.35 ? `drop-shadow(0 0 3px ${color})` : undefined,
-              }}
-              initial={{ scaleY: 0 }}
-              animate={{
-                scaleY: isActive ? [height * 0.55, height, height * 0.55] : height,
-              }}
-              transition={
-                isActive
-                  ? { duration: 0.85 + (i % 5) * 0.09, repeat: Infinity, ease: 'easeInOut' }
-                  : { type: 'spring', stiffness: 320, damping: 24, delay: i * 0.004 }
-              }
-            />
-          )
-        })}
-      </div>
-
-      {progress > 0 && (
-        <motion.div
-          className="pointer-events-none absolute top-0 h-full w-px"
-          style={{ background: WAVEFORM_PLAYHEAD_COLOR, boxShadow: `0 0 8px 1px ${WAVEFORM_PLAYHEAD_COLOR}` }}
-          animate={{ left: `${playheadPct}%` }}
-          transition={{ type: 'tween', ease: 'linear', duration: 0.1 }}
-        >
-          <span
-            className="absolute -top-0.5 -left-[3px] size-[7px] rounded-full"
-            style={{ background: WAVEFORM_PLAYHEAD_COLOR, boxShadow: `0 0 6px 1px ${WAVEFORM_PLAYHEAD_COLOR}` }}
-          />
-        </motion.div>
-      )}
+      {/* The waveform and its playhead, drawn in one canvas pass (B-P2). The playhead comes
+          from the media clock, so it moves at display rate instead of the browser's ~4 Hz
+          `timeupdate`; nothing here re-renders per frame. */}
+      <WaveformCanvas
+        envelope={envelope}
+        failed={failed}
+        mediaRef={mediaRef}
+        playing={playing}
+        progress={progress}
+        className="-m-px h-full"
+        showPeakReadout
+      />
 
       {/* bottom time axis */}
       {hasTimeAxis && ticks != null && (

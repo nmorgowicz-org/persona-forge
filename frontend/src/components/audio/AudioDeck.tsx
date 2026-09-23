@@ -3,7 +3,7 @@ import { Download, Gauge, Pause, Play, Repeat, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Waveform } from '@/components/Waveform'
 import { useAudioSource } from '@/hooks/useAudioTransport'
-import { computePeaks } from '@/lib/waveform'
+import { computeEnvelope, envelopePeaks, type AudioEnvelope } from '@/lib/waveform'
 import { cn } from '@/lib/utils'
 import { LevelMeter } from './LevelMeter'
 import { SpectralAccent } from './SpectralAccent'
@@ -116,7 +116,8 @@ export function AudioDeck({
   // The deck is one audio source among several (T1): starting it silences whichever was
   // sounding, and it reports its position to the coordinator.
   const source = useAudioSource('audio-deck', 'Audio deck')
-  const [peaks, setPeaks] = useState<number[] | null>(null)
+  const [envelope, setEnvelope] = useState<AudioEnvelope | null>(null)
+  const [decodeFailed, setDecodeFailed] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState<number | null>(null)
@@ -157,38 +158,37 @@ export function AudioDeck({
   // A drag-selected slice (0..1 fractions) to audition on repeat; overrides whole-clip loop.
   const [region, setRegion] = useState<{ start: number; end: number } | null>(null)
 
+  const peaks = useMemo(() => (envelope ? envelopePeaks(envelope, 96) : null), [envelope])
   const currentLevel = useMemo(() => {
     if (!peaks || peaks.length === 0) return 0
     const index = Math.max(0, Math.min(peaks.length - 1, Math.floor(progress * peaks.length)))
     return peaks[index] ?? 0
   }, [peaks, progress])
 
-  const peakLevel = useMemo(() => Math.max(...(peaks ?? [0])), [peaks])
+  // The meter still reads the old normalized shape; P4 replaces it with true dBFS. Deriving it
+  // from the envelope keeps the two from disagreeing about the same audio in the meantime.
+  const peakLevel = envelope?.peakAbs ?? 0
 
   useEffect(() => {
-    setPeaks(null)
+    setEnvelope(null)
+    setDecodeFailed(false)
     setProgress(0)
     setIsPlaying(false)
     if (!blob) return
     let cancelled = false
-    computePeaks(blob).then((p) => {
-      if (!cancelled) setPeaks(p)
-    })
+    // One decode, resolution-independent: the renderer picks columns from this pyramid for
+    // whatever width it ends up with (B-P2).
+    computeEnvelope(blob)
+      .then((next) => {
+        if (!cancelled) setEnvelope(next)
+      })
+      .catch(() => {
+        if (!cancelled) setDecodeFailed(true)
+      })
     return () => {
       cancelled = true
     }
   }, [blob])
-
-  useEffect(() => {
-    if (!blob || duration == null || !isFinite(duration)) return
-    let cancelled = false
-    computePeaks(blob, Math.max(24, Math.min(120, Math.round(duration * 24)))).then((p) => {
-      if (!cancelled) setPeaks(p)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [blob, duration])
 
   useEffect(() => {
     if (!autoPlay) return
@@ -292,7 +292,10 @@ export function AudioDeck({
       {layout === 'stacked' ? (
         <div className="flex flex-col gap-2">
           <Waveform
-            peaks={peaks ?? Array(64).fill(0.15)}
+            envelope={envelope}
+            failed={decodeFailed}
+            mediaRef={audioRef}
+            playing={isPlaying}
             progress={progress}
             duration={duration}
             className="h-28"
@@ -375,7 +378,10 @@ export function AudioDeck({
 
           <div className="min-w-0">
             <Waveform
-              peaks={peaks ?? Array(64).fill(0.15)}
+              envelope={envelope}
+              failed={decodeFailed}
+              mediaRef={audioRef}
+              playing={isPlaying}
               progress={progress}
               duration={compact ? null : duration}
               className={compact ? 'h-10' : undefined}
