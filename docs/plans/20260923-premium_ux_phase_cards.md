@@ -266,6 +266,39 @@ green; capture compared.
 
 ---
 
+## A-4b — Exclusive audition for the last two audio owners (N6 completion)
+
+**Read:** A §8 "N6". Owner decision 2026-09-23: close N6 as written before CP1.
+
+**Allowed files:** `components/stitch/SegmentBrowserModal.tsx`;
+`components/prosody/useProsodyEditor.ts`; extend
+`tests/ui/core/exclusive-audition.spec.js`; ledgers.
+
+**State at card start (measured):** the segment browser's row audition (its own
+`new Audio()`) and the prosody variant preview (an `Audio` that is never
+attached to the document) were the two players still outside
+`lib/playbackFocus.ts`, so auditioning a segment left the arrangement playing
+under the modal and previewing a variant kept sounding when the A/B compare
+started.
+
+**RED:** (1) with the arrangement playing, auditioning a segment row must stop
+it — asserted with the transport's src pinned and its position required to be
+mid-arrangement, because a re-rendered preview also pauses it (which made the
+first version of this test pass vacuously); (2) previewing a variant then
+starting the lane compare leaves exactly one media element sounding. Both use
+an owner-agnostic invariant — at most one element playing — since the preview's
+element is not queryable from the DOM.
+
+**GREEN:** claim where each owner starts sounding, release on every stop path
+(row toggle-off / ended / dialog close / unmount; variant toggle-off / ended).
+
+**Verify:** build; extended spec (repeat ×3) + `studio.spec.js` green; captures
+unchanged (no visual surface).
+
+**Commit:** `feat(ui): exclusive audition for the last two audio owners`
+
+---
+
 ## A-5 — Context menus on clips, seams, and segment rows (M2, N5)
 
 **Read:** A §3 "M2", A §8 "N5", A §2 "Phase 5".
