@@ -531,7 +531,7 @@ consumes its tokens; P2 before P3/P4 — both consume its envelope and clock.
 | --- | --- | --- | --- |
 | P0 look-dev + brand board | PASS 2026-09-23 (38 + 2 outputs, receipts green; capture self-tests 15/15) | | D1 = Obsidian, D7 refined to Signal Crucible, D9 = S-c hybrid |
 | P1 tokens | PASS 2026-09-23 (tokens 3/3, suite 124/0/1 skipped) | a9282ce | D3 = follow accent; neutrals match the board by pixel count |
-| P2 waveform renderer | | | |
+| P2 waveform renderer | PASS 2026-09-23 (waveform-truth 4/4, suite 128/0/1 skipped, 0 long tasks > 50 ms) | 1e78662 | fixes A2, A3, A4, A5; one canvas renderer, absolute-unit envelope, shared scale |
 | P3 spectrogram | | | D4 = accepted |
 | P4 transport + metering | | | D5 = accepted (LUFS) |
 | P5 knob/fader | | | D2 = accepted |
