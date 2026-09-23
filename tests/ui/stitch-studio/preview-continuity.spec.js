@@ -71,10 +71,14 @@ test.describe('preview continuity', () => {
     // The preview really was re-rendered ...
     await expect.poll(() => transport.evaluate((el) => el.src), { timeout: 15000 }).not.toBe(srcBefore)
 
-    // ... and the transport carried on instead of resetting to zero and stopping.
+    // ... and the transport carried on instead of resetting to zero and stopping. A render
+    // slow enough that the arrangement reaches its own end is not a failure: the contract is
+    // that the *swap* neither rewinds nor stops playback, so a natural end (paused at the end)
+    // is allowed, and a stop anywhere else is not.
     const after = await transport.evaluate((el) => ({ paused: el.paused, t: el.currentTime, d: el.duration }))
-    expect(after.paused, 'playback stopped when the preview was re-rendered').toBe(false)
-    expect(after.t, 'the playhead was rewound by the re-render').toBeGreaterThan(tBefore * 0.5)
+    expect(after.t, 'the playhead was rewound by the re-render').toBeGreaterThan(tBefore * 0.9)
+    const endedNaturally = after.t >= after.d - 0.05
+    expect(after.paused && !endedNaturally, 'playback stopped when the preview was re-rendered').toBe(false)
   })
 
   test('a preview re-render keeps the position of a paused transport', async ({ page }) => {
