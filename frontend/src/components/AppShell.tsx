@@ -35,6 +35,7 @@ import {
 import { useSidebar } from '@/components/ui/sidebar-context'
 import { ActivityStatusBar } from '@/components/ui/ActivityStatusBar'
 import { CommandPalette, ShortcutKeymap } from '@/components/CommandPalette'
+import { TransportReadout } from '@/components/audio/TransportReadout'
 import {
   isPrimaryModifier,
   openCommandPalette,
@@ -493,6 +494,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </SidebarInset>
       <ActivityStatusBar />
+      <TransportReadout />
       <CommandPalette />
       <ShortcutKeymap />
     </SidebarProvider>

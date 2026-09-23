@@ -1,8 +1,8 @@
-import { useEffect, useId, useMemo, useRef, useState, type ComponentProps } from 'react'
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
 import { Download, Gauge, Pause, Play, Repeat, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Waveform } from '@/components/Waveform'
-import { claimPlayback, releasePlayback } from '@/lib/playbackFocus'
+import { useAudioSource } from '@/hooks/useAudioTransport'
 import { computePeaks } from '@/lib/waveform'
 import { cn } from '@/lib/utils'
 import { LevelMeter } from './LevelMeter'
@@ -113,8 +113,9 @@ export function AudioDeck({
   onSpeedChange,
 }: AudioDeckProps) {
   const audioRef = useRef<HTMLAudioElement>(null)
-  // Identifies this deck instance in the playback-focus registry (N6).
-  const playbackFocusId = useId()
+  // The deck is one audio source among several (T1): starting it silences whichever was
+  // sounding, and it reports its position to the coordinator.
+  const source = useAudioSource('audio-deck', 'Audio deck')
   const [peaks, setPeaks] = useState<number[] | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -263,17 +264,17 @@ export function AudioDeck({
         }}
         onPlay={() => {
           setIsPlaying(true)
-          // One claim per deck (N6): starting any deck silences whichever was sounding.
-          claimPlayback(playbackFocusId, () => audioRef.current?.pause())
+          // One claim per deck: starting any deck silences whichever was sounding.
+          source.claim(() => audioRef.current?.pause())
         }}
         onPause={() => {
           setIsPlaying(false)
-          releasePlayback(playbackFocusId)
+          source.release()
         }}
         onEnded={() => {
           setIsPlaying(false)
           setProgress(0)
-          releasePlayback(playbackFocusId)
+          source.release()
         }}
         onTimeUpdate={(e) => {
           const audio = e.currentTarget
@@ -282,6 +283,7 @@ export function AudioDeck({
           if (region && audio.currentTime / audio.duration >= region.end) {
             audio.currentTime = region.start * audio.duration
           }
+          source.report(audio.currentTime, audio.duration)
           setProgress(audio.currentTime / audio.duration)
         }}
         className="hidden"

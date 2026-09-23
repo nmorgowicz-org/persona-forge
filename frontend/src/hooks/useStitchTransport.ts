@@ -5,8 +5,8 @@
 // React state (that would re-render the whole tree on every animation frame); instead,
 // subscribe to `subscribeTime`, which only runs while playing and calls back via
 // requestAnimationFrame so a consumer can push the position straight onto a DOM node's style.
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { claimPlayback, releasePlayback } from '@/lib/playbackFocus'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useAudioSource } from '@/hooks/useAudioTransport'
 
 export interface StitchTransport {
   /** Attach to the single <audio> element that plays the rendered preview. It's a callback
@@ -75,9 +75,9 @@ export function useStitchTransport(src: string | null): StitchTransport {
   const lastFractionRef = useRef(0)
   const isPlayingRef = useRef(false)
   const resumeRef = useRef<{ fraction: number; play: boolean; rangeId: string | null; rangeEndFraction: number | null } | null>(null)
-  // Playback focus (N6): this element is one audio owner among several; whoever starts
-  // sounding takes the focus and stops the previous owner.
-  const focusId = useId()
+  // The arrangement is one audio source among several (T1): whoever starts sounding takes
+  // playback from the previous owner.
+  const source = useAudioSource('stitch-arrangement', 'Stitch arrangement')
   const subscribersRef = useRef<Set<(sec: number) => void>>(new Set())
   const rafRef = useRef<number | null>(null)
 
@@ -117,6 +117,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
         rangeEndRef.current = resume.rangeEndFraction * duration
         setActiveRangeId(resume.rangeId)
       }
+      source.report(audio.currentTime, duration)
       // One-shot notify so a paused playhead lands at the carried position immediately.
       for (const cb of subscribersRef.current) cb(audio.currentTime)
       if (resume.play) audio.play().catch(() => {})
@@ -125,13 +126,14 @@ export function useStitchTransport(src: string | null): StitchTransport {
       setIsPlaying(true)
       isPlayingRef.current = true
       // One claim per owner, at the single place a transport can start sounding (arrangement
-      // playback, a bounded clip range, or a programmatic play) -- see lib/playbackFocus.ts.
-      claimPlayback(focusId, () => audio.pause())
+      // playback, a bounded clip range, or a programmatic play) -- see lib/audioTransport.ts.
+      source.claim(() => audio.pause())
     }
     const onPause = () => {
       setIsPlaying(false)
       isPlayingRef.current = false
-      releasePlayback(focusId)
+      source.report(audio.currentTime, durationSecRef.current)
+      source.release()
     }
     const onEnded = () => {
       setIsPlaying(false)
@@ -139,7 +141,8 @@ export function useStitchTransport(src: string | null): StitchTransport {
       lastFractionRef.current = 0
       setActiveRangeId(null)
       rangeEndRef.current = null
-      releasePlayback(focusId)
+      source.report(audio.currentTime, durationSecRef.current)
+      source.release()
     }
     const onTimeUpdate = () => {
       if (rangeEndRef.current != null && audio.currentTime >= rangeEndRef.current) {
@@ -189,6 +192,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
         // can overshoot it, which would push the playhead past the exact-duration tick.
         const t = durationSec > 0 ? Math.min(audio.currentTime, durationSec) : audio.currentTime
         lastFractionRef.current = durationSec > 0 ? t / durationSec : 0
+        source.report(t, durationSecRef.current)
         for (const cb of subscribersRef.current) cb(t)
       }
       rafRef.current = requestAnimationFrame(tick)
@@ -252,6 +256,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
     if (!audio) return
     audio.currentTime = Math.max(0, sec)
     lastFractionRef.current = durationSecRef.current > 0 ? audio.currentTime / durationSecRef.current : 0
+    source.report(audio.currentTime, durationSecRef.current)
     // One-shot notify so a paused playhead moves immediately instead of waiting for the RAF
     // loop, which only runs while playing.
     for (const cb of subscribersRef.current) cb(audio.currentTime)

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { claimPlayback, releasePlayback } from '@/lib/playbackFocus'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useAudioSource } from '@/hooks/useAudioTransport'
 import {
   cancelVoiceAlignment,
   deleteVoiceVariant,
@@ -123,7 +123,8 @@ export function useProsodyEditor(
   const variantPreviewAudioRef = useRef<HTMLAudioElement | null>(null)
   // This editor's identity in the playback-focus registry (N6): previewing a variant
   // silences whatever else is sounding, and vice versa.
-  const focusId = useId()
+  // The variant preview is one audio source among several (T1).
+  const source = useAudioSource('prosody-preview', 'Prosody preview')
   const variantPreviewUrlRef = useRef<string | null>(null)
   const [variantBusy, setVariantBusy] = useState<string | null>(null)
   const [savingVariantBusy, setSavingVariantBusy] = useState(false)
@@ -386,7 +387,7 @@ export function useProsodyEditor(
     if (previewingVariant === entry.filename) {
       variantPreviewAudioRef.current?.pause()
       variantPreviewAudioRef.current = null
-      releasePlayback(focusId)
+      source.release()
       if (variantPreviewUrlRef.current) {
         URL.revokeObjectURL(variantPreviewUrlRef.current)
         variantPreviewUrlRef.current = null
@@ -418,13 +419,13 @@ export function useProsodyEditor(
       variantPreviewAudioRef.current = el
       setPreviewingVariant(entry.filename)
       setPreviewMetrics(metricsResult ? metricsResult.metrics : null)
-      claimPlayback(focusId, () => {
+      source.claim(() => {
         el.pause()
         setPreviewingVariant(null)
       })
       el.addEventListener('ended', () => {
         setPreviewingVariant(null)
-        releasePlayback(focusId)
+        source.release()
         if (variantPreviewUrlRef.current === url) {
           URL.revokeObjectURL(url)
           variantPreviewUrlRef.current = null
@@ -438,7 +439,7 @@ export function useProsodyEditor(
     } finally {
       if (voiceIdRef.current === capturedVoiceId) setVariantBusy(null)
     }
-  }, [previewingVariant, voiceId])
+  }, [previewingVariant, voiceId, source])
 
   const forkVariant = useCallback(async (entry: VoiceVariantEntry) => {
     if (!onFork) return

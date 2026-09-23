@@ -6,14 +6,14 @@
 // via the shared bounded cache) is fetched only when a row is actually auditioned, and only one
 // row plays at a time. Rows use content-visibility (see index.css .segment-browser-row) so a
 // 250-row library scrolls smoothly without a virtualization dependency.
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { Copy, Loader2, Pause, Play, Plus } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { base64ToBlob, cn } from '@/lib/utils'
 import { getClipAudioAnalysis } from '@/lib/waveform'
 import { getSegmentAudioBase64, getVoice, type SegmentMeta, type VoiceMeta } from '@/lib/api'
-import { claimPlayback, releasePlayback } from '@/lib/playbackFocus'
+import { useAudioSource } from '@/hooks/useAudioTransport'
 import { SegmentPreviewRail } from './SegmentPreviewRail'
 import * as ContextMenu from '../ui/context-menu'
 
@@ -229,17 +229,17 @@ export function SegmentBrowserModal({
   // can detect it has been superseded and bail out instead of clobbering newer playback state
   // or resuming audio after the dialog has closed.
   const playbackTokenRef = useRef(0)
-  // This modal's identity in the playback-focus registry (N6): an audition here silences
-  // whatever else is sounding, including the arrangement playing underneath it.
-  const focusId = useId()
+  // This modal is one audio source in the transport coordinator (T1): an audition here
+  // silences whatever else is sounding, including the arrangement playing underneath it.
+  const source = useAudioSource('segment-audition', 'Segment audition')
 
   /** The one way an audition ends: pausing, clearing the row's playing state, and giving up
    * playback focus. Every stop path routes through it so none can leave a stale claim. */
   const stopAudition = useCallback(() => {
     audioRef.current?.pause()
     setPlayingId(null)
-    releasePlayback(focusId)
-  }, [setPlayingId, focusId])
+    source.release()
+  }, [setPlayingId, source])
   // The Audio object is created once and outlives individual renders; its 'ended' listener
   // reads the latest stop path through this ref.
   const stopAuditionRef = useRef(stopAudition)
@@ -264,10 +264,10 @@ export function SegmentBrowserModal({
   useEffect(() => {
     return () => {
       audioRef.current?.pause()
-      releasePlayback(focusId)
+      source.release()
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
     }
-  }, [])
+  }, [source])
 
   // Optional controller: expose open() to the parent without changing how the dialog is
   // otherwise driven (the trigger button keeps working as before).
@@ -404,7 +404,7 @@ export function SegmentBrowserModal({
       setProgress(0)
       // Auditioning a row takes playback focus (N6): whatever else is sounding -- the
       // arrangement under the modal, a deck elsewhere -- stops.
-      claimPlayback(focusId, stopAudition)
+      source.claim(stopAudition)
       await audioRef.current.play()
       if (token !== playbackTokenRef.current) {
         stopAudition()

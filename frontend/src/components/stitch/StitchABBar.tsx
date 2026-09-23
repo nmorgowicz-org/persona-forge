@@ -8,12 +8,12 @@
 //
 // Auditioning is a third audio owner, so it goes through the playback-focus registry (N6):
 // claiming playback pauses whatever owned it before, including the arrangement transport.
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pause, Play } from 'lucide-react'
 import { create } from 'zustand'
 import { useAppStore } from '@/store'
 import { cloneStitchPlanState, hashStitchPlan, type StitchPlanState } from '@/lib/stitchPlan'
-import { claimPlayback, releasePlayback } from '@/lib/playbackFocus'
+import { useAudioSource } from '@/hooks/useAudioTransport'
 import { useStitchPreview } from '@/hooks/useStitchPreview'
 import { cn } from '@/lib/utils'
 
@@ -79,7 +79,8 @@ export function StitchABBar() {
   const previewB = useStitchPreview(b?.plan ?? emptyPlan)
   const previewFor = { a: previewA, b: previewB }
 
-  const focusId = useId()
+  // Each snapshot audition is one audio source in the transport coordinator (T1).
+  const source = useAudioSource('ab-snapshot', 'A/B snapshot')
   const audioARef = useRef<HTMLAudioElement | null>(null)
   const audioBRef = useRef<HTMLAudioElement | null>(null)
   const [playingSlot, setPlayingSlot] = useState<Slot | null>(null)
@@ -88,8 +89,8 @@ export function StitchABBar() {
     audioARef.current?.pause()
     audioBRef.current?.pause()
     setPlayingSlot(null)
-    releasePlayback(focusId)
-  }, [focusId])
+    source.release()
+  }, [source])
   // The registry keeps this callback: it must reach the current render's state.
   const stopRef = useRef(stopAudition)
   stopRef.current = stopAudition
@@ -102,7 +103,7 @@ export function StitchABBar() {
       return
     }
     stopAudition()
-    claimPlayback(focusId, () => stopRef.current())
+    source.claim(() => stopRef.current())
     element.currentTime = 0
     void element.play().catch(() => {})
   }
@@ -172,10 +173,13 @@ export function StitchABBar() {
               preload="auto"
               data-testid={`stitch-ab-audio-${slot}`}
               onPlay={() => setPlayingSlot(slot)}
+              onTimeUpdate={(event) =>
+                source.report(event.currentTarget.currentTime, event.currentTarget.duration)
+              }
               onPause={() => setPlayingSlot((current) => (current === slot ? null : current))}
               onEnded={() => {
                 setPlayingSlot(null)
-                releasePlayback(focusId)
+                source.release()
               }}
             />
           </div>

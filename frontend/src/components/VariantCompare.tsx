@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -13,7 +13,7 @@ import {
 import { computePeaks } from '@/lib/waveform'
 import { generateSpeechWithMetrics, listVoices, type ReferenceMetrics, type VoiceMeta } from '@/lib/api'
 import { AudioStatsStrip } from './waveform/AudioStatsStrip'
-import { claimPlayback, releasePlayback } from '@/lib/playbackFocus'
+import { useAudioSource } from '@/hooks/useAudioTransport'
 import { WaveformLane } from './waveform/WaveformLane'
 
 interface CompareResult {
@@ -51,9 +51,9 @@ export function VariantCompare() {
 
   const audioARef = useRef<HTMLAudioElement | null>(null)
   const audioBRef = useRef<HTMLAudioElement | null>(null)
-  // Both lanes sound together by design, so the pair is one owner in the playback-focus
-  // registry (N6).
-  const playbackFocusId = useId()
+  // Both lanes sound together by design, so the pair is one source in the transport
+  // coordinator (T1).
+  const source = useAudioSource('variant-compare', 'Variant compare')
   const objectUrlsRef = useRef<string[]>([])
 
   useEffect(() => {
@@ -115,7 +115,7 @@ export function VariantCompare() {
     if (next) {
       // Claim once for the synchronized pair; the pause callback also drops the local playing
       // state, because these lanes carry no pause/ended listeners of their own.
-      claimPlayback(playbackFocusId, () => {
+      source.claim(() => {
         audioARef.current?.pause()
         audioBRef.current?.pause()
         setIsPlaying(false)
@@ -123,7 +123,7 @@ export function VariantCompare() {
       void audioARef.current?.play()
       void audioBRef.current?.play()
     } else {
-      releasePlayback(playbackFocusId)
+      source.release()
       audioARef.current?.pause()
       audioBRef.current?.pause()
     }
@@ -131,6 +131,7 @@ export function VariantCompare() {
 
   const handleTimeUpdate = (event: React.SyntheticEvent<HTMLAudioElement, Event>) => {
     setCurrentTime(event.currentTarget.currentTime)
+    source.report(event.currentTarget.currentTime, event.currentTarget.duration)
   }
 
   useEffect(() => {
