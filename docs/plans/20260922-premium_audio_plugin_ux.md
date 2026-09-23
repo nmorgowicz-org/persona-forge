@@ -368,7 +368,7 @@ same coordinate-mapping work and completes the transport story.
 | 4b clip range readiness fix | PASS 2026-09-23 | a756e31 | The per-clip range button no longer offers playback before the transport can play it: `playRange` refuses a sub-50ms range and the card waits for a known transport duration and clip duration. New range-readiness.spec; suite 89/89. |
 | 4c N6 completion (segment audition + variant preview) | PASS 2026-09-23 | a72c891 | The last two audio owners joined the playback-focus registry: the segment browser's row audition and the prosody variant preview. N6's acceptance — "starting any player pauses whichever other player was sounding" — now holds for every owner in the app. Spec 4/4; suite 90 passed / 1 flaky (pre-existing). |
 | 4d preview continuity fix | PASS 2026-09-23 | d480bf6 | A preview re-render (a real plan change: gap suggestion or an analysis-driven trim clamp) replaced the transport's src and stopped playback at zero. The transport now carries position as a duration fraction and resumes, including an active clip range. preview-continuity.spec 2/2; suite 93/93. |
-| 5 M2 context menu + N5 | | | |
+| 5 M2 context menu + N5 | PASS 2026-09-23 | 320f672 | Clip/seam/segment-row right-click menus over the already-installed radix-ui ContextMenu (no dependency change). Keyboard parity implemented in the trigger (macOS Chromium never synthesizes `contextmenu` from Shift+F10). Primary-button guards for scrub/selection/trim drags. context-menu.spec 5/5; suite 98/98; captures pixel-identical. |
 | 6 T2 undo/redo | | | |
 | 7 M4 command palette | | | |
 | 8 M5 A/B snapshots | | | |
