@@ -530,7 +530,7 @@ consumes its tokens; P2 before P3/P4 — both consume its envelope and clock.
 | Phase | Gate result | Commit | Notes |
 | --- | --- | --- | --- |
 | P0 look-dev + brand board | PASS 2026-09-23 (38 + 2 outputs, receipts green; capture self-tests 15/15) | | D1 = Obsidian, D7 refined to Signal Crucible, D9 = S-c hybrid |
-| P1 tokens | | | D3 = follow accent |
+| P1 tokens | PASS 2026-09-23 (tokens 3/3, suite 124/0/1 skipped) | a9282ce | D3 = follow accent; neutrals match the board by pixel count |
 | P2 waveform renderer | | | |
 | P3 spectrogram | | | D4 = accepted |
 | P4 transport + metering | | | D5 = accepted (LUFS) |
