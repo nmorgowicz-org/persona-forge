@@ -119,15 +119,32 @@ def _install_fake_runtime():
 
 
 def _patch_generate_for_slow_async(rt):
+    """Make the `slow_async` profile mean what it documents: async jobs take 3-5 seconds.
+
+    Two halves are needed, and only the first was here. Slowing `_run_generate` alone left
+    the job *already complete*: the runtime completes an async job the moment it is created
+    (`async_jobs_complete_immediately`), so a caller polling `/generate/progress` saw
+    `completed` within ~10ms and the job's status could never be observed as running. The
+    knob is what the flow's own state machine reads, so the profile turns it off and lets the
+    wrapper complete the job when the slowed work actually finishes.
+    """
     if not rt._slow_async:
         return
+
+    rt.async_jobs_complete_immediately = False
 
     original_run_generate = _get_module_attr("persona_forge.model", "_run_generate")
 
     def _wrapped(text, language, **kwargs):
-        if kwargs.get("job_id"):
+        job_id = kwargs.get("job_id")
+        if job_id:
             time.sleep(random.uniform(3, 5))
-        return original_run_generate(text, language, **kwargs)
+        result = original_run_generate(text, language, **kwargs)
+        if job_id:
+            # Mirrors what the immediate path sets at creation: status, frame count, the
+            # stand-in waveform the audio endpoint serves, and the progress dict.
+            rt.ensure_job_status(job_id, "completed")
+        return result
 
     _set_module_attr("persona_forge.model", "_run_generate", _wrapped)
 

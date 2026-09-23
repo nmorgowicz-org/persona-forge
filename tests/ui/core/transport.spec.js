@@ -13,6 +13,8 @@ import { test, expect } from '@playwright/test'
 //
 // RED-first: every test must fail on unmodified code because the feature is missing.
 
+const PROFILE = (process.env.TEST_PROFILE || '').trim().toLowerCase()
+
 const readout = (page) => page.getByTestId('transport-active-source')
 
 async function openStudio(page) {
@@ -95,12 +97,50 @@ test.describe('A-9: shared audio transport coordinator', () => {
   })
 
   test('starting playback never cancels a generation job', async ({ page }) => {
-    // Scope, stated plainly: the fake tier's async generation completes in ~10ms (measured
-    // against fixtures/fake_model_server.py), so no test here can hold a job open across a
-    // click, and TEST_PROFILE=slow_async does not widen it -- that profile wraps the
-    // non-streaming generator, and this path runs the streaming one. What this guards is the
-    // coupling, which is the actual failure mode: a coordinator that cancelled or paused jobs
-    // when audio started would issue /generate/cancel or leave the job unfinished.
+    // The always-on half of the job guarantee. With the default fake an async job is complete
+    // the moment it is created, so this cannot hold one open -- the next test does that under
+    // TEST_PROFILE=slow_async. What it guards is the coupling, which is the actual failure
+    // mode: a coordinator that cancelled or paused jobs when audio started would issue
+    // /generate/cancel or leave the job unfinished.
+    //
+    // Playback is started and asserted *before* the second job, deliberately: a new take swaps
+    // the deck's src, which pauses it, so a readout assertion taken after that would be racing
+    // the app's own legitimate pause rather than testing the coordinator.
+    const cancels = []
+    page.on('request', (request) => {
+      if (request.url().includes('/generate/cancel')) cancels.push(request.url())
+    })
+
+    await page.goto('/')
+    await page.getByTestId('speak-text-input').fill('Keep the job alive.')
+    await page.getByTestId('speak-generate-button').click()
+    await expect(page.getByTestId('speak-result')).toBeVisible({ timeout: 30000 })
+    const firstTake = await page.getByTestId('speak-result').locator('audio').getAttribute('src')
+
+    // Park the first take's deck paused, then start it by hand: audio is playing from here on.
+    await page.getByTestId('speak-result').getByRole('button', { name: 'Pause audio' }).click()
+    await page.getByTestId('speak-result').getByRole('button', { name: 'Play audio' }).click()
+    await expect(readout(page)).toHaveAttribute('data-source-kind', 'audio-deck')
+
+    // A second job starts while that playback is live, and still delivers its take.
+    await page.getByTestId('speak-generate-button').click()
+    await expect(page.getByTestId('speak-generate-button')).toBeEnabled({ timeout: 30000 })
+    await expect(page.getByTestId('speak-error')).toHaveCount(0)
+    await expect(page.getByTestId('speak-result').locator('audio')).not.toHaveAttribute('src', firstTake)
+    expect(cancels).toEqual([])
+  })
+
+  test('a generation job outlives playback started while it runs', async ({ page }) => {
+    // The overlap half, and the reason TEST_PROFILE=slow_async exists: with the default fake
+    // the runtime completes an async job at creation (`async_jobs_complete_immediately`), so
+    // there is no window to observe. The profile turns that off and slows the work to 3-5s
+    // (tests/ui/fixtures/fake_model_server.py::_patch_generate_for_slow_async).
+    //
+    // Run it against a *fresh* server: the Playwright config reuses a running one locally, and
+    // a server started without the profile makes the "still running" read below fail rather
+    // than silently pass -- but a stale server is the first thing to check when it does.
+    test.skip(PROFILE !== 'slow_async', 'needs TEST_PROFILE=slow_async: async jobs run 3-5s')
+
     const cancels = []
     page.on('request', (request) => {
       if (request.url().includes('/generate/cancel')) cancels.push(request.url())
@@ -115,14 +155,23 @@ test.describe('A-9: shared audio transport coordinator', () => {
     await page.getByTestId('speak-result').getByRole('button', { name: 'Pause audio' }).click()
     const playDeck = page.getByTestId('speak-result').getByRole('button', { name: 'Play audio' })
     await expect(playDeck).toBeVisible()
+    const firstTake = await page.getByTestId('speak-result').locator('audio').getAttribute('src')
 
     // A second job, with the first take's deck still mounted and playable.
     await page.getByTestId('speak-generate-button').click()
+    await expect(page.getByTestId('speak-generate-button')).toBeDisabled()
     await playDeck.click()
 
+    // Point-in-time reads, not retrying assertions: "still running" has to be true at the
+    // moment playback starts, and a retrying expect would happily wait for the job to finish
+    // and then report that it had.
+    expect(await page.getByTestId('speak-generate-button').isDisabled()).toBe(true)
     await expect(readout(page)).toHaveAttribute('data-source-kind', 'audio-deck')
-    await expect(page.getByTestId('speak-result')).toBeVisible()
+
+    // The job then finishes on its own and hands over a new take.
+    await expect(page.getByTestId('speak-generate-button')).toBeEnabled({ timeout: 30000 })
     await expect(page.getByTestId('speak-error')).toHaveCount(0)
+    await expect(page.getByTestId('speak-result').locator('audio')).not.toHaveAttribute('src', firstTake)
     expect(cancels).toEqual([])
   })
 })
