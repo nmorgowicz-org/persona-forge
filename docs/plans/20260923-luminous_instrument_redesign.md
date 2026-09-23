@@ -1,281 +1,446 @@
 # Luminous Instrument — Presentation Overhaul
 
-Date: 2026-09-23
+Date: 2026-09-23 (revised same day after a code-truth audit, §"Baseline truth audit")
 Status: **PROPOSED** — planning doc only; no phase starts without owner
-acceptance. Approved execution order is §5.
+acceptance. Execution order, checkpoints, and the premium scorecard live in the
+master runbook `docs/plans/20260923-premium_ux_execution.md`.
 Branch: `feat/premium-audio-plugin-ux-20260923` (same branch as the interaction
-plan; this doc is its visual sibling, sequenced **after** Phases 0–5 land).
+plan; this doc is its visual sibling, sequenced **after** interaction Phases 0–5
+land — except P0 look-dev, which runs before anything, see runbook).
 
 ## Goal statement
 
 The interaction plan (`20260922-premium_audio_plugin_ux.md`) fixes how the app
-*behaves*. This plan fixes how it *reads*: Persona Forge should look like a
-precision audio instrument — FabFilter-clean, dark, luminous — not a competent
-dark-mode web form with audio in it. Same layout and IA everywhere; the change
-is the presentation system sitting on top of it.
+*behaves*. This plan fixes how it *reads* and how its signal is *shown*:
+Persona Forge should look and feel like a modern 2026 audio plugin that had
+real time and care put into it — FabFilter-clean, Xfer-bright where signal
+lives, UAD-solid in its materials — not a competent dark-mode web form with
+audio in it. Same layout and IA everywhere; the change is the presentation
+system and the signal-display layer sitting on top of it.
 
 Owner direction (2026-09-23): **new visual system, same layout** ·
-**FabFilter-clean aesthetic** · **confident motion design**.
+**FabFilter-clean aesthetic** · **confident motion design** · reference set
+FabFilter / Xfer / UAD "and countless others".
 
-Surveyed against FabFilter/Valhalla/UAD-class surfaces plus our own README
-screenshots. The delta between our UI and theirs is six concrete things:
+## What "premium plugin" means here (grounded, not vibes)
 
-1. **Light, not paint.** Premium plugin surfaces are dark *so that signal
-   glows against them* — playheads, meters, active states emit light.
-   Our dark surfaces are matte: waveforms are flat bars, playheads are thin
-   yellow lines, active states are fill swaps. Nothing emits.
-2. **Meters everywhere signal exists.** Every surface that plays audio in a
-   premium plugin shows level. Our Speak deck has one LEVEL readout; Stitch
-   clips, audition takes, and library rows play audio with no metering at all.
-3. **One elevation language.** Premium surfaces read depth instantly: chrome
-   → panel → well → readout. Our cards are all one flat charcoal with the
-   same radius and border; hierarchy comes only from color, never depth.
-4. **Numeric readouts are instruments.** Tabular figures, unit styling,
-   parameter labels above values, exact timecodes. Our readouts mix fonts,
-   hide units (`GAP 520`), and label dropdowns with current values.
-5. **Motion is feedback.** Premium plugins animate state, not decoration:
-   playheads sweep, meters fall ballistically, active controls breathe on
-   hover, views transition. Our motion today is hover-lift on one stepper and
-   spring taps on chips — the transport itself barely moves.
-6. **No prototype residue.** Lab-notebook copy, `v0.0.0-fake` chrome, and
-   unlabeled controls in *published screenshots*. Premium means the
-   storefront is finished.
+Surveyed against FabFilter/Xfer/UAD-class surfaces plus our own README
+screenshots. The delta is seven concrete things. Each maps to a workstream:
+
+1. **Honest signal (the one nobody sees missing until it's there).** Every
+   premium plugin's meters, playheads, and waveforms are *true* — they move at
+   display rate and report real levels. Ours don't (see audit A1–A5): the
+   LEVEL meter is a lookup, the playhead steps at ~4 Hz, every waveform is
+   normalized to itself. Craft on top of untrue signal still reads as a toy.
+   → P2, P4.
+2. **Light, not paint.** Premium surfaces are dark *so that signal glows
+   against them* — playheads, meters, active states emit light. Our dark
+   surfaces are matte shadcn neutrals; nothing emits. → P1, P6, P7.
+3. **One elevation language and one material.** Chrome → panel → well →
+   readout, read instantly by depth, on slightly tinted (not dead-grey)
+   neutrals with a consistent top-lit edge. Ours: one flat charcoal, two
+   ad-hoc radii. → P1.
+4. **A hero visualization.** FabFilter's analyzer, Serum's oscilloscope, RX's
+   spectrogram: the plugin's *face* is a rich, true view of the sound. For a
+   voice studio that face is a spectrogram — it shows sibilance, breath,
+   pitch and formant structure a waveform can't. We ship a fake one (A6). → P3.
+5. **Instrument controls.** Knobs/faders you drag, scroll, double-click to
+   reset, with a value bubble while you move them. Plan A's S1/N1/N2 build the
+   behavior; P5 gives it the instrument form. → P5.
+6. **Numeric readouts are instruments.** Tabular figures, dBFS and ms units,
+   parameter labels above values, exact timecodes. → P8.
+7. **Motion is feedback; the storefront is finished.** Playheads sweep,
+   meters fall ballistically, views transition; no lab-notebook copy or
+   `v0.0.0-fake` in published media. → P7, P10, P11.
+
+## Baseline truth audit (verified against code, 2026-09-23)
+
+Every workstream below cites these. Line numbers are at `753da87`.
+
+| # | Finding | Evidence |
+| --- | --- | --- |
+| A1 | **LEVEL meter is not a meter.** `currentLevel` is the normalized max-abs peak bucket at the playhead index; `peakLevel` is the max of the whole file (static). Readout is `%`, not dBFS. | `components/audio/AudioDeck.tsx:95-101`, `LevelMeter.tsx:22-29` |
+| A2 | **Playhead and meter step at ~4 Hz.** `progress` is set only from `onTimeUpdate` (browser fires ~4×/s); no RAF clock outside Stitch. | `AudioDeck.tsx:196-204`; `VariantCompare.tsx` (`onTimeUpdate`); RAF exists only in `hooks/useStitchTransport.ts` |
+| A3 | **Every waveform is normalized to its own maximum.** In the Stitch timeline and A/B lanes a quiet clip draws as tall as a loud one — the loudness mismatch between stitched segments (the single most useful thing to see) is invisible. | `lib/waveform.ts:32-33` (`p / overallMax`), shared by every consumer via `computePeaks`/analysis cache |
+| A4 | **Resolution capped at 120 max-abs buckets regardless of lane width**, no RMS body. | `lib/waveform.ts:11-15, 17-31` |
+| A5 | **Deck waveform is 64–120 animated DOM nodes** (`motion.div` per bar, per-bar spring with index delay, per-bar `drop-shadow` filter) re-rendered on every `timeupdate`; a flat fake `Array(64).fill(0.15)` renders while loading. `WaveformLane` already proves the right approach (canvas, DPR-aware). | `components/Waveform.tsx:123-147`; `AudioDeck.tsx:211`; `waveform/WaveformLane.tsx:29-39` |
+| A6 | **`SpectralAccent` is not spectral and fakes data**: it re-draws the peak array as cells, and with no peaks renders a synthetic sine. | `components/audio/SpectralAccent.tsx:10` |
+| A7 | **No exclusive audition.** Five independent `<audio>` owners (+ AlignmentCompare decode-play) can sound at once; starting one never stops another. | `<audio>` in `StitchTimeline.tsx` (2), `VariantCompare.tsx`, `AudioDeck.tsx`, `AlignmentCompare.tsx`; no coordination symbol anywhere |
+| A8 | **Neutrals are stock shadcn achromatic greys** (`oklch(L 0 0)`); only `--surface-1` carries a tint (hue 285). | `index.css:161-201`, `42`, `184` |
+| A9 | **Brand CTA is hard-coded cyan in all four accent themes** (`--brand-from/to/glow`), and the signal palette is a separate fixed cyan→magenta — two unrelated "brand" colors plus the theme accent, with no doctrine. | `index.css:38-40`; `lib/waveform.ts` `waveformBarColor` |
+| A10 | **Radius is ad hoc and generic**: 38× `rounded-lg`, 29× `rounded-xl`, 2× `rounded-2xl` across components; `--radius` is the shadcn default `0.625rem`. | `grep` count 2026-09-23; `index.css:51` |
+| A11 | **Brand mark is a stock icon** (lucide `AudioLines` in a gradient tile). | `components/AppShell.tsx:371-372` |
+
+Nothing above needs a backend change. A1–A6 are the "honest signal" gap;
+A8–A11 are the "material" gap.
+
+## Doctrines (binding for every workstream)
+
+- **Honest signal.** Nothing renders as audio data unless it is audio data.
+  No synthetic fallbacks, no flat placeholder bars — loading is a designed
+  skeleton state (P9), never fake signal. Meters report dBFS computed from the
+  decoded buffer.
+- **Analysis is allowed; processing is not.** The standing "no DSP
+  changes" constraint covers what the user *hears*. Offline analysis of an
+  already-decoded buffer (envelopes, STFT, loudness) changes no output and is
+  in scope. Nothing is inserted into the playback path (no
+  `createMediaElementSource`), so element playback, CORS, and the existing
+  audio graph are untouched.
+- **Two color roles, never mixed.** *Accent* (theme `--primary`, 4 themes)
+  = selection, focus, chrome glow, CTA (subject to CP0 decision D3). *Signal*
+  (one fixed palette, the existing `waveformBarColor` cyan→magenta grammar)
+  = waveforms, meters, spectrogram, playhead. Signal never re-skins with the
+  theme — like a plugin whose analyzer stays readable under any skin.
+  Semantic status tokens (`DESIGN_SYSTEM.md`) stay a third, separate role.
+- **Draw at display rate without React.** Anything that moves per frame
+  (playhead, meters, scrolling spectrogram cursor) draws imperatively into a
+  canvas from a RAF loop reading `audio.currentTime`. No React commit per
+  frame.
 
 ## Non-goals / constraints (carry forward)
 
 - Same layout and IA on every page. No page restructuring, no new routes.
-- No new frontend dependencies. `motion/react` (^13.1.0, already installed)
-  covers the motion system; canvas + WebAudio cover metering/rendering.
-- No light theme. Dark-only, all four accent themes (`violet`/`teal`/`amber`/
-  `rose`) keep working — the glow system keys off `--primary` and
-  `--brand-*`, never hardcoded hues.
-- No backend contract changes, no DSP changes, no undo/history.
-- Design-system rules in `docs/dev/DESIGN_SYSTEM.md` stay binding: semantic
-  status tokens only, `.btn-brand` for CTAs, the oxlint
-  `no-raw-status-colors` guard keeps passing.
-- Reduced motion: every animation ships with a `prefers-reduced-motion` path
-  (static end-state, no sweep). Matches the existing
-  `StitchTimeline.tsx:35` pattern.
+  Control *form* may change inside its existing slot (P5, owner-gated).
+- No new frontend dependencies. `motion/react` covers motion; canvas, Web
+  Workers (native Vite `new Worker(new URL(...), { type: 'module' })`) and
+  `AudioContext.decodeAudioData` cover rendering and analysis.
+- No light theme. Dark-only; all four accent themes keep working.
+- No backend contract changes, no change to what the user hears, no
+  undo/history (Plan A T2 remains the only, owner-gated exception).
+- `docs/dev/DESIGN_SYSTEM.md` stays binding; the oxlint
+  `no-raw-status-colors` guard keeps passing. New tokens are documented there
+  in the phase that adds them.
+- Reduced motion: every animation ships a `prefers-reduced-motion` path
+  (static end-state). Meters under reduced motion drop ballistic *easing* but
+  still show true level (it's data, not decoration).
+- **Performance budget (every phase that renders signal):** during playback
+  on the `segment-browser-scale` and `stitch-assembly` scenarios — zero
+  `longtask` entries > 50 ms (PerformanceObserver in the phase spec), no React
+  commit per animation frame on deck/lane components, spectrogram STFT off the
+  main thread.
 
-## Workstreams (each ~one PR, ordered)
+## Workstreams (one phase = one commit; the whole arc ships as one PR at P12)
 
-### P1 — Glow + elevation token layer (the foundation everything sits on)
+### P0 — Look-dev lock (zero production code; runs at runbook Checkpoint 0)
 
-New presentation tokens in `frontend/src/index.css`, consumed as utilities:
+Pick the look *before* eleven phases of code commit to it. A capture scenario
+injects candidate token CSS into the real app via `page.addStyleTag` (no
+production edit) and shoots the four hero surfaces — Speak (after generate),
+Stitch Studio (assembly), Voice Design (panel), Voice Edit (prosody A/B) —
+in two accent themes (`violet`, `amber`) per candidate.
 
-- `--glow-primary` / `.glow-active`: box-shadow + text-shadow treatment for
-  active controls, selected chips, playheads, live meters — keyed off
-  `--primary` so all four themes glow in their own accent.
-- `.panel-1 / .panel-2 / .well`: three elevation steps (chrome → card →
-  inset readout well) via layered shadow + border treatments. Replaces the
-  current single-flat-card look without touching layout.
-- `.hairline`: 1px dividers with theme-aware alpha for section separation
-  inside cards (today: ad-hoc `border-border/80` everywhere).
-- `.readout`: tabular-nums + mono + unit styling for every time/level value.
+Candidates (each is only a token set — neutrals ramp, material recipe, radius
+scale; see P1 for the token list):
 
-**Acceptance:** tokens render identically under all four accent themes;
-`npm --prefix frontend run lint` clean; no component restyle yet — this phase
-only adds the tokens plus a `DESIGN_SYSTEM.md` section documenting them.
-**Files:** `frontend/src/index.css`, `docs/dev/DESIGN_SYSTEM.md`.
-Commit: `feat(ui): luminous elevation and glow token layer`.
+- **L1 "Graphite"** — cool blue-grey neutrals (hue ~255, chroma ≤ 0.012),
+  soft top-lit edges, 6/10 px radii. Closest to FabFilter.
+- **L2 "Obsidian"** — near-black neutrals (L ≈ 0.12), higher-contrast signal,
+  tighter 4/8 px radii, stronger glow. Closest to Xfer.
+- **L3 "Machined"** — warmer neutrals (hue ~60, chroma ≤ 0.01), visible bevel
+  highlights and inset wells. Closest to UAD, without skeuomorphic textures.
 
-### P2 — Waveform render quality (mirrored, hi-res, played-region tint)
+**Acceptance:** 3 candidates × 4 surfaces × 2 themes captured into one board
+(`tests/ui/capture/lookdev/` CSS + scenario); owner picks one (or a named
+hybrid) and the choice is recorded in the runbook ledger as decision D1.
+**Files:** `tests/ui/capture/lookdev/{graphite,obsidian,machined}.css`, new
+scenario `tests/ui/capture/scenarios/lookdev/board.mjs`. No `frontend/src`
+edits.
+Commit: `test(ui): look-dev capture board for presentation candidates`.
 
-Every lane today renders coarse single-sided block bars (visible in all four
-README screenshots). The data layer is already good — real decoded peaks
-(`lib/waveform.ts:17-40`), persistent per-clip LRU caching (`43-60`,
-`<kind>:<persistent-id>:<revision>` keys), existing played/unplayed color
-grammar (`waveformBarColor`, `115-124`). Missing: density-scaled bucketing,
-mirrored center-line silhouette, played-region tint so the playhead reads as
-position-on-sound.
+### P1 — Material + token layer (the foundation everything sits on)
 
-**Acceptance:** at typical lane widths every consumer (Speak deck,
-`StitchClipCard`, `WaveformLane.tsx`, A/B lanes) renders mirrored,
-density-scaled peaks with a visible played treatment; only the existing
-`waveformBarColor` grammar, at higher fidelity; cache keys unchanged
-(`<kind>:<persistent-id>:<revision>`).
-**Files:** `lib/waveform.ts` + lane renderers. Canvas vs DOM is executor's
-call; render cost measured before/after on the segment-browser-scale
-scenario — no main-thread regression.
-Commit: `feat(ui): hi-res mirrored waveform rendering`.
+Implement the D1 look as tokens in `frontend/src/index.css` and a single
+`frontend/src/lib/motion.ts` module. No component restyle yet.
 
-### P3 — Transport chrome (AudioDeck + MiniAudioDeck + clip audition)
+- **Neutral ramp (fixes A8):** tinted `--background`, `--surface-0..3`
+  (chrome → panel → raised), `--well` (inset, darker than background),
+  `--border`/`--hairline` alphas — replacing the achromatic `.dark` greys.
+- **Material recipe:** `.panel-1 / .panel-2 / .well` utilities = layered
+  shadow + 1px top-edge highlight (`inset 0 1px 0 oklch(1 0 0 / 4–6%)`) +
+  inset shadow for wells. One recipe, used everywhere.
+- **Glow:** `--glow-accent` / `.glow-active` keyed off `--primary`;
+  `--glow-signal` keyed off the fixed signal palette.
+- **Radius scale (fixes A10):** `--radius-well`, `--radius-control`,
+  `--radius-panel` with Tailwind aliases; P6 migrates the 69 ad-hoc usages.
+- **Type scale:** `.micro-label` (uppercase, tracked, 10–11 px, muted),
+  `.readout` (Geist Mono, `tabular-nums`, unit span styling), `.display`
+  (page title). Geist stays — already self-hosted for metric stability
+  (`index.css:107-112`).
+- **Focus:** focus-visible ring becomes an accent glow (keyboard users get
+  the same "lit" feedback as pointer users).
+- **Signal constants:** move the signal palette + meter scale (dBFS range,
+  tick set, clip threshold) into `lib/signal.ts` so P2–P4 share one source.
+- **Motion tokens:** `lib/motion.ts` exports named durations, easings and
+  springs (`snappy`, `settle`, `meterFall`) + `useReducedMotionSafe()`;
+  mirrored as CSS vars for CSS transitions.
+- **Brand (fixes A9, per CP0 decision D3):** either derive `--brand-*` from
+  `--primary` with relative color syntax (`oklch(from var(--primary) …)`) or
+  keep signature cyan — recorded, then documented.
 
-The Speak screenshot shows the problem: LEVEL + speed + download icons tiny,
-crowded, low hit-target, while Generate sits small against a large empty
-textarea. Elevate the deck into an instrument strip: grouped transport
-cluster (play/restart/loop) at proper touch targets, prominent level meter
-with peak-hold reusing P1 glow, labeled speed control (feeds S1/V3 grammar),
-download + seed actions in a consistent trailing cluster.
+**Acceptance:** tokens render correctly under all four themes (capture:
+look-dev board re-shot with real tokens, must match D1); lint + oxlint guard
+clean; `DESIGN_SYSTEM.md` gains a "Materials, signal, motion" section.
+**Files:** `frontend/src/index.css`, `lib/motion.ts`, `lib/signal.ts`,
+`docs/dev/DESIGN_SYSTEM.md`.
+Commit: `feat(ui): luminous material, signal, and motion token layer`.
 
-**Acceptance:** every deck instance (Speak, library rows via MiniAudioDeck,
-clip audition) uses the same strip; hit targets ≥ 32px; meter shows
-peak-hold; no layout change to surrounding pages.
+### P2 — One true waveform renderer (fixes A3, A4, A5)
+
+Replace the DOM-bar `Waveform.tsx` drawing with the canvas approach
+`WaveformLane` already proves, as one shared renderer.
+
+- **Multi-resolution envelope:** at decode, compute a min/max/RMS pyramid
+  (e.g. 256-sample base, ×4 levels) **in absolute sample units** (not
+  normalized). Stored *additively* in the existing analysis cache entry under
+  the unchanged `<kind>:<persistent-id>:<revision>` key (locked contract
+  honored: new fields only; `peaks` stays for any consumer not yet migrated).
+- **Density follows pixels:** buckets = lane CSS width × DPR ÷ bar pitch,
+  picked from the pyramid — zoom never re-decodes.
+- **Two-tone silhouette:** mirrored peak outline + brighter RMS body (the
+  pro-DAW look), colored with the existing `waveformBarColor` grammar;
+  played region tinted.
+- **Gain truth in multi-clip views:** Stitch timeline, A/B lanes, and
+  variant compare share one vertical scale across all clips on screen, so a
+  quiet segment *looks* quiet. Single-clip views may auto-fit but show a
+  small `−x dBFS` peak readout so the fit is never mistaken for level.
+- **Playhead:** drawn in the same canvas pass from a RAF media clock
+  (`hooks/useMediaClock.ts` — reads `audio.currentTime` per frame, no React
+  state per frame); fixes A2 for every waveform consumer.
+- **Loading:** designed skeleton (P9 style), never `Array(64).fill(0.15)`.
+- **Delete** the per-bar `motion.div`/spring/`drop-shadow` rendering.
+
+**Acceptance:** every waveform consumer (Speak deck, VoiceDesign/OmniVoice
+decks, `StitchClipCard`, `WaveformLane`, A/B + `VariantCompare`,
+`RegionEditor`, `AlignmentCompare`) draws through the shared renderer;
+Playwright asserts a quieter fixture clip renders shorter than a louder one on
+the Stitch timeline; playhead position sampled at two RAF ticks < 50 ms apart
+differs (proves display-rate motion); performance budget met; existing
+region-select/seek specs unregressed.
+**Files:** `lib/waveform.ts`, new `components/waveform/WaveformCanvas.tsx`,
+new `hooks/useMediaClock.ts`, `components/Waveform.tsx` (becomes a thin
+wrapper or is removed with callers migrated), `WaveformLane.tsx`, consumers
+listed above.
+Commit: `feat(ui): true-scale hi-res waveform renderer with RAF playhead`.
+
+### P3 — Spectrogram view (the hero visualization; fixes A6; CP0 decision D4)
+
+Real STFT spectrogram of any decoded clip, rendered to canvas.
+
+- **Compute:** Hann-windowed FFT (1024, hop 256; radix-2 implementation in
+  ~80 lines, no dependency) in a module Web Worker; decoded
+  `Float32Array` transferred from the main thread. Budget: a 30 s mono clip
+  at 24 kHz ≈ 2.8k frames — well under 300 ms off-thread.
+- **Render:** log-frequency axis (voice-relevant 50 Hz–12 kHz), dB magnitude
+  mapped through a signal-palette colormap (black → cyan → magenta → white,
+  the waveform grammar extended), drawn once to an offscreen canvas and
+  blitted; playhead shares P2's media clock. Hover shows `time · Hz · dB`.
+- **Cache:** additive key `spectrogram:<kind>:<persistent-id>:<revision>`
+  in the same LRU (count budget respected).
+- **Where:** a `Wave | Spectrum` view toggle on stacked `AudioDeck`
+  (Speak result, Voice Design results) and on Voice Edit A/B lanes. Retires
+  `SpectralAccent` entirely.
+
+**Acceptance:** fixture tone at a known frequency renders its band at the
+correct axis position (Playwright reads the canvas pixel column); toggle
+persists per session; STFT runs off-thread (no long task); `SpectralAccent`
+and its synthetic fallback deleted.
+**Files:** new `lib/stft.worker.ts`, `lib/spectrogram.ts`,
+`components/waveform/SpectrogramCanvas.tsx`; `AudioDeck.tsx`,
+`VariantCompare.tsx`/Voice Edit lanes; delete `audio/SpectralAccent.tsx`.
+Commit: `feat(ui): spectrogram view for decoded clips`.
+
+### P4 — Instrument transport + truthful metering (fixes A1, A2)
+
+One transport strip everywhere audio plays, with a real meter.
+
+- **Meter:** driven by P2's absolute envelope sampled at the media clock
+  every frame. Scale −60…0 dBFS (ticks −48/−36/−24/−18/−12/−6/−3/0),
+  instant attack, ballistic fall (~20 dB per 1.5 s), peak-hold line 1.5 s
+  then fall, **clip LED** latched at ≥ −0.1 dBFS sample peak (click to
+  clear). Readouts: live dBFS, held peak dBFS. Signal palette only.
+- **Strip layout:** grouped transport cluster (play/restart/loop), meter,
+  labeled speed (P5 control once shipped), trailing cluster (download, seed)
+  — ≥ 32 px hit targets, same arrangement in every deck.
+- **Clip stats:** file peak dBFS + RMS dBFS in the deck header readout.
+  Integrated loudness (BS.1770 LUFS, K-weighting applied offline to the
+  decoded buffer — analysis only) is CP0 decision D5.
+
+**Acceptance:** a fixture with a known −6 dBFS peak reads −6.0 ± 0.1 on the
+held-peak readout; a fixture with a full-scale sample lights the clip LED;
+meter bar height changes between consecutive frames during playback; every
+deck instance (Speak, library rows via `MiniAudioDeck`, candidate audition,
+Voice Design) uses the same strip; performance budget met.
 **Files:** `components/audio/AudioDeck.tsx`, `MiniAudioDeck.tsx`,
-`components/AudioPlayer.tsx`.
-Commit: `feat(ui): instrument-grade transport strip`.
+`LevelMeter.tsx` (rebuilt on canvas), `AudioPlayer.tsx`,
+`OmniVoice/ClipPlayer.tsx`, `lib/signal.ts`.
+Commit: `feat(ui): instrument transport strip with true dBFS metering`.
 
-### P4 — App chrome depth (sidebar, headers, banners, status)
+### P5 — Instrument control primitives (CP0 decision D2)
 
-Same IA, higher craft: sidebar active item gets the P1 glow treatment
-instead of a flat fill; section headers across pages converge on one
-micro-label style (uppercase, tracked, muted — already half-present);
-the banner stack (`SwapBanner`, `HealthStatusBanner`,
-`UpdateAvailableBanner`) converges on `.status-badge` tones instead of three
-bespoke looks; `ActivityStatusBar` becomes the single ambient-status surface.
+Give Plan A's drag-scrub behavior (S1 + N1 + N2) its instrument form.
 
-**Acceptance:** one header grammar, one banner grammar, one status surface;
-screenshots of shell before/after at all four themes.
+- **`Knob`** — SVG arc (track, value arc in accent, pointer), vertical drag
+  via `useDragScrubValue` (same hook as S1: Shift fine, Alt bypass snap,
+  double-click reset, wheel nudge, click-to-type), **value bubble** while
+  dragging/hovering, `role="slider"` + full keyboard.
+- **`Fader`** — the linear sibling for long-range parameters.
+- **Placement (same slots, new form):** Stitch DSP controls (`SliderField`,
+  `StitchTimeline.tsx:527-552`) become a knob row; AudioDeck speed becomes a
+  compact knob; trim/fade/gap keep their numeric-field form (they are
+  timecodes, not parameters).
+
+**Acceptance:** knob and fader pass the same Playwright contract as S1
+controls (drag, Shift-fine, double-click reset, wheel, typed entry, keyboard);
+value bubble visible during drag; no page layout shift (capture diff).
+**Files:** new `components/ui/knob.tsx`, `components/ui/fader.tsx`;
+`StitchTimeline.tsx` (DSP row), `AudioDeck.tsx` (speed).
+Commit: `feat(ui): knob and fader instrument controls`.
+
+### P6 — App chrome depth (sidebar, headers, banners, status, info view)
+
+- Sidebar active item: accent glow instead of flat fill; radius migration
+  (A10) across the shell.
+- **One header grammar:** every page opens with the same plugin-style title
+  band — `.display` title, `.micro-label` context readouts, primary action
+  aligned right. Same content as today, one form.
+- **Banner convergence:** `SwapBanner`, `HealthStatusBanner`,
+  `UpdateAvailableBanner` → `.status-badge` tones, one component shape.
+- **Info view (CP0 decision D6):** hovering or focusing any control with a
+  `data-help` string shows its explanation in `ActivityStatusBar` (the
+  Ableton/FabFilter help-strip idiom). This is also where Plan A V2's genuine
+  warnings (e.g. the high-pitch tinniness note) live, instead of paragraphs.
+- **Brand mark (CP0 decision D7):** replace the stock `AudioLines` tile
+  (A11) with a custom SVG glyph + wordmark — owner supplies or approves.
+
+**Acceptance:** one header, banner, and status grammar across every page;
+info view announces via the same live region as Plan A N3; shell captures at
+all four themes.
 **Files:** `components/AppShell.tsx`, banner components,
-`components/ui/ActivityStatusBar.tsx`.
-Commit: `feat(ui): chrome depth and banner convergence`.
+`components/ui/ActivityStatusBar.tsx`, page headers.
+Commit: `feat(ui): chrome depth, header grammar, and info view`.
 
-### P5 — Motion as feedback (motion/react system)
+### P7 — Motion as feedback
 
-Confident but functional: view/section enter transitions, `AnimatePresence`
-on dialogs/menus/popovers, `layout` animation on clip reorder (today reorder
-jumps), spring tap states extended from chips to transport buttons, meter
-needles with ballistic fall, playhead sweep already exists — give it glow
-(P1) so motion reads as light. Every animation checks
-`prefers-reduced-motion` and renders its end-state statically.
+Using `lib/motion.ts` tokens only: view/section enter transitions,
+`AnimatePresence` on dialogs/menus/popovers, `layout` animation on clip
+reorder (today reorder jumps), spring tap states extended from chips to
+transport buttons, playhead + meter glow (motion that reads as light).
+Motion animates `transform`/`opacity` only; never per-bar or per-row node
+counts that scale with data.
 
-**Acceptance:** reorder animates, dialogs/menus transition, meters fall
-ballistically, reduced-motion path verified per surface (or forced via
-emulation in the spec).
+**Acceptance:** reorder animates; dialogs/menus transition; reduced-motion
+path verified per surface via emulation in the spec; performance budget met.
 **Files:** page shells, `StitchTimeline.tsx` (reorder), dialog/menu
-primitives, deck meters.
+primitives, transport buttons.
 Commit: `feat(ui): motion-as-feedback system`.
 
-### P6 — Readout typography + labeled controls (Speak first)
+### P8 — Readout typography + labeled controls (Speak first)
 
-`tabular-nums` + `.readout` on every time/level value; dropdowns get
-small-caps parameter labels above the control (VOICE / LANGUAGE / the `Off`
-control's actual function) instead of value-as-label; icon buttons reuse the
-existing `tooltip=` pattern from `AudioDeck.tsx:255`. Extends the interaction
-plan's S4/V3 grammar into the visual layer.
+`.readout` on every time/level value; dropdowns get `.micro-label` parameter
+labels above the control (VOICE / LANGUAGE / the `Off` control's actual
+function) instead of value-as-label; icon buttons reuse the `tooltip=`
+pattern (`AudioDeck.tsx:255`). Absorbs Plan A V3; extends S4's grammar.
 
-**Acceptance:** no unlabeled select on Speak; every numeric readout tabular;
-units always visible (`GAP 520` → `520 ms`).
-**Files:** `pages/SpeakPage.tsx`, then Voice Design / Voice Edit selects.
+**Acceptance:** no unlabeled select on Speak, Voice Design, or Voice Edit;
+every numeric readout tabular with a visible unit (`GAP 520` → `520 ms`).
+**Files:** `pages/SpeakPage.tsx`, Voice Design / Voice Edit selects.
 Commit: `feat(ui): instrument readout typography`.
 
-### P7 — Empty / loading / error states with craft
+### P9 — Async states with craft
 
-Segment Library `(3)` with no clips, empty script box, `Generating
-preview...` with no meter — premium instruments never show a void. Crafted
-empty states with a next action, determinate progress where the backend
-reports it (Speak already polls `getGenerateJobProgress` with `progress_pct`
-- ETA — surface it as a real progress readout, not just a bar width),
-`role="status"`/`progressbar` semantics folded in (covers N3/N4 of the
-interaction plan — accept those here instead of there).
+Crafted empty → working → done/error states everywhere. Determinate progress
+wherever the backend reports it (Speak already polls
+`getGenerateJobProgress` with `progress_pct` + ETA — surface a real readout),
+skeletons in the material recipe (these also replace P2's former fake
+placeholder), `role="status"`/`progressbar` semantics. Absorbs Plan A N3/N4.
+A designed startup state for the initial-load 503 window (the app's "splash").
 
-**Acceptance:** every async surface has designed empty → working →
-done/error states; progress determinate wherever the backend measures.
-**Files:** per-surface, plus shared `components/ui/` primitives as needed.
+**Acceptance:** every async surface has all four states; progress
+determinate wherever measured; startup state captured.
+**Files:** per-surface, plus shared `components/ui/` primitives
+(`toast.tsx`/announcer, `progress.tsx` on the installed `radix-ui` export).
 Commit: `feat(ui): crafted async states`.
 
-### P8 — Storefront re-shoot + residue sweep
+### P10 — Residue sweep + craft verdict
 
-Re-capture all eight README screenshots post-P1–P7; sweep prototype residue
-(V2 of the interaction plan: `AccentChipPanel.tsx:104-125` lab copy as
-contextual guidance, `v0.0.0-fake` chrome, placeholder voice names) so the
-published product reads finished.
+Sweep prototype residue (Plan A V2: `AccentChipPanel.tsx:104-125` lab copy →
+info view/contextual hints; `v0.0.0-fake` chrome; placeholder voice names).
+Capture every hero surface for the **premium scorecard** (runbook §5) —
+verdict only; publishing happens once, in P11.
 
-**Acceptance:** README screenshots re-shot, residue checklist closed,
-receipts green.
-Commit: `feat(ui): storefront re-shoot and residue sweep`.
+**Acceptance:** residue checklist closed; scorecard fully PASS/N-A, reviewed
+at runbook Checkpoint 2.
+Commit: `feat(ui): residue sweep and craft verdict`.
 
-### P9 — Reference docs, walkthroughs, and full media refresh
+### P11 — Reference docs, walkthroughs, and full media refresh
 
-Docs must describe the product that P1–P8 built, not the one from September.
-Concretely:
+The **single** publishing re-shoot. Docs describe the product P0–P10 built.
 
-- **Re-take everything published:** all 8 README PNGs
-  (`speak-generate`, `hero-voice-design`, `prosody-adjustment`,
-  `stitch-assembly`, `voice-edit` workspace, `readiness-states`,
-  `voice-edit` prosody-ab, `omnivoice-audition` candidates) **plus** both
-  README GIFs (`omnivoice-audition-gif`, `design-to-stitch-gif`) via the
-  existing capture scenarios (`tests/ui/capture/scenarios/`,
-  `audition-gif.mjs` + `design-to-stitch-gif.mjs` already script dwell
-  times so beats stay readable). P8's re-shoot covers the craft deltas;
-  P9 re-verifies every file README.md references and closes any stale
-  frame.
-- **Illustrate the reference docs:** add screenshots to feature
-  documentation where a picture replaces a paragraph —
-  `docs/architecture/PERSONA_FORGE_STUDIO.md`,
-  `docs/architecture/VOICE_DESIGN.md`,
-  `docs/architecture/OMNIVOICE_REFERENCE.md`,
-  `docs/architecture/STUDIO_LIBRARIES.md`, and the user-facing walkthrough
-  surfaces (`docs/HOW_TO_RUN.md`, `docs/README.md`) get a captioned
-  screenshot per major flow (Speak → Voice Design → Audition → Stitch →
-  Voice Edit). New images live under `docs/screenshots/` beside the
-  existing set; every added image gets a one-line caption tying it to the
-  feature text.
-- **Capability audit:** walk each reference doc against the shipped UI and
-  fix drift — new drag-scrub/zoom/loop/context-menu behavior (interaction
-  plan Phases 1–5), new glow/meter/motion/readout behavior (this plan
-  P1–P7), current engine/backend names, current routes and nav labels.
-  Delete or rewrite anything describing pre-overhaul behavior.
-- **Walkthrough check:** the end-to-end user path (clone/design → audition
-  → stitch → edit → generate over API) must read start-to-finish across
-  the docs without gaps; add a short guided walkthrough section where the
-  chain currently jumps between pages unexplained.
+- **Re-take everything published:** all 8 README PNGs (`speak-generate`,
+  `hero-voice-design`, `prosody-adjustment`, `stitch-assembly`, `voice-edit`
+  workspace, `readiness-states`, `voice-edit` prosody-ab,
+  `omnivoice-audition` candidates) **plus** both README GIFs
+  (`omnivoice-audition-gif`, `design-to-stitch-gif`) via the existing capture
+  scenarios, and one **new** GIF showing the signal layer (meter + playhead +
+  spectrogram toggle during playback).
+- **Illustrate the reference docs:** captioned screenshots per major flow
+  (Speak → Voice Design → Audition → Stitch → Voice Edit) in
+  `docs/architecture/PERSONA_FORGE_STUDIO.md`, `VOICE_DESIGN.md`,
+  `OMNIVOICE_REFERENCE.md`, `STUDIO_LIBRARIES.md`, `docs/HOW_TO_RUN.md`,
+  `docs/README.md`; a controls reference (knob/fader gestures, keymap, meter
+  scale) in `FRONTEND_OVERVIEW.md`. New images under `docs/screenshots/`.
+- **Capability audit:** walk each reference doc against the shipped UI —
+  drag-scrub/zoom/loop/context-menu (Plan A), metering/spectrogram/knobs/
+  motion (this plan), current engine names, routes, nav labels. Rewrite
+  anything describing pre-overhaul behavior.
+- **Walkthrough check:** clone/design → audition → stitch → edit → generate
+  over API reads start-to-finish without gaps.
 
-**Acceptance:** `python scripts/validate_repo.py` clean; every image
-README.md and the touched reference docs embed resolves to a file
-regenerated in P8/P9 (no stale frames); a reviewer can follow the
-walkthrough cold.
+**Acceptance:** `python scripts/validate_repo.py` clean; every image the
+README and touched docs embed was regenerated in P11; a reviewer can follow
+the walkthrough cold.
 **Files:** `README.md`, `docs/architecture/*.md`, `docs/HOW_TO_RUN.md`,
 `docs/README.md`, `docs/screenshots/**`, `tests/ui/capture/scenarios/**`
-(only if a scenario needs a dwell/selector fix to re-capture cleanly).
+(dwell/selector fixes only, plus the new signal GIF scenario).
 Commit: `docs: refresh reference docs, walkthroughs, and published media`.
 
-### P10 — Archive planning docs and open the PR
+### P12 — Archive planning docs and open the PR
 
-The last step before review, not after merge:
+1. Both plan ledgers and the runbook ledger complete — every executed phase
+   PASS with its commit; every CP0 decision recorded.
+2. Move `20260922-premium_audio_plugin_ux.md`, this file, and
+   `20260923-premium_ux_execution.md` to `docs/archive/luminous-instrument/`
+   (convention: `docs/archive/stitch-studio/`), stamped with final hashes.
+   Active `docs/plans/` left clean.
+3. Final preflight + `git diff --check`; open the PR with the Release Please
+   override block (AGENTS.md) — one entry per phase commit; PR body carries
+   the scorecard and the capture before/after index.
 
-1. Confirm both plans' ledgers are complete (interaction plan §7,
-   this plan's Phase ledger) — every phase PASS with its commit.
-2. Move both planning docs out of the active set following the
-   established convention (`docs/archive/<topic>/`, cf.
-   `docs/archive/stitch-studio/20260920-stitch_studio_ux_overhaul.md`):
-   `docs/plans/20260922-premium_audio_plugin_ux.md` and this file go to
-   `docs/archive/luminous-instrument/` (new folder), updated in place
-   with final commit hashes. Active `docs/plans/` is left clean.
-3. Final preflight (`validate_repo.py`, frontend `check` + `lint`,
-   `git diff --check`), then open the PR with the Release Please override
-   block per repo PR conventions (AGENTS.md) — one `feat(ui):` entry per
-   craft phase so the changelog tells the whole story.
-
-**Acceptance:** `docs/plans/` contains no file for this work; archive
-copies are final; PR body carries the override block and the capture
-before/after index.
+**Acceptance:** `docs/plans/` holds nothing for this arc; PR body carries the
+override block, scorecard, and capture index.
 Commit: `chore: archive luminous-instrument planning docs`.
 
-## Execution discipline (§2 of the interaction plan applies verbatim)
+## Execution discipline
 
-One phase at a time, previous gate PASS before next starts. RED-before-GREEN
-with focused Playwright specs; preflight identical
-(`git branch --show-current && git status --short &&
-python scripts/validate_repo.py && npm run --prefix frontend check`).
-Each phase names its capture scenario in its gate; before/after pairs
-inspected, differences attributable to the hunk, no regressions (no layout
-shift, no truncated labels). Per-phase Conventional Commits pre-assigned
-above. Sequencing: **after interaction-plan Phases 0–5** (the glow/meter
-work lands on top of the drag-scrub/zoom/context-menu behavior, not under
-it). P1 must go first within this doc — everything else consumes its tokens.
+Owned by the runbook (`20260923-premium_ux_execution.md` §3), which applies
+Plan A §2 verbatim to every phase here. Sequencing: P0 at Checkpoint 0;
+P1–P12 after interaction Phases 0–5 and Checkpoint 1. P1 first — everything
+consumes its tokens; P2 before P3/P4 — both consume its envelope and clock.
 
 ## Phase ledger
 
 | Phase | Gate result | Commit | Notes |
 | --- | --- | --- | --- |
+| P0 look-dev | | | D1 = |
 | P1 tokens | | | |
-| P2 waveforms | | | |
-| P3 transport | | | |
-| P4 chrome | | | |
-| P5 motion | | | |
-| P6 readouts | | | |
-| P7 async states | | | |
-| P8 storefront | | | |
-| P9 docs + media | | | |
-| P10 archive + PR | | | |
+| P2 waveform renderer | | | |
+| P3 spectrogram | | | D4 = |
+| P4 transport + metering | | | D5 = |
+| P5 knob/fader | | | D2 = |
+| P6 chrome | | | D3/D6/D7 = |
+| P7 motion | | | |
+| P8 readouts | | | |
+| P9 async states | | | |
+| P10 residue + verdict | | | |
+| P11 docs + media | | | |
+| P12 archive + PR | | | |

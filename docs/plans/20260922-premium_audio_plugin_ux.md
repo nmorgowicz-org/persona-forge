@@ -2,8 +2,10 @@
 
 Date: 2026-09-22
 Status: **APPROVED FOR EXECUTION** — Phases 0–5 below are approved; M3–M5,
-T1–T3, and all N-/V-candidates are owner-gated and do not start without an
-explicit acceptance note recorded in the §7 ledger.
+T1–T3, and all N-candidates are owner-gated and are decided **once, up front,
+at Checkpoint 0** of the master runbook
+(`docs/plans/20260923-premium_ux_execution.md`), recorded in the §7 ledger.
+V1–V4 are superseded by the presentation plan (see §8 notes).
 
 ## Goal statement
 
@@ -41,7 +43,7 @@ others.
 | Visible keymap / keyboard-first operation | `StitchTimeline.tsx:261-311, 897-924` (`?` dialog) | Installed only while the timeline is mounted; `components/audio/AudioDeck.tsx` has no keyboard binding; no global layer |
 | Right-click context menus | — | No `onContextMenu` anywhere in the frontend (verified globally 2026-09-23) |
 | Undo/redo history | backend voice-reference undo (`api.ts:140-142, 458-461`) | No editor/plan history (`store.ts:52-92` type slice, `store.ts:322-340` ovStitch slice; 856 lines, zero undo/history symbols) |
-| Per-clip metering / analysis inspector | `LevelMeter`, `SpectralAccent` (used in `AudioDeck.tsx:252-255`) | Timeline clips draw static peaks only (`waveform/WaveformLane.tsx:15-78`) |
+| Per-clip metering / analysis inspector | `LevelMeter` exists as a component (`AudioDeck.tsx:253, 304`) — **but it is not a true meter**: level is a normalized peak lookup updated at ~4 Hz, peak is the file max, and `SpectralAccent` redraws peaks (with a synthetic sine fallback). Verified 2026-09-23; fixed by the presentation plan P2–P4 | Timeline clips draw static peaks only (`waveform/WaveformLane.tsx:15-78`); every waveform is normalized to its own max (`lib/waveform.ts:32-33`) |
 | Double-click-to-reset on controls (plugin idiom) | — (only `SegmentBrowserModal.tsx:105` uses double-click, for row insert) | No numeric/slider control anywhere supports double-click-to-default |
 | Scroll-wheel fine-adjust on numeric controls | timeline zoom (`StitchTimeline.tsx:233-240, 378`) | No value control reacts to wheel; `onWheel` exists only for timeline zoom |
 | Determinate feedback for long operations / announcements | `Skeleton` component ships in `components/ui/` | Zero `aria-live`/`role="status"`/`role="progressbar"` anywhere in `frontend/src` (verified globally 2026-09-23); no toast/notification component exists |
@@ -162,15 +164,17 @@ not add one and do not reach for Vitest.
   present; no dependency change); wire actions to `StitchPlanSession` +
   region-edit callbacks. **Gate 5:** spec green; a keyboard-only path to the
   same actions exists.
-- **Phase 6+ (owner-gated):** M3–M5, T1–T3, and every N-/V-candidate in §8 are
-  **not** auto-approved. Each needs an explicit owner acceptance note appended
-  to this doc (§7 ledger) before its phase is cut; T2 additionally violates
-  the standing no-undo constraint and cannot start on a nod — it needs the
-  recorded sign-off described in §6.
+- **Phase 6+ (owner-gated):** M3–M5, T1–T3, and every N-candidate in §8 are
+  **not** auto-approved. Each is decided at runbook Checkpoint 0 — before
+  Phase 0 — so items that fold into Phases 1–5 (N1, N2 into Phase 1; N5 after
+  Phase 5; N6 alongside Phase 4) are known before those gates run. T2
+  additionally violates the standing no-undo constraint and cannot start on
+  a nod — it needs the recorded sign-off described in §6.
 
 A failed gate reopens its phase; never compensate in a later phase. One
-Conventional Commit per phase (titles pre-assigned above). Squash-merge,
-PR title = the evaluated commit per repo release rules.
+Conventional Commit per phase (titles pre-assigned above). The whole arc
+(this plan + the presentation plan) ships as **one PR**, opened at the
+presentation plan's P12; its override block carries one entry per phase.
 
 ---
 
@@ -211,6 +215,9 @@ no new chart dependency.
 **Files:** `StitchClipCard.tsx`, `waveform/WaveformLane.tsx`, `LevelMeter.tsx`,
 `SpectralAccent.tsx`, `lib/waveform.ts` cache; optional
 `components/stitch/ClipInspector.tsx`.
+**Depends on (if accepted):** presentation plan P2 (absolute RMS/peak
+envelope) and P4 (meter) — schedule after those land; do not build a second
+analysis path.
 
 ### M4 — One global command/shortcut layer (owner-gated)
 
@@ -354,8 +361,8 @@ same coordinate-mapping work and completes the transport story.
 | 4 M1 loop brace | | | |
 | 5 M2 context menu | | | |
 
-Owner acceptance notes for Phase 6+ items (M3–M5, T1–T3) also get appended
-here, in-date, before their phase is cut.
+Owner decisions for every owner-gated item (M3–M5, T1–T3, N1–N6) are recorded
+here at runbook Checkpoint 0, in-date, before Phase 0.
 
 ---
 
@@ -451,9 +458,32 @@ thin wrappers over current handlers; keyboard parity retained.
 **Files:** `components/stitch/SegmentBrowserModal.tsx`, reusing M2's context
 menu. **Depends on:** Gate 5.
 
+### N6 — Exclusive audition (one sound at a time)
+
+Verified 2026-09-23: five independent `<audio>` owners
+(`StitchTimeline.tsx` ×2, `VariantCompare.tsx`, `AudioDeck.tsx`,
+`AlignmentCompare.tsx`) plus AlignmentCompare's decode-and-play can sound
+simultaneously; starting one never stops another (no coordination symbol
+exists). Every plugin host and DAW browser auditions exclusively. This is
+the minimal, safe subset of T1: no shared transport state, only a
+"playback focus" registry — each player registers a `pause()` callback; any
+player starting pauses the others. Isolated candidate audition still must
+not interrupt an active generation job (no job coupling at all).
+
+**Acceptance:** starting any player pauses whichever other player was
+sounding (Playwright: start deck A, start deck B, assert A paused); no
+player's own contract changes.
+**Files:** new `lib/playbackFocus.ts`; one register/claim call in each of
+the five owners. **Size:** small. **Slot:** alongside Phase 4 (M1 touches
+`useStitchTransport`). Superseded by T1 if T1 is ever accepted.
+
 ---
 
-### V1 — Waveform render quality (hi-res, mirrored, played-region tint)
+### V1 — Waveform render quality → **superseded by presentation plan P2**
+
+Kept for provenance. The presentation plan's code audit (A3–A5) found the
+problem is deeper than resolution: per-file normalization, a 120-bucket cap,
+and per-bar DOM animation. P2 replaces this item; do not execute V1.
 
 The screenshot pass made this the highest-leverage **visual** item in the
 plan: every lane today renders the same coarse single-sided block bars
@@ -477,7 +507,7 @@ lane renderers that consume peaks (Speak deck, `StitchClipCard`,
 whichever preserves the existing cache contract.
 **Size:** medium-small; render-only, zero domain change.
 
-### V2 — Prototype-residue copy sweep (Voice Design + app chrome)
+### V2 — Prototype-residue copy sweep → **superseded by presentation plan P6 (info view) + P10**
 
 The Voice Design screenshot shows engineering notebook copy shipped as
 product: `"High pitch" trends tinnier in testing — "moderate" is usually the
@@ -497,7 +527,7 @@ contextual, state-dependent guidance; published screenshots re-captured.
 **Size:** small; copy-only, zero behavior change. Pairs naturally with
 Phase 0 (re-capture baseline while the camera is out).
 
-### V3 — Labeled-control grammar for anonymous dropdowns (Speak first)
+### V3 — Labeled-control grammar → **superseded by presentation plan P8**
 
 The Speak screenshot shows the pattern that reads most "generic web form":
 `Default voice`, `English`, `Off` — dropdowns whose label names the current
@@ -515,7 +545,11 @@ Voice Design / Voice Edit selects as a follow-up.
 **Size:** small; markup-only. Natural companion to S4's units/tabs/tooltip
 grammar — accept together if appetite allows.
 
-### V4 — Before/after capture verdicts for every craft phase
+### V4 — Capture verdicts → **superseded by runbook §3 + presentation plan P10/P11**
+
+Every phase gate now names its capture scenario (runbook §3); publishing
+happens once, in presentation P11 — the "re-shoot after Phase 5" below is
+dropped to avoid three re-shoots.
 
 The capture harness already produces before/after pairs for scenarios
 (`stitch-assembly`, `prosody-adjustment`, `voice-edit`, `speak-generate`,
