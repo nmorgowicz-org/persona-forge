@@ -185,6 +185,73 @@ published product reads finished.
 receipts green.
 Commit: `feat(ui): storefront re-shoot and residue sweep`.
 
+### P9 — Reference docs, walkthroughs, and full media refresh
+
+Docs must describe the product that P1–P8 built, not the one from September.
+Concretely:
+
+- **Re-take everything published:** all 8 README PNGs
+  (`speak-generate`, `hero-voice-design`, `prosody-adjustment`,
+  `stitch-assembly`, `voice-edit` workspace, `readiness-states`,
+  `voice-edit` prosody-ab, `omnivoice-audition` candidates) **plus** both
+  README GIFs (`omnivoice-audition-gif`, `design-to-stitch-gif`) via the
+  existing capture scenarios (`tests/ui/capture/scenarios/`,
+  `audition-gif.mjs` + `design-to-stitch-gif.mjs` already script dwell
+  times so beats stay readable). P8's re-shoot covers the craft deltas;
+  P9 re-verifies every file README.md references and closes any stale
+  frame.
+- **Illustrate the reference docs:** add screenshots to feature
+  documentation where a picture replaces a paragraph —
+  `docs/architecture/PERSONA_FORGE_STUDIO.md`,
+  `docs/architecture/VOICE_DESIGN.md`,
+  `docs/architecture/OMNIVOICE_REFERENCE.md`,
+  `docs/architecture/STUDIO_LIBRARIES.md`, and the user-facing walkthrough
+  surfaces (`docs/HOW_TO_RUN.md`, `docs/README.md`) get a captioned
+  screenshot per major flow (Speak → Voice Design → Audition → Stitch →
+  Voice Edit). New images live under `docs/screenshots/` beside the
+  existing set; every added image gets a one-line caption tying it to the
+  feature text.
+- **Capability audit:** walk each reference doc against the shipped UI and
+  fix drift — new drag-scrub/zoom/loop/context-menu behavior (interaction
+  plan Phases 1–5), new glow/meter/motion/readout behavior (this plan
+  P1–P7), current engine/backend names, current routes and nav labels.
+  Delete or rewrite anything describing pre-overhaul behavior.
+- **Walkthrough check:** the end-to-end user path (clone/design → audition
+  → stitch → edit → generate over API) must read start-to-finish across
+  the docs without gaps; add a short guided walkthrough section where the
+  chain currently jumps between pages unexplained.
+
+**Acceptance:** `python scripts/validate_repo.py` clean; every image
+README.md and the touched reference docs embed resolves to a file
+regenerated in P8/P9 (no stale frames); a reviewer can follow the
+walkthrough cold.
+**Files:** `README.md`, `docs/architecture/*.md`, `docs/HOW_TO_RUN.md`,
+`docs/README.md`, `docs/screenshots/**`, `tests/ui/capture/scenarios/**`
+(only if a scenario needs a dwell/selector fix to re-capture cleanly).
+Commit: `docs: refresh reference docs, walkthroughs, and published media`.
+
+### P10 — Archive planning docs and open the PR
+
+The last step before review, not after merge:
+
+1. Confirm both plans' ledgers are complete (interaction plan §7,
+   this plan's Phase ledger) — every phase PASS with its commit.
+2. Move both planning docs out of the active set following the
+   established convention (`docs/archive/<topic>/`, cf.
+   `docs/archive/stitch-studio/20260920-stitch_studio_ux_overhaul.md`):
+   `docs/plans/20260922-premium_audio_plugin_ux.md` and this file go to
+   `docs/archive/luminous-instrument/` (new folder), updated in place
+   with final commit hashes. Active `docs/plans/` is left clean.
+3. Final preflight (`validate_repo.py`, frontend `check` + `lint`,
+   `git diff --check`), then open the PR with the Release Please override
+   block per repo PR conventions (AGENTS.md) — one `feat(ui):` entry per
+   craft phase so the changelog tells the whole story.
+
+**Acceptance:** `docs/plans/` contains no file for this work; archive
+copies are final; PR body carries the override block and the capture
+before/after index.
+Commit: `chore: archive luminous-instrument planning docs`.
+
 ## Execution discipline (§2 of the interaction plan applies verbatim)
 
 One phase at a time, previous gate PASS before next starts. RED-before-GREEN
@@ -210,3 +277,5 @@ it). P1 must go first within this doc — everything else consumes its tokens.
 | P6 readouts | | | |
 | P7 async states | | | |
 | P8 storefront | | | |
+| P9 docs + media | | | |
+| P10 archive + PR | | | |
