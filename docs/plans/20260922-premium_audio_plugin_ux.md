@@ -39,9 +39,12 @@ others.
 | Pointer-captured trim/fade gestures, monotonic snapping ladders | `StitchClipCard.tsx:185-302`; `GapControl.tsx:1-15, 88-145` (**already implements the full drag-scrub pattern** — see S1) | The *other* numeric controls (`MsStepper` `StitchClipCard.tsx:26-67`, `SliderField` `StitchTimeline.tsx:527-552`, `AudioDeck.tsx:18-39` speed) don't use that pattern yet — click-only |
 | Loop regions with brace/repeat semantics | `AudioDeck.tsx:85-140`; `AlignmentCompare.tsx:353-374` | Stitch Studio arrangement has no loop brace; only per-clip `playRange` |
 | Visible keymap / keyboard-first operation | `StitchTimeline.tsx:261-311, 897-924` (`?` dialog) | Installed only while the timeline is mounted; `components/audio/AudioDeck.tsx` has no keyboard binding; no global layer |
-| Right-click context menus | — | No `onContextMenu` anywhere in the frontend |
+| Right-click context menus | — | No `onContextMenu` anywhere in the frontend (verified globally 2026-09-23) |
 | Undo/redo history | backend voice-reference undo (`api.ts:140-142, 458-461`) | No editor/plan history (`store.ts:52-92` type slice, `store.ts:322-340` ovStitch slice; 856 lines, zero undo/history symbols) |
 | Per-clip metering / analysis inspector | `LevelMeter`, `SpectralAccent` (used in `AudioDeck.tsx:252-255`) | Timeline clips draw static peaks only (`waveform/WaveformLane.tsx:15-78`) |
+| Double-click-to-reset on controls (plugin idiom) | — (only `SegmentBrowserModal.tsx:105` uses double-click, for row insert) | No numeric/slider control anywhere supports double-click-to-default |
+| Scroll-wheel fine-adjust on numeric controls | timeline zoom (`StitchTimeline.tsx:233-240, 378`) | No value control reacts to wheel; `onWheel` exists only for timeline zoom |
+| Determinate feedback for long operations / announcements | `Skeleton` component ships in `components/ui/` | Zero `aria-live`/`role="status"`/`role="progressbar"` anywhere in `frontend/src` (verified globally 2026-09-23); no toast/notification component exists |
 
 ---
 
@@ -352,3 +355,85 @@ same coordinate-mapping work and completes the transport story.
 
 Owner acceptance notes for Phase 6+ items (M3–M5, T1–T3) also get appended
 here, in-date, before their phase is cut.
+
+---
+
+## 8. Second-pass candidates (owner-gated; added 2026-09-23 self-review re-research)
+
+Validated against the codebase in this review pass, and re-checked against
+current plugin-industry conventions (control double-click-to-reset, wheel
+input on parameters, real-time feedback for every state change, deterministic
+progress, screen-reader announcements). All zero-dep, no-restyle, no backend
+change. Each is a candidate until you accept it; none modify Phases 0–5.
+
+### N1 — Double-click-to-reset on the drag-scrub hook (upgrade S1 for free)
+
+The canonical knob/slider reset gesture (double-click restores the parameter's
+default) does not exist anywhere in the app today. If accepted **before Gate
+1**, it folds into `useDragScrubValue.ts` for free instead of being retrofitted
+per-control later. The reset value is a property of each control (MsStepper
+default gap, SliderField neutral value, AudioDeck 1.0× speed), never a guess.
+
+**Acceptance:** double-clicking any drag-scrub control restores its defined
+default and announces it; GapControl spec asserts non-regression.
+**Files:** `hooks/useDragScrubValue.ts` + each migrated control's default.
+**Depends on:** S1. **Size:** tiny if folded into Phase 1; small otherwise.
+
+### N2 — Scroll-wheel fine-adjust on numeric controls
+
+Plugin convention: hovering a knob/slider and scrolling nudges the value with
+modifier-key fine adjustment. Today `onWheel` exists only for timeline zoom
+(`StitchTimeline.tsx:378`); GapControl's own pattern has no wheel path, so the
+S1 hook should accept an optional wheel handler per control (opt-in where it
+doesn't fight existing scroll containers like the timeline).
+
+**Acceptance:** wheeling over an S1-migrated control nudges value in fine
+steps; timeline zoom and page scroll behavior unchanged.
+**Files:** `hooks/useDragScrubValue.ts` (+ control sockets opt-in).
+**Depends on:** S1. **Risk:** must not hijack wheel inside scrollable
+containers — per-control opt-in, never global.
+
+### N3 — One tiny announcement/toast utility (feedback for async wins)
+
+Verified: zero `aria-live`/`role="status"`/`role="progressbar"` occurrences in
+`frontend/src`, and no toast/notification component in `components/ui/` despite
+`Skeleton` shipping there. Async completions (generation done, save succeeded,
+clipboard copy, promote success) currently give no ambient confirmation;
+assistive tech gets nothing either. A single non-dependency-built utility —
+a small fixed-position toast stack + an `aria-live="polite"` region — closes
+both the accessibility gap and the "did it work?" gap with one primitive.
+
+**Acceptance:** the utility is the only announcement surface; generation,
+save, and promote paths route a confirmation through it; the region is
+programmatically detectable (`role="status"`).
+**Files:** new `components/ui/toast.tsx` (or `announcer.tsx`), wired at ~5
+call sites (`prosody` variant save/promote, generate, copy, stitch save).
+No new deps. **Size:** small; biggest value for the least engineering in §8.
+
+### N4 — Determinate progress for long GPU/model operations
+
+Today `Skeleton` exists but nothing renders `role="progressbar"`. Model loads,
+export jobs, and batch renders report nothing but indeterminate shimmer —
+a premium instrument shows its ETA. Backend already reports per-job progress
+(`fake_model_server.py` mirrors `get_fake_job_progress`; check which surfaces
+can show a determinate bar). Phase must first prove the progress source; the
+UI hunk is a `components/ui/progress.tsx` wrapper reusing the unified
+`radix-ui` `Progress` export if the value source proves out.
+
+**Acceptance:** every operation the backend can measure shows determinate
+progress; indeterminate shimmer remains only where the backend can't measure.
+**Files:** `components/ui/progress.tsx` + the generation/model-load surfaces.
+**Gate-in:** conditional — proof the progress value exists before GREEN.
+
+### N5 — Segment-browser gesture parity (context-menu gentle extension)
+
+`SegmentBrowserModal.tsx:105` is the **only** double-click surface in the app
+(row insert). Once M2 ships `components/ui/context-menu.tsx`, the same
+primitive is a natural fit for the segment browser row menu (insert, audition,
+preview, copy id) — a one-PR polish on an already-approved primitive rather
+than a new invention.
+
+**Acceptance:** right-click on a segment row offers the existing actions as
+thin wrappers over current handlers; keyboard parity retained.
+**Files:** `components/stitch/SegmentBrowserModal.tsx`, reusing M2's context
+menu. **Depends on:** Gate 5.
