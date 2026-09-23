@@ -185,9 +185,11 @@ test.describe('A-3: pointer-safe waveform and one numeric grammar', () => {
 // A-3b (S3 completion): one hover time readout on every waveform surface, and the
 // modifier-held scrub. RED-first: on the pre-card code the deck and the clip lane have no
 // readout at all, the three existing readouts use three different precisions
-// (2dp / 3dp / 2dp), and no scrub gesture exists. The readout must be written straight to
+// (2dp / 3dp / 2dp), and no scrub gesture exists. Owner decision: the readout shows 10 ms
+// everywhere, at any zoom (a readout is a single value, so it need not share the coarser
+// precision the ruler uses to keep tick labels from colliding). The readout must be written straight to
 // the DOM -- pointer movement may not re-render a waveform that is hosting a gesture.
-const SUB_SECOND_READOUT = /^\d+\.\ds$/ // the ruler's own grammar below ten seconds
+const SUB_SECOND_READOUT = /^\d+\.\d\ds$/ // 10 ms, below ten seconds
 
 test.describe('A-3b: hover time readout and modifier scrub', () => {
   test('the deck shows the time under the pointer and hides it on leave', async ({ page }) => {
@@ -205,7 +207,7 @@ test.describe('A-3b: hover time readout and modifier scrub', () => {
     }
 
     // The readout is the exact time under the pointer, in the ruler's grammar.
-    expect(await labelAt(0.5)).toBe(`${(duration * 0.5).toFixed(1)}s`)
+    expect(await labelAt(0.5)).toBe(`${(duration * 0.5).toFixed(2)}s`)
     const near = Number((await labelAt(0.25)).replace('s', ''))
     const far = Number((await labelAt(0.75)).replace('s', ''))
     expect(far).toBeGreaterThan(near)
@@ -245,7 +247,7 @@ test.describe('A-3b: hover time readout and modifier scrub', () => {
     const deckBox = await waveform.boundingBox()
     await page.mouse.move(deckBox.x + deckBox.width * 0.5, deckBox.y + deckBox.height / 2)
     const deckLabel = (await page.getByTestId('deck-waveform-time').textContent()) ?? ''
-    expect(deckLabel).toBe(`${(duration * 0.5).toFixed(1)}s`)
+    expect(deckLabel).toBe(`${(duration * 0.5).toFixed(2)}s`)
     expect(deckLabel).toMatch(SUB_SECOND_READOUT)
 
     await insertSegments(page, 2)

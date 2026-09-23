@@ -18,9 +18,8 @@ export interface HoverTimeGuide {
   /** Attach to the label inside the guide. */
   labelRef: React.RefObject<HTMLSpanElement | null>
   /** `left` is the CSS position the caller's own geometry produced; `fraction` (0..1 across
-   * the surface) only decides which way the label flips at the edges so it stays inside;
-   * `pixelsPerSecond` picks the ruler's tick step for the label. */
-  show: (left: string, seconds: number, fraction: number, pixelsPerSecond: number) => void
+   * the surface) only decides which way the label flips at the edges so it stays inside. */
+  show: (left: string, seconds: number, fraction: number) => void
   hide: () => void
 }
 
@@ -28,13 +27,13 @@ export function useHoverTimeGuide(): HoverTimeGuide {
   const guideRef = useRef<HTMLDivElement | null>(null)
   const labelRef = useRef<HTMLSpanElement | null>(null)
 
-  const show = useCallback((left: string, seconds: number, fraction: number, pixelsPerSecond: number) => {
+  const show = useCallback((left: string, seconds: number, fraction: number) => {
     const guide = guideRef.current
     const label = labelRef.current
     if (!guide || !label) return
     guide.style.display = ''
     guide.style.left = left
-    label.textContent = formatHoverTime(seconds, pixelsPerSecond)
+    label.textContent = formatHoverTime(seconds)
     // Keep the label inside the surface at its edges instead of letting it hang off.
     label.style.transform = fraction <= 0.06 ? 'translateX(0)' : fraction >= 0.94 ? 'translateX(-100%)' : 'translateX(-50%)'
   }, [])
@@ -50,4 +49,4 @@ export function useHoverTimeGuide(): HoverTimeGuide {
 /** The guide markup every surface renders: a cyan line plus its time label. */
 export const HOVER_TIME_GUIDE_LINE_CLASS = 'pointer-events-none absolute inset-y-0 z-20 w-px bg-cyan-300/70'
 export const HOVER_TIME_GUIDE_LABEL_CLASS =
-  'pointer-events-none absolute top-0.5 whitespace-nowrap rounded bg-background/90 px-1 text-[9px] font-mono tabular-nums text-cyan-200 shadow-sm'
+  'pointer-events-none absolute top-1 whitespace-nowrap rounded bg-background px-1 text-[9px] font-mono tabular-nums text-cyan-200 shadow-sm ring-1 ring-border/60'

@@ -68,13 +68,24 @@ export function formatTimelineTime(seconds: number, stepSeconds = 1): string {
   return `${m}:${sWhole.toString().padStart(2, '0')}.${d}`
 }
 
-/** One hover readout grammar for every waveform surface. Delegates to `formatTimelineTime`
- * with the same "nice" step the ruler above the surface uses, so the readout under the
- * pointer and the tick labels around it cannot drift into two dialects. */
-export function formatHoverTime(seconds: number, pixelsPerSecond: number): string {
-  if (!isFinite(seconds)) return '0.0s'
-  const pps = isFinite(pixelsPerSecond) && pixelsPerSecond > 0 ? pixelsPerSecond : 1
-  return formatTimelineTime(Math.max(0, seconds), niceTimeStep(1 / pps))
+/** One hover readout grammar for every waveform surface: always 10 ms, at any zoom. A
+ * readout is a single value with room to itself, so it does not need the coarser one-decimal
+ * branch `formatTimelineTime` uses to keep ruler tick labels from colliding with each other --
+ * but it keeps that module's m:ss shape past ten seconds so a long position still reads as a
+ * clock. Cursor text lines use the same grammar: 10 ms is the granularity prosody cuts and
+ * fades are placed at. */
+export function formatHoverTime(seconds: number): string {
+  if (!isFinite(seconds)) return '0.00s'
+  const clamped = Math.max(0, seconds)
+  if (clamped < 10) return `${clamped.toFixed(2)}s`
+  // Round to centiseconds first so float wobble cannot mislabel a value (the same discipline
+  // formatTimelineTime's tenths branch uses).
+  const centis = Math.round(clamped * 100)
+  const minutes = Math.floor(centis / 6000)
+  const rest = centis % 6000
+  const wholeSeconds = Math.floor(rest / 100)
+  const hundredths = rest % 100
+  return `${minutes}:${String(wholeSeconds).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}`
 }
 
 /** Builds evenly-spaced ticks from 0 through `durationSeconds`, choosing a "nice" step so

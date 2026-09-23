@@ -286,7 +286,7 @@ export const StitchTimeline = memo(function StitchTimeline({
       const rulerViewportX = rulerEl.getBoundingClientRect().left
       const sec = (e.clientX - rulerViewportX) / ppsRef.current
       if (sec < 0 || sec > totalSecondsRef.current) return
-      guide.show(`${sec * ppsRef.current}px`, sec, totalSecondsRef.current > 0 ? sec / totalSecondsRef.current : 0, ppsRef.current)
+      guide.show(`${sec * ppsRef.current}px`, sec, totalSecondsRef.current > 0 ? sec / totalSecondsRef.current : 0)
     }
     const onLeave = () => guide.hide()
     node.addEventListener('wheel', onWheel, { passive: false })

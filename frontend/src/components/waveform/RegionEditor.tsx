@@ -64,8 +64,6 @@ export function RegionEditor({ audioBase64, edits = [], pauseIntervals = [], bou
   }, [decoded, edits])
 
   const selected = selection ?? { startMs: 0, endMs: Math.min(300, durationMs) }
-  // The lane's own scale, for the shared hover readout grammar.
-  const pixelsPerSecond = durationMs > 0 ? (laneRef.current?.clientWidth ?? 0) / (durationMs / 1000) : 0
   const pointToMs = (clientX: number) => {
     const rect = laneRef.current?.getBoundingClientRect()
     if (!rect) return 0
@@ -114,7 +112,7 @@ export function RegionEditor({ audioBase64, edits = [], pauseIntervals = [], bou
         const pct = hoverMs / durationMs * 100
         return <>
           <div className="pointer-events-none absolute inset-y-0 z-10 w-px bg-cyan-300" style={{ left: `${pct}%` }} />
-          <span className="pointer-events-none absolute top-0.5 z-10 rounded bg-background/90 px-1 text-[9px] font-mono tabular-nums text-cyan-200 shadow-sm" style={{ left: `${pct}%`, transform: pct <= 8 ? 'translateX(0)' : pct >= 92 ? 'translateX(-100%)' : 'translateX(-50%)' }}>{formatHoverTime(hoverMs / 1000, pixelsPerSecond)}</span>
+          <span className="pointer-events-none absolute top-0.5 z-10 rounded bg-background/90 px-1 text-[9px] font-mono tabular-nums text-cyan-200 shadow-sm" style={{ left: `${pct}%`, transform: pct <= 8 ? 'translateX(0)' : pct >= 92 ? 'translateX(-100%)' : 'translateX(-50%)' }}>{formatHoverTime(hoverMs / 1000)}</span>
         </>
       })()}
     </div>
@@ -123,7 +121,7 @@ export function RegionEditor({ audioBase64, edits = [], pauseIntervals = [], bou
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-muted-foreground">
         <span>◆ manufactured</span><span>● natural</span><span className="text-cyan-300">alignment</span><span className="text-warning">VAD fallback</span><span className="text-violet-300">energy fallback</span>
       </div>
-    ) : <p className="text-[10px] tabular-nums text-muted-foreground">Selection {selected.startMs}-{selected.endMs}ms ({(selected.startMs / 1000).toFixed(3)}-{(selected.endMs / 1000).toFixed(3)}s) · cursor {hoverMs !== null ? formatHoverTime(hoverMs / 1000, pixelsPerSecond) : '—'} · amber regions are detected pauses</p>}
+    ) : <p className="text-[10px] tabular-nums text-muted-foreground">Selection {selected.startMs}-{selected.endMs}ms ({(selected.startMs / 1000).toFixed(3)}-{(selected.endMs / 1000).toFixed(3)}s) · cursor {hoverMs !== null ? formatHoverTime(hoverMs / 1000) : '—'} · amber regions are detected pauses</p>}
     {!readOnly && <>
     <div className="flex flex-wrap items-center gap-2">
       <Button size="sm" variant="outline" onClick={() => add({ type: 'delete', startMs: selected.startMs, endMs: selected.endMs })}><Scissors /> Delete</Button>

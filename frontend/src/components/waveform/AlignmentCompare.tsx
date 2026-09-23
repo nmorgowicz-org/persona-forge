@@ -96,9 +96,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
   stylePreset?: string
 }) {
   const [originalBase64, setOriginalBase64] = useState<string | null>(null)
-  // Hover position plus the lane's own scale, so the readout formats through the shared
-  // time-axis grammar (the same one the ruler under it uses).
-  const [hover, setHover] = useState<{ pct: number; pps: number } | null>(null)
+  const [hoverPct, setHoverPct] = useState<number | null>(null)
   const [playing, setPlaying] = useState<'original' | 'adjusted' | null>(null)
   const [positionMs, setPositionMs] = useState(0)
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null)
@@ -257,7 +255,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
 
   const onStripMove = (e: React.MouseEvent) => {
     const r = containerRef.current?.getBoundingClientRect()
-    if (r) setHover({ pct: Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100)), pps: r.width / (maxDurMs / 1000) })
+    if (r) setHoverPct(Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100)))
     const m = markerDragRef.current
     if (m && r) {
       m.deltaMs = ((e.clientX - m.startX) / r.width) * maxDurMs
@@ -319,7 +317,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
     return <p className="text-xs text-muted-foreground">Loading waveform…</p>
   }
 
-  const hoverMs = hover ? (hover.pct / 100) * maxDurMs : null
+  const hoverMs = hoverPct !== null ? (hoverPct / 100) * maxDurMs : null
   const hovered = hoverMs !== null
     ? words.find((w) => hoverMs / 1000 >= w.start && hoverMs / 1000 <= w.end) ?? null
     : null
@@ -349,7 +347,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
       className="relative select-none space-y-1 rounded outline-none focus-visible:ring-1 focus-visible:ring-warning/50"
       onMouseMove={onStripMove}
       onMouseUp={finishDrag}
-      onMouseLeave={() => { setHover(null); finishDrag() }}
+      onMouseLeave={() => { setHoverPct(null); finishDrag() }}
       onMouseDownCapture={() => containerRef.current?.focus()}
       onKeyDown={onKeyDown}
     >
@@ -480,13 +478,13 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
           <div className="absolute -top-1 size-1.5 -translate-x-1/2 rotate-45" style={{ backgroundColor: 'hsl(38 95% 62%)' }} />
         </div>
       )}
-      {hover && hoverMs !== null && (
+      {hoverPct !== null && hoverMs !== null && (
         <>
-          <div className="pointer-events-none absolute inset-x-0 top-6 bottom-4 z-30" style={{ left: `${hover.pct}%` }}>
+          <div className="pointer-events-none absolute inset-x-0 top-6 bottom-4 z-30" style={{ left: `${hoverPct}%` }}>
             <div className="absolute inset-y-0 w-px bg-cyan-300/70" />
           </div>
-          <span className="pointer-events-none absolute top-6 z-30 rounded bg-background/90 px-1 text-[9px] font-mono tabular-nums text-cyan-200 shadow-sm" style={{ left: `${hover.pct}%`, transform: hover.pct <= 8 ? 'translateX(0)' : hover.pct >= 92 ? 'translateX(-100%)' : 'translateX(-50%)' }}>
-            {formatHoverTime(hoverMs / 1000, hover.pps)}{hovered ? ` · "${hovered.text}" ${(hovered.score * 100).toFixed(0)}%` : ''}
+          <span className="pointer-events-none absolute top-6 z-30 rounded bg-background/90 px-1 text-[9px] font-mono tabular-nums text-cyan-200 shadow-sm" style={{ left: `${hoverPct}%`, transform: hoverPct <= 8 ? 'translateX(0)' : hoverPct >= 92 ? 'translateX(-100%)' : 'translateX(-50%)' }}>
+            {formatHoverTime(hoverMs / 1000)}{hovered ? ` · "${hovered.text}" ${(hovered.score * 100).toFixed(0)}%` : ''}
           </span>
         </>
       )}

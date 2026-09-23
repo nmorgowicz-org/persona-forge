@@ -29,15 +29,15 @@ export const WaveformLane = memo(function WaveformLane({
   const guide = useHoverTimeGuide()
   const hasScale = durMs != null && durMs > 0
 
-  // The lane's scale is measured at hover time rather than observed: a per-lane
-  // ResizeObserver would add a state update and a re-render to every clip for a readout
-  // that only exists while a pointer is over it.
+  // The lane's box is measured at hover time rather than observed: a per-lane ResizeObserver
+  // would add a state update and a re-render to every clip for a readout that only exists
+  // while a pointer is over it.
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!hasScale || event.pointerType === 'touch') return
     const rect = event.currentTarget.getBoundingClientRect()
     if (rect.width <= 0) return
     const frac = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
-    guide.show(`${frac * 100}%`, frac * ((durMs as number) / 1000), frac, rect.width / ((durMs as number) / 1000))
+    guide.show(`${frac * 100}%`, frac * ((durMs as number) / 1000), frac)
   }
 
   useEffect(() => {
