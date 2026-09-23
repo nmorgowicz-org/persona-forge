@@ -1,6 +1,8 @@
 // Decodes an audio Blob into peak amplitudes for waveform rendering.
 // Buckets are chosen relative to duration so the waveform visually spans the
 // full width of the container instead of bunching into one side.
+import { SIGNAL_PLAYHEAD, signalColor } from '@/lib/signal'
+
 let sharedContext: AudioContext | null = null
 
 function getAudioContext(): AudioContext {
@@ -117,21 +119,15 @@ export async function getClipAudioAnalysis(
 // waveform in the app -- Waveform.tsx's playback deck and WaveformLane's clip-editing canvas --
 // instead of each consumer recomputing its own `hsl(...)` from a peak value.
 
-/** A dedicated meter palette, independent of the app's neutral (grayscale) theme -- real
- * DAW/VST meters use their own color language rather than the plugin chrome. Quiet material
- * reads cool cyan/teal, loud peaks push into hot magenta, like a level meter. `played` renders
- * the brighter, more saturated "already heard" state. */
+/** The app's waveform color, now a view onto the one signal palette (B-P1). Kept with its
+ * original name and signature because callers still pass a 0..1 peak; the palette itself lives
+ * in `lib/signal.ts` so the waveform, meters and spectrogram can never disagree.
+ *
+ * P2 moves callers to `signalColor(heat(amplitude), played)`, which is the same ramp fed by
+ * dBFS instead of a normalized peak. */
 export function waveformBarColor(peak: number, played = false): string {
-  const hue = 190 + peak * 140 // 190 = cyan, 330 = magenta
-  if (played) {
-    const light = 58 + peak * 14
-    const alpha = 0.55 + peak * 0.45
-    return `hsl(${hue} 90% ${light}% / ${alpha})`
-  }
-  const light = 40 + peak * 10
-  const alpha = 0.28 + peak * 0.22
-  return `hsl(${hue} 45% ${light}% / ${alpha})`
+  return signalColor(peak, played)
 }
 
 /** Warm amber cursor color, pops against the cool waveform palette. */
-export const WAVEFORM_PLAYHEAD_COLOR = 'hsl(38 95% 62%)'
+export const WAVEFORM_PLAYHEAD_COLOR = SIGNAL_PLAYHEAD

@@ -49,6 +49,64 @@ treatment. Components should add only layout classes:
 
 Supported tones: `success`, `warning`, `info`, `danger`, and `neutral`.
 
+## Materials, signal, motion (B-P1)
+
+The look is **Obsidian** (chosen on the look-dev board, CP0b D1): near-black
+neutrals at hue 270, hairline edges, tight radii. Its values live in the `.dark`
+block of `index.css` and came verbatim from
+`tests/ui/capture/lookdev/obsidian.css`, the file the owner approved — if the two
+ever disagree, the board is the reference and one of them is a bug.
+
+### Two color roles, never mixed
+
+- **Accent** (`--primary`, four themes) — selection, focus, chrome glow, and the
+  CTA. `--brand-from` / `--brand-to` / `--brand-glow` are *derived* from it with
+  relative color syntax (`oklch(from var(--primary) …)`), so `.btn-brand` is
+  violet in violet and amber in amber (D3). Never hard-code a CTA color.
+- **Signal** (`frontend/src/lib/signal.ts`) — waveforms, meters, spectrogram,
+  playhead. **One fixed palette, no theme awareness**: like a plugin whose
+  analyzer stays readable under any skin. `SIGNAL_RAMP` (blue → violet → magenta
+  → near-white), `SIGNAL_PLAYHEAD` (amber), `SPECTRO_STOPS`, the meter scale, and
+  `heat()` (dBFS, not linear amplitude — linear never reaches the hot end for
+  speech peaking at −6 dBFS). `waveformBarColor` is a view onto it.
+
+Semantic status tokens stay a third, separate role.
+
+### Material
+
+One recipe, three surfaces — never a bespoke shadow in a component:
+
+| Class | Use for |
+| --- | --- |
+| `.panel-1` | A raised surface: `--card` + `--shadow-panel` |
+| `.panel-2` | A floating surface above panels: `--popover` + a deeper drop |
+| `.well` | An inset surface: `--well` (darker than the page) + `--shadow-well` |
+
+`--shadow-panel` / `--shadow-well` are the board's `--ld-panel-shadow` /
+`--ld-well-shadow` renamed. Glow is keyed to a role: `--glow-accent` (follows the
+theme, used by `.glow-active` and keyboard focus) and `--glow-signal` (fixed).
+
+Radii come from one knob: `--radius` (0.3rem) with `--radius-well`,
+`--radius-control`, `--radius-panel` registered in `@theme inline` as
+`rounded-well` / `rounded-control` / `rounded-panel`.
+
+### Type
+
+`.display` (page title), `.micro-label` (uppercase, tracked, muted — field and
+section labels), `.readout` (Geist Mono + `tabular-nums`, with `.readout-unit`
+for the unit span). Readouts must not reflow when their value changes: that is
+what `tabular-nums` is for, and it is why the mono family is self-hosted.
+
+### Motion
+
+`frontend/src/lib/motion.ts` owns the named durations, easings and springs
+(`MOTION.snappy`, `.settle`, `.drift`, `SPRING.meterFall`). Use those names, not
+raw numbers. The same values are mirrored as `--motion-*` / `--ease-*` in
+`index.css` for transitions that never touch React; keep the two in step.
+`useReducedMotionSafe()` starts `false` so the first client paint matches the
+server. Every animation needs a static end-state under reduced motion — reduced
+motion removes travel, never information.
+
 ## Lint Guard
 
 `frontend/oxlint-design-system.cjs` adds
