@@ -96,10 +96,9 @@ candidate list.
 | N1–N6 | A §8 interaction candidates | accept / reject each | **Accept N1, N2, N6** (fold into A-1/A-4 at near-zero cost); N3/N4 are absorbed by B-P9 automatically; N5 accept if appetite |
 | M3–M5, T1–T3 | A §3–§4 structural items | accept / defer each | T2 needs the §6 architectural sign-off; the rest are appetite calls |
 
-**Preconditions also cleared at CP0:** the `096d424` push was blocked by the
-local git guard ("direct push to protected branch") although earlier pushes to
-this branch succeeded — resolve the guard/protection mismatch so phase
-commits can be pushed; working tree clean.
+**Precondition at CP0:** working tree clean and the branch pushed (a one-off
+local guard block on `096d424` cleared on retry at `339e9bf`; if it recurs,
+stop and ask rather than bypassing the guard).
 
 ### CP1 — Feel review (after A-5 + accepted structural items)
 
