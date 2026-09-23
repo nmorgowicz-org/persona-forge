@@ -183,6 +183,33 @@ Owner uses the build: drag-scrub, zoom, loop, menus, exclusive audition.
 Behavior issues reopen their A-phase before any B-phase starts (B styles what
 A builds).
 
+**CP1 open 2026-09-23 — executor side done, awaiting owner.** Build clean. Full UI
+suite **119 passed / 0 failed / 1 skipped** (the skip is the `TEST_PROFILE=slow_async`
+overlap test, run separately at 5/5); A-0 baseline was 68 passed / 0 failed, so there
+are **no new failures**. The one intermittent failure seen all arc, `zoom-hover` "Fit
+still restores auto-fit after manual zoom", is pre-existing (reproduced on a pre-A-8
+build in A-4) and passed in this run.
+
+**How to try it (10 lines).** A preview is already running: **http://127.0.0.1:8319**
+(fake model tier — same UI, instant generations, real segment fixtures; no model needed).
+To restart it: `npm run --prefix frontend check` then `node tests/ui/run-server.mjs`.
+For the real backend instead: `scripts/dev-deploy.sh` on docker-agent.
+
+1. Stitch Studio → **+ Add segments** → pick two clips.
+2. Drag any number left/right to scrub it (hold **Shift** for fine steps); release without
+   moving to type a value; **double-click the row** to reset it to its default.
+3. Scroll over a number to nudge it. **Ctrl/Cmd-wheel over the timeline zooms, and the
+   point under your cursor stays put** — the thing to judge here.
+4. Hover the timeline: a time readout follows the pointer.
+5. Drag across the **ruler** to set a loop brace; **Space** plays and wraps at the brace.
+6. **Right-click** a clip, a seam, and a segment row — menus everywhere you edit.
+7. **Cmd/Ctrl-Z** undoes a plan change, **Shift-Cmd/Ctrl-Z** redoes; one drag is one step.
+8. **Cmd/Ctrl-K** opens the palette; **?** shows the keymap.
+9. Capture **A**, change the plan, capture **B**, switch between them; audition either.
+10. Start any second sound (audition a segment, play a deck, the arrangement) — the first
+    stops. That is now one coordinator, and the readout at the bottom of the DOM says who
+    is audible.
+
 ### CP2 — Craft review (after B-P10)
 
 Owner reviews the §5 scorecard with its captures. Every cell PASS or N/A with
@@ -284,7 +311,7 @@ FAIL / N/A-with-reason. Owning phase in brackets.
 | A-8 M5 A/B plan snapshots | A | PASS 2026-09-23 | 1837929 | New `components/stitch/StitchABBar.tsx`, mounted on `StitchStudioPage`; the only other file needed was that page (the session/preview/plan helpers in the card's list were not touched -- the bar uses the existing `useStitchPreview` and `replaceOvStitchPlan` as-is). Snapshots live in **module state, deliberately**: session-local (a reload clears them, navigating away and back does not), never written to the store, the payload, or the backend -- asserted by reading `localStorage` and by reloading. Switching is one `replaceOvStitchPlan`, so it is one undoable entry (A-6): the spec asserts the depth moves by exactly one and that a single undo returns to the pre-switch plan rather than a mixture. Auditioning is a third audio owner and goes through the playback-focus registry (N6) -- claiming pauses the arrangement transport, asserted. Each slot renders its own preview via the existing hook, so 'audition both' is literal without touching the editor's transport; a slot's audition button stays disabled until its preview is ready (the A-4 readiness lesson). The active slot is labelled, and says 'active · edited' once the live plan diverges. RED verified by stashing the implementation and rebuilding: 5/5 failed. GREEN: 5/5, neighbours studio 42 + undo 7 green, full suite **114 passed / 1 flaky** (the pre-existing A-2 Fit flake, reproduced on the pre-A-8 build in A-4). Visual: `_gates/A-8/`. |
 | A-9 T1 shared transport | A | PASS 2026-09-23 | dc56730 | `lib/playbackFocus.ts` (N6) became `lib/audioTransport.ts`: a coordinator that owns **no element and no clock** -- each surface registers a kind + label, claims playback, and reports its own position from the tick it already runs. New `hooks/useAudioTransport.ts` (`useAudioSource`) and an sr-only `components/audio/TransportReadout.tsx` in AppShell, written imperatively per frame (never React state). **Seven owners migrated, not three:** the card's file list named the arrangement, the deck and the A/B compare, but the prosody variant preview, the segment-browser audition and the A-8 snapshot bar imported the same registry -- leaving them behind would have been a broken cutover. RED verified by stashing the implementation and rebuilding: transport 4/4 failed. GREEN: 4/4; full suite **118 passed / 1 flaky** (the same pre-existing A-2 Fit flake; A-8 was 114 + 1). **Captures identical: 0.000% changed pixels** on `transport-playback` and both `voice-edit` frames, measured against a pre-A-9 build of the same tree -- the A-0 baseline could not be used for this because it predates A-8's A/B bar. Two honest limits: the fake tier's async generation completes in ~10ms (measured directly against the fake server), so no test can hold a job open across a click -- `TEST_PROFILE=slow_async` does not widen it, because that profile wraps the non-streaming generator while this path runs the streaming one; the job test therefore guards the coupling (no `/generate/cancel`, job still delivers, no error) rather than the overlap. Visual: `_gates/A-9/`. |
 | A-9 fix (slow_async profile) | A | PASS 2026-09-23 | 23087a1 | Owner asked for the gap from the A-9 gate to be closed rather than recorded. **Root cause found by instrumenting the job state:** `_FakeJobState` is created *completed* (`async_jobs_complete_immediately`, fake_runtime.py), so an async job in this tier is born finished -- a caller polling `/generate/progress` saw `completed` in ~10ms. The `slow_async` profile only wrapped `_run_generate`, which made the *work* slow while the status was already final, which is why the profile documented 3-5s jobs and delivered none. Fix: the wrapper turns the knob off and completes the job when the slowed work finishes (via the runtime's own `ensure_job_status`, so status/frames/wav/progress all move together). Measured after: `running` for 4.5s, then `completed`. **Consequences:** the A-9 third acceptance test is now the card's actual claim -- a job is held open across a playback click, the job is still running when playback starts (point-in-time read, not a retrying expect), then finishes on its own; RED verified by reverting the fixture change, failing at exactly that read. The always-on coupling test stays in the default suite and was restructured to stop racing the app's own legitimate pause when a new take swaps the deck's `src` (found by a full-suite run: it passed standalone, failed under load). Runs: spec 4 passed / 1 skipped default, **5/5 under `TEST_PROFILE=slow_async`**, generation-heavy specs 7/7 under the profile, full suite **118 passed / 1 flaky (pre-existing) / 1 skipped**. |
-| CP1 feel review | — | | | |
+| CP1 feel review | — | awaiting owner 2026-09-23 | 81b512d | Executor side done: build clean, suite 119 passed / 0 failed / 1 skipped (skip = slow_async overlap test, 5/5 under the profile), no new failures vs A-0 (68/0). "How to try it" (10 lines) in §4; preview left running at http://127.0.0.1:8319. Owner replies "proceed" or names an A-card to reopen. |
 | B-P1 tokens | B | | | |
 | B-P2 waveform renderer | B | | | |
 | B-P3 spectrogram | B | | | |
