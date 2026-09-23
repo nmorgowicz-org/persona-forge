@@ -7,7 +7,7 @@
 // row plays at a time. Rows use content-visibility (see index.css .segment-browser-row) so a
 // 250-row library scrolls smoothly without a virtualization dependency.
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { Loader2, Pause, Play, Plus } from 'lucide-react'
+import { Copy, Loader2, Pause, Play, Plus } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { base64ToBlob, cn } from '@/lib/utils'
@@ -15,6 +15,7 @@ import { getClipAudioAnalysis } from '@/lib/waveform'
 import { getSegmentAudioBase64, getVoice, type SegmentMeta, type VoiceMeta } from '@/lib/api'
 import { claimPlayback, releasePlayback } from '@/lib/playbackFocus'
 import { SegmentPreviewRail } from './SegmentPreviewRail'
+import * as ContextMenu from '../ui/context-menu'
 
 type BrowserTab = 'segments' | 'voices'
 type SortMode = 'newest' | 'duration' | 'name'
@@ -85,6 +86,8 @@ interface BrowserRowItemProps {
   onToggleSelect: (id: string) => void
   onTogglePlay: (row: BrowserRow) => void
   onDoubleClickInsert: (row: BrowserRow) => void
+  /** Context-menu insert: the same path as a double click, exposed for the row menu. */
+  onInsertRow: (row: BrowserRow) => void
 }
 
 /** One browser row, memoized so playback progress re-renders only the active row, never the
@@ -99,9 +102,13 @@ const BrowserRowItem = memo(function BrowserRowItem({
   onToggleSelect,
   onTogglePlay,
   onDoubleClickInsert,
+  onInsertRow,
 }: BrowserRowItemProps) {
   return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>
     <div
+      data-testid="segment-browser-row"
       className="segment-browser-row flex items-center gap-2 py-2"
       onDoubleClick={() => onDoubleClickInsert(row)}
     >
@@ -143,7 +150,28 @@ const BrowserRowItem = memo(function BrowserRowItem({
           {row.projectName}
         </span>
       )}
+
     </div>
+      </ContextMenu.Trigger>
+      <ContextMenu.Content data-testid="stitch-context-menu" data-menu-scope="segment">
+        <ContextMenu.Label>{row.kind === 'segment' ? 'Segment' : 'Voice'}</ContextMenu.Label>
+        <ContextMenu.Item data-testid="stitch-menu-insert" onSelect={() => onInsertRow(row)}>
+          <Plus className="size-3" />
+          Insert
+        </ContextMenu.Item>
+        <ContextMenu.Item data-testid="stitch-menu-audition" onSelect={() => onTogglePlay(row)}>
+          {isPlaying ? <Pause className="size-3" /> : <Play className="size-3" />}
+          {isPlaying ? 'Stop audition' : 'Audition'}
+        </ContextMenu.Item>
+        <ContextMenu.Item
+          data-testid="stitch-menu-copy-id"
+          onSelect={() => { void navigator.clipboard?.writeText(row.id).catch(() => {}) }}
+        >
+          <Copy className="size-3" />
+          Copy id
+        </ContextMenu.Item>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
   )
 })
 
@@ -328,6 +356,8 @@ export function SegmentBrowserModal({
     commitInsert([row.id])
   }, [commitInsert])
 
+  const handleInsertRow = handleDoubleClickInsert
+
   const togglePlay = useCallback(async (row: BrowserRow) => {
     if (playingIdRef.current === row.id) {
       stopAudition()
@@ -495,6 +525,7 @@ export function SegmentBrowserModal({
                 onToggleSelect={toggleSelected}
                 onTogglePlay={togglePlay}
                 onDoubleClickInsert={handleDoubleClickInsert}
+                onInsertRow={handleInsertRow}
               />
             ))}
           </div>

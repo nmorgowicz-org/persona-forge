@@ -202,6 +202,9 @@ export function useDragScrubValue({
     (event: PointerEvent, captureElement: HTMLElement, options?: { openEditorOnRelease?: boolean }) => {
       const l = latestRef.current
       if (l.disabled || l.editing) return
+      // Only the primary button scrubs: the secondary one belongs to the context menu, and a
+      // right-press must neither capture the pointer nor commit a value on release.
+      if (event.button !== 0) return
       // No preventDefault: it would suppress the synthesized mouse events (click,
       // dblclick) Chromium needs for N1's double-click reset and button clicks. Text
       // selection is prevented by the controls' select-none class instead.

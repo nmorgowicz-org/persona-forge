@@ -17,6 +17,7 @@ import { useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { formatMsValue } from '@/lib/timeAxis'
 import { NUMERIC_CONTROL_FOCUS_CLASS, NUMERIC_CONTROL_UNIT_CLASS, useDragScrubValue } from '@/hooks/useDragScrubValue'
+import * as ContextMenu from '../ui/context-menu'
 
 const SNAP_MS = [0, 80, 150, 250, 400, 600, 900]
 const MAX_GAP_MS = 5000
@@ -85,8 +86,11 @@ export function GapControl({
   const isClamped = !isZero && naturalWidthPx < MIN_NONZERO_BOX_PX
   const ariaLabel = `Gap between clip ${gapIndex + 1} and clip ${gapIndex + 2}`
   const unit = formatMsValue(displayMs)
+  const setGap = (ms: number) => onSetPadding(gapIndex, Math.max(0, Math.min(MAX_GAP_MS, Math.round(ms))))
 
   return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>
     <div
       data-testid="stitch-gap-control"
       data-numeric-control="gap"
@@ -171,5 +175,29 @@ export function GapControl({
         </span>
       )}
     </div>
+      </ContextMenu.Trigger>
+      <ContextMenu.Content data-testid="stitch-context-menu" data-menu-scope="seam">
+        <ContextMenu.Label>{ariaLabel}</ContextMenu.Label>
+        <ContextMenu.Item
+          data-testid="stitch-menu-gap-suggested"
+          disabled={defaultMs == null || Math.round(defaultMs) === Math.round(paddingMs)}
+          onSelect={() => setGap(defaultMs ?? 0)}
+        >
+          Use suggested gap
+          {defaultMs != null && <ContextMenu.Hint>{Math.round(defaultMs)}ms</ContextMenu.Hint>}
+        </ContextMenu.Item>
+        <ContextMenu.Item data-testid="stitch-menu-gap-zero" disabled={isZero} onSelect={() => setGap(0)}>
+          Remove gap
+          <ContextMenu.Hint>0ms</ContextMenu.Hint>
+        </ContextMenu.Item>
+        <ContextMenu.Separator />
+        <ContextMenu.Item data-testid="stitch-menu-gap-tighter" disabled={isZero} onSelect={() => setGap(paddingMs - 100)}>
+          Tighten by 100ms
+        </ContextMenu.Item>
+        <ContextMenu.Item data-testid="stitch-menu-gap-wider" onSelect={() => setGap(paddingMs + 100)}>
+          Widen by 100ms
+        </ContextMenu.Item>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
   )
 }
