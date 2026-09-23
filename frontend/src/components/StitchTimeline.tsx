@@ -324,6 +324,23 @@ export const StitchTimeline = memo(function StitchTimeline({
     [transport, previewScale],
   )
 
+  // The brace is drawn and dragged in arrangement seconds (what the ruler measures); the
+  // transport wraps on its own audio clock, so the loop crosses that boundary converted --
+  // the same previewScale the seek and clip-range paths use.
+  const { setLoopRange } = transport
+  const handleLoopChange = useCallback(
+    (range: { startSec: number; endSec: number } | null) => {
+      setLoopRange(range ? { startSec: range.startSec * previewScale, endSec: range.endSec * previewScale } : null)
+    },
+    [setLoopRange, previewScale],
+  )
+  const loopRangeArrangement = useMemo(
+    () => (transport.loopRange && previewScale > 0
+      ? { startSec: transport.loopRange.startSec / previewScale, endSec: transport.loopRange.endSec / previewScale }
+      : null),
+    [transport.loopRange, previewScale],
+  )
+
   // One stable playback callback shared by every card: the card supplies its own clipId at
   // click time, so memoized cards receive an identical function across plain re-renders
   // (only a real preview/range change, or the range becoming active, changes identity).
@@ -471,6 +488,8 @@ export const StitchTimeline = memo(function StitchTimeline({
             transport={transport}
             previewScale={previewScale}
             onSeekSeconds={handleSeek}
+            loopRange={loopRangeArrangement}
+            onLoopChange={handleLoopChange}
           />
         )}
 
@@ -1028,7 +1047,7 @@ function TransportBar({ transport }: { transport: StitchTransport }) {
 /* ---------- shortcuts dialog ---------- */
 
 const SHORTCUTS: Array<[string, string]> = [
-  ['Space', 'Play/pause the arrangement'],
+  ['Space', 'Play/pause the arrangement (with a loop, from its start)'],
   ['Click ruler', 'Seek the arrangement'],
   ['←/→', 'Select the previous/next clip'],
   ['Shift+←/→', 'Reorder the selected clip'],

@@ -5,7 +5,8 @@
 // React state (that would re-render the whole tree on every animation frame); instead,
 // subscribe to `subscribeTime`, which only runs while playing and calls back via
 // requestAnimationFrame so a consumer can push the position straight onto a DOM node's style.
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { claimPlayback, releasePlayback } from '@/lib/playbackFocus'
 
 export interface StitchTransport {
   /** Attach to the single <audio> element that plays the rendered preview. It's a callback
@@ -29,6 +30,13 @@ export interface StitchTransport {
    * so callers can tell whether it's their own range currently active. Calling it again with
    * the same id while that range is already playing pauses instead (toggle semantics). */
   playRange(id: string, startSec: number, endSec: number): void
+  /** The active arrangement loop, in this element's own seconds, or null. Arrangement
+   * seconds differ from these by `previewScale`, so the caller converts. */
+  loopRange: { startSec: number; endSec: number } | null
+  /** Sets or clears the arrangement loop. While one is set, arrangement playback wraps back
+   * to its start instead of running past its end; a bounded clip range still plays to its own
+   * end untouched. */
+  setLoopRange(range: { startSec: number; endSec: number } | null): void
   /** Runs `cb` on every animation frame while playing, with the audio element's current time
    * in seconds. Returns an unsubscribe function. Never triggers a React re-render. */
   subscribeTime(cb: (sec: number) => void): () => void
@@ -47,7 +55,13 @@ export function useStitchTransport(src: string | null): StitchTransport {
   const [isPlaying, setIsPlaying] = useState(false)
   const [durationSec, setDurationSec] = useState(0)
   const [activeRangeId, setActiveRangeId] = useState<string | null>(null)
+  const [loopRange, setLoopRangeState] = useState<{ startSec: number; endSec: number } | null>(null)
+  const loopRef = useRef(loopRange)
+  loopRef.current = loopRange
   const rangeEndRef = useRef<number | null>(null)
+  // Playback focus (N6): this element is one audio owner among several; whoever starts
+  // sounding takes the focus and stops the previous owner.
+  const focusId = useId()
   const subscribersRef = useRef<Set<(sec: number) => void>>(new Set())
   const rafRef = useRef<number | null>(null)
 
@@ -65,12 +79,21 @@ export function useStitchTransport(src: string | null): StitchTransport {
     const audio = elRef.current
     if (!audio) return
     const onLoadedMetadata = () => setDurationSec(isFinite(audio.duration) ? audio.duration : 0)
-    const onPlay = () => setIsPlaying(true)
-    const onPause = () => setIsPlaying(false)
+    const onPlay = () => {
+      setIsPlaying(true)
+      // One claim per owner, at the single place a transport can start sounding (arrangement
+      // playback, a bounded clip range, or a programmatic play) -- see lib/playbackFocus.ts.
+      claimPlayback(focusId, () => audio.pause())
+    }
+    const onPause = () => {
+      setIsPlaying(false)
+      releasePlayback(focusId)
+    }
     const onEnded = () => {
       setIsPlaying(false)
       setActiveRangeId(null)
       rangeEndRef.current = null
+      releasePlayback(focusId)
     }
     const onTimeUpdate = () => {
       if (rangeEndRef.current != null && audio.currentTime >= rangeEndRef.current) {
@@ -107,6 +130,15 @@ export function useStitchTransport(src: string | null): StitchTransport {
       if (cancelled) return
       const audio = elRef.current
       if (audio) {
+        // The arrangement loop wraps here rather than in 'timeupdate': that event fires a few
+        // times a second, which would let playback audibly overshoot the brace end. A bounded
+        // clip range owns its own end (rangeEndRef), so the loop leaves it alone.
+        const loop = loopRef.current
+        if (loop && rangeEndRef.current == null && audio.currentTime >= loop.endSec) {
+          audio.currentTime = loop.startSec
+          // Notify immediately: otherwise the playhead paints one more frame past the brace.
+          for (const cb of subscribersRef.current) cb(audio.currentTime)
+        }
         // Clamp at the exact audio duration: on the final frames before 'ended', currentTime
         // can overshoot it, which would push the playhead past the exact-duration tick.
         const t = durationSec > 0 ? Math.min(audio.currentTime, durationSec) : audio.currentTime
@@ -129,11 +161,25 @@ export function useStitchTransport(src: string | null): StitchTransport {
 
   const getCurrentTime = useCallback(() => elRef.current?.currentTime ?? 0, [])
 
+  // With a loop set, starting playback begins at the loop -- a press of Space replays the
+  // brace rather than resuming wherever the playhead was parked outside it.
+  const seekToLoopStartIfOutside = useCallback(() => {
+    const audio = elRef.current
+    const loop = loopRef.current
+    if (!audio || !loop) return
+    if (audio.currentTime < loop.startSec || audio.currentTime >= loop.endSec) {
+      audio.currentTime = loop.startSec
+      // Notify immediately: the RAF loop only runs while playing.
+      for (const cb of subscribersRef.current) cb(audio.currentTime)
+    }
+  }, [])
+
   const play = useCallback(() => {
     const audio = elRef.current
     if (!audio) return
     rangeEndRef.current = null
     setActiveRangeId(null)
+    seekToLoopStartIfOutside()
     // play() rejects on interrupt (src swap mid-click) or autoplay-policy denial;
     // playback state is event-driven, so the rejection carries no state to recover.
     audio.play().catch(() => {})
@@ -147,6 +193,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
     if (audio.paused) {
       rangeEndRef.current = null
       setActiveRangeId(null)
+      seekToLoopStartIfOutside()
       audio.play().catch(() => {})
     } else {
       audio.pause()
@@ -177,11 +224,18 @@ export function useStitchTransport(src: string | null): StitchTransport {
     audio.play().catch(() => {})
   }, [activeRangeId])
 
+  // Clearing a loop never touches playback; a caller that also wants to stop can pause().
+  const setLoopRange = useCallback((range: { startSec: number; endSec: number } | null) => {
+    setLoopRangeState(range && range.endSec > range.startSec ? range : null)
+  }, [])
+
   return {
     audioRef,
     isPlaying,
     durationSec,
     activeRangeId,
+    loopRange,
+    setLoopRange,
     play,
     pause,
     toggle,

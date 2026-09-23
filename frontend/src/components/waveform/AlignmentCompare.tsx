@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Pause, Play, Repeat, X } from 'lucide-react'
 import type { AlignmentBoundary, ProsodyPausePlanEntry } from '@/lib/api'
 import { getVoice } from '@/lib/api'
 import { base64ToBlob } from '@/lib/utils'
 import { formatHoverTime } from '@/lib/timeAxis'
+import { claimPlayback, releasePlayback } from '@/lib/playbackFocus'
 import { WaveformLane } from './WaveformLane'
 import { TimeRuler } from './TimeRuler'
 
@@ -98,6 +99,9 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
   const [originalBase64, setOriginalBase64] = useState<string | null>(null)
   const [hoverPct, setHoverPct] = useState<number | null>(null)
   const [playing, setPlaying] = useState<'original' | 'adjusted' | null>(null)
+  // Both lanes are already mutually exclusive here, so the compare is one owner in the
+  // playback-focus registry (N6).
+  const playbackFocusId = useId()
   const [positionMs, setPositionMs] = useState(0)
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null)
   const [loop, setLoop] = useState(false)
@@ -178,7 +182,10 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
     if (!playing) return
     const el = laneAudio(playing)
     if (!el) return
-    const onEnd = () => setPlaying(null)
+    const onEnd = () => {
+      setPlaying(null)
+      releasePlayback(playbackFocusId)
+    }
     el.addEventListener('ended', onEnd)
     const tick = () => {
       const region = regionRef.current
@@ -189,6 +196,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
           el.pause()
           setPositionMs(region.end)
           setPlaying(null)
+          releasePlayback(playbackFocusId)
           return
         }
       }
@@ -210,6 +218,11 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
     lastLaneRef.current = lane
     el.currentTime = Math.max(0, fromMs / 1000)
     setPositionMs(fromMs)
+    claimPlayback(playbackFocusId, () => {
+      laneAudio('original')?.pause()
+      laneAudio('adjusted')?.pause()
+      setPlaying(null)
+    })
     void el.play().then(() => setPlaying(lane)).catch(() => {})
   }
 
@@ -217,6 +230,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
     if (playing === lane) {
       laneAudio(lane)?.pause()
       setPlaying(null)
+      releasePlayback(playbackFocusId)
       return
     }
     // Play the selection if one is set, else the whole lane from the playhead — but if the
