@@ -369,7 +369,7 @@ same coordinate-mapping work and completes the transport story.
 | 4c N6 completion (segment audition + variant preview) | PASS 2026-09-23 | a72c891 | The last two audio owners joined the playback-focus registry: the segment browser's row audition and the prosody variant preview. N6's acceptance — "starting any player pauses whichever other player was sounding" — now holds for every owner in the app. Spec 4/4; suite 90 passed / 1 flaky (pre-existing). |
 | 4d preview continuity fix | PASS 2026-09-23 | d480bf6 | A preview re-render (a real plan change: gap suggestion or an analysis-driven trim clamp) replaced the transport's src and stopped playback at zero. The transport now carries position as a duration fraction and resumes, including an active clip range. preview-continuity.spec 2/2; suite 93/93. |
 | 5 M2 context menu + N5 | PASS 2026-09-23 | 320f672 | Clip/seam/segment-row right-click menus over the already-installed radix-ui ContextMenu (no dependency change). Keyboard parity implemented in the trigger (macOS Chromium never synthesizes `contextmenu` from Shift+F10). Primary-button guards for scrub/selection/trim drags. context-menu.spec 5/5; suite 98/98; captures pixel-identical. |
-| 6 T2 undo/redo | | | |
+| 6 T2 undo/redo | PASS 2026-09-23 | d58af05 | Store-driven recording over the four plan slices; cap-100 snapshot stacks; atomic restore; 800ms same-control coalescing (wheel bursts are the case that needs it -- every drag already commits once on release); Cmd/Ctrl+Z behind the editable-target guard; controls survive an empty plan; drafts isolated until commit. undo.spec 7/7; suite 105/105. |
 | 7 M4 command palette | | | |
 | 8 M5 A/B snapshots | | | |
 | 9 T1 shared transport | | | |
