@@ -1,22 +1,92 @@
 # Premium UX Execution — Master Runbook
 
-Date: 2026-09-23 (revised same day: Checkpoint 0, decision register, premium
-scorecard, performance budget, single-PR shape; CP0a answers recorded)
-Status: **CP0a CLOSED 2026-09-23** (owner answers recorded in §4/§7).
-**CP0b OPEN** — D1 look, D7 brand mark, and D9 signal palette are picked from
-the B-P0 look-dev board; A-0 starts only after CP0b closes. This file is
-process only: order, decisions, gates, scorecard, commands. All design
-content lives in the two planning docs.
+Date: 2026-09-23 (revised same day: CP0a and CP0b closed; executor protocol
+and phase cards added)
+Status: **READY TO EXECUTE.** Every owner decision is closed (§4, §7). Next
+step: phase card **A-0** in `docs/plans/20260923-premium_ux_phase_cards.md`.
+This file is process only: order, decisions, gates, scorecard, executor
+protocol. Design content lives in the two planning docs; step-by-step
+instructions live in the phase cards.
+
+## 0. Executor protocol (binding for every agent that executes a card)
+
+This arc is designed to be executed by a mid-tier model (e.g. Sonnet) one
+phase per session, with the owner reviewing at every gate.
+
+**One card per session.** Start a session by reading this §0, the §7 ledger
+(to find the first row without a PASS), and that phase's card. Do not start a
+second card in the same session.
+
+**STOP at every gate.** After the gate report is written, the ledger row
+filled, and the phase commit pushed: stop and hand control back to the owner
+with the gate report. Do not begin the next card until the owner replies
+"proceed" (or equivalent). Checkpoint cards (CP1, CP2) are owner-only; the
+executor prepares the listed materials and stops.
+
+**STOP and ask immediately (do not improvise) if:**
+1. A step is ambiguous or the code does not match what the card/plan
+   describes (file moved, symbol renamed, line numbers far off).
+2. A change would touch a file not in the card's "Allowed files" list.
+3. A change would add/upgrade a dependency, touch backend Python, change an
+   HTTP payload, or change what the user *hears* (DSP).
+4. The RED spec passes against unmodified code (the test is wrong or the
+   feature exists), or fails for a reason other than the missing feature.
+5. Any gate check still fails after **two** honest fix attempts.
+6. The performance budget fails, or a capture shows a regression the card
+   did not predict.
+7. `git push` is blocked by a guard or protection rule — never bypass.
+
+When stopping early, write the ledger row as `BLOCKED — <reason>` and report.
+
+**Hard rules.** No new frontend dependencies. No unit-test runner (no
+Vitest/Jest). No `--no-verify`, no force-push, no history rewrite. Never
+delete or weaken an existing test to make a gate pass. Follow
+`AGENTS.md` and `docs/dev/DESIGN_SYSTEM.md`. Commit titles are the
+pre-assigned ones on the card (≤ 72 characters; the local hook rejects longer).
+
+**Standard commands** (run from the repo root unless noted):
+
+| Purpose | Command |
+| --- | --- |
+| Preflight | `git branch --show-current && git status --short && python scripts/validate_repo.py && npm run --prefix frontend check` |
+| Build (required before any Playwright run; specs run against `frontend/dist`) | `npm run --prefix frontend build` |
+| One spec file | `cd tests/ui && npx playwright test <path/to/file.spec.js>` |
+| One test by name | `cd tests/ui && npx playwright test <file> -g "<test name>"` |
+| Capture scenario | `node tests/ui/capture/index.mjs --scenario <key> --source fake` |
+| Save a "before" capture (before editing; gitignored, stays local) | `mkdir -p docs/screenshots/artifacts/_gates/<card> && cp -R docs/screenshots/artifacts/<category> docs/screenshots/artifacts/_gates/<card>/before` |
+| Capture harness self-test | `cd tests/ui && node --test capture/*.test.mjs && node capture/cli-manifest.mjs --strict` |
+| Final diff hygiene | `git diff --check` |
+
+**Gate report** (paste into the ledger Notes as a one-line summary, and send
+in full to the owner):
+
+```text
+Phase: <id> — <title>
+Commit: <hash>  (pushed: yes/no)
+RED: <spec file> — failed before GREEN because: <reason>
+GREEN: <spec file> — <n> passed
+Neighbour specs: <files> — <n> passed / <n> failed
+Capture: <scenario> — before: docs/screenshots/artifacts/_gates/<card>/before, after: docs/screenshots/artifacts/<category>
+Visual verdict: <what changed, and confirmation nothing else did>
+Perf budget: <n/a | longtasks > 50 ms: <n>>
+Deviations from the card: <none | list>
+Open questions for the owner: <none | list>
+```
+
+**Visual verdict.** Open the before and after PNGs (image viewer / read
+tool) and describe what changed. If you cannot attribute a difference to
+this phase's hunk, that is stop condition 6.
 
 ## 1. The two plans
 
 | # | Doc | Layer | Phases |
 | --- | --- | --- | --- |
-| A | `docs/plans/20260922-premium_audio_plugin_ux.md` | Interaction — how the app **behaves** | 0–5 approved; M3–M5, T1–T3, N1–N6 owner-gated; V1–V4 superseded by B |
-| B | `docs/plans/20260923-luminous_instrument_redesign.md` | Presentation + signal display — how it **reads** and how its **sound is shown** | P0–P12, all PROPOSED |
+| A | `docs/plans/20260922-premium_audio_plugin_ux.md` | Interaction — how the app **behaves** | Phases 0–10 (see §2); T3 deferred; V1–V4 superseded by B |
+| B | `docs/plans/20260923-luminous_instrument_redesign.md` | Presentation + signal display — how it **reads** and how its **sound is shown** | P0 done; P1–P12 |
+| C | `docs/plans/20260923-premium_ux_phase_cards.md` | **Executor instructions** — one card per phase, in run order | Execute cards top to bottom |
 
-Read A, then B (including B's "Baseline truth audit" A1–A11 and its
-doctrines), before Checkpoint 0.
+An executor reads §0 (above), then the next unfinished card in C. The card
+says exactly which sections of A and B to read for that phase.
 
 **The one idea that ties them together:** premium feel comes from *truth first,
 then craft*. A makes the controls behave like instruments; B makes the signal
@@ -91,21 +161,20 @@ candidate list.
 
 | ID | Decision | Options | Recommendation | **Owner answer (2026-09-23)** |
 | --- | --- | --- | --- | --- |
-| D1 | Look | L1 Graphite / L2 Obsidian / L3 Machined / **L4 Forge** (brand-derived, added after CP0a) / named hybrid | Pick from the board, not from prose | **Decide from the B-P0 board** → CP0b |
+| D1 | Look | L1 Graphite / L2 Obsidian / L3 Machined / L4 Forge | Pick from the board | **L2 Obsidian** (CP0b) — token values in `tests/ui/capture/lookdev/obsidian.css` |
 | D2 | Knob/fader controls in DSP + speed slots (B-P5) | accept / reject | Accept | **Accepted** |
 | D3 | CTA color | derive from theme accent / keep signature cyan | Derive from accent | **Follow the accent** |
 | D4 | Spectrogram view (B-P3) | accept / reject | Accept | **Accepted** |
 | D5 | Integrated loudness (LUFS) in B-P4 | accept / defer | Appetite call | **Accepted** — ships in B-P4 |
 | D6 | Info strip in the status bar (B-P6) | accept / reject | Accept | **Accepted** |
-| D7 | Brand mark | owner supplies / draft / keep stock | Owner's taste | **Owner supplied hero art (Option E)**; the existing SVG is the stock Vite favicon (see B "Brand"), so B-P0 drafts marks derived from Option E → pick at CP0b |
+| D7 | Brand mark | drafts M-a / M-b / M-c | Ring + spark | **M-b ring + spark** (CP0b). No designer: the final assets were produced and board-verified at CP0b — `assets/brand/concepts/persona-forge/mark-final/mark.svg` (≥ 48 px) and `mark-small.svg` (≤ 32 px, reads on light and dark chrome). B-P6 only wires files |
 | D8 | Single look vs selectable skins | one look + 4 accents / 3 skins × 4 accents | One look | **One look + 4 accents** |
-| D9 | Signal palette | keep current cyan→magenta / brand-aligned cyan→violet→lavender (Option E ribbons) | Pick from the board | Added after CP0a → **CP0b** |
+| D9 | Signal palette | S-a current / S-b brand / S-c hybrid | Hybrid | **S-c hybrid** (CP0b): blue → violet → hot magenta → near-white, amber playhead, color by dBFS; exact values in B P1 "Signal constants" |
 | N1–N6 | A §8 interaction candidates | accept / reject each | Accept N1, N2, N6 | **Accepted N1, N2, N5, N6**; N3/N4 absorbed by B-P9 |
 | M3–M5, T1–T3 | A §3–§4 structural items | accept / defer each | T2 needs architectural sign-off | **Accepted M3, M4, M5, T1, T2** (T2 selection = recorded architectural sign-off for the no-undo exception); **T3 deferred** |
 
-**Precondition at CP0b:** working tree clean and the branch pushed. If the
-local git guard blocks a push again (seen once on `096d424`, cleared on
-retry), stop and ask rather than bypassing it.
+**CP0 closed 2026-09-23.** Precondition for A-0: working tree clean and the
+branch pushed.
 
 ### CP1 — Feel review (after A-9)
 
@@ -165,10 +234,10 @@ FAIL / N/A-with-reason. Owning phase in brackets.
 | CP0a D8 skins | B | one look + 4 accents 2026-09-23 | — | |
 | CP0a N1–N6 | A | N1, N2, N5, N6 accepted; N3/N4 → B-P9 | — | |
 | CP0a M3–M5, T1–T3 | A | M3, M4, M5, T1, T2 accepted; T3 deferred | — | T2 = architectural sign-off |
-| CP0b D1 look | B | | | from B-P0 board |
-| CP0b D7 brand mark | B | | | from B-P0 brand board |
-| CP0b D9 signal palette | B | | | from B-P0 board |
-| B-P0 look-dev + brand board | B | | | |
+| CP0b D1 look | B | **Obsidian** 2026-09-23 | — | lookdev-board |
+| CP0b D7 brand mark | B | **ring + spark**; final assets in `mark-final/` 2026-09-23 | — | lookdev-brand |
+| CP0b D9 signal palette | B | **S-c hybrid** 2026-09-23 | — | lookdev-board signal board |
+| B-P0 look-dev + brand board | B | PASS 2026-09-23 | abfe76e | + CP0b refinement commit |
 | A-0 baseline | A | | | |
 | A-1 S1 drag-scrub + N1 + N2 | A | | | |
 | A-2 S2 zoom + hover | A | | | |

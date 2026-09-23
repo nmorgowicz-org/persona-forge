@@ -161,11 +161,17 @@ export default async function (ctx) {
     // INTENT: Accent check — every look under violet and amber on the same surface.
     await captureShot(page, `${key}-sheet-accent-speak.png`, { fullPage: false, scrollToSelector: '#board' });
 
-    const looks = LOOKS.map((look) => ({ ...look, surface: lookSurface(look.id) }));
-    await showBoard(page, signalBoardHtml(looks, `Real decoded speech (fixture "Podcast Host", ${SIGNAL_FIXTURE.split('/').at(-2)}) · true-scale waveform (peak + RMS body) · STFT spectrogram 50 Hz–12 kHz · dBFS meter with peak-hold at the playhead`));
+    // D1 = Obsidian (CP0b, 2026-09-23): the signal board compares palettes on the chosen look.
+    const obsidian = LOOKS.find((look) => look.id === 'obsidian');
+    const palettes = [
+        { id: 'a', label: 'S-a · current', note: 'cyan → magenta, amber playhead (waveformBarColor today)' },
+        { id: 'b', label: 'S-b · brand', note: 'blue → violet → lavender, white playhead (Option E)' },
+        { id: 'c', label: 'S-c · hybrid ✓', note: 'blue → violet → hot magenta → white, amber playhead (owner D9)' },
+    ];
+    await showBoard(page, signalBoardHtml({ ...obsidian, surface: lookSurface('obsidian') }, palettes, `Real decoded speech (fixture "Podcast Host", ${SIGNAL_FIXTURE.split('/').at(-2)}) · true-scale waveform (peak + RMS body), color by dBFS · STFT spectrogram 50 Hz–12 kHz · dBFS meter + peak-hold at the playhead`));
     const wavBase64 = readFileSync(repoPath(SIGNAL_FIXTURE)).toString('base64');
     const stats = await page.evaluate(renderSignalBoard, { wavBase64, playFrac: 0.42 });
     console.log(`[LOOKDEV] signal fixture: ${JSON.stringify(stats)}`);
-    // INTENT: D9 — S-a current vs S-b brand-aligned signal palette on every candidate surface.
+    // INTENT: D9 — current, brand, and hybrid signal palettes on the chosen Obsidian surfaces.
     await captureShot(page, `${key}-signal-palettes.png`, { fullPage: false, scrollToSelector: '#board' });
 }

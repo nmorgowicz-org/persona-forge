@@ -98,29 +98,22 @@ export function accentSheetHtml(surfaceLabel, cells, crop = { top: 440, height: 
     <div style="display:grid;grid-template-columns:690px 690px;gap:8px 16px">${rows}</div></div>`;
 }
 
-/** D9 signal board skeleton: one row per look, S-a current vs S-b brand-aligned palette. */
-export function signalBoardHtml(looks, meta) {
-    const cell = (look, palette) => {
-        const s = look.surface;
-        return `<div style="background:${s.bg};padding:7px 9px;border-radius:6px">
-      <div style="background:${s.card};border:1px solid ${s.border};border-radius:${s.radius};padding:7px 9px;display:flex;flex-direction:column;gap:5px;box-shadow:inset 0 1px 0 #ffffff0d">
-        <canvas data-sig="wave" data-pal="${palette}" width="560" height="56"></canvas>
-        <canvas data-sig="spec" data-pal="${palette}" width="560" height="62"></canvas>
-        <canvas data-sig="meter" data-pal="${palette}" width="560" height="18"></canvas>
-        <span data-readout="${palette}" class="mono" style="font-size:10.5px;color:${s.muted};white-space:nowrap"></span>
+/** D9 signal board: one row per palette, on the chosen look's surfaces, at near-product size. */
+export function signalBoardHtml(look, palettes, meta) {
+    const s = look.surface;
+    const row = (p) => `<div style="align-self:center;display:flex;flex-direction:column;gap:4px">
+        <div class="lbl" style="color:#e9e7f2">${p.label}</div>
+        <div style="font-size:11px;color:#9b98ad;line-height:1.35">${p.note}</div></div>
+      <div style="background:${s.bg};padding:7px 9px;border-radius:6px">
+      <div style="background:${s.card};border:1px solid ${s.border};border-radius:${s.radius};padding:8px 10px;display:flex;flex-direction:column;gap:5px;box-shadow:inset 0 1px 0 #ffffff0d">
+        <canvas data-sig="wave" data-pal="${p.id}" width="1180" height="80"></canvas>
+        <canvas data-sig="spec" data-pal="${p.id}" width="1180" height="100"></canvas>
+        <canvas data-sig="meter" data-pal="${p.id}" width="1180" height="18"></canvas>
+        <span data-readout="${p.id}" class="mono" style="font-size:10.5px;color:${s.muted};white-space:nowrap"></span>
       </div></div>`;
-    };
-    const rows = looks
-        .map(
-            (look) => `<div class="lbl" style="align-self:center">${look.label}</div>${cell(look, 'a')}${cell(look, 'b')}`,
-        )
-        .join('');
     return `<style>${BOARD_STYLE}</style><div id="board">
-    <div class="hd"><h1>D9 — Signal palette</h1><p>${meta}</p></div>
-    <div style="display:grid;grid-template-columns:100px 600px 600px;gap:8px 16px;align-items:stretch">
-      <div></div><div class="lbl">S-a · current cyan → magenta (waveformBarColor)</div><div class="lbl">S-b · brand-aligned blue → violet → lavender (Option E)</div>
-      ${rows}
-    </div></div>`;
+    <div class="hd"><h1>D9 — Signal palette on ${look.label}</h1><p>${meta}</p></div>
+    <div style="display:grid;grid-template-columns:150px 1220px;gap:8px 14px;align-items:stretch">${palettes.map(row).join('')}</div></div>`;
 }
 
 /**
@@ -148,6 +141,22 @@ export async function renderSignalBoard({ wavBase64, playFrac }) {
         return [lerp(l0, l1, u), lerp(c0, c1, u), lerp(h0, h1, u)];
     };
     const BRAND = [[0, 0.74, 0.14, 235], [0.55, 0.65, 0.22, 290], [1, 0.95, 0.04, 295]];
+    // S-c hybrid (owner D9): brand blue -> violet body, S-a's hot magenta top end so loud reads
+    // by hue as well as lightness, amber playhead (complement of violet; today's
+    // WAVEFORM_PLAYHEAD_COLOR). Canonical definition: luminous plan P1 "Signal constants".
+    const HYBRID = [[0, 0.72, 0.13, 235], [0.45, 0.64, 0.22, 285], [0.8, 0.7, 0.21, 332], [1, 0.95, 0.04, 330]];
+    const rampPal = (stops, playhead, spec) => ({
+        played: (t) => {
+            const [l, c, h] = oklchRamp(stops, t);
+            return `oklch(${l} ${c} ${h} / ${0.6 + t * 0.4})`;
+        },
+        unplayed: (t) => {
+            const [l, c, h] = oklchRamp(stops, t);
+            return `oklch(${l - 0.2} ${c * 0.6} ${h} / ${0.32 + t * 0.2})`;
+        },
+        playhead,
+        spec,
+    });
     const PAL = {
         a: {
             played: (t) => `hsl(${190 + t * 140} 90% ${58 + t * 14}% / ${0.55 + t * 0.45})`,
@@ -155,19 +164,12 @@ export async function renderSignalBoard({ wavBase64, playFrac }) {
             playhead: 'hsl(38 95% 62%)',
             spec: ['#05060a', 'hsl(200 70% 16%)', 'hsl(190 90% 45%)', 'hsl(300 85% 58%)', 'hsl(330 95% 90%)'],
         },
-        b: {
-            played: (t) => {
-                const [l, c, h] = oklchRamp(BRAND, t);
-                return `oklch(${l} ${c} ${h} / ${0.6 + t * 0.4})`;
-            },
-            unplayed: (t) => {
-                const [l, c, h] = oklchRamp(BRAND, t);
-                return `oklch(${l - 0.2} ${c * 0.6} ${h} / ${0.32 + t * 0.2})`;
-            },
-            playhead: 'oklch(0.96 0.03 295)',
-            spec: ['#07051a', 'oklch(0.28 0.12 280)', 'oklch(0.62 0.16 240)', 'oklch(0.64 0.23 290)', 'oklch(0.97 0.03 295)'],
-        },
+        b: rampPal(BRAND, 'oklch(0.96 0.03 295)', ['#07051a', 'oklch(0.28 0.12 280)', 'oklch(0.62 0.16 240)', 'oklch(0.64 0.23 290)', 'oklch(0.97 0.03 295)']),
+        c: rampPal(HYBRID, 'hsl(38 95% 62%)', ['#05040f', 'oklch(0.26 0.1 275)', 'oklch(0.58 0.16 245)', 'oklch(0.62 0.23 290)', 'oklch(0.7 0.22 335)', 'oklch(0.97 0.03 330)']),
     };
+    // Color intensity follows loudness in dBFS (-48..0), not linear amplitude: speech peaks near
+    // -6 dBFS are only 0.5 linear, so a linear map never reaches a palette's hot end.
+    const heat = (amp) => Math.min(1, Math.max(0, (20 * Math.log10(Math.max(amp, 1e-6)) + 48) / 48));
     const lut = (stops) => {
         const c = document.createElement('canvas');
         c.width = 256;
@@ -252,11 +254,11 @@ export async function renderSignalBoard({ wavBase64, playFrac }) {
                     ss += x[i] * x[i];
                 }
                 const rms = Math.sqrt(ss / Math.max(1, b - a));
-                const t = Math.min(1, Math.max(mx, -mn));
+                const t = heat(Math.max(mx, -mn));
                 const color = c < playX ? pal.played : pal.unplayed;
-                g.fillStyle = color(t * 0.6);
+                g.fillStyle = color(t * 0.7);
                 g.fillRect(c, mid - mx * scale, 1, Math.max(1, (mx - mn) * scale));
-                g.fillStyle = color(Math.min(1, t * 1.1));
+                g.fillStyle = color(Math.min(1, heat(rms) * 1.15));
                 g.fillRect(c, mid - rms * scale, 1, Math.max(1, rms * 2 * scale));
             }
             g.save();
@@ -321,30 +323,35 @@ export async function renderSignalBoard({ wavBase64, playFrac }) {
     return { duration: n / sr, rmsDb, holdDb, filePeakDb: dbfs(filePeak), frames };
 }
 
-/** D7 brand board 1: every mark at every size, dark + light, plus in-product lockups. */
+/**
+ * D7 brand board 1: every mark at every size, dark + light, plus in-product lockups. A mark
+ * with `smallUri` is a shipping set: the small variant renders at <= 32 px, as in production.
+ */
 export function brandMarksHtml(marks) {
     const sizes = [64, 32, 16];
+    const at = (m, s) => (s <= 32 && m.smallUri ? m.smallUri : m.uri);
+    const tab = (m, bg, fg) => `<div style="display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:8px 8px 0 0;background:${bg};color:${fg};flex:1;min-width:0">
+        <img src="${at(m, 16)}" style="width:16px;height:16px"/><span style="font-size:11px;white-space:nowrap">Persona Forge</span></div>`;
     const col = (m) => `<div style="display:flex;flex-direction:column;gap:10px;padding:12px;border-radius:10px;background:#0e0c1a;outline:1px solid ${m.flag ? '#ff5a6e88' : '#ffffff12'}">
       <div class="lbl" style="color:${m.flag ? '#ff8a98' : '#b9b3dd'}">${m.name}</div>
       <div style="height:170px;display:grid;place-items:center;border-radius:8px;background:radial-gradient(circle at 50% 45%,#1d1545,#0a0816 70%)">
         <img src="${m.uri}" style="width:150px;height:150px"/></div>
       <div style="display:flex;gap:6px">
-        <div style="flex:1;display:flex;align-items:center;justify-content:space-around;height:78px;border-radius:6px;background:#07060d">${sizes.map((s) => `<img src="${m.uri}" style="width:${s}px;height:${s}px"/>`).join('')}</div>
-        <div style="flex:1;display:flex;align-items:center;justify-content:space-around;height:78px;border-radius:6px;background:#f3f1fa">${sizes.map((s) => `<img src="${m.uri}" style="width:${s}px;height:${s}px"/>`).join('')}</div>
+        <div style="flex:1;display:flex;align-items:center;justify-content:space-around;height:78px;border-radius:6px;background:#07060d">${sizes.map((s) => `<img src="${at(m, s)}" style="width:${s}px;height:${s}px"/>`).join('')}</div>
+        <div style="flex:1;display:flex;align-items:center;justify-content:space-around;height:78px;border-radius:6px;background:#f3f1fa">${sizes.map((s) => `<img src="${at(m, s)}" style="width:${s}px;height:${s}px"/>`).join('')}</div>
       </div>
       <div class="lbl" style="font-size:9px">sidebar lockup (actual size)</div>
       <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:#141126">
         <div style="width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:#0b0918;box-shadow:inset 0 1px 0 #ffffff14,0 0 14px #7e14ff44">
-          <img src="${m.uri}" style="width:24px;height:24px"/></div>
+          <img src="${at(m, 24)}" style="width:24px;height:24px"/></div>
         <div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:14px;font-weight:600;letter-spacing:-.01em;line-height:1">Persona Forge</span><span style="font-size:11px;color:#a29dbd">Voice Studio</span></div>
       </div>
-      <div class="lbl" style="font-size:9px">browser tab (favicon 16 px)</div>
-      <div style="display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:8px 8px 0 0;background:#232135;width:190px">
-        <img src="${m.uri}" style="width:16px;height:16px"/><span style="font-size:12px">Persona Forge</span></div>
+      <div class="lbl" style="font-size:9px">browser tabs (favicon 16 px) · dark / light chrome</div>
+      <div style="display:flex;gap:8px">${tab(m, '#232135', '#e9e7f2')}${tab(m, '#e8e6ef', '#1c1a26')}</div>
     </div>`;
     return `<style>${BOARD_STYLE}</style><div id="board">
-    <div class="hd"><h1>D7 — Brand mark drafts</h1><p>Original geometry derived from the Option E hero. The current favicon is the stock Vite scaffold logo and must be replaced (plan audit A11).</p></div>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">${marks.map(col).join('')}</div></div>`;
+    <div class="hd"><h1>D7 — Brand mark</h1><p>Original geometry derived from the Option E hero. The current favicon is the stock Vite scaffold logo and must be replaced (plan audit A11).</p></div>
+    <div style="display:grid;grid-template-columns:repeat(${marks.length},minmax(0,1fr));gap:14px">${marks.map(col).join('')}</div></div>`;
 }
 
 /** D7 brand board 2: where the hero art lives (splash/README) with each mark in context. */
@@ -368,5 +375,5 @@ export function brandContextHtml(marks, heroUri, avatarUri) {
       <figure style="margin:0;display:flex;flex-direction:column;gap:4px"><figcaption class="lbl">Avatar crop (reference)</figcaption>
         <img src="${avatarUri}" style="width:300px;height:300px;border-radius:10px;object-fit:cover"/></figure>
     </div>
-    <div style="display:flex;gap:18px">${marks.filter((m) => !m.flag).map(splash).join('')}</div></div>`;
+    <div style="display:flex;gap:18px">${marks.filter((m) => !m.flag && m.splash !== false).map(splash).join('')}</div></div>`;
 }

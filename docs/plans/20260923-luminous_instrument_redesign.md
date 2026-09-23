@@ -1,9 +1,12 @@
 # Luminous Instrument — Presentation Overhaul
 
 Date: 2026-09-23 (revised same day after a code-truth audit, §"Baseline truth audit")
-Status: **PROPOSED** — planning doc only; no phase starts without owner
-acceptance. Execution order, checkpoints, and the premium scorecard live in the
-master runbook `docs/plans/20260923-premium_ux_execution.md`.
+Status: **ACCEPTED FOR EXECUTION** — every decision closed at CP0a/CP0b
+(2026-09-23): D1 **Obsidian**, D7 **ring + spark** (final assets in
+`assets/brand/concepts/persona-forge/mark-final/`), D9 **S-c hybrid** signal
+palette. Execution order, gates, and the step-by-step phase cards live in the
+runbook `docs/plans/20260923-premium_ux_execution.md` and
+`docs/plans/20260923-premium_ux_phase_cards.md`.
 Branch: `feat/premium-audio-plugin-ux-20260923` (same branch as the interaction
 plan; this doc is its visual sibling, sequenced **after** interaction Phases 0–5
 land — except P0 look-dev, which runs before anything, see runbook).
@@ -88,8 +91,8 @@ A8–A11 are the "material" gap.
   audio graph are untouched.
 - **Two color roles, never mixed.** *Accent* (theme `--primary`, 4 themes)
   = selection, focus, chrome glow, and the CTA (D3 = follow accent). *Signal*
-  (one fixed palette — today's `waveformBarColor` cyan→magenta, or the
-  brand-aligned variant picked at D9) = waveforms, meters, spectrogram,
+  (one fixed palette — the S-c hybrid chosen at D9, specified in P1 "Signal
+  constants") = waveforms, meters, spectrogram,
   playhead. Signal never re-skins with the theme — like a plugin whose
   analyzer stays readable under any skin. Semantic status tokens
   (`DESIGN_SYSTEM.md`) stay a third, separate role.
@@ -194,15 +197,24 @@ Commit: `test(ui): look-dev and brand-mark capture boards`.
 
 ### P1 — Material + token layer (the foundation everything sits on)
 
-Implement the D1 look as tokens in `frontend/src/index.css` and a single
-`frontend/src/lib/motion.ts` module. No component restyle yet.
+Implement the D1 look (**Obsidian**) as tokens in `frontend/src/index.css` and a
+single `frontend/src/lib/motion.ts` module. No component restyle yet —
+changing the `.dark` neutral values is visible app-wide by design; the new
+utilities stay unused until P6.
 
-- **Neutral ramp (fixes A8):** tinted `--background`, `--surface-0..3`
-  (chrome → panel → raised), `--well` (inset, darker than background),
-  `--border`/`--hairline` alphas — replacing the achromatic `.dark` greys.
-- **Material recipe:** `.panel-1 / .panel-2 / .well` utilities = layered
-  shadow + 1px top-edge highlight (`inset 0 1px 0 oklch(1 0 0 / 4–6%)`) +
-  inset shadow for wells. One recipe, used everywhere.
+- **Neutral ramp (fixes A8):** copy the exact values from
+  `tests/ui/capture/lookdev/obsidian.css` (the look the owner approved on the
+  board) into the `.dark` block: `--background`, `--card`, `--popover`,
+  `--secondary`, `--muted`, `--accent`, `--muted-foreground`, `--surface-1`,
+  `--sidebar`, `--sidebar-accent`, `--border`, `--sidebar-border`, `--input`,
+  `--radius: 0.3rem`. Add `--well` (`oklch(0.1 0.004 270)`) for inset
+  surfaces.
+- **Material recipe:** `.panel-1 / .panel-2 / .well` utilities built from the
+  Obsidian `--ld-panel-shadow` / `--ld-well-shadow` values in
+  `obsidian.css` (renamed `--shadow-panel` / `--shadow-well`). One recipe,
+  used everywhere. `tests/ui/capture/lookdev/common.css` shows where each
+  maps onto today's classes; it is a board-only shim — do **not** copy its
+  class-hijacking selectors (`.bg-card { box-shadow }`) into `index.css`.
 - **Glow:** `--glow-accent` / `.glow-active` keyed off `--primary`;
   `--glow-signal` keyed off the fixed signal palette.
 - **Radius scale (fixes A10):** `--radius-well`, `--radius-control`,
@@ -213,8 +225,27 @@ Implement the D1 look as tokens in `frontend/src/index.css` and a single
   (`index.css:107-112`).
 - **Focus:** focus-visible ring becomes an accent glow (keyboard users get
   the same "lit" feedback as pointer users).
-- **Signal constants:** move the signal palette + meter scale (dBFS range,
-  tick set, clip threshold) into `lib/signal.ts` so P2–P4 share one source.
+- **Signal constants (D9 = S-c hybrid):** new `lib/signal.ts` is the single
+  source for every signal color. Exact definition (verified on the board):
+  - `SIGNAL_RAMP` OKLCH stops `(t, L, C, H)`: `(0, 0.72, 0.13, 235)` blue →
+    `(0.45, 0.64, 0.22, 285)` violet → `(0.8, 0.70, 0.21, 332)` hot magenta →
+    `(1, 0.95, 0.04, 330)` near-white. Linear interpolation per channel.
+  - `signalColor(t, played)`: played = `oklch(L C H / 0.6 + 0.4t)`;
+    unplayed = `oklch(L−0.2 0.6C H / 0.32 + 0.2t)`.
+  - `SIGNAL_PLAYHEAD = 'hsl(38 95% 62%)'` (unchanged amber;
+    `WAVEFORM_PLAYHEAD_COLOR` becomes an alias of it).
+  - `SPECTRO_STOPS = ['#05040f', 'oklch(0.26 0.1 275)', 'oklch(0.58 0.16 245)', 'oklch(0.62 0.23 290)', 'oklch(0.7 0.22 335)', 'oklch(0.97 0.03 330)']`
+    (evenly spaced); spectrogram dB window −72…−12 dB.
+  - `heat(amp)` = clamp((20·log10(amp) + 48) / 48, 0, 1): color intensity
+    follows dBFS, never linear amplitude (linear never reaches the hot end
+    for speech peaking at −6 dBFS).
+  - Meter scale −60…0 dBFS, ticks `[-48,-36,-24,-18,-12,-6,-3,0]`, clip at
+    ≥ −0.1 dBFS.
+  - `waveformBarColor(peak, played)` keeps its name and signature but
+    delegates to `signalColor(peak, played)` in P1; P2 switches callers to
+    `signalColor(heat(absAmp), played)`.
+  - Reference renderer: `renderSignalBoard` in
+    `tests/ui/capture/lookdev/pages.mjs` (palette `c`).
 - **Motion tokens:** `lib/motion.ts` exports named durations, easings and
   springs (`snappy`, `settle`, `meterFall`) + `useReducedMotionSafe()`;
   mirrored as CSS vars for CSS transitions.
@@ -224,8 +255,9 @@ Implement the D1 look as tokens in `frontend/src/index.css` and a single
   violet, amber in amber. `.btn-brand` keeps its API; no component changes.
 
 **Acceptance:** tokens render correctly under all four themes (capture:
-look-dev board re-shot with real tokens, must match D1); lint + oxlint guard
-clean; `DESIGN_SYSTEM.md` gains a "Materials, signal, motion" section.
+`lookdev-board` Obsidian shots vs the real P1 build — neutrals match);
+`waveformBarColor` output changed to S-c; lint + oxlint guard clean;
+`DESIGN_SYSTEM.md` gains a "Materials, signal, motion" section.
 **Files:** `frontend/src/index.css`, `lib/motion.ts`, `lib/signal.ts`,
 `docs/dev/DESIGN_SYSTEM.md`.
 Commit: `feat(ui): luminous material, signal, and motion token layer`.
@@ -243,8 +275,9 @@ Replace the DOM-bar `Waveform.tsx` drawing with the canvas approach
 - **Density follows pixels:** buckets = lane CSS width × DPR ÷ bar pitch,
   picked from the pyramid — zoom never re-decodes.
 - **Two-tone silhouette:** mirrored peak outline + brighter RMS body (the
-  pro-DAW look), colored with the existing `waveformBarColor` grammar;
-  played region tinted.
+  pro-DAW look), colored `signalColor(heat(amp) * 0.7, played)` for the peak
+  outline and `signalColor(min(1, heat(rms) * 1.15), played)` for the body —
+  exactly as the P0 reference renderer draws it; played region tinted.
 - **Gain truth in multi-clip views:** Stitch timeline, A/B lanes, and
   variant compare share one vertical scale across all clips on screen, so a
   quiet segment *looks* quiet. Single-clip views may auto-fit but show a
@@ -358,13 +391,17 @@ Commit: `feat(ui): knob and fader instrument controls`.
   `data-help` string shows its explanation in `ActivityStatusBar` (the
   Ableton/FabFilter help-strip idiom). This is also where Plan A V2's genuine
   warnings (e.g. the high-pitch tinniness note) live, instead of paragraphs.
-- **Brand mark (D7, picked at CP0b from P0's drafts):** replace the stock
-  `AudioLines` tile (A11) with the chosen mark + wordmark lockup; replace the
-  Vite favicon in all three copies (`frontend/public/favicon.svg`,
-  `src/persona_forge/static/favicon.svg`,
-  `assets/brand/exports/persona-forge-mark.svg`); correct
-  `assets/brand/README.md`, which currently calls the Vite file the
-  canonical mark.
+- **Brand mark (D7 = ring + spark, final assets ready):** the design is done;
+  this phase only wires files. Copy
+  `assets/brand/concepts/persona-forge/mark-final/mark-small.svg` over
+  `frontend/public/favicon.svg` and `src/persona_forge/static/favicon.svg`;
+  copy `mark-final/mark.svg` over `assets/brand/exports/persona-forge-mark.svg`.
+  In `AppShell.tsx:371-372` replace the `AudioLines` gradient tile with
+  `<img src="/favicon.svg">` at 24 px inside the existing 32 px tile (dark
+  tile background, as on the brand board). Rewrite the "Existing identity"
+  section of `assets/brand/README.md`: the old file was the stock Vite
+  favicon; the canonical mark is now the ring + spark (`mark.svg` ≥ 48 px,
+  `mark-small.svg` ≤ 32 px).
 
 **Acceptance:** one header, banner, and status grammar across every page;
 info view announces via the same live region as Plan A N3; shell captures at
@@ -409,7 +446,7 @@ wherever the backend reports it (Speak already polls
 skeletons in the material recipe (these also replace P2's former fake
 placeholder), `role="status"`/`progressbar` semantics. Absorbs Plan A N3/N4.
 A designed startup state for the initial-load 503 window (the app's
-"splash"): the chosen mark over a cropped, dimmed Option E field with a
+"splash"): `mark-final/mark.svg` at 72 px over a cropped, dimmed Option E field (`social-ready/persona-forge-option-e-social.jpg`, as on the `lookdev-brand` context board) with a
 determinate or stepped model-load readout. Empty states (no voices, no
 segments, no project) use the ring/wave motif as a quiet line illustration
 with a single next action — never the full artwork behind controls.
@@ -492,7 +529,7 @@ consumes its tokens; P2 before P3/P4 — both consume its envelope and clock.
 
 | Phase | Gate result | Commit | Notes |
 | --- | --- | --- | --- |
-| P0 look-dev + brand board | PASS 2026-09-23 (38 + 2 outputs, receipts green; capture self-tests 15/15) | | D1 = , D7 = , D9 = (awaiting owner at CP0b) |
+| P0 look-dev + brand board | PASS 2026-09-23 (38 + 2 outputs, receipts green; capture self-tests 15/15) | | D1 = Obsidian, D7 = ring + spark (mark-final/), D9 = S-c hybrid |
 | P1 tokens | | | D3 = follow accent |
 | P2 waveform renderer | | | |
 | P3 spectrogram | | | D4 = accepted |

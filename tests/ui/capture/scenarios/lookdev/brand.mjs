@@ -12,11 +12,14 @@ const DRAFTS = 'assets/brand/concepts/persona-forge/mark-drafts';
 
 export default async function ({ page }) {
     const svg = (path) => dataUri(repoPath(path), 'image/svg+xml');
+    // D7 = M-b (CP0b, 2026-09-23). The shipping set uses mark.svg at >= 48 px and
+    // mark-small.svg at <= 32 px (sidebar tile glyph, favicon); the draft stays for reference.
+    const FINAL = 'assets/brand/concepts/persona-forge/mark-final';
     const marks = [
         { name: 'Current — stock Vite favicon', uri: svg('frontend/public/favicon.svg'), flag: true },
-        { name: 'M-a · Ring', uri: svg(`${DRAFTS}/m-a-ring.svg`) },
-        { name: 'M-b · Ring + spark', uri: svg(`${DRAFTS}/m-b-ring-spark.svg`) },
-        { name: 'M-c · Waveform monogram', uri: svg(`${DRAFTS}/m-c-wave-monogram.svg`) },
+        { name: 'Final · shipping set (mark + mark-small)', uri: svg(`${FINAL}/mark.svg`), smallUri: svg(`${FINAL}/mark-small.svg`) },
+        { name: 'Final · mark-small.svg only', uri: svg(`${FINAL}/mark-small.svg`), splash: false },
+        { name: 'M-b draft (reference)', uri: svg(`${DRAFTS}/m-b-ring-spark.svg`), splash: false },
     ];
 
     await showBoard(page, brandMarksHtml(marks));
