@@ -23,6 +23,13 @@ import { useStitchTransport, type StitchTransport } from '@/hooks/useStitchTrans
 import { planStateToPayload } from '@/lib/stitchPreview'
 import { useStitchPreview } from '@/hooks/useStitchPreview'
 import { useStitchHistory, type StitchHistory } from '@/hooks/useStitchHistory'
+import {
+  isPrimaryModifier,
+  isShortcutKeymapOpen,
+  openShortcutKeymap,
+  useShortcutScope,
+  type ShortcutCommand,
+} from '@/hooks/useGlobalShortcuts'
 import { SegmentBrowserModal, type SegmentBrowserModalController } from './stitch/SegmentBrowserModal'
 import { useDragScrubValue, parseNumericText } from '@/hooks/useDragScrubValue'
 import { HOVER_TIME_GUIDE_LABEL_CLASS, HOVER_TIME_GUIDE_LINE_CLASS, useHoverTimeGuide } from '@/hooks/useHoverTimeGuide'
@@ -62,12 +69,6 @@ const RAIL_PADDING_PX = 32
 
 function clampPps(v: number): number {
   return Math.max(MIN_PPS, Math.min(MAX_PPS, v))
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  const tag = target.tagName
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
 }
 
 // Shared empty array so cards with no region edits receive a stable prop and their
@@ -250,7 +251,6 @@ export const StitchTimeline = memo(function StitchTimeline({
   const previewScale = transport.durationSec > 0 && effectiveTotalMs > 0
     ? (transport.durationSec * 1000) / effectiveTotalMs
     : 1
-  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const reducedMotion = useReducedMotion()
 
   const autoPace = useCallback(() => {
@@ -399,67 +399,90 @@ export const StitchTimeline = memo(function StitchTimeline({
     playRange(clipId, (range.startMs * previewScale) / 1000, (range.endMs * previewScale) / 1000)
   }, [playRange, clips, clipRanges, previewScale, transport.durationSec])
 
-  // Keyboard shortcuts for playback, selection, reorder, removal, and trim nudging -- scoped
-  // to this component's lifetime and unconditionally skipped whenever the event target is an
-  // editable control, so typing in a clip's text field, a gap's typed-value input, etc. is
-  // never hijacked by these bindings. Space and `?` don't require a selected clip; the rest do.
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      // The focus guard above every other binding: Cmd/Ctrl+Z while typing belongs to the
-      // text field (the browser's own undo), never to the plan.
-      if (isEditableTarget(e.target)) return
-      if (historyEnabled && (e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) {
-        e.preventDefault()
-        if (e.shiftKey) redoHistory()
-        else undoHistory()
-        return
-      }
-      if ((e.code === 'Space' || e.key === ' ') && !e.repeat) {
-        // The shortcuts dialog is open on a non-editable surface; Space there would
-        // otherwise toggle arrangement playback behind the dialog.
-        if (shortcutsOpen) return
-        e.preventDefault()
-        transport.toggle()
-        return
-      }
-      if (e.key === '?' && !e.repeat) {
-        e.preventDefault()
-        setShortcutsOpen(true)
-        return
-      }
-      if (!selectedClipId) return
-      const index = clips.findIndex((c) => c.clipId === selectedClipId)
-      if (index === -1) return
-      if (e.key === 'ArrowRight' && !e.shiftKey) {
-        e.preventDefault()
-        const next = clips[index + 1]
-        if (next) setSelectedClipId(next.clipId)
-      } else if (e.key === 'ArrowLeft' && !e.shiftKey) {
-        e.preventDefault()
-        const prev = clips[index - 1]
-        if (prev) setSelectedClipId(prev.clipId)
-      } else if (e.key === 'ArrowRight' && e.shiftKey) {
-        e.preventDefault()
-        moveClip(index, 'right')
-      } else if (e.key === 'ArrowLeft' && e.shiftKey) {
-        e.preventDefault()
-        moveClip(index, 'left')
-      } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        e.preventDefault()
-        removeClip(selectedClipId)
-      } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        e.preventDefault()
-        const clip = clips[index]
-        if (!clip.durationMs) return
-        const delta = (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 100 : 10)
-        const maxStart = Math.max(0, clip.durationMs - 20 - clip.trimEndMs)
-        const nextTrimStart = Math.max(0, Math.min(maxStart, clip.trimStartMs + delta))
-        updateClip(selectedClipId, { trimStartMs: nextTrimStart })
-      }
+  // This page's keys live in the shared registry (M4) rather than in a private window
+  // listener, so the `?` keymap and the command palette list exactly what is dispatchable.
+  // The editable-target guard that used to be repeated here now lives in the dispatcher, for
+  // every scope at once. Space does not require a selected clip; the rest do.
+  const stitchCommands = useMemo<ShortcutCommand[]>(() => {
+    const index = selectedClipId ? clips.findIndex((clip) => clip.clipId === selectedClipId) : -1
+    const selected = index === -1 ? null : clips[index]
+    const commands: ShortcutCommand[] = [
+      {
+        id: 'stitch.playPause',
+        label: 'Play/pause the arrangement (with a loop, from its start)',
+        keys: 'Space',
+        match: (event) => (event.code === 'Space' || event.key === ' ') && !event.repeat,
+        // The keymap is open on a non-editable surface; Space there would otherwise toggle
+        // arrangement playback behind the dialog.
+        run: () => {
+          if (!isShortcutKeymapOpen()) transport.toggle()
+        },
+      },
+      { id: 'stitch.seek', label: 'Seek the arrangement', keys: 'Click ruler' },
+      {
+        id: 'stitch.selectNeighbour',
+        label: 'Select the previous/next clip',
+        keys: '←/→',
+        palette: false,
+        match: (event) => !!selected && !event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight'),
+        run: (event) => {
+          const neighbour = clips[index + (event?.key === 'ArrowLeft' ? -1 : 1)]
+          if (neighbour) setSelectedClipId(neighbour.clipId)
+        },
+      },
+      {
+        id: 'stitch.reorder',
+        label: 'Reorder the selected clip',
+        keys: 'Shift+←/→',
+        palette: false,
+        match: (event) => !!selected && event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight'),
+        run: (event) => moveClip(index, event?.key === 'ArrowLeft' ? 'left' : 'right'),
+      },
+      {
+        id: 'stitch.nudgeTrim',
+        label: 'Nudge trim start by 10ms (Shift = 100ms)',
+        keys: '↑/↓',
+        palette: false,
+        match: (event) => !!selected && (event.key === 'ArrowUp' || event.key === 'ArrowDown'),
+        run: (event) => {
+          if (!selected?.durationMs) return
+          const delta = (event?.key === 'ArrowUp' ? 1 : -1) * (event?.shiftKey ? 100 : 10)
+          const maxStart = Math.max(0, selected.durationMs - 20 - selected.trimEndMs)
+          updateClip(selected.clipId, { trimStartMs: Math.max(0, Math.min(maxStart, selected.trimStartMs + delta)) })
+        },
+      },
+      {
+        id: 'stitch.removeSelected',
+        label: 'Remove the selected clip',
+        keys: 'Delete/Backspace',
+        match: (event) => !!selected && (event.key === 'Delete' || event.key === 'Backspace'),
+        run: () => {
+          if (selected) removeClip(selected.clipId)
+        },
+      },
+    ]
+    if (historyEnabled) {
+      commands.push(
+        {
+          id: 'stitch.undo',
+          label: 'Undo the last plan change (Shift to redo)',
+          keys: 'Cmd/Ctrl+Z',
+          match: (event) => isPrimaryModifier(event) && (event.key === 'z' || event.key === 'Z') && !event.shiftKey,
+          run: undoHistory,
+        },
+        {
+          id: 'stitch.redo',
+          label: 'Redo the last undone change',
+          keys: 'Shift+Cmd/Ctrl+Z',
+          palette: false,
+          match: (event) => isPrimaryModifier(event) && (event.key === 'z' || event.key === 'Z') && event.shiftKey,
+          run: redoHistory,
+        },
+      )
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selectedClipId, clips, moveClip, removeClip, updateClip, transport, shortcutsOpen, historyEnabled, undoHistory, redoHistory])
+    return commands
+  }, [clips, selectedClipId, transport, moveClip, removeClip, updateClip, historyEnabled, undoHistory, redoHistory])
+  useShortcutScope('stitch', 'Stitch Studio', stitchCommands)
 
   if (!clips.length) {
     return (
@@ -508,7 +531,7 @@ export const StitchTimeline = memo(function StitchTimeline({
             <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted" onClick={autoPace}>
               <Gauge className="size-3.5" /> Auto-pace
             </button>
-            <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted" onClick={() => setShortcutsOpen(true)} title="Keyboard shortcuts (?)">
+            <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted" onClick={openShortcutKeymap} title="Keyboard shortcuts (?)">
               Shortcuts
             </button>
             {(library.length > 0 || hasVoiceLibrary) && (
@@ -620,7 +643,6 @@ export const StitchTimeline = memo(function StitchTimeline({
         </MotionConfig>
       </div>
     </div>
-    <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </>
   )
 })
@@ -1100,37 +1122,5 @@ function TransportBar({ transport }: { transport: StitchTransport }) {
         <div ref={fillRef} className="absolute inset-y-0 left-0 bg-gradient-to-r from-cyan-500/50 to-fuchsia-500/40" style={{ width: '0%' }} />
       </div>
     </div>
-  )
-}
-
-/* ---------- shortcuts dialog ---------- */
-
-const SHORTCUTS: Array<[string, string]> = [
-  ['Space', 'Play/pause the arrangement (with a loop, from its start)'],
-  ['Click ruler', 'Seek the arrangement'],
-  ['←/→', 'Select the previous/next clip'],
-  ['Shift+←/→', 'Reorder the selected clip'],
-  ['↑/↓', 'Nudge trim start by 10ms (Shift = 100ms)'],
-  ['Delete/Backspace', 'Remove the selected clip'],
-  ['Cmd/Ctrl+Z', 'Undo the last plan change (Shift to redo)'],
-  ['?', 'Show this dialog'],
-]
-
-function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-testid="stitch-shortcuts-dialog" className="max-w-sm">
-        <DialogTitle>Keyboard shortcuts</DialogTitle>
-        <DialogDescription className="sr-only">Stitch Studio keyboard shortcuts</DialogDescription>
-        <dl className="flex flex-col gap-2 text-xs">
-          {SHORTCUTS.map(([key, desc]) => (
-            <div key={key} className="flex items-center justify-between gap-4">
-              <dt className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">{key}</dt>
-              <dd className="text-muted-foreground">{desc}</dd>
-            </div>
-          ))}
-        </dl>
-      </DialogContent>
-    </Dialog>
   )
 }

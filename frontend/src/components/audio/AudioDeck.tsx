@@ -9,6 +9,7 @@ import { LevelMeter } from './LevelMeter'
 import { SpectralAccent } from './SpectralAccent'
 import { AudioStatsStrip } from '../waveform/AudioStatsStrip'
 import { useDragScrubValue, parseNumericText } from '@/hooks/useDragScrubValue'
+import { useShortcutScope, type ShortcutCommand } from '@/hooks/useGlobalShortcuts'
 // 0.1-increment speed control, styled to match the segment Duration input in
 // SegmentRackRow.tsx so the two "adjust after generation" controls read as a matched pair.
 // A-1: drag-scrub + click-to-type + double-click reset to 1.0 + opt-in wheel nudge via the
@@ -120,6 +121,33 @@ export function AudioDeck({
   const [duration, setDuration] = useState<number | null>(null)
   const [isLooping, setIsLooping] = useState(false)
   const [playbackRate, setPlaybackRate] = useState(initialSpeed)
+
+  // The deck's transport joins the shared command registry (M4) so it is discoverable from the
+  // palette and documented in the `?` keymap alongside the rest of the app. It keeps its own
+  // keys to itself -- the deck has never had keyboard bindings, and adding them is not this
+  // card's job. The commands read live closures through a ref so their identity never churns
+  // (a re-registration per render would notify every registry subscriber).
+  const deckActionsRef = useRef({ togglePlay: () => {}, restart: () => {}, toggleLoop: () => {}, download: () => {} })
+  deckActionsRef.current = {
+    togglePlay,
+    restart: () => {
+      const audio = audioRef.current
+      if (audio) audio.currentTime = 0
+      setProgress(0)
+    },
+    toggleLoop: () => setIsLooping((looping) => !looping),
+    download,
+  }
+  const deckCommands = useMemo<ShortcutCommand[]>(
+    () => [
+      { id: 'deck.playPause', label: 'Play or pause this clip', run: () => deckActionsRef.current.togglePlay() },
+      { id: 'deck.restart', label: 'Restart this clip', run: () => deckActionsRef.current.restart() },
+      { id: 'deck.loop', label: 'Toggle looping for this clip', run: () => deckActionsRef.current.toggleLoop() },
+      { id: 'deck.download', label: 'Download this clip', run: () => deckActionsRef.current.download() },
+    ],
+    [],
+  )
+  useShortcutScope('deck', title, deckCommands)
 
   function changeSpeed(v: number) {
     setPlaybackRate(v)

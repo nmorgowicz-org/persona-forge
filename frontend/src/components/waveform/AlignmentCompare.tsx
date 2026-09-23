@@ -5,6 +5,7 @@ import { getVoice } from '@/lib/api'
 import { base64ToBlob } from '@/lib/utils'
 import { formatHoverTime } from '@/lib/timeAxis'
 import { claimPlayback, releasePlayback } from '@/lib/playbackFocus'
+import { useShortcutScope, type ShortcutCommand } from '@/hooks/useGlobalShortcuts'
 import { WaveformLane } from './WaveformLane'
 import { TimeRuler } from './TimeRuler'
 
@@ -310,21 +311,54 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
     startPlay(d.lane, region.start, region)
   }
 
-  // Keyboard transport: space = play/pause the last lane, L = loop, ←/→ = step the playhead
-  // (hold Shift for a fine 20 ms nudge instead of 100 ms).
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === ' ' || e.key === 'Spacebar') {
-      e.preventDefault()
-      togglePlay(playing ?? lastLaneRef.current)
-    } else if (e.key === 'l' || e.key === 'L') {
-      e.preventDefault()
-      setLoop((v) => !v)
-    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      e.preventDefault()
-      const step = (e.shiftKey ? 20 : 100) * (e.key === 'ArrowRight' ? 1 : -1)
-      seekTo(Math.max(0, Math.min(maxDurMs, positionMs + step)))
-    }
+  // Keyboard transport, now in the shared registry (M4): space = play/pause the last lane,
+  // L = loop, ←/→ = step the playhead (hold Shift for a fine 20 ms nudge instead of 100 ms).
+  // The bindings keep their original scope -- the surface takes focus on pointer-down, and the
+  // registry's `when` gate means they only fire while focus is inside it -- but they are now
+  // documented in the `?` keymap along with everything else.
+  const compareActionsRef = useRef({
+    togglePlay: () => {},
+    toggleLoop: () => {},
+    seekBy: (_deltaMs: number) => {},
+  })
+  compareActionsRef.current = {
+    togglePlay: () => togglePlay(playing ?? lastLaneRef.current),
+    toggleLoop: () => setLoop((value) => !value),
+    seekBy: (deltaMs: number) => seekTo(Math.max(0, Math.min(maxDurMs, positionMs + deltaMs))),
   }
+  const compareCommands = useMemo<ShortcutCommand[]>(
+    () => [
+      {
+        id: 'compare.playPause',
+        label: 'Play/pause the A/B lanes',
+        keys: 'Space',
+        match: (event) => event.key === ' ' || event.key === 'Spacebar',
+        run: () => compareActionsRef.current.togglePlay(),
+      },
+      {
+        id: 'compare.loop',
+        label: 'Toggle the A/B loop',
+        keys: 'L',
+        match: (event) => event.key === 'l' || event.key === 'L',
+        run: () => compareActionsRef.current.toggleLoop(),
+      },
+      {
+        id: 'compare.step',
+        label: 'Step the playhead by 100ms (Shift = 20ms)',
+        keys: '←/→',
+        palette: false,
+        match: (event) => event.key === 'ArrowLeft' || event.key === 'ArrowRight',
+        run: (event) => compareActionsRef.current.seekBy((event?.shiftKey ? 20 : 100) * (event?.key === 'ArrowRight' ? 1 : -1)),
+      },
+    ],
+    [],
+  )
+  useShortcutScope(
+    'compare',
+    'Voice Edit A/B compare',
+    compareCommands,
+    () => !!containerRef.current?.contains(document.activeElement),
+  )
 
   if (hasAdjusted && !adjusted) return null
   if (!hasAdjusted && !original) {
@@ -363,7 +397,6 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
       onMouseUp={finishDrag}
       onMouseLeave={() => { setHoverPct(null); finishDrag() }}
       onMouseDownCapture={() => containerRef.current?.focus()}
-      onKeyDown={onKeyDown}
     >
       {/* Transport — A/B play, loop, and the current drag-selection. */}
       <div className="flex items-center gap-2 pb-0.5">

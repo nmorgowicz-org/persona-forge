@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   AudioLines,
@@ -12,6 +12,7 @@ import {
   Palette,
   Plug,
   Settings2,
+  Search,
   Sparkles,
   Wand2,
   Wrench,
@@ -33,6 +34,14 @@ import {
 } from '@/components/ui/sidebar'
 import { useSidebar } from '@/components/ui/sidebar-context'
 import { ActivityStatusBar } from '@/components/ui/ActivityStatusBar'
+import { CommandPalette, ShortcutKeymap } from '@/components/CommandPalette'
+import {
+  isPrimaryModifier,
+  openCommandPalette,
+  openShortcutKeymap,
+  useShortcutScope,
+  type ShortcutCommand,
+} from '@/hooks/useGlobalShortcuts'
 import { Separator } from '@/components/ui/separator'
 import { SwapBanner } from '@/components/SwapBanner'
 import { HealthStatusBanner } from '@/components/HealthStatusBanner'
@@ -349,6 +358,50 @@ export function AppShell({ children }: { children: ReactNode }) {
   const setRuntimeConfig = useAppStore((s) => s.setRuntimeConfig)
   const active = NAV_ITEMS.find((item) => item.page === page)
 
+  // The app-wide layer of the shortcut registry: navigation (one command per nav item, so the
+  // palette cannot drift from the sidebar), the two global keys, and focus-search. Pages
+  // register their own on top -- see hooks/useGlobalShortcuts.ts.
+  const appCommands = useMemo<ShortcutCommand[]>(
+    () => [
+      {
+        id: 'palette.open',
+        label: 'Open command palette',
+        keys: 'Cmd/Ctrl+K',
+        allowInEditable: true,
+        match: (event) => isPrimaryModifier(event) && (event.key === 'k' || event.key === 'K'),
+        run: openCommandPalette,
+      },
+      {
+        id: 'keymap.open',
+        // The wording the stitch-only dialog used, preserved: this row is that dialog's
+        // replacement, now listing every surface rather than one page's keys.
+        label: 'Show this dialog',
+        hint: 'Keyboard shortcuts',
+        keys: '?',
+        match: (event) => event.key === '?' && !event.repeat,
+        run: openShortcutKeymap,
+      },
+      {
+        id: 'search.focus',
+        label: 'Focus search',
+        hint: 'Current page',
+        run: () => {
+          const field = document.querySelector<HTMLInputElement>('input[type="search"], input[placeholder^="Search"]')
+          field?.focus()
+          field?.select()
+        },
+      },
+      ...NAV_ITEMS.map((item) => ({
+        id: `nav.${item.page}`,
+        label: item.label,
+        hint: item.description,
+        run: () => setPage(item.page),
+      })),
+    ],
+    [setPage],
+  )
+  useShortcutScope('app', 'Global', appCommands)
+
   // One-time fetch to initialize Pocket TTS banner state at startup
   useEffect(() => {
     getRuntimeConfig()
@@ -419,6 +472,18 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="text-sm font-medium leading-none">{active?.label}</span>
             <span className="text-[11px] text-muted-foreground">{active?.description}</span>
           </div>
+          <button
+            type="button"
+            data-testid="command-palette-button"
+            onClick={openCommandPalette}
+            aria-label="Open command palette"
+            title="Search commands (Cmd/Ctrl+K)"
+            className="ml-auto inline-flex h-8 shrink-0 items-center gap-2 rounded-md border border-border bg-background px-2.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <Search className="size-3.5" />
+            <span className="hidden sm:inline">Search</span>
+            <kbd className="hidden rounded border border-border bg-muted px-1 font-mono text-[10px] sm:inline">⌘K</kbd>
+          </button>
         </header>
         <UpdateAvailableBanner />
         <HealthStatusBanner />
@@ -428,6 +493,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </SidebarInset>
       <ActivityStatusBar />
+      <CommandPalette />
+      <ShortcutKeymap />
     </SidebarProvider>
   )
 }
