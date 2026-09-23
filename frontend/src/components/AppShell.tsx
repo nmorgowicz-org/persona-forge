@@ -297,6 +297,7 @@ function SidebarVersionDisplay() {
     <>
       {/* Expanded: full "vX.Y.Z" text */}
       <div
+        data-testid="sidebar-version"
         className={cn(
           'group-data-[collapsible=icon]:hidden text-center text-[11px] font-bold',
           colorClass,

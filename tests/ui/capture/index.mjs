@@ -167,8 +167,11 @@ export const SCENARIOS = {
         runtime: 'neutral',
         source: 'fake',
         contract: {
-            intent: 'Show the dedicated Voice Edit workspace with its shared prosody controls.',
-            expectedOutputs: ['voice-edit--neutral--workspace.png'],
+            intent: 'Show the dedicated Voice Edit workspace with its shared prosody controls and always-mounted A/B strip, before and after a preview render.',
+            expectedOutputs: [
+                'voice-edit--neutral--workspace.png',
+                'voice-edit--neutral--prosody-ab.png',
+            ],
         },
     },
     'segment-library-browse': {
