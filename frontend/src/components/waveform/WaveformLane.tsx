@@ -1,5 +1,7 @@
-import { memo, useEffect, useRef } from 'react'
+import { memo, useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react'
 import { waveformBarColor } from '@/lib/waveform'
+import { HOVER_TIME_GUIDE_LABEL_CLASS, HOVER_TIME_GUIDE_LINE_CLASS, useHoverTimeGuide } from '@/hooks/useHoverTimeGuide'
+import { useElementWidth } from '@/hooks/useElementWidth'
 
 interface WaveformLaneProps {
   peaks: number[] | null
@@ -9,6 +11,9 @@ interface WaveformLaneProps {
   fadeInMs: number
   fadeOutMs: number
   pauseIntervals?: [number, number][]
+  /** Opt-in hover time readout, named for tests. Hosts that already render their own readout
+   * with extra semantics (the prosody region editor, the voice-edit compare) leave it off. */
+  timeGuideTestId?: string
 }
 
 export const WaveformLane = memo(function WaveformLane({
@@ -19,8 +24,19 @@ export const WaveformLane = memo(function WaveformLane({
   fadeInMs,
   fadeOutMs,
   pauseIntervals,
+  timeGuideTestId,
 }: WaveformLaneProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const [laneRef, laneWidthPx] = useElementWidth<HTMLDivElement>()
+  const pixelsPerSecond = durMs && durMs > 0 && laneWidthPx > 0 ? laneWidthPx / (durMs / 1000) : 0
+  const guide = useHoverTimeGuide({ pixelsPerSecond })
+
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (pixelsPerSecond <= 0 || event.pointerType === 'touch') return
+    const rect = event.currentTarget.getBoundingClientRect()
+    const frac = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
+    guide.show(`${frac * 100}%`, frac * ((durMs as number) / 1000), frac)
+  }
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -89,8 +105,20 @@ export const WaveformLane = memo(function WaveformLane({
   }
 
   return (
-    <div className="relative flex h-full items-center overflow-hidden px-0.5">
+    <div
+      ref={laneRef}
+      className="relative flex h-full items-center overflow-hidden px-0.5"
+      onPointerMove={pixelsPerSecond > 0 ? onPointerMove : undefined}
+      onPointerLeave={pixelsPerSecond > 0 ? guide.hide : undefined}
+    >
       <canvas ref={canvasRef} className="block h-full w-full" data-testid="stitch-waveform-canvas" />
+      {pixelsPerSecond > 0 && (
+        <div ref={guide.guideRef} data-testid={timeGuideTestId} className={HOVER_TIME_GUIDE_LINE_CLASS} style={{ left: 0, display: 'none' }}>
+          <span ref={guide.labelRef} className={HOVER_TIME_GUIDE_LABEL_CLASS}>
+            0.0s
+          </span>
+        </div>
+      )}
       {/* Trim/fade values stay readable as text -- the canvas is never the sole information
           channel. */}
       <span className="sr-only">

@@ -24,6 +24,7 @@ import { planStateToPayload } from '@/lib/stitchPreview'
 import { useStitchPreview } from '@/hooks/useStitchPreview'
 import { SegmentBrowserModal, type SegmentBrowserModalController } from './stitch/SegmentBrowserModal'
 import { useDragScrubValue, parseNumericText } from '@/hooks/useDragScrubValue'
+import { HOVER_TIME_GUIDE_LABEL_CLASS, HOVER_TIME_GUIDE_LINE_CLASS, useHoverTimeGuide } from '@/hooks/useHoverTimeGuide'
 import { cn } from '@/lib/utils'
 import { TimelineRuler } from './stitch/TimelineRuler'
 import { GapControl } from './stitch/GapControl'
@@ -250,7 +251,7 @@ export const StitchTimeline = memo(function StitchTimeline({
   const wheelHandlerRef = useRef<((e: WheelEvent) => void) | null>(null)
   const hoverHandlerRef = useRef<((e: PointerEvent) => void) | null>(null)
   const leaveHandlerRef = useRef<(() => void) | null>(null)
-  const guideElRef = useRef<HTMLDivElement | null>(null)
+  const guide = useHoverTimeGuide({ pixelsPerSecond })
   const attachTimelineEl = useCallback((node: HTMLDivElement | null) => {
     scrollRef(node)
     const prev = scrollElRef.current
@@ -275,31 +276,27 @@ export const StitchTimeline = memo(function StitchTimeline({
       }
       setManualPps(clampPps(ppsRef.current * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))
     }
-    // The hover guide is written straight to the DOM (never React state) so pointer
-    // movement cannot re-render the timeline mid-gesture -- the same discipline the
-    // ruler's playhead uses for playback position.
+    // The hover guide is the shared one (hooks/useHoverTimeGuide): written straight to the
+    // DOM, never React state, so pointer movement cannot re-render the timeline mid-gesture
+    // -- the same discipline the ruler's playhead uses for playback position -- and it
+    // formats through the ruler's own grammar so the two cannot drift.
     const onHover = (e: PointerEvent) => {
-      const guide = guideElRef.current
       const rulerEl = node.querySelector<HTMLElement>('[data-testid="stitch-timeline-ruler"]')
-      if (!guide || !rulerEl || ppsRef.current <= 0) return
+      if (!rulerEl || ppsRef.current <= 0) return
       const rulerViewportX = rulerEl.getBoundingClientRect().left
       const sec = (e.clientX - rulerViewportX) / ppsRef.current
       if (sec < 0 || sec > totalSecondsRef.current) return
-      guide.style.display = ''
-      guide.style.left = `${sec * ppsRef.current}px`
-      const label = guide.querySelector('span')
-      if (label) label.textContent = `${sec.toFixed(2)}s`
+      guide.show(`${sec * ppsRef.current}px`, sec, totalSecondsRef.current > 0 ? sec / totalSecondsRef.current : 0)
     }
-    const onLeave = () => {
-      const guide = guideElRef.current
-      if (guide) guide.style.display = 'none'
-    }
+    const onLeave = () => guide.hide()
     node.addEventListener('wheel', onWheel, { passive: false })
     node.addEventListener('pointermove', onHover)
     node.addEventListener('pointerleave', onLeave)
     wheelHandlerRef.current = onWheel
     hoverHandlerRef.current = onHover
     leaveHandlerRef.current = onLeave
+    // guide.show/hide are identity-stable (they read live values through refs).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollRef])
   // The scroll correction runs in a layout effect after React committed the new scale, and
   // clamps against the expected content width (totalSeconds * newPps + rail padding), not
@@ -459,14 +456,9 @@ export const StitchTimeline = memo(function StitchTimeline({
         style={{ minWidth: 0 }}
       >
         {contentWidthPx > 0 && (
-          <div
-            ref={guideElRef}
-            data-testid="timeline-hover-guide"
-            className="pointer-events-none absolute inset-y-0 z-20 w-px bg-cyan-400/60"
-            style={{ left: 0, display: 'none' }}
-          >
-            <span className="absolute top-0 -translate-x-1/2 whitespace-nowrap rounded bg-background/90 px-1 text-[9px] font-mono tabular-nums text-cyan-300 shadow-sm">
-              0.00s
+          <div ref={guide.guideRef} data-testid="timeline-hover-guide" className={HOVER_TIME_GUIDE_LINE_CLASS} style={{ left: 0, display: 'none' }}>
+            <span ref={guide.labelRef} className={HOVER_TIME_GUIDE_LABEL_CLASS}>
+              0.0s
             </span>
           </div>
         )}

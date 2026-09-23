@@ -217,6 +217,7 @@ export function VariantCompare() {
                   fadeInMs={0}
                   fadeOutMs={0}
                   pauseIntervals={res.metrics.pause_intervals}
+                  timeGuideTestId="variant-lane-time"
                 />
                 <audio ref={ref} src={res.audioUrl} onTimeUpdate={handleTimeUpdate} className="hidden" />
               </div>

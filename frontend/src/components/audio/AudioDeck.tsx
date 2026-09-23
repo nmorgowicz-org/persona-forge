@@ -188,6 +188,16 @@ export function AudioDeck({
     audio.currentTime = pct * duration
   }
 
+  // Alt-drag scrub: move the playhead with the pointer. `progress` is mirrored immediately
+  // (a paused element does not reliably emit timeupdate on seek) so the deck's playhead
+  // tracks the gesture even when nothing is playing.
+  function handleScrub(pct: number) {
+    const audio = audioRef.current
+    if (!audio || duration == null) return
+    audio.currentTime = pct * duration
+    setProgress(pct)
+  }
+
   // A drag on the waveform selects a slice, then plays it; a click clears any slice.
   function handleSelectRegion(next: { start: number; end: number } | null) {
     setRegion(next)
@@ -248,6 +258,7 @@ export function AudioDeck({
             onClick={handleSeek}
             selection={region}
             onSelectRegion={handleSelectRegion}
+            onScrub={handleScrub}
             testId="deck-waveform"
           />
           <div className="flex flex-wrap items-center gap-1">
@@ -330,6 +341,7 @@ export function AudioDeck({
               onClick={handleSeek}
               selection={region}
               onSelectRegion={handleSelectRegion}
+              onScrub={handleScrub}
               testId="deck-waveform"
             />
             {!compact && showSpectralAccent && <SpectralAccent peaks={peaks} className="mt-2" />}

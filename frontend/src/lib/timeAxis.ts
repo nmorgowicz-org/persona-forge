@@ -68,6 +68,15 @@ export function formatTimelineTime(seconds: number, stepSeconds = 1): string {
   return `${m}:${sWhole.toString().padStart(2, '0')}.${d}`
 }
 
+/** One hover readout grammar for every waveform surface. Delegates to `formatTimelineTime`
+ * with the same "nice" step the ruler above the surface uses, so the readout under the
+ * pointer and the tick labels around it cannot drift into two dialects. */
+export function formatHoverTime(seconds: number, pixelsPerSecond: number): string {
+  if (!isFinite(seconds)) return '0.0s'
+  const pps = isFinite(pixelsPerSecond) && pixelsPerSecond > 0 ? pixelsPerSecond : 1
+  return formatTimelineTime(Math.max(0, seconds), niceTimeStep(1 / pps))
+}
+
 /** Builds evenly-spaced ticks from 0 through `durationSeconds`, choosing a "nice" step so
  * labels don't collide. Grid ticks stop strictly before the exact duration; the final tick is
  * always appended at exactly `durationSeconds`, dropping any last grid tick whose label would

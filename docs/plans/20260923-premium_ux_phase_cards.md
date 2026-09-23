@@ -178,6 +178,58 @@ green; perf budget n/a (no new animation); captures compared.
 
 ---
 
+## A-3b — One hover time readout on every waveform surface + modifier scrub (S3 completion)
+
+**Read:** A §1 "S3" (acceptance prose: "exact hover time on all waveform
+surfaces; modifier-held scrub gesture without breaking click-seek or
+loop-region selection"). Owner decision 2026-09-23: take the prose on now, all
+five surfaces, one grammar taken from the ruler; include the scrub.
+
+**Allowed files:** `lib/timeAxis.ts`; new `hooks/useHoverTimeGuide.ts`;
+`components/Waveform.tsx`; `components/waveform/WaveformLane.tsx`;
+`components/waveform/AlignmentCompare.tsx`; `components/waveform/RegionEditor.tsx`;
+`components/StitchTimeline.tsx` (adopt the shared guide);
+`components/stitch/StitchClipCard.tsx`; extend
+`tests/ui/generate/waveform-pointer.spec.js`; ledgers.
+
+**Save before:** `speak-generate`, `voice-edit`, `prosody-adjustment`.
+
+**State at card start (measured):** hover time exists on the timeline ruler
+(A-2, `toFixed(2)`), AlignmentCompare (`toFixed(2)`), RegionEditor
+(`toFixed(3)`) and is missing entirely on the Speak/Voice-Library deck
+(`Waveform.tsx`) and the clip lane (`WaveformLane.tsx`). No modifier-held
+scrub exists anywhere: drag selects a region, click seeks.
+
+**RED:**
+
+1. Hovering the Speak deck waveform shows a readout that tracks the pointer
+   and hides on leave.
+2. The readout is the ruler's grammar on every surface: hovering comparable
+   positions on the deck, the clip lane, the prosody region editor, and the
+   voice-edit alignment compare yields the same format (asserted by shape, not
+   by pixel), and the timeline guide matches it.
+3. Alt-drag on the deck waveform scrubs (the deck's `audio.currentTime`
+   follows the pointer), while plain drag still selects a region and a click
+   without movement still seeks.
+
+**GREEN:** one `formatHoverTime(seconds, pixelsPerSecond)` in
+`lib/timeAxis.ts` delegating to `formatTimelineTime` with the ruler's own
+`niceTimeStep` (so the readout and the tick labels cannot drift), used by all
+five surfaces; one `useHoverTimeGuide` hook that writes the guide and its
+label straight to the DOM (the A-2 discipline: pointer movement must never
+re-render a waveform that may be hosting a gesture), adopted by the timeline
+and used for the two new surfaces; `Waveform.tsx` gains the modifier-held
+scrub on the pointer state machine A-3 already wrote.
+
+**Verify:** build; extended spec + `voice-edit` + `prosody-adjustment` +
+`studio.spec.js` green; captures compared (deck, prosody, voice-edit); perf
+budget n/a (no new animation; the guide must not add a render per pointermove
+— assert the waveform element identity is stable across a hover sweep).
+
+**Commit:** `feat(ui): one hover time readout across every waveform surface`
+
+---
+
 ## A-4 — Loop brace + exclusive audition (M1, N6)
 
 **Read:** A §3 "M1", A §8 "N6", A §2 "Phase 4".

@@ -552,7 +552,7 @@ export const StitchClipCard = memo(function StitchClipCard({
             }
           }}
         >
-          <WaveformLane peaks={peaks} durMs={durMs} trimStartMs={trimStartMs} trimEndMs={trimEndMs} fadeInMs={fadeInMs} fadeOutMs={fadeOutMs} />
+          <WaveformLane peaks={peaks} durMs={durMs} trimStartMs={trimStartMs} trimEndMs={trimEndMs} fadeInMs={fadeInMs} fadeOutMs={fadeOutMs} timeGuideTestId="stitch-lane-time" />
           {fadeOverlay('left', fadeInMs)}
           {fadeOverlay('right', fadeOutMs)}
 

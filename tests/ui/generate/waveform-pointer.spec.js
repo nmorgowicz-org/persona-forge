@@ -181,3 +181,92 @@ test.describe('A-3: pointer-safe waveform and one numeric grammar', () => {
     }
   })
 })
+
+// A-3b (S3 completion): one hover time readout on every waveform surface, and the
+// modifier-held scrub. RED-first: on the pre-card code the deck and the clip lane have no
+// readout at all, the three existing readouts use three different precisions
+// (2dp / 3dp / 2dp), and no scrub gesture exists. The readout must be written straight to
+// the DOM -- pointer movement may not re-render a waveform that is hosting a gesture.
+const SUB_SECOND_READOUT = /^\d+\.\ds$/ // the ruler's own grammar below ten seconds
+
+test.describe('A-3b: hover time readout and modifier scrub', () => {
+  test('the deck shows the time under the pointer and hides it on leave', async ({ page }) => {
+    const audio = await generateResult(page)
+    const duration = await audio.evaluate((el) => el.duration)
+    const waveform = page.getByTestId('deck-waveform')
+    const readout = page.getByTestId('deck-waveform-time')
+    await expect(readout).toBeHidden()
+
+    const box = await waveform.boundingBox()
+    const labelAt = async (fraction) => {
+      await page.mouse.move(box.x + box.width * fraction, box.y + box.height / 2)
+      await expect(readout).toBeVisible()
+      return (await readout.textContent()) ?? ''
+    }
+
+    // The readout is the exact time under the pointer, in the ruler's grammar.
+    expect(await labelAt(0.5)).toBe(`${(duration * 0.5).toFixed(1)}s`)
+    const near = Number((await labelAt(0.25)).replace('s', ''))
+    const far = Number((await labelAt(0.75)).replace('s', ''))
+    expect(far).toBeGreaterThan(near)
+
+    await page.mouse.move(box.x - 120, box.y - 120)
+    await expect(readout).toBeHidden()
+  })
+
+  test('Alt-drag scrubs the deck playhead without touching the selected slice', async ({ page }) => {
+    const audio = await generateResult(page)
+    const duration = await audio.evaluate((el) => el.duration)
+    await audio.evaluate((el) => el.pause())
+    const waveform = page.getByTestId('deck-waveform')
+    const box = await waveform.boundingBox()
+    const y = box.y + box.height / 2
+
+    await page.keyboard.down('Alt')
+    await page.mouse.move(box.x + box.width * 0.2, y)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width * 0.7, y, { steps: 5 })
+    await page.mouse.up()
+    await page.keyboard.up('Alt')
+
+    const after = await audio.evaluate((el) => ({ currentTime: el.currentTime, paused: el.paused }))
+    expect(Math.abs(after.currentTime - duration * 0.7)).toBeLessThanOrEqual(0.2)
+    // A scrub only moves the playhead: it must not select a slice or start playback.
+    expect(after.paused).toBe(true)
+    await expect(page.getByTestId('deck-waveform-selection')).toHaveCount(0)
+  })
+
+  test('every waveform surface reads out time in the ruler\'s grammar', async ({ page }) => {
+    // Deck (Speak result) and, on the same page load, the stitch clip lane plus the timeline
+    // ruler that A-2 added -- three surfaces, one grammar.
+    const audio = await generateResult(page)
+    const duration = await audio.evaluate((el) => el.duration)
+    const waveform = page.getByTestId('deck-waveform')
+    const deckBox = await waveform.boundingBox()
+    await page.mouse.move(deckBox.x + deckBox.width * 0.5, deckBox.y + deckBox.height / 2)
+    const deckLabel = (await page.getByTestId('deck-waveform-time').textContent()) ?? ''
+    expect(deckLabel).toBe(`${(duration * 0.5).toFixed(1)}s`)
+    expect(deckLabel).toMatch(SUB_SECOND_READOUT)
+
+    await insertSegments(page, 2)
+    await expect(page.getByTestId('stitch-trim-handle-left').first()).toBeVisible()
+
+    const lane = page.getByTestId('stitch-lane-time').first()
+    const laneBox = await (await lane.evaluateHandle((el) => el.parentElement)).asElement().boundingBox()
+    await page.mouse.move(laneBox.x + laneBox.width * 0.5, laneBox.y + laneBox.height / 2)
+    const laneLabel = (await lane.textContent()) ?? ''
+    expect(laneLabel).toMatch(SUB_SECOND_READOUT)
+
+    const rulerGuide = page.getByTestId('timeline-hover-guide')
+    const ruler = page.getByTestId('stitch-timeline-ruler')
+    const rulerBox = await ruler.boundingBox()
+    await page.mouse.move(rulerBox.x + rulerBox.width * 0.25, rulerBox.y + rulerBox.height / 2)
+    await expect(rulerGuide).toBeVisible()
+    const rulerLabel = (await rulerGuide.textContent()) ?? ''
+    expect(rulerLabel).toMatch(SUB_SECOND_READOUT)
+
+    // Same grammar means the same precision: no surface may drift to its own decimal count.
+    expect(laneLabel.replace(/[\d.]/g, '')).toBe(deckLabel.replace(/[\d.]/g, ''))
+    expect(rulerLabel.replace(/[\d.]/g, '')).toBe(deckLabel.replace(/[\d.]/g, ''))
+  })
+})
