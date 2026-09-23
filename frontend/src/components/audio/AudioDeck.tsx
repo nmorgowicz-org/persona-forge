@@ -7,31 +7,64 @@ import { cn } from '@/lib/utils'
 import { LevelMeter } from './LevelMeter'
 import { SpectralAccent } from './SpectralAccent'
 import { AudioStatsStrip } from '../waveform/AudioStatsStrip'
-
+import { useDragScrubValue, parseNumericText } from '@/hooks/useDragScrubValue'
 // 0.1-increment speed control, styled to match the segment Duration input in
 // SegmentRackRow.tsx so the two "adjust after generation" controls read as a matched pair.
+// A-1: drag-scrub + click-to-type + double-click reset to 1.0 + opt-in wheel nudge via the
+// shared useDragScrubValue gesture.
 function SpeedStepper({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const clamp = (v: number) => Math.round(Math.max(0.5, Math.min(2, v)) * 10) / 10
+  const roundStep = (v: number) => Math.round(Math.max(0.5, Math.min(2, v)) * 10) / 10
+  const {
+    editing,
+    draftText,
+    setDraftText,
+    commitEdit,
+    displayValue,
+    beginScrub,
+    handleKeyDown,
+    handleDoubleClick,
+    wheelTargetRef,
+  } = useDragScrubValue({
+    value,
+    min: 0.5,
+    max: 2,
+    dragScale: 0.01,
+    step: 0.1,
+    onChange,
+    dragThreshold: 2,
+    shiftStep: 0.5,
+    parse: parseNumericText,
+    format: (v) => v.toFixed(1),
+    round: roundStep,
+    defaultValue: 1,
+    wheel: true,
+  })
   return (
-    <div className="flex shrink-0 items-center gap-0.5">
+    <div
+      data-testid="deck-speed"
+      data-speed={displayValue}
+      ref={(node) => { wheelTargetRef.current = node }}
+      className="flex shrink-0 cursor-ew-resize touch-none select-none items-center gap-0.5"
+      onPointerDown={(e) => { if (!(e.target as HTMLElement).closest('button, input')) beginScrub(e.nativeEvent, e.currentTarget, { openEditorOnRelease: true }) }}
+      onDoubleClick={handleDoubleClick}
+      title="Playback speed"
+    >
       <Gauge className="size-3 text-muted-foreground" />
-      <input
-        type="number"
-        min={0.5}
-        max={2}
-        step={0.1}
-        value={value}
-        onChange={(e) => {
-          const v = Number(e.target.value)
-          if (!Number.isNaN(v)) onChange(clamp(v))
-        }}
-        onBlur={(e) => {
-          const v = Number(e.target.value)
-          onChange(Number.isNaN(v) ? 1 : clamp(v))
-        }}
-        aria-label="Playback speed"
-        className="w-12 rounded-md border border-input bg-transparent px-1 py-0.5 text-[9px] outline-none transition-colors focus-visible:border-ring"
-      />
+      {editing ? (
+        <input
+          type="text"
+          inputMode="decimal"
+          value={draftText}
+          aria-label="Playback speed"
+          onChange={(e) => setDraftText(e.target.value)}
+          onBlur={commitEdit}
+          onKeyDown={handleKeyDown}
+          className="w-10 rounded-md border border-input bg-transparent px-1 py-0.5 text-[9px] outline-none transition-colors focus-visible:border-ring"
+          autoFocus
+        />
+      ) : (
+        <span className="font-mono tabular-nums text-[9px] text-foreground">{displayValue.toFixed(1)}</span>
+      )}
       <span className="text-[9px] text-muted-foreground">x</span>
     </div>
   )

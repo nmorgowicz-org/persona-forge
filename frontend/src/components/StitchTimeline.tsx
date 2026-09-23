@@ -23,6 +23,8 @@ import { useStitchTransport, type StitchTransport } from '@/hooks/useStitchTrans
 import { planStateToPayload } from '@/lib/stitchPreview'
 import { useStitchPreview } from '@/hooks/useStitchPreview'
 import { SegmentBrowserModal, type SegmentBrowserModalController } from './stitch/SegmentBrowserModal'
+import { useDragScrubValue, parseNumericText } from '@/hooks/useDragScrubValue'
+import { cn } from '@/lib/utils'
 import { TimelineRuler } from './stitch/TimelineRuler'
 import { GapControl } from './stitch/GapControl'
 import { StitchClipCard } from './stitch/StitchClipCard'
@@ -417,7 +419,7 @@ export const StitchTimeline = memo(function StitchTimeline({
                 className="flex shrink-0 items-start gap-4 transition-transform duration-150 ease-out motion-reduce:transition-none motion-reduce:duration-0"
               >
                 {i > 0 && (
-                  <GapControl gapIndex={i - 1} paddingMs={paddingMs[i - 1] || 0} onSetPadding={setPadding} pixelsPerSecond={pixelsPerSecond} />
+                  <GapControl gapIndex={i - 1} paddingMs={paddingMs[i - 1] || 0} onSetPadding={setPadding} pixelsPerSecond={pixelsPerSecond} defaultMs={suggestedGapMs(clips[i - 1]?.text ?? '')} />
                 )}
                 <Reorder.Item
                   value={clip}
@@ -498,25 +500,25 @@ export function StitchDspControls({
             exit={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
             className="grid grid-cols-2 gap-x-6 gap-y-3 overflow-hidden rounded-lg border border-border/60 bg-muted/40 px-4 py-3"
           >
-            <SliderField label="Segment target" value={dsp.segmentTargetDbfs} min={-40} max={-10} step={0.5} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ segmentTargetDbfs: v })} />
-            <SliderField label="Final target" value={dsp.finalTargetDbfs} min={-40} max={-10} step={0.5} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ finalTargetDbfs: v })} />
-            <SliderField label="Final ceiling" value={dsp.finalCeilingDb} min={-6} max={0} step={0.2} format={(v) => `${v} dB`} onChange={(v) => setDsp({ finalCeilingDb: v })} />
-            <SliderField label="Crossfade" value={dsp.crossfadeMs} min={0} max={400} step={5} format={(v) => `${v} ms`} onChange={(v) => setDsp({ crossfadeMs: v })} />
+            <SliderField label="Segment target" value={dsp.segmentTargetDbfs} min={-40} max={-10} step={0.5} defaultValue={-20} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ segmentTargetDbfs: v })} />
+            <SliderField label="Final target" value={dsp.finalTargetDbfs} min={-40} max={-10} step={0.5} defaultValue={-18} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ finalTargetDbfs: v })} />
+            <SliderField label="Final ceiling" value={dsp.finalCeilingDb} min={-6} max={0} step={0.2} defaultValue={-1} format={(v) => `${v} dB`} onChange={(v) => setDsp({ finalCeilingDb: v })} />
+            <SliderField label="Crossfade" value={dsp.crossfadeMs} min={0} max={400} step={5} defaultValue={100} format={(v) => `${v} ms`} onChange={(v) => setDsp({ crossfadeMs: v })} />
             <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
               Pacing style
               <select value={dsp.prosodyStylePreset} onChange={(e) => setDsp({ prosodyStylePreset: e.currentTarget.value as typeof dsp.prosodyStylePreset })} className="rounded border border-border bg-background px-2 py-1 text-xs text-foreground">
                 {['Neutral', 'Storyteller', 'Calm', 'Energetic', 'Broadcast', 'Clean'].map((name) => <option key={name} value={name}>{name}</option>)}
               </select>
             </label>
-            <SliderField label="Pace" value={dsp.paceMultiplier} min={0.5} max={2} step={0.05} format={(v) => `${v.toFixed(2)}×`} onChange={(v) => setDsp({ paceMultiplier: v })} />
+            <SliderField label="Pace" value={dsp.paceMultiplier} min={0.5} max={2} step={0.05} defaultValue={1} format={(v) => `${v.toFixed(2)}×`} onChange={(v) => setDsp({ paceMultiplier: v })} />
             <div className="col-span-2 flex items-center justify-between pt-1">
               <label className="flex items-center gap-2 text-xs text-foreground">
                 <input type="checkbox" checked={dsp.compressEnabled} onChange={(e) => setDsp({ compressEnabled: e.currentTarget.checked })} className="h-3.5 w-3.5 accent-cyan-500" />
                 Compression
               </label>
               <div className="flex items-center gap-4">
-                <SliderField label="Threshold" value={dsp.compressThresholdDb} min={-60} max={-12} step={0.5} format={(v) => `${v} dB`} onChange={(v) => setDsp({ compressThresholdDb: v })} disabled={!dsp.compressEnabled} />
-                <SliderField label="Ratio" value={dsp.compressRatio} min={1} max={10} step={0.1} format={(v) => `${v}:1`} onChange={(v) => setDsp({ compressRatio: v })} disabled={!dsp.compressEnabled} />
+                <SliderField label="Threshold" value={dsp.compressThresholdDb} min={-60} max={-12} step={0.5} defaultValue={-24} format={(v) => `${v} dB`} onChange={(v) => setDsp({ compressThresholdDb: v })} disabled={!dsp.compressEnabled} />
+                <SliderField label="Ratio" value={dsp.compressRatio} min={1} max={10} step={0.1} defaultValue={2.5} format={(v) => `${v}:1`} onChange={(v) => setDsp({ compressRatio: v })} disabled={!dsp.compressEnabled} />
               </div>
             </div>
           </motion.div>
@@ -525,7 +527,6 @@ export function StitchDspControls({
     </div>
   )
 }
-
 function SliderField({
   label,
   value,
@@ -535,6 +536,7 @@ function SliderField({
   format,
   onChange,
   disabled,
+  defaultValue,
 }: {
   label: string
   value: number
@@ -544,14 +546,64 @@ function SliderField({
   format: (v: number) => string
   onChange: (v: number) => void
   disabled?: boolean
+  /** N1 double-click reset target (the plan-start value from store.ts). */
+  defaultValue?: number
 }) {
+  const {
+    editing,
+    draftText,
+    setDraftText,
+    commitEdit,
+    displayValue,
+    beginScrub,
+    handleKeyDown,
+    handleDoubleClick,
+  } = useDragScrubValue({
+    value,
+    min,
+    max,
+    step,
+    onChange,
+    dragScale: (max - min) / 160,
+    dragThreshold: 2,
+    shiftStep: step * 5,
+    parse: parseNumericText,
+    defaultValue,
+    disabled,
+  })
   return (
-    <div className="flex flex-col gap-1">
+    <div
+      className={cn('flex flex-col gap-1 select-none', disabled && 'opacity-50')}
+      onPointerDown={(e) => { if (!(e.target as HTMLElement).closest('input')) beginScrub(e.nativeEvent, e.currentTarget, { openEditorOnRelease: true }) }}
+      onDoubleClick={handleDoubleClick}
+    >
       <div className="flex items-center justify-between">
         <span className="text-[11px] text-muted-foreground">{label}</span>
-        <span className="text-[11px] font-mono tabular-nums text-foreground">{format(value)}</span>
+        {editing ? (
+          <input
+            type="text"
+            inputMode="decimal"
+            value={draftText}
+            aria-label={label}
+            onChange={(event) => setDraftText(event.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={handleKeyDown}
+            className="w-16 rounded border border-cyan-500/40 bg-muted/40 px-1 text-right text-[11px] font-mono tabular-nums text-foreground outline-none"
+            autoFocus
+          />
+        ) : (
+          <span className="text-[11px] font-mono tabular-nums text-foreground">
+            {format(displayValue)}
+          </span>
+        )}
       </div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} disabled={disabled} className="h-1.5 w-full cursor-pointer accent-cyan-500" />
+      <div
+        className="h-1.5 w-full rounded bg-muted"
+        aria-hidden
+        style={{
+          background: `linear-gradient(to right, var(--color-cyan-500) ${((displayValue - min) / (max - min)) * 100}%, var(--color-muted) ${((displayValue - min) / (max - min)) * 100}%)`,
+        }}
+      />
     </div>
   )
 }
