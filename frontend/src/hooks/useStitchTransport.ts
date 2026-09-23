@@ -60,9 +60,21 @@ export function useStitchTransport(src: string | null): StitchTransport {
   const [durationSec, setDurationSec] = useState(0)
   const [activeRangeId, setActiveRangeId] = useState<string | null>(null)
   const [loopRange, setLoopRangeState] = useState<{ startSec: number; endSec: number } | null>(null)
+  const durationSecRef = useRef(0)
+  durationSecRef.current = durationSec
+  const activeRangeIdRef = useRef<string | null>(null)
+  activeRangeIdRef.current = activeRangeId
   const loopRef = useRef(loopRange)
   loopRef.current = loopRange
   const rangeEndRef = useRef<number | null>(null)
+  // Playback survives a preview swap. A re-render replaces the element's src (the plan really
+  // did change -- a gap suggestion landing, an analysis-driven edit), which empties the
+  // element: it stops and rewinds to zero. The transport restores the equivalent position
+  // instead, carried as a *fraction* of the duration because the new render can be slightly
+  // longer or shorter than the old one.
+  const lastFractionRef = useRef(0)
+  const isPlayingRef = useRef(false)
+  const resumeRef = useRef<{ fraction: number; play: boolean; rangeId: string | null; rangeEndFraction: number | null } | null>(null)
   // Playback focus (N6): this element is one audio owner among several; whoever starts
   // sounding takes the focus and stops the previous owner.
   const focusId = useId()
@@ -73,6 +85,17 @@ export function useStitchTransport(src: string | null): StitchTransport {
   // node's attribute rather than remounting it); playback/range state from the previous
   // preview no longer applies to the new audio.
   useEffect(() => {
+    // Read the outgoing playback state from refs: by the time this effect runs the element has
+    // already been emptied by the src change, so its own currentTime is no longer usable.
+    const wasPlaying = isPlayingRef.current
+    const fraction = lastFractionRef.current
+    const rangeId = activeRangeIdRef.current
+    const rangeEndFraction = rangeEndRef.current != null && durationSecRef.current > 0
+      ? rangeEndRef.current / durationSecRef.current
+      : null
+    resumeRef.current = fraction > 0 || wasPlaying || rangeId
+      ? { fraction, play: wasPlaying, rangeId, rangeEndFraction }
+      : null
     setIsPlaying(false)
     setActiveRangeId(null)
     rangeEndRef.current = null
@@ -82,19 +105,38 @@ export function useStitchTransport(src: string | null): StitchTransport {
   useEffect(() => {
     const audio = elRef.current
     if (!audio) return
-    const onLoadedMetadata = () => setDurationSec(isFinite(audio.duration) ? audio.duration : 0)
+    const onLoadedMetadata = () => {
+      const duration = isFinite(audio.duration) ? audio.duration : 0
+      setDurationSec(duration)
+      const resume = resumeRef.current
+      resumeRef.current = null
+      if (!resume || duration <= 0) return
+      audio.currentTime = Math.max(0, Math.min(duration, resume.fraction * duration))
+      lastFractionRef.current = duration > 0 ? audio.currentTime / duration : 0
+      if (resume.rangeId != null && resume.rangeEndFraction != null) {
+        rangeEndRef.current = resume.rangeEndFraction * duration
+        setActiveRangeId(resume.rangeId)
+      }
+      // One-shot notify so a paused playhead lands at the carried position immediately.
+      for (const cb of subscribersRef.current) cb(audio.currentTime)
+      if (resume.play) audio.play().catch(() => {})
+    }
     const onPlay = () => {
       setIsPlaying(true)
+      isPlayingRef.current = true
       // One claim per owner, at the single place a transport can start sounding (arrangement
       // playback, a bounded clip range, or a programmatic play) -- see lib/playbackFocus.ts.
       claimPlayback(focusId, () => audio.pause())
     }
     const onPause = () => {
       setIsPlaying(false)
+      isPlayingRef.current = false
       releasePlayback(focusId)
     }
     const onEnded = () => {
       setIsPlaying(false)
+      isPlayingRef.current = false
+      lastFractionRef.current = 0
       setActiveRangeId(null)
       rangeEndRef.current = null
       releasePlayback(focusId)
@@ -146,6 +188,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
         // Clamp at the exact audio duration: on the final frames before 'ended', currentTime
         // can overshoot it, which would push the playhead past the exact-duration tick.
         const t = durationSec > 0 ? Math.min(audio.currentTime, durationSec) : audio.currentTime
+        lastFractionRef.current = durationSec > 0 ? t / durationSec : 0
         for (const cb of subscribersRef.current) cb(t)
       }
       rafRef.current = requestAnimationFrame(tick)
@@ -208,6 +251,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
     const audio = elRef.current
     if (!audio) return
     audio.currentTime = Math.max(0, sec)
+    lastFractionRef.current = durationSecRef.current > 0 ? audio.currentTime / durationSecRef.current : 0
     // One-shot notify so a paused playhead moves immediately instead of waiting for the RAF
     // loop, which only runs while playing.
     for (const cb of subscribersRef.current) cb(audio.currentTime)
@@ -226,6 +270,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
       return
     }
     audio.currentTime = Math.max(0, startSec)
+    lastFractionRef.current = durationSecRef.current > 0 ? audio.currentTime / durationSecRef.current : 0
     rangeEndRef.current = endSec
     setActiveRangeId(id)
     audio.play().catch(() => {})
