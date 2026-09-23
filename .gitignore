@@ -266,3 +266,13 @@ CLAUDE.local.md
 .mcp.json
 .opencode/
 .serena/
+.codegraph
+
+# Local brand exploration; only the selected Signal Crucible finalist is published.
+/assets/brand/concepts/persona-forge/hero-options/
+/assets/brand/concepts/persona-forge/social-ready/
+/assets/brand/concepts/persona-forge/avatar-options/
+/assets/brand/concepts/persona-forge/mark-drafts/
+/assets/brand/concepts/persona-forge/mark-final/
+/assets/brand/concepts/persona-forge/hero-v2/masters/
+/assets/brand/concepts/persona-forge/hero-v2/contact-sheet.png

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-labelledby="title">
+  <title id="title">Persona Forge Signal Crucible favicon</title>
+  <defs><linearGradient id="a" x1="12" y1="9" x2="53" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#C7D1FF"/><stop offset=".42" stop-color="#3D4770"/><stop offset="1" stop-color="#080B14"/></linearGradient><linearGradient id="s" x1="15" y1="32" x2="50" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#47BFFF"/><stop offset=".55" stop-color="#9B6BFF"/><stop offset="1" stop-color="#C9F1FF"/></linearGradient></defs>
+  <rect width="64" height="64" rx="14" fill="#080B14"/>
+  <g stroke="url(#a)" stroke-width="8"><path d="M29 8A25 25 0 0 1 51 21"/><path d="M56 28A25 25 0 0 1 50 45"/><path d="M43 54A25 25 0 0 1 24 55"/><path d="M12 47A25 25 0 0 1 8 34"/></g>
+  <path d="M15 32C21 27 26 37 32 32C38 27 40 37 49 32" stroke="url(#s)" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="32" cy="32" r="3" fill="#FFBE55"/>
+</svg>

@@ -1,34 +1,29 @@
-// SCENARIO INTENT: B-P0 brand board (D7). Shows the three original mark drafts beside the
-// current favicon (the stock Vite scaffold logo) at 150/64/32/16 px on dark and light, as the
-// sidebar lockup and a browser tab, then shows the Option E hero art in its sanctioned places
-// (README/social banner, startup state). Plan: luminous_instrument_redesign.md "P0".
+// SCENARIO INTENT: Signal Crucible brand board. Shows the selected SVG set at
+// production sizes and the selected hero family in social, startup, and avatar contexts.
+// Plan: luminous_instrument_redesign.md "P0" and owner D7 refinement.
 import { captureShot } from '../../harness/shot.mjs';
 import { brandContextHtml, brandMarksHtml, dataUri, repoPath, showBoard } from '../../lookdev/pages.mjs';
 
 const key = 'lookdev-brand';
 export const LOOKDEV_BRAND_OUTPUTS = [`${key}--neutral--marks.png`, `${key}--neutral--context.png`];
-
-const DRAFTS = 'assets/brand/concepts/persona-forge/mark-drafts';
+const FINAL = 'assets/brand/concepts/persona-forge/hero-v2/finalists/signal-crucible';
 
 export default async function ({ page }) {
     const svg = (path) => dataUri(repoPath(path), 'image/svg+xml');
-    // D7 = M-b (CP0b, 2026-09-23). The shipping set uses mark.svg at >= 48 px and
-    // mark-small.svg at <= 32 px (sidebar tile glyph, favicon); the draft stays for reference.
-    const FINAL = 'assets/brand/concepts/persona-forge/mark-final';
     const marks = [
-        { name: 'Current — stock Vite favicon', uri: svg('frontend/public/favicon.svg'), flag: true },
-        { name: 'Final · shipping set (mark + mark-small)', uri: svg(`${FINAL}/mark.svg`), smallUri: svg(`${FINAL}/mark-small.svg`) },
-        { name: 'Final · mark-small.svg only', uri: svg(`${FINAL}/mark-small.svg`), splash: false },
-        { name: 'M-b draft (reference)', uri: svg(`${DRAFTS}/m-b-ring-spark.svg`), splash: false },
+        { name: 'Current · stock Vite favicon', uri: svg('frontend/public/favicon.svg'), flag: true },
+        { name: 'Signal Crucible · full + compact', uri: svg(`${FINAL}/svg/mark.svg`), smallUri: svg(`${FINAL}/svg/mark-small.svg`) },
+        { name: 'Signal Crucible · compact mark', uri: svg(`${FINAL}/svg/mark-small.svg`), splash: false },
+        { name: 'Signal Crucible · favicon', uri: svg(`${FINAL}/svg/favicon.svg`), splash: false },
     ];
 
     await showBoard(page, brandMarksHtml(marks));
-    // INTENT: Every mark draft at every size, dark and light, sidebar lockup and browser tab.
+    // INTENT: Verify full, compact, and favicon geometry on light/dark chrome and at small sizes.
     await captureShot(page, `${key}-marks.png`, { fullPage: false, scrollToSelector: '#board' });
 
-    const hero = dataUri(repoPath('assets/brand/concepts/persona-forge/social-ready/persona-forge-option-e-social.jpg'), 'image/jpeg');
-    const avatar = dataUri(repoPath('assets/brand/concepts/persona-forge/avatar-options/persona-forge-option-e-avatar.png'), 'image/png');
+    const hero = dataUri(repoPath(`${FINAL}/github-social.jpg`), 'image/jpeg');
+    const avatar = dataUri(repoPath(`${FINAL}/avatar-study.png`), 'image/png');
     await showBoard(page, brandContextHtml(marks, hero, avatar));
-    // INTENT: Hero art in its sanctioned places — README/social banner and the startup state per mark.
+    // INTENT: Verify selected artwork in social, startup, and square contexts.
     await captureShot(page, `${key}-context.png`, { fullPage: false, scrollToSelector: '#board' });
 }

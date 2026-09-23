@@ -1,64 +1,61 @@
 # Persona Forge branding
 
-This directory is the source-of-truth home for Persona Forge visual identity
-assets and review material. Persona Forge is the voice design and voice-cloning
-studio: it turns a voice identity into designed, editable, synthesized speech
-through Voice Design, OmniVoice auditioning, Stitch Studio, prosody controls,
-voice libraries, and an OpenAI-compatible TTS API.
+This directory holds the Git-visible Persona Forge identity. Persona Forge
+turns voice identities into designed, editable, synthesized speech.
 
-## Existing identity
+## Selected identity
 
-The canonical mark is the purple-to-cyan lightning bolt already used by the
-frontend favicon. It is preserved unchanged at
-`exports/persona-forge-mark.svg` and remains the mark to use for small square
-repo and organization icons until a replacement is explicitly selected.
+**Signal Crucible** is the owner-selected direction. Multiple blue and violet
+voice fields converge through open Obsidian arcs at one amber calibration
+point. One coherent pale waveform leaves the Crucible.
 
-Core palette:
+The identity communicates voice transformation and precision audio tooling. It
+does not use lightning, microphones, human profiles, or generic AI symbols.
 
-- Violet: `#863bff`
-- Electric purple: `#7e14ff`
-- Cyan: `#47bfff`
-- Pale lavender: `#ede6ff`
-- Midnight indigo / near-black backgrounds
+Core colors:
 
-The visual language pairs the bolt's decisive shape with waveform ribbons,
-voiceprints, timelines, and precise studio-like synthesis. The goal is to make
-the product legible as voice tooling rather than generic music or microphone
-software.
+- Obsidian: `#080B14`
+- Electric blue: `#47BFFF`
+- Violet: `#9B6BFF`
+- Restrained magenta: `#E853FF`
+- Amber calibration: `#FFBE55`
+- Pale signal: `#C9F1FF`
 
-## Asset layout
+## Published assets
 
 ```text
 assets/brand/
 ├── exports/
-│   └── persona-forge-mark.svg       canonical existing favicon/mark
-└── concepts/persona-forge/
-    ├── hero-options/                full-resolution concept artwork
-    ├── social-ready/                1280×640 JPEG previews, under 1 MB each
-    └── avatar-options/              1024×1024 square crops for icon review
+│   └── persona-forge-mark.svg
+└── concepts/persona-forge/hero-v2/finalists/signal-crucible/
+    ├── app-hero.png
+    ├── startup-field.png
+    ├── github-social.jpg
+    ├── square-social.png
+    ├── avatar-study.png
+    └── svg/
+        ├── mark.svg
+        ├── mark-small.svg
+        ├── favicon.svg
+        └── lockup.svg
 ```
 
-Options A–E are intentionally retained together for review. The hero PNGs are
-the source concepts; the JPEGs are derived upload candidates and should be used
-for repository social previews, not as logo replacements. The square crops are
-visual tests for how the artwork survives a small icon treatment. They are
-review material, not a final mark system.
+Use `github-social.jpg` for the GitHub repository social preview. It is
+1280×640 and below GitHub's 1 MB limit.
 
-The social-ready files use a controlled center crop only along the vertical
-axis to reach GitHub's 2:1 preview shape. No text is baked into the artwork, so
-the images can be reused in repository previews, project pages, or other
-product-facing surfaces without creating a false wordmark.
+Use `app-hero.png` only on non-operational surfaces such as documentation and
+onboarding. Use `startup-field.png` behind startup status. Never put full hero
+art behind working controls.
 
-## Selection guidance
+The SVG set is concept-stage until the B-P6 optical gate verifies it at
+16/24/32/48 px on light and dark backgrounds. Until that gate passes, it does
+not replace production favicon files or `exports/persona-forge-mark.svg`.
 
-Prefer the existing SVG bolt for favicon, repo-avatar, and other small-square
-uses. Select one of the hero concepts for a social preview or landing-page
-surface based on the desired emphasis:
+## Local exploration assets
 
-- A–C explore waveform, voiceprint, and multi-persona studio directions.
-- D makes the existing bolt-to-voice relationship the clearest.
-- E most directly communicates voice identities entering a synthesis workflow.
+Rejected and superseded concepts remain local for provenance but are ignored
+by Git. This includes prior hero, social, avatar, mark-draft, mark-final,
+multi-direction master, and contact-sheet directories.
 
-Before promoting any concept to a permanent product surface, check it at the
-actual rendered size, in both light and dark surrounding UI, and against the
-upload service's current dimensions and file-size limits.
+Do not add those exploration files back to Git. Publish only the selected
+Signal Crucible finalist family.

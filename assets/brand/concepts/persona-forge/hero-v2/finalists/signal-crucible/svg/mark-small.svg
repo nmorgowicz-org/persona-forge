@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-labelledby="title">
+  <title id="title">Persona Forge Signal Crucible small mark</title>
+  <defs>
+    <linearGradient id="arc" x1="12" y1="10" x2="55" y2="56" gradientUnits="userSpaceOnUse"><stop stop-color="#B5C1E7"/><stop offset=".38" stop-color="#343D5C"/><stop offset="1" stop-color="#090C15"/></linearGradient>
+    <linearGradient id="wave" x1="10" y1="32" x2="54" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#47BFFF"/><stop offset=".5" stop-color="#9B6BFF"/><stop offset="1" stop-color="#C9F1FF"/></linearGradient>
+    <filter id="g" x="-60%" y="-80%" width="220%" height="260%"><feGaussianBlur stdDeviation="1.15" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#080B14"/>
+  <g stroke="url(#arc)" stroke-width="7" stroke-linecap="butt">
+    <path d="M29 8A25 25 0 0 1 50 20"/>
+    <path d="M56 27A25 25 0 0 1 51 44"/>
+    <path d="M44 53A25 25 0 0 1 25 55"/>
+    <path d="M13 48A25 25 0 0 1 8 34"/>
+  </g>
+  <path d="M10 32C17 26 23 37 29 32C35 27 36 37 42 32C47 28 48 35 55 32" stroke="url(#wave)" stroke-width="2.5" stroke-linecap="round" filter="url(#g)"/>
+  <circle cx="32" cy="32" r="2.5" fill="#FFBE55"/>
+</svg>

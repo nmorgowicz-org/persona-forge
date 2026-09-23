@@ -1,10 +1,10 @@
 # Luminous Instrument — Presentation Overhaul
 
 Date: 2026-09-23 (revised same day after a code-truth audit, §"Baseline truth audit")
-Status: **ACCEPTED FOR EXECUTION** — every decision closed at CP0a/CP0b
-(2026-09-23): D1 **Obsidian**, D7 **ring + spark** (final assets in
-`assets/brand/concepts/persona-forge/mark-final/`), D9 **S-c hybrid** signal
-palette. Execution order, gates, and the step-by-step phase cards live in the
+Status: **ACCEPTED FOR EXECUTION** — every decision closed at CP0a/CP0b and
+the owner-selected Signal Crucible refinement: D1 **Obsidian**, D7 **Signal
+Crucible**, D9 **S-c hybrid** signal palette.
+Execution order, gates, and the step-by-step phase cards live in the
 runbook `docs/plans/20260923-premium_ux_execution.md` and
 `docs/plans/20260923-premium_ux_phase_cards.md`.
 Branch: `feat/premium-audio-plugin-ux-20260923` (same branch as the interaction
@@ -72,7 +72,7 @@ Every workstream below cites these. Line numbers are at `753da87`.
 | A8 | **Neutrals are stock shadcn achromatic greys** (`oklch(L 0 0)`); only `--surface-1` carries a tint (hue 285). | `index.css:161-201`, `42`, `184` |
 | A9 | **Brand CTA is hard-coded cyan in all four accent themes** (`--brand-from/to/glow`), and the signal palette is a separate fixed cyan→magenta — two unrelated "brand" colors plus the theme accent, with no doctrine. | `index.css:38-40`; `lib/waveform.ts` `waveformBarColor` |
 | A10 | **Radius is ad hoc and generic**: 38× `rounded-lg`, 29× `rounded-xl`, 2× `rounded-2xl` across components; `--radius` is the shadcn default `0.625rem`. | `grep` count 2026-09-23; `index.css:51` |
-| A11 | **There is no Persona Forge mark in the product.** The sidebar tile is a stock lucide `AudioLines` icon, and `assets/brand/exports/persona-forge-mark.svg` (also `frontend/public/favicon.svg`, `src/persona_forge/static/favicon.svg`) is **byte-identical to the stock Vite scaffold favicon**: same path data and `#863bff` glow ellipses as `vitejs/vite` `packages/create-vite/template-react-ts/public/favicon.svg`. The only original identity is the Option E hero art (`assets/brand/concepts/persona-forge/{hero-options,social-ready,avatar-options}/…option-e…`). | `components/AppShell.tsx:371-372`; md5 `7e840862…` shared by all three repo copies; upstream fetch 2026-09-23 |
+| A11 | **There is no Persona Forge mark in the product.** The sidebar tile is a stock lucide `AudioLines` icon, and `assets/brand/exports/persona-forge-mark.svg` (also `frontend/public/favicon.svg`, `src/persona_forge/static/favicon.svg`) is **byte-identical to the stock Vite scaffold favicon**. The owner rejected the interim lightning-centered concepts and selected the Signal Crucible family under `assets/brand/concepts/persona-forge/hero-v2/finalists/signal-crucible/`. | `components/AppShell.tsx:371-372`; md5 `7e840862…` shared by all three repo copies; owner selection 2026-09-23 |
 
 Nothing above needs a backend change. A1–A6 are the "honest signal" gap;
 A8–A11 are the "material" gap.
@@ -96,13 +96,13 @@ A8–A11 are the "material" gap.
   playhead. Signal never re-skins with the theme — like a plugin whose
   analyzer stays readable under any skin. Semantic status tokens
   (`DESIGN_SYSTEM.md`) stay a third, separate role.
-- **Brand is the north star, not wallpaper.** The Option E hero (dark indigo
-  field, violet→electric-blue ribbons converging on a glowing ring, a luminous
-  waveform leaving it) is what the app should *feel* like. The UI borrows its
-  palette, its glow physics, and its ring/wave motif; it never pastes the
-  artwork behind working surfaces (legibility). The artwork appears only
-  where nothing is being operated: startup state (P9), empty states (P9),
-  README/social (P11).
+- **Brand is the north star, not wallpaper.** Signal Crucible is the selected
+  identity: multiple blue/violet voice fields converge through open Obsidian
+  arcs at one amber calibration line and leave as one coherent pale waveform.
+  The UI borrows this transformation grammar, glow physics, and material
+  restraint. Full artwork appears only where nothing is being operated:
+  startup state (P9), empty states (P9), README, and social media (P11).
+  Never place the artwork behind working controls.
 - **Draw at display rate without React.** Anything that moves per frame
   (playhead, meters, scrolling spectrogram cursor) draws imperatively into a
   canvas from a RAF loop reading `audio.currentTime`. No React commit per
@@ -166,21 +166,18 @@ brand-aligned ramp taken from the hero's ribbons (electric blue → violet →
 pale lavender `#ede6ff` at peaks). Signal stays fixed across accents either
 way (doctrine); D9 only chooses which fixed palette.
 
-**Brand mark drafts (decision D7).** The current "mark" is the Vite favicon
-(audit A11), so it cannot stay. P0 drafts three original SVG marks derived
-from Option E, each shown at 16/32/64/512 px, on the sidebar tile, as the
-favicon, and on light and dark backgrounds:
+**Brand direction (decision D7).** The current product mark is the Vite
+favicon and cannot stay. P0 originally tested three ring-based marks and an
+Option E lightning hero. The owner later rejected the lightning-centered
+identity and selected **Signal Crucible**. Its concept-stage SVG set is:
 
-- **M-a Ring** — the hero's segmented forge ring with a single waveform
-  crossing its center line (no bolt).
-- **M-b Ring + spark** — the ring with an original angular spark in the
-  center (a new shape, not the Vite bolt path).
-- **M-c Waveform monogram** — a "P" or "PF" drawn from one continuous
-  waveform stroke, for the smallest sizes where a ring turns to mush.
+- `hero-v2/finalists/signal-crucible/svg/mark.svg` for 48 px and above.
+- `hero-v2/finalists/signal-crucible/svg/mark-small.svg` for compact UI use.
+- `hero-v2/finalists/signal-crucible/svg/favicon.svg` for favicon/app-icon use.
+- `hero-v2/finalists/signal-crucible/svg/lockup.svg` for horizontal brand use.
 
-Plus a wordmark lockup ("Persona Forge", Geist, tracked) for each. If none
-lands, the owner may commission a designer instead; P6 wires whatever is
-picked.
+The identity uses open Obsidian arcs, converging voice fields, one coherent
+output waveform, and an amber calibration point. It contains no lightning.
 
 **Acceptance:** 4 looks × 4 surfaces × 2 themes (violet, amber) shot on the
 real app via token injection; per-look and accent-check contact sheets; the
@@ -189,8 +186,8 @@ records D1, D7, D9 in the runbook ledger (CP0b).
 **Files:** `tests/ui/capture/lookdev/{common,graphite,obsidian,machined,forge}.css`,
 `tests/ui/capture/lookdev/pages.mjs`, scenarios
 `tests/ui/capture/scenarios/lookdev/{board,brand}.mjs` (registered as
-`lookdev-board` / `lookdev-brand`), draft marks under
-`assets/brand/concepts/persona-forge/mark-drafts/`. No `frontend/src` edits.
+`lookdev-board` / `lookdev-brand`). The selected public assets live under
+`assets/brand/concepts/persona-forge/hero-v2/finalists/signal-crucible/`.
 Run: `node tests/ui/capture/index.mjs --scenario lookdev-board --source fake`
 (and `lookdev-brand`); outputs land in `docs/screenshots/artifacts/lookdev/`.
 Commit: `test(ui): look-dev and brand-mark capture boards`.
@@ -391,17 +388,15 @@ Commit: `feat(ui): knob and fader instrument controls`.
   `data-help` string shows its explanation in `ActivityStatusBar` (the
   Ableton/FabFilter help-strip idiom). This is also where Plan A V2's genuine
   warnings (e.g. the high-pitch tinniness note) live, instead of paragraphs.
-- **Brand mark (D7 = ring + spark, final assets ready):** the design is done;
-  this phase only wires files. Copy
-  `assets/brand/concepts/persona-forge/mark-final/mark-small.svg` over
-  `frontend/public/favicon.svg` and `src/persona_forge/static/favicon.svg`;
-  copy `mark-final/mark.svg` over `assets/brand/exports/persona-forge-mark.svg`.
-  In `AppShell.tsx:371-372` replace the `AudioLines` gradient tile with
-  `<img src="/favicon.svg">` at 24 px inside the existing 32 px tile (dark
-  tile background, as on the brand board). Rewrite the "Existing identity"
-  section of `assets/brand/README.md`: the old file was the stock Vite
-  favicon; the canonical mark is now the ring + spark (`mark.svg` ≥ 48 px,
-  `mark-small.svg` ≤ 32 px).
+- **Brand mark (D7 = Signal Crucible):** copy
+  `assets/brand/concepts/persona-forge/hero-v2/finalists/signal-crucible/svg/favicon.svg`
+  over `frontend/public/favicon.svg` and
+  `src/persona_forge/static/favicon.svg`; copy the adjacent `mark.svg` over
+  `assets/brand/exports/persona-forge-mark.svg`. In `AppShell.tsx:371-372`,
+  replace the `AudioLines` gradient tile with `<img src="/favicon.svg">` at
+  24 px inside the existing 32 px tile. Rewrite `assets/brand/README.md` so
+  Signal Crucible is the canonical identity. Before wiring, verify the SVGs
+  at 16/24/32/48 px on light and dark backgrounds without relying on glow.
 
 **Acceptance:** one header, banner, and status grammar across every page;
 info view announces via the same live region as Plan A N3; shell captures at
@@ -445,11 +440,12 @@ wherever the backend reports it (Speak already polls
 `getGenerateJobProgress` with `progress_pct` + ETA — surface a real readout),
 skeletons in the material recipe (these also replace P2's former fake
 placeholder), `role="status"`/`progressbar` semantics. Absorbs Plan A N3/N4.
-A designed startup state for the initial-load 503 window (the app's
-"splash"): `mark-final/mark.svg` at 72 px over a cropped, dimmed Option E field (`social-ready/persona-forge-option-e-social.jpg`, as on the `lookdev-brand` context board) with a
-determinate or stepped model-load readout. Empty states (no voices, no
-segments, no project) use the ring/wave motif as a quiet line illustration
-with a single next action — never the full artwork behind controls.
+A designed startup state for the initial-load 503 window uses the Signal
+Crucible `svg/mark.svg` at 72 px over a dimmed copy of
+`finalists/signal-crucible/startup-field.png`, with a determinate or stepped
+model-load readout. Empty states use the open-arc and converging-wave motif as
+a quiet line illustration with one next action. Never put full artwork behind
+controls.
 
 **Acceptance:** every async surface has all four states; progress
 determinate wherever measured; startup state captured.
@@ -478,9 +474,10 @@ The **single** publishing re-shoot. Docs describe the product P0–P10 built.
   `omnivoice-audition` candidates) **plus** both README GIFs
   (`omnivoice-audition-gif`, `design-to-stitch-gif`) via the existing capture
   scenarios, and one **new** GIF showing the signal layer (meter + playhead +
-  spectrogram toggle during playback). The README gains the Option E hero
-  (`social-ready/…option-e-social.jpg`, already 1280×640 and < 1 MB) as its
-  top banner, and the same file is set as the GitHub social preview.
+  spectrogram toggle during playback). The README gains the selected Signal
+  Crucible `app-hero.png` as its top banner. The optimized
+  `github-social.jpg` (1280×640 and below 1 MB) becomes the GitHub social
+  preview.
 - **Illustrate the reference docs:** captioned screenshots per major flow
   (Speak → Voice Design → Audition → Stitch → Voice Edit) in
   `docs/architecture/PERSONA_FORGE_STUDIO.md`, `VOICE_DESIGN.md`,
@@ -506,10 +503,13 @@ Commit: `docs: refresh reference docs, walkthroughs, and published media`.
 
 1. Both plan ledgers and the runbook ledger complete — every executed phase
    PASS with its commit; every CP0 decision recorded.
-2. Move `20260922-premium_audio_plugin_ux.md`, this file, and
-   `20260923-premium_ux_execution.md` to `docs/archive/luminous-instrument/`
-   (convention: `docs/archive/stitch-studio/`), stamped with final hashes.
-   Active `docs/plans/` left clean.
+2. Move `20260922-premium_audio_plugin_ux.md`, this file,
+   `20260923-premium_ux_execution.md`,
+   `20260923-premium_ux_phase_cards.md`, and
+   `20260923-native_codex_hero_generation_handoff.md` to
+   `docs/archive/luminous-instrument/` (convention:
+   `docs/archive/stitch-studio/`), stamped with final hashes. Active
+   `docs/plans/` is left clean.
 3. Final preflight + `git diff --check`; open the PR with the Release Please
    override block (AGENTS.md) — one entry per phase commit; PR body carries
    the scorecard and the capture before/after index.
@@ -529,7 +529,7 @@ consumes its tokens; P2 before P3/P4 — both consume its envelope and clock.
 
 | Phase | Gate result | Commit | Notes |
 | --- | --- | --- | --- |
-| P0 look-dev + brand board | PASS 2026-09-23 (38 + 2 outputs, receipts green; capture self-tests 15/15) | | D1 = Obsidian, D7 = ring + spark (mark-final/), D9 = S-c hybrid |
+| P0 look-dev + brand board | PASS 2026-09-23 (38 + 2 outputs, receipts green; capture self-tests 15/15) | | D1 = Obsidian, D7 refined to Signal Crucible, D9 = S-c hybrid |
 | P1 tokens | | | D3 = follow accent |
 | P2 waveform renderer | | | |
 | P3 spectrogram | | | D4 = accepted |

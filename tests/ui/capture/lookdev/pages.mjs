@@ -350,7 +350,7 @@ export function brandMarksHtml(marks) {
       <div style="display:flex;gap:8px">${tab(m, '#232135', '#e9e7f2')}${tab(m, '#e8e6ef', '#1c1a26')}</div>
     </div>`;
     return `<style>${BOARD_STYLE}</style><div id="board">
-    <div class="hd"><h1>D7 — Brand mark</h1><p>Original geometry derived from the Option E hero. The current favicon is the stock Vite scaffold logo and must be replaced (plan audit A11).</p></div>
+    <div class="hd"><h1>D7 — Brand mark</h1><p>Signal Crucible turns many voice fields into one coherent output. The current favicon is the stock Vite scaffold logo and must be replaced (plan audit A11).</p></div>
     <div style="display:grid;grid-template-columns:repeat(${marks.length},minmax(0,1fr));gap:14px">${marks.map(col).join('')}</div></div>`;
 }
 
@@ -370,7 +370,7 @@ export function brandContextHtml(marks, heroUri, avatarUri) {
     return `<style>${BOARD_STYLE}</style><div id="board">
     <div class="hd"><h1>D7 — Brand in context</h1><p>Hero art appears only where nothing is operated: README/social banner, startup state, empty states. Never behind working controls.</p></div>
     <div style="display:flex;gap:18px;align-items:flex-start">
-      <figure style="margin:0;display:flex;flex-direction:column;gap:4px"><figcaption class="lbl">README banner + GitHub social preview (option-e-social.jpg, 1280×640)</figcaption>
+      <figure style="margin:0;display:flex;flex-direction:column;gap:4px"><figcaption class="lbl">README banner + GitHub social preview (github-social.jpg, 1280×640, &lt;1 MB)</figcaption>
         <img src="${heroUri}" style="width:880px;height:440px;border-radius:10px;object-fit:cover"/></figure>
       <figure style="margin:0;display:flex;flex-direction:column;gap:4px"><figcaption class="lbl">Avatar crop (reference)</figcaption>
         <img src="${avatarUri}" style="width:300px;height:300px;border-radius:10px;object-fit:cover"/></figure>

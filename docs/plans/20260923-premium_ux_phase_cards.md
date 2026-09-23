@@ -602,8 +602,8 @@ components adding `data-help` strings; radius-class migration across
 **RED:**
 
 1. `frontend/public/favicon.svg` is byte-identical to
-   `assets/brand/concepts/persona-forge/mark-final/mark-small.svg` (read both
-   files in the spec with `fs`).
+   `assets/brand/concepts/persona-forge/hero-v2/finalists/signal-crucible/svg/favicon.svg`
+   (read both files in the spec with `fs`).
 2. The sidebar header renders an `<img>` whose src ends in `favicon.svg`
    (no `AudioLines` icon).
 3. Hovering a control with `data-help` puts that text into
@@ -612,8 +612,9 @@ components adding `data-help` strings; radius-class migration across
 4. The three banners share one component shape (same root test id pattern
    `data-testid="app-banner"` + `data-tone`).
 
-**GREEN:** B P6. Brand wiring is copy-only (B P6 "Brand mark" lists every
-file). Move A V2's high-pitch warning into `data-help`.
+**GREEN:** B P6. Brand wiring is copy-only after the Signal Crucible SVGs pass
+the required 16/24/32/48 px optical board. Move A V2's high-pitch warning into
+`data-help`.
 
 **Verify:** build; new spec + full suite; `python scripts/validate_repo.py`;
 captures at all four themes compared.
@@ -691,11 +692,11 @@ per-surface empty/working/error markup; startup state component; new
 3. Empty Stitch Studio / empty library show a designed empty state with one
    next-action button (`data-testid="empty-state-action"`).
 4. The initial-load 503 window shows `data-testid="startup-state"` with the
-   ring + spark mark.
+   Signal Crucible mark.
 
-**GREEN:** B P9 (splash per B P9 using `mark-final/mark.svg` and the Option E
-social JPEG, which must be copied into `frontend/public/` or imported; ask
-if unsure where static assets belong — stop condition 1).
+**GREEN:** B P9 uses the selected `svg/mark.svg` over a dimmed copy of
+`finalists/signal-crucible/startup-field.png`. Copy the raster into
+`frontend/public/` or import it; ask if static-asset placement is unclear.
 
 **Verify:** build; new spec + full suite; captures compared.
 
@@ -748,9 +749,9 @@ GIF scenario, registered in `tests/ui/capture/index.mjs`); ledgers.
    ones in `docs/screenshots/` (same filenames README already embeds).
 2. Add the signal GIF scenario (meter + playhead + spectrogram toggle during
    playback) and embed it in README.
-3. Add the Option E social JPEG as README's top banner; tell the owner to
-   set it as the GitHub social preview (repo settings — not an executor
-   action).
+3. Add Signal Crucible `app-hero.png` as README's top banner; tell the owner
+   to upload the optimized `github-social.jpg` as the GitHub social preview
+   (repo settings — not an executor action).
 4. Add captioned screenshots per flow to the docs B P11 lists; add a
    controls reference (knob/fader gestures, keymap, meter scale) to
    `docs/architecture/FRONTEND_OVERVIEW.md`.
@@ -774,8 +775,10 @@ every image README embeds exists and was regenerated this phase
 **Steps:**
 
 1. All ledgers complete (A §7, B "Phase ledger", R §7).
-2. `git mv` A, B, R, and this file into `docs/archive/luminous-instrument/`;
-   fix any links to them (`grep -rn "20260923-premium_ux\|20260922-premium_audio\|20260923-luminous" docs README.md`).
+2. Stamp final hashes, then `git mv` A, B, R, this file, and
+   `20260923-native_codex_hero_generation_handoff.md` into
+   `docs/archive/luminous-instrument/`; fix every inbound link to those five
+   documents.
 3. Preflight + `git diff --check`; commit; push.
 4. Draft the PR title and body (Conventional Commit title; Release Please
    override block with one line per phase commit; scorecard; before/after

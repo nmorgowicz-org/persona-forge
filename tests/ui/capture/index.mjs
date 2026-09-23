@@ -330,7 +330,7 @@ export const SCENARIOS = {
         runtime: 'neutral',
         source: 'fake',
         contract: {
-            intent: 'B-P0 brand board: mark drafts at every size and the Option E hero art in context.',
+            intent: 'Signal Crucible brand board: selected SVG set at production sizes and selected hero art in context.',
             expectedOutputs: LOOKDEV_BRAND_OUTPUTS,
         },
     },

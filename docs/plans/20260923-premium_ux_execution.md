@@ -167,7 +167,7 @@ candidate list.
 | D4 | Spectrogram view (B-P3) | accept / reject | Accept | **Accepted** |
 | D5 | Integrated loudness (LUFS) in B-P4 | accept / defer | Appetite call | **Accepted** — ships in B-P4 |
 | D6 | Info strip in the status bar (B-P6) | accept / reject | Accept | **Accepted** |
-| D7 | Brand mark | drafts M-a / M-b / M-c | Ring + spark | **M-b ring + spark** (CP0b). No designer: the final assets were produced and board-verified at CP0b — `assets/brand/concepts/persona-forge/mark-final/mark.svg` (≥ 48 px) and `mark-small.svg` (≤ 32 px, reads on light and dark chrome). B-P6 only wires files |
+| D7 | Brand identity | interim ring + spark / Signal Crucible | Signal Crucible | **Signal Crucible selected** after native Codex hero exploration. Public assets live under `assets/brand/concepts/persona-forge/hero-v2/finalists/signal-crucible/`; legacy concepts stay local and ignored. B-P6 wires the SVG set after its small-size optical gate |
 | D8 | Single look vs selectable skins | one look + 4 accents / 3 skins × 4 accents | One look | **One look + 4 accents** |
 | D9 | Signal palette | S-a current / S-b brand / S-c hybrid | Hybrid | **S-c hybrid** (CP0b): blue → violet → hot magenta → near-white, amber playhead, color by dBFS; exact values in B P1 "Signal constants" |
 | N1–N6 | A §8 interaction candidates | accept / reject each | Accept N1, N2, N6 | **Accepted N1, N2, N5, N6**; N3/N4 absorbed by B-P9 |
@@ -213,9 +213,11 @@ FAIL / N/A-with-reason. Owning phase in brackets.
 
 1. All three ledgers complete (A §7, B phase ledger, §7 below); every CP0
    decision recorded.
-2. Move A, B, **and this runbook** to `docs/archive/luminous-instrument/`
-   (convention: `docs/archive/stitch-studio/`), stamped with final hashes.
-   Active `docs/plans/` left clean.
+2. Move A, B, **this runbook**, the phase cards, and
+   `20260923-native_codex_hero_generation_handoff.md` to
+   `docs/archive/luminous-instrument/` (convention:
+   `docs/archive/stitch-studio/`), stamped with final hashes. Active
+   `docs/plans/` is left clean.
 3. Final preflight + `git diff --check`; open the **one** PR with the
    Release Please override block (AGENTS.md) — one entry per phase commit
    (`feat(ui):` per craft phase, `docs:` for P11, `test(ui):` for P0) — so
@@ -235,7 +237,7 @@ FAIL / N/A-with-reason. Owning phase in brackets.
 | CP0a N1–N6 | A | N1, N2, N5, N6 accepted; N3/N4 → B-P9 | — | |
 | CP0a M3–M5, T1–T3 | A | M3, M4, M5, T1, T2 accepted; T3 deferred | — | T2 = architectural sign-off |
 | CP0b D1 look | B | **Obsidian** 2026-09-23 | — | lookdev-board |
-| CP0b D7 brand mark | B | **ring + spark**; final assets in `mark-final/` 2026-09-23 | — | lookdev-brand |
+| CP0b D7 brand identity | B | **Signal Crucible**; lightning-centered identity rejected 2026-09-23 | — | selected finalist under `hero-v2/finalists/signal-crucible/` |
 | CP0b D9 signal palette | B | **S-c hybrid** 2026-09-23 | — | lookdev-board signal board |
 | B-P0 look-dev + brand board | B | PASS 2026-09-23 | abfe76e | + CP0b refinement commit |
 | A-0 baseline | A | | | |
