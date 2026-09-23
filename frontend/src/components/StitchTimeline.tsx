@@ -349,8 +349,11 @@ export const StitchTimeline = memo(function StitchTimeline({
     const index = clips.findIndex((c) => c.clipId === clipId)
     const range = index >= 0 ? clipRanges[index] : undefined
     if (!range) return
+    // Belt and braces with the card's disabled state: a range measured before the transport
+    // knows its duration would be a fraction of the clip, or nothing at all.
+    if (transport.durationSec <= 0) return
     playRange(clipId, (range.startMs * previewScale) / 1000, (range.endMs * previewScale) / 1000)
-  }, [playRange, clips, clipRanges, previewScale])
+  }, [playRange, clips, clipRanges, previewScale, transport.durationSec])
 
   // Keyboard shortcuts for playback, selection, reorder, removal, and trim nudging -- scoped
   // to this component's lifetime and unconditionally skipped whenever the event target is an
@@ -552,6 +555,7 @@ export const StitchTimeline = memo(function StitchTimeline({
                     isWidthClamped={isClipClamped}
                     isRangePlaying={isRangePlaying}
                     onPlayRange={handlePlayRange}
+                    rangePlayReady={transport.durationSec > 0}
                   />
                 </Reorder.Item>
               </motion.div>

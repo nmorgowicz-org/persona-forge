@@ -45,6 +45,10 @@ export interface StitchTransport {
   getCurrentTime(): number
 }
 
+/** Shortest bounded range worth playing. Anything below this is a clip whose duration is not
+ * known yet, not a range the user asked to hear. */
+const MIN_RANGE_SEC = 0.05
+
 export function useStitchTransport(src: string | null): StitchTransport {
   const elRef = useRef<HTMLAudioElement | null>(null)
   const [attachTick, setAttachTick] = useState(0)
@@ -211,7 +215,10 @@ export function useStitchTransport(src: string | null): StitchTransport {
 
   const playRange = useCallback((id: string, startSec: number, endSec: number) => {
     const audio = elRef.current
-    if (!audio) return
+    // No element yet (preview still mounting) or no span (a clip whose duration is not known
+    // yet): there is nothing to play. Refusing beats starting a range that ends on the next
+    // timeupdate, which is what a caller would otherwise hear as a click that did nothing.
+    if (!audio || !(endSec - startSec > MIN_RANGE_SEC)) return
     if (activeRangeId === id && !audio.paused) {
       audio.pause()
       setActiveRangeId(null)

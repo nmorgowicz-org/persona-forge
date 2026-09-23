@@ -166,6 +166,7 @@ export const StitchClipCard = memo(function StitchClipCard({
   isWidthClamped,
   isRangePlaying,
   onPlayRange,
+  rangePlayReady = true,
 }: {
   clip: StitchPlanClip
   onRemove: (clipId: string) => void
@@ -183,6 +184,9 @@ export const StitchClipCard = memo(function StitchClipCard({
    * The card supplies its own clipId at click time so the timeline can pass one stable
    * callback to every memoized card. */
   onPlayRange: (clipId: string) => void
+  /** False until the shared transport has an audio element that knows its duration: before
+   * that a range play would either silently do nothing or start a degenerate range. */
+  rangePlayReady?: boolean
 }) {
   const [peaks, setPeaks] = useState<number[] | null>(null)
   const [durMs, setDurMs] = useState<number | null>(null)
@@ -520,9 +524,9 @@ export const StitchClipCard = memo(function StitchClipCard({
             type="button"
             className="rounded p-0.5 text-muted-foreground hover:text-foreground"
             onClick={() => onPlayRange(clip.clipId)}
-            disabled={!clip.sourceAudioBase64}
+            disabled={!clip.sourceAudioBase64 || !rangePlayReady || clipEffectiveDurationMs(clip) <= 0}
             aria-label={isRangePlaying ? 'Pause clip playback' : 'Play clip playback'}
-            title="Listen to just this segment"
+            title={rangePlayReady ? 'Listen to just this segment' : 'Waiting for the preview to render'}
           >
             {isRangePlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
           </button>
