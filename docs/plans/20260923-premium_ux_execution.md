@@ -268,7 +268,7 @@ FAIL / N/A-with-reason. Owning phase in brackets.
 | CP0b D9 signal palette | B | **S-c hybrid** 2026-09-23 | — | lookdev-board signal board |
 | B-P0 look-dev + brand board | B | PASS 2026-09-23 | abfe76e | + CP0b refinement commit 7fc9f4e (Signal Crucible) |
 | Owner addendum: release version | R | **MAJOR (Y.0.0)** decided 2026-09-23 | — | semi-rebrand + UX overhaul; `feat(ui)!:` first override entry + `BREAKING CHANGE:` footer; verify release PR proposes Y.0.0, else `Release-As:` — §6 step 4 |
-| A-0 baseline | A | | | |
+| A-0 baseline | A | PASS 2026-09-23 | a542cc3 | Suite: 68 passed / 0 failed (2.1m, Chromium+fake model). All 11 scenarios captured on `--source fake` (speak-generate, hero-voice-design, prosody-adjustment, stitch-assembly, voice-edit, readiness-states, omnivoice-audition, omnivoice-audition-gif, design-to-stitch-gif, gap-editing, transport-playback, segment-browser-scale); before set in `docs/screenshots/artifacts/_gates/A-0/` (gitignored, local). Baseline behavior: zoom is button-only (×1.25 steps + Fit, no wheel, no cursor anchoring — `StitchTimeline.tsx:230-232`); scrub exists only in GapControl drag; no context menu anywhere in the frontend |
 | A-1 S1 drag-scrub + N1 + N2 | A | | | |
 | A-2 S2 zoom + hover | A | | | |
 | A-3 S3+S4 | A | | | |
