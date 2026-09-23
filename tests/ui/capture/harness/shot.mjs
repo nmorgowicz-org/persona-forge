@@ -29,7 +29,17 @@ export function gifFrameCount(ms) {
 export async function holdFor(recorder, page, ms) {
     const frames = gifFrameCount(ms);
     for (let i = 0; i < frames; i += 1) {
-        await recorder.snap(page);
+        // Frame 0 of every hold pays the full settle — the version poll resolves
+        // once and layout springs land — and doubles as the per-beat settle. Later
+        // frames of the same hold cannot change page-level state, so they use the
+        // cheap capped settle below instead of re-billing settle budgets that
+        // never expire on a permanently animating surface (a running playhead or
+        // spinner would have paid up to ~4s of waitForUiSettled budget per frame).
+        if (i === 0) {
+            await recorder.snap(page);
+        } else {
+            await recorder.snapSettled(page);
+        }
     }
 }
 
@@ -45,6 +55,26 @@ async function layoutSignature(page) {
         }
         return h;
     });
+}
+
+// Bounded geometry-only settle: element boxes hold still across `stableFrames`
+// consecutive samples. This is the condition ANY capture needs — version polling
+// and per-shape re-sampling are extras a per-frame GIF beat does not pay for.
+export async function waitForLayoutStable(page, { timeout = 2000, stableFrames = 3, intervalMs = 40 } = {}) {
+    const deadline = Date.now() + timeout;
+    let last = null;
+    let same = 0;
+    while (Date.now() < deadline) {
+        const signature = await layoutSignature(page).catch(() => null);
+        if (signature !== null && signature === last) {
+            same += 1;
+            if (same >= stableFrames - 1) return;
+        } else {
+            same = 0;
+        }
+        last = signature;
+        await sleep(intervalMs);
+    }
 }
 
 // Gate every shot on the two async states that were silently landing mid-flight:
@@ -70,20 +100,7 @@ export async function waitForUiSettled(page, { timeout = 2000, stableFrames = 3,
         await sleep(intervalMs);
     }
 
-    const deadline = Date.now() + timeout;
-    let last = null;
-    let same = 0;
-    while (Date.now() < deadline) {
-        const signature = await layoutSignature(page).catch(() => null);
-        if (signature !== null && signature === last) {
-            same += 1;
-            if (same >= stableFrames - 1) return;
-        } else {
-            same = 0;
-        }
-        last = signature;
-        await sleep(intervalMs);
-    }
+    await waitForLayoutStable(page, { timeout, stableFrames, intervalMs });
 }
 
 export async function captureShot(page, rawFilename, options = {}) {
@@ -199,6 +216,17 @@ export function createRecorder(prefix) {
         async snap(page) {
             const path = join(FRAME_DIR, `${prefix}_${String(i).padStart(3, '0')}.png`);
             await waitForUiSettled(page);
+            await page.screenshot({ path });
+            i += 1;
+        },
+        // Per-frame settle for GIF beats already inside a hold: geometry-only,
+        // hard-capped, no version poll. The sidebar version cannot change
+        // mid-scenario, and re-sampling full waitForUiSettled budgets per frame
+        // means a permanently animating surface bills every frame for settle
+        // budgets that never resolve. Bounded and non-throwing like the rest.
+        async snapSettled(page, { timeout = 500, stableFrames = 2, intervalMs = 120 } = {}) {
+            const path = join(FRAME_DIR, `${prefix}_${String(i).padStart(3, '0')}.png`);
+            await waitForLayoutStable(page, { timeout, stableFrames, intervalMs });
             await page.screenshot({ path });
             i += 1;
         },

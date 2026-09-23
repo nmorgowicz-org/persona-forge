@@ -122,6 +122,14 @@ answers) and for element geometry to hold still across consecutive samples (Fram
 springs, e.g. the engine selector's shared-layout highlight, otherwise land mid-flight). It is
 bounded and never throws, so a permanently animating page cannot hang a capture.
 
+Inside a hold (`holdFor`), frame 0 still pays `recorder.snap`'s full settle — but the *remaining*
+frames of the same hold use `recorder.snapSettled()`: geometry-only (no version poll, since the
+sidebar version cannot change mid-scenario) and hard-capped at 500ms. On a permanently animating
+surface (a running playhead, a spinner) a full `waitForUiSettled` budget never expires and would
+otherwise be re-billed by every frame of the hold. Do not use `snapSettled` for the first frame
+of a hold or for a standalone snap — page-level state can change there, and it needs the full
+settle.
+
 ### Fixture audio
 
 The fake tier fabricates *inference*, not audio. Serve the real fixture clips — reference voices
