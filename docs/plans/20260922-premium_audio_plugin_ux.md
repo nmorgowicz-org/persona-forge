@@ -164,12 +164,17 @@ not add one and do not reach for Vitest.
   present; no dependency change); wire actions to `StitchPlanSession` +
   region-edit callbacks. **Gate 5:** spec green; a keyboard-only path to the
   same actions exists.
-- **Phase 6+ (owner-gated):** M3–M5, T1–T3, and every N-candidate in §8 are
-  **not** auto-approved. Each is decided at runbook Checkpoint 0 — before
-  Phase 0 — so items that fold into Phases 1–5 (N1, N2 into Phase 1; N5 after
-  Phase 5; N6 alongside Phase 4) are known before those gates run. T2
-  additionally violates the standing no-undo constraint and cannot start on
-  a nod — it needs the recorded sign-off described in §6.
+- **Phase 6+ — decided at runbook CP0a (2026-09-23):** accepted N1 + N2
+  (fold into Phase 1), N6 (folds into Phase 4), N5 (folds into Phase 5), and
+  structural items as numbered phases: **Phase 6 T2 undo/redo** (owner's
+  selection is the recorded architectural sign-off for the no-undo
+  exception, §6), **Phase 7 M4 command palette**, **Phase 8 M5 A/B plan
+  snapshots**, **Phase 9 T1 shared transport**, and **Phase 10 M3 clip
+  inspector** (runs after presentation P4 — see runbook §2). **T3 deferred.**
+  Each keeps the same RED-before-GREEN gate; commit titles: `feat(ui): stitch
+  editor undo/redo`, `feat(ui): global command palette`, `feat(ui): A/B plan
+  snapshots`, `feat(ui): shared audio transport coordinator`, `feat(ui): clip
+  analysis inspector`.
 
 A failed gate reopens its phase; never compensate in a later phase. One
 Conventional Commit per phase (titles pre-assigned above). The whole arc
@@ -355,14 +360,21 @@ same coordinate-mapping work and completes the transport story.
 | Phase | Gate result | Commit | Notes |
 | --- | --- | --- | --- |
 | 0 baseline | | | |
-| 1 S1 drag-scrub | | | |
+| 1 S1 drag-scrub + N1 + N2 | | | |
 | 2 S2 zoom+hover | | | |
 | 3 S3+S4 waveform+grammar | | | |
-| 4 M1 loop brace | | | |
-| 5 M2 context menu | | | |
+| 4 M1 loop brace + N6 | | | |
+| 5 M2 context menu + N5 | | | |
+| 6 T2 undo/redo | | | |
+| 7 M4 command palette | | | |
+| 8 M5 A/B snapshots | | | |
+| 9 T1 shared transport | | | |
+| 10 M3 clip inspector | | | after presentation P4 |
 
-Owner decisions for every owner-gated item (M3–M5, T1–T3, N1–N6) are recorded
-here at runbook Checkpoint 0, in-date, before Phase 0.
+**Owner decisions (CP0a, 2026-09-23):** N1, N2, N5, N6 accepted; N3/N4
+absorbed by presentation P9; M3, M4, M5, T1, T2 accepted (T2 = recorded
+architectural sign-off for the no-undo exception); T3 deferred — revisit
+after merge.
 
 ---
 
@@ -474,8 +486,9 @@ not interrupt an active generation job (no job coupling at all).
 sounding (Playwright: start deck A, start deck B, assert A paused); no
 player's own contract changes.
 **Files:** new `lib/playbackFocus.ts`; one register/claim call in each of
-the five owners. **Size:** small. **Slot:** alongside Phase 4 (M1 touches
-`useStitchTransport`). Superseded by T1 if T1 is ever accepted.
+the five owners. **Size:** small. **Slot:** Phase 4. **T1 (accepted,
+Phase 9) grows this registry into the full coordinator** rather than
+replacing it, so N6 is not throwaway work.
 
 ---
 

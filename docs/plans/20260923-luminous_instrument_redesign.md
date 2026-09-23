@@ -69,7 +69,7 @@ Every workstream below cites these. Line numbers are at `753da87`.
 | A8 | **Neutrals are stock shadcn achromatic greys** (`oklch(L 0 0)`); only `--surface-1` carries a tint (hue 285). | `index.css:161-201`, `42`, `184` |
 | A9 | **Brand CTA is hard-coded cyan in all four accent themes** (`--brand-from/to/glow`), and the signal palette is a separate fixed cyan→magenta — two unrelated "brand" colors plus the theme accent, with no doctrine. | `index.css:38-40`; `lib/waveform.ts` `waveformBarColor` |
 | A10 | **Radius is ad hoc and generic**: 38× `rounded-lg`, 29× `rounded-xl`, 2× `rounded-2xl` across components; `--radius` is the shadcn default `0.625rem`. | `grep` count 2026-09-23; `index.css:51` |
-| A11 | **Brand mark is a stock icon** (lucide `AudioLines` in a gradient tile). | `components/AppShell.tsx:371-372` |
+| A11 | **There is no Persona Forge mark in the product.** The sidebar tile is a stock lucide `AudioLines` icon, and `assets/brand/exports/persona-forge-mark.svg` (also `frontend/public/favicon.svg`, `src/persona_forge/static/favicon.svg`) is **byte-identical to the stock Vite scaffold favicon**: same path data and `#863bff` glow ellipses as `vitejs/vite` `packages/create-vite/template-react-ts/public/favicon.svg`. The only original identity is the Option E hero art (`assets/brand/concepts/persona-forge/{hero-options,social-ready,avatar-options}/…option-e…`). | `components/AppShell.tsx:371-372`; md5 `7e840862…` shared by all three repo copies; upstream fetch 2026-09-23 |
 
 Nothing above needs a backend change. A1–A6 are the "honest signal" gap;
 A8–A11 are the "material" gap.
@@ -87,11 +87,19 @@ A8–A11 are the "material" gap.
   `createMediaElementSource`), so element playback, CORS, and the existing
   audio graph are untouched.
 - **Two color roles, never mixed.** *Accent* (theme `--primary`, 4 themes)
-  = selection, focus, chrome glow, CTA (subject to CP0 decision D3). *Signal*
-  (one fixed palette, the existing `waveformBarColor` cyan→magenta grammar)
-  = waveforms, meters, spectrogram, playhead. Signal never re-skins with the
-  theme — like a plugin whose analyzer stays readable under any skin.
-  Semantic status tokens (`DESIGN_SYSTEM.md`) stay a third, separate role.
+  = selection, focus, chrome glow, and the CTA (D3 = follow accent). *Signal*
+  (one fixed palette — today's `waveformBarColor` cyan→magenta, or the
+  brand-aligned variant picked at D9) = waveforms, meters, spectrogram,
+  playhead. Signal never re-skins with the theme — like a plugin whose
+  analyzer stays readable under any skin. Semantic status tokens
+  (`DESIGN_SYSTEM.md`) stay a third, separate role.
+- **Brand is the north star, not wallpaper.** The Option E hero (dark indigo
+  field, violet→electric-blue ribbons converging on a glowing ring, a luminous
+  waveform leaving it) is what the app should *feel* like. The UI borrows its
+  palette, its glow physics, and its ring/wave motif; it never pastes the
+  artwork behind working surfaces (legibility). The artwork appears only
+  where nothing is being operated: startup state (P9), empty states (P9),
+  README/social (P11).
 - **Draw at display rate without React.** Anything that moves per frame
   (playhead, meters, scrolling spectrogram cursor) draws imperatively into a
   canvas from a RAF loop reading `audio.currentTime`. No React commit per
@@ -121,7 +129,7 @@ A8–A11 are the "material" gap.
 
 ## Workstreams (one phase = one commit; the whole arc ships as one PR at P12)
 
-### P0 — Look-dev lock (zero production code; runs at runbook Checkpoint 0)
+### P0 — Look-dev + brand board (zero production code; closes runbook CP0b)
 
 Pick the look *before* eleven phases of code commit to it. A capture scenario
 injects candidate token CSS into the real app via `page.addStyleTag` (no
@@ -138,14 +146,43 @@ scale; see P1 for the token list):
   tighter 4/8 px radii, stronger glow. Closest to Xfer.
 - **L3 "Machined"** — warmer neutrals (hue ~60, chroma ≤ 0.01), visible bevel
   highlights and inset wells. Closest to UAD, without skeuomorphic textures.
+- **L4 "Forge"** (added after CP0a, derived from the Option E hero) — deep
+  indigo neutrals (hue ~275, chroma ~0.02–0.03, L 0.11–0.24), violet default
+  accent (already `DEFAULT_THEME = 'violet'` in `lib/theme.ts`), glow
+  strongest of the four, 6/10 px radii. The on-brand candidate; the board
+  must show it with the amber accent too, to prove the tinted neutrals don't
+  fight non-violet themes.
 
-**Acceptance:** 3 candidates × 4 surfaces × 2 themes captured into one board
-(`tests/ui/capture/lookdev/` CSS + scenario); owner picks one (or a named
-hybrid) and the choice is recorded in the runbook ledger as decision D1.
-**Files:** `tests/ui/capture/lookdev/{graphite,obsidian,machined}.css`, new
-scenario `tests/ui/capture/scenarios/lookdev/board.mjs`. No `frontend/src`
-edits.
-Commit: `test(ui): look-dev capture board for presentation candidates`.
+**Signal palette variants (decision D9)** — each look is also shot with:
+S-a the current cyan→magenta `waveformBarColor` grammar, and S-b a
+brand-aligned ramp taken from the hero's ribbons (electric blue → violet →
+pale lavender `#ede6ff` at peaks). Signal stays fixed across accents either
+way (doctrine); D9 only chooses which fixed palette.
+
+**Brand mark drafts (decision D7).** The current "mark" is the Vite favicon
+(audit A11), so it cannot stay. P0 drafts three original SVG marks derived
+from Option E, each shown at 16/32/64/512 px, on the sidebar tile, as the
+favicon, and on light and dark backgrounds:
+
+- **M-a Ring** — the hero's segmented forge ring with a single waveform
+  crossing its center line (no bolt).
+- **M-b Ring + spark** — the ring with an original angular spark in the
+  center (a new shape, not the Vite bolt path).
+- **M-c Waveform monogram** — a "P" or "PF" drawn from one continuous
+  waveform stroke, for the smallest sizes where a ring turns to mush.
+
+Plus a wordmark lockup ("Persona Forge", Geist, tracked) for each. If none
+lands, the owner may commission a designer instead; P6 wires whatever is
+picked.
+
+**Acceptance:** 4 looks × 2 signal palettes × 4 surfaces × 2 themes
+(violet, amber) on one board, plus the brand board; owner records D1, D7,
+D9 in the runbook ledger (CP0b).
+**Files:** `tests/ui/capture/lookdev/{graphite,obsidian,machined,forge}.css`,
+`tests/ui/capture/lookdev/signal-{current,brand}.css`, new scenario
+`tests/ui/capture/scenarios/lookdev/board.mjs`, draft marks under
+`assets/brand/concepts/persona-forge/mark-drafts/`. No `frontend/src` edits.
+Commit: `test(ui): look-dev and brand-mark capture boards`.
 
 ### P1 — Material + token layer (the foundation everything sits on)
 
@@ -173,9 +210,10 @@ Implement the D1 look as tokens in `frontend/src/index.css` and a single
 - **Motion tokens:** `lib/motion.ts` exports named durations, easings and
   springs (`snappy`, `settle`, `meterFall`) + `useReducedMotionSafe()`;
   mirrored as CSS vars for CSS transitions.
-- **Brand (fixes A9, per CP0 decision D3):** either derive `--brand-*` from
-  `--primary` with relative color syntax (`oklch(from var(--primary) …)`) or
-  keep signature cyan — recorded, then documented.
+- **Brand CTA (fixes A9, D3 = follow accent):** `--brand-from/to/glow` are
+  derived from `--primary` with relative color syntax
+  (`oklch(from var(--primary) …)`), so the Generate button is violet in
+  violet, amber in amber. `.btn-brand` keeps its API; no component changes.
 
 **Acceptance:** tokens render correctly under all four themes (capture:
 look-dev board re-shot with real tokens, must match D1); lint + oxlint guard
@@ -261,12 +299,15 @@ One transport strip everywhere audio plays, with a real meter.
 - **Strip layout:** grouped transport cluster (play/restart/loop), meter,
   labeled speed (P5 control once shipped), trailing cluster (download, seed)
   — ≥ 32 px hit targets, same arrangement in every deck.
-- **Clip stats:** file peak dBFS + RMS dBFS in the deck header readout.
-  Integrated loudness (BS.1770 LUFS, K-weighting applied offline to the
-  decoded buffer — analysis only) is CP0 decision D5.
+- **Clip stats (D5 accepted):** file peak dBFS, RMS dBFS, and integrated
+  loudness (ITU-R BS.1770-4 LUFS: K-weighting biquads + 400 ms gated blocks,
+  run offline on the decoded buffer in the P3 worker — analysis only) in the
+  deck header readout.
 
 **Acceptance:** a fixture with a known −6 dBFS peak reads −6.0 ± 0.1 on the
-held-peak readout; a fixture with a full-scale sample lights the clip LED;
+held-peak readout; a mono 997 Hz sine at −20 dBFS peak reads −23.0 ± 0.1
+LUFS (BS.1770: sine mean-square −3.01 dB, K-weighting gain at 997 Hz cancels
+the −0.691 offset); a fixture with a full-scale sample lights the clip LED;
 meter bar height changes between consecutive frames during playback; every
 deck instance (Speak, library rows via `MiniAudioDeck`, candidate audition,
 Voice Design) uses the same strip; performance budget met.
@@ -275,7 +316,7 @@ Voice Design) uses the same strip; performance budget met.
 `OmniVoice/ClipPlayer.tsx`, `lib/signal.ts`.
 Commit: `feat(ui): instrument transport strip with true dBFS metering`.
 
-### P5 — Instrument control primitives (CP0 decision D2)
+### P5 — Instrument control primitives (D2 accepted)
 
 Give Plan A's drag-scrub behavior (S1 + N1 + N2) its instrument form.
 
@@ -296,7 +337,7 @@ value bubble visible during drag; no page layout shift (capture diff).
 `StitchTimeline.tsx` (DSP row), `AudioDeck.tsx` (speed).
 Commit: `feat(ui): knob and fader instrument controls`.
 
-### P6 — App chrome depth (sidebar, headers, banners, status, info view)
+### P6 — App chrome depth (sidebar, headers, banners, status, info strip, brand)
 
 - Sidebar active item: accent glow instead of flat fill; radius migration
   (A10) across the shell.
@@ -309,15 +350,21 @@ Commit: `feat(ui): knob and fader instrument controls`.
   `data-help` string shows its explanation in `ActivityStatusBar` (the
   Ableton/FabFilter help-strip idiom). This is also where Plan A V2's genuine
   warnings (e.g. the high-pitch tinniness note) live, instead of paragraphs.
-- **Brand mark (CP0 decision D7):** replace the stock `AudioLines` tile
-  (A11) with a custom SVG glyph + wordmark — owner supplies or approves.
+- **Brand mark (D7, picked at CP0b from P0's drafts):** replace the stock
+  `AudioLines` tile (A11) with the chosen mark + wordmark lockup; replace the
+  Vite favicon in all three copies (`frontend/public/favicon.svg`,
+  `src/persona_forge/static/favicon.svg`,
+  `assets/brand/exports/persona-forge-mark.svg`); correct
+  `assets/brand/README.md`, which currently calls the Vite file the
+  canonical mark.
 
 **Acceptance:** one header, banner, and status grammar across every page;
 info view announces via the same live region as Plan A N3; shell captures at
 all four themes.
 **Files:** `components/AppShell.tsx`, banner components,
-`components/ui/ActivityStatusBar.tsx`, page headers.
-Commit: `feat(ui): chrome depth, header grammar, and info view`.
+`components/ui/ActivityStatusBar.tsx`, page headers, the three favicon
+copies, `assets/brand/README.md`.
+Commit: `feat(ui): chrome depth, header grammar, info strip, and brand mark`.
 
 ### P7 — Motion as feedback
 
@@ -353,7 +400,11 @@ wherever the backend reports it (Speak already polls
 `getGenerateJobProgress` with `progress_pct` + ETA — surface a real readout),
 skeletons in the material recipe (these also replace P2's former fake
 placeholder), `role="status"`/`progressbar` semantics. Absorbs Plan A N3/N4.
-A designed startup state for the initial-load 503 window (the app's "splash").
+A designed startup state for the initial-load 503 window (the app's
+"splash"): the chosen mark over a cropped, dimmed Option E field with a
+determinate or stepped model-load readout. Empty states (no voices, no
+segments, no project) use the ring/wave motif as a quiet line illustration
+with a single next action — never the full artwork behind controls.
 
 **Acceptance:** every async surface has all four states; progress
 determinate wherever measured; startup state captured.
@@ -382,7 +433,9 @@ The **single** publishing re-shoot. Docs describe the product P0–P10 built.
   `omnivoice-audition` candidates) **plus** both README GIFs
   (`omnivoice-audition-gif`, `design-to-stitch-gif`) via the existing capture
   scenarios, and one **new** GIF showing the signal layer (meter + playhead +
-  spectrogram toggle during playback).
+  spectrogram toggle during playback). The README gains the Option E hero
+  (`social-ready/…option-e-social.jpg`, already 1280×640 and < 1 MB) as its
+  top banner, and the same file is set as the GitHub social preview.
 - **Illustrate the reference docs:** captioned screenshots per major flow
   (Speak → Voice Design → Audition → Stitch → Voice Edit) in
   `docs/architecture/PERSONA_FORGE_STUDIO.md`, `VOICE_DESIGN.md`,
@@ -431,13 +484,13 @@ consumes its tokens; P2 before P3/P4 — both consume its envelope and clock.
 
 | Phase | Gate result | Commit | Notes |
 | --- | --- | --- | --- |
-| P0 look-dev | | | D1 = |
-| P1 tokens | | | |
+| P0 look-dev + brand board | | | D1 = , D7 = , D9 = |
+| P1 tokens | | | D3 = follow accent |
 | P2 waveform renderer | | | |
-| P3 spectrogram | | | D4 = |
-| P4 transport + metering | | | D5 = |
-| P5 knob/fader | | | D2 = |
-| P6 chrome | | | D3/D6/D7 = |
+| P3 spectrogram | | | D4 = accepted |
+| P4 transport + metering | | | D5 = accepted (LUFS) |
+| P5 knob/fader | | | D2 = accepted |
+| P6 chrome | | | D6 = accepted; D7 from P0 |
 | P7 motion | | | |
 | P8 readouts | | | |
 | P9 async states | | | |

@@ -1,10 +1,12 @@
 # Premium UX Execution — Master Runbook
 
 Date: 2026-09-23 (revised same day: Checkpoint 0, decision register, premium
-scorecard, performance budget, single-PR shape)
-Status: **PROPOSED** — no phase starts until the owner closes Checkpoint 0.
-This file is process only: order, decisions, gates, scorecard, commands. All
-design content lives in the two planning docs.
+scorecard, performance budget, single-PR shape; CP0a answers recorded)
+Status: **CP0a CLOSED 2026-09-23** (owner answers recorded in §4/§7).
+**CP0b OPEN** — D1 look, D7 brand mark, and D9 signal palette are picked from
+the B-P0 look-dev board; A-0 starts only after CP0b closes. This file is
+process only: order, decisions, gates, scorecard, commands. All design
+content lives in the two planning docs.
 
 ## 1. The two plans
 
@@ -29,26 +31,29 @@ Strictly sequential, one branch, one PR at the end. No parallel agents: every
 phase touches shared timeline / shell / token / media-clock state.
 
 ```text
-CP0 decisions ─ B-P0 look-dev board ─ D1..D7 recorded
+CP0a decisions (closed) → B-P0 look-dev + brand board → CP0b: D1, D7, D9 picked
   → A-0 baseline (all 8 README scenarios + both GIFs captured as the "before" set)
-  → A-1 S1 drag-scrub (+N1 reset, +N2 wheel if accepted)
+  → A-1 S1 drag-scrub + N1 double-click reset + N2 wheel adjust
   → A-2 S2 zoom + hover guide
   → A-3 S3+S4 pointer waveform + numeric grammar
-  → A-4 M1 loop brace (+N6 exclusive audition if accepted)
-  → A-5 M2 context menu (+N5 segment-browser menu if accepted)
-  → [accepted structural items, in this order: T2 undo → M4 command layer → M5 A/B → T1]
+  → A-4 M1 loop brace + N6 exclusive audition (playback-focus registry)
+  → A-5 M2 context menu + N5 segment-browser menu
+  → A-6 T2 undo/redo → A-7 M4 command palette → A-8 M5 A/B plan snapshots
+  → A-9 T1 shared transport (grows N6's registry into the coordinator)
   → CP1 feel review
-  → B-P1 tokens → B-P2 waveform renderer → B-P3 spectrogram → B-P4 transport + metering
-  → [M3 clip inspector, if accepted — consumes P2 envelope + P4 meter]
-  → B-P5 knob/fader → B-P6 chrome → B-P7 motion → B-P8 readouts → B-P9 async states
+  → B-P1 tokens → B-P2 waveform renderer → B-P3 spectrogram → B-P4 transport + metering + LUFS
+  → A-10 M3 clip inspector (consumes P2 envelope, P3 spectrum, P4 meter)
+  → B-P5 knob/fader → B-P6 chrome + info strip + brand mark → B-P7 motion → B-P8 readouts → B-P9 async states
   → B-P10 residue sweep + scorecard verdict
   → CP2 craft review
   → B-P11 docs + media → B-P12 archive + PR
 ```
 
-- T3 (automation lanes) is not slotted: if accepted at CP0, its own "is every
-  edit representable in the payload" proof runs first and it is placed after
-  B-P4 by a CP1 note.
+- **Why T1 lands before B-P2:** B-P2's media clock and B-P4's meters read
+  playback position; building them on the final transport owner avoids
+  re-plumbing every deck twice.
+- **T3 (automation lanes): deferred** at CP0a — not selected; recorded, not
+  dropped. Revisit after the PR merges.
 - Rejected or deferred items are recorded in §7 as `deferred — <reason>`,
   never silently dropped.
 
@@ -84,23 +89,25 @@ The owner answers the decision register once; execution then runs without
 stalls. Owner receives: the B-P0 look-dev board, this register, and the A §8
 candidate list.
 
-| ID | Decision | Options | Recommendation (why) |
-| --- | --- | --- | --- |
-| D1 | Look | L1 Graphite / L2 Obsidian / L3 Machined / named hybrid (B-P0 board) | Pick from the board, not from prose |
-| D2 | Knob/fader controls in DSP + speed slots (B-P5) | accept / reject | **Accept** — the single most "plugin" affordance; built on A's S1 hook, so near-free after A-1 |
-| D3 | CTA brand color | derive from theme accent / keep signature cyan | **Derive from accent** — today's fixed cyan clashes with rose/amber themes (B audit A9); signal palette stays fixed either way |
-| D4 | Spectrogram view (B-P3) | accept / reject | **Accept** — the hero visualization for a *voice* tool; replaces a fake component |
-| D5 | Integrated loudness (LUFS) readout in B-P4 | accept / defer | Accept if API users target loudness specs; else defer (peak + RMS dBFS ship regardless) |
-| D6 | Info view in the status bar (B-P6) | accept / reject | **Accept** — also resolves A V2's warnings as design, not paragraphs |
-| D7 | Custom brand glyph + wordmark (B-P6) | owner supplies / approve a drafted SVG / keep stock icon | Owner's taste; blocks nothing if deferred |
-| N1–N6 | A §8 interaction candidates | accept / reject each | **Accept N1, N2, N6** (fold into A-1/A-4 at near-zero cost); N3/N4 are absorbed by B-P9 automatically; N5 accept if appetite |
-| M3–M5, T1–T3 | A §3–§4 structural items | accept / defer each | T2 needs the §6 architectural sign-off; the rest are appetite calls |
+| ID | Decision | Options | Recommendation | **Owner answer (2026-09-23)** |
+| --- | --- | --- | --- | --- |
+| D1 | Look | L1 Graphite / L2 Obsidian / L3 Machined / **L4 Forge** (brand-derived, added after CP0a) / named hybrid | Pick from the board, not from prose | **Decide from the B-P0 board** → CP0b |
+| D2 | Knob/fader controls in DSP + speed slots (B-P5) | accept / reject | Accept | **Accepted** |
+| D3 | CTA color | derive from theme accent / keep signature cyan | Derive from accent | **Follow the accent** |
+| D4 | Spectrogram view (B-P3) | accept / reject | Accept | **Accepted** |
+| D5 | Integrated loudness (LUFS) in B-P4 | accept / defer | Appetite call | **Accepted** — ships in B-P4 |
+| D6 | Info strip in the status bar (B-P6) | accept / reject | Accept | **Accepted** |
+| D7 | Brand mark | owner supplies / draft / keep stock | Owner's taste | **Owner supplied hero art (Option E)**; the existing SVG is the stock Vite favicon (see B "Brand"), so B-P0 drafts marks derived from Option E → pick at CP0b |
+| D8 | Single look vs selectable skins | one look + 4 accents / 3 skins × 4 accents | One look | **One look + 4 accents** |
+| D9 | Signal palette | keep current cyan→magenta / brand-aligned cyan→violet→lavender (Option E ribbons) | Pick from the board | Added after CP0a → **CP0b** |
+| N1–N6 | A §8 interaction candidates | accept / reject each | Accept N1, N2, N6 | **Accepted N1, N2, N5, N6**; N3/N4 absorbed by B-P9 |
+| M3–M5, T1–T3 | A §3–§4 structural items | accept / defer each | T2 needs architectural sign-off | **Accepted M3, M4, M5, T1, T2** (T2 selection = recorded architectural sign-off for the no-undo exception); **T3 deferred** |
 
-**Precondition at CP0:** working tree clean and the branch pushed (a one-off
-local guard block on `096d424` cleared on retry at `339e9bf`; if it recurs,
-stop and ask rather than bypassing the guard).
+**Precondition at CP0b:** working tree clean and the branch pushed. If the
+local git guard blocks a push again (seen once on `096d424`, cleared on
+retry), stop and ask rather than bypassing it.
 
-### CP1 — Feel review (after A-5 + accepted structural items)
+### CP1 — Feel review (after A-9)
 
 Owner uses the build: drag-scrub, zoom, loop, menus, exclusive audition.
 Behavior issues reopen their A-phase before any B-phase starts (B styles what
@@ -150,31 +157,36 @@ FAIL / N/A-with-reason. Owning phase in brackets.
 
 | Step | Plan | Gate / decision | Commit | Notes |
 | --- | --- | --- | --- | --- |
-| CP0 D1 look | B | | | |
-| CP0 D2 knob/fader | B | | | |
-| CP0 D3 CTA color | B | | | |
-| CP0 D4 spectrogram | B | | | |
-| CP0 D5 LUFS | B | | | |
-| CP0 D6 info view | B | | | |
-| CP0 D7 brand mark | B | | | |
-| CP0 N1–N6 | A | | | |
-| CP0 M3–M5, T1–T3 | A | | | |
-| B-P0 look-dev | B | | | |
+| CP0a D2 knob/fader | B | accepted 2026-09-23 | — | |
+| CP0a D3 CTA color | B | follow accent 2026-09-23 | — | |
+| CP0a D4 spectrogram | B | accepted 2026-09-23 | — | |
+| CP0a D5 LUFS | B | accepted 2026-09-23 | — | ships in B-P4 |
+| CP0a D6 info strip | B | accepted 2026-09-23 | — | |
+| CP0a D8 skins | B | one look + 4 accents 2026-09-23 | — | |
+| CP0a N1–N6 | A | N1, N2, N5, N6 accepted; N3/N4 → B-P9 | — | |
+| CP0a M3–M5, T1–T3 | A | M3, M4, M5, T1, T2 accepted; T3 deferred | — | T2 = architectural sign-off |
+| CP0b D1 look | B | | | from B-P0 board |
+| CP0b D7 brand mark | B | | | from B-P0 brand board |
+| CP0b D9 signal palette | B | | | from B-P0 board |
+| B-P0 look-dev + brand board | B | | | |
 | A-0 baseline | A | | | |
-| A-1 S1 drag-scrub | A | | | |
+| A-1 S1 drag-scrub + N1 + N2 | A | | | |
 | A-2 S2 zoom + hover | A | | | |
 | A-3 S3+S4 | A | | | |
-| A-4 M1 loop brace | A | | | |
-| A-5 M2 context menu | A | | | |
-| Accepted structural items | A | | | |
+| A-4 M1 loop brace + N6 | A | | | |
+| A-5 M2 context menu + N5 | A | | | |
+| A-6 T2 undo/redo | A | | | |
+| A-7 M4 command palette | A | | | |
+| A-8 M5 A/B plan snapshots | A | | | |
+| A-9 T1 shared transport | A | | | |
 | CP1 feel review | — | | | |
 | B-P1 tokens | B | | | |
 | B-P2 waveform renderer | B | | | |
 | B-P3 spectrogram | B | | | |
-| B-P4 transport + metering | B | | | |
-| M3 clip inspector (if accepted) | A | | | |
+| B-P4 transport + metering + LUFS | B | | | |
+| A-10 M3 clip inspector | A | | | |
 | B-P5 knob/fader | B | | | |
-| B-P6 chrome | B | | | |
+| B-P6 chrome + info strip + brand mark | B | | | |
 | B-P7 motion | B | | | |
 | B-P8 readouts | B | | | |
 | B-P9 async states | B | | | |
