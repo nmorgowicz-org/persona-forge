@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/store'
 import { StitchEditorInline } from '@/components/StitchTimeline'
+import { StitchABBar } from '@/components/stitch/StitchABBar'
 import { useStoreStitchPlanSession } from '@/hooks/useStitchPlanSession'
 import {
   activateVoiceForApi,
@@ -207,6 +208,8 @@ export function StitchStudioPage() {
 
       {error && <p className="text-xs text-destructive">{error}</p>}
       {isSaving && <p className="text-xs text-muted-foreground">Saving…</p>}
+
+      <StitchABBar />
 
       <StitchEditorInline
         surface="studio"
