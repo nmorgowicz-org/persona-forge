@@ -1,9 +1,9 @@
 # Premium Audio-Plugin UX: Interaction Craft Pass
 
 Date: 2026-09-22
-Status: **APPROVED FOR EXECUTION** — Phases 0–5 below are approved; M3–M5 and
-T1–T3 are owner-gated (§6) and do not start without an explicit acceptance note.
-Branch: `feat/premium-audio-plugin-ux-20260923` (cut from main @ `37a7cd9`)
+Status: **APPROVED FOR EXECUTION** — Phases 0–5 below are approved; M3–M5,
+T1–T3, and all N-/V-candidates are owner-gated and do not start without an
+explicit acceptance note recorded in the §7 ledger.
 
 ## Goal statement
 
@@ -162,10 +162,11 @@ not add one and do not reach for Vitest.
   present; no dependency change); wire actions to `StitchPlanSession` +
   region-edit callbacks. **Gate 5:** spec green; a keyboard-only path to the
   same actions exists.
-- **Phase 6+ (owner-gated):** M3–M5 and T1–T3 are **not** auto-approved. Each
-  needs an explicit owner acceptance note appended to this doc before its
-  phase is cut; T2 additionally violates the standing no-undo constraint and
-  cannot start on a nod — it needs the recorded sign-off described in §6.
+- **Phase 6+ (owner-gated):** M3–M5, T1–T3, and every N-/V-candidate in §8 are
+  **not** auto-approved. Each needs an explicit owner acceptance note appended
+  to this doc (§7 ledger) before its phase is cut; T2 additionally violates
+  the standing no-undo constraint and cannot start on a nod — it needs the
+  recorded sign-off described in §6.
 
 A failed gate reopens its phase; never compensate in a later phase. One
 Conventional Commit per phase (titles pre-assigned above). Squash-merge,
@@ -360,11 +361,23 @@ here, in-date, before their phase is cut.
 
 ## 8. Second-pass candidates (owner-gated; added 2026-09-23 self-review re-research)
 
-Validated against the codebase in this review pass, and re-checked against
-current plugin-industry conventions (control double-click-to-reset, wheel
-input on parameters, real-time feedback for every state change, deterministic
-progress, screen-reader announcements). All zero-dep, no-restyle, no backend
-change. Each is a candidate until you accept it; none modify Phases 0–5.
+Evidence for this section came from two passes the first draft never did:
+direct code verification (every claim below names the file/line that proves
+it) **plus visual review of the four published README screenshots
+(`speak-generate--pocket-tts--after-generate.png`,
+`stitch-assembly--neutral--assembly.png`,
+`hero-voice-design--neutral--panel.png`,
+`prosody/voice-edit--neutral--prosody-ab.png`) against the same
+FabFilter/iZotope reference frame.** The screenshots surfaced a different
+class of gap than the interaction survey: not broken gestures, but
+*prototype residue presented as product* (lab-notebook copy, placeholder
+version tags, unlabeled dropdowns) and *coarse rendering the interaction
+work will sit on top of* (block-bar waveforms). Those are visual-hygiene and
+render-quality items — they are small, safe, and they raise the ceiling every
+approved phase lands on.
+
+All zero-dep, no-restyle, no backend change. Each is a candidate until you
+accept it; none modify Phases 0–5.
 
 ### N1 — Double-click-to-reset on the drag-scrub hook (upgrade S1 for free)
 
@@ -437,3 +450,83 @@ than a new invention.
 thin wrappers over current handlers; keyboard parity retained.
 **Files:** `components/stitch/SegmentBrowserModal.tsx`, reusing M2's context
 menu. **Depends on:** Gate 5.
+
+---
+
+### V1 — Waveform render quality (hi-res, mirrored, played-region tint)
+
+The screenshot pass made this the highest-leverage **visual** item in the
+plan: every lane today renders the same coarse single-sided block bars
+(Speak player, Stitch clips, A/B lanes). Underneath, the data is already
+good — `lib/waveform.ts` decodes real peaks via `peaksFromBuffer`
+(`lib/waveform.ts:17-32`) with persistent per-clip caching (`45-51`) and an
+existing played/unplayed color grammar (`waveformBarColor`,
+`lib/waveform.ts:118-125`: cyan/teal base, magenta push, `played` variant).
+What is missing is resolution and shape: density-scaled bucketing, a
+mirrored (center-line symmetric) silhouette, and a distinct played-region
+tint so the playhead reads as position-on-sound, not a yellow line floating
+over bars.
+
+**Acceptance:** at typical lane widths every lane renders mirrored,
+density-scaled peaks with a visible played-region treatment; no new color —
+only the existing `waveformBarColor` grammar at higher fidelity; cache keys
+unchanged (`<kind>:<persistent-id>:<revision>`).
+**Files:** `lib/waveform.ts` (`peaksFromBuffer`, `waveformBarColor`),
+lane renderers that consume peaks (Speak deck, `StitchClipCard`,
+`WaveformLane.tsx`, A/B lanes). Canvas vs DOM is the executor's call —
+whichever preserves the existing cache contract.
+**Size:** medium-small; render-only, zero domain change.
+
+### V2 — Prototype-residue copy sweep (Voice Design + app chrome)
+
+The Voice Design screenshot shows engineering notebook copy shipped as
+product: `"High pitch" trends tinnier in testing — "moderate" is usually the
+safer default` and `there's no "warm" or "sweet" here (that's
+VoiceDesign-only)` (`components/OmniVoice/AccentChipPanel.tsx:104-125`),
+plus `v0.0.0-fake` chrome in published screenshots. The tinny-pitch warning
+is genuine product knowledge — it should **survive as design**, not die as
+copy: e.g. a "safe default" marker on the Moderate chip, or a one-line hint
+that only appears when High/Very-high is selected, instead of a paragraph
+the user reads before they have made any choice.
+
+**Acceptance:** no sentence in shipped UI explains the engineering process
+(`testing`, backend-name internals); every genuine warning is preserved as
+contextual, state-dependent guidance; published screenshots re-captured.
+**Files:** `components/OmniVoice/AccentChipPanel.tsx:95-127`,
+`VoiceDesignPanel`, `EngineSelector`, AppShell version/footer copy.
+**Size:** small; copy-only, zero behavior change. Pairs naturally with
+Phase 0 (re-capture baseline while the camera is out).
+
+### V3 — Labeled-control grammar for anonymous dropdowns (Speak first)
+
+The Speak screenshot shows the pattern that reads most "generic web form":
+`Default voice`, `English`, `Off` — dropdowns whose label names the current
+*value*, not the *parameter*, so a first-time user cannot tell what the third
+one even controls. Plugin convention (and S4's own grammar instinct) is
+small-caps parameter labels sitting above the control: VOICE / LANGUAGE /
+the `Off` control's actual function (prosody repair? post-processing?),
+each with an inline `title`/tooltip.
+**Acceptance:** every select on the Speak page carries a visible
+parameter label (`<label>` or labelled group), the `Off` control names its
+function, and icon-only buttons reuse the existing `tooltip=` pattern from
+`AudioDeck.tsx:255`.
+**Files:** `pages/SpeakPage.tsx` (controls row), then the same grammar on
+Voice Design / Voice Edit selects as a follow-up.
+**Size:** small; markup-only. Natural companion to S4's units/tabs/tooltip
+grammar — accept together if appetite allows.
+
+### V4 — Before/after capture verdicts for every craft phase
+
+The capture harness already produces before/after pairs for scenarios
+(`stitch-assembly`, `prosody-adjustment`, `voice-edit`, `speak-generate`,
+`hero-*`, `readiness-states`). The 2026-09-20 plan proved the mechanism
+(receipts with hashes), but no phase currently **requires the visual verdict**:
+before/after pair inspected, differences attributable to the hunk, no
+regression (no layout shift, no truncated labels, no residue). Make each
+phase's gate include its capture diff as an artifact, and re-shoot the
+eight README screenshots once at the end of Phase 5 — the README is the
+product's storefront, and every craft hunk should be visible in it.
+**Acceptance:** §2 gates each name their capture scenario; README
+screenshots re-shot post-Phase-5.
+**Files:** `tests/ui/capture/` scenarios (existing) + §2 gate text.
+**Size:** process-only; zero production code.
