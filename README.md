@@ -16,6 +16,8 @@ run it in the container or natively.
 
 ---
 
+![Persona Forge](assets/brand/concepts/persona-forge/hero-v2/finalists/signal-crucible/app-hero.png)
+
 **OmniVoice accent audition** — generate candidates per segment, across accents, in real time:
 
 ![OmniVoice audition](docs/screenshots/omnivoice-audition-gif--omnivoice--audition.gif)
