@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { pulsedWav, sineWav } from '../fixtures/signalFixtures.mjs'
+import { generateWith, playAudio } from '../fixtures/speak.mjs'
 
 // B-P4: truthful metering and one transport strip (audit A1 -- the "LEVEL" readout was a
 // normalized peak bucket rendered as a percentage, which is not a level; and A2 -- it stepped
@@ -12,19 +13,8 @@ import { pulsedWav, sineWav } from '../fixtures/signalFixtures.mjs'
 //
 // RED-first: all five must fail on unmodified code.
 
-const SPEAK_RESULT_AUDIO = '**/generate/job/*/audio*'
-
-async function routeSpeakResult(page, body) {
-  await page.route(SPEAK_RESULT_AUDIO, (route) => route.fulfill({ status: 200, contentType: 'audio/wav', body }))
-}
-
-async function generateWith(page, body, text = 'Metering fixture.') {
-  await routeSpeakResult(page, body)
-  await page.goto('/')
-  await page.getByTestId('speak-text-input').fill(text)
-  await page.getByTestId('speak-generate-button').click()
-  await expect(page.getByTestId('speak-result')).toBeVisible({ timeout: 30000 })
-}
+// Generating, routing the result audio and starting playback all live in `fixtures/speak.mjs`,
+// shared with the stitch specs that also make claims about a *playing* deck.
 
 test.describe('B-P4: truthful metering and the transport strip', () => {
   test('a -6 dBFS peak reads -6.0 on the peak readout', async ({ page }) => {
@@ -53,8 +43,7 @@ test.describe('B-P4: truthful metering and the transport strip', () => {
     // every sample reads the same. The fixture alternates loud and quiet every 250 ms.
     await generateWith(page, pulsedWav({ hz: 440, loudDbfs: -6, quietDbfs: -40, seconds: 2 }))
 
-    const play = page.getByTestId('speak-result').getByRole('button', { name: 'Play audio' })
-    if (await play.isVisible()) await play.click()
+    await playAudio(page)
     await page.waitForTimeout(300)
 
     const samples = await page.evaluate(async () => {

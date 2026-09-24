@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { sineWav } from '../fixtures/signalFixtures.mjs'
 import { collectLongTasks } from '../fixtures/longtasks.mjs'
+import { generateWith, playAudio } from '../fixtures/speak.mjs'
 
 // B-P2: one true-scale hi-res waveform renderer.
 //
@@ -86,14 +87,19 @@ test.describe('B-P2: true-scale waveform renderer', () => {
   })
 
   test('the playhead moves at display rate, not at the browser timeupdate rate', async ({ page }) => {
-    await page.goto('/')
-    await page.getByTestId('speak-text-input').fill('Display rate playhead.')
-    await page.getByTestId('speak-generate-button').click()
-    await expect(page.getByTestId('speak-result')).toBeVisible({ timeout: 30000 })
+    // Routed result audio, and an unguarded Play: this test failed on CI reading eight zeros,
+    // which looked like a sampling artefact and was really a click that never happened (the
+    // result card was up at -inf dBFS while the fake model was still loading, so the guarded
+    // `if (isVisible())` skipped it and the deck never started).
+    await generateWith(page, sineWav({ hz: 440, dbfs: -12, seconds: 2 }), 'Display rate playhead.')
+    await playAudio(page)
 
-    const play = page.getByTestId('speak-result').getByRole('button', { name: 'Play audio' })
-    if (await play.isVisible()) await play.click()
-    await page.waitForTimeout(400)
+    // Playback is genuinely moving before anything is sampled, so a deck that never started
+    // fails here saying so rather than downstream as a set of identical numbers.
+    const playhead = page.getByTestId('waveform-canvas')
+    await expect
+      .poll(async () => Number(await playhead.getAttribute('data-playhead-pct')), { timeout: 10000 })
+      .toBeGreaterThan(0)
 
     // Eight samples ~40 ms apart: a playhead fed by `timeupdate` (~4 Hz) cannot move between
     // *every* pair, while one drawn per animation frame must. Sampling one pair would pass on
