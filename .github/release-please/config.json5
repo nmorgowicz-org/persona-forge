@@ -39,8 +39,9 @@
         },
 
         {
-          "type": "generic",
-          "path": "uv.lock"
+          "type": "toml",
+          "path": "uv.lock",
+          "jsonpath": "$.package[?(@.name.value=='persona-forge')].version"
         }
       ]
     }

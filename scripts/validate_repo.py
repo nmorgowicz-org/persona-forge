@@ -116,6 +116,42 @@ def validate_workflows() -> None:
     tag_prefix = release_config.get("tag-prefix", "v")
     expected_release_tag = f"{package_name}-{tag_prefix}*"
 
+    # uv.lock records the root package's own version, so a release PR that bumps pyproject.toml
+    # without the lock fails `uv lock --check` -- the first gate of package-* and
+    # target-resolution in ci-packaging.yml. Two ways to get this wrong, both already shipped:
+    #
+    # * The generic updater only rewrites values carrying an `x-release-please-version`
+    #   annotation, and a generated lockfile has none, so `{"type": "generic", "path":
+    #   "uv.lock"}` updates nothing while looking correct.
+    # * The filter has to read `@.name.value`, not `@.name`: GenericToml queries JSONPath
+    #   against the parser's *tagged* tree, where scalars are wrapped in `{value: ...}`, so
+    #   `@.name == 'persona-forge'` matches nothing and the updater only logs "No entries
+    #   modified".
+    #
+    # Both were verified by running release-please's own GenericToml against this repo's
+    # uv.lock: this jsonpath changes exactly the root package's version, `@.name == ...`
+    # changes nothing, and an index-based `$.package[0].version` changes an unrelated
+    # dependency instead.
+    lock_entries = [
+        entry
+        for entry in release_config["packages"]["."]["extra-files"]
+        if isinstance(entry, dict) and entry.get("path") == "uv.lock"
+    ]
+    if len(lock_entries) != 1 or lock_entries[0].get("type") != "toml":
+        raise RuntimeError(
+            "Release Please must update uv.lock with the 'toml' updater: the 'generic' updater "
+            "only rewrites values carrying an x-release-please-version annotation, which a "
+            "generated lockfile does not have, so uv.lock goes stale and `uv lock --check` "
+            "fails every release PR"
+        )
+    lock_jsonpath = lock_entries[0].get("jsonpath", "")
+    if "@.name.value" not in lock_jsonpath or not lock_jsonpath.endswith(".version"):
+        raise RuntimeError(
+            "Release Please's uv.lock jsonpath must select the root package version through "
+            f"`@.name.value` and end in `.version` (found {lock_jsonpath!r}): the query runs "
+            "against a tagged TOML tree where a bare `@.name` comparison matches nothing"
+        )
+
     image_workflow = yaml.load(
         (ROOT / ".github" / "workflows" / "image.yml").read_text(encoding="utf-8"),
         Loader=yaml.BaseLoader,
