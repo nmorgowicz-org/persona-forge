@@ -16,12 +16,21 @@ const read = (path) => readFileSync(resolve(REPO, path))
 const CRUCIBLE_SVG = 'assets/brand/concepts/persona-forge/hero-v2/finalists/signal-crucible/svg'
 
 test.describe('B-P6: chrome, header grammar, and brand', () => {
-  test('the shipped favicon is the Signal Crucible mark, byte for byte', async () => {
+  test('the shipped favicon is the Signal Crucible mark, byte for byte', async ({ request }) => {
     const favicon = read('frontend/public/favicon.svg')
     const canonical = read(`${CRUCIBLE_SVG}/favicon.svg`)
     expect(favicon.equals(canonical), 'frontend/public/favicon.svg differs from the selected mark').toBe(true)
-    // ...and the copy the app serves at /favicon.svg is the same file.
-    expect(read('src/persona_forge/static/favicon.svg').equals(canonical)).toBe(true)
+    // ...and the bytes the app actually serves at /favicon.svg are the same. That route serves
+    // the built frontend (frontend/dist), which is generated from frontend/public/favicon.svg, so
+    // this asserts the real contract rather than a copy in the source tree. It used to compare
+    // against src/persona_forge/static/favicon.svg, which is gitignored: the file existed on a
+    // developer's disk and could never exist on CI, so the test was unable to pass there.
+    const served = await request.get('/favicon.svg')
+    expect(served.ok()).toBe(true)
+    expect(
+      Buffer.from(await served.body()).equals(canonical),
+      'the served /favicon.svg differs from the selected mark'
+    ).toBe(true)
   })
 
   test('the sidebar brand tile is the product mark, not a stock icon', async ({ page }) => {
