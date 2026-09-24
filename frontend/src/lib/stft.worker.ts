@@ -15,8 +15,16 @@ declare const self: {
   postMessage(message: unknown, transfer?: Transferable[]): void
 }
 
+interface LoudnessRequest {
+  requestId: number
+  kind: 'loudness'
+  samples: Float32Array
+  sampleRate: number
+}
+
 interface StftRequest {
   requestId: number
+  kind?: 'stft'
   samples: Float32Array
   sampleRate: number
   windowSize: number
@@ -60,8 +68,117 @@ function fft(re: Float64Array, im: Float64Array): void {
   }
 }
 
-self.onmessage = (event: MessageEvent<StftRequest>) => {
-  const { requestId, samples, sampleRate, windowSize, hop } = event.data
+export interface LoudnessResult {
+  peakDbfs: number
+  rmsDbfs: number
+  /** Integrated loudness, ITU-R BS.1770-4. -Infinity when the whole clip is below the gate. */
+  lufs: number
+}
+
+/** K-weighting: the two filters BS.1770 specifies, designed for the actual sample rate. The
+ * published parameter values are the standard's own, not a fit. */
+function kWeighting(sampleRate: number): { b: number[]; a: number[] }[] {
+  const shelfF0 = 1681.974450955533
+  const shelfGainDb = 3.999843853973347
+  const shelfQ = 0.7071752369554196
+  const shelfK = Math.tan((Math.PI * shelfF0) / sampleRate)
+  const vh = 10 ** (shelfGainDb / 20)
+  const vb = vh ** 0.4996667741545416
+  const shelfA0 = 1 + shelfK / shelfQ + shelfK * shelfK
+  const shelf = {
+    b: [
+      (vh + (vb * shelfK) / shelfQ + shelfK * shelfK) / shelfA0,
+      (2 * (shelfK * shelfK - vh)) / shelfA0,
+      (vh - (vb * shelfK) / shelfQ + shelfK * shelfK) / shelfA0,
+    ],
+    a: [1, (2 * (shelfK * shelfK - 1)) / shelfA0, (1 - shelfK / shelfQ + shelfK * shelfK) / shelfA0],
+  }
+
+  const hpF0 = 38.13547087602444
+  const hpQ = 0.5003270373238773
+  const hpK = Math.tan((Math.PI * hpF0) / sampleRate)
+  const hpA0 = 1 + hpK / hpQ + hpK * hpK
+  const highPass = {
+    b: [1, -2, 1],
+    a: [1, (2 * (hpK * hpK - 1)) / hpA0, (1 - hpK / hpQ + hpK * hpK) / hpA0],
+  }
+
+  return [shelf, highPass]
+}
+
+function biquad(input: Float32Array, coefficients: { b: number[]; a: number[] }): Float32Array {
+  const { b, a } = coefficients
+  const out = new Float32Array(input.length)
+  let x1 = 0
+  let x2 = 0
+  let y1 = 0
+  let y2 = 0
+  for (let i = 0; i < input.length; i++) {
+    const x0 = input[i]
+    const y0 = b[0] * x0 + b[1] * x1 + b[2] * x2 - a[1] * y1 - a[2] * y2
+    out[i] = y0
+    x2 = x1
+    x1 = x0
+    y2 = y1
+    y1 = y0
+  }
+  return out
+}
+
+/** ITU-R BS.1770-4 integrated loudness for one channel. */
+function integratedLufs(samples: Float32Array, sampleRate: number): number {
+  const [shelf, highPass] = kWeighting(sampleRate)
+  const weighted = biquad(biquad(samples, shelf), highPass)
+
+  const blockSamples = Math.max(1, Math.round(sampleRate * 0.4))
+  const hopSamples = Math.max(1, Math.round(blockSamples / 4))
+  if (weighted.length < blockSamples) return -Infinity
+
+  const loudness: number[] = []
+  const powers: number[] = []
+  for (let start = 0; start + blockSamples <= weighted.length; start += hopSamples) {
+    let sum = 0
+    for (let i = start; i < start + blockSamples; i++) sum += weighted[i] * weighted[i]
+    const power = sum / blockSamples
+    powers.push(power)
+    loudness.push(-0.691 + 10 * Math.log10(Math.max(power, Number.MIN_VALUE)))
+  }
+
+  // Absolute gate at -70 LUFS, then the relative gate 10 LU below the mean of what survived.
+  const above = (threshold: number) => powers.filter((_, index) => loudness[index] > threshold)
+  const absolute = above(-70)
+  if (absolute.length === 0) return -Infinity
+  const meanAbsolute = absolute.reduce((total, value) => total + value, 0) / absolute.length
+  const relativeThreshold = -0.691 + 10 * Math.log10(Math.max(meanAbsolute, Number.MIN_VALUE)) - 10
+  const relative = above(relativeThreshold)
+  const gated = relative.length > 0 ? relative : absolute
+  const mean = gated.reduce((total, value) => total + value, 0) / gated.length
+  return -0.691 + 10 * Math.log10(Math.max(mean, Number.MIN_VALUE))
+}
+
+function measureLoudness(samples: Float32Array, sampleRate: number): LoudnessResult {
+  let peak = 0
+  let sumSquares = 0
+  for (let i = 0; i < samples.length; i++) {
+    const abs = Math.abs(samples[i])
+    if (abs > peak) peak = abs
+    sumSquares += samples[i] * samples[i]
+  }
+  return {
+    peakDbfs: peak > 0 ? 20 * Math.log10(peak) : -Infinity,
+    rmsDbfs: samples.length > 0 && sumSquares > 0 ? 10 * Math.log10(sumSquares / samples.length) : -Infinity,
+    lufs: integratedLufs(samples, sampleRate),
+  }
+}
+
+self.onmessage = (event: MessageEvent<StftRequest | LoudnessRequest>) => {
+  if (event.data.kind === 'loudness') {
+    const { requestId, samples, sampleRate } = event.data
+    const result = { requestId, ...measureLoudness(samples, sampleRate) }
+    self.postMessage(result)
+    return
+  }
+  const { requestId, samples, sampleRate, windowSize, hop } = event.data as StftRequest
   const n = windowSize
   const bins = n / 2 + 1
   const frames = samples.length >= n ? Math.floor((samples.length - n) / hop) + 1 : 0

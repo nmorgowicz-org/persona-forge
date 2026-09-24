@@ -43,7 +43,8 @@ export const CLIP_DBFS = -0.1
 
 const clamp01 = (value: number) => (value < 0 ? 0 : value > 1 ? 1 : value)
 
-function rampAt(t: number): readonly [number, number, number] {
+/** Ramp position for an intensity in [0, 1], interpolated per channel. */
+export function signalRampAt(t: number): readonly [number, number, number] {
   const clamped = clamp01(t)
   for (let i = 1; i < SIGNAL_RAMP.length; i++) {
     const [stopT, stopL, stopC, stopH] = SIGNAL_RAMP[i]
@@ -64,7 +65,7 @@ const fmt = (value: number) => value.toFixed(3).replace(/0+$/, '').replace(/\.$/
  * saturated "already heard" state; unplayed drops lightness and chroma so the heard/unheard
  * boundary is legible without a second hue. */
 export function signalColor(t: number, played = false): string {
-  const [light, chroma, hue] = rampAt(t)
+  const [light, chroma, hue] = signalRampAt(t)
   if (played) {
     return `oklch(${fmt(light)} ${fmt(chroma)} ${fmt(hue)} / ${fmt(0.6 + 0.4 * clamp01(t))})`
   }
@@ -80,4 +81,17 @@ export function heat(amplitude: number): number {
   const amp = Math.abs(amplitude)
   if (amp <= 0) return 0
   return clamp01((20 * Math.log10(amp) + 48) / 48)
+}
+
+/** dBFS for a linear amplitude. -Infinity for silence, so a readout can say so rather than
+ * showing a floor value that looks like measured level. */
+export function dbFromAmplitude(amplitude: number): number {
+  const abs = Math.abs(amplitude)
+  return abs > 0 ? 20 * Math.log10(abs) : -Infinity
+}
+
+/** Where a level sits on the meter scale, 0..1 from the floor to 0 dBFS. */
+export function meterFraction(db: number): number {
+  if (!Number.isFinite(db)) return 0
+  return clamp01((db - METER_FLOOR_DB) / (METER_CEIL_DB - METER_FLOOR_DB))
 }

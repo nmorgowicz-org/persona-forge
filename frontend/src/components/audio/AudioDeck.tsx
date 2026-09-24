@@ -3,7 +3,9 @@ import { Download, Gauge, Pause, Play, Repeat, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Waveform } from '@/components/Waveform'
 import { useAudioSource } from '@/hooks/useAudioTransport'
-import { computeEnvelope, envelopePeaks, type AudioEnvelope } from '@/lib/waveform'
+import { envelopeFromChannels, type AudioEnvelope } from '@/lib/waveform'
+import { getLoudness, type Loudness } from '@/lib/spectrogram'
+import { CLIP_DBFS } from '@/lib/signal'
 import { SpectrogramCanvas } from '@/components/waveform/SpectrogramCanvas'
 import { setSignalView, useSignalView } from '@/lib/spectrogram'
 import { cn } from '@/lib/utils'
@@ -117,6 +119,9 @@ export function AudioDeck({
   const source = useAudioSource('audio-deck', 'Audio deck')
   const [envelope, setEnvelope] = useState<AudioEnvelope | null>(null)
   const [decodeFailed, setDecodeFailed] = useState(false)
+  // Clip stats (P4 / D5): peak, RMS and BS.1770-4 integrated loudness for the whole file.
+  const [stats, setStats] = useState<Loudness | null>(null)
+  const [clipCleared, setClipCleared] = useState(false)
   // Session-wide, so switching to Spectrum and coming back to the page does not undo it.
   const view = useSignalView()
   const [isPlaying, setIsPlaying] = useState(false)
@@ -159,37 +164,41 @@ export function AudioDeck({
   // A drag-selected slice (0..1 fractions) to audition on repeat; overrides whole-clip loop.
   const [region, setRegion] = useState<{ start: number; end: number } | null>(null)
 
-  const peaks = useMemo(() => (envelope ? envelopePeaks(envelope, 96) : null), [envelope])
-  const currentLevel = useMemo(() => {
-    if (!peaks || peaks.length === 0) return 0
-    const index = Math.max(0, Math.min(peaks.length - 1, Math.floor(progress * peaks.length)))
-    return peaks[index] ?? 0
-  }, [peaks, progress])
-
-  // The meter still reads the old normalized shape; P4 replaces it with true dBFS. Deriving it
-  // from the envelope keeps the two from disagreeing about the same audio in the meantime.
-  const peakLevel = envelope?.peakAbs ?? 0
+  // The clip LED latches on the file's own sample peak and stays latched until cleared -- it is
+  // a record that something clipped, not a live indicator that would blink away.
+  const clipped = !clipCleared && stats != null && stats.peakDbfs >= CLIP_DBFS
 
   useEffect(() => {
     setEnvelope(null)
+    setStats(null)
+    setClipCleared(false)
     setDecodeFailed(false)
     setProgress(0)
     setIsPlaying(false)
     if (!blob) return
     let cancelled = false
-    // One decode, resolution-independent: the renderer picks columns from this pyramid for
-    // whatever width it ends up with (B-P2).
-    computeEnvelope(blob)
-      .then((next) => {
-        if (!cancelled) setEnvelope(next)
-      })
-      .catch(() => {
+    // One decode feeds both analyses: the waveform envelope (P2) and the loudness stats (P4),
+    // the second computed off-thread by the P3 worker.
+    const run = async () => {
+      try {
+        const ctx = new AudioContext()
+        const buffer = await ctx.decodeAudioData(await blob.arrayBuffer())
+        const samples = buffer.getChannelData(0)
+        const nextEnvelope = envelopeFromChannels([samples], buffer.sampleRate)
+        const nextStats = await getLoudness(`loudness:deck:${src}:${blob.size}`, samples, buffer.sampleRate)
+        void ctx.close()
+        if (cancelled) return
+        setEnvelope(nextEnvelope)
+        setStats(nextStats)
+      } catch {
         if (!cancelled) setDecodeFailed(true)
-      })
+      }
+    }
+    void run()
     return () => {
       cancelled = true
     }
-  }, [blob])
+  }, [blob, src])
 
   useEffect(() => {
     if (!autoPlay) return
@@ -290,8 +299,37 @@ export function AudioDeck({
         className="hidden"
       />
 
+      {/* Clip stats (P4 / D5): peak, RMS and integrated loudness of the file itself. These are
+          properties of the audio, not of the playback, so they never move. */}
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className="micro-label">Clip</span>
+        <span className="readout" data-testid="deck-peak-readout">
+          {stats ? (stats.peakDbfs === -Infinity ? '−∞' : stats.peakDbfs.toFixed(1)) : '—'}
+          <span className="readout-unit">dBFS peak</span>
+        </span>
+        <span className="readout" data-testid="deck-lufs-readout">
+          {stats ? (stats.lufs === -Infinity ? '−∞' : stats.lufs.toFixed(1)) : '—'}
+          <span className="readout-unit">LUFS</span>
+        </span>
+        <button
+          type="button"
+          data-testid="deck-clip-led"
+          data-state={clipped ? 'on' : 'off'}
+          onClick={() => setClipCleared(true)}
+          title={clipped ? 'This clip reached full scale. Click to clear.' : 'No sample reached full scale.'}
+          className={cn(
+            'rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase transition-colors',
+            clipped
+              ? 'border-destructive/60 bg-destructive/20 text-destructive'
+              : 'border-border/60 text-muted-foreground/60',
+          )}
+        >
+          Clip
+        </button>
+      </div>
+
       {layout === 'stacked' ? (
-        <div className="flex flex-col gap-2">
+        <div data-testid="transport-strip" className="flex flex-col gap-2">
           <div className="flex items-center gap-1">
             {(['wave', 'spectrum'] as const).map((mode) => (
               <button
@@ -339,17 +377,17 @@ export function AudioDeck({
           <div className="flex flex-wrap items-center gap-1">
             <Button
               type="button"
-              size="icon-sm"
+              size="icon"
               variant="secondary"
               className="rounded-full"
               onClick={togglePlay}
               aria-label={isPlaying ? 'Pause audio' : 'Play audio'}
             >
-              {isPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5 translate-x-px" />}
+              {isPlaying ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
             </Button>
             <Button
               type="button"
-              size="icon-sm"
+              size="icon"
               variant="ghost"
               onClick={() => {
                 const audio = audioRef.current
@@ -358,31 +396,38 @@ export function AudioDeck({
               }}
               aria-label="Restart audio"
             >
-              <RotateCcw className="size-3.5" />
+              <RotateCcw className="size-4" />
             </Button>
             <Button
               type="button"
-              size="icon-sm"
+              size="icon"
               variant="ghost"
               onClick={() => setIsLooping(!isLooping)}
               tooltip="Toggle loop"
               aria-label="Toggle loop"
             >
-              <Repeat className={cn('size-3.5', isLooping ? 'text-primary' : 'text-muted-foreground')} />
+              <Repeat className={cn('size-4', isLooping ? 'text-primary' : 'text-muted-foreground')} />
             </Button>
-            <LevelMeter level={currentLevel} peak={peakLevel} />
+            <LevelMeter
+              envelope={envelope}
+              mediaRef={audioRef}
+              playing={isPlaying}
+              progress={progress}
+              className="flex-1"
+            />
+            <span className="micro-label">Speed</span>
             <SpeedStepper value={playbackRate} onChange={changeSpeed} />
-            <Button type="button" size="icon-sm" variant="ghost" onClick={download} tooltip="Download" aria-label="Download audio">
-              <Download className="size-3.5 text-muted-foreground" />
+            <Button type="button" size="icon" variant="ghost" onClick={download} tooltip="Download" aria-label="Download audio">
+              <Download className="size-4 text-muted-foreground" />
             </Button>
           </div>
         </div>
       ) : (
-        <div className={cn('grid gap-3', compact ? 'grid-cols-[auto_1fr_auto]' : 'grid-cols-[auto_1fr] md:grid-cols-[auto_1fr_9rem]')}>
+        <div data-testid="transport-strip" className={cn('grid gap-3', compact ? 'grid-cols-[auto_1fr_auto]' : 'grid-cols-[auto_1fr] md:grid-cols-[auto_1fr_9rem]')}>
           <div className="flex items-center gap-1.5">
             <Button
               type="button"
-              size={compact ? 'icon-sm' : 'icon'}
+              size="icon"
               variant="secondary"
               className="rounded-full"
               onClick={togglePlay}
@@ -390,21 +435,19 @@ export function AudioDeck({
             >
               {isPlaying ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
             </Button>
-            {!compact && (
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                onClick={() => {
-                  const audio = audioRef.current
-                  if (audio) audio.currentTime = 0
-                  setProgress(0)
-                }}
-                aria-label="Restart audio"
-              >
-                <RotateCcw className="size-3.5" />
-              </Button>
-            )}
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              onClick={() => {
+                const audio = audioRef.current
+                if (audio) audio.currentTime = 0
+                setProgress(0)
+              }}
+              aria-label="Restart audio"
+            >
+              <RotateCcw className="size-4" />
+            </Button>
             {!compact && (
               <div className="flex items-center gap-1">
                 {(['wave', 'spectrum'] as const).map((mode) => (
@@ -461,23 +504,29 @@ export function AudioDeck({
           </div>
 
           <div className={cn('flex items-center gap-1', compact ? '' : 'justify-end md:flex-col md:items-stretch')}>
-            {!compact && <LevelMeter level={currentLevel} peak={peakLevel} />}
+            <LevelMeter
+              envelope={envelope}
+              mediaRef={audioRef}
+              playing={isPlaying}
+              progress={progress}
+              className={compact ? 'min-w-20' : undefined}
+            />
             <div className="flex items-center justify-end gap-1">
               <Button
                 type="button"
-                size="icon-sm"
+                size="icon"
                 variant="ghost"
                 onClick={() => setIsLooping(!isLooping)}
                 tooltip="Toggle loop"
                 aria-label="Toggle loop"
               >
-                <Repeat className={cn('size-3.5', isLooping ? 'text-primary' : 'text-muted-foreground')} />
+                <Repeat className={cn('size-4', isLooping ? 'text-primary' : 'text-muted-foreground')} />
               </Button>
               {!compact && (
                 <SpeedStepper value={playbackRate} onChange={changeSpeed} />
               )}
-              <Button type="button" size="icon-sm" variant="ghost" onClick={download} tooltip="Download" aria-label="Download audio">
-                <Download className="size-3.5 text-muted-foreground" />
+              <Button type="button" size="icon" variant="ghost" onClick={download} tooltip="Download" aria-label="Download audio">
+                <Download className="size-4 text-muted-foreground" />
               </Button>
             </div>
           </div>

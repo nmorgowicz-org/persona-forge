@@ -46,10 +46,38 @@ export function sineWav({ hz = 440, dbfs = -6, seconds = 2, sampleRate = SAMPLE_
   return writeWav(samples, sampleRate)
 }
 
-/** A single-sample impulse at a known level: the honest way to pin a peak without a tone. */
+/**
+ * A single-sample impulse at a known level.
+ *
+ * Careful: this is a *sampling* primitive, not a way to test clipping. A browser decodes into
+ * its own AudioContext rate, and rate conversion spreads a one-sample event -- a 0 dBFS impulse
+ * written at 24 kHz measured -0.9 dBFS through the app. Use a full-scale tone when the claim is
+ * about peak level; that is what `sineWav({ dbfs: 0 })` is for.
+ */
 export function impulseWav({ dbfs = 0, seconds = 0.5, sampleRate = SAMPLE_RATE } = {}) {
   const count = Math.max(1, Math.round(seconds * sampleRate))
   const samples = new Float32Array(count)
   samples[Math.floor(count / 2)] = amplitudeFor(dbfs)
+  return writeWav(samples, sampleRate)
+}
+
+/** A tone that alternates between two levels. A steady tone cannot move a meter: with a fixed
+ * level, any ballistic meter settles and every sample reads the same. */
+export function pulsedWav({
+  hz = 440,
+  loudDbfs = -6,
+  quietDbfs = -40,
+  seconds = 2,
+  periodSeconds = 0.25,
+  sampleRate = SAMPLE_RATE,
+} = {}) {
+  const count = Math.max(1, Math.round(seconds * sampleRate))
+  const period = Math.max(1, Math.round(periodSeconds * sampleRate))
+  const samples = new Float32Array(count)
+  for (let i = 0; i < count; i++) {
+    const loud = Math.floor(i / period) % 2 === 0
+    const amplitude = amplitudeFor(loud ? loudDbfs : quietDbfs)
+    samples[i] = amplitude * Math.sin((2 * Math.PI * hz * i) / sampleRate)
+  }
   return writeWav(samples, sampleRate)
 }

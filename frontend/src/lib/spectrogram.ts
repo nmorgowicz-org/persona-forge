@@ -53,18 +53,25 @@ function touch(key: string, value: Spectrogram): void {
   }
 }
 
+export interface Loudness {
+  peakDbfs: number
+  rmsDbfs: number
+  /** Integrated loudness, ITU-R BS.1770-4. */
+  lufs: number
+}
+
 let worker: Worker | null = null
 let nextRequestId = 1
-const pending = new Map<number, { resolve: (value: Spectrogram) => void; reject: (error: Error) => void }>()
+const pending = new Map<number, { resolve: (value: never) => void; reject: (error: Error) => void }>()
 
 function ensureWorker(): Worker | null {
   if (worker) return worker
   if (typeof Worker === 'undefined') return null
   worker = new Worker(new URL('./stft.worker.ts', import.meta.url), { type: 'module' })
-  worker.onmessage = (event: MessageEvent<Spectrogram & { requestId: number }>) => {
+  worker.onmessage = (event: MessageEvent<Spectrogram & Loudness & { requestId: number }>) => {
     const entry = pending.get(event.data.requestId)
     pending.delete(event.data.requestId)
-    entry?.resolve(event.data)
+    entry?.resolve(event.data as never)
   }
   worker.onerror = () => {
     for (const [id, entry] of pending) {
@@ -93,7 +100,7 @@ export async function getSpectrogram(
   if (!instance) throw new Error('Web Workers are unavailable')
   const requestId = nextRequestId++
   const result = await new Promise<Spectrogram>((resolve, reject) => {
-    pending.set(requestId, { resolve, reject })
+    pending.set(requestId, { resolve: resolve as (value: never) => void, reject })
     // One copy goes to the worker, and its buffer is transferred: the caller's samples are the
     // decoded clip, which other surfaces may still need, so they are never handed away.
     const payload = samples.slice()
@@ -180,4 +187,41 @@ export function useSignalView(): SignalView {
     () => view,
     () => 'wave' as SignalView,
   )
+}
+
+// ---- Loudness (B-P4, CP0 decision D5) -------------------------------------------------------
+//
+// Peak and RMS come straight off the buffer; integrated loudness is ITU-R BS.1770-4 (K-weighting
+// plus 400 ms gated blocks) computed in the P3 worker. Analysis only -- nothing here touches what
+// the user hears.
+
+const loudnessCache = new Map<string, Loudness>()
+const LOUDNESS_LRU_MAX = 64
+
+export async function getLoudness(
+  cacheKey: string,
+  samples: Float32Array,
+  sampleRate: number,
+): Promise<Loudness> {
+  const cached = loudnessCache.get(cacheKey)
+  if (cached) {
+    loudnessCache.delete(cacheKey)
+    loudnessCache.set(cacheKey, cached)
+    return cached
+  }
+  const instance = ensureWorker()
+  if (!instance) throw new Error('Web Workers are unavailable')
+  const requestId = nextRequestId++
+  const payload = samples.slice()
+  const result = await new Promise<Loudness>((resolve, reject) => {
+    pending.set(requestId, { resolve: resolve as (value: never) => void, reject })
+    instance.postMessage({ requestId, kind: 'loudness', samples: payload, sampleRate }, [payload.buffer])
+  })
+  loudnessCache.set(cacheKey, result)
+  while (loudnessCache.size > LOUDNESS_LRU_MAX) {
+    const oldest = loudnessCache.keys().next().value
+    if (oldest === undefined) break
+    loudnessCache.delete(oldest)
+  }
+  return result
 }
