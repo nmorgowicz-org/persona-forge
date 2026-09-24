@@ -1652,7 +1652,7 @@ wheels = [
 
 [[package]]
 name = "persona-forge"
-version = "1.5.0" # x-release-please-version
+version = "1.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
@@ -1738,7 +1738,7 @@ requires-dist = [
     { name = "librosa" },
     { name = "omnivoice", specifier = "==0.2.1" },
     { name = "onnxruntime", marker = "extra == 'qwen-tts'" },
-    { name = "pocket-tts", specifier = "==3.1.0" },
+    { name = "pocket-tts", specifier = "==3.3.0" },
     { name = "pydub" },
     { name = "pyloudnorm" },
     { name = "qwen-tts", marker = "extra == 'qwen-tts'", specifier = "==0.1.1" },
@@ -1820,7 +1820,7 @@ wheels = [
 
 [[package]]
 name = "pocket-tts"
-version = "3.1.0"
+version = "3.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "einops" },
@@ -1833,6 +1833,7 @@ dependencies = [
     { name = "safetensors" },
     { name = "scipy" },
     { name = "sentencepiece" },
+    { name = "tokenizers" },
     { name = "torch", version = "2.13.0+rocm7.1", source = { registry = "https://download.pytorch.org/whl/rocm7.1" }, marker = "(sys_platform == 'linux' and extra == 'extra-13-persona-forge-rocm') or (extra == 'extra-13-persona-forge-rocm' and extra == 'extra-13-persona-forge-xpu') or (extra == 'extra-13-persona-forge-cuda12' and extra == 'extra-13-persona-forge-cuda13') or (extra == 'extra-13-persona-forge-cuda12' and extra == 'extra-13-persona-forge-rocm') or (extra == 'extra-13-persona-forge-cuda12' and extra == 'extra-13-persona-forge-xpu') or (extra == 'extra-13-persona-forge-cuda13' and extra == 'extra-13-persona-forge-rocm') or (extra == 'extra-13-persona-forge-cuda13' and extra == 'extra-13-persona-forge-xpu')" },
     { name = "torch", version = "2.13.0+xpu", source = { registry = "https://download.pytorch.org/whl/xpu" }, marker = "(sys_platform == 'linux' and extra == 'extra-13-persona-forge-xpu') or (sys_platform == 'win32' and extra == 'extra-13-persona-forge-xpu') or (extra == 'extra-13-persona-forge-rocm' and extra == 'extra-13-persona-forge-xpu') or (extra == 'extra-13-persona-forge-cuda12' and extra == 'extra-13-persona-forge-cuda13') or (extra == 'extra-13-persona-forge-cuda12' and extra == 'extra-13-persona-forge-rocm') or (extra == 'extra-13-persona-forge-cuda12' and extra == 'extra-13-persona-forge-xpu') or (extra == 'extra-13-persona-forge-cuda13' and extra == 'extra-13-persona-forge-rocm') or (extra == 'extra-13-persona-forge-cuda13' and extra == 'extra-13-persona-forge-xpu')" },
     { name = "torch", version = "2.14.0", source = { registry = "https://pypi.org/simple" }, marker = "(sys_platform != 'linux' and sys_platform != 'win32') or (sys_platform == 'win32' and extra == 'extra-13-persona-forge-rocm') or (sys_platform == 'linux' and extra == 'extra-13-persona-forge-cuda12' and extra == 'extra-13-persona-forge-cuda13') or (sys_platform == 'linux' and extra == 'extra-13-persona-forge-cuda12' and extra == 'extra-13-persona-forge-rocm') or (sys_platform == 'linux' and extra == 'extra-13-persona-forge-cuda12' and extra == 'extra-13-persona-forge-xpu') or (sys_platform == 'linux' and extra == 'extra-13-persona-forge-cuda13' and extra == 'extra-13-persona-forge-rocm') or (sys_platform == 'linux' and extra == 'extra-13-persona-forge-cuda13' and extra == 'extra-13-persona-forge-xpu') or (sys_platform == 'linux' and extra == 'extra-13-persona-forge-rocm' and extra == 'extra-13-persona-forge-xpu') or (sys_platform == 'win32' and extra == 'extra-13-persona-forge-cuda12' and extra == 'extra-13-persona-forge-cuda13') or (sys_platform == 'win32' and extra == 'extra-13-persona-forge-cuda13' and extra == 'extra-13-persona-forge-xpu') or (sys_platform == 'win32' and extra == 'extra-13-persona-forge-cuda12' and extra != 'extra-13-persona-forge-rocm' and extra == 'extra-13-persona-forge-xpu') or (sys_platform == 'win32' and extra != 'extra-13-persona-forge-cuda12' and extra != 'extra-13-persona-forge-cuda13' and extra != 'extra-13-persona-forge-xpu') or (sys_platform == 'linux' and extra != 'extra-13-persona-forge-cuda12' and extra != 'extra-13-persona-forge-cuda13' and extra != 'extra-13-persona-forge-rocm' and extra != 'extra-13-persona-forge-xpu')" },
@@ -1842,9 +1843,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b4/4d/2c97117deb4ce79adeaffa0d1aaf6d31dfd902b539fb48b211998fbb8eb5/pocket_tts-3.1.0.tar.gz", hash = "sha256:7991e312a36a5150da639d5cb1eda8ed3a5faf915dc725a51044564478c32580", size = 779123, upload-time = "2026-09-03T16:00:52.147Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/56/e4/08262e47704291a99c211515b17e754d4891a899323a8171e220f468e45b/pocket_tts-3.3.0.tar.gz", hash = "sha256:997b3dd39d43c0555cdd9b8efd72ac926dbfcd250fb5f3575aa29c33db5b6621", size = 802539, upload-time = "2026-09-24T15:22:49.416Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d0/52/83feb14ac0f70a433a4f360087c96536f60393764325a4fa17dae1c22fc7/pocket_tts-3.1.0-py3-none-any.whl", hash = "sha256:956d111e04387af6018b5cdcc44947ee576479b9c2772e574204867ec5de59c0", size = 77912, upload-time = "2026-09-03T16:00:50.553Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/c0/9bf4453c170bfe15cbe71d9ec7bbd7052bea0275e5c0645f59be373b83ab/pocket_tts-3.3.0-py3-none-any.whl", hash = "sha256:77b2eb5554cb710e92888f84e28816f2361dba075e0ace47108458794db99111", size = 86452, upload-time = "2026-09-24T15:22:47.852Z" },
 ]
 
 [[package]]
