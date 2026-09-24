@@ -20,6 +20,7 @@ import { beginCaptureReceipt, finishCaptureReceipt, setCaptureDiagnostics } from
 import health from './scenarios/core/health.mjs';
 import home from './scenarios/core/home.mjs';
 import generate from './scenarios/generate/generate.mjs';
+import signalLayerGif from './scenarios/generate/signal-layer-gif.mjs';
 import voiceDesignPanel from './scenarios/voice-design/panel.mjs';
 import voiceDesignGenerate from './scenarios/voice-design/generate.mjs';
 import voiceVariantList from './scenarios/voice-library/variant-list.mjs';
@@ -75,6 +76,15 @@ export const SCENARIOS = {
                 'speak-generate--pocket-tts--before-generate.png',
                 'speak-generate--pocket-tts--after-generate.png',
             ],
+        },
+    },
+    'signal-layer-gif': {
+        run: signalLayerGif,
+        category: 'generate',
+        runtime: 'pocket-tts',
+        contract: {
+            intent: 'Animate the signal layer under playback: the level meter and playhead moving on a real take, then the same take read as a spectrogram.',
+            expectedOutputs: ['signal-layer-gif--pocket-tts--signal-layer.gif'],
         },
     },
     'voice-design-panel': {
