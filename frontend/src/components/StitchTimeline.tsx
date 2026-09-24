@@ -2,7 +2,8 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { AnimatePresence, motion, MotionConfig, Reorder } from 'motion/react'
 import { ChevronUp, ChevronDown, Loader2, Play, Gauge, RotateCcw, Minus, Plus, Maximize2, Redo2, Undo2 } from 'lucide-react'
-import { type StitchPlanClip, type StitchPlanDsp } from '@/store'
+import { useAppStore, type StitchPlanClip, type StitchPlanDsp } from '@/store'
+import { EmptyState } from '@/components/ui/empty-state'
 import { MOTION } from '@/lib/motion'
 import {
   getStitchPacingTargets,
@@ -517,22 +518,37 @@ export const StitchTimeline = memo(function StitchTimeline({
   useShortcutScope('stitch', 'Stitch Studio', stitchCommands)
 
   if (!clips.length) {
+    const canPick = library.length > 0 || hasVoiceLibrary
     return (
-      <div className="flex h-24 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
-        <span>No clips in timeline</span>
-        <div className="flex items-center gap-2">
-          {historyEnabled && <HistoryControls history={history} />}
-          {(library.length > 0 || hasVoiceLibrary) && (
-            <SegmentBrowserModal
-              segments={library}
-              onInsertSegments={onInsertFromLibrary}
-              voices={voiceLibrary}
-              onInsertVoices={onInsertVoiceFromLibrary}
-              insertAfterClipId={null}
-              controllerRef={pickerRef}
-            />
-          )}
-        </div>
+      <div className="py-2">
+        <EmptyState
+          title="No clips in the timeline"
+          description={
+            canPick
+              ? 'Add a segment or a saved reference voice, then trim the edges, reorder, and shape the gaps between them.'
+              : 'Segments and reference voices are made in Voice Design and OmniVoice. Design one, then build the timeline here.'
+          }
+          actionLabel={canPick ? 'Add segments' : 'Design a voice'}
+          onAction={() => {
+            if (canPick) pickerRef?.current?.open()
+            else useAppStore.getState().setPage('voice-design')
+          }}
+        >
+          <div className="flex items-center gap-2">
+            {historyEnabled && <HistoryControls history={history} />}
+            {canPick && (
+              <SegmentBrowserModal
+                segments={library}
+                onInsertSegments={onInsertFromLibrary}
+                voices={voiceLibrary}
+                onInsertVoices={onInsertVoiceFromLibrary}
+                insertAfterClipId={null}
+                controllerRef={pickerRef}
+                hideTrigger
+              />
+            )}
+          </div>
+        </EmptyState>
       </div>
     )
   }

@@ -24,9 +24,9 @@ import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
 import { VoiceSelector } from '@/components/VoiceSelector'
 import { AudioPlayer } from '@/components/AudioPlayer'
-import { MOTION } from '@/lib/motion'
 import { InfoIcon } from '@/components/InfoIcon'
 import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
 import { PageHeader } from '@/components/ui/page-header'
 import {
   Select,
@@ -151,6 +151,7 @@ export function SpeakPage() {
     speakAudioBlob,
     setSpeakAudioBlob,
     serviceStarted,
+    announce,
   } = useAppStore()
   const [language, setLanguage] = useState('English')
   // The two parameter dropdowns get labels wired by id, so the name a screen reader reads is
@@ -233,6 +234,12 @@ export function SpeakPage() {
               rtf: rtfHeader ? Number(rtfHeader) : p.rtf ?? null,
               audioSeconds: audioSecondsHeader ? Number(audioSecondsHeader) : p.audio_seconds ?? null,
             })
+            // The visible result is the player below; this is the same news for anyone who is
+            // not looking at it (B-P9).
+            const seconds = audioSecondsHeader ? Number(audioSecondsHeader) : p.audio_seconds
+            announce(
+              seconds ? `Generation complete. ${seconds.toFixed(1)}s of audio ready.` : 'Generation complete. Audio is ready.',
+            )
           } catch {
             setSpeakError('Failed to download generated audio')
           }
@@ -246,6 +253,7 @@ export function SpeakPage() {
           const msg = p.message || 'Generation failed'
           const info = classifyGenerateError(msg, null)
           setSpeakError(info.headline + (info.detail ? '\n' + info.detail : ''))
+          announce(`Generation failed. ${info.headline}`)
           setSpeakIsGenerating(false)
           setSpeakJobId(null)
           setSpeakJobProgress(null)
@@ -483,19 +491,15 @@ export function SpeakPage() {
         {speakIsGenerating && speakJobProgress && (
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
-              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                <motion.div
-                  className="h-full bg-primary"
-                  animate={{
-                     width: `${Math.min(100, Math.max(3, speakJobProgress.progress_pct))}%`,
-                  }}
-                  transition={MOTION.settle}
-                />
-              </div>
+              <Progress
+                value={speakJobProgress.progress_pct}
+                label="Generation progress"
+                testId="speak-progress"
+              />
                {typeof speakJobProgress.progress_pct === 'number' && (
                  <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
                    {Math.round(speakJobProgress.progress_pct)}%
-                </span>
+                 </span>
               )}
             </div>
             <p className="text-[11px] text-muted-foreground">

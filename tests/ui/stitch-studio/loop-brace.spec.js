@@ -9,7 +9,7 @@ import { test, expect } from '@playwright/test'
 async function insertSegments(page, n) {
   await page.goto('/')
   await page.getByTestId('nav-stitch-studio').click()
-  await page.getByTestId('stitch-picker-toggle-segments').click()
+  await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
   const items = page.getByTestId('stitch-picker-item-segments')
   await expect(items.first()).toBeVisible()
   for (let i = 0; i < n; i++) await items.nth(i).click()

@@ -47,6 +47,8 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { SwapBanner } from '@/components/SwapBanner'
 import { HealthStatusBanner } from '@/components/HealthStatusBanner'
+import { StartupState } from '@/components/StartupState'
+import { Announcer } from '@/components/ui/announcer'
 import { UpdateAvailableBanner } from '@/components/UpdateAvailableBanner'
 import { getRuntimeConfig, getHealth } from '@/lib/api'
 import { type Page, useAppStore } from '@/store'
@@ -363,6 +365,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const page = useAppStore((s) => s.page)
   const setPage = useAppStore((s) => s.setPage)
   const setRuntimeConfig = useAppStore((s) => s.setRuntimeConfig)
+  const serviceStarted = useAppStore((s) => s.serviceStarted)
+  const healthStatus = useAppStore((s) => s.healthStatus)
+  const healthChecked = useAppStore((s) => s.healthChecked)
   // Info view (D6): one delegated listener for the whole app. Any control can carry a
   // `data-help` string and have it explained in the status bar's info strip on hover or
   // keyboard focus -- no per-control wiring, and nothing renders until there is something to
@@ -452,6 +457,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <SidebarProvider>
+
       <Sidebar collapsible="icon">
         <SidebarHeader className="px-3 py-4">
           <div className="flex items-center gap-2.5 px-1">
@@ -536,6 +542,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       </SidebarInset>
       <ActivityStatusBar />
       <TransportReadout />
+      <Announcer />
+      {/* Cold boot, as a layer rather than a replacement. The backend has answered and said it
+          has never started; until it answers at all the shell is what renders, because an
+          unasked question is not a cold boot. A startup failure resolves to the error banner
+          instead. Kept in the same tree so the palette, keymap and banners stay mounted -- they
+          are what the shell is for, and unmounting them mid-boot is a race no test should see. */}
+      {healthChecked && !serviceStarted && healthStatus !== 'error' && <StartupState />}
       <CommandPalette />
       <ShortcutKeymap />
     </SidebarProvider>

@@ -138,7 +138,16 @@ def _patch_generate_for_slow_async(rt):
     def _wrapped(text, language, **kwargs):
         job_id = kwargs.get("job_id")
         if job_id:
-            time.sleep(random.uniform(3, 5))
+            # Ramp the job's frame count while the slowed work runs, so its reported progress
+            # moves. Ten ticks of 0.3-0.5s keeps this profile's documented 3-5s duration, and
+            # `get_job_progress` derives progress_pct from these frames -- a job pinned at one
+            # percentage cannot tell a determinate readout from a decorative one.
+            for tick in range(1, 11):
+                time.sleep(random.uniform(0.3, 0.5))
+                active = rt._active_jobs.get(job_id)
+                if active is None:
+                    break
+                active.frames_generated = int(60 * tick / 10)
         result = original_run_generate(text, language, **kwargs)
         if job_id:
             # Mirrors what the immediate path sets at creation: status, frame count, the

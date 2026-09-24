@@ -8,7 +8,6 @@ import {
   FoldHorizontal,
   GitFork,
   Layers,
-  Mic2,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -58,6 +57,7 @@ import {
 import { hasChipSelections, type ChipSelections } from '@/lib/voiceDesignChips'
 import { MiniAudioDeck } from '@/components/audio/MiniAudioDeck'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { createStitchClipFromSegment } from '@/lib/stitchClips'
 import { useAppStore, type StitchPlanClip, type StitchPlanDsp } from '@/store'
 import { VariantCompare } from '@/components/VariantCompare'
@@ -1237,7 +1237,7 @@ export function VoiceLibraryPage() {
   }
 
   useEffect(() => {
-    refresh()
+    void refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -1812,13 +1812,13 @@ export function VoiceLibraryPage() {
 
       {/* Voices */}
       {voices.length === 0 && segments.length === 0 && !error ? (
-        <div className="flex flex-col items-center justify-center gap-2 rounded-panel border border-dashed border-border py-16 text-center">
-          <Mic2 className="size-6 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">No voices saved yet.</p>
-          <Button size="sm" variant="secondary" onClick={() => setPage('voice-design')}>
-            Design your first voice
-          </Button>
-        </div>
+        <EmptyState
+          className="py-16"
+          title="No voices saved yet"
+          description="Design a voice or clone one from a reference clip. Saved voices and segments collect here, and the API serves them."
+          actionLabel="Design your first voice"
+          onAction={() => setPage('voice-design')}
+        />
       ) : (
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v === 'segments' ? 'segments' : 'voices')}>
           <TabsList>

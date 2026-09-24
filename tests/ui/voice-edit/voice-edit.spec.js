@@ -10,7 +10,7 @@ test.describe('Voice Edit workspace', () => {
   test('Voice Edit deep link preselects the saved voice', async ({ page }) => {
     await page.goto('/')
     await page.getByTestId('nav-stitch-studio').click()
-    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
     await page.getByTestId('stitch-picker-item-segments').nth(0).click()
     await page.getByTestId('stitch-picker-item-segments').nth(1).click()
     await page.getByTestId('stitch-picker-item-segments').nth(2).click()

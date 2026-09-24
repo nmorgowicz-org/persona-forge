@@ -96,7 +96,7 @@ test.describe('B-P8: readout typography and labeled controls', () => {
   test('the gap readout carries its unit', async ({ page }) => {
     await page.goto('/')
     await page.getByTestId('nav-stitch-studio').click()
-    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
     const items = page.getByTestId('stitch-picker-item-segments')
     await expect(items.first()).toBeVisible()
     for (let i = 0; i < 2; i++) await items.nth(i).click()
@@ -149,7 +149,7 @@ test.describe('B-P8: readout typography and labeled controls', () => {
 
     // The timeline's own ruler and zoom readout are time readouts too.
     await page.getByTestId('nav-stitch-studio').click()
-    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
     const items = page.getByTestId('stitch-picker-item-segments')
     await expect(items.first()).toBeVisible()
     for (let i = 0; i < 2; i++) await items.nth(i).click()

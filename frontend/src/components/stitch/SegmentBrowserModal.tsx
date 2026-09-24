@@ -8,6 +8,7 @@
 // 250-row library scrolls smoothly without a virtualization dependency.
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { Copy, Loader2, Pause, Play, Plus } from 'lucide-react'
+import { useAppStore } from '@/store'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { base64ToBlob, cn } from '@/lib/utils'
@@ -165,7 +166,12 @@ const BrowserRowItem = memo(function BrowserRowItem({
         </ContextMenu.Item>
         <ContextMenu.Item
           data-testid="stitch-menu-copy-id"
-          onSelect={() => { void navigator.clipboard?.writeText(row.id).catch(() => {}) }}
+          onSelect={() => {
+            void navigator.clipboard
+              ?.writeText(row.id)
+              .then(() => useAppStore.getState().announce(`Copied ${row.id}`))
+              .catch(() => {})
+          }}
         >
           <Copy className="size-3" />
           Copy id
@@ -189,6 +195,9 @@ export interface SegmentBrowserModalProps {
   insertAfterClipId: string | null
   /** Optional controller the parent uses to open the dialog without a DOM click. */
   controllerRef?: { current: SegmentBrowserModalController | null }
+  /** Hide the inline trigger when the caller supplies its own action (an empty state's single
+   * next step, for instance) and drives the dialog through `controllerRef`. */
+  hideTrigger?: boolean
 }
 
 export function SegmentBrowserModal({
@@ -198,6 +207,7 @@ export function SegmentBrowserModal({
   onInsertVoices,
   insertAfterClipId,
   controllerRef,
+  hideTrigger = false,
 }: SegmentBrowserModalProps) {
   const [open, setOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<BrowserTab>('segments')
@@ -429,14 +439,16 @@ export function SegmentBrowserModal({
 
   return (
     <>
-      <button
-        type="button"
-        data-testid="stitch-picker-toggle-segments"
-        onClick={() => setOpen(true)}
-        className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted"
-      >
-        <Plus className="size-3.5" /> Add segments
-      </button>
+      {!hideTrigger && (
+        <button
+          type="button"
+          data-testid="stitch-picker-toggle-segments"
+          onClick={() => setOpen(true)}
+          className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted"
+        >
+          <Plus className="size-3.5" /> Add segments
+        </button>
+      )}
 
       <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetPickerState() }}>
         {/* DialogContent is programmatically focusable (not in the Tab order) so the dialog

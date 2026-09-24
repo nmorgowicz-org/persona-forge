@@ -87,7 +87,7 @@ test.describe('B-P3: spectrogram view', () => {
     await expect(page.getByTestId('spectrogram-canvas')).toBeVisible({ timeout: 20000 })
 
     await page.getByTestId('nav-stitch-studio').click()
-    await expect(page.getByTestId('stitch-picker-toggle-segments')).toBeVisible({ timeout: 15000 })
+    await expect(page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action'))).toBeVisible({ timeout: 15000 })
     await page.getByTestId('nav-speak').click()
     await expect(page.getByTestId('speak-result')).toBeVisible({ timeout: 15000 })
 

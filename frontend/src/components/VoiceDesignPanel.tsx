@@ -271,6 +271,9 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
         deliveryVariant.kind,
       )
       setSavedVoiceId(result.voice_id)
+      // The confirmation is the "Saved as ..." block below; this is the same news for anyone
+      // who is not looking at it (B-P9).
+      useAppStore.getState().announce(`Voice saved to the library as ${result.voice_id}.`)
     } catch (err) {
       setError(
         err instanceof Error ? err.message : String(err),

@@ -104,6 +104,7 @@ export function StitchStudioPage() {
         })
         setSavedVoiceId(result.voice_id)
         setDeepLinkProsodyVoiceId(result.voice_id)
+        useAppStore.getState().announce(`Saved ${name.trim()} to the voice library.`)
         if (useAsApiDefault) {
           try {
             await activateVoiceForApi(result.voice_id)

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAudioSource } from '@/hooks/useAudioTransport'
+import { useAppStore } from '@/store'
 import {
   cancelVoiceAlignment,
   deleteVoiceVariant,
@@ -316,6 +317,7 @@ export function useProsodyEditor(
     try {
       await saveVoiceProsodyVariant(voiceId, stylePreset, paceMultiplier, pauseOffset, mode, targetOverrides)
       if (voiceIdRef.current !== capturedVoiceId) return
+      useAppStore.getState().announce('Prosody variant saved — it is listed with this voice.')
       await refresh()
       await onChanged?.()
     } catch (err) {
@@ -338,6 +340,7 @@ export function useProsodyEditor(
       const variantFilename = `prosody_${created.variant_slug}.wav`
       await setActiveVoiceVariant(voiceId, variantFilename)
       stage = 'done'
+      useAppStore.getState().announce('Variant saved and promoted — it is what the API serves now.')
       await refresh()
       await onChanged?.()
     } catch (err) {

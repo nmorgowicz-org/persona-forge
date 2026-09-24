@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test'
 // unified `radix-ui` package.
 
 async function openPicker(page) {
-  await page.getByTestId('stitch-picker-toggle-segments').click()
+  await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
   await expect(page.getByTestId('segment-browser-dialog')).toBeVisible()
 }
 

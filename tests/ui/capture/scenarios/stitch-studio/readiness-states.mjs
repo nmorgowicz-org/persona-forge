@@ -28,7 +28,7 @@ export default async function (ctx) {
         scrollToSelector: '[data-testid="stitch-reference-readiness"]',
     });
 
-    await page.click('[data-testid="stitch-picker-toggle-segments"]');
+    await page.click('[data-testid="stitch-picker-toggle-segments"], [data-testid="empty-state-action"]');
     await page.waitForSelector('[data-testid="segment-browser-dialog"]');
     const items = await page.$$('[data-testid="stitch-picker-item-segments"]');
     await items[0].click();

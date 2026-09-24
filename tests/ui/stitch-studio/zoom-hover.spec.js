@@ -12,7 +12,7 @@ test.describe('A-2: cursor-anchored zoom and hover time guide', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.getByTestId('nav-stitch-studio').click()
-    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
     const items = page.getByTestId('stitch-picker-item-segments')
     await expect(items.first()).toBeVisible()
     for (let i = 0; i < 3; i++) await items.nth(i).click()

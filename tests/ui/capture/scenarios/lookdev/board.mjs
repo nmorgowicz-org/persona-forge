@@ -102,8 +102,8 @@ async function waitPreviewSettled(page) {
 
 async function driveStitch(page) {
     await page.click('[data-testid="nav-stitch-studio"]');
-    await page.waitForSelector('[data-testid="stitch-picker-toggle-segments"]');
-    await page.click('[data-testid="stitch-picker-toggle-segments"]');
+    await page.waitForSelector('[data-testid="stitch-picker-toggle-segments"], [data-testid="empty-state-action"]');
+    await page.click('[data-testid="stitch-picker-toggle-segments"], [data-testid="empty-state-action"]');
     await page.waitForSelector('[data-testid="stitch-picker-item-segments"]');
     await page.waitForFunction(
         () => getComputedStyle(document.querySelector('[data-testid="segment-browser-dialog"]')).opacity === '1',

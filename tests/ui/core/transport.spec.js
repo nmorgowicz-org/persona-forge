@@ -24,7 +24,7 @@ async function openStudio(page) {
 
 async function insertSegments(page, n) {
   await openStudio(page)
-  await page.getByTestId('stitch-picker-toggle-segments').click()
+  await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
   const items = page.getByTestId('stitch-picker-item-segments')
   await expect(items.first()).toBeVisible()
   for (let i = 0; i < n; i++) await items.nth(i).click()

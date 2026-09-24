@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Persona Forge Signal Crucible mark</title>
+  <desc id="desc">An open four-segment crucible transforms multiple voice signals into one waveform.</desc>
+  <defs>
+    <linearGradient id="ceramic" x1="22" y1="15" x2="108" y2="116" gradientUnits="userSpaceOnUse"><stop stop-color="#5D6A8D"/><stop offset=".34" stop-color="#181D2D"/><stop offset="1" stop-color="#080B14"/></linearGradient>
+    <linearGradient id="signal" x1="10" y1="64" x2="118" y2="64" gradientUnits="userSpaceOnUse"><stop stop-color="#47BFFF"/><stop offset=".47" stop-color="#9B6BFF"/><stop offset=".67" stop-color="#E853FF"/><stop offset="1" stop-color="#A9E7FF"/></linearGradient>
+    <radialGradient id="core" cx="0" cy="0" r="1" gradientTransform="translate(64 64) rotate(90) scale(18)"><stop stop-color="#E853FF" stop-opacity=".95"/><stop offset=".34" stop-color="#9B6BFF" stop-opacity=".58"/><stop offset="1" stop-color="#111629" stop-opacity="0"/></radialGradient>
+    <filter id="glow" x="-50%" y="-80%" width="200%" height="260%"><feGaussianBlur stdDeviation="2.4" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <circle cx="64" cy="64" r="17" fill="url(#core)"/>
+  <g stroke="url(#ceramic)" stroke-width="13" stroke-linecap="butt">
+    <path d="M57 12A53 53 0 0 1 103 36"/>
+    <path d="M112 50A53 53 0 0 1 104 87"/>
+    <path d="M92 108A53 53 0 0 1 49 116"/>
+    <path d="M27 103A53 53 0 0 1 13 72"/>
+  </g>
+  <g fill="none" stroke="url(#signal)" stroke-linecap="round" filter="url(#glow)">
+    <path d="M8 52C24 43 38 45 52 57C58 62 61 63 64 64" stroke-width="2.2"/>
+    <path d="M8 64C24 56 40 71 55 66C59 65 61 64 64 64" stroke-width="2.4"/>
+    <path d="M8 76C25 83 42 79 55 69C59 66 61 65 64 64" stroke-width="2.2"/>
+    <path d="M64 64C70 64 72 53 78 53C84 53 84 75 90 75C96 75 96 58 102 58C108 58 108 68 118 68" stroke-width="3"/>
+  </g>
+  <path d="M64 38V90" stroke="#FFBE55" stroke-width="1.5" stroke-linecap="round"/>
+  <circle cx="64" cy="64" r="3" fill="#FFBE55"/>
+</svg>

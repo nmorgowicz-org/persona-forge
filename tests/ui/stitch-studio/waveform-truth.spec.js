@@ -36,7 +36,7 @@ async function routeSegmentAudio(page, { delayMs = 0 } = {}) {
 }
 
 async function insertSegments(page, n) {
-  await page.getByTestId('stitch-picker-toggle-segments').click()
+  await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
   const items = page.getByTestId('stitch-picker-item-segments')
   await expect(items.first()).toBeVisible()
   for (let i = 0; i < n; i++) await items.nth(i).click()
@@ -145,7 +145,7 @@ test.describe('B-P2: true-scale waveform renderer', () => {
     })
     await routeSegmentAudio(page)
     await openStudio(page)
-    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
     await page.getByTestId('stitch-picker-item-segments').first().click()
     await page.getByTestId('stitch-picker-insert-segments').click()
     await expect(page.getByTestId('stitch-clip')).toHaveCount(1)

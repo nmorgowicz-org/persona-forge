@@ -7,8 +7,8 @@ export default async function (ctx) {
     const { page, baseURL } = ctx;
     await page.goto(baseURL, { waitUntil: 'networkidle0' });
     await page.click('[data-testid="nav-stitch-studio"]');
-    await page.waitForSelector('[data-testid="stitch-picker-toggle-segments"]');
-    await page.click('[data-testid="stitch-picker-toggle-segments"]');
+    await page.waitForSelector('[data-testid="stitch-picker-toggle-segments"], [data-testid="empty-state-action"]');
+    await page.click('[data-testid="stitch-picker-toggle-segments"], [data-testid="empty-state-action"]');
     await page.waitForSelector('[data-testid="segment-browser-dialog"]');
     await page.waitForFunction(
         () => {

@@ -4,7 +4,7 @@ import { installLargeSegmentLibrary, makeTinyWavBuffer } from '../fixtures/large
 async function insertNSegments(page, n) {
   await page.goto('/')
   await page.getByTestId('nav-stitch-studio').click()
-  await page.getByTestId('stitch-picker-toggle-segments').click()
+  await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
   const items = page.getByTestId('stitch-picker-item-segments')
   await expect(items.first()).toBeVisible()
   for (let i = 0; i < n; i++) {
@@ -14,7 +14,7 @@ async function insertNSegments(page, n) {
   await expect(page.getByTestId('stitch-clip')).toHaveCount(n)
 }
 async function appendPickerItems(page, tab, count) {
-  await page.getByTestId('stitch-picker-toggle-segments').click()
+  await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
   if (tab === 'voices') await page.getByRole('tab', { name: 'Reference voices' }).click()
   const items = page.getByTestId(`stitch-picker-item-${tab}`)
   await expect(items.first()).toBeVisible()
@@ -299,7 +299,7 @@ test.describe('Voice Library discoverability and segment browser scale', () => {
     await page.goto('/')
     await page.getByTestId('nav-stitch-studio').click()
 
-    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
     await expect(page.getByTestId('segment-browser-dialog')).toBeVisible()
     const allItems = page.getByTestId('stitch-picker-item-segments')
     await allItems.nth(0).click()
@@ -313,7 +313,7 @@ test.describe('Voice Library discoverability and segment browser scale', () => {
     // land right after the selected clip, not appended at the very end.
     await page.getByTestId('stitch-clip').first().click()
 
-    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
     await expect(page.getByTestId('segment-browser-dialog')).toBeVisible()
     await page.getByTestId('segment-browser-project-filter').selectOption({ label: projectNames[2] })
     const filtered = page.getByTestId('stitch-picker-item-segments')
@@ -339,7 +339,7 @@ test.describe('Voice Library discoverability and segment browser scale', () => {
     const { audioRequests } = await installLargeSegmentLibrary(page)
     await page.goto('/')
     await page.getByTestId('nav-stitch-studio').click()
-    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
     await expect(page.getByTestId('segment-browser-dialog')).toBeVisible()
     await expect(page.getByTestId('stitch-picker-item-segments').first()).toBeVisible()
 
@@ -371,7 +371,7 @@ test.describe('Voice Library discoverability and segment browser scale', () => {
     })
     await page.goto('/')
     await page.getByTestId('nav-stitch-studio').click()
-    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
     await expect(page.getByTestId('segment-browser-dialog')).toBeVisible()
     await expect(page.getByTestId('stitch-picker-item-segments').first()).toBeVisible()
 
@@ -412,7 +412,7 @@ test.describe('Voice Library discoverability and segment browser scale', () => {
     })
     await page.goto('/')
     await page.getByTestId('nav-stitch-studio').click()
-    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
     await expect(page.getByTestId('segment-browser-dialog')).toBeVisible()
     await expect(page.getByTestId('stitch-picker-item-segments').first()).toBeVisible()
 
@@ -438,7 +438,7 @@ test.describe('Voice Library discoverability and segment browser scale', () => {
     const items = page.getByTestId('stitch-picker-item-segments')
     const clips = page.getByTestId('stitch-clip')
     const openDialog = async () => {
-      await page.getByTestId('stitch-picker-toggle-segments').click()
+      await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
       await expect(dialog).toBeVisible()
       await expect(items.first()).toBeVisible()
     }
@@ -518,7 +518,7 @@ test.describe('Stitch Studio shared visual primitives', () => {
 
     // Insert two more segments: same "Fit" ruler now spans a longer duration, i.e. a
     // different effective seconds-per-pixel scale, without any explicit zoom control yet.
-    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
     await page.getByTestId('stitch-picker-item-segments').nth(1).click()
     await page.getByTestId('stitch-picker-insert-segments').click()
     await expect(page.getByTestId('stitch-clip')).toHaveCount(2)

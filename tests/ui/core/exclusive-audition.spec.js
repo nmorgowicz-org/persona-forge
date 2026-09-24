@@ -145,7 +145,7 @@ test.describe('A-4b: the last two audio owners', () => {
     await trackMedia(page)
     await page.goto('/')
     await page.getByTestId('nav-stitch-studio').click()
-    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
     const items = page.getByTestId('stitch-picker-item-segments')
     await expect(items.first()).toBeVisible()
     for (let i = 0; i < 2; i++) await items.nth(i).click()
@@ -159,7 +159,7 @@ test.describe('A-4b: the last two audio owners', () => {
     const srcBefore = await startArrangementPlaying(page, transport)
 
     // The browser opens over the playing arrangement; auditioning a row must take focus.
-    await page.getByTestId('stitch-picker-toggle-segments').click()
+    await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
     await expect(page.getByTestId('segment-browser-dialog')).toBeVisible()
     const audition = page.getByTestId('segment-browser-audio').first()
     await audition.click()
