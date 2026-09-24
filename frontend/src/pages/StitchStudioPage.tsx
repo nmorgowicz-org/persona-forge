@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/store'
 import { StitchEditorInline } from '@/components/StitchTimeline'
 import { StitchABBar } from '@/components/stitch/StitchABBar'
+import { PageHeader } from '@/components/ui/page-header'
 import { useStoreStitchPlanSession } from '@/hooks/useStitchPlanSession'
 import {
   activateVoiceForApi,
@@ -146,11 +147,10 @@ export function StitchStudioPage() {
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div>
-        <h1 className="text-lg font-semibold text-foreground">Stitch Studio</h1>
-        <p className="text-sm text-muted-foreground">
-          Arrange saved segments or voice-library entries into a timeline and save the result as a
-          new reference voice — no audition required first.
-        </p>
+        <PageHeader
+          title="Stitch Studio"
+          description="Arrange saved segments or voice-library entries into a timeline and save the result as a new reference voice — no audition required first."
+        />
       </div>
 
       <div className="flex max-w-md flex-col gap-1.5">

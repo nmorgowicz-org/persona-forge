@@ -30,7 +30,7 @@ export function AccentChipPanel({
   onToggleWhisper,
 }: AccentChipPanelProps) {
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 text-card-foreground shadow-sm">
+    <div className="flex flex-col gap-2 rounded-panel border border-border bg-card p-3 text-card-foreground shadow-sm">
       <div>
         <h2 className="text-[13px] font-semibold tracking-tight">
           Design an accent-cloned voice
@@ -101,13 +101,16 @@ export function AccentChipPanel({
               label={chip.label}
               selected={selections.pitch === chip.id}
               onClick={() => onToggleSingle('pitch', chip.id)}
+              // Genuine product knowledge, kept as design rather than as a paragraph read
+              // before any choice: it appears when the pointer is on the chips it is about.
+              help={
+                chip.id === 'high' || chip.id === 'very-high'
+                  ? 'High pitch trends tinnier. Moderate is usually the safer default.'
+                  : undefined
+              }
             />
           ))}
         </div>
-        <p className="mt-1.5 text-[10px] text-muted-foreground">
-          "High pitch" trends tinnier in testing —
-          "moderate" is usually the safer default.
-        </p>
       </ChipSection>
 
       <ChipSection title="Style">

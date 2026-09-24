@@ -4,6 +4,7 @@ import { Check, Copy, Plug } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { PageHeader } from '@/components/ui/page-header'
 import { cn } from '@/lib/utils'
 
 const CURL_SNIPPET = (voiceId: string) => `curl -X POST "$PERSONA_FORGE_BASE_URL/v1/audio/speech" \\
@@ -29,7 +30,7 @@ response.stream_to_file("speech.mp3")`
 function CodeBlock({ code }: { code: string }) {
   const [copied, setCopied] = useState(false)
   return (
-    <div className="group relative rounded-lg border border-border bg-muted/30 transition-colors hover:border-border/80">
+    <div className="group relative rounded-control border border-border bg-muted/30 transition-colors hover:border-border/80">
       <Button
         type="button"
         size="icon-sm"
@@ -87,19 +88,18 @@ export function IntegrationsPage() {
   return (
     <div className="flex flex-col gap-6">
       <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-2xl font-semibold tracking-tight">Integrations</h1>
-        <p className="text-sm text-muted-foreground">
-          Voices designed here are served by the always-resident base model over an
-          OpenAI-compatible endpoint — Hermes and other apps consume them directly.
-        </p>
+        <PageHeader
+          title="Integrations"
+          description="Voices designed here are served by the always-resident base model over an OpenAI-compatible endpoint — Hermes and other apps consume them directly."
+        />
       </motion.div>
 
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm"
+        className="flex items-center gap-3 rounded-panel border border-border bg-card p-4 text-card-foreground shadow-sm"
       >
-        <div className="relative flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <div className="relative flex size-9 shrink-0 items-center justify-center rounded-control bg-primary/10 text-primary">
           <Plug className="size-4" />
           {storeModelLoaded && (
             <span className="absolute -top-0.5 -right-0.5 flex size-2.5">
@@ -127,7 +127,7 @@ export function IntegrationsPage() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05 }}
-        className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm"
+        className="flex flex-col gap-3 rounded-panel border border-border bg-card p-5 text-card-foreground shadow-sm"
       >
         <div>
           <p className="text-sm font-semibold">OpenAI-compatible speech endpoint</p>
@@ -142,7 +142,7 @@ export function IntegrationsPage() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
-        className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm"
+        className="flex flex-col gap-3 rounded-panel border border-border bg-card p-5 text-card-foreground shadow-sm"
       >
         <div>
           <p className="text-sm font-semibold">Python (OpenAI SDK)</p>
@@ -158,7 +158,7 @@ export function IntegrationsPage() {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15 }}
-          className="flex flex-col gap-2 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm"
+          className="flex flex-col gap-2 rounded-panel border border-border bg-card p-5 text-card-foreground shadow-sm"
         >
           <p className="text-sm font-semibold">Available voice IDs</p>
           <div className="flex flex-wrap gap-1.5">

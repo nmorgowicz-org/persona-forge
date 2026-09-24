@@ -128,7 +128,7 @@ export function StitchABBar() {
   return (
     <div
       data-testid="stitch-ab-bar"
-      className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2"
+      className="flex flex-wrap items-center gap-2 rounded-control border border-border/60 bg-muted/20 px-3 py-2"
     >
       <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
         A/B snapshots

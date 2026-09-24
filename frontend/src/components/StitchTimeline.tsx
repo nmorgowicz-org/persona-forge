@@ -711,7 +711,7 @@ export function StitchDspControls({
             initial={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
-            className="flex flex-col gap-4 overflow-hidden rounded-lg border border-border/60 bg-muted/40 px-4 py-3"
+            className="flex flex-col gap-4 overflow-hidden rounded-control border border-border/60 bg-muted/40 px-4 py-3"
           >
             {/* Knobs for the parameters you tune by feel; the compressor threshold keeps a
                 fader because its 48 dB range would spend most of an arc on territory nobody
@@ -1036,7 +1036,7 @@ export function StitchEditorPanel(props: Extract<StitchEditorBodyProps, { surfac
 // page, which is the editor's home rather than something popping over another workflow.
 export function StitchEditorInline(props: Extract<StitchEditorBodyProps, { surface: 'studio' }>) {
   return (
-    <div className="flex min-w-0 flex-col gap-4 rounded-2xl border border-border bg-background/50 px-6 py-5">
+    <div className="flex min-w-0 flex-col gap-4 rounded-panel border border-border bg-background/50 px-6 py-5">
       <StitchEditorBody {...props} />
     </div>
   )

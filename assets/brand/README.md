@@ -47,9 +47,18 @@ Use `app-hero.png` only on non-operational surfaces such as documentation and
 onboarding. Use `startup-field.png` behind startup status. Never put full hero
 art behind working controls.
 
-The SVG set is concept-stage until the B-P6 optical gate verifies it at
-16/24/32/48 px on light and dark backgrounds. Until that gate passes, it does
-not replace production favicon files or `exports/persona-forge-mark.svg`.
+The SVG set **passed the B-P6 optical gate** (2026-09-23): `favicon.svg`,
+`mark-small.svg` and `mark.svg` were rendered at 16, 24, 32 and 48 px on light
+and dark grounds and judged without any glow behind them. `favicon.svg` and
+`mark-small.svg` carry their own Obsidian ground, so they read at 16 px on
+either background; `mark.svg` is light-on-transparent and is therefore for
+**dark backgrounds only** — do not place it on a light surface.
+
+`favicon.svg` is now the production favicon in both copies the app serves
+(`frontend/public/favicon.svg` and `src/persona_forge/static/favicon.svg`), and
+`mark.svg` is `exports/persona-forge-mark.svg`. All three are byte-identical to
+the finalist originals, and the B-P6 spec asserts that, so a future edit cannot
+silently drift from the selected identity.
 
 ## Local exploration assets
 

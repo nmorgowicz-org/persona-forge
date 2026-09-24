@@ -156,8 +156,8 @@ export function VariantCompare() {
   }, [])
 
   return (
-    <div className="flex flex-col gap-6 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm">
-      <div className="flex flex-col gap-4 rounded-lg border border-border bg-muted/30 p-4">
+    <div className="flex flex-col gap-6 rounded-panel border border-border bg-card p-4 text-card-foreground shadow-sm">
+      <div className="flex flex-col gap-4 rounded-control border border-border bg-muted/30 p-4">
         <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-3">
           <div className="space-y-2">
             <label className="text-sm font-medium">Test Text</label>

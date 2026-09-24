@@ -47,7 +47,7 @@ export function EngineSelector({ value, onChange, disabledReasons }: EngineSelec
             disabled={Boolean(disabledReason)}
             title={disabledReason}
             className={cn(
-              'relative flex items-start gap-3 rounded-xl border p-4 text-left transition-colors',
+              'relative flex items-start gap-3 rounded-panel border p-4 text-left transition-colors',
               selected
                 ? 'border-primary bg-primary/5'
                 : 'border-border bg-card hover:bg-accent/40',
@@ -57,7 +57,7 @@ export function EngineSelector({ value, onChange, disabledReasons }: EngineSelec
             {selected && (
               <motion.div
                 layoutId="engine-selector-highlight"
-                className="pointer-events-none absolute inset-0 rounded-xl border border-primary"
+                className="pointer-events-none absolute inset-0 rounded-panel border border-primary"
                 transition={{ type: 'spring', stiffness: 500, damping: 40 }}
               />
             )}

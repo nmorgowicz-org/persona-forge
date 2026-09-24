@@ -67,7 +67,7 @@ export function ReferenceReadiness({
     <section
       data-testid="stitch-reference-readiness"
       data-readiness-state={state}
-      className={`flex flex-col gap-3 rounded-lg border px-4 py-3 ${stateClass}`}
+      className={`flex flex-col gap-3 rounded-control border px-4 py-3 ${stateClass}`}
       aria-label="Reference readiness"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">

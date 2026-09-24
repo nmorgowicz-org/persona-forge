@@ -35,6 +35,7 @@ import {
 import { useSidebar } from '@/components/ui/sidebar-context'
 import { ActivityStatusBar } from '@/components/ui/ActivityStatusBar'
 import { CommandPalette, ShortcutKeymap } from '@/components/CommandPalette'
+import { setHelpText } from '@/components/ui/ActivityStatusBar'
 import { TransportReadout } from '@/components/audio/TransportReadout'
 import {
   isPrimaryModifier,
@@ -86,7 +87,12 @@ function StudioNav({ page, setPage }: { page: Page; setPage: (page: Page) => voi
       isActive={isActive}
       tooltip={item.label}
       onClick={() => { setPage(item.page); if (isMobile) setOpenMobile(false) }}
-      className={cn('relative transition-all', isActive && 'before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-primary group-data-[collapsible=icon]:before:hidden')}
+      // Active state is light, not paint: an accent rail plus a soft glow, keyed to
+      // --glow-accent so it follows the theme (B-P6).
+      className={cn(
+        'relative transition-all',
+        isActive && 'glow-active before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-primary group-data-[collapsible=icon]:before:hidden',
+      )}
     ><item.icon /><span className="group-data-[collapsible=icon]:hidden">{item.label}</span></SidebarMenuButton></SidebarMenuItem>
   })}</SidebarMenu>
 }
@@ -231,7 +237,7 @@ function ThemePaletteButton() {
           top: pos.y,
           zIndex: 9999,
         }}
-        className="flex gap-1.5 rounded-lg border border-border bg-popover px-2.5 py-1.5 shadow-lg"
+        className="flex gap-1.5 rounded-control border border-border bg-popover px-2.5 py-1.5 shadow-lg"
       >
         {THEMES.map((t) => {
           const active = theme === t
@@ -344,7 +350,7 @@ function SidebarCollapseButton() {
     <button
       type="button"
       onClick={toggleSidebar}
-      className="group/collapse flex w-full items-center justify-between gap-2 rounded-xl border border-border/90 px-3 py-2 text-xs font-medium text-foreground/90 shadow-sm transition-all hover:border-border hover:bg-accent hover:text-foreground hover:shadow"
+      className="group/collapse flex w-full items-center justify-between gap-2 rounded-panel border border-border/90 px-3 py-2 text-xs font-medium text-foreground/90 shadow-sm transition-all hover:border-border hover:bg-accent hover:text-foreground hover:shadow"
       title="Collapse sidebar"
     >
       <span>Collapse sidebar</span>
@@ -357,6 +363,33 @@ export function AppShell({ children }: { children: ReactNode }) {
   const page = useAppStore((s) => s.page)
   const setPage = useAppStore((s) => s.setPage)
   const setRuntimeConfig = useAppStore((s) => s.setRuntimeConfig)
+  // Info view (D6): one delegated listener for the whole app. Any control can carry a
+  // `data-help` string and have it explained in the status bar's info strip on hover or
+  // keyboard focus -- no per-control wiring, and nothing renders until there is something to
+  // say.
+  useEffect(() => {
+    const findHelp = (target: EventTarget | null): string | null => {
+      if (!(target instanceof Element)) return null
+      const owner = target.closest('[data-help]')
+      if (!(owner instanceof HTMLElement)) return null
+      return owner.dataset.help?.trim() || null
+    }
+    const onOver = (event: Event) => setHelpText(findHelp(event.target))
+    const onOut = () => setHelpText(null)
+    const onFocus = (event: Event) => setHelpText(findHelp(event.target))
+    const onBlur = () => setHelpText(null)
+    document.addEventListener('pointerover', onOver)
+    document.addEventListener('pointerout', onOut)
+    document.addEventListener('focusin', onFocus)
+    document.addEventListener('focusout', onBlur)
+    return () => {
+      document.removeEventListener('pointerover', onOver)
+      document.removeEventListener('pointerout', onOut)
+      document.removeEventListener('focusin', onFocus)
+      document.removeEventListener('focusout', onBlur)
+    }
+  }, [])
+
   const active = NAV_ITEMS.find((item) => item.page === page)
 
   // The app-wide layer of the shortcut registry: navigation (one command per nav item, so the
@@ -422,9 +455,17 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Sidebar collapsible="icon">
         <SidebarHeader className="px-3 py-4">
           <div className="flex items-center gap-2.5 px-1">
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm ring-1 ring-primary/20">
-              <AudioLines className="size-4" />
-            </div>
+            {/* The product mark (D7 = Signal Crucible). It carries its own Obsidian ground, so
+                it reads at 24 px on any theme without a glow behind it -- verified at 16/24/32/48
+                px on light and dark before wiring. */}
+            <img
+              data-testid="app-brand-mark"
+              src="/favicon.svg"
+              alt=""
+              width={24}
+              height={24}
+              className="size-6 shrink-0"
+            />
             <div className="flex flex-col group-data-[collapsible=icon]:hidden">
               <span className="text-sm font-semibold leading-none tracking-tight">Persona Forge</span>
               <span className="text-[11px] text-muted-foreground">Voice Studio</span>

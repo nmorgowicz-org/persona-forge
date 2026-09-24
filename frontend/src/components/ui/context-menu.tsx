@@ -69,7 +69,7 @@ export function Content({
     <M.Portal>
       <M.Content
         className={cn(
-          'z-50 min-w-[196px] rounded-lg border border-border/90 bg-popover p-1',
+          'z-50 min-w-[196px] rounded-control border border-border/90 bg-popover p-1',
           'text-[11px] leading-snug text-popover-foreground shadow-lg',
           'animate-in fade-in-0 zoom-in-95 duration-100',
           className,

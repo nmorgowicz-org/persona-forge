@@ -1518,7 +1518,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
 
   // -- Render: Right column --
   const rightColumn = (
-    <div className="flex h-fit flex-col gap-2.5 rounded-xl border border-border bg-card p-3 text-card-foreground shadow-sm lg:sticky lg:top-4">
+    <div className="flex h-fit flex-col gap-2.5 rounded-panel border border-border bg-card p-3 text-card-foreground shadow-sm lg:sticky lg:top-4">
       {/* Composed instruct */}
       <div>
         <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -1539,7 +1539,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
           {/* Script / Lines (composer-style) */}
           <div className="flex flex-col gap-1">
             {/* Script control-panel card */}
-            <div className="flex flex-col rounded-lg border border-border bg-card">
+            <div className="flex flex-col rounded-control border border-border bg-card">
               {/* Header bar */}
               <div className="flex items-center justify-between gap-2 rounded-t-lg border-b border-border bg-muted/50 px-2.5 py-1.5">
               <div className="flex items-center gap-2">
@@ -1828,7 +1828,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="flex flex-col gap-2 overflow-hidden rounded-lg border border-border/70 bg-muted/50 p-2.5"
+              className="flex flex-col gap-2 overflow-hidden rounded-control border border-border/70 bg-muted/50 p-2.5"
             >
               {/* Steps */}
               <div className="flex items-center gap-3">
@@ -2397,7 +2397,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}
-            className="flex flex-col gap-3 rounded-xl border border-border bg-muted/50 px-4 py-3"
+            className="flex flex-col gap-3 rounded-panel border border-border bg-muted/50 px-4 py-3"
           >
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Stitched preview
@@ -2441,7 +2441,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
 
 
       {/* Segment library */}
-      <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
+      <div className="flex flex-col gap-2 rounded-control border border-border p-3">
         <button
           type="button"
           className="flex items-center justify-between text-left text-[10px] font-medium uppercase tracking-wider text-muted-foreground"

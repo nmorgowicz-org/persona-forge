@@ -523,7 +523,7 @@ export const StitchClipCard = memo(function StitchClipCard({
       <ContextMenu.Trigger asChild>
         <div
           className={cn(
-            'group relative flex w-full min-w-0 flex-col overflow-hidden rounded-lg border border-border/50 bg-muted/10 p-1.5',
+            'group relative flex w-full min-w-0 flex-col overflow-hidden rounded-control border border-border/50 bg-muted/10 p-1.5',
             isReordering && 'cursor-grab',
             isSelected && 'ring-2 ring-cyan-500/70',
           )}
@@ -532,7 +532,7 @@ export const StitchClipCard = memo(function StitchClipCard({
             <div
               data-testid="stitch-clip-clamped"
               title={`Real width would be narrower than the minimum interactive size (effective duration ${effectiveDuration}ms)`}
-              className="pointer-events-none absolute inset-0 z-10 rounded-lg bg-[repeating-linear-gradient(45deg,rgba(6,182,212,0.12),rgba(6,182,212,0.12)_4px,transparent_4px,transparent_8px)]"
+              className="pointer-events-none absolute inset-0 z-10 rounded-control bg-[repeating-linear-gradient(45deg,rgba(6,182,212,0.12),rgba(6,182,212,0.12)_4px,transparent_4px,transparent_8px)]"
             />
           )}
           <div className="flex flex-col gap-1 px-1.5 pt-1 pb-1" onClick={(e) => e.stopPropagation()}>

@@ -13,7 +13,7 @@ interface ProsodyVariantsListProps {
 export function ProsodyVariantsList({ editor, layout }: ProsodyVariantsListProps) {
   const rowTestId = layout === 'page' ? 'voice-edit-variant' : undefined
   return (
-    <div className={cn('flex flex-col overflow-hidden rounded-lg border border-border/60 bg-muted/10', layout === 'page' ? 'p-3' : 'p-2')}>
+    <div className={cn('flex flex-col overflow-hidden rounded-control border border-border/60 bg-muted/10', layout === 'page' ? 'p-3' : 'p-2')}>
       <div className="flex items-center justify-between px-1">
         <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Prosody Variants</p>
         <span className="flex items-center gap-1 text-[10px] text-muted-foreground">

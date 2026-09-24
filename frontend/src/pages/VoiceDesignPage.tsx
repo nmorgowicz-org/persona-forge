@@ -3,6 +3,7 @@ import { motion } from 'motion/react'
 import { VoiceDesignPanel } from '@/components/VoiceDesignPanel'
 import { OmniVoicePanel } from '@/components/OmniVoicePanel'
 import { EngineSelector } from '@/components/EngineSelector'
+import { PageHeader } from '@/components/ui/page-header'
 import { useAppStore, type EditingVoice } from '@/store'
 import { listVoices } from '@/lib/api'
 
@@ -39,13 +40,10 @@ export function VoiceDesignPage() {
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
       >
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Voice Design
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Compose a voice from traits, preview it, and
-          save it to the library.
-        </p>
+        <PageHeader
+          title="Voice Design"
+          description="Compose a voice from traits, preview it, and save it to the library."
+        />
       </motion.div>
 
       <motion.div

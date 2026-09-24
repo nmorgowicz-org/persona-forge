@@ -284,7 +284,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-      <div className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm">
+      <div className="flex flex-col gap-5 rounded-panel border border-border bg-card p-5 text-card-foreground shadow-sm">
         <div>
           <h2 className="text-base font-semibold">
             {initial ? 'Tune this voice' : 'Design a voice'}
@@ -387,7 +387,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
         </ChipSection>
       </div>
 
-      <div className="flex h-fit flex-col gap-4 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm lg:sticky lg:top-8">
+      <div className="flex h-fit flex-col gap-4 rounded-panel border border-border bg-card p-5 text-card-foreground shadow-sm lg:sticky lg:top-8">
         <AnimatePresence initial={false}>
           {warnings.map((message) => (
             <motion.p

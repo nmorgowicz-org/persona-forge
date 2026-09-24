@@ -8,14 +8,17 @@ interface ChipButtonProps {
   selected: boolean
   onClick: () => void
   experimental?: boolean
+  /** Explanation shown in the status bar's info strip on hover or focus (B-P6, D6). */
+  help?: string
 }
 
-export function ChipButton({ label, selected, onClick, experimental }: ChipButtonProps) {
+export function ChipButton({ label, selected, onClick, experimental, help }: ChipButtonProps) {
   return (
     <Toggle
       pressed={selected}
       onPressedChange={onClick}
       variant="outline"
+      data-help={help}
       className={cn(
         'h-auto rounded-full border px-3 py-1.5 text-xs font-medium data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground',
       )}

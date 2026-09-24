@@ -26,6 +26,7 @@ import { VoiceSelector } from '@/components/VoiceSelector'
 import { AudioPlayer } from '@/components/AudioPlayer'
 import { InfoIcon } from '@/components/InfoIcon'
 import { Button } from '@/components/ui/button'
+import { PageHeader } from '@/components/ui/page-header'
 import {
   Select,
   SelectContent,
@@ -62,7 +63,7 @@ function StructuredError({ error }: { error: string }) {
     <div
       data-testid="speak-error"
       className={
-        'flex flex-col gap-1 rounded-lg border px-3 py-2 text-xs ' +
+        'flex flex-col gap-1 rounded-control border px-3 py-2 text-xs ' +
         (isStrong
           ? 'border-warning/40 bg-warning/10 text-warning'
           : 'border-destructive/40 bg-destructive/10 text-destructive')
@@ -318,14 +319,14 @@ export function SpeakPage() {
         initial={{ opacity: 0, y: reducedMotion ? 0 : -8 }} 
         animate={{ opacity: 1, y: 0 }}
       >
-        <h1 className="text-2xl font-semibold tracking-tight">Speak</h1>
-         <p className="text-sm text-muted-foreground">
-           Type text, pick a curated Pocket voice or clone your own, and hear it spoken.
-         </p>
+        <PageHeader
+          title="Speak"
+          description="Type text, pick a curated Pocket voice or clone your own, and hear it spoken."
+        />
       </motion.div>
 
       <motion.div
-        className="flex flex-col gap-5 rounded-xl border border-border bg-card p-6 text-card-foreground shadow-sm"
+        className="flex flex-col gap-5 rounded-panel border border-border bg-card p-6 text-card-foreground shadow-sm"
         initial={{ opacity: 0, y: reducedMotion ? 0 : 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05 }}
@@ -333,7 +334,7 @@ export function SpeakPage() {
          <textarea
            data-testid="speak-text-input"
            aria-label="Text to synthesize"
-           className="min-h-48 resize-y rounded-lg border border-input bg-transparent p-4 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+           className="min-h-48 resize-y rounded-control border border-input bg-transparent p-4 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
            placeholder="Say something..."
            value={text}
            onChange={(e) => setText(e.target.value)}

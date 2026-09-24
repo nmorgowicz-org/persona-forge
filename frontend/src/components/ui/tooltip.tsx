@@ -60,7 +60,7 @@ export function Content({
         align={align}
         sideOffset={6}
         className={cn(
-          'z-50 max-w-[240px] rounded-lg border border-border/90 bg-popover px-2.5 py-1.5',
+          'z-50 max-w-[240px] rounded-control border border-border/90 bg-popover px-2.5 py-1.5',
           'text-[11px] leading-snug text-popover-foreground shadow-lg',
           'animate-in fade-in-0 zoom-in-95 duration-150',
           className,
@@ -144,7 +144,7 @@ export function TitleTooltipBridge() {
   }, [])
 
   return tip ? createPortal(
-    <div className="pointer-events-none fixed z-[100] max-w-[240px] -translate-x-1/2 -translate-y-full rounded-lg border border-border/90 bg-popover px-2.5 py-1.5 text-[11px] leading-snug text-popover-foreground shadow-lg animate-in fade-in-0 zoom-in-95 duration-150" style={{ left: tip.x, top: tip.y }} role="tooltip">
+    <div className="pointer-events-none fixed z-[100] max-w-[240px] -translate-x-1/2 -translate-y-full rounded-control border border-border/90 bg-popover px-2.5 py-1.5 text-[11px] leading-snug text-popover-foreground shadow-lg animate-in fade-in-0 zoom-in-95 duration-150" style={{ left: tip.x, top: tip.y }} role="tooltip">
       {tip.label}
     </div>, document.body,
   ) : null

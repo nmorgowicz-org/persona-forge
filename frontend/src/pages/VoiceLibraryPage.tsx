@@ -64,6 +64,7 @@ import { VariantCompare } from '@/components/VariantCompare'
 import { cn } from '@/lib/utils'
 import { InfoIcon } from '@/components/InfoIcon'
 import { Badge } from '@/components/ui/badge'
+import { PageHeader } from '@/components/ui/page-header'
 import { RegionEditor } from '@/components/waveform/RegionEditor'
 import { AlignmentCompare } from '@/components/waveform/AlignmentCompare'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -548,7 +549,7 @@ function VoiceMetricChip({
 
 function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle, previewMetrics, layoutMode }: { metrics: VoiceReferenceMetrics | null; busy: boolean; onAnalyze: () => void; expanded: boolean; onToggle: () => void; previewMetrics: VoiceReferenceMetrics | null; layoutMode: string }) {
   if (!metrics) return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-border/60 bg-muted/10 p-3">
+    <div className="flex items-center justify-between gap-3 rounded-control border border-dashed border-border/60 bg-muted/10 p-3">
       <div><p className="text-xs font-medium">Reference analysis unavailable</p><p className="text-[10px] text-muted-foreground">Analyze this saved WAV to add duration, pacing, pause, loudness, and peak data.</p></div>
       <Button size="sm" variant="outline" disabled={busy} onClick={onAnalyze}>Analyze reference</Button>
     </div>
@@ -592,7 +593,7 @@ function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle, previ
         </span>
         <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-foreground">Audio analysis <ChevronDown className={cn('size-3.5 transition-transform', expanded && 'rotate-180')} /></span>
       </button>
-      {expanded && <div className="mt-3 rounded-lg bg-muted/20 p-2">
+      {expanded && <div className="mt-3 rounded-control bg-muted/20 p-2">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -930,7 +931,7 @@ function VoiceCard({
       animate={{ opacity: 1, y: reducedMotion || !(prosodyPopoverOpen || moreActionsPopoverOpen) ? 0 : -2 }}
       whileHover={reducedMotion ? {} : { y: -2 }}
       className={cn(
-        'flex flex-col gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm transition-shadow duration-200 hover:border-border/80 hover:shadow-lg',
+        'flex flex-col gap-3 rounded-panel border border-border bg-card p-4 text-card-foreground shadow-sm transition-shadow duration-200 hover:border-border/80 hover:shadow-lg',
         deepLinkFocused && 'ring-2 ring-cyan-400 ring-offset-2 ring-offset-background',
       )}
     >
@@ -979,7 +980,7 @@ function VoiceCard({
         </div>
       )}
 
-       <div className="rounded-lg border border-border/60 bg-muted/20 p-2">
+       <div className="rounded-control border border-border/60 bg-muted/20 p-2">
           <div className="mb-1 flex items-center justify-between gap-2">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
               Reference text
@@ -1707,7 +1708,7 @@ export function VoiceLibraryPage() {
       animate={{ opacity: 1, y: reducedMotion ? 0 : 0 }}
       transition={{ delay: i * 0.02 }}
       whileHover={reducedMotion ? {} : { y: -1 }}
-      className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 text-card-foreground shadow-sm transition-shadow hover:shadow-lg"
+      className="flex flex-col gap-2 rounded-panel border border-border bg-card p-3 text-card-foreground shadow-sm transition-shadow hover:shadow-lg"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1">
@@ -1776,7 +1777,10 @@ export function VoiceLibraryPage() {
         >
 
          <div className="flex items-center justify-between">
-           <h1 className="text-2xl font-semibold tracking-tight">Voice Library</h1>
+           <PageHeader
+             title="Voice Library"
+             description="Voices you've designed and saved, ready to use in Speak or over the API."
+           />
            <Button
              variant="outline"
              size="sm"
@@ -1790,9 +1794,6 @@ export function VoiceLibraryPage() {
              {compareMode ? 'Exit Compare' : 'Compare Variants'}
            </Button>
          </div>
-         <p className="text-sm text-muted-foreground">
-           Voices you've designed and saved, ready to use in Speak or over the API.
-         </p>
        </motion.div>
 
      {compareMode && (
@@ -1811,7 +1812,7 @@ export function VoiceLibraryPage() {
 
       {/* Voices */}
       {voices.length === 0 && segments.length === 0 && !error ? (
-        <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border py-16 text-center">
+        <div className="flex flex-col items-center justify-center gap-2 rounded-panel border border-dashed border-border py-16 text-center">
           <Mic2 className="size-6 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">No voices saved yet.</p>
           <Button size="sm" variant="secondary" onClick={() => setPage('voice-design')}>
@@ -1852,7 +1853,7 @@ export function VoiceLibraryPage() {
                    >
                      <Folder className="size-3.5" />
                    </Button>
-                   <div className="flex items-center gap-1 rounded-lg bg-muted/50 p-1">
+                   <div className="flex items-center gap-1 rounded-control bg-muted/50 p-1">
                      <Button
                        variant={layoutMode === 'grid-1' ? 'secondary' : 'ghost'}
                        size="icon-sm"
@@ -1949,7 +1950,7 @@ export function VoiceLibraryPage() {
             </div>
 
             {segments.length === 0 && (
-              <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border py-10 text-center">
+              <div className="flex flex-col items-center justify-center gap-2 rounded-panel border border-dashed border-border py-10 text-center">
                   <AudioWaveform className="size-5 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">
                   No saved segments yet.

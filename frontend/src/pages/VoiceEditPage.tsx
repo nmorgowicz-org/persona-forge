@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { SavedVoicePicker } from '@/components/voice/SavedVoicePicker'
 import { ProsodyEditorPanel } from '@/components/prosody/ProsodyEditorPanel'
+import { PageHeader } from '@/components/ui/page-header'
 import { listVoices, type VoiceMeta } from '@/lib/api'
 import { useAppStore } from '@/store'
 
@@ -51,10 +52,10 @@ export function VoiceEditPage() {
 
   return (
     <div data-testid="voice-edit-page" className="flex min-w-0 flex-col gap-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Voice Edit</h1>
-        <p className="text-sm text-muted-foreground">Create, compare, and promote prosody variants without leaving the voice workflow.</p>
-      </header>
+      <PageHeader
+        title="Voice Edit"
+        description="Create, compare, and promote prosody variants without leaving the voice workflow."
+      />
       {loadError && (
         <p data-testid="voice-edit-load-error" className="status-badge status-tone-danger px-3 py-1.5 text-xs font-medium">
           {loadError}

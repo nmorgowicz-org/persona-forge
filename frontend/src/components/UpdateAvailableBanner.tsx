@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Sparkles, X } from 'lucide-react'
+import { AppBanner } from '@/components/ui/app-banner'
 import { getHealth } from '@/lib/api'
 import { checkForUpdate, getDismissedVersion, setDismissedVersion } from '@/lib/updateCheck'
 
@@ -46,33 +47,32 @@ export function UpdateAvailableBanner() {
         initial={{ height: 0, opacity: 0 }}
         animate={{ height: 'auto', opacity: 1 }}
         exit={{ height: 0, opacity: 0 }}
-        className="overflow-hidden border-b border-primary/30 bg-primary/10"
+        className="overflow-hidden"
       >
-        <div className="flex items-center gap-2 px-4 py-1.5 text-xs text-primary">
-          <Sparkles className="size-3 shrink-0" />
-          <span className="min-w-0 flex-1 truncate">
-            Persona Forge {update.version} is available.{' '}
-            <a
-              href={update.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline"
+        <AppBanner
+          tone="info"
+          icon={<Sparkles className="size-3 shrink-0" />}
+          actions={
+            <button
+              type="button"
+              onClick={() => {
+                setDismissedVersion(update.version)
+                setUpdate(null)
+              }}
+              className="shrink-0 rounded p-0.5 hover:bg-info/20"
+              title="Dismiss"
             >
+              <X className="size-3" />
+            </button>
+          }
+        >
+          <span className="truncate">
+            Persona Forge {update.version} is available.{' '}
+            <a href={update.url} target="_blank" rel="noopener noreferrer" className="underline">
               See what's new
             </a>
           </span>
-          <button
-            type="button"
-            onClick={() => {
-              setDismissedVersion(update.version)
-              setUpdate(null)
-            }}
-            className="shrink-0 rounded p-0.5 hover:bg-primary/20"
-            title="Dismiss"
-          >
-            <X className="size-3" />
-          </button>
-        </div>
+        </AppBanner>
       </motion.div>
     </AnimatePresence>
   )

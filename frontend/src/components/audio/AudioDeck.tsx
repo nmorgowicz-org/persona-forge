@@ -201,7 +201,7 @@ export function AudioDeck({
   return (
     <section
       className={cn(
-        'rounded-lg border border-border bg-card/95 text-card-foreground shadow-sm ring-1 ring-white/5',
+        'rounded-control border border-border bg-card/95 text-card-foreground shadow-sm ring-1 ring-white/5',
         compact ? 'p-2' : 'p-3',
         className,
       )}
