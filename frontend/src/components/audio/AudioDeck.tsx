@@ -4,9 +4,10 @@ import { Button } from '@/components/ui/button'
 import { Waveform } from '@/components/Waveform'
 import { useAudioSource } from '@/hooks/useAudioTransport'
 import { computeEnvelope, envelopePeaks, type AudioEnvelope } from '@/lib/waveform'
+import { SpectrogramCanvas } from '@/components/waveform/SpectrogramCanvas'
+import { setSignalView, useSignalView } from '@/lib/spectrogram'
 import { cn } from '@/lib/utils'
 import { LevelMeter } from './LevelMeter'
-import { SpectralAccent } from './SpectralAccent'
 import { AudioStatsStrip } from '../waveform/AudioStatsStrip'
 import { useDragScrubValue, parseNumericText } from '@/hooks/useDragScrubValue'
 import { useShortcutScope, type ShortcutCommand } from '@/hooks/useGlobalShortcuts'
@@ -83,7 +84,6 @@ interface AudioDeckProps {
   // rack, where the waveform is the primary thing being judged. 'inline' (default) keeps the
   // original single-row layout used by SpeakPage's result player.
   layout?: 'inline' | 'stacked'
-  showSpectralAccent?: boolean
   title?: string
   seed?: number | null
   metrics?: ComponentProps<typeof AudioStatsStrip>['metrics']
@@ -103,7 +103,6 @@ export function AudioDeck({
   autoPlay = true,
   compact = false,
   layout = 'inline',
-  showSpectralAccent = true,
   title = 'Audio result',
   seed = null,
   metrics = null,
@@ -118,6 +117,8 @@ export function AudioDeck({
   const source = useAudioSource('audio-deck', 'Audio deck')
   const [envelope, setEnvelope] = useState<AudioEnvelope | null>(null)
   const [decodeFailed, setDecodeFailed] = useState(false)
+  // Session-wide, so switching to Spectrum and coming back to the page does not undo it.
+  const view = useSignalView()
   const [isPlaying, setIsPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState<number | null>(null)
@@ -291,20 +292,50 @@ export function AudioDeck({
 
       {layout === 'stacked' ? (
         <div className="flex flex-col gap-2">
-          <Waveform
-            envelope={envelope}
-            failed={decodeFailed}
-            mediaRef={audioRef}
-            playing={isPlaying}
-            progress={progress}
-            duration={duration}
-            className="h-28"
-            onClick={handleSeek}
-            selection={region}
-            onSelectRegion={handleSelectRegion}
-            onScrub={handleScrub}
-            testId="deck-waveform"
-          />
+          <div className="flex items-center gap-1">
+            {(['wave', 'spectrum'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                data-testid={mode === 'wave' ? 'view-wave' : 'view-spectrum'}
+                aria-pressed={view === mode}
+                onClick={() => setSignalView(mode)}
+                className={cn(
+                  'rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors',
+                  view === mode
+                    ? 'border-border bg-background text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {mode === 'wave' ? 'Wave' : 'Spectrum'}
+              </button>
+            ))}
+          </div>
+          {view === 'spectrum' ? (
+            <SpectrogramCanvas
+              blob={blob ?? null}
+              cacheKey={src ? `spectrogram:deck:${src}:${blob?.size ?? 0}` : null}
+              mediaRef={audioRef}
+              playing={isPlaying}
+              className="h-28 rounded-md"
+              testId="deck-spectrogram"
+            />
+          ) : (
+            <Waveform
+              envelope={envelope}
+              failed={decodeFailed}
+              mediaRef={audioRef}
+              playing={isPlaying}
+              progress={progress}
+              duration={duration}
+              className="h-28"
+              onClick={handleSeek}
+              selection={region}
+              onSelectRegion={handleSelectRegion}
+              onScrub={handleScrub}
+              testId="deck-waveform"
+            />
+          )}
           <div className="flex flex-wrap items-center gap-1">
             <Button
               type="button"
@@ -374,9 +405,40 @@ export function AudioDeck({
                 <RotateCcw className="size-3.5" />
               </Button>
             )}
+            {!compact && (
+              <div className="flex items-center gap-1">
+                {(['wave', 'spectrum'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    data-testid={mode === 'wave' ? 'view-wave' : 'view-spectrum'}
+                    aria-pressed={view === mode}
+                    onClick={() => setSignalView(mode)}
+                    className={cn(
+                      'rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors',
+                      view === mode
+                        ? 'border-border bg-background text-foreground'
+                        : 'border-transparent text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {mode === 'wave' ? 'Wave' : 'Spectrum'}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="min-w-0">
+            {view === 'spectrum' && !compact ? (
+              <SpectrogramCanvas
+                blob={blob ?? null}
+                cacheKey={src ? `spectrogram:deck:${src}:${blob?.size ?? 0}` : null}
+                mediaRef={audioRef}
+                playing={isPlaying}
+                className="h-10 rounded-md"
+                testId="deck-spectrogram"
+              />
+            ) : (
             <Waveform
               envelope={envelope}
               failed={decodeFailed}
@@ -391,7 +453,7 @@ export function AudioDeck({
               onScrub={handleScrub}
               testId="deck-waveform"
             />
-            {!compact && showSpectralAccent && <SpectralAccent peaks={peaks} className="mt-2" />}
+            )}
           </div>
 
           <div className={cn('flex items-center gap-1', compact ? '' : 'justify-end md:flex-col md:items-stretch')}>

@@ -8,6 +8,8 @@ import { formatHoverTime } from '@/lib/timeAxis'
 import { useAudioSource } from '@/hooks/useAudioTransport'
 import { useShortcutScope, type ShortcutCommand } from '@/hooks/useGlobalShortcuts'
 import { WaveformLane } from './WaveformLane'
+import { SpectrogramCanvas } from './SpectrogramCanvas'
+import { setSignalView, useSignalView } from '@/lib/spectrogram'
 import { TimeRuler } from './TimeRuler'
 
 // A shared-time-axis A/B view of the reference clip (original vs prosody-adjusted).
@@ -121,6 +123,9 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
   const adjAudio = useLaneAudio(adjustedBase64)
 
   const hasAdjusted = adjustedBase64 != null
+  // Shared with the decks: one view preference for the session.
+  const view = useSignalView()
+
   const sharedScaleAbs = useMemo(() => {
     const peaks = [original?.envelope.peakAbs ?? 0, adjusted?.envelope.peakAbs ?? 0].filter((value) => value > 0)
     return peaks.length ? Math.max(...peaks) : null
@@ -401,6 +406,22 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
     >
       {/* Transport — A/B play, loop, and the current drag-selection. */}
       <div className="flex items-center gap-2 pb-0.5">
+        <div className="flex items-center gap-1">
+          {(['wave', 'spectrum'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              data-testid={mode === 'wave' ? 'lane-view-wave' : 'lane-view-spectrum'}
+              aria-pressed={view === mode}
+              onClick={() => setSignalView(mode)}
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                view === mode ? 'border-border bg-background text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {mode === 'wave' ? 'Wave' : 'Spectrum'}
+            </button>
+          ))}
+        </div>
         <TransportButton lane="original" />
         {hasAdjusted && <TransportButton lane="adjusted" />}
         <button
@@ -432,7 +453,17 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
           onMouseDown={onLaneDown('original')}
         >
           <div className="absolute inset-y-0 left-0 opacity-80" style={{ width: pct(original?.durationMs ?? 0) }}>
-            <WaveformLane envelope={original?.envelope ?? null} scaleAbs={sharedScaleAbs} durMs={original?.durationMs ?? null} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
+            {view === 'spectrum' ? (
+              <SpectrogramCanvas
+                blob={originalBase64 ? base64ToBlob(originalBase64) : null}
+                cacheKey={originalBase64 ? `spectrogram:voice-edit:${voiceId}:original:${originalBase64.length}` : null}
+                mediaRef={origAudio}
+                playing={playing === 'original'}
+                testId="original-spectrogram"
+              />
+            ) : (
+              <WaveformLane envelope={original?.envelope ?? null} scaleAbs={sharedScaleAbs} durMs={original?.durationMs ?? null} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
+            )}
           </div>
           {selection && (
             <div className="pointer-events-none absolute inset-y-0 z-0 border-x border-warning/60 bg-warning/15" style={{ left: pct(selection.start), width: selWidth }} />
@@ -476,7 +507,17 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
           onMouseDown={onLaneDown('adjusted')}
         >
           <div className="absolute inset-y-0 left-0" style={{ width: pct(adjusted.durationMs) }}>
-            <WaveformLane envelope={adjusted.envelope} scaleAbs={sharedScaleAbs} durMs={adjusted.durationMs} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
+            {view === 'spectrum' ? (
+              <SpectrogramCanvas
+                blob={adjustedBase64 ? base64ToBlob(adjustedBase64) : null}
+                cacheKey={adjustedBase64 ? `spectrogram:voice-edit:${voiceId}:adjusted:${adjustedBase64.length}` : null}
+                mediaRef={adjAudio}
+                playing={playing === 'adjusted'}
+                testId="adjusted-spectrogram"
+              />
+            ) : (
+              <WaveformLane envelope={adjusted.envelope} scaleAbs={sharedScaleAbs} durMs={adjusted.durationMs} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
+            )}
           </div>
           {selection && (
             <div className="pointer-events-none absolute inset-y-0 z-0 border-x border-warning/60 bg-warning/15" style={{ left: pct(selection.start), width: selWidth }} />

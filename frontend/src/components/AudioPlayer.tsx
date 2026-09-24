@@ -10,7 +10,6 @@ interface AudioPlayerProps {
   rtf?: number | null
   downloadName?: string
   layout?: 'inline' | 'stacked'
-  showSpectralAccent?: boolean
   initialSpeed?: number
   onSpeedChange?: (speed: number) => void
 }
@@ -25,7 +24,6 @@ export function AudioPlayer({
   rtf = null,
   downloadName,
   layout,
-  showSpectralAccent,
   initialSpeed,
   onSpeedChange,
 }: AudioPlayerProps) {
@@ -40,7 +38,6 @@ export function AudioPlayer({
       rtf={rtf}
       downloadName={downloadName}
       layout={layout}
-      showSpectralAccent={showSpectralAccent}
       initialSpeed={initialSpeed}
       onSpeedChange={onSpeedChange}
     />

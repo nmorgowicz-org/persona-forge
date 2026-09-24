@@ -487,7 +487,6 @@ export function SegmentRackRow({
                     className="min-w-0"
                     autoPlay={selected && autoplayTakes && Boolean(c.audio_base64)}
                     layout="stacked"
-                    showSpectralAccent={false}
                     initialSpeed={candidateSpeeds[c.candidate_id] ?? 1}
                     onSpeedChange={(speed) => onCandidateSpeedChange(c.candidate_id, speed)}
                   />
