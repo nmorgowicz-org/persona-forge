@@ -37,7 +37,10 @@ export default async function (ctx) {
     // Let the take land on screen before measuring it.
     await holdFor(recorder, page, 2500);
 
-    // Play, and keep the meter and playhead in frame while they move.
+    // Play, and keep the meter and playhead in frame while they move. Wait for the transport
+    // itself: the result container renders before the deck inside it, so clicking straight
+    // after the container appears is a race the first run duly lost.
+    await page.waitForSelector('[aria-label="Play audio"]', { timeout: 60000 });
     await page.click('[aria-label="Play audio"]');
     for (let i = 0; i < MOTION_FRAMES; i++) {
         await recorder.snapSettled(page);
