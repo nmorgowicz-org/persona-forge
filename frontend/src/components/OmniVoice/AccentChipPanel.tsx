@@ -121,11 +121,6 @@ export function AccentChipPanel({
             onClick={onToggleWhisper}
           />
         </div>
-        <p className="mt-1.5 text-[10px] text-muted-foreground">
-          The only style tag OmniVoice documents — there's
-          no "warm" or "sweet" here (that's
-          VoiceDesign-only).
-        </p>
       </ChipSection>
     </div>
   )

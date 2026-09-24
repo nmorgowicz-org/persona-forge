@@ -626,7 +626,6 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
 
         <AnimatePresence>
            {previewAudioUrl && previewId && (
-             console.log('[VoiceDesignPanel] Result Block:', { savedVoiceId, isSaving, previewId, previewAudioUrl }),
              <motion.div
                data-testid="voice-design-result"
               initial={{ opacity: 0, y: 8 }}

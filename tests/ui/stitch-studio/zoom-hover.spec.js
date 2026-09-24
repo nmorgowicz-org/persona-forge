@@ -7,9 +7,36 @@
 // x = contentX(pps) - scrollLeft. If the time under the pointer is preserved, then for the
 // tick at pointer-time t: viewportX_after == viewportX_before (within 1px, per the card).
 import { test, expect } from '@playwright/test'
+import { suppressUpdateBanner } from '../fixtures/pointer.mjs'
+
+/**
+ * The fitted zoom level once it has stopped moving.
+ *
+ * Fit derives its px/s from the plan's total duration, and the plan keeps growing while the
+ * clip analysis resolves -- so a level sampled before that settles is not comparable to one
+ * sampled after. This is why the test below would occasionally read 109px/s and then find
+ * 106px/s restored: the plan was still 3% short when it took the first reading. Two identical
+ * readings in a row is the same "settled" idiom `settledBox` uses for geometry.
+ */
+async function settledZoomLevel(page, { attempts = 60, intervalMs = 100 } = {}) {
+  const level = page.getByTestId('stitch-zoom-level')
+  let previous = null
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const text = await level.textContent()
+    if (text && text === previous) return text
+    previous = text
+    await page.waitForTimeout(intervalMs)
+  }
+  return previous
+}
 
 test.describe('A-2: cursor-anchored zoom and hover time guide', () => {
   test.beforeEach(async ({ page }) => {
+    // Preventive, not this test's cause (see `settledZoomLevel`): the update banner inserts
+    // itself above the content five seconds after startup and changes the container width, the
+    // same race P7 hit in the drag specs. This spec finishes inside that window today, which is
+    // exactly the kind of timing that stops being true on a slower machine.
+    await suppressUpdateBanner(page)
     await page.goto('/')
     await page.getByTestId('nav-stitch-studio').click()
     await page.getByTestId('stitch-picker-toggle-segments').or(page.getByTestId('empty-state-action')).click()
@@ -100,7 +127,7 @@ test.describe('A-2: cursor-anchored zoom and hover time guide', () => {
   })
 
   test('zoom Fit still restores auto-fit after manual zoom', async ({ page }) => {
-    const fitLevel = await page.getByTestId('stitch-zoom-level').textContent()
+    const fitLevel = await settledZoomLevel(page)
     // Zoom OUT from Fit: three clips fit near ~400px/s (the clamp), so 1.25x zoom-in
     // would saturate at MAX_PPS and the level would never change. Zooming out goes
     // below the clamp and Fit must restore the exact original level.

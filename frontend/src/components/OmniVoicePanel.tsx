@@ -2391,7 +2391,6 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
       {/* Stitched preview */}
        <AnimatePresence>
          {stitchedUrl && (
-           console.log('[OmniVoicePanel] Result Block:', { savedVoiceId, isSaving, stitchedUrl, stitchedBlob }),
            <motion.div
              data-testid="omnivoice-result"
             initial={{ opacity: 0, y: 8 }}
