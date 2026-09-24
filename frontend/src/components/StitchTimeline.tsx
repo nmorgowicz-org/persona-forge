@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { AnimatePresence, motion, MotionConfig, Reorder } from 'motion/react'
 import { ChevronUp, ChevronDown, Loader2, Play, Gauge, RotateCcw, Minus, Plus, Maximize2, Redo2, Undo2 } from 'lucide-react'
 import { type StitchPlanClip, type StitchPlanDsp } from '@/store'
+import { MOTION } from '@/lib/motion'
 import {
   getStitchPacingTargets,
   type StitchPlanPayload,
@@ -626,8 +627,11 @@ export const StitchTimeline = memo(function StitchTimeline({
                 initial={{ opacity: 0, scale: 0.96 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.96 }}
-                transition={{ duration: reducedMotion ? 0 : 0.18, ease: 'easeOut' }}
-                className="flex shrink-0 items-start gap-4 transition-transform duration-150 ease-out motion-reduce:transition-none motion-reduce:duration-0"
+                // Tokens, not raw numbers, and *no* CSS transition on transform: a CSS
+                // transition here interpolates against the layout animation motion is already
+                // running, which is what made the reorder look like a jump followed by a snap.
+                transition={reducedMotion ? { duration: 0 } : MOTION.settle}
+                className="flex shrink-0 items-start gap-4"
               >
                 {i > 0 && (
                   <GapControl gapIndex={i - 1} paddingMs={paddingMs[i - 1] || 0} onSetPadding={setPadding} pixelsPerSecond={pixelsPerSecond} defaultMs={suggestedGapMs(clips[i - 1]?.text ?? '')} />
@@ -643,10 +647,10 @@ export const StitchTimeline = memo(function StitchTimeline({
                 >
                   {/* Keyboard-accessible reorder buttons */}
                   <div className="absolute -left-5 top-6 flex flex-col gap-0.5 opacity-40 group-hover:opacity-100 z-10">
-                    <button type="button" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'left')} title="Move left">
+                    <button type="button" data-testid="stitch-clip-move-left" aria-label="Move clip left" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'left')} title="Move left">
                       <ChevronUp className="size-3" />
                     </button>
-                    <button type="button" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'right')} title="Move right">
+                    <button type="button" data-testid="stitch-clip-move-right" aria-label="Move clip right" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'right')} title="Move right">
                       <ChevronDown className="size-3" />
                     </button>
                   </div>

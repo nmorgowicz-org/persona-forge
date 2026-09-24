@@ -8,6 +8,8 @@ import { getLoudness, type Loudness } from '@/lib/spectrogram'
 import { CLIP_DBFS } from '@/lib/signal'
 import { SpectrogramCanvas } from '@/components/waveform/SpectrogramCanvas'
 import { setSignalView, useSignalView } from '@/lib/spectrogram'
+import { motion } from 'motion/react'
+import { SPRING } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 import { LevelMeter } from './LevelMeter'
 import { Knob } from '@/components/ui/knob'
@@ -325,7 +327,13 @@ export function AudioDeck({
               onClick={togglePlay}
               aria-label={isPlaying ? 'Pause audio' : 'Play audio'}
             >
-              {isPlaying ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
+              <motion.span
+                className="inline-flex items-center justify-center"
+                whileTap={{ scale: 0.92 }}
+                transition={SPRING.snappy}
+              >
+                {isPlaying ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
+              </motion.span>
             </Button>
             <Button
               type="button"
@@ -338,7 +346,7 @@ export function AudioDeck({
               }}
               aria-label="Restart audio"
             >
-              <RotateCcw className="size-4" />
+              <motion.span className="inline-flex items-center justify-center" whileTap={{ scale: 0.92 }} transition={SPRING.snappy}><RotateCcw className="size-4" /></motion.span>
             </Button>
             <Button
               type="button"
@@ -348,7 +356,7 @@ export function AudioDeck({
               tooltip="Toggle loop"
               aria-label="Toggle loop"
             >
-              <Repeat className={cn('size-4', isLooping ? 'text-primary' : 'text-muted-foreground')} />
+              <motion.span className="inline-flex items-center justify-center" whileTap={{ scale: 0.92 }} transition={SPRING.snappy}><Repeat className={cn('size-4', isLooping ? 'text-primary' : 'text-muted-foreground')} /></motion.span>
             </Button>
             <LevelMeter
               envelope={envelope}
@@ -386,7 +394,13 @@ export function AudioDeck({
               onClick={togglePlay}
               aria-label={isPlaying ? 'Pause audio' : 'Play audio'}
             >
-              {isPlaying ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
+              <motion.span
+                className="inline-flex items-center justify-center"
+                whileTap={{ scale: 0.92 }}
+                transition={SPRING.snappy}
+              >
+                {isPlaying ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
+              </motion.span>
             </Button>
             <Button
               type="button"
@@ -399,7 +413,7 @@ export function AudioDeck({
               }}
               aria-label="Restart audio"
             >
-              <RotateCcw className="size-4" />
+              <motion.span className="inline-flex items-center justify-center" whileTap={{ scale: 0.92 }} transition={SPRING.snappy}><RotateCcw className="size-4" /></motion.span>
             </Button>
             {!compact && (
               <div className="flex items-center gap-1">
@@ -473,7 +487,7 @@ export function AudioDeck({
                 tooltip="Toggle loop"
                 aria-label="Toggle loop"
               >
-                <Repeat className={cn('size-4', isLooping ? 'text-primary' : 'text-muted-foreground')} />
+                <motion.span className="inline-flex items-center justify-center" whileTap={{ scale: 0.92 }} transition={SPRING.snappy}><Repeat className={cn('size-4', isLooping ? 'text-primary' : 'text-muted-foreground')} /></motion.span>
               </Button>
               <Knob
               testId="deck-speed"

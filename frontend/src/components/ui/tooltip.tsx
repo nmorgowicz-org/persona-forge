@@ -117,6 +117,11 @@ export function TitleTooltipBridge() {
         const title = element.getAttribute('title')
         if (!title) continue
         element.setAttribute('data-app-tooltip', title)
+        // The tooltip is not in the accessibility tree, so removing `title` would leave an
+        // icon-only control with no name at all. Give it one, unless the author already did.
+        if (!element.hasAttribute('aria-label') && !element.hasAttribute('aria-labelledby')) {
+          element.setAttribute('aria-label', title)
+        }
         element.removeAttribute('title')
       }
     }

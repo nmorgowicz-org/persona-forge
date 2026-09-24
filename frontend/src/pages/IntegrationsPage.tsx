@@ -5,6 +5,7 @@ import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { PageHeader } from '@/components/ui/page-header'
+import { MOTION } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 
 const CURL_SNIPPET = (voiceId: string) => `curl -X POST "$PERSONA_FORGE_BASE_URL/v1/audio/speech" \\
@@ -52,7 +53,7 @@ function CodeBlock({ code }: { code: string }) {
               initial={{ scale: 0.5, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.5, opacity: 0 }}
-              transition={{ duration: 0.15 }}
+              transition={MOTION.snappy}
               className="flex"
             >
               <Check className="size-3.5" />
@@ -63,7 +64,7 @@ function CodeBlock({ code }: { code: string }) {
               initial={{ scale: 0.5, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.5, opacity: 0 }}
-              transition={{ duration: 0.15 }}
+              transition={MOTION.snappy}
               className="flex"
             >
               <Copy className="size-3.5" />

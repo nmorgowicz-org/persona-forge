@@ -24,6 +24,7 @@ import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
 import { VoiceSelector } from '@/components/VoiceSelector'
 import { AudioPlayer } from '@/components/AudioPlayer'
+import { MOTION } from '@/lib/motion'
 import { InfoIcon } from '@/components/InfoIcon'
 import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/page-header'
@@ -472,7 +473,7 @@ export function SpeakPage() {
                   animate={{
                      width: `${Math.min(100, Math.max(3, speakJobProgress.progress_pct))}%`,
                   }}
-                  transition={{ ease: 'easeOut', duration: 0.3 }}
+                  transition={MOTION.settle}
                 />
               </div>
                {typeof speakJobProgress.progress_pct === 'number' && (

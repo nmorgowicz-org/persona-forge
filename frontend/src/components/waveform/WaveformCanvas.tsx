@@ -132,11 +132,17 @@ export function WaveformCanvas({
 
       if (playheadFraction != null && playheadFraction >= 0 && playheadFraction <= 1) {
         const x = playheadFraction * width
+        // The playhead reads as light rather than paint: a short shadow under the line, which
+        // costs one property and no per-frame layout (B-P7).
+        ctx.save()
+        ctx.shadowColor = SIGNAL_PLAYHEAD
+        ctx.shadowBlur = 8
         ctx.fillStyle = SIGNAL_PLAYHEAD
         ctx.fillRect(x - 0.5, 0, 1, height)
         ctx.beginPath()
         ctx.arc(x, 4, 3.5, 0, Math.PI * 2)
         ctx.fill()
+        ctx.restore()
       }
     }
   }, [envelope, windowStart, windowEnd, effectiveScale, onOverlay])

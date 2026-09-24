@@ -97,8 +97,12 @@ export const LevelMeter = memo(function LevelMeter({
 
       const held = heldRef.current.db
       if (held > METER_FLOOR_DB) {
+        ctx.save()
+        ctx.shadowColor = 'oklch(1 0 0 / 70%)'
+        ctx.shadowBlur = 6
         ctx.fillStyle = 'oklch(1 0 0 / 85%)'
         ctx.fillRect(meterFraction(held) * width - 0.5, 0, 1, height)
+        ctx.restore()
       }
 
       if (readoutRef.current) {
