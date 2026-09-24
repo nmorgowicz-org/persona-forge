@@ -581,49 +581,32 @@ def _resolve_builtin_voice_artifact(name: str) -> Path | None:
 
 
 def _export_voice_state(model: TTSModel, state: dict[str, Any], cache_path: Path) -> bool:
-    """Write a resolved voice_state to the on-disk cache, when the library supports it.
+    """Persist a resolved voice_state so the next process can reload it.
 
-    ``TTSModel.export_model_state`` exists in pocket-tts 3.0.x and is gone in 3.1.x, which
-    caches the prompt state internally instead (``_cached_get_state_for_audio_prompt``). It was
-    called unguarded, and one missing attribute broke *both* resolution paths in opposite
-    directions: the built-in branch swallowed the AttributeError and fell through to the voice
-    library, where a built-in is not, surfacing as "voice_id 'vera' not found in voice_library";
-    the library branch let it raise, so no cloned voice could generate at all.
+    pocket-tts exposes this as a *module-level* function
+    (``pocket_tts.models.model_state.export_model_state``) and never as a ``TTSModel`` method;
+    there is deliberately no import counterpart, because a saved state is reloaded by handing its
+    ``.safetensors`` path to ``get_state_for_audio_prompt`` — which is exactly what the read path
+    below does. Calling ``model.export_model_state`` (as this code used to) therefore always
+    raised AttributeError: the built-in branch swallowed it and fell through to the voice library
+    ("voice_id 'vera' not found in voice_library"), and the library branch let it escape, so no
+    cloned voice could generate at all.
 
-    Losing the on-disk copy only costs a rebuild after a restart, which the in-memory cache in
-    this module and the library's own cache both cover. Returns whether it was written.
+    The method is still preferred when present, so a future release that moves it onto the model
+    keeps working. Returns whether the state was written.
     """
     export = getattr(model, "export_model_state", None)
-    if not callable(export):
+    if callable(export):
+        export(state, str(cache_path))
+        return True
+    try:
+        from pocket_tts.models.model_state import export_model_state as export_state_to_file
+    except Exception:
         return False
-    export(state, str(cache_path))
+    export_state_to_file(state, str(cache_path))
     return True
 
 
-def _import_voice_state(model: TTSModel, cache_path: Path) -> dict[str, Any] | None:
-    """Read the on-disk voice_state cache, when the library supports that format at all.
-
-    The counterpart of `_export_voice_state`: `import_model_state` is 3.0.x-only. On 3.1.x
-    there is simply no disk cache to read, so the caller rebuilds the state instead of logging
-    a failure for a feature that does not exist in the installed library.
-    """
-    read = getattr(model, "import_model_state", None)
-    if not callable(read):
-        return None
-    result = read(str(cache_path))
-    return result if isinstance(result, dict) else None
-
-
-def _has_disk_state_cache(model: TTSModel) -> bool:
-    """Whether the installed pocket-tts has the on-disk voice-state format.
-
-    Present in 3.0.x, gone in 3.1.x (which caches prompt state internally). Checked before
-    attempting either direction so a missing format is a clean "not supported here" rather
-    than a logged failure.
-    """
-    return callable(getattr(model, "import_model_state", None)) and callable(
-        getattr(model, "export_model_state", None)
-    )
 
 
 def get_pocket_tts_voice_state(
@@ -710,14 +693,13 @@ def get_pocket_tts_voice_state(
         if dependency_mtimes and cache_path.stat().st_mtime < max(dependency_mtimes):
             cache_is_current = False
 
-    if cache_path.is_file() and cache_is_current and _has_disk_state_cache(model):
+    if cache_path.is_file() and cache_is_current:
         try:
             print(f"[pocket_tts] Loading cached voice state from disk: {cache_path.name}")
-            state = _import_voice_state(model, cache_path)
-            if state is None:
-                # The predicate said the format exists, so a None here means the file did not
-                # yield a state -- fall through and rebuild rather than cache the miss.
-                raise ValueError("cached state did not decode to a voice state")
+            # The library owns the on-disk format: a saved state *is* a .safetensors prompt
+            # source, so reloading goes through get_state_for_audio_prompt. There is no
+            # import_model_state to call -- see _export_voice_state.
+            state = model.get_state_for_audio_prompt(str(cache_path))
             pocket_tts_voice_state_cache[resolved_id] = state
             print(f"[pocket_tts] voice_state resolution: {resolved_id!r} (disk cache import)")
             return state
