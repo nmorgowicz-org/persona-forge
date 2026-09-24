@@ -533,7 +533,7 @@ consumes its tokens; P2 before P3/P4 — both consume its envelope and clock.
 | P1 tokens | PASS 2026-09-23 (tokens 3/3, suite 124/0/1 skipped) | a9282ce | D3 = follow accent; neutrals match the board by pixel count |
 | P2 waveform renderer | PASS 2026-09-23 (waveform-truth 4/4, suite 128/0/1 skipped, 0 long tasks > 50 ms) | 1e78662 | fixes A2, A3, A4, A5; one canvas renderer, absolute-unit envelope, shared scale |
 | P3 spectrogram | PASS 2026-09-23 (spectrogram 3/3, suite 131/0/1 skipped, 0 long tasks > 50 ms) | 073ecaa | fixes A6; real STFT in a worker, log axis, SpectralAccent deleted |
-| P4 transport + metering | | | D5 = accepted (LUFS) |
+| P4 transport + metering | PASS 2026-09-23 (metering 5/5, suite 136/0/1 skipped) | 1e18747 | fixes A1, A2; true dBFS meter, BS.1770-4 LUFS, one strip in every deck |
 | P5 knob/fader | | | D2 = accepted |
 | P6 chrome | | | D6 = accepted; D7 from P0 |
 | P7 motion | | | |
