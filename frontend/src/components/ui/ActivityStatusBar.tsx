@@ -1,8 +1,36 @@
 import * as React from 'react'
-import { Loader2, StopCircle, Timer } from 'lucide-react'
+import { Info, Loader2, StopCircle, Timer } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { useSidebar } from '@/components/ui/sidebar-context'
 import { cn } from '@/lib/utils'
+
+// The info view (CP0 decision D6). Any control can carry a `data-help` string; hovering or
+// focusing it puts that string in this strip, the way a plugin's help line works. It is also
+// where genuine product knowledge lives now, instead of paragraphs in the panel that the user
+// reads before they have made any choice.
+let helpText: string | null = null
+const helpListeners = new Set<() => void>()
+
+export function setHelpText(next: string | null): void {
+  if (helpText === next) return
+  helpText = next
+  for (const listener of helpListeners) listener()
+}
+
+function subscribeHelp(listener: () => void): () => void {
+  helpListeners.add(listener)
+  return () => {
+    helpListeners.delete(listener)
+  }
+}
+
+function useHelpText(): string | null {
+  return React.useSyncExternalStore(
+    subscribeHelp,
+    () => helpText,
+    () => null,
+  )
+}
 
 function formatEta(s: number) {
   const total = Math.round(s)
@@ -53,15 +81,22 @@ export function ActivityStatusBar() {
     return () => clearInterval(id)
   }, [active, countdown])
 
-  if (!active || !status) return null
+  const help = useHelpText()
 
-  const title = status.title
-  const message =
-    status.message || adaptiveMessage(true, status.progress, countdown)
-  const detail = status.detail
+  // The strip exists to say something: activity, or an explanation of whatever the pointer is
+  // on. With neither, it stays out of the way rather than holding a permanent empty bar.
+  const activity = active && status ? status : null
+  if (!help && !activity) return null
+
+  const title = activity?.title
+  const message = activity
+    ? activity.message || adaptiveMessage(true, activity.progress, countdown)
+    : ''
+  const detail = activity?.detail
+  const onCancel = activity?.onCancel
   const progress =
-    typeof status.progress === 'number' && status.progress >= 0
-      ? Math.min(1, status.progress)
+    typeof activity?.progress === 'number' && activity.progress >= 0
+      ? Math.min(1, activity.progress)
       : 0
   const etaDisplay =
     countdown != null && countdown >= 5 && countdown <= 1800
@@ -96,6 +131,7 @@ export function ActivityStatusBar() {
 
         <div className="relative">
           {/* Primary row */}
+          {activity && (
           <div className="flex items-center gap-2.5 px-4 py-1.5 text-[10px] text-muted-foreground">
             <Loader2 className="size-3 shrink-0 animate-spin text-primary" />
 
@@ -117,15 +153,15 @@ export function ActivityStatusBar() {
             )}
 
             {detail && (
-              <span className={cn(!status.onCancel && 'ml-auto', 'shrink-0')}>
+              <span className={cn(!onCancel && 'ml-auto', 'shrink-0')}>
                 {detail}
               </span>
             )}
 
-            {status.onCancel && (
+            {onCancel && (
               <button
                 type="button"
-                onClick={status.onCancel}
+                onClick={onCancel}
                 className="ml-auto flex shrink-0 items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive transition-colors hover:bg-destructive/20"
               >
                 <StopCircle className="size-3" />
@@ -133,6 +169,20 @@ export function ActivityStatusBar() {
               </button>
             )}
           </div>
+          )}
+
+          {/* Info view (D6): whatever control the pointer or focus is on, explained in place. */}
+          {help && (
+            <div
+              data-testid="info-strip"
+              role="status"
+              aria-live="polite"
+              className="flex items-center gap-2 px-4 py-1.5 text-[11px] text-muted-foreground"
+            >
+              <Info className="size-3 shrink-0 text-primary" />
+              <span className="truncate">{help}</span>
+            </div>
+          )}
 
           {/* Secondary row: appears on hover if there's extra detail */}
           {hovered && (

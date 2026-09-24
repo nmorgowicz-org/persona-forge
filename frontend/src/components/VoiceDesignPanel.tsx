@@ -1,4 +1,4 @@
-import { useMemo, useRef, useCallback, useState } from 'react'
+import { useMemo, useRef, useCallback, useId, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Disclose } from './Disclose'
 import { createVoiceDesign, saveVoiceDesign } from '../lib/api'
@@ -177,6 +177,11 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
     [setManualDescription],
   )
 
+  // The labels above the parameter dropdowns name them by id, so the accessible name and the
+  // visible text cannot drift apart (B-P8).
+  const languageLabelId = useId()
+  const exampleLabelId = useId()
+
   const handleStop = useCallback(() => {
     if (!isGenerating) return
     abortRef.current?.abort()
@@ -266,6 +271,9 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
         deliveryVariant.kind,
       )
       setSavedVoiceId(result.voice_id)
+      // The confirmation is the "Saved as ..." block below; this is the same news for anyone
+      // who is not looking at it (B-P9).
+      useAppStore.getState().announce(`Voice saved to the library as ${result.voice_id}.`)
     } catch (err) {
       setError(
         err instanceof Error ? err.message : String(err),
@@ -284,7 +292,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-      <div className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm">
+      <div className="flex flex-col gap-5 rounded-panel border border-border bg-card p-5 text-card-foreground shadow-sm">
         <div>
           <h2 className="text-base font-semibold">
             {initial ? 'Tune this voice' : 'Design a voice'}
@@ -387,7 +395,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
         </ChipSection>
       </div>
 
-      <div className="flex h-fit flex-col gap-4 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm lg:sticky lg:top-8">
+      <div className="flex h-fit flex-col gap-4 rounded-panel border border-border bg-card p-5 text-card-foreground shadow-sm lg:sticky lg:top-8">
         <AnimatePresence initial={false}>
           {warnings.map((message) => (
             <motion.p
@@ -426,13 +434,18 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
           />
 
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-            <Select value="" onValueChange={applyExample}>
-              <SelectTrigger
-                data-testid="voice-design-example-select"
-                className="h-7 w-auto gap-1.5 border-none bg-transparent px-0 text-[11px] text-muted-foreground underline decoration-dotted hover:text-foreground"
-              >
-                <SelectValue placeholder="Insert a tried-and-true example…" />
-              </SelectTrigger>
+            <div className="flex flex-col gap-1">
+              <span id={exampleLabelId} className="micro-label">
+                Examples
+              </span>
+              <Select value="" onValueChange={applyExample}>
+                <SelectTrigger
+                  data-testid="voice-design-example-select"
+                  aria-labelledby={exampleLabelId}
+                  className="h-7 w-auto gap-1.5 border-none bg-transparent px-0 text-[11px] text-muted-foreground underline decoration-dotted hover:text-foreground"
+                >
+                  <SelectValue placeholder="Insert a tried-and-true example…" />
+                </SelectTrigger>
               <SelectContent>
                 {VOICE_DESIGN_EXAMPLES.map(
                   (example) => (
@@ -446,6 +459,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
                 )}
               </SelectContent>
             </Select>
+            </div>
             <button
               type="button"
               onClick={() =>
@@ -493,13 +507,17 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Select
-            value={language}
-            onValueChange={setLanguage}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
+          <div className="flex flex-col gap-1">
+            <span id={languageLabelId} className="micro-label">
+              Language
+            </span>
+            <Select
+              value={language}
+              onValueChange={setLanguage}
+            >
+              <SelectTrigger aria-labelledby={languageLabelId}>
+                <SelectValue />
+              </SelectTrigger>
             <SelectContent>
               <SelectItem value="English">
                 English
@@ -509,6 +527,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
               </SelectItem>
             </SelectContent>
           </Select>
+          </div>
 
           <Disclose level="expert" className="flex items-center gap-1">
             <input
@@ -607,7 +626,6 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
 
         <AnimatePresence>
            {previewAudioUrl && previewId && (
-             console.log('[VoiceDesignPanel] Result Block:', { savedVoiceId, isSaving, previewId, previewAudioUrl }),
              <motion.div
                data-testid="voice-design-result"
               initial={{ opacity: 0, y: 8 }}

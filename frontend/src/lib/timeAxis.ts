@@ -9,6 +9,19 @@ export interface TimeTick {
   label: string
 }
 
+/** One display grammar for every millisecond-valued control (clip trim/fade, seam gaps):
+ * below a second the number is shown in whole milliseconds, at or above a second it is
+ * shown in seconds with trailing zeros stripped. The number and its unit are returned
+ * separately so a control can keep the number itself machine-readable (tests, aria) while
+ * still showing the unit -- see `parseGapText` for the matching input grammar, which
+ * accepts a bare number, `ms`, or `s`. */
+export function formatMsValue(ms: number): { text: string; unit: 'ms' | 's' } {
+  if (!isFinite(ms)) return { text: '0', unit: 'ms' }
+  const rounded = Math.round(ms)
+  if (Math.abs(rounded) < 1000) return { text: String(rounded), unit: 'ms' }
+  return { text: String(Number((rounded / 1000).toFixed(3))), unit: 's' }
+}
+
 // A 1-2-5 "nice number" ladder in seconds, covering sub-second waveform zooms through
 // hour-scale timelines.
 const NICE_SECONDS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
@@ -53,6 +66,26 @@ export function formatTimelineTime(seconds: number, stepSeconds = 1): string {
   const sWhole = Math.floor((tenths % 600) / 10)
   const d = tenths % 10
   return `${m}:${sWhole.toString().padStart(2, '0')}.${d}`
+}
+
+/** One hover readout grammar for every waveform surface: always 10 ms, at any zoom. A
+ * readout is a single value with room to itself, so it does not need the coarser one-decimal
+ * branch `formatTimelineTime` uses to keep ruler tick labels from colliding with each other --
+ * but it keeps that module's m:ss shape past ten seconds so a long position still reads as a
+ * clock. Cursor text lines use the same grammar: 10 ms is the granularity prosody cuts and
+ * fades are placed at. */
+export function formatHoverTime(seconds: number): string {
+  if (!isFinite(seconds)) return '0.00s'
+  const clamped = Math.max(0, seconds)
+  if (clamped < 10) return `${clamped.toFixed(2)}s`
+  // Round to centiseconds first so float wobble cannot mislabel a value (the same discipline
+  // formatTimelineTime's tenths branch uses).
+  const centis = Math.round(clamped * 100)
+  const minutes = Math.floor(centis / 6000)
+  const rest = centis % 6000
+  const wholeSeconds = Math.floor(rest / 100)
+  const hundredths = rest % 100
+  return `${minutes}:${String(wholeSeconds).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}`
 }
 
 /** Builds evenly-spaced ticks from 0 through `durationSeconds`, choosing a "nice" step so

@@ -635,7 +635,13 @@ class FakeModelRuntime:
                 "status": job.status,
                 "frames_generated": job.frames_generated,
                 "expected_total_frames": 60,
-                "progress_pct": 100.0 if job.status == "completed" else 25.0,
+                # Derive the running percentage from the job's own frame count. A constant here
+                # is indistinguishable from a decorative bar: a client cannot tell a
+                # determinate readout from a painted-on one, which is exactly what the
+                # progress-bar test needs to be able to tell apart.
+                "progress_pct": 100.0
+                if job.status == "completed"
+                else round(min(95.0, 100.0 * job.frames_generated / 60), 1),
                 "elapsed_seconds": round(elapsed, 1),
                 "audio_seconds_generated": round(job.frames_generated / 12, 2),
                 "live_rtf_estimate": round(elapsed / max(1, job.frames_generated / 12), 2)

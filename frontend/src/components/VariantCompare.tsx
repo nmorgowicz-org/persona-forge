@@ -10,15 +10,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { computePeaks } from '@/lib/waveform'
+import { computeEnvelope, type AudioEnvelope } from '@/lib/waveform'
 import { generateSpeechWithMetrics, listVoices, type ReferenceMetrics, type VoiceMeta } from '@/lib/api'
 import { AudioStatsStrip } from './waveform/AudioStatsStrip'
+import { useAudioSource } from '@/hooks/useAudioTransport'
 import { WaveformLane } from './waveform/WaveformLane'
 
 interface CompareResult {
   audioUrl: string
   metrics: ReferenceMetrics
-  peaks: number[]
+  envelope: AudioEnvelope | null
   durationMs: number
 }
 
@@ -50,6 +51,9 @@ export function VariantCompare() {
 
   const audioARef = useRef<HTMLAudioElement | null>(null)
   const audioBRef = useRef<HTMLAudioElement | null>(null)
+  // Both lanes sound together by design, so the pair is one source in the transport
+  // coordinator (T1).
+  const source = useAudioSource('variant-compare', 'Variant compare')
   const objectUrlsRef = useRef<string[]>([])
 
   useEffect(() => {
@@ -75,16 +79,23 @@ export function VariantCompare() {
     }
   }
 
+  // A and B are the same text through two voices: sharing a vertical scale is what makes the
+  // louder of the two visibly louder (B-P2).
+  const sharedScaleAbs = useMemo(() => {
+    const peaks = [resultA, resultB].map((result) => result?.envelope?.peakAbs ?? 0).filter((value) => value > 0)
+    return peaks.length ? Math.max(...peaks) : null
+  }, [resultA, resultB])
+
   const fetchAudio = async (voiceId: string): Promise<CompareResult> => {
     const { blob, metrics } = await generateSpeechWithMetrics({ text, voiceId })
-    const [peaks, durationSeconds] = await Promise.all([computePeaks(blob), decodeAudio(blob)])
+    const [envelope, durationSeconds] = await Promise.all([computeEnvelope(blob), decodeAudio(blob)])
     const audioUrl = URL.createObjectURL(blob)
     objectUrlsRef.current.push(audioUrl)
 
     return {
       audioUrl,
       metrics: { duration_seconds: durationSeconds, ...metrics },
-      peaks,
+      envelope,
       durationMs: Math.round(durationSeconds * 1000),
     }
   }
@@ -109,9 +120,17 @@ export function VariantCompare() {
     const next = !isPlaying
     setIsPlaying(next)
     if (next) {
+      // Claim once for the synchronized pair; the pause callback also drops the local playing
+      // state, because these lanes carry no pause/ended listeners of their own.
+      source.claim(() => {
+        audioARef.current?.pause()
+        audioBRef.current?.pause()
+        setIsPlaying(false)
+      })
       void audioARef.current?.play()
       void audioBRef.current?.play()
     } else {
+      source.release()
       audioARef.current?.pause()
       audioBRef.current?.pause()
     }
@@ -119,6 +138,7 @@ export function VariantCompare() {
 
   const handleTimeUpdate = (event: React.SyntheticEvent<HTMLAudioElement, Event>) => {
     setCurrentTime(event.currentTarget.currentTime)
+    source.report(event.currentTarget.currentTime, event.currentTarget.duration)
   }
 
   useEffect(() => {
@@ -136,8 +156,8 @@ export function VariantCompare() {
   }, [])
 
   return (
-    <div className="flex flex-col gap-6 rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm">
-      <div className="flex flex-col gap-4 rounded-lg border border-border bg-muted/30 p-4">
+    <div className="flex flex-col gap-6 rounded-panel border border-border bg-card p-4 text-card-foreground shadow-sm">
+      <div className="flex flex-col gap-4 rounded-control border border-border bg-muted/30 p-4">
         <div className="grid grid-cols-1 items-end gap-4 md:grid-cols-3">
           <div className="space-y-2">
             <label className="text-sm font-medium">Test Text</label>
@@ -210,13 +230,15 @@ export function VariantCompare() {
               </div>
               <div className="relative h-16 overflow-hidden rounded-md border border-border bg-muted/20">
                 <WaveformLane
-                  peaks={res.peaks}
+                  envelope={res.envelope}
+                  scaleAbs={sharedScaleAbs}
                   durMs={res.durationMs}
                   trimStartMs={0}
                   trimEndMs={0}
                   fadeInMs={0}
                   fadeOutMs={0}
                   pauseIntervals={res.metrics.pause_intervals}
+                  timeGuideTestId="variant-lane-time"
                 />
                 <audio ref={ref} src={res.audioUrl} onTimeUpdate={handleTimeUpdate} className="hidden" />
               </div>

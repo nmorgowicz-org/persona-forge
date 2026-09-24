@@ -31,6 +31,17 @@ CONVENTIONAL_TYPES = (
 OVERRIDE_ENTRY_RE = re.compile(
     rf"^({'|'.join(CONVENTIONAL_TYPES)})(?:\([a-z0-9][a-z0-9._/-]*\))?!?: .+$"
 )
+# Release Please parses the block as a single commit message and extracts
+# BREAKING CHANGE notes "regardless of whether they fall in summary, body, or
+# footer" (src/commit.ts), so a footer is a legitimate part of a block. It is
+# also the opposite of what this guard exists to catch: a footer is never
+# silently dropped, it changes the version bump. Continuation lines belong to
+# the note above them.
+OVERRIDE_FOOTER_RE = re.compile(r"^(BREAKING CHANGE|BREAKING-CHANGE): .+$")
+# Markdown lists stay rejected even inside a note: Release Please honours them,
+# but a leading `- ` is exactly how an intended entry gets silently dropped, and
+# the cost of allowing it is higher than asking for prose here.
+MARKDOWN_LIST_RE = re.compile(r"^(?:[-*+]|\d+[.)]) ")
 
 
 def validate_pr_override_body(body: str) -> None:
@@ -45,12 +56,24 @@ def validate_pr_override_body(body: str) -> None:
     entries = [line.strip() for line in block.splitlines() if line.strip()]
     if not entries:
         raise RuntimeError("Release Please commit override block must not be empty")
-    invalid = [entry for entry in entries if not OVERRIDE_ENTRY_RE.fullmatch(entry)]
+    invalid: list[str] = []
+    in_footer = False
+    for entry in entries:
+        if OVERRIDE_ENTRY_RE.fullmatch(entry):
+            in_footer = False
+            continue
+        if OVERRIDE_FOOTER_RE.fullmatch(entry):
+            in_footer = True
+            continue
+        if in_footer and not MARKDOWN_LIST_RE.match(entry):
+            continue
+        invalid.append(entry)
     if invalid:
         raise RuntimeError(
             "Release Please override entries must each be a single Conventional Commit line "
             "without a Markdown list marker, with one supported type and an optional simple scope; "
-            f"invalid entries: {invalid}"
+            "the only other permitted content is a `BREAKING CHANGE:` note and its continuation "
+            f"lines; invalid entries: {invalid}"
         )
 
 

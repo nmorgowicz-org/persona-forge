@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 128" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Persona Forge Signal Crucible horizontal lockup</title>
+  <desc id="desc">A crucible signal mark followed by the Persona Forge wordmark.</desc>
+  <defs>
+    <linearGradient id="arc" x1="13" y1="13" x2="103" y2="108" gradientUnits="userSpaceOnUse"><stop stop-color="#C7D1FF"/><stop offset=".42" stop-color="#384260"/><stop offset="1" stop-color="#080B14"/></linearGradient>
+    <linearGradient id="wave" x1="13" y1="64" x2="116" y2="64" gradientUnits="userSpaceOnUse"><stop stop-color="#47BFFF"/><stop offset=".52" stop-color="#9B6BFF"/><stop offset="1" stop-color="#C9F1FF"/></linearGradient>
+    <filter id="g" x="-40%" y="-80%" width="180%" height="260%"><feGaussianBlur stdDeviation="1.9" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <g transform="translate(12)">
+    <g stroke="url(#arc)" stroke-width="13"><path d="M57 12A53 53 0 0 1 103 36"/><path d="M112 50A53 53 0 0 1 104 87"/><path d="M92 108A53 53 0 0 1 49 116"/><path d="M27 103A53 53 0 0 1 13 72"/></g>
+    <path d="M8 64C25 50 43 76 57 67C61 65 62 64 64 64C72 64 74 52 81 52C88 52 89 75 96 75C103 75 105 58 116 64" stroke="url(#wave)" stroke-width="3" stroke-linecap="round" filter="url(#g)"/>
+    <path d="M64 40V88" stroke="#FFBE55" stroke-width="1.5"/><circle cx="64" cy="64" r="3" fill="#FFBE55"/>
+  </g>
+  <text x="160" y="60" fill="#EDE6FF" font-family="Geist, Arial, sans-serif" font-size="32" font-weight="650" letter-spacing="4">PERSONA</text>
+  <text x="160" y="94" fill="#9FB0D6" font-family="Geist, Arial, sans-serif" font-size="25" font-weight="500" letter-spacing="8">FORGE</text>
+  <path d="M160 108H462" stroke="#33415F" stroke-width="1"/>
+</svg>

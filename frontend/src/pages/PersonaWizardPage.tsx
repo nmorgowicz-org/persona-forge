@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { motion } from 'motion/react'
 import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
+import { PageHeader } from '@/components/ui/page-header'
 import {
   PERSONAS,
   PERSONA_GROUP_LABELS,
@@ -60,17 +61,16 @@ export function PersonaWizardPage() {
   return (
     <div className="flex flex-col gap-6">
       <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="text-2xl font-semibold tracking-tight">New Voice (Guided)</h1>
-        <p className="text-sm text-muted-foreground">
-          A few quick questions, then you land in the full editor with sensible defaults already
-          applied — you can change anything from there.
-        </p>
+        <PageHeader
+          title="New Voice (Guided)"
+          description="A few quick questions, then you land in the full editor with sensible defaults already applied — you can change anything from there."
+        />
       </motion.div>
 
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex max-w-2xl flex-col gap-6 rounded-lg border border-border bg-card p-6"
+        className="flex max-w-2xl flex-col gap-6 rounded-control border border-border bg-card p-6"
       >
         {step === 'use-case' && (
           <div className="flex flex-col gap-4">

@@ -7,13 +7,16 @@
 // row plays at a time. Rows use content-visibility (see index.css .segment-browser-row) so a
 // 250-row library scrolls smoothly without a virtualization dependency.
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { Loader2, Pause, Play, Plus } from 'lucide-react'
+import { Copy, Loader2, Pause, Play, Plus } from 'lucide-react'
+import { useAppStore } from '@/store'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { base64ToBlob, cn } from '@/lib/utils'
 import { getClipAudioAnalysis } from '@/lib/waveform'
 import { getSegmentAudioBase64, getVoice, type SegmentMeta, type VoiceMeta } from '@/lib/api'
+import { useAudioSource } from '@/hooks/useAudioTransport'
 import { SegmentPreviewRail } from './SegmentPreviewRail'
+import * as ContextMenu from '../ui/context-menu'
 
 type BrowserTab = 'segments' | 'voices'
 type SortMode = 'newest' | 'duration' | 'name'
@@ -84,6 +87,8 @@ interface BrowserRowItemProps {
   onToggleSelect: (id: string) => void
   onTogglePlay: (row: BrowserRow) => void
   onDoubleClickInsert: (row: BrowserRow) => void
+  /** Context-menu insert: the same path as a double click, exposed for the row menu. */
+  onInsertRow: (row: BrowserRow) => void
 }
 
 /** One browser row, memoized so playback progress re-renders only the active row, never the
@@ -98,9 +103,13 @@ const BrowserRowItem = memo(function BrowserRowItem({
   onToggleSelect,
   onTogglePlay,
   onDoubleClickInsert,
+  onInsertRow,
 }: BrowserRowItemProps) {
   return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>
     <div
+      data-testid="segment-browser-row"
       className="segment-browser-row flex items-center gap-2 py-2"
       onDoubleClick={() => onDoubleClickInsert(row)}
     >
@@ -142,7 +151,33 @@ const BrowserRowItem = memo(function BrowserRowItem({
           {row.projectName}
         </span>
       )}
+
     </div>
+      </ContextMenu.Trigger>
+      <ContextMenu.Content data-testid="stitch-context-menu" data-menu-scope="segment">
+        <ContextMenu.Label>{row.kind === 'segment' ? 'Segment' : 'Voice'}</ContextMenu.Label>
+        <ContextMenu.Item data-testid="stitch-menu-insert" onSelect={() => onInsertRow(row)}>
+          <Plus className="size-3" />
+          Insert
+        </ContextMenu.Item>
+        <ContextMenu.Item data-testid="stitch-menu-audition" onSelect={() => onTogglePlay(row)}>
+          {isPlaying ? <Pause className="size-3" /> : <Play className="size-3" />}
+          {isPlaying ? 'Stop audition' : 'Audition'}
+        </ContextMenu.Item>
+        <ContextMenu.Item
+          data-testid="stitch-menu-copy-id"
+          onSelect={() => {
+            void navigator.clipboard
+              ?.writeText(row.id)
+              .then(() => useAppStore.getState().announce(`Copied ${row.id}`))
+              .catch(() => {})
+          }}
+        >
+          <Copy className="size-3" />
+          Copy id
+        </ContextMenu.Item>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
   )
 })
 
@@ -160,6 +195,9 @@ export interface SegmentBrowserModalProps {
   insertAfterClipId: string | null
   /** Optional controller the parent uses to open the dialog without a DOM click. */
   controllerRef?: { current: SegmentBrowserModalController | null }
+  /** Hide the inline trigger when the caller supplies its own action (an empty state's single
+   * next step, for instance) and drives the dialog through `controllerRef`. */
+  hideTrigger?: boolean
 }
 
 export function SegmentBrowserModal({
@@ -169,6 +207,7 @@ export function SegmentBrowserModal({
   onInsertVoices,
   insertAfterClipId,
   controllerRef,
+  hideTrigger = false,
 }: SegmentBrowserModalProps) {
   const [open, setOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<BrowserTab>('segments')
@@ -200,14 +239,28 @@ export function SegmentBrowserModal({
   // can detect it has been superseded and bail out instead of clobbering newer playback state
   // or resuming audio after the dialog has closed.
   const playbackTokenRef = useRef(0)
+  // This modal is one audio source in the transport coordinator (T1): an audition here
+  // silences whatever else is sounding, including the arrangement playing underneath it.
+  const source = useAudioSource('segment-audition', 'Segment audition')
+
+  /** The one way an audition ends: pausing, clearing the row's playing state, and giving up
+   * playback focus. Every stop path routes through it so none can leave a stale claim. */
+  const stopAudition = useCallback(() => {
+    audioRef.current?.pause()
+    setPlayingId(null)
+    source.release()
+  }, [setPlayingId, source])
+  // The Audio object is created once and outlives individual renders; its 'ended' listener
+  // reads the latest stop path through this ref.
+  const stopAuditionRef = useRef(stopAudition)
+  stopAuditionRef.current = stopAudition
 
   const hasVoices = (voices?.length ?? 0) > 0 && !!onInsertVoices
 
   useEffect(() => {
     if (!open) {
       playbackTokenRef.current += 1
-      audioRef.current?.pause()
-      setPlayingId(null)
+      stopAudition()
       // Close leaves no audition state behind: a late in-flight resolve must not re-show a
       // spinner on reopen, and the object URL must not survive close/reopen cycles.
       setLoadingAudioId(null)
@@ -221,9 +274,10 @@ export function SegmentBrowserModal({
   useEffect(() => {
     return () => {
       audioRef.current?.pause()
+      source.release()
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
     }
-  }, [])
+  }, [source])
 
   // Optional controller: expose open() to the parent without changing how the dialog is
   // otherwise driven (the trigger button keeps working as before).
@@ -312,10 +366,11 @@ export function SegmentBrowserModal({
     commitInsert([row.id])
   }, [commitInsert])
 
+  const handleInsertRow = handleDoubleClickInsert
+
   const togglePlay = useCallback(async (row: BrowserRow) => {
     if (playingIdRef.current === row.id) {
-      audioRef.current?.pause()
-      setPlayingId(null)
+      stopAudition()
       return
     }
     const token = ++playbackTokenRef.current
@@ -352,14 +407,17 @@ export function SegmentBrowserModal({
         audio.addEventListener('timeupdate', () => {
           if (audio.duration) setProgress(audio.currentTime / audio.duration)
         })
-        audio.addEventListener('ended', () => setPlayingId(null))
+        audio.addEventListener('ended', stopAuditionRef.current)
         audioRef.current = audio
       }
       audioRef.current.src = url
       setProgress(0)
+      // Auditioning a row takes playback focus (N6): whatever else is sounding -- the
+      // arrangement under the modal, a deck elsewhere -- stops.
+      source.claim(stopAudition)
       await audioRef.current.play()
       if (token !== playbackTokenRef.current) {
-        audioRef.current.pause()
+        stopAudition()
         return
       }
       setPlayingId(row.id)
@@ -381,14 +439,16 @@ export function SegmentBrowserModal({
 
   return (
     <>
-      <button
-        type="button"
-        data-testid="stitch-picker-toggle-segments"
-        onClick={() => setOpen(true)}
-        className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted"
-      >
-        <Plus className="size-3.5" /> Add segments
-      </button>
+      {!hideTrigger && (
+        <button
+          type="button"
+          data-testid="stitch-picker-toggle-segments"
+          onClick={() => setOpen(true)}
+          className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted"
+        >
+          <Plus className="size-3.5" /> Add segments
+        </button>
+      )}
 
       <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetPickerState() }}>
         {/* DialogContent is programmatically focusable (not in the Tab order) so the dialog
@@ -477,6 +537,7 @@ export function SegmentBrowserModal({
                 onToggleSelect={toggleSelected}
                 onTogglePlay={togglePlay}
                 onDoubleClickInsert={handleDoubleClickInsert}
+                onInsertRow={handleInsertRow}
               />
             ))}
           </div>

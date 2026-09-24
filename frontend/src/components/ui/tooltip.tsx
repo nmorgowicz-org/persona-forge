@@ -60,7 +60,7 @@ export function Content({
         align={align}
         sideOffset={6}
         className={cn(
-          'z-50 max-w-[240px] rounded-lg border border-border/90 bg-popover px-2.5 py-1.5',
+          'z-50 max-w-[240px] rounded-control border border-border/90 bg-popover px-2.5 py-1.5',
           'text-[11px] leading-snug text-popover-foreground shadow-lg',
           'animate-in fade-in-0 zoom-in-95 duration-150',
           className,
@@ -117,6 +117,19 @@ export function TitleTooltipBridge() {
         const title = element.getAttribute('title')
         if (!title) continue
         element.setAttribute('data-app-tooltip', title)
+        // The tooltip is not in the accessibility tree, so removing `title` would leave an
+        // icon-only control with no name at all -- native `title` does supply one and this
+        // keeps that. But only for controls that have no name of their own: `aria-label`
+        // *overrides* an element's own text, so naming a labelled button from its tooltip
+        // renames it. These tooltips describe what the control will do next ("Play from
+        // playhead", "Pause"), which is not the control's name and changes as it is used.
+        const hasOwnName =
+          element.hasAttribute('aria-label') ||
+          element.hasAttribute('aria-labelledby') ||
+          (element.textContent ?? '').trim().length > 0
+        if (!hasOwnName) {
+          element.setAttribute('aria-label', title)
+        }
         element.removeAttribute('title')
       }
     }
@@ -144,7 +157,7 @@ export function TitleTooltipBridge() {
   }, [])
 
   return tip ? createPortal(
-    <div className="pointer-events-none fixed z-[100] max-w-[240px] -translate-x-1/2 -translate-y-full rounded-lg border border-border/90 bg-popover px-2.5 py-1.5 text-[11px] leading-snug text-popover-foreground shadow-lg animate-in fade-in-0 zoom-in-95 duration-150" style={{ left: tip.x, top: tip.y }} role="tooltip">
+    <div className="pointer-events-none fixed z-[100] max-w-[240px] -translate-x-1/2 -translate-y-full rounded-control border border-border/90 bg-popover px-2.5 py-1.5 text-[11px] leading-snug text-popover-foreground shadow-lg animate-in fade-in-0 zoom-in-95 duration-150" style={{ left: tip.x, top: tip.y }} role="tooltip">
       {tip.label}
     </div>, document.body,
   ) : null

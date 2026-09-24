@@ -16,6 +16,8 @@ run it in the container or natively.
 
 ---
 
+![Persona Forge](assets/brand/concepts/persona-forge/hero-v2/finalists/signal-crucible/app-hero.png)
+
 **OmniVoice accent audition** — generate candidates per segment, across accents, in real time:
 
 ![OmniVoice audition](docs/screenshots/omnivoice-audition-gif--omnivoice--audition.gif)
@@ -24,6 +26,11 @@ run it in the container or natively.
 reference clip:
 
 ![Voice Design to Stitch](docs/screenshots/design-to-stitch-gif--pocket-tts--design-to-stitch.gif)
+
+**The signal layer** — a true-scale waveform, a dBFS meter with peak hold, and a live
+spectrogram, all drawn from one media clock while the take plays:
+
+![Signal layer](docs/screenshots/signal-layer-gif--pocket-tts--signal-layer.gif)
 
 ---
 

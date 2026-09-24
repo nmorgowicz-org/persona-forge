@@ -1,8 +1,10 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { AnimatePresence, motion, MotionConfig, Reorder } from 'motion/react'
-import { ChevronUp, ChevronDown, Loader2, Play, Gauge, RotateCcw, Minus, Plus, Maximize2 } from 'lucide-react'
-import { type StitchPlanClip, type StitchPlanDsp } from '@/store'
+import { ChevronUp, ChevronDown, Loader2, Play, Gauge, RotateCcw, Minus, Plus, Maximize2, Redo2, Undo2 } from 'lucide-react'
+import { useAppStore, type StitchPlanClip, type StitchPlanDsp } from '@/store'
+import { EmptyState } from '@/components/ui/empty-state'
+import { MOTION } from '@/lib/motion'
 import {
   getStitchPacingTargets,
   type StitchPlanPayload,
@@ -21,8 +23,20 @@ import { useElementWidth } from '@/hooks/useElementWidth'
 import { type StitchPlanSession } from '@/hooks/useStitchPlanSession'
 import { useStitchTransport, type StitchTransport } from '@/hooks/useStitchTransport'
 import { planStateToPayload } from '@/lib/stitchPreview'
+import { getClipAudioAnalysis } from '@/lib/waveform'
 import { useStitchPreview } from '@/hooks/useStitchPreview'
+import { useStitchHistory, type StitchHistory } from '@/hooks/useStitchHistory'
+import {
+  isPrimaryModifier,
+  isShortcutKeymapOpen,
+  openShortcutKeymap,
+  useShortcutScope,
+  type ShortcutCommand,
+} from '@/hooks/useGlobalShortcuts'
 import { SegmentBrowserModal, type SegmentBrowserModalController } from './stitch/SegmentBrowserModal'
+import { Knob } from '@/components/ui/knob'
+import { Fader } from '@/components/ui/fader'
+import { HOVER_TIME_GUIDE_LABEL_CLASS, HOVER_TIME_GUIDE_LINE_CLASS, useHoverTimeGuide } from '@/hooks/useHoverTimeGuide'
 import { TimelineRuler } from './stitch/TimelineRuler'
 import { GapControl } from './stitch/GapControl'
 import { StitchClipCard } from './stitch/StitchClipCard'
@@ -60,16 +74,46 @@ function clampPps(v: number): number {
   return Math.max(MIN_PPS, Math.min(MAX_PPS, v))
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  const tag = target.tagName
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable
-}
-
 // Shared empty array so cards with no region edits receive a stable prop and their
 // React.memo comparison holds across plain re-renders.
 const EMPTY_REGION_EDITS: RegionEdit[] = []
 
+
+/* ---------- history controls ---------- */
+
+/** Undo/redo for the committed plan. Rendered in the insert bar and in the empty state: an
+ * empty plan is exactly what undoing the first insert produces, so stranding the redo there
+ * would make the last step of history unreachable. */
+function HistoryControls({ history }: { history: StitchHistory }) {
+  return (
+    <div className="flex items-center gap-1 rounded border border-border bg-background px-1">
+      <button
+        type="button"
+        data-testid="stitch-undo"
+        data-history-depth={history.depth}
+        disabled={!history.canUndo}
+        onClick={history.undo}
+        aria-label="Undo"
+        title={history.canUndo ? `Undo (${history.depth} step${history.depth === 1 ? '' : 's'})` : 'Nothing to undo'}
+        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
+      >
+        <Undo2 className="size-3.5" />
+      </button>
+      <button
+        type="button"
+        data-testid="stitch-redo"
+        data-redo-depth={history.redoDepth}
+        disabled={!history.canRedo}
+        onClick={history.redo}
+        aria-label="Redo"
+        title={history.canRedo ? `Redo (${history.redoDepth} step${history.redoDepth === 1 ? '' : 's'})` : 'Nothing to redo'}
+        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
+      >
+        <Redo2 className="size-3.5" />
+      </button>
+    </div>
+  )
+}
 
 /* ---------- main component ---------- */
 
@@ -85,6 +129,10 @@ interface StitchTimelineProps {
   /** Controller handle for the mounted segment-browser modal(s); the editor body uses it
    * to open the picker from the readiness guidance instead of a DOM click. */
   pickerRef?: { current: SegmentBrowserModalController | null }
+  /** Undo/redo controls and their shortcuts. Off for the quick-insert draft surface: the
+   * draft is local state with no history of its own, and offering the studio's there would
+   * silently rewind the committed plan behind the dialog. */
+  historyEnabled?: boolean
 }
 
 export const StitchTimeline = memo(function StitchTimeline({
@@ -97,9 +145,42 @@ export const StitchTimeline = memo(function StitchTimeline({
   onInsertVoiceFromLibrary,
   transport,
   pickerRef,
+  historyEnabled = true,
 }: StitchTimelineProps) {
   const { plan, reorderClip, removeClip, updateClip, setClips, setPaddingAt: setPadding, setPadding: setPaddingMs, setRegionEdits: onAddOrRemoveRegionEdit } = session
   const { clips, paddingMs, regionEditsByClip } = plan
+
+  // One vertical scale for every clip on screen, so a quiet segment looks quiet next to its
+  // neighbours. Read from the shared analysis cache the clip cards already fill -- a cache hit,
+  // never a second decode. With a single clip the lane auto-fits, and the card is told to show
+  // the peak readout so the fit is not mistaken for level.
+  const [scaleAbs, setScaleAbs] = useState<number | null>(null)
+  useEffect(() => {
+    let dead = false
+    const withAudio = clips.filter((clip) => clip.sourceAudioBase64)
+    if (withAudio.length === 0) {
+      setScaleAbs(null)
+      return
+    }
+    Promise.all(
+      withAudio.map((clip) =>
+        getClipAudioAnalysis(`clip:${clip.clipId}:${clip.sourceAudioBase64.length}`, clip.sourceAudioBase64, 48),
+      ),
+    )
+      .then((analyses) => {
+        if (dead) return
+        const peaks = analyses.map((analysis) => analysis.envelope?.peakAbs ?? 0).filter((value) => value > 0)
+        setScaleAbs(peaks.length ? Math.max(...peaks) : null)
+      })
+      .catch(() => {
+        if (!dead) setScaleAbs(null)
+      })
+    return () => {
+      dead = true
+    }
+  }, [clips])
+  const history = useStitchHistory()
+  const { undo: undoHistory, redo: redoHistory } = history
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null)
   const onAddRegionEdit = useCallback((clipId: string, edit: RegionEdit) => {
     onAddOrRemoveRegionEdit(clipId, [...(regionEditsByClip[clipId] ?? []), edit])
@@ -203,7 +284,6 @@ export const StitchTimeline = memo(function StitchTimeline({
   const previewScale = transport.durationSec > 0 && effectiveTotalMs > 0
     ? (transport.durationSec * 1000) / effectiveTotalMs
     : 1
-  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const reducedMotion = useReducedMotion()
 
   const autoPace = useCallback(() => {
@@ -230,19 +310,112 @@ export const StitchTimeline = memo(function StitchTimeline({
   const zoomIn = useCallback(() => setManualPps(clampPps(pixelsPerSecond * 1.25)), [pixelsPerSecond])
   const zoomOut = useCallback(() => setManualPps(clampPps(pixelsPerSecond / 1.25)), [pixelsPerSecond])
   const zoomFit = useCallback(() => setManualPps(null), [])
-  const onWheelZoom = useCallback(
-    (e: React.WheelEvent<HTMLDivElement>) => {
+  // Cursor-anchored zoom (S2): after a Ctrl/Cmd-wheel zoom the arrangement time under the
+  // pointer must not move. The ruler's content origin sits at scrollLeft 0 (absolute left-0),
+  // so pointerTime = (pointerViewportX - rulerViewportX) / pps; preserving that time means
+  // the new scrollLeft must place pointerTime * newPps at the same viewport offset.
+  //
+  // The wheel listener is native and non-passive: React's synthetic onWheel is registered
+  // passive, so preventDefault() (which must stop the browser's own pinch-zoom) would be a
+  const zoomAnchorRef = useRef<{ pointerViewportX: number; pointerTimeSec: number } | null>(null)
+  const scrollElRef = useRef<HTMLDivElement | null>(null)
+  const ppsRef = useRef(pixelsPerSecond)
+  ppsRef.current = pixelsPerSecond
+  // The wheel zoom and hover guide listeners are attached imperatively from the scroll
+  // container's ref callback: the timeline only mounts once clips exist, so an empty-deps
+  // effect would run before the element exists and never bind. Both read live values
+  // through refs, so the bindings themselves are one-shot.
+  const wheelHandlerRef = useRef<((e: WheelEvent) => void) | null>(null)
+  const hoverHandlerRef = useRef<((e: PointerEvent) => void) | null>(null)
+  const leaveHandlerRef = useRef<(() => void) | null>(null)
+  const guide = useHoverTimeGuide()
+  const attachTimelineEl = useCallback((node: HTMLDivElement | null) => {
+    scrollRef(node)
+    const prev = scrollElRef.current
+    if (prev && prev !== node) {
+      if (wheelHandlerRef.current) prev.removeEventListener('wheel', wheelHandlerRef.current)
+      if (hoverHandlerRef.current) prev.removeEventListener('pointermove', hoverHandlerRef.current)
+      if (leaveHandlerRef.current) prev.removeEventListener('pointerleave', leaveHandlerRef.current)
+      wheelHandlerRef.current = hoverHandlerRef.current = leaveHandlerRef.current = null
+    }
+    scrollElRef.current = node
+    if (!node) return
+    const onWheel = (e: WheelEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
-      setManualPps(clampPps(pixelsPerSecond * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))
-    },
-    [pixelsPerSecond],
-  )
+      const rulerEl = node.querySelector<HTMLElement>('[data-testid="stitch-timeline-ruler"]')
+      if (rulerEl) {
+        const rulerViewportX = rulerEl.getBoundingClientRect().left
+        zoomAnchorRef.current = {
+          pointerViewportX: e.clientX,
+          pointerTimeSec: Math.max(0, (e.clientX - rulerViewportX) / ppsRef.current),
+        }
+      }
+      setManualPps(clampPps(ppsRef.current * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))
+    }
+    // The hover guide is the shared one (hooks/useHoverTimeGuide): written straight to the
+    // DOM, never React state, so pointer movement cannot re-render the timeline mid-gesture
+    // -- the same discipline the ruler's playhead uses for playback position -- and it
+    // formats through the ruler's own grammar so the two cannot drift.
+    const onHover = (e: PointerEvent) => {
+      const rulerEl = node.querySelector<HTMLElement>('[data-testid="stitch-timeline-ruler"]')
+      if (!rulerEl || ppsRef.current <= 0) return
+      const rulerViewportX = rulerEl.getBoundingClientRect().left
+      const sec = (e.clientX - rulerViewportX) / ppsRef.current
+      if (sec < 0 || sec > totalSecondsRef.current) return
+      guide.show(`${sec * ppsRef.current}px`, sec, totalSecondsRef.current > 0 ? sec / totalSecondsRef.current : 0)
+    }
+    const onLeave = () => guide.hide()
+    node.addEventListener('wheel', onWheel, { passive: false })
+    node.addEventListener('pointermove', onHover)
+    node.addEventListener('pointerleave', onLeave)
+    wheelHandlerRef.current = onWheel
+    hoverHandlerRef.current = onHover
+    leaveHandlerRef.current = onLeave
+    // guide.show/hide are identity-stable (they read live values through refs).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollRef])
+  // The scroll correction runs in a layout effect after React committed the new scale, and
+  // clamps against the expected content width (totalSeconds * newPps + rail padding), not
+  // the DOM's current scrollWidth: Framer's layout animations can lag the scrollable range
+  // by a frame, which would clamp the correction to 0.
+  const totalSecondsRef = useRef(totalSeconds)
+  totalSecondsRef.current = totalSeconds
+  useLayoutEffect(() => {
+    const anchor = zoomAnchorRef.current
+    const scrollEl = scrollElRef.current
+    if (!anchor || !scrollEl || manualPps === null) return
+    zoomAnchorRef.current = null
+    const rulerEl = scrollEl.querySelector<HTMLElement>('[data-testid="stitch-timeline-ruler"]')
+    if (!rulerEl) return
+    const rulerViewportX = rulerEl.getBoundingClientRect().left
+    const pointerContentX = anchor.pointerTimeSec * manualPps
+    const desired = scrollEl.scrollLeft + pointerContentX - (anchor.pointerViewportX - rulerViewportX)
+    const maxScroll = Math.max(scrollEl.scrollWidth, totalSecondsRef.current * manualPps + RAIL_PADDING_PX) - scrollEl.clientWidth
+    scrollEl.scrollLeft = Math.max(0, Math.min(desired, maxScroll))
+  }, [manualPps])
   const contentWidthPx = totalSeconds * pixelsPerSecond
 
   const handleSeek = useCallback(
     (arrangementSec: number) => transport.seek(arrangementSec * previewScale),
     [transport, previewScale],
+  )
+
+  // The brace is drawn and dragged in arrangement seconds (what the ruler measures); the
+  // transport wraps on its own audio clock, so the loop crosses that boundary converted --
+  // the same previewScale the seek and clip-range paths use.
+  const { setLoopRange } = transport
+  const handleLoopChange = useCallback(
+    (range: { startSec: number; endSec: number } | null) => {
+      setLoopRange(range ? { startSec: range.startSec * previewScale, endSec: range.endSec * previewScale } : null)
+    },
+    [setLoopRange, previewScale],
+  )
+  const loopRangeArrangement = useMemo(
+    () => (transport.loopRange && previewScale > 0
+      ? { startSec: transport.loopRange.startSec / previewScale, endSec: transport.loopRange.endSec / previewScale }
+      : null),
+    [transport.loopRange, previewScale],
   )
 
   // One stable playback callback shared by every card: the card supplies its own clipId at
@@ -253,79 +426,129 @@ export const StitchTimeline = memo(function StitchTimeline({
     const index = clips.findIndex((c) => c.clipId === clipId)
     const range = index >= 0 ? clipRanges[index] : undefined
     if (!range) return
+    // Belt and braces with the card's disabled state: a range measured before the transport
+    // knows its duration would be a fraction of the clip, or nothing at all.
+    if (transport.durationSec <= 0) return
     playRange(clipId, (range.startMs * previewScale) / 1000, (range.endMs * previewScale) / 1000)
-  }, [playRange, clips, clipRanges, previewScale])
+  }, [playRange, clips, clipRanges, previewScale, transport.durationSec])
 
-  // Keyboard shortcuts for playback, selection, reorder, removal, and trim nudging -- scoped
-  // to this component's lifetime and unconditionally skipped whenever the event target is an
-  // editable control, so typing in a clip's text field, a gap's typed-value input, etc. is
-  // never hijacked by these bindings. Space and `?` don't require a selected clip; the rest do.
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (isEditableTarget(e.target)) return
-      if ((e.code === 'Space' || e.key === ' ') && !e.repeat) {
-        // The shortcuts dialog is open on a non-editable surface; Space there would
-        // otherwise toggle arrangement playback behind the dialog.
-        if (shortcutsOpen) return
-        e.preventDefault()
-        transport.toggle()
-        return
-      }
-      if (e.key === '?' && !e.repeat) {
-        e.preventDefault()
-        setShortcutsOpen(true)
-        return
-      }
-      if (!selectedClipId) return
-      const index = clips.findIndex((c) => c.clipId === selectedClipId)
-      if (index === -1) return
-      if (e.key === 'ArrowRight' && !e.shiftKey) {
-        e.preventDefault()
-        const next = clips[index + 1]
-        if (next) setSelectedClipId(next.clipId)
-      } else if (e.key === 'ArrowLeft' && !e.shiftKey) {
-        e.preventDefault()
-        const prev = clips[index - 1]
-        if (prev) setSelectedClipId(prev.clipId)
-      } else if (e.key === 'ArrowRight' && e.shiftKey) {
-        e.preventDefault()
-        moveClip(index, 'right')
-      } else if (e.key === 'ArrowLeft' && e.shiftKey) {
-        e.preventDefault()
-        moveClip(index, 'left')
-      } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        e.preventDefault()
-        removeClip(selectedClipId)
-      } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        e.preventDefault()
-        const clip = clips[index]
-        if (!clip.durationMs) return
-        const delta = (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 100 : 10)
-        const maxStart = Math.max(0, clip.durationMs - 20 - clip.trimEndMs)
-        const nextTrimStart = Math.max(0, Math.min(maxStart, clip.trimStartMs + delta))
-        updateClip(selectedClipId, { trimStartMs: nextTrimStart })
-      }
+  // This page's keys live in the shared registry (M4) rather than in a private window
+  // listener, so the `?` keymap and the command palette list exactly what is dispatchable.
+  // The editable-target guard that used to be repeated here now lives in the dispatcher, for
+  // every scope at once. Space does not require a selected clip; the rest do.
+  const stitchCommands = useMemo<ShortcutCommand[]>(() => {
+    const index = selectedClipId ? clips.findIndex((clip) => clip.clipId === selectedClipId) : -1
+    const selected = index === -1 ? null : clips[index]
+    const commands: ShortcutCommand[] = [
+      {
+        id: 'stitch.playPause',
+        label: 'Play/pause the arrangement (with a loop, from its start)',
+        keys: 'Space',
+        match: (event) => (event.code === 'Space' || event.key === ' ') && !event.repeat,
+        // The keymap is open on a non-editable surface; Space there would otherwise toggle
+        // arrangement playback behind the dialog.
+        run: () => {
+          if (!isShortcutKeymapOpen()) transport.toggle()
+        },
+      },
+      { id: 'stitch.seek', label: 'Seek the arrangement', keys: 'Click ruler' },
+      {
+        id: 'stitch.selectNeighbour',
+        label: 'Select the previous/next clip',
+        keys: '←/→',
+        palette: false,
+        match: (event) => !!selected && !event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight'),
+        run: (event) => {
+          const neighbour = clips[index + (event?.key === 'ArrowLeft' ? -1 : 1)]
+          if (neighbour) setSelectedClipId(neighbour.clipId)
+        },
+      },
+      {
+        id: 'stitch.reorder',
+        label: 'Reorder the selected clip',
+        keys: 'Shift+←/→',
+        palette: false,
+        match: (event) => !!selected && event.shiftKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight'),
+        run: (event) => moveClip(index, event?.key === 'ArrowLeft' ? 'left' : 'right'),
+      },
+      {
+        id: 'stitch.nudgeTrim',
+        label: 'Nudge trim start by 10ms (Shift = 100ms)',
+        keys: '↑/↓',
+        palette: false,
+        match: (event) => !!selected && (event.key === 'ArrowUp' || event.key === 'ArrowDown'),
+        run: (event) => {
+          if (!selected?.durationMs) return
+          const delta = (event?.key === 'ArrowUp' ? 1 : -1) * (event?.shiftKey ? 100 : 10)
+          const maxStart = Math.max(0, selected.durationMs - 20 - selected.trimEndMs)
+          updateClip(selected.clipId, { trimStartMs: Math.max(0, Math.min(maxStart, selected.trimStartMs + delta)) })
+        },
+      },
+      {
+        id: 'stitch.removeSelected',
+        label: 'Remove the selected clip',
+        keys: 'Delete/Backspace',
+        match: (event) => !!selected && (event.key === 'Delete' || event.key === 'Backspace'),
+        run: () => {
+          if (selected) removeClip(selected.clipId)
+        },
+      },
+    ]
+    if (historyEnabled) {
+      commands.push(
+        {
+          id: 'stitch.undo',
+          label: 'Undo the last plan change (Shift to redo)',
+          keys: 'Cmd/Ctrl+Z',
+          match: (event) => isPrimaryModifier(event) && (event.key === 'z' || event.key === 'Z') && !event.shiftKey,
+          run: undoHistory,
+        },
+        {
+          id: 'stitch.redo',
+          label: 'Redo the last undone change',
+          keys: 'Shift+Cmd/Ctrl+Z',
+          palette: false,
+          match: (event) => isPrimaryModifier(event) && (event.key === 'z' || event.key === 'Z') && event.shiftKey,
+          run: redoHistory,
+        },
+      )
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selectedClipId, clips, moveClip, removeClip, updateClip, transport, shortcutsOpen])
+    return commands
+  }, [clips, selectedClipId, transport, moveClip, removeClip, updateClip, historyEnabled, undoHistory, redoHistory])
+  useShortcutScope('stitch', 'Stitch Studio', stitchCommands)
 
   if (!clips.length) {
+    const canPick = library.length > 0 || hasVoiceLibrary
     return (
-      <div className="flex h-24 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
-        <span>No clips in timeline</span>
-        <div className="flex items-center gap-2">
-          {(library.length > 0 || hasVoiceLibrary) && (
-            <SegmentBrowserModal
-              segments={library}
-              onInsertSegments={onInsertFromLibrary}
-              voices={voiceLibrary}
-              onInsertVoices={onInsertVoiceFromLibrary}
-              insertAfterClipId={null}
-              controllerRef={pickerRef}
-            />
-          )}
-        </div>
+      <div className="py-2">
+        <EmptyState
+          title="No clips in the timeline"
+          description={
+            canPick
+              ? 'Add a segment or a saved reference voice, then trim the edges, reorder, and shape the gaps between them.'
+              : 'Segments and reference voices are made in Voice Design and OmniVoice. Design one, then build the timeline here.'
+          }
+          actionLabel={canPick ? 'Add segments' : 'Design a voice'}
+          onAction={() => {
+            if (canPick) pickerRef?.current?.open()
+            else useAppStore.getState().setPage('voice-design')
+          }}
+        >
+          <div className="flex items-center gap-2">
+            {historyEnabled && <HistoryControls history={history} />}
+            {canPick && (
+              <SegmentBrowserModal
+                segments={library}
+                onInsertSegments={onInsertFromLibrary}
+                voices={voiceLibrary}
+                onInsertVoices={onInsertVoiceFromLibrary}
+                insertAfterClipId={null}
+                controllerRef={pickerRef}
+                hideTrigger
+              />
+            )}
+          </div>
+        </EmptyState>
       </div>
     )
   }
@@ -340,6 +563,7 @@ export const StitchTimeline = memo(function StitchTimeline({
             Drag to reorder clips, trim edges, and adjust gaps to build your 10–15s reference voice.
           </span>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {historyEnabled && <HistoryControls history={history} />}
             <div className="flex items-center gap-1 rounded border border-border bg-background px-1">
               <button type="button" data-testid="stitch-zoom-out" className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={zoomOut} aria-label="Zoom out">
                 <Minus className="size-3.5" />
@@ -350,12 +574,12 @@ export const StitchTimeline = memo(function StitchTimeline({
               <button type="button" data-testid="stitch-zoom-in" className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={zoomIn} aria-label="Zoom in">
                 <Plus className="size-3.5" />
               </button>
-              <span data-testid="stitch-zoom-level" className="px-1 text-[10px] font-mono text-muted-foreground/70">{Math.round(pixelsPerSecond)}px/s</span>
+              <span data-testid="stitch-zoom-level" className="px-1 text-[10px] font-mono tabular-nums text-muted-foreground/70">{Math.round(pixelsPerSecond)}px/s</span>
             </div>
             <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted" onClick={autoPace}>
               <Gauge className="size-3.5" /> Auto-pace
             </button>
-            <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted" onClick={() => setShortcutsOpen(true)} title="Keyboard shortcuts (?)">
+            <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted" onClick={openShortcutKeymap} title="Keyboard shortcuts (?)">
               Shortcuts
             </button>
             {(library.length > 0 || hasVoiceLibrary) && (
@@ -371,14 +595,18 @@ export const StitchTimeline = memo(function StitchTimeline({
           </div>
         </div>
       )}
-
-      {/* Timeline */}
       <div
-        ref={scrollRef}
-        onWheel={onWheelZoom}
+        ref={attachTimelineEl}
         className="relative flex items-stretch gap-0 overflow-x-auto overflow-y-visible pl-5"
         style={{ minWidth: 0 }}
       >
+        {contentWidthPx > 0 && (
+          <div ref={guide.guideRef} data-testid="timeline-hover-guide" className={HOVER_TIME_GUIDE_LINE_CLASS} style={{ left: 0, display: 'none' }}>
+            <span ref={guide.labelRef} className={HOVER_TIME_GUIDE_LABEL_CLASS}>
+              0.0s
+            </span>
+          </div>
+        )}
         {contentWidthPx > 0 && (
           <TimelineRuler
             durationSeconds={totalSeconds}
@@ -388,6 +616,8 @@ export const StitchTimeline = memo(function StitchTimeline({
             transport={transport}
             previewScale={previewScale}
             onSeekSeconds={handleSeek}
+            loopRange={loopRangeArrangement}
+            onLoopChange={handleLoopChange}
           />
         )}
 
@@ -413,11 +643,14 @@ export const StitchTimeline = memo(function StitchTimeline({
                 initial={{ opacity: 0, scale: 0.96 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.96 }}
-                transition={{ duration: reducedMotion ? 0 : 0.18, ease: 'easeOut' }}
-                className="flex shrink-0 items-start gap-4 transition-transform duration-150 ease-out motion-reduce:transition-none motion-reduce:duration-0"
+                // Tokens, not raw numbers, and *no* CSS transition on transform: a CSS
+                // transition here interpolates against the layout animation motion is already
+                // running, which is what made the reorder look like a jump followed by a snap.
+                transition={reducedMotion ? { duration: 0 } : MOTION.settle}
+                className="flex shrink-0 items-start gap-4"
               >
                 {i > 0 && (
-                  <GapControl gapIndex={i - 1} paddingMs={paddingMs[i - 1] || 0} onSetPadding={setPadding} pixelsPerSecond={pixelsPerSecond} />
+                  <GapControl gapIndex={i - 1} paddingMs={paddingMs[i - 1] || 0} onSetPadding={setPadding} pixelsPerSecond={pixelsPerSecond} defaultMs={suggestedGapMs(clips[i - 1]?.text ?? '')} />
                 )}
                 <Reorder.Item
                   value={clip}
@@ -430,15 +663,17 @@ export const StitchTimeline = memo(function StitchTimeline({
                 >
                   {/* Keyboard-accessible reorder buttons */}
                   <div className="absolute -left-5 top-6 flex flex-col gap-0.5 opacity-40 group-hover:opacity-100 z-10">
-                    <button type="button" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'left')} title="Move left">
+                    <button type="button" data-testid="stitch-clip-move-left" aria-label="Move clip left" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'left')} title="Move left">
                       <ChevronUp className="size-3" />
                     </button>
-                    <button type="button" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'right')} title="Move right">
+                    <button type="button" data-testid="stitch-clip-move-right" aria-label="Move clip right" className="size-4 rounded bg-muted/70 text-[10px] text-muted-foreground hover:bg-muted" onClick={() => moveClip(i, 'right')} title="Move right">
                       <ChevronDown className="size-3" />
                     </button>
                   </div>
                   <StitchClipCard
                     clip={clip}
+                    scaleAbs={scaleAbs}
+                    showPeakReadout={clips.length === 1}
                     onRemove={removeClip}
                     onUpdate={updateClip}
                     regionEdits={regionEditsByClip[clip.clipId] ?? EMPTY_REGION_EDITS}
@@ -450,6 +685,7 @@ export const StitchTimeline = memo(function StitchTimeline({
                     isWidthClamped={isClipClamped}
                     isRangePlaying={isRangePlaying}
                     onPlayRange={handlePlayRange}
+                    rangePlayReady={transport.durationSec > 0}
                   />
                 </Reorder.Item>
               </motion.div>
@@ -460,7 +696,6 @@ export const StitchTimeline = memo(function StitchTimeline({
         </MotionConfig>
       </div>
     </div>
-    <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </>
   )
 })
@@ -496,27 +731,34 @@ export function StitchDspControls({
             initial={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
-            className="grid grid-cols-2 gap-x-6 gap-y-3 overflow-hidden rounded-lg border border-border/60 bg-muted/40 px-4 py-3"
+            className="flex flex-col gap-4 overflow-hidden rounded-control border border-border/60 bg-muted/40 px-4 py-3"
           >
-            <SliderField label="Segment target" value={dsp.segmentTargetDbfs} min={-40} max={-10} step={0.5} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ segmentTargetDbfs: v })} />
-            <SliderField label="Final target" value={dsp.finalTargetDbfs} min={-40} max={-10} step={0.5} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ finalTargetDbfs: v })} />
-            <SliderField label="Final ceiling" value={dsp.finalCeilingDb} min={-6} max={0} step={0.2} format={(v) => `${v} dB`} onChange={(v) => setDsp({ finalCeilingDb: v })} />
-            <SliderField label="Crossfade" value={dsp.crossfadeMs} min={0} max={400} step={5} format={(v) => `${v} ms`} onChange={(v) => setDsp({ crossfadeMs: v })} />
+            {/* Knobs for the parameters you tune by feel; the compressor threshold keeps a
+                fader because its 48 dB range would spend most of an arc on territory nobody
+                uses (B-P5). */}
+            <div className="flex flex-wrap items-start gap-5">
+              <Knob testId="dsp-knob-segment-target" label="Segment target" value={dsp.segmentTargetDbfs} min={-40} max={-10} step={0.5} defaultValue={-20} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ segmentTargetDbfs: v })} />
+              <Knob testId="dsp-knob-final-target" label="Final target" value={dsp.finalTargetDbfs} min={-40} max={-10} step={0.5} defaultValue={-18} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ finalTargetDbfs: v })} />
+              <Knob testId="dsp-knob-final-ceiling" label="Final ceiling" value={dsp.finalCeilingDb} min={-6} max={0} step={0.2} defaultValue={-1} format={(v) => `${v} dB`} onChange={(v) => setDsp({ finalCeilingDb: v })} />
+              <Knob testId="dsp-knob-crossfade" label="Crossfade" value={dsp.crossfadeMs} min={0} max={400} step={5} defaultValue={100} format={(v) => `${v} ms`} onChange={(v) => setDsp({ crossfadeMs: v })} />
+            </div>
             <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
               Pacing style
               <select value={dsp.prosodyStylePreset} onChange={(e) => setDsp({ prosodyStylePreset: e.currentTarget.value as typeof dsp.prosodyStylePreset })} className="rounded border border-border bg-background px-2 py-1 text-xs text-foreground">
                 {['Neutral', 'Storyteller', 'Calm', 'Energetic', 'Broadcast', 'Clean'].map((name) => <option key={name} value={name}>{name}</option>)}
               </select>
             </label>
-            <SliderField label="Pace" value={dsp.paceMultiplier} min={0.5} max={2} step={0.05} format={(v) => `${v.toFixed(2)}×`} onChange={(v) => setDsp({ paceMultiplier: v })} />
+            <div className="flex flex-wrap items-start gap-5">
+              <Knob testId="dsp-knob-pace" label="Pace" value={dsp.paceMultiplier} min={0.5} max={2} step={0.05} defaultValue={1} format={(v) => `${v.toFixed(2)}×`} onChange={(v) => setDsp({ paceMultiplier: v })} />
+            </div>
             <div className="col-span-2 flex items-center justify-between pt-1">
               <label className="flex items-center gap-2 text-xs text-foreground">
                 <input type="checkbox" checked={dsp.compressEnabled} onChange={(e) => setDsp({ compressEnabled: e.currentTarget.checked })} className="h-3.5 w-3.5 accent-cyan-500" />
                 Compression
               </label>
               <div className="flex items-center gap-4">
-                <SliderField label="Threshold" value={dsp.compressThresholdDb} min={-60} max={-12} step={0.5} format={(v) => `${v} dB`} onChange={(v) => setDsp({ compressThresholdDb: v })} disabled={!dsp.compressEnabled} />
-                <SliderField label="Ratio" value={dsp.compressRatio} min={1} max={10} step={0.1} format={(v) => `${v}:1`} onChange={(v) => setDsp({ compressRatio: v })} disabled={!dsp.compressEnabled} />
+                <Fader testId="dsp-fader-threshold" label="Threshold" value={dsp.compressThresholdDb} min={-60} max={-12} step={0.5} defaultValue={-24} format={(v) => `${v} dB`} onChange={(v) => setDsp({ compressThresholdDb: v })} disabled={!dsp.compressEnabled} />
+                <Knob testId="dsp-knob-ratio" label="Ratio" value={dsp.compressRatio} min={1} max={10} step={0.1} defaultValue={2.5} format={(v) => `${v}:1`} onChange={(v) => setDsp({ compressRatio: v })} disabled={!dsp.compressEnabled} />
               </div>
             </div>
           </motion.div>
@@ -525,37 +767,6 @@ export function StitchDspControls({
     </div>
   )
 }
-
-function SliderField({
-  label,
-  value,
-  min,
-  max,
-  step,
-  format,
-  onChange,
-  disabled,
-}: {
-  label: string
-  value: number
-  min: number
-  max: number
-  step: number
-  format: (v: number) => string
-  onChange: (v: number) => void
-  disabled?: boolean
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] text-muted-foreground">{label}</span>
-        <span className="text-[11px] font-mono tabular-nums text-foreground">{format(value)}</span>
-      </div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} disabled={disabled} className="h-1.5 w-full cursor-pointer accent-cyan-500" />
-    </div>
-  )
-}
-
 /* ---------- Editor shell ---------- */
 
 interface StitchEditorCommonProps {
@@ -738,6 +949,7 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
         onInsertVoiceFromLibrary={onInsertVoiceFromLibrary}
         transport={transport}
         pickerRef={pickerRef}
+        historyEnabled={props.surface === 'studio'}
       />
       <StitchDspControls open={showDsp} onToggle={() => setShowDsp((v) => !v)} dsp={dsp} onSetDsp={session.setDsp} />
 
@@ -844,7 +1056,7 @@ export function StitchEditorPanel(props: Extract<StitchEditorBodyProps, { surfac
 // page, which is the editor's home rather than something popping over another workflow.
 export function StitchEditorInline(props: Extract<StitchEditorBodyProps, { surface: 'studio' }>) {
   return (
-    <div className="flex min-w-0 flex-col gap-4 rounded-2xl border border-border bg-background/50 px-6 py-5">
+    <div className="flex min-w-0 flex-col gap-4 rounded-panel border border-border bg-background/50 px-6 py-5">
       <StitchEditorBody {...props} />
     </div>
   )
@@ -889,36 +1101,5 @@ function TransportBar({ transport }: { transport: StitchTransport }) {
         <div ref={fillRef} className="absolute inset-y-0 left-0 bg-gradient-to-r from-cyan-500/50 to-fuchsia-500/40" style={{ width: '0%' }} />
       </div>
     </div>
-  )
-}
-
-/* ---------- shortcuts dialog ---------- */
-
-const SHORTCUTS: Array<[string, string]> = [
-  ['Space', 'Play/pause the arrangement'],
-  ['Click ruler', 'Seek the arrangement'],
-  ['←/→', 'Select the previous/next clip'],
-  ['Shift+←/→', 'Reorder the selected clip'],
-  ['↑/↓', 'Nudge trim start by 10ms (Shift = 100ms)'],
-  ['Delete/Backspace', 'Remove the selected clip'],
-  ['?', 'Show this dialog'],
-]
-
-function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-testid="stitch-shortcuts-dialog" className="max-w-sm">
-        <DialogTitle>Keyboard shortcuts</DialogTitle>
-        <DialogDescription className="sr-only">Stitch Studio keyboard shortcuts</DialogDescription>
-        <dl className="flex flex-col gap-2 text-xs">
-          {SHORTCUTS.map(([key, desc]) => (
-            <div key={key} className="flex items-center justify-between gap-4">
-              <dt className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">{key}</dt>
-              <dd className="text-muted-foreground">{desc}</dd>
-            </div>
-          ))}
-        </dl>
-      </DialogContent>
-    </Dialog>
   )
 }

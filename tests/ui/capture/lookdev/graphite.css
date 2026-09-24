@@ -1,0 +1,25 @@
+/* L1 Graphite — cool blue-grey neutrals, soft top-lit edges, ~7/10 px radii. FabFilter-adjacent.
+   Board candidate only (B-P0); see common.css for how --ld-* variables are applied. */
+html.dark {
+  --background: oklch(0.155 0.008 255);
+  --card: oklch(0.205 0.01 255);
+  --popover: oklch(0.215 0.011 255);
+  --secondary: oklch(0.255 0.012 255);
+  --muted: oklch(0.255 0.012 255);
+  --accent: oklch(0.275 0.013 255);
+  --muted-foreground: oklch(0.71 0.015 255);
+  --surface-1: oklch(0.18 0.009 255);
+  --sidebar: oklch(0.172 0.009 255);
+  --sidebar-accent: oklch(0.255 0.012 255);
+  --border: oklch(0.86 0.02 255 / 9%);
+  --sidebar-border: oklch(0.86 0.02 255 / 9%);
+  --input: oklch(0.86 0.02 255 / 14%);
+  --radius: 0.45rem;
+
+  --ld-panel-shadow: inset 0 1px 0 oklch(1 0 0 / 5%), 0 1px 2px oklch(0 0 0 / 35%), 0 10px 26px -14px oklch(0 0 0 / 55%);
+  --ld-panel-sheen: linear-gradient(180deg, oklch(1 0 0 / 1.8%), transparent 40%);
+  --ld-well-shadow: inset 0 1px 3px oklch(0 0 0 / 45%), inset 0 -1px 0 oklch(1 0 0 / 3%);
+  --ld-chrome-edge: inset -1px 0 0 oklch(1 0 0 / 5%);
+  --ld-glow-blur: 14px;
+  --ld-glow-mix: 30%;
+}

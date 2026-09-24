@@ -20,6 +20,7 @@ import { beginCaptureReceipt, finishCaptureReceipt, setCaptureDiagnostics } from
 import health from './scenarios/core/health.mjs';
 import home from './scenarios/core/home.mjs';
 import generate from './scenarios/generate/generate.mjs';
+import signalLayerGif from './scenarios/generate/signal-layer-gif.mjs';
 import voiceDesignPanel from './scenarios/voice-design/panel.mjs';
 import voiceDesignGenerate from './scenarios/voice-design/generate.mjs';
 import voiceVariantList from './scenarios/voice-library/variant-list.mjs';
@@ -43,6 +44,8 @@ import heroSpeakFilled from './scenarios/hero/speak-filled.mjs';
 import heroSpeakResult from './scenarios/hero/speak-result.mjs';
 import heroVoiceDesign from './scenarios/hero/voice-design.mjs';
 import heroLibrary from './scenarios/hero/library.mjs';
+import lookdevBoard, { LOOKDEV_BOARD_OUTPUTS } from './scenarios/lookdev/board.mjs';
+import lookdevBrand, { LOOKDEV_BRAND_OUTPUTS } from './scenarios/lookdev/brand.mjs';
 
 export const SCENARIOS = {
     health: {
@@ -73,6 +76,15 @@ export const SCENARIOS = {
                 'speak-generate--pocket-tts--before-generate.png',
                 'speak-generate--pocket-tts--after-generate.png',
             ],
+        },
+    },
+    'signal-layer-gif': {
+        run: signalLayerGif,
+        category: 'generate',
+        runtime: 'pocket-tts',
+        contract: {
+            intent: 'Animate the signal layer under playback: the level meter and playhead moving on a real take, then the same take read as a spectrogram.',
+            expectedOutputs: ['signal-layer-gif--pocket-tts--signal-layer.gif'],
         },
     },
     'voice-design-panel': {
@@ -310,6 +322,26 @@ export const SCENARIOS = {
         contract: {
             intent: 'Hero candidate — the Voice Library with prosody fingerprints.',
             expectedOutputs: ['hero-library--neutral--panel.png'],
+        },
+    },
+    'lookdev-board': {
+        run: lookdevBoard,
+        category: 'lookdev',
+        runtime: 'neutral',
+        source: 'fake',
+        contract: {
+            intent: 'B-P0 look-dev board: four candidate looks x two accents on four hero surfaces, contact sheets, and the D9 signal-palette board.',
+            expectedOutputs: LOOKDEV_BOARD_OUTPUTS,
+        },
+    },
+    'lookdev-brand': {
+        run: lookdevBrand,
+        category: 'lookdev',
+        runtime: 'neutral',
+        source: 'fake',
+        contract: {
+            intent: 'Signal Crucible brand board: selected SVG set at production sizes and selected hero art in context.',
+            expectedOutputs: LOOKDEV_BRAND_OUTPUTS,
         },
     },
 };

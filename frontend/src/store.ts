@@ -114,6 +114,10 @@ interface StoreState {
   loadingMessage: string | null
   healthStatus: string | null
   healthError: string | null
+  /** True once /health has answered at least once -- a 503 counts. Without it, "the service
+   * has never started" and "nobody has asked yet" are the same state, and the cold-boot
+   * splash would flash on every ordinary page load. */
+  healthChecked: boolean
   text: string
   voiceId: string | null
   voices: VoiceMeta[]
@@ -155,6 +159,13 @@ interface StoreState {
   // Voice Library card to focus after a diagnostic action in a global banner.
   voiceLibraryFocusVoiceId: string | null
   setVoiceLibraryFocusVoiceId: (voiceId: string | null) => void
+
+  // B-P9: the one live region's message. A single slot rather than a queue -- this region
+  // exists to say "it happened", and a queue would read out stale news. The announcer
+  // clears it after a few seconds, so announcing the same thing twice still re-announces.
+  announcedMessage: string | null
+  announce: (text: string) => void
+  clearAnnouncedMessage: () => void
 
   setPage: (page: Page) => void
   setTheme: (theme: Theme) => void
@@ -370,6 +381,7 @@ export const useAppStore = create<StoreState>((set) => ({
   loadingMessage: null,
   healthStatus: null,
   healthError: null,
+  healthChecked: false,
   text: '',
   voiceId: null,
    voices: [],
@@ -392,6 +404,7 @@ export const useAppStore = create<StoreState>((set) => ({
     pocketTtsVoiceCloningMessage: null,
     refTextValidation: null,
     voiceLibraryFocusVoiceId: null,
+    announcedMessage: null,
 
     setPage: (page) => set({ page }),
   setTheme: (theme) => {
@@ -596,6 +609,8 @@ export const useAppStore = create<StoreState>((set) => ({
   setOvSavedVoiceId: (v) => set({ ovSavedVoiceId: v }),
   setDeepLinkProsodyVoiceId: (v) => set({ deepLinkProsodyVoiceId: v }),
   setVoiceLibraryFocusVoiceId: (voiceId) => set({ voiceLibraryFocusVoiceId: voiceId }),
+  announce: (announcedMessage) => set({ announcedMessage }),
+  clearAnnouncedMessage: () => set({ announcedMessage: null }),
   setOvCurrentJobId: (v) => set({ ovCurrentJobId: v }),
   setOvJobTotalSegments: (v) => set({ ovJobTotalSegments: v }),
   setOvJobStatus: (v) => set({ ovJobStatus: v }),
@@ -733,6 +748,11 @@ const PROGRESS_POLL_MS = 700
   async function poll() {
     try {
       const res = await fetch('/health')
+      // Checked counts as "we asked", whether or not the answer was usable: a 503 is exactly
+      // the cold boot the splash exists for.
+      if (!useAppStore.getState().healthChecked) {
+        useAppStore.setState({ healthChecked: true })
+      }
       if (!res.ok) return
       const data = await res.json()
       const store = useAppStore.getState()

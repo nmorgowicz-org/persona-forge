@@ -29,7 +29,7 @@ export function Glossary({ isOpen, onClose, focusId }: GlossaryProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6 shadow-2xl max-w-lg w-full max-h-[80vh]">
+      <div className="flex flex-col gap-4 rounded-panel border border-border bg-card p-6 shadow-2xl max-w-lg w-full max-h-[80vh]">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold">Glossary &amp; Troubleshooting</h2>
           <Button variant="ghost" size="icon" onClick={onClose}>

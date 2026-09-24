@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import { Plus } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { BuiltInVoiceMeta, VoiceMeta } from '../lib/api'
@@ -69,6 +70,9 @@ function categoryLabel(category: string): string {
 }
 
 export function VoiceSelector({ voices, builtInVoices = [], voiceId, onChange }: VoiceSelectorProps) {
+  // The label above the control is what names it, wired by id rather than duplicated as an
+  // aria-label (B-P8).
+  const labelId = useId()
   const setPage = useAppStore((s) => s.setPage)
   const setTargetFamilyId = useAppStore((s) => s.setTargetFamilyId)
   const setDesignEngine = useAppStore((s) => s.setDesignEngine)
@@ -102,10 +106,14 @@ export function VoiceSelector({ voices, builtInVoices = [], voiceId, onChange }:
   )
 
   return (
-    <Select value={voiceId ?? 'default'} onValueChange={(v) => onChange(v === 'default' ? null : v)}>
-      <SelectTrigger className="min-w-48">
-        <SelectValue placeholder="Default voice" />
-      </SelectTrigger>
+    <div className="flex flex-col gap-1">
+      <span id={labelId} className="micro-label">
+        Voice
+      </span>
+      <Select value={voiceId ?? 'default'} onValueChange={(v) => onChange(v === 'default' ? null : v)}>
+        <SelectTrigger className="min-w-48" aria-labelledby={labelId}>
+          <SelectValue placeholder="Default voice" />
+        </SelectTrigger>
       <SelectContent>
         <SelectItem value="default">Default voice</SelectItem>
 
@@ -273,5 +281,6 @@ export function VoiceSelector({ voices, builtInVoices = [], voiceId, onChange }:
         )}
       </SelectContent>
     </Select>
+    </div>
   )
 }

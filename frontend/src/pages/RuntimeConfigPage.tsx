@@ -7,6 +7,7 @@ import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { PageHeader } from '@/components/ui/page-header'
 import { Toggle } from '@/components/ui/toggle'
 import {
   Select,
@@ -123,13 +124,10 @@ export function RuntimeConfigPage() {
         animate={{ opacity: 1, y: 0 }}
         className="flex items-start justify-between gap-4"
       >
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Runtime</h1>
-          <p className="text-sm text-muted-foreground">
-            Live knobs for how this container is running right now. Changes to backend or
-            quantization briefly reload the model — in-flight requests wait, they don't fail.
-          </p>
-        </div>
+        <PageHeader
+          title="Runtime"
+          description="Live knobs for how this container is running right now. Changes to backend or quantization briefly reload the model — in-flight requests wait, they don't fail."
+        />
         <Button variant="outline" size="sm" onClick={() => setExpertMode((v) => !v)}>
           {expertMode ? 'Hide advanced' : 'Show advanced'}
         </Button>
@@ -144,7 +142,7 @@ export function RuntimeConfigPage() {
       )}
 
       {state?.accelerator && (
-        <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm">
+        <div className="flex flex-col gap-3 rounded-panel border border-border bg-card p-5 text-card-foreground shadow-sm">
           <div className="flex items-center gap-2">
             <Cpu className="size-4 text-primary" />
             <p className="text-sm font-semibold">Detected accelerator</p>
@@ -172,13 +170,13 @@ export function RuntimeConfigPage() {
       )}
 
       {error && (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+        <div className="rounded-control border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
           {error}
         </div>
       )}
 
       {state?.reconfig_in_progress && (
-        <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
+        <div className="rounded-control border border-warning/40 bg-warning/10 p-3 text-sm">
           Reconfiguration in progress — the model is reloading.
         </div>
       )}
@@ -187,7 +185,7 @@ export function RuntimeConfigPage() {
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex flex-col gap-5 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm"
+          className="flex flex-col gap-5 rounded-panel border border-border bg-card p-5 text-card-foreground shadow-sm"
         >
           <div className="flex items-center gap-2">
             <Settings2 className="size-4 text-primary" />
@@ -388,7 +386,7 @@ export function RuntimeConfigPage() {
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
-              className="flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-4"
+              className="flex flex-col gap-3 rounded-control border border-border bg-muted/30 p-4"
             >
               <p className="text-sm font-semibold">Pocket TTS generation tuning</p>
 
@@ -550,7 +548,7 @@ export function RuntimeConfigPage() {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.05 }}
-          className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm"
+          className="flex flex-col gap-3 rounded-panel border border-border bg-card p-5 text-card-foreground shadow-sm"
         >
           <p className="text-sm font-semibold">Read-only — set by the container, not this app</p>
           <div className="flex flex-wrap gap-1.5">
@@ -580,7 +578,7 @@ export function RuntimeConfigPage() {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="flex flex-col gap-3 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm"
+          className="flex flex-col gap-3 rounded-panel border border-border bg-card p-5 text-card-foreground shadow-sm"
         >
           <p className="text-sm font-semibold">
             {state.live.TTS_BACKEND === 'openvino'
@@ -609,7 +607,7 @@ export function RuntimeConfigPage() {
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15 }}
-          className={`flex flex-col gap-3 rounded-xl border border-border bg-card p-5 text-card-foreground shadow-sm ${expertClass(expertMode)}`}
+          className={`flex flex-col gap-3 rounded-panel border border-border bg-card p-5 text-card-foreground shadow-sm ${expertClass(expertMode)}`}
         >
           <p className="text-sm font-semibold">Requires container restart</p>
           <p className="text-xs text-muted-foreground">

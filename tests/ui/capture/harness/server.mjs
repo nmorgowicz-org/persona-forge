@@ -83,6 +83,13 @@ export async function startRealServer({
   segmentLibraryDir,
   modelSize = '0.6B',
   device = 'cpu',
+  // Which engine the real server runs. The product default is `pocket_tts` -- CPU-only,
+  // self-contained, no IR export -- while `pytorch` is the Qwen3-TTS rollback baseline. The
+  // default here stays `pytorch` so nothing that already relied on it changes; a capture set
+  // that is meant to depict the shipped default passes CAPTURE_TTS_BACKEND=pocket_tts, because
+  // the backend a shot ran with is visible in the UI (the Speak voice list, the diagnostics
+  // drawer) even though the filename's runtime tag is a declared label rather than a reading.
+  backend = process.env.CAPTURE_TTS_BACKEND || 'pytorch',
   timeoutMs = 120000,
   seedFixtures = true,
 } = {}) {
@@ -97,7 +104,7 @@ export async function startRealServer({
     PYTHONPATH: [REPO_ROOT, join(REPO_ROOT, 'src'), join(REPO_ROOT, 'src', 'export')].join(
       process.platform === 'win32' ? ';' : ':'
     ),
-    TTS_BACKEND: 'pytorch',
+    TTS_BACKEND: backend,
     DEVICE: device,
     MODEL_SIZE: modelSize,
     VOICE_LIBRARY_DIR: voiceLibraryDir,

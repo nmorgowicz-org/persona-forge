@@ -87,7 +87,7 @@ export function AcceleratorCoachCard({
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      className="flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/5 p-5"
+      className="flex flex-col gap-3 rounded-panel border border-primary/30 bg-primary/5 p-5"
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">

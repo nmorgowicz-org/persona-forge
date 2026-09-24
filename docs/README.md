@@ -4,6 +4,11 @@ Start here. Docs are grouped by what you are trying to do.
 
 ## Run it
 
+**The signal layer under playback** — a true-scale waveform, a dBFS meter with peak hold, and a
+live spectrogram, all drawn from one media clock:
+
+![Signal layer](screenshots/signal-layer-gif--pocket-tts--signal-layer.gif)
+
 | Doc | What it covers |
 |---|---|
 | [HOW_TO_RUN.md](HOW_TO_RUN.md) | Docker Compose setup, first boot, the export step for Qwen/OpenVINO |

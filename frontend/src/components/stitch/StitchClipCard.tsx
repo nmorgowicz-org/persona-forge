@@ -7,13 +7,16 @@
 // on every pointermove -- only the final value does. Using pointer events (not mouse events)
 // means touch and pen produce the same gesture, and setPointerCapture keeps receiving
 // move/up even if the cursor leaves the handle mid-drag.
-import { memo, useCallback, useEffect, useState, useRef, type PointerEvent as ReactPointerEvent } from 'react'
-import { ChevronUp, GripVertical, X, Play, Pause, Scissors, Trash2, Volume2, VolumeX } from 'lucide-react'
+import { memo, useCallback, useEffect, useLayoutEffect, useState, useRef, type PointerEvent as ReactPointerEvent } from 'react'
+import { ChevronUp, Crosshair, GripVertical, Pencil, RotateCcw, X, Play, Pause, Scissors, Trash2, Volume2, VolumeX } from 'lucide-react'
 import { type StitchPlanClip } from '@/store'
 import { cn } from '@/lib/utils'
 import { clipEffectiveDurationMs, type StitchRegionEdit } from '@/lib/stitchPlan'
-import { getClipAudioAnalysis } from '@/lib/waveform'
+import { formatMsValue } from '@/lib/timeAxis'
+import { getClipAudioAnalysis, type AudioEnvelope } from '@/lib/waveform'
+import { NUMERIC_CONTROL_FOCUS_CLASS, NUMERIC_CONTROL_UNIT_CLASS, useDragScrubValue } from '@/hooks/useDragScrubValue'
 import { WaveformLane } from '../waveform/WaveformLane'
+import * as ContextMenu from '../ui/context-menu'
 
 type RegionEdit = StitchRegionEdit
 type HandleKind = 'leftTrim' | 'rightTrim' | 'leftFade' | 'rightFade'
@@ -25,7 +28,6 @@ function clampMs(v: number, min: number, max: number): number {
 function makeRegionEditId(type: RegionEdit['type']): string {
   return `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
-
 export function MsStepper({
   label,
   value,
@@ -35,6 +37,9 @@ export function MsStepper({
   onChange,
   compact,
   testId,
+  defaultValue,
+  controlName,
+  editorRef,
 }: {
   label: string
   value: number
@@ -44,13 +49,128 @@ export function MsStepper({
   onChange: (v: number) => void
   compact?: boolean
   testId?: string
+  /** N1 double-click reset target. */
+  defaultValue?: number
+  /** Shared numeric-control grammar (S4): names the control for the tab-order/focus-ring
+   * contract, so trim/fade pairs group as `trim` and `fade` in the tab walk. */
+  controlName?: 'trim' | 'fade'
+  /** Exposes the typed-entry opener so a context menu can focus this control's editor. */
+  editorRef?: React.MutableRefObject<(() => void) | null>
 }) {
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const {
+    editing,
+    draftText,
+    setDraftText,
+    beginEdit,
+    commitEdit,
+    nudge,
+    displayValue,
+    beginScrub,
+    handleKeyDown,
+    handleDoubleClick,
+    wheelTargetRef,
+  } = useDragScrubValue({
+    value,
+    min,
+    max,
+    step,
+    onChange,
+    dragScale: (max - min) / 200,
+    dragThreshold: 2,
+    defaultValue,
+    wheel: true,
+  })
+  const unit = formatMsValue(displayValue)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  // Children's layout effects run before the parent's, so a card that asks for the editor in
+  // its own layout effect always finds this ref populated.
+  useLayoutEffect(() => {
+    if (!editorRef) return
+    editorRef.current = () => {
+      beginEdit()
+      // The input mounts on the next commit and the context menu's close sequence (which
+      // restores focus to the trigger) runs in between -- so focus after both.
+      window.setTimeout(() => inputRef.current?.focus(), 0)
+    }
+    return () => {
+      editorRef.current = null
+    }
+  }, [editorRef, beginEdit])
+
+  // Native capture-phase pointerdown: the stepper sits inside the clip's Reorder.Item,
+  // whose own drag listener is a native bubble-phase listener on the card element. A React
+  // (delegated) handler cannot stop it, so the scrub start must be native and capture-phase
+  // and must stop propagation before the card's listener runs -- otherwise the card also
+  // follows the pointer while the value scrubs.
+  useEffect(() => {
+    const element = rootRef.current
+    if (!element) return
+    const onPointerDown = (event: PointerEvent) => {
+      // The −/+ nudge buttons and the typed-entry input keep their own pointer semantics:
+      // a press on them must neither start a scrub nor block the card's reorder drag.
+      if ((event.target as HTMLElement).closest('button, input')) return
+      // Anywhere else on the control (label, value, track) scrubs; a no-travel release
+      // on the value span is a click-to-type.
+      beginScrub(event, element, { openEditorOnRelease: (event.target as HTMLElement).hasAttribute('data-testid') })
+    }
+    element.addEventListener('pointerdown', onPointerDown, { capture: true })
+    return () => element.removeEventListener('pointerdown', onPointerDown, { capture: true })
+    // beginScrub is identity-stable (reads props through latestRef internally).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   return (
-    <div className={cn('flex min-w-0 items-center gap-1', compact && 'gap-0.5')} title={label}>
+    <div
+      ref={(node) => {
+        rootRef.current = node
+        wheelTargetRef.current = node
+      }}
+      data-testid={testId ? `${testId}-row` : undefined}
+      data-numeric-control={controlName}
+      tabIndex={0}
+      role="group"
+      aria-label={label}
+      className={cn(
+        'flex min-w-0 cursor-ew-resize touch-none select-none items-center gap-1 rounded',
+        compact && 'gap-0.5',
+        NUMERIC_CONTROL_FOCUS_CLASS,
+      )}
+      title={label}
+      onKeyDown={handleKeyDown}
+      onDoubleClick={handleDoubleClick}
+    >
       {!compact && <span className="min-w-0 flex-1 truncate text-[10px] uppercase text-muted-foreground/70">{label}</span>}
-      <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" aria-label={`Decrease ${label}`} onClick={() => onChange(Math.max(min, value - step))}>−</button>
-      <span data-testid={testId} className="inline-flex min-w-[28px] shrink-0 justify-center text-xs font-mono tabular-nums text-foreground">{value}</span>
-      <button type="button" className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" aria-label={`Increase ${label}`} onClick={() => onChange(Math.min(max, value + step))}>+</button>
+      <button type="button" tabIndex={-1} className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" aria-label={`Decrease ${label}`} onClick={() => nudge(-step)} onPointerDown={(e) => e.stopPropagation()}>−</button>
+      {editing ? (
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode="decimal"
+          data-testid={testId}
+          value={draftText}
+          aria-label={label}
+          onChange={(event) => setDraftText(event.target.value)}
+          onBlur={commitEdit}
+          onPointerDown={(event) => event.stopPropagation()}
+          className="w-12 rounded border border-cyan-500/40 bg-muted/40 px-1 text-center font-mono tabular-nums text-foreground outline-none"
+          autoFocus
+        />
+      ) : (
+        <>
+          <span
+            data-testid={testId}
+            className="inline-flex min-w-[28px] shrink-0 justify-center font-mono tabular-nums text-foreground"
+          >
+            {unit.text}
+          </span>
+          <span data-testid={testId ? `${testId}-unit` : undefined} className={NUMERIC_CONTROL_UNIT_CLASS}>
+            {unit.unit}
+          </span>
+        </>
+      )}
+      <button type="button" tabIndex={-1} className="inline-flex size-5 shrink-0 items-center justify-center rounded bg-muted/70 text-xs text-muted-foreground hover:bg-muted" aria-label={`Increase ${label}`} onClick={() => nudge(step)} onPointerDown={(e) => e.stopPropagation()}>+</button>
     </div>
   )
 }
@@ -68,6 +188,9 @@ export const StitchClipCard = memo(function StitchClipCard({
   isWidthClamped,
   isRangePlaying,
   onPlayRange,
+  rangePlayReady = true,
+  scaleAbs = null,
+  showPeakReadout = false,
 }: {
   clip: StitchPlanClip
   onRemove: (clipId: string) => void
@@ -85,8 +208,18 @@ export const StitchClipCard = memo(function StitchClipCard({
    * The card supplies its own clipId at click time so the timeline can pass one stable
    * callback to every memoized card. */
   onPlayRange: (clipId: string) => void
+  /** False until the shared transport has an audio element that knows its duration: before
+   * that a range play would either silently do nothing or start a degenerate range. */
+  rangePlayReady?: boolean
+  /** Absolute amplitude at full lane height, shared by every clip on the timeline (B-P2), so a
+   * quiet segment looks quiet next to its neighbours. */
+  scaleAbs?: number | null
+  /** Set when this is the only lane on screen: it then auto-fits, and the readout keeps the
+   * fit from being mistaken for level. */
+  showPeakReadout?: boolean
 }) {
-  const [peaks, setPeaks] = useState<number[] | null>(null)
+  const [envelope, setEnvelope] = useState<AudioEnvelope | null>(null)
+  const [decodeFailed, setDecodeFailed] = useState(false)
   const [durMs, setDurMs] = useState<number | null>(null)
   const [editingText, setEditingText] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -98,6 +231,13 @@ export const StitchClipCard = memo(function StitchClipCard({
   const [silenceMs, setSilenceMs] = useState(180)
   const textInputRef = useRef<HTMLInputElement | null>(null)
   const laneRef = useRef<HTMLDivElement>(null)
+  // Context menu (A-5). The menu only wraps handlers this card already had: the session's
+  // remove/update, the shared transport's range play, and the card's own text and numeric
+  // editors. Actions that move focus themselves must stop Radix's FocusScope from pulling
+  // focus back to the trigger when the menu unmounts.
+  const focusManagedRef = useRef(false)
+  const trimEditorRef = useRef<(() => void) | null>(null)
+  const [numericFocusRequest, setNumericFocusRequest] = useState(0)
 
   // Visual-only preview during a handle drag: the committed clip.trimStartMs/etc. is only
   // written once, on pointerup, so intermediate pointermove events never thrash the store or
@@ -120,6 +260,27 @@ export const StitchClipCard = memo(function StitchClipCard({
     setEditingText(true)
   }
 
+  const menuEditText = () => {
+    focusManagedRef.current = true
+    beginEditText()
+    // The menu's close sequence (which restores focus to the trigger) runs in the same
+    // commit, so the caret has to be placed after it.
+    window.setTimeout(() => textInputRef.current?.focus(), 0)
+  }
+
+  /** Opens the trim control's typed entry, expanding the edit panel first if it is collapsed. */
+  const menuFocusNumericEditor = () => {
+    focusManagedRef.current = true
+    setShowAdvanced(true)
+    // A counter, not a boolean: asking twice in a row must focus twice.
+    setNumericFocusRequest((n) => n + 1)
+  }
+
+  useLayoutEffect(() => {
+    if (numericFocusRequest === 0) return
+    trimEditorRef.current?.()
+  }, [numericFocusRequest])
+
   const commitText = () => {
     setEditingText(false)
     const trimmed = draftText.trim()
@@ -139,10 +300,14 @@ export const StitchClipCard = memo(function StitchClipCard({
       .then((analysis) => {
         if (dead) return
         setDurMs(analysis.durationMs)
-        setPeaks(analysis.peaks)
+        setEnvelope(analysis.envelope)
+        setDecodeFailed(analysis.decodeFailed)
       })
       .catch(() => {
-        if (!dead) setPeaks([])
+        if (!dead) {
+          setEnvelope(null)
+          setDecodeFailed(true)
+        }
       })
     return () => { dead = true }
   }, [clip.clipId, clip.sourceAudioBase64])
@@ -249,6 +414,7 @@ export const StitchClipCard = memo(function StitchClipCard({
   }, [handlePointerMove, onUpdate, clip.clipId, clampForKind])
 
   const startDrag = (kind: HandleKind) => (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
     e.stopPropagation()
     e.preventDefault()
     if (!laneRef.current || !durMs) return
@@ -302,6 +468,8 @@ export const StitchClipCard = memo(function StitchClipCard({
   }, [handlePointerMove, endDrag, handleSelectionPointerMove, endSelectionDrag])
 
   const startSelection = (e: ReactPointerEvent<HTMLDivElement>) => {
+    // Only the primary button starts a gesture; the secondary one belongs to the context menu.
+    if (e.button !== 0) return
     if (!durMs) return
     e.preventDefault()
     e.stopPropagation()
@@ -351,228 +519,272 @@ export const StitchClipCard = memo(function StitchClipCard({
   const fadeOutMs = dragPreview?.kind === 'rightFade' ? dragPreview.value : clip.fadeOutMs
 
   return (
-    <div
-      className={cn(
-        'group relative flex w-full min-w-0 flex-col overflow-hidden rounded-lg border border-border/50 bg-muted/10 p-1.5',
-        isReordering && 'cursor-grab',
-        isSelected && 'ring-2 ring-cyan-500/70',
-      )}
-    >
-      {isWidthClamped && (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>
         <div
-          data-testid="stitch-clip-clamped"
-          title={`Real width would be narrower than the minimum interactive size (effective duration ${effectiveDuration}ms)`}
-          className="pointer-events-none absolute inset-0 z-10 rounded-lg bg-[repeating-linear-gradient(45deg,rgba(6,182,212,0.12),rgba(6,182,212,0.12)_4px,transparent_4px,transparent_8px)]"
-        />
-      )}
-      <div className="flex flex-col gap-1 px-1.5 pt-1 pb-1" onClick={(e) => e.stopPropagation()}>
-        <div className="min-w-0">
-          {editingText ? (
-            <input
-              ref={textInputRef}
-              type="text"
-              value={draftText}
-              onChange={(e) => setDraftText(e.target.value)}
-              onBlur={commitText}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') { e.preventDefault(); commitText() }
-                else if (e.key === 'Escape') { e.preventDefault(); cancelEditText() }
-              }}
-              className="w-full min-w-0 rounded border border-cyan-500/40 bg-muted/40 px-1.5 py-0.5 text-xs font-medium text-foreground outline-none"
-              aria-label="Edit clip text"
-            />
-          ) : (
-            <span
-              className="block min-w-0 cursor-text truncate text-xs font-medium text-foreground hover:text-cyan-400"
-              title={`${clip.text ?? ''}\n(click to edit reference text)`}
-              onClick={beginEditText}
-            >
-              {clip.text || '(untitled — click to add reference text)'}
-            </span>
+          className={cn(
+            'group relative flex w-full min-w-0 flex-col overflow-hidden rounded-control border border-border/50 bg-muted/10 p-1.5',
+            isReordering && 'cursor-grab',
+            isSelected && 'ring-2 ring-cyan-500/70',
           )}
-        </div>
-        <div className="flex items-center justify-end gap-1.5">
-          <select
-            value={clip.prosodyMode ?? 'auto'}
-            onChange={(event) => onUpdate(clip.clipId, { prosodyMode: event.currentTarget.value as StitchPlanClip['prosodyMode'] })}
-            onMouseDown={(event) => event.stopPropagation()}
-            className="rounded border border-border/50 bg-muted/50 px-1 py-0.5 text-[10px] text-muted-foreground"
-            aria-label="Internal pacing repair mode"
-            title="Repair internal blended sentence boundaries before stitching"
-          >
-            <option value="off">Repair off</option>
-            <option value="auto">Repair auto</option>
-            <option value="precise">Repair precise</option>
-          </select>
-          <button
-            type="button"
-            className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={() => setShowAdvanced((visible) => !visible)}
-            aria-expanded={showAdvanced}
-            data-testid="stitch-clip-edit-toggle"
-          >
-            {showAdvanced ? 'Hide edits' : 'Edit clip'}
-          </button>
-          {isReordering && (
-            <div className="flex items-center text-muted-foreground/60">
-              <GripVertical className="size-3.5" />
-            </div>
-          )}
-          <button
-            type="button"
-            className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-            onClick={() => onPlayRange(clip.clipId)}
-            disabled={!clip.sourceAudioBase64}
-            aria-label={isRangePlaying ? 'Pause clip playback' : 'Play clip playback'}
-            title="Listen to just this segment"
-          >
-            {isRangePlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-          </button>
-          <button
-            type="button"
-            className="rounded p-0.5 text-muted-foreground hover:text-destructive"
-            onClick={() => onRemove(clip.clipId)}
-            aria-label="Remove clip"
-            title="Remove clip"
-          >
-            <X className="size-3.5" />
-          </button>
-        </div>
-      </div>
-
-      <div className="relative h-24 overflow-hidden rounded-md bg-black/40">
-        <div
-          ref={laneRef}
-          className="relative h-full w-full"
-          onPointerDown={startSelection}
-          onLostPointerCapture={(e) => endSelectionDrag(e.nativeEvent)}
-          onClick={(e) => {
-            const gesture = movedGestureRef.current
-            if (gesture && gesture.pointerId === (e.nativeEvent as PointerEvent).pointerId && performance.now() - gesture.at < 500) {
-              e.stopPropagation()
-              movedGestureRef.current = null
-            }
-          }}
         >
-          <WaveformLane peaks={peaks} durMs={durMs} trimStartMs={trimStartMs} trimEndMs={trimEndMs} fadeInMs={fadeInMs} fadeOutMs={fadeOutMs} />
-          {fadeOverlay('left', fadeInMs)}
-          {fadeOverlay('right', fadeOutMs)}
-
-          {regionEdits.map((edit) => {
-            if (edit.type === 'insert_silence') {
-              return (
-                <div key={edit.id} className="pointer-events-none absolute inset-y-2 w-1 rounded-full bg-sky-300/70" style={{ left: regionPercent(edit.atMs ?? 0) }} title={describeEdit(edit)} />
-              )
-            }
-            const left = regionPercent(edit.startMs ?? 0)
-            const width = regionPercent(Math.max(10, (edit.endMs ?? 0) - (edit.startMs ?? 0)))
-            return (
-              <div
-                key={edit.id}
-                className={cn(
-                  'pointer-events-none absolute inset-y-1 rounded-sm border',
-                  edit.type === 'delete' && 'border-destructive/60 bg-destructive/20',
-                  edit.type === 'mute' && 'border-zinc-300/40 bg-zinc-950/55',
-                  edit.type === 'gain' && 'border-warning/50 bg-warning/15',
-                  edit.type === 'fade' && 'border-cyan-300/50 bg-gradient-to-r from-transparent via-cyan-300/20 to-transparent',
-                )}
-                style={{ left, width }}
-                title={describeEdit(edit)}
-              />
-            )
-          })}
-
-          {selection && (
+          {isWidthClamped && (
             <div
-              className="pointer-events-none absolute inset-y-0 rounded-sm border border-cyan-300/80 bg-cyan-300/15"
-              style={{ left: regionPercent(selection.startMs), width: regionPercent(selection.endMs - selection.startMs) }}
-            >
-              <div className="absolute inset-y-0 left-0 w-1 bg-cyan-300" />
-              <div className="absolute inset-y-0 right-0 w-1 bg-cyan-300" />
-            </div>
+              data-testid="stitch-clip-clamped"
+              title={`Real width would be narrower than the minimum interactive size (effective duration ${effectiveDuration}ms)`}
+              className="pointer-events-none absolute inset-0 z-10 rounded-control bg-[repeating-linear-gradient(45deg,rgba(6,182,212,0.12),rgba(6,182,212,0.12)_4px,transparent_4px,transparent_8px)]"
+            />
           )}
+          <div className="flex flex-col gap-1 px-1.5 pt-1 pb-1" onClick={(e) => e.stopPropagation()}>
+            <div className="min-w-0">
+              {editingText ? (
+                <input
+                  ref={textInputRef}
+                  type="text"
+                  value={draftText}
+                  onChange={(e) => setDraftText(e.target.value)}
+                  onBlur={commitText}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); commitText() }
+                    else if (e.key === 'Escape') { e.preventDefault(); cancelEditText() }
+                  }}
+                  className="w-full min-w-0 rounded border border-cyan-500/40 bg-muted/40 px-1.5 py-0.5 text-xs font-medium text-foreground outline-none"
+                  aria-label="Edit clip text"
+                />
+              ) : (
+                <span
+                  className="block min-w-0 cursor-text truncate text-xs font-medium text-foreground hover:text-cyan-400"
+                  title={`${clip.text ?? ''}\n(click to edit reference text)`}
+                  onClick={beginEditText}
+                >
+                  {clip.text || '(untitled — click to add reference text)'}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-1.5">
+              <select
+                value={clip.prosodyMode ?? 'auto'}
+                onChange={(event) => onUpdate(clip.clipId, { prosodyMode: event.currentTarget.value as StitchPlanClip['prosodyMode'] })}
+                onMouseDown={(event) => event.stopPropagation()}
+                className="rounded border border-border/50 bg-muted/50 px-1 py-0.5 text-[10px] text-muted-foreground"
+                aria-label="Internal pacing repair mode"
+                title="Repair internal blended sentence boundaries before stitching"
+              >
+                <option value="off">Repair off</option>
+                <option value="auto">Repair auto</option>
+                <option value="precise">Repair precise</option>
+              </select>
+              <button
+                type="button"
+                className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={() => setShowAdvanced((visible) => !visible)}
+                aria-expanded={showAdvanced}
+                data-testid="stitch-clip-edit-toggle"
+              >
+                {showAdvanced ? 'Hide edits' : 'Edit clip'}
+              </button>
+              {isReordering && (
+                <div className="flex items-center text-muted-foreground/60">
+                  <GripVertical className="size-3.5" />
+                </div>
+              )}
+              <button
+                type="button"
+                className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                onClick={() => onPlayRange(clip.clipId)}
+                disabled={!clip.sourceAudioBase64 || !rangePlayReady || clipEffectiveDurationMs(clip) <= 0}
+                aria-label={isRangePlaying ? 'Pause clip playback' : 'Play clip playback'}
+                title={rangePlayReady ? 'Listen to just this segment' : 'Waiting for the preview to render'}
+              >
+                {isRangePlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+              </button>
+              <button
+                type="button"
+                className="rounded p-0.5 text-muted-foreground hover:text-destructive"
+                onClick={() => onRemove(clip.clipId)}
+                aria-label="Remove clip"
+                title="Remove clip"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          </div>
 
-          {durMs && (
+          <div className="relative h-24 overflow-hidden rounded-md bg-black/40">
+            <div
+              ref={laneRef}
+              className="relative h-full w-full"
+              onPointerDown={startSelection}
+              onLostPointerCapture={(e) => endSelectionDrag(e.nativeEvent)}
+              onClick={(e) => {
+                const gesture = movedGestureRef.current
+                if (gesture && gesture.pointerId === (e.nativeEvent as PointerEvent).pointerId && performance.now() - gesture.at < 500) {
+                  e.stopPropagation()
+                  movedGestureRef.current = null
+                }
+              }}
+            >
+              <WaveformLane envelope={envelope} scaleAbs={scaleAbs} showPeakReadout={showPeakReadout} failed={decodeFailed} durMs={durMs} trimStartMs={trimStartMs} trimEndMs={trimEndMs} fadeInMs={fadeInMs} fadeOutMs={fadeOutMs} timeGuideTestId="stitch-lane-time" />
+              {fadeOverlay('left', fadeInMs)}
+              {fadeOverlay('right', fadeOutMs)}
+
+              {regionEdits.map((edit) => {
+                if (edit.type === 'insert_silence') {
+                  return (
+                    <div key={edit.id} className="pointer-events-none absolute inset-y-2 w-1 rounded-full bg-sky-300/70" style={{ left: regionPercent(edit.atMs ?? 0) }} title={describeEdit(edit)} />
+                  )
+                }
+                const left = regionPercent(edit.startMs ?? 0)
+                const width = regionPercent(Math.max(10, (edit.endMs ?? 0) - (edit.startMs ?? 0)))
+                return (
+                  <div
+                    key={edit.id}
+                    className={cn(
+                      'pointer-events-none absolute inset-y-1 rounded-sm border',
+                      edit.type === 'delete' && 'border-destructive/60 bg-destructive/20',
+                      edit.type === 'mute' && 'border-zinc-300/40 bg-zinc-950/55',
+                      edit.type === 'gain' && 'border-warning/50 bg-warning/15',
+                      edit.type === 'fade' && 'border-cyan-300/50 bg-gradient-to-r from-transparent via-cyan-300/20 to-transparent',
+                    )}
+                    style={{ left, width }}
+                    title={describeEdit(edit)}
+                  />
+                )
+              })}
+
+              {selection && (
+                <div
+                  className="pointer-events-none absolute inset-y-0 rounded-sm border border-cyan-300/80 bg-cyan-300/15"
+                  style={{ left: regionPercent(selection.startMs), width: regionPercent(selection.endMs - selection.startMs) }}
+                >
+                  <div className="absolute inset-y-0 left-0 w-1 bg-cyan-300" />
+                  <div className="absolute inset-y-0 right-0 w-1 bg-cyan-300" />
+                </div>
+              )}
+
+              {durMs && (
+                <>
+                  <div
+                    data-testid="stitch-trim-handle-left"
+                    className="absolute inset-y-0 left-0 z-20 w-2 cursor-ew-resize touch-none bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
+                    onPointerDown={startDrag('leftTrim')}
+                    onLostPointerCapture={(e) => endDrag(e.nativeEvent)}
+                  />
+                  <div
+                    data-testid="stitch-trim-handle-right"
+                    className="absolute inset-y-0 right-0 z-20 w-2 cursor-ew-resize touch-none bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
+                    onPointerDown={startDrag('rightTrim')}
+                    onLostPointerCapture={(e) => endDrag(e.nativeEvent)}
+                  />
+                  {/* Trim handles render with a higher z-index than fade handles: at the default
+                      fadeInMs/fadeOutMs = 0, a fade handle sits at the exact same pixel position as
+                      its corresponding trim handle, and without this precedence the fade handle
+                      (later in paint order) would always win the hit-test, making the trim handle
+                      silently unreachable by pointer whenever fade is at its default. */}
+                  <div
+                    data-testid="stitch-fade-handle-left"
+                    className="absolute inset-y-0 z-10 w-2 cursor-ew-resize touch-none bg-warning/50 hover:bg-warning transition-colors"
+                    style={{ left: `${(fadeInMs / effectiveDuration) * 100}%` }}
+                    onPointerDown={startDrag('leftFade')}
+                    onLostPointerCapture={(e) => endDrag(e.nativeEvent)}
+                  />
+                  <div
+                    data-testid="stitch-fade-handle-right"
+                    className="absolute inset-y-0 z-10 w-2 cursor-ew-resize touch-none bg-warning/50 hover:bg-warning transition-colors"
+                    style={{ right: `${(fadeOutMs / effectiveDuration) * 100}%` }}
+                    onPointerDown={startDrag('rightFade')}
+                    onLostPointerCapture={(e) => endDrag(e.nativeEvent)}
+                  />
+                </>
+              )}
+            </div>
+          </div>
+
+          {showAdvanced && (
             <>
-              <div
-                data-testid="stitch-trim-handle-left"
-                className="absolute inset-y-0 left-0 z-20 w-2 cursor-ew-resize touch-none bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
-                onPointerDown={startDrag('leftTrim')}
-                onLostPointerCapture={(e) => endDrag(e.nativeEvent)}
-              />
-              <div
-                data-testid="stitch-trim-handle-right"
-                className="absolute inset-y-0 right-0 z-20 w-2 cursor-ew-resize touch-none bg-cyan-500/50 hover:bg-cyan-400 transition-colors"
-                onPointerDown={startDrag('rightTrim')}
-                onLostPointerCapture={(e) => endDrag(e.nativeEvent)}
-              />
-              {/* Trim handles render with a higher z-index than fade handles: at the default
-                  fadeInMs/fadeOutMs = 0, a fade handle sits at the exact same pixel position as
-                  its corresponding trim handle, and without this precedence the fade handle
-                  (later in paint order) would always win the hit-test, making the trim handle
-                  silently unreachable by pointer whenever fade is at its default. */}
-              <div
-                data-testid="stitch-fade-handle-left"
-                className="absolute inset-y-0 z-10 w-2 cursor-ew-resize touch-none bg-warning/50 hover:bg-warning transition-colors"
-                style={{ left: `${(fadeInMs / effectiveDuration) * 100}%` }}
-                onPointerDown={startDrag('leftFade')}
-                onLostPointerCapture={(e) => endDrag(e.nativeEvent)}
-              />
-              <div
-                data-testid="stitch-fade-handle-right"
-                className="absolute inset-y-0 z-10 w-2 cursor-ew-resize touch-none bg-warning/50 hover:bg-warning transition-colors"
-                style={{ right: `${(fadeOutMs / effectiveDuration) * 100}%` }}
-                onPointerDown={startDrag('rightFade')}
-                onLostPointerCapture={(e) => endDrag(e.nativeEvent)}
-              />
+              <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1.5" onClick={(e) => e.stopPropagation()}>
+                <MsStepper testId="stitch-stepper-trim-start-value" controlName="trim" label="Trim start" editorRef={trimEditorRef} value={clip.trimStartMs} min={0} max={durMs ?? 0} step={10} defaultValue={0} onChange={(v) => onUpdate(clip.clipId, { trimStartMs: clampTrimStart(v) })} />
+                <MsStepper testId="stitch-stepper-trim-end-value" controlName="trim" label="Trim end" value={clip.trimEndMs} min={0} max={durMs ?? 0} step={10} defaultValue={0} onChange={(v) => onUpdate(clip.clipId, { trimEndMs: clampTrimEnd(v) })} />
+                <MsStepper testId="stitch-stepper-fade-in-value" controlName="fade" label="Fade in" value={clip.fadeInMs} min={0} max={2000} step={10} defaultValue={0} onChange={(v) => onUpdate(clip.clipId, { fadeInMs: clampFade(v) })} />
+                <MsStepper testId="stitch-stepper-fade-out-value" controlName="fade" label="Fade out" value={clip.fadeOutMs} min={0} max={2000} step={10} defaultValue={0} onChange={(v) => onUpdate(clip.clipId, { fadeOutMs: clampFade(v) })} />
+              </div>
+
+              <div className="mt-2 rounded-md border border-border/50 bg-black/20 p-2" onClick={(e) => e.stopPropagation()}>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <MsStepper label="Region start" value={selectedRegion.startMs} min={0} max={effectiveDuration} step={10} onChange={(v) => setSelection(clampSelection(v, selectedRegion.endMs))} compact />
+                  <MsStepper label="Region end" value={selectedRegion.endMs} min={0} max={effectiveDuration} step={10} onChange={(v) => setSelection(clampSelection(selectedRegion.startMs, v))} compact />
+                  <span className="self-center text-[10px] font-mono text-muted-foreground">{selectedDuration}ms</span>
+                  <MsStepper label="Gain" value={gainDb} min={-24} max={12} step={1} onChange={setGainDb} compact />
+                  <MsStepper label="Fade in" value={regionFadeInMs} min={0} max={500} step={5} onChange={setRegionFadeInMs} compact />
+                  <MsStepper label="Fade out" value={regionFadeOutMs} min={0} max={500} step={5} onChange={setRegionFadeOutMs} compact />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyGain} title="Apply gain to selected region"><Volume2 className="size-3" /> gain</button>
+                  <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyMute} title="Mute selected region"><VolumeX className="size-3" /> mute</button>
+                  <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyDelete} title="Delete selected region"><Trash2 className="size-3" /> delete</button>
+                  <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyFade} title="Fade selected region"><ChevronUp className="size-3" /> fade</button>
+                  <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => onSplitRegion(clip.clipId, selectedRegion.startMs, selectedRegion.endMs)} title="Split clip at selected region boundaries"><Scissors className="size-3" /> split</button>
+                  <MsStepper label="Silence" value={silenceMs} min={20} max={2000} step={10} onChange={setSilenceMs} compact />
+                  <button type="button" className="rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => insertSilenceAt('before')} title="Insert silence before selected region">+ before</button>
+                  <button type="button" className="rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => insertSilenceAt('after')} title="Insert silence after selected region">+ after</button>
+                </div>
+                {regionEdits.length > 0 && (
+                  <div className="mt-2 flex flex-col gap-1 border-t border-border/40 pt-2">
+                    {regionEdits.map((edit) => (
+                      <div key={edit.id} data-testid="stitch-region-edit" className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                        <span className="truncate">{describeEdit(edit)}</span>
+                        <button type="button" className="shrink-0 rounded p-0.5 hover:bg-muted hover:text-foreground" onClick={() => onRemoveRegionEdit(clip.clipId, edit.id)} title="Remove edit">
+                          <X className="size-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </>
           )}
         </div>
-      </div>
-
-      {showAdvanced && (
-        <>
-          <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1.5" onClick={(e) => e.stopPropagation()}>
-            <MsStepper testId="stitch-stepper-trim-start-value" label="Trim start" value={clip.trimStartMs} min={0} max={durMs ?? 0} step={10} onChange={(v) => onUpdate(clip.clipId, { trimStartMs: clampTrimStart(v) })} />
-            <MsStepper testId="stitch-stepper-trim-end-value" label="Trim end" value={clip.trimEndMs} min={0} max={durMs ?? 0} step={10} onChange={(v) => onUpdate(clip.clipId, { trimEndMs: clampTrimEnd(v) })} />
-            <MsStepper testId="stitch-stepper-fade-in-value" label="Fade in" value={clip.fadeInMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeInMs: clampFade(v) })} />
-            <MsStepper testId="stitch-stepper-fade-out-value" label="Fade out" value={clip.fadeOutMs} min={0} max={2000} step={10} onChange={(v) => onUpdate(clip.clipId, { fadeOutMs: clampFade(v) })} />
-          </div>
-
-          <div className="mt-2 rounded-md border border-border/50 bg-black/20 p-2" onClick={(e) => e.stopPropagation()}>
-            <div className="grid grid-cols-3 gap-1.5">
-              <MsStepper label="Region start" value={selectedRegion.startMs} min={0} max={effectiveDuration} step={10} onChange={(v) => setSelection(clampSelection(v, selectedRegion.endMs))} compact />
-              <MsStepper label="Region end" value={selectedRegion.endMs} min={0} max={effectiveDuration} step={10} onChange={(v) => setSelection(clampSelection(selectedRegion.startMs, v))} compact />
-              <span className="self-center text-[10px] font-mono text-muted-foreground">{selectedDuration}ms</span>
-              <MsStepper label="Gain" value={gainDb} min={-24} max={12} step={1} onChange={setGainDb} compact />
-              <MsStepper label="Fade in" value={regionFadeInMs} min={0} max={500} step={5} onChange={setRegionFadeInMs} compact />
-              <MsStepper label="Fade out" value={regionFadeOutMs} min={0} max={500} step={5} onChange={setRegionFadeOutMs} compact />
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyGain} title="Apply gain to selected region"><Volume2 className="size-3" /> gain</button>
-              <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyMute} title="Mute selected region"><VolumeX className="size-3" /> mute</button>
-              <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyDelete} title="Delete selected region"><Trash2 className="size-3" /> delete</button>
-              <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={applyFade} title="Fade selected region"><ChevronUp className="size-3" /> fade</button>
-              <button type="button" className="inline-flex items-center gap-1 rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => onSplitRegion(clip.clipId, selectedRegion.startMs, selectedRegion.endMs)} title="Split clip at selected region boundaries"><Scissors className="size-3" /> split</button>
-              <MsStepper label="Silence" value={silenceMs} min={20} max={2000} step={10} onChange={setSilenceMs} compact />
-              <button type="button" className="rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => insertSilenceAt('before')} title="Insert silence before selected region">+ before</button>
-              <button type="button" className="rounded bg-muted/70 px-2 py-1 text-[10px] text-foreground hover:bg-muted" onClick={() => insertSilenceAt('after')} title="Insert silence after selected region">+ after</button>
-            </div>
-            {regionEdits.length > 0 && (
-              <div className="mt-2 flex flex-col gap-1 border-t border-border/40 pt-2">
-                {regionEdits.map((edit) => (
-                  <div key={edit.id} data-testid="stitch-region-edit" className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-                    <span className="truncate">{describeEdit(edit)}</span>
-                    <button type="button" className="shrink-0 rounded p-0.5 hover:bg-muted hover:text-foreground" onClick={() => onRemoveRegionEdit(clip.clipId, edit.id)} title="Remove edit">
-                      <X className="size-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </>
-      )}
-    </div>
+      </ContextMenu.Trigger>
+      <ContextMenu.Content
+        data-testid="stitch-context-menu"
+        data-menu-scope="clip"
+        // FocusScope restores focus to the trigger when a menu unmounts; the two actions that
+        // hand focus to an editor must keep it there.
+        onCloseAutoFocus={(event) => {
+          if (!focusManagedRef.current) return
+          focusManagedRef.current = false
+          event.preventDefault()
+        }}
+      >
+        <ContextMenu.Item
+          data-testid="stitch-menu-play-range"
+          disabled={!clip.sourceAudioBase64 || !rangePlayReady || clipEffectiveDurationMs(clip) <= 0}
+          onSelect={() => onPlayRange(clip.clipId)}
+        >
+          {isRangePlaying ? <Pause className="size-3" /> : <Play className="size-3" />}
+          {isRangePlaying ? 'Pause range' : 'Play range'}
+        </ContextMenu.Item>
+        <ContextMenu.Item data-testid="stitch-menu-edit-text" onSelect={menuEditText}>
+          <Pencil className="size-3" />
+          Edit text
+        </ContextMenu.Item>
+        <ContextMenu.Item
+          data-testid="stitch-menu-reset-trim"
+          onSelect={() => onUpdate(clip.clipId, { trimStartMs: 0, trimEndMs: 0, fadeInMs: 0, fadeOutMs: 0 })}
+        >
+          <RotateCcw className="size-3" />
+          Reset trim and fades
+        </ContextMenu.Item>
+        <ContextMenu.Item data-testid="stitch-menu-focus-trim" onSelect={menuFocusNumericEditor}>
+          <Crosshair className="size-3" />
+          Focus trim editor
+        </ContextMenu.Item>
+        <ContextMenu.Separator />
+        <ContextMenu.Item danger data-testid="stitch-menu-remove-clip" onSelect={() => onRemove(clip.clipId)}>
+          <X className="size-3" />
+          Remove clip
+        </ContextMenu.Item>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
   )
 })

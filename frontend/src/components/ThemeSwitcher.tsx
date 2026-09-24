@@ -50,7 +50,7 @@ export function ThemeSwitcher() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-0 mt-7 mb-1 flex gap-1.5 rounded-lg border border-border bg-popover px-2.5 py-1.5 shadow-lg">
+        <div className="absolute right-0 top-0 mt-7 mb-1 flex gap-1.5 rounded-control border border-border bg-popover px-2.5 py-1.5 shadow-lg">
           {THEMES.map((t) => {
             const active = theme === t
             return (

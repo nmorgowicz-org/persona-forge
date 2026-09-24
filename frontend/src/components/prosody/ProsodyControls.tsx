@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import { AlertTriangle, AudioWaveform, Loader2, Play, Star, Undo2, Wand2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -47,6 +48,9 @@ const MODE_TITLES: Record<ProsodyMode, (hasTranscript: boolean) => string> = {
 // page; the surrounding variants list and alignment comparison are composed by the caller
 // so each surface can place them where its layout needs.
 export function ProsodyControls({ editor, layout, triage, busy }: ProsodyControlsProps) {
+  // The Style Preset label names the dropdown by id, so the name a screen reader reads is the
+  // text that is visible above it (B-P8).
+  const styleLabelId = useId()
   const sentenceBoundaries = (editor.alignBoundaries ?? []).filter((b) => b.kind === 'sentence_split')
   const clauseBoundaries = (editor.alignBoundaries ?? []).filter((b) => b.kind !== 'sentence_split' && b.owns_clause)
   const shapedBoundaryCount = sentenceBoundaries.length + clauseBoundaries.length
@@ -55,7 +59,7 @@ export function ProsodyControls({ editor, layout, triage, busy }: ProsodyControl
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
-          <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Processing mode</label>
+          <label className="micro-label">Processing mode</label>
           {triage?.mode && (
             <span className="text-[9px] text-muted-foreground" title={(triage.reasons ?? []).filter(Boolean).join('\n')}>
               triage: {triage.mode}
@@ -127,9 +131,9 @@ export function ProsodyControls({ editor, layout, triage, busy }: ProsodyControl
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Style Preset</label>
+        <label id={styleLabelId} className="micro-label">Style Preset</label>
         <Select value={editor.stylePreset} disabled={editor.previewBusy} onValueChange={(val) => { editor.setStylePreset(val); editor.clearPreview() }}>
-          <SelectTrigger size="sm" className="w-full h-7 px-2 text-xs">
+          <SelectTrigger size="sm" aria-labelledby={styleLabelId} className="w-full h-7 px-2 text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -149,8 +153,8 @@ export function ProsodyControls({ editor, layout, triage, busy }: ProsodyControl
 
       <div className="flex flex-col gap-1.5">
         <div className="flex justify-between items-center">
-          <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Global Pace Scale</label>
-          <span className="font-mono text-[10px]">{editor.paceMultiplier.toFixed(1)}x</span>
+          <label className="micro-label">Global Pace Scale</label>
+          <span className="font-mono text-[10px] tabular-nums">{editor.paceMultiplier.toFixed(1)}x</span>
         </div>
         <p className="text-[10px] text-muted-foreground italic leading-tight mb-1">
           Scales all pauses proportionally (e.g., 1.2x increases all gaps by 20%).
@@ -166,8 +170,8 @@ export function ProsodyControls({ editor, layout, triage, busy }: ProsodyControl
 
       <div className="flex flex-col gap-1.5">
         <div className="flex justify-between items-center">
-          <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Pause Offset</label>
-          <span className="font-mono text-[10px]">{editor.pauseOffset > 0 ? `+${editor.pauseOffset}` : editor.pauseOffset}ms</span>
+          <label className="micro-label">Pause Offset</label>
+          <span className="font-mono text-[10px] tabular-nums">{editor.pauseOffset > 0 ? `+${editor.pauseOffset}` : editor.pauseOffset}ms</span>
         </div>
         <p className="text-[10px] text-muted-foreground italic leading-tight mb-1">
           Shifts all gaps by a flat amount (e.g., +100ms adds 100ms to every pause).

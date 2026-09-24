@@ -45,7 +45,7 @@ export const AudioStatsStrip = memo(function AudioStatsStrip({
   return (
     <div
       className={cn(
-        'flex h-8 items-center gap-4 border-y border-border bg-background/50 px-3 text-[11px] font-mono text-muted-foreground/80',
+        'flex h-8 items-center gap-4 border-y border-border bg-background/50 px-3 text-[11px] font-mono tabular-nums text-muted-foreground/80',
         className,
       )}
     >

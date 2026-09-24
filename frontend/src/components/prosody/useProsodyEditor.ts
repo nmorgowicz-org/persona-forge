@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useAudioSource } from '@/hooks/useAudioTransport'
+import { useAppStore } from '@/store'
 import {
   cancelVoiceAlignment,
   deleteVoiceVariant,
@@ -120,6 +122,10 @@ export function useProsodyEditor(
 
   const [previewingVariant, setPreviewingVariant] = useState<string | null>(null)
   const variantPreviewAudioRef = useRef<HTMLAudioElement | null>(null)
+  // This editor's identity in the playback-focus registry (N6): previewing a variant
+  // silences whatever else is sounding, and vice versa.
+  // The variant preview is one audio source among several (T1).
+  const source = useAudioSource('prosody-preview', 'Prosody preview')
   const variantPreviewUrlRef = useRef<string | null>(null)
   const [variantBusy, setVariantBusy] = useState<string | null>(null)
   const [savingVariantBusy, setSavingVariantBusy] = useState(false)
@@ -311,6 +317,7 @@ export function useProsodyEditor(
     try {
       await saveVoiceProsodyVariant(voiceId, stylePreset, paceMultiplier, pauseOffset, mode, targetOverrides)
       if (voiceIdRef.current !== capturedVoiceId) return
+      useAppStore.getState().announce('Prosody variant saved — it is listed with this voice.')
       await refresh()
       await onChanged?.()
     } catch (err) {
@@ -333,6 +340,7 @@ export function useProsodyEditor(
       const variantFilename = `prosody_${created.variant_slug}.wav`
       await setActiveVoiceVariant(voiceId, variantFilename)
       stage = 'done'
+      useAppStore.getState().announce('Variant saved and promoted — it is what the API serves now.')
       await refresh()
       await onChanged?.()
     } catch (err) {
@@ -382,6 +390,7 @@ export function useProsodyEditor(
     if (previewingVariant === entry.filename) {
       variantPreviewAudioRef.current?.pause()
       variantPreviewAudioRef.current = null
+      source.release()
       if (variantPreviewUrlRef.current) {
         URL.revokeObjectURL(variantPreviewUrlRef.current)
         variantPreviewUrlRef.current = null
@@ -413,8 +422,13 @@ export function useProsodyEditor(
       variantPreviewAudioRef.current = el
       setPreviewingVariant(entry.filename)
       setPreviewMetrics(metricsResult ? metricsResult.metrics : null)
+      source.claim(() => {
+        el.pause()
+        setPreviewingVariant(null)
+      })
       el.addEventListener('ended', () => {
         setPreviewingVariant(null)
+        source.release()
         if (variantPreviewUrlRef.current === url) {
           URL.revokeObjectURL(url)
           variantPreviewUrlRef.current = null
@@ -428,7 +442,7 @@ export function useProsodyEditor(
     } finally {
       if (voiceIdRef.current === capturedVoiceId) setVariantBusy(null)
     }
-  }, [previewingVariant, voiceId])
+  }, [previewingVariant, voiceId, source])
 
   const forkVariant = useCallback(async (entry: VoiceVariantEntry) => {
     if (!onFork) return

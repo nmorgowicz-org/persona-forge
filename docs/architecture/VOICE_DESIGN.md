@@ -1,5 +1,12 @@
 # VoiceDesign + Web Frontend
 
+**The design surface.** Trait chips (gender, age, register, texture, persona) compose a
+description; the panel below the chips shows the composed text, the sample text the new voice
+will be cloned against, and the language/example controls. Every parameter control carries a
+visible label, and the readouts are tabular with units.
+
+![Voice Design panel](../screenshots/hero-voice-design--neutral--panel.png)
+
 > Audience: a fresh AI coding agent with **zero prior context** on this repo. Read this doc top
 > to bottom before writing code. It tells you what exists, how it works, and why decisions were made.
 > Where a decision was made, the reasoning is included so you don't need to re-derive it — but you may

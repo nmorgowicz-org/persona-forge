@@ -580,6 +580,35 @@ def _resolve_builtin_voice_artifact(name: str) -> Path | None:
     return result.path
 
 
+def _export_voice_state(model: TTSModel, state: dict[str, Any], cache_path: Path) -> bool:
+    """Persist a resolved voice_state so the next process can reload it.
+
+    pocket-tts exposes this as a *module-level* function
+    (``pocket_tts.models.model_state.export_model_state``) and never as a ``TTSModel`` method;
+    there is deliberately no import counterpart, because a saved state is reloaded by handing its
+    ``.safetensors`` path to ``get_state_for_audio_prompt`` — which is exactly what the read path
+    below does. Calling ``model.export_model_state`` (as this code used to) therefore always
+    raised AttributeError: the built-in branch swallowed it and fell through to the voice library
+    ("voice_id 'vera' not found in voice_library"), and the library branch let it escape, so no
+    cloned voice could generate at all.
+
+    The method is still preferred when present, so a future release that moves it onto the model
+    keeps working. Returns whether the state was written.
+    """
+    export = getattr(model, "export_model_state", None)
+    if callable(export):
+        export(state, str(cache_path))
+        return True
+    try:
+        from pocket_tts.models.model_state import export_model_state as export_state_to_file
+    except Exception:
+        return False
+    export_state_to_file(state, str(cache_path))
+    return True
+
+
+
+
 def get_pocket_tts_voice_state(
     model: TTSModel,
     voice_id: str | None,
@@ -667,7 +696,10 @@ def get_pocket_tts_voice_state(
     if cache_path.is_file() and cache_is_current:
         try:
             print(f"[pocket_tts] Loading cached voice state from disk: {cache_path.name}")
-            state = model.import_model_state(str(cache_path))
+            # The library owns the on-disk format: a saved state *is* a .safetensors prompt
+            # source, so reloading goes through get_state_for_audio_prompt. There is no
+            # import_model_state to call -- see _export_voice_state.
+            state = model.get_state_for_audio_prompt(str(cache_path))
             pocket_tts_voice_state_cache[resolved_id] = state
             print(f"[pocket_tts] voice_state resolution: {resolved_id!r} (disk cache import)")
             return state
@@ -688,7 +720,7 @@ def get_pocket_tts_voice_state(
             print(f"[pocket_tts] Attempting to load built-in voice: {resolved_id!r}")
             state = model.get_state_for_audio_prompt(state_input)
             pocket_tts_voice_state_cache[resolved_id] = state
-            model.export_model_state(state, str(cache_path))
+            _export_voice_state(model, state, cache_path)
             print(f"[pocket_tts] voice_state resolution: {resolved_id!r} (built-in preset, rebuilt)")
             return state
         except Exception as exc:
@@ -714,7 +746,7 @@ def get_pocket_tts_voice_state(
 
     state = model.get_state_for_audio_prompt(wav_path)
     pocket_tts_voice_state_cache[resolved_id] = state
-    model.export_model_state(state, str(cache_path))
+    _export_voice_state(model, state, cache_path)
     print(f"[pocket_tts] voice_state resolution: {resolved_id!r} (library, rebuilt from wav)")
     return state
 

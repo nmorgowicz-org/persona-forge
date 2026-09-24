@@ -21,7 +21,7 @@ export function AccentBank({ selectedId, onSelect }: AccentBankProps) {
             onClick={() => onSelect(entry)}
             whileTap={{ scale: 0.97 }}
             className={cn(
-              'flex w-56 flex-col gap-2 rounded-xl border p-3 text-left transition-colors',
+              'flex w-56 flex-col gap-2 rounded-panel border p-3 text-left transition-colors',
               selected ? 'border-primary bg-primary/5' : 'border-border bg-card hover:bg-accent/40',
             )}
           >

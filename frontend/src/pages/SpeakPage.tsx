@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import {
   AlertCircle,
@@ -26,6 +26,8 @@ import { VoiceSelector } from '@/components/VoiceSelector'
 import { AudioPlayer } from '@/components/AudioPlayer'
 import { InfoIcon } from '@/components/InfoIcon'
 import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
+import { PageHeader } from '@/components/ui/page-header'
 import {
   Select,
   SelectContent,
@@ -62,7 +64,7 @@ function StructuredError({ error }: { error: string }) {
     <div
       data-testid="speak-error"
       className={
-        'flex flex-col gap-1 rounded-lg border px-3 py-2 text-xs ' +
+        'flex flex-col gap-1 rounded-control border px-3 py-2 text-xs ' +
         (isStrong
           ? 'border-warning/40 bg-warning/10 text-warning'
           : 'border-destructive/40 bg-destructive/10 text-destructive')
@@ -149,8 +151,13 @@ export function SpeakPage() {
     speakAudioBlob,
     setSpeakAudioBlob,
     serviceStarted,
+    announce,
   } = useAppStore()
   const [language, setLanguage] = useState('English')
+  // The two parameter dropdowns get labels wired by id, so the name a screen reader reads is
+  // the same text that is visible above the control (B-P8).
+  const languageLabelId = useId()
+  const polishLabelId = useId()
   const [stylePreset, setStylePreset] = useState<(typeof POLISH_OPTIONS)[number]['id']>('off')
   const [seedInput, setSeedInput] = useState('')
   const [builtInVoices, setBuiltInVoices] = useState<BuiltInVoiceMeta[]>([])
@@ -227,6 +234,12 @@ export function SpeakPage() {
               rtf: rtfHeader ? Number(rtfHeader) : p.rtf ?? null,
               audioSeconds: audioSecondsHeader ? Number(audioSecondsHeader) : p.audio_seconds ?? null,
             })
+            // The visible result is the player below; this is the same news for anyone who is
+            // not looking at it (B-P9).
+            const seconds = audioSecondsHeader ? Number(audioSecondsHeader) : p.audio_seconds
+            announce(
+              seconds ? `Generation complete. ${seconds.toFixed(1)}s of audio ready.` : 'Generation complete. Audio is ready.',
+            )
           } catch {
             setSpeakError('Failed to download generated audio')
           }
@@ -240,6 +253,7 @@ export function SpeakPage() {
           const msg = p.message || 'Generation failed'
           const info = classifyGenerateError(msg, null)
           setSpeakError(info.headline + (info.detail ? '\n' + info.detail : ''))
+          announce(`Generation failed. ${info.headline}`)
           setSpeakIsGenerating(false)
           setSpeakJobId(null)
           setSpeakJobProgress(null)
@@ -318,14 +332,14 @@ export function SpeakPage() {
         initial={{ opacity: 0, y: reducedMotion ? 0 : -8 }} 
         animate={{ opacity: 1, y: 0 }}
       >
-        <h1 className="text-2xl font-semibold tracking-tight">Speak</h1>
-         <p className="text-sm text-muted-foreground">
-           Type text, pick a curated Pocket voice or clone your own, and hear it spoken.
-         </p>
+        <PageHeader
+          title="Speak"
+          description="Type text, pick a curated Pocket voice or clone your own, and hear it spoken."
+        />
       </motion.div>
 
       <motion.div
-        className="flex flex-col gap-5 rounded-xl border border-border bg-card p-6 text-card-foreground shadow-sm"
+        className="flex flex-col gap-5 rounded-panel border border-border bg-card p-6 text-card-foreground shadow-sm"
         initial={{ opacity: 0, y: reducedMotion ? 0 : 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05 }}
@@ -333,7 +347,7 @@ export function SpeakPage() {
          <textarea
            data-testid="speak-text-input"
            aria-label="Text to synthesize"
-           className="min-h-48 resize-y rounded-lg border border-input bg-transparent p-4 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+           className="min-h-48 resize-y rounded-control border border-input bg-transparent p-4 text-base outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
            placeholder="Say something..."
            value={text}
            onChange={(e) => setText(e.target.value)}
@@ -362,33 +376,45 @@ export function SpeakPage() {
             onChange={handleVoiceChange}
           />
 
-          <Select value={language} onValueChange={setLanguage}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="English">English</SelectItem>
-              <SelectItem value="Chinese">Chinese</SelectItem>
-              <SelectItem value="French">French</SelectItem>
-              <SelectItem value="German">German</SelectItem>
-              <SelectItem value="Italian">Italian</SelectItem>
-              <SelectItem value="Portuguese">Portuguese</SelectItem>
-              <SelectItem value="Spanish">Spanish</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex flex-col gap-1">
+            <span id={languageLabelId} className="micro-label">
+              Language
+            </span>
+            <Select value={language} onValueChange={setLanguage}>
+              <SelectTrigger aria-labelledby={languageLabelId}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="English">English</SelectItem>
+                <SelectItem value="Chinese">Chinese</SelectItem>
+                <SelectItem value="French">French</SelectItem>
+                <SelectItem value="German">German</SelectItem>
+                <SelectItem value="Italian">Italian</SelectItem>
+                <SelectItem value="Portuguese">Portuguese</SelectItem>
+                <SelectItem value="Spanish">Spanish</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-          <Select value={stylePreset} onValueChange={(value) => setStylePreset(value as typeof stylePreset)}>
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="Tone / polish" />
-            </SelectTrigger>
-            <SelectContent>
-              {POLISH_OPTIONS.map((option) => (
-                <SelectItem key={option.id} value={option.id}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex flex-col gap-1">
+            {/* Its value reads "Off", which is a state, not a function. The label names what
+                the control does: post-processing applied to the finished render. */}
+            <span id={polishLabelId} className="micro-label">
+              Post-processing
+            </span>
+            <Select value={stylePreset} onValueChange={(value) => setStylePreset(value as typeof stylePreset)}>
+              <SelectTrigger className="w-44" aria-labelledby={polishLabelId}>
+                <SelectValue placeholder="Tone / polish" />
+              </SelectTrigger>
+              <SelectContent>
+                {POLISH_OPTIONS.map((option) => (
+                  <SelectItem key={option.id} value={option.id}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
            <InfoIcon 
              text="Tone / polish applies real post-processing after generation. Voice variants still control the performance; polish only finishes the rendered audio." 
@@ -465,19 +491,15 @@ export function SpeakPage() {
         {speakIsGenerating && speakJobProgress && (
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
-              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                <motion.div
-                  className="h-full bg-primary"
-                  animate={{
-                     width: `${Math.min(100, Math.max(3, speakJobProgress.progress_pct))}%`,
-                  }}
-                  transition={{ ease: 'easeOut', duration: 0.3 }}
-                />
-              </div>
+              <Progress
+                value={speakJobProgress.progress_pct}
+                label="Generation progress"
+                testId="speak-progress"
+              />
                {typeof speakJobProgress.progress_pct === 'number' && (
                  <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
                    {Math.round(speakJobProgress.progress_pct)}%
-                </span>
+                 </span>
               )}
             </div>
             <p className="text-[11px] text-muted-foreground">
@@ -527,7 +549,6 @@ export function SpeakPage() {
               seed={speakLastSeed}
               rtf={resultMeta?.rtf ?? null}
               metrics={resultMeta?.audioSeconds ? { duration_seconds: resultMeta.audioSeconds } : null}
-              showSpectralAccent={false}
             />
             {speakLastSeed !== null && (
               <div className="flex items-center justify-between">

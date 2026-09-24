@@ -1,6 +1,7 @@
 import { useAppStore } from '@/store'
 import { AlertTriangle, ArrowRight, Info, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { AppBanner } from '@/components/ui/app-banner'
 
 export function HealthStatusBanner() {
   const serviceStarted = useAppStore((s) => s.serviceStarted)
@@ -20,24 +21,18 @@ export function HealthStatusBanner() {
   if (loadingMessage) {
     if (healthStatus === 'error') {
       return (
-        <div className="flex items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-4 py-1.5 text-xs text-destructive">
-          <AlertTriangle className="size-3 shrink-0" />
-          <div className="min-w-0 flex-1">
-            <span className="inline-block truncate">
-              {loadingMessage}
-              {healthError ? `: ${healthError}` : ''}
-            </span>
-          </div>
-        </div>
+        <AppBanner tone="danger" icon={<AlertTriangle className="size-3 shrink-0" />}>
+          <span className="inline-block truncate">
+            {loadingMessage}
+            {healthError ? `: ${healthError}` : ''}
+          </span>
+        </AppBanner>
       )
     }
     return (
-      <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground">
-        <div className="min-w-0 flex items-center gap-2">
-          <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
-          <span className="truncate">{loadingMessage}</span>
-        </div>
-      </div>
+      <AppBanner tone="neutral" icon={<Loader2 className="size-3 shrink-0 animate-spin" />}>
+        <span className="truncate">{loadingMessage}</span>
+      </AppBanner>
     )
   }
 
@@ -69,57 +64,54 @@ export function HealthStatusBanner() {
           : 'Reference text may not match the mounted reference audio.'
 
       return (
-        <div
-          className={
-            'flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-4 py-1.5 text-xs ' +
-            (affectsActiveGeneration && isFail
-              ? 'border-destructive/30 bg-destructive/10 text-destructive'
-              : affectsActiveGeneration
-                ? 'border-warning/30 bg-warning/10 text-warning'
-                : 'border-border bg-muted/30 text-muted-foreground')
+        <AppBanner
+          tone={affectsActiveGeneration ? (isFail ? 'danger' : 'warning') : 'neutral'}
+          icon={
+            affectsActiveGeneration ? (
+              <AlertTriangle className="size-3 shrink-0" />
+            ) : (
+              <Info className="size-3 shrink-0" />
+            )
           }
-        >
-          {affectsActiveGeneration ? (
-            <AlertTriangle className="size-3 shrink-0" />
-          ) : (
-            <Info className="size-3 shrink-0" />
-          )}
-          <div className="min-w-0 flex-1 leading-tight">
-            <span className="font-medium">{mismatchDetail}</span>{' '}
-            <span className="opacity-80">
-              {activeVoiceDiffers
-                ? `It is not the active API voice, so current no-voice generation uses ${activeApiVoiceId}.`
-                : textSource === 'env'
-                  ? 'The configured REF_TEXT belongs to different audio.'
-                  : 'Review or regenerate the transcript before cloning.'}
-            </span>
-            {(audioPath || configuredText || refTextValidation.whisperTranscript) && (
-              <span className="mt-0.5 block truncate text-[10px] opacity-70" title={configuredText || undefined}>
+          detail={
+            (audioPath || configuredText || refTextValidation.whisperTranscript) && (
+              <span title={configuredText || undefined}>
                 {audioPath && `Audio: ${audioPath}`}
                 {textSource && ` · Text source: ${textSource === 'env' ? 'REF_TEXT' : textSource}`}
                 {configuredText && ` · Configured: “${configuredText}”`}
                 {refTextValidation.whisperTranscript &&
                   ` · Whisper heard: “${refTextValidation.whisperTranscript}”`}
               </span>
-            )}
-          </div>
-          {voiceId && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              data-testid="health-review-voice"
-              className="h-6 shrink-0 gap-1 px-1.5 text-[10px] underline underline-offset-2"
-              onClick={() => {
-                setVoiceLibraryFocusVoiceId(voiceId)
-                setPage('voice-library')
-              }}
-            >
-              Review {voiceId}
-              <ArrowRight className="size-3" />
-            </Button>
-          )}
-        </div>
+            )
+          }
+          actions={
+            voiceId && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                data-testid="health-review-voice"
+                className="h-6 shrink-0 gap-1 px-1.5 text-[10px] underline underline-offset-2"
+                onClick={() => {
+                  setVoiceLibraryFocusVoiceId(voiceId)
+                  setPage('voice-library')
+                }}
+              >
+                Review {voiceId}
+                <ArrowRight className="size-3" />
+              </Button>
+            )
+          }
+        >
+          <span className="font-medium">{mismatchDetail}</span>{' '}
+          <span className="opacity-80">
+            {activeVoiceDiffers
+              ? `It is not the active API voice, so current no-voice generation uses ${activeApiVoiceId}.`
+              : textSource === 'env'
+                ? 'The configured REF_TEXT belongs to different audio.'
+                : 'Review or regenerate the transcript before cloning.'}
+          </span>
+        </AppBanner>
       )
     }
 
@@ -134,14 +126,16 @@ export function HealthStatusBanner() {
   if (!needsBase) return null
 
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground">
-      <div className="min-w-0 flex items-center gap-2">
-        <Loader2 className="size-3 shrink-0 animate-spin text-muted-foreground" />
-        <span className="truncate">{loadingMessage || 'Initializing TTS model…'}</span>
-      </div>
-      <span className="shrink-0 opacity-70 hidden sm:inline">
-        Speak and Voice Design will be available shortly.
-      </span>
-    </div>
+    <AppBanner
+      tone="neutral"
+      icon={<Loader2 className="size-3 shrink-0 animate-spin" />}
+      actions={
+        <span className="hidden shrink-0 opacity-70 sm:inline">
+          Speak and Voice Design will be available shortly.
+        </span>
+      }
+    >
+      <span className="truncate">{loadingMessage || 'Initializing TTS model…'}</span>
+    </AppBanner>
   )
 }

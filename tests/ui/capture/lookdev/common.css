@@ -1,0 +1,68 @@
+/* Look-dev common layer (B-P0, docs/plans/20260923-luminous_instrument_redesign.md).
+   Injected by tests/ui/capture/scenarios/lookdev/board.mjs AFTER one candidate file
+   (graphite/obsidian/machined/forge.css). Candidates only set --ld-* material variables and
+   the existing shadcn neutral tokens; this file maps those variables onto classes the app
+   already renders, so every candidate is shot on the real UI with zero frontend/src edits.
+
+   Board-only approximation: P1 introduces real .panel-/.well utilities. Here the recipe rides
+   on today's classes (bg-card = panel, bg-background inside a card = well), which covers the
+   dominant surfaces but not every ad-hoc container. */
+
+/* Panels: top-lit edge + elevation shadow + optional sheen. */
+html.dark .bg-card,
+html.dark .bg-popover {
+  box-shadow: var(--ld-panel-shadow);
+  background-image: var(--ld-panel-sheen);
+}
+
+/* Wells: inset readout/input surfaces sitting inside a panel. */
+html.dark .bg-card .bg-background,
+html.dark .bg-card input,
+html.dark .bg-card textarea {
+  box-shadow: var(--ld-well-shadow);
+}
+
+/* Chrome: sidebar edge reads as a machined seam, not a flat border. */
+html.dark [data-slot='sidebar-container'],
+html.dark [data-sidebar='sidebar'] {
+  box-shadow: var(--ld-chrome-edge);
+}
+
+/* Emits light: active nav item, primary fills. Keyed off --primary so all four accent
+   themes glow in their own color (doctrine: accent role). */
+html.dark [data-sidebar='menu-button'][data-active='true'] {
+  background: color-mix(in oklch, var(--primary) 16%, transparent);
+  color: var(--foreground);
+  box-shadow:
+    inset 2px 0 0 var(--primary),
+    0 0 var(--ld-glow-blur) color-mix(in oklch, var(--primary) var(--ld-glow-mix), transparent);
+}
+html.dark .bg-primary {
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--primary) 45%, transparent),
+    0 0 var(--ld-glow-blur) color-mix(in oklch, var(--primary) var(--ld-glow-mix), transparent);
+}
+
+/* D3 = follow the accent: CTA gradient derived from --primary (relative color syntax). */
+html.dark .btn-brand {
+  background-image: linear-gradient(
+    to right,
+    oklch(from var(--primary) calc(l + 0.07) c h),
+    var(--primary)
+  );
+  color: var(--primary-foreground);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 18%),
+    0 4px 18px color-mix(in oklch, var(--primary) 38%, transparent);
+}
+html.dark .btn-brand:hover:not(:disabled) {
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 22%),
+    0 8px 28px color-mix(in oklch, var(--primary) 50%, transparent);
+}
+
+/* Focus reads as light, same as pointer-active states. */
+html.dark :focus-visible {
+  outline-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 30%, transparent);
+}

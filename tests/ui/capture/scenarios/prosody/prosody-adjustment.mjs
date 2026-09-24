@@ -14,8 +14,21 @@ export default async function (ctx) {
     // INTENT: Show the voice library with voices that have alignment data.
     await captureShot(page, 'prosody-adjustment-voice-library.png', { scrollToSelector: '[data-testid="voice-card"]' });
 
-    // Find a voice card that has alignment data (has an "Adjust prosody" button)
+    // Find a voice card whose prosody panel can actually run forced alignment.
+    //
+    // "Has an Adjust prosody button" is not sufficient, and assuming it was is what broke this
+    // scenario: Precise mode is *disabled* for a voice with no transcript (the panel says so
+    // itself — "Precise (forced alignment) needs reference text"), and clicking a disabled
+    // button is a silent no-op, so the run waited 30s for an alignment job that was never
+    // started and failed with an unhelpful "never reached a terminal UI state". The card is now
+    // only accepted if its Precise button is enabled; otherwise the panel is closed and the next
+    // card is tried.
     let foundProsodyBtn = false;
+    // The card the scenario actually aligns. Every later capture is scoped to it: a bare
+    // `[data-testid="voice-card"]` matches the *first* card in the grid, which is why the
+    // "calm-adjusted" shot used to show a different voice's strip (and an empty one, since that
+    // voice has no preview).
+    let chosenVoiceId = null;
 
     const voiceCards = await page.$$('div[data-testid="voice-card"]');
 
@@ -30,40 +43,57 @@ export default async function (ctx) {
             return false;
         }, voiceCards[i]);
 
-        if (hasBtn) {
-            // Click the button to open the prosody settings panel
-            await page.evaluate((card) => {
-                const buttons = card.querySelectorAll('button');
-                for (const btn of buttons) {
-                    if (btn.textContent.includes('Adjust prosody')) {
-                        btn.click();
-                        return true;
-                    }
+        if (!hasBtn) continue;
+
+        // Click the button to open the prosody settings panel
+        await page.evaluate((card) => {
+            const buttons = card.querySelectorAll('button');
+            for (const btn of buttons) {
+                if (btn.textContent.includes('Adjust prosody')) {
+                    btn.click();
+                    return true;
                 }
-                return false;
-            }, voiceCards[i]);
+            }
+            return false;
+        }, voiceCards[i]);
 
-            // Wait for the prosody settings panel to appear
-            await page.waitForFunction(() => {
-                return document.body.innerText.includes('Prosody Settings');
-            }, { timeout: 10000 });
+        // Wait for the prosody settings panel to appear
+        await page.waitForFunction(() => {
+            return document.body.innerText.includes('Prosody Settings');
+        }, { timeout: 10000 });
 
+        const preciseEnabled = await page.evaluate(() => {
+            for (const el of document.querySelectorAll('button')) {
+                if (el.textContent.trim().toLowerCase() === 'precise') return !el.disabled;
+            }
+            return false;
+        });
+
+        if (preciseEnabled) {
+            chosenVoiceId = await page.evaluate((card) => card.getAttribute('data-voice-id'), voiceCards[i]);
             foundProsodyBtn = true;
             break;
         }
+
+        // No transcript on this voice, so Precise is disabled. Close the panel and try the next.
+        await page.keyboard.press('Escape');
+        await new Promise((resolve) => setTimeout(resolve, 400));
     }
 
     if (!foundProsodyBtn) {
-        throw new Error('Could not find a voice card with Adjust prosody button');
+        throw new Error(
+            'No voice card offers an enabled Precise mode (forced alignment needs a transcript — ' +
+                'every card in this library either lacks the prosody panel or has no reference text)',
+        );
     }
 
     // INTENT: Show the voice card with prosody settings panel open.
-    await captureShot(page, 'prosody-adjustment-settings-open.png', { scrollToSelector: '[data-testid="voice-card"]' });
+    await captureShot(page, 'prosody-adjustment-settings-open.png', { scrollToSelector: `[data-voice-id="${chosenVoiceId}"]` });
 
     // Select "Precise" processing mode (forces forced-alignment-directed pauses)
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    let preciseClicked = await page.evaluate(() => {
+    const preciseClicked = await page.evaluate(() => {
         const allElements = document.querySelectorAll('*');
         for (const el of allElements) {
             if (el.tagName === 'BUTTON' && el.textContent.trim().toLowerCase() === 'precise') {
@@ -160,7 +190,7 @@ export default async function (ctx) {
     await new Promise(resolve => setTimeout(resolve, 500));
 
     // INTENT: Show the prosody settings with mode and preset selected.
-    await captureShot(page, 'prosody-adjustment-preset-selected.png', { scrollToSelector: '[data-testid="voice-card"]' });
+    await captureShot(page, 'prosody-adjustment-preset-selected.png', { scrollToSelector: `[data-voice-id="${chosenVoiceId}"]` });
 
     // Click Preview to generate the adjusted waveform with pause markers
     await page.evaluate(() => {
@@ -187,13 +217,20 @@ export default async function (ctx) {
     // Wait for the waveform to fully render
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Close the prosody settings panel to show the full A/B comparison
+    // Close the prosody popover so the card's own A/B strip is the subject — but wait for that
+    // strip first: captureShot now fails when its scrollToSelector matches nothing, and the
+    // strip renders its lanes only once the take's audio has resolved.
+    await page.waitForSelector('[data-testid="alignment-compare"]', { timeout: 30000 });
     await page.keyboard.press('Escape');
     await new Promise(resolve => setTimeout(resolve, 500));
+    await page.waitForFunction(() => {
+        const el = document.querySelector('[data-testid="alignment-compare"]');
+        return Boolean(el) && el.getBoundingClientRect().height > 60;
+    }, { timeout: 15000 });
 
     // INTENT: Show the hero result — Original vs Adjusted waveforms with
     // pause markers (cyan diamonds and teal shaded regions) and word labels
     // on the original lane showing where pauses were placed. Centered on the
     // A/B strip itself, since the lanes + ruler + markers are the subject.
-    await captureShot(page, 'prosody-adjustment-calm-adjusted.png', { scrollToSelector: '[data-testid="alignment-compare"]' });
+    await captureShot(page, 'prosody-adjustment-calm-adjusted.png', { scrollToSelector: `[data-voice-id="${chosenVoiceId}"] [data-testid="alignment-compare"]` });
 }

@@ -33,11 +33,14 @@
   --warning-foreground: oklch(0.18 0.02 70);
   --info: oklch(0.62 0.16 235);
   --info-foreground: oklch(0.985 0 0);
-  /* Brand accent — the cyan "generate / primary action" gradient. Consumed via
-     the .btn-brand utility below; do not hand-roll this gradient in components. */
-  --brand-from: hsl(190 90% 50%);
-  --brand-to: hsl(210 90% 45%);
-  --brand-glow: 34 211 238;
+  /* Brand accent — the "generate / primary action" gradient. Consumed via the .btn-brand
+     utility below; do not hand-roll this gradient in components.
+     B-P1 (D3 = follow accent): derived from --primary with relative color syntax, so the CTA
+     is violet in violet and amber in amber instead of a fixed cyan that fought three of the
+     four themes. Resolved at use, so the accent themes below need no brand overrides. */
+  --brand-from: oklch(from var(--primary) l c h);
+  --brand-to: oklch(from var(--primary) calc(l * 0.82) c h);
+  --brand-glow: oklch(from var(--primary) l c h);
   /* Elevated app-chrome surface (status bars, docked panels) above --background. */
   --surface-1: oklch(0.16 0.005 285);
   --border: oklch(0.922 0 0);
@@ -156,22 +159,27 @@ html {
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  /* B-P1 radius scale: one knob (--radius) with three named steps, so P6 can migrate the
+     ad-hoc usages without each one inventing its own value. */
+  --radius-well: calc(var(--radius) * 0.8);
+  --radius-control: var(--radius);
+  --radius-panel: calc(var(--radius) * 1.5);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
+  --background: oklch(0.118 0.004 270);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
+  --card: oklch(0.158 0.005 270);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
+  --popover: oklch(0.168 0.005 270);
   --popover-foreground: oklch(0.985 0 0);
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
+  --secondary: oklch(0.205 0.006 270);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
+  --muted: oklch(0.205 0.006 270);
+  --muted-foreground: oklch(0.69 0.008 270);
+  --accent: oklch(0.225 0.007 270);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
@@ -181,24 +189,44 @@ html {
   --warning-foreground: oklch(0.2 0.03 75);
   --info: oklch(0.7 0.14 235);
   --info-foreground: oklch(0.16 0.03 235);
-  --surface-1: oklch(0.185 0.004 285);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  --surface-1: oklch(0.14 0.005 270);
+  --border: oklch(1 0 0 / 7.5%);
+  --input: oklch(1 0 0 / 12%);
   --ring: oklch(0.556 0 0);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
+  --sidebar: oklch(0.13 0.005 270);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent: oklch(0.205 0.006 270);
   --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-border: oklch(1 0 0 / 7.5%);
+  --sidebar-ring: oklch(0.556 0 0);  /* B-P1 (D1 Obsidian): one material recipe for every raised and inset surface. The board's
+     --ld-panel-shadow / --ld-well-shadow, renamed: a hairline edge, a top-lit bevel, and a
+     wide soft drop -- never a second recipe per component. */
+  --shadow-panel: inset 0 1px 0 oklch(1 0 0 / 4%), 0 0 0 1px oklch(0 0 0 / 55%), 0 12px 30px -16px oklch(0 0 0 / 70%);
+  --shadow-well: inset 0 0 0 1px oklch(0 0 0 / 45%), inset 0 1px 2px oklch(0 0 0 / 60%);
+  /* Inset surface value (the board's extra token): darker than --background, so a well reads
+     as a hole rather than a panel. */
+  --well: oklch(0.1 0.004 270);
+  /* Glow is keyed to a role, never hard-coded: chrome glows in the accent (D3), signal glows
+     in the fixed signal palette so a meter never changes color with the theme. */
+  --glow-accent: 0 0 0 1px color-mix(in oklch, var(--primary) 55%, transparent),
+    0 0 18px color-mix(in oklch, var(--primary) 42%, transparent);
+  --glow-signal: 0 0 18px oklch(0.64 0.22 285 / 42%);
+  --radius: 0.3rem;
+  /* Motion, mirrored from lib/motion.ts for transitions that never touch React. */
+  --motion-snap: 0.12s;
+  --motion-settle: 0.24s;
+  --motion-drift: 0.4s;
+  --ease-snappy: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-settle: cubic-bezier(0.4, 0, 0.2, 1);
 }
+
 
 /* Accent palettes — layered on top of .dark, dark-mode only for now. Each theme only
    overrides the interactive accent (primary/ring/sidebar-primary), not the neutral
@@ -249,6 +277,14 @@ html {
   html {
     @apply font-sans;
   }
+  /* Keyboard focus gets the same "lit" feedback a pointer gets on hover. The ring stays crisp
+     (an outline, so it never changes layout) and the glow is the accent, so it reads as the
+     app's own light rather than a browser default. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    box-shadow: var(--glow-accent);
+  }
 }
 
 @keyframes pulse-subtle {
@@ -263,13 +299,13 @@ html {
   .btn-brand {
     background-image: linear-gradient(to right, var(--brand-from), var(--brand-to));
     color: var(--background);
-    box-shadow: 0 4px 15px rgb(var(--brand-glow) / 0.25);
+    box-shadow: 0 4px 15px color-mix(in oklch, var(--brand-glow) 25%, transparent);
     transition-property: transform, box-shadow, opacity;
     transition-duration: 150ms;
   }
   .btn-brand:hover:not(:disabled) {
     transform: scale(1.02);
-    box-shadow: 0 8px 25px rgb(var(--brand-glow) / 0.35);
+    box-shadow: 0 8px 25px color-mix(in oklch, var(--brand-glow) 35%, transparent);
   }
   .btn-brand:disabled {
     opacity: 0.5;
@@ -294,6 +330,59 @@ html {
   .status-tone-info { --status: var(--info); }
   .status-tone-danger { --status: var(--destructive); }
   .status-tone-neutral { --status: var(--muted-foreground); }
+
+  /* B-P1 material recipe. Every raised or inset surface uses one of these three, so depth is
+     consistent app-wide and a new panel cannot invent its own edge. */
+  .panel-1 {
+    background-color: var(--card);
+    box-shadow: var(--shadow-panel);
+    border-radius: var(--radius-panel);
+  }
+  .panel-2 {
+    background-color: var(--popover);
+    box-shadow: var(--shadow-panel), 0 18px 40px -24px oklch(0 0 0 / 80%);
+    border-radius: var(--radius-panel);
+  }
+  .well {
+    background-color: var(--well);
+    box-shadow: var(--shadow-well);
+    border-radius: var(--radius-well);
+  }
+  /* Anything currently holding the app's attention: focus, an armed control, the active
+     lane. Keyed to the accent, so it follows the theme. */
+  .glow-active {
+    box-shadow: var(--glow-accent);
+  }
+
+  /* B-P1 type scale. Three roles, named, so a readout cannot drift into a paragraph. */
+  .micro-label {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+  /* Numeric readouts: Geist Mono with tabular figures, so a value that changes does not
+     reflow the text around it. Wrap the unit in .readout-unit. */
+  .readout {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.8125rem;
+    letter-spacing: -0.01em;
+    color: var(--foreground);
+  }
+  .readout-unit {
+    margin-left: 0.125rem;
+    font-size: 0.9em;
+    color: var(--muted-foreground);
+  }
+  .display {
+    font-family: var(--font-heading);
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--foreground);
+  }
 
   /* Segment/voice browser row (frontend/src/components/stitch/SegmentBrowserModal.tsx).
      content-visibility skips layout/paint for off-screen rows in long (100s-row) lists

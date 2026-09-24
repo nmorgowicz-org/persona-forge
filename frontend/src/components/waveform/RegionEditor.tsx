@@ -4,6 +4,8 @@ import type { ProsodyPausePlanEntry, StitchPlanRegionEdit } from '@/lib/api'
 import { base64ToBlob } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { MiniAudioDeck } from '@/components/audio/MiniAudioDeck'
+import { formatHoverTime } from '@/lib/timeAxis'
+import { envelopeFromChannels, type AudioEnvelope } from '@/lib/waveform'
 import { WaveformLane } from './WaveformLane'
 import { TimeRuler } from './TimeRuler'
 import { encodeRegionWav, renderRegionEdits, type RegionAudio } from './regionAudio'
@@ -26,7 +28,7 @@ export function RegionEditor({ audioBase64, edits = [], pauseIntervals = [], bou
 }) {
   const laneRef = useRef<HTMLDivElement>(null)
   const [durationMs, setDurationMs] = useState(0)
-  const [peaks, setPeaks] = useState<number[]>([])
+  const [envelope, setEnvelope] = useState<AudioEnvelope | null>(null)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [silenceMs, setSilenceMs] = useState(250)
   const [audioUrl, setAudioUrl] = useState('')
@@ -53,12 +55,9 @@ export function RegionEditor({ audioBase64, edits = [], pauseIntervals = [], bou
     const url = URL.createObjectURL(blob)
     setAudioUrl((previous) => { if (previous) URL.revokeObjectURL(previous); return url })
     setDurationMs(Math.round((channels[0].length / decoded.sampleRate) * 1000))
-    const channel = channels[0]
-    const count = 160
-    const width = Math.max(1, Math.floor(channel.length / count))
-    const values = Array.from({ length: count }, (_, index) => { let peak = 0; for (let i = index * width; i < Math.min(channel.length, (index + 1) * width); i++) peak = Math.max(peak, Math.abs(channel[i])); return peak })
-    const max = Math.max(...values, 0.01)
-    setPeaks(values.map((value) => value / max))
+    // The lane draws the *edited* render, so its envelope comes from the same channels --
+    // building it here avoids decoding the WAV we just encoded.
+    setEnvelope(envelopeFromChannels(channels, decoded.sampleRate))
     return () => URL.revokeObjectURL(url)
   }, [decoded, edits])
 
@@ -96,7 +95,7 @@ export function RegionEditor({ audioBase64, edits = [], pauseIntervals = [], bou
     {!readOnly && <div className="flex items-center justify-between"><div><p className="text-xs font-medium">Reference audio editor</p><p className="text-[10px] text-muted-foreground">Playback and waveform include all queued edits.</p></div><Button size="icon-sm" variant="ghost" aria-label="Close audio editor" tooltip="Close audio editor" onClick={onClose}><X /></Button></div>}
     {showPlayer && audioUrl && <MiniAudioDeck src={audioUrl} autoPlay={false} />}
     <div ref={laneRef} className={`relative h-20 overflow-hidden rounded border border-border bg-muted/20 ${readOnly ? 'cursor-default' : 'cursor-crosshair'}`} onMouseDown={startSelection} onMouseMove={(event) => setHoverMs(pointToMs(event.clientX))} onMouseLeave={() => setHoverMs(null)}>
-      <WaveformLane peaks={peaks} durMs={durationMs} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} />
+      <WaveformLane envelope={envelope} durMs={durationMs} trimStartMs={0} trimEndMs={0} fadeInMs={0} fadeOutMs={0} showPeakReadout />
       {pauseIntervals.map(([start, end], index) => <div key={`${start}-${end}-${index}`} className="pointer-events-none absolute inset-y-0 border-x border-warning/40 bg-warning/10" style={{ left: `${start * 1000 / Math.max(1, durationMs) * 100}%`, width: `${(end - start) * 1000 / Math.max(1, durationMs) * 100}%` }} />)}
       {boundaryPlan.map((marker, index) => {
         const pct = Math.max(0, Math.min(100, marker.cut_sample / Math.max(1, renderedSamples) * 100))
@@ -111,7 +110,7 @@ export function RegionEditor({ audioBase64, edits = [], pauseIntervals = [], bou
         const pct = hoverMs / durationMs * 100
         return <>
           <div className="pointer-events-none absolute inset-y-0 z-10 w-px bg-cyan-300" style={{ left: `${pct}%` }} />
-          <span className="pointer-events-none absolute top-0.5 z-10 rounded bg-background/90 px-1 text-[9px] font-mono tabular-nums text-cyan-200 shadow-sm" style={{ left: `${pct}%`, transform: pct <= 8 ? 'translateX(0)' : pct >= 92 ? 'translateX(-100%)' : 'translateX(-50%)' }}>{(hoverMs / 1000).toFixed(3)}s</span>
+          <span className="pointer-events-none absolute top-0.5 z-10 rounded bg-background/90 px-1 text-[9px] font-mono tabular-nums text-cyan-200 shadow-sm" style={{ left: `${pct}%`, transform: pct <= 8 ? 'translateX(0)' : pct >= 92 ? 'translateX(-100%)' : 'translateX(-50%)' }}>{formatHoverTime(hoverMs / 1000)}</span>
         </>
       })()}
     </div>
@@ -120,7 +119,7 @@ export function RegionEditor({ audioBase64, edits = [], pauseIntervals = [], bou
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-muted-foreground">
         <span>◆ manufactured</span><span>● natural</span><span className="text-cyan-300">alignment</span><span className="text-warning">VAD fallback</span><span className="text-violet-300">energy fallback</span>
       </div>
-    ) : <p className="text-[10px] tabular-nums text-muted-foreground">Selection {selected.startMs}-{selected.endMs}ms ({(selected.startMs / 1000).toFixed(3)}-{(selected.endMs / 1000).toFixed(3)}s) · cursor {hoverMs !== null ? `${(hoverMs / 1000).toFixed(3)}s` : '—'} · amber regions are detected pauses</p>}
+    ) : <p className="text-[10px] tabular-nums text-muted-foreground">Selection {selected.startMs}-{selected.endMs}ms ({(selected.startMs / 1000).toFixed(3)}-{(selected.endMs / 1000).toFixed(3)}s) · cursor {hoverMs !== null ? formatHoverTime(hoverMs / 1000) : '—'} · amber regions are detected pauses</p>}
     {!readOnly && <>
     <div className="flex flex-wrap items-center gap-2">
       <Button size="sm" variant="outline" onClick={() => add({ type: 'delete', startMs: selected.startMs, endMs: selected.endMs })}><Scissors /> Delete</Button>

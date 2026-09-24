@@ -80,7 +80,7 @@ export default async function (ctx) {
     await page.type('[data-testid="stitch-voice-name"]', 'Wizard Demo Voice');
     await holdFor(recorder, page, 2000);
 
-    await page.click('[data-testid="stitch-picker-toggle-segments"]');
+    await page.click('[data-testid="stitch-picker-toggle-segments"], [data-testid="empty-state-action"]');
     await page.waitForSelector('[data-testid="segment-browser-dialog"]');
     await page.waitForSelector('[data-testid="stitch-picker-item-segments"]');
     await page.waitForFunction(

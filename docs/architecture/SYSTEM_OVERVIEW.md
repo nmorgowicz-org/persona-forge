@@ -2,7 +2,17 @@
 
 One-paragraph summary:
 
-This system is a single-process, single-image TTS service for running voice-clone speech synthesis on Intel CPUs with OpenVINO acceleration. Its core capabilities are: (1) reference-based voice cloning via a Qwen3-TTS Base checkpoint; (2) programmatic voice creation from a text description using a VoiceDesign checkpoint; (3) accent/tone design and multi-segment auditioning via a separate OmniVoice checkpoint; and (4) segment-level editing (stitching, trimming, loudness, compression) so individual takes can be assembled into a reusable reference voice. Only one model is resident in memory at any time; swaps between Base, VoiceDesign, and OmniVoice are serialized and guarded. The service is wrapped in a Flask API with an optional React frontend (Persona Forge Studio) served from the same container.
+This system is a single-process, single-image TTS service for running voice-clone speech
+synthesis. Its default engine is **pocket-tts** — self-contained, CPU-only, no IR export — with
+Qwen3-TTS available as an opt-in baseline (PyTorch) or accelerated path (OpenVINO on Intel CPUs);
+`TTS_BACKEND` selects between them and `pytorch` is the tested rollback. Its core capabilities are: (1) reference-based voice cloning via a Qwen3-TTS Base checkpoint; (2) programmatic voice creation from a text description using a VoiceDesign checkpoint; (3) accent/tone design and multi-segment auditioning via a separate OmniVoice checkpoint; and (4) segment-level editing (stitching, trimming, loudness, compression) so individual takes can be assembled into a reusable reference voice. Only one model is resident in memory at any time; swaps between Base, VoiceDesign, and OmniVoice are serialized and guarded. The service is wrapped in a Flask API with an optional React frontend (Persona Forge Studio).
+
+**What the service produces.** Speak, generating from a saved voice: the deck's waveform is drawn
+at true scale from the take's own envelope, the meter reads its level in dBFS, and every readout
+carries its unit — the signal layer is documented in
+[FRONTEND_OVERVIEW.md §4](../architecture/FRONTEND_OVERVIEW.md).
+
+![Speak, after generating](../screenshots/speak-generate--pocket-tts--after-generate.png)
 
 High-level component diagram:
 
@@ -63,7 +73,7 @@ Key components:
   - Auto-disables if FRONTEND_ENABLED=0 or dist directory is missing; app remains a pure API service.
 
 - Voice library (src/persona_forge/voice_library.py):
-  - Persists reference voices as WAV+JSON on disk (VOICE_LIBRARY_PATH_CONTAINER).
+  - Persists reference voices as WAV+JSON on disk (VOICE_LIBRARY_DIR).
   - Used by /generate, /v1/audio/speech, and Persona Forge.
 
 - Segment library (src/persona_forge/segment_library.py):
@@ -155,14 +165,14 @@ Volume layout
   - Both mounted persistently; kernel cache alone saves 60–120s per restart.
 
 - Voice library:
-  - Path: VOICE_LIBRARY_PATH_CONTAINER (default /voices).
+  - Path: VOICE_LIBRARY_DIR (default /voices).
   - Contains:
     - voices/<voice_id>/meta.json
     - voices/<voice_id>/reference.wav
   - Read/written by voice_library module and used by both the Speak page and Persona Forge.
 
 - Segment library:
-  - Path: SEGMENT_LIBRARY_PATH_CONTAINER (default /segments).
+  - Path: SEGMENT_LIBRARY_DIR (default /segments).
   - Contains:
     - segments/<segment_id>/meta.json
     - segments/<segment_id>/audio.wav

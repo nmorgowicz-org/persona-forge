@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   AudioLines,
@@ -12,6 +12,7 @@ import {
   Palette,
   Plug,
   Settings2,
+  Search,
   Sparkles,
   Wand2,
   Wrench,
@@ -33,9 +34,21 @@ import {
 } from '@/components/ui/sidebar'
 import { useSidebar } from '@/components/ui/sidebar-context'
 import { ActivityStatusBar } from '@/components/ui/ActivityStatusBar'
+import { CommandPalette, ShortcutKeymap } from '@/components/CommandPalette'
+import { setHelpText } from '@/components/ui/ActivityStatusBar'
+import { TransportReadout } from '@/components/audio/TransportReadout'
+import {
+  isPrimaryModifier,
+  openCommandPalette,
+  openShortcutKeymap,
+  useShortcutScope,
+  type ShortcutCommand,
+} from '@/hooks/useGlobalShortcuts'
 import { Separator } from '@/components/ui/separator'
 import { SwapBanner } from '@/components/SwapBanner'
 import { HealthStatusBanner } from '@/components/HealthStatusBanner'
+import { StartupState } from '@/components/StartupState'
+import { Announcer } from '@/components/ui/announcer'
 import { UpdateAvailableBanner } from '@/components/UpdateAvailableBanner'
 import { getRuntimeConfig, getHealth } from '@/lib/api'
 import { type Page, useAppStore } from '@/store'
@@ -76,7 +89,12 @@ function StudioNav({ page, setPage }: { page: Page; setPage: (page: Page) => voi
       isActive={isActive}
       tooltip={item.label}
       onClick={() => { setPage(item.page); if (isMobile) setOpenMobile(false) }}
-      className={cn('relative transition-all', isActive && 'before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-primary group-data-[collapsible=icon]:before:hidden')}
+      // Active state is light, not paint: an accent rail plus a soft glow, keyed to
+      // --glow-accent so it follows the theme (B-P6).
+      className={cn(
+        'relative transition-all',
+        isActive && 'glow-active before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-primary group-data-[collapsible=icon]:before:hidden',
+      )}
     ><item.icon /><span className="group-data-[collapsible=icon]:hidden">{item.label}</span></SidebarMenuButton></SidebarMenuItem>
   })}</SidebarMenu>
 }
@@ -221,7 +239,7 @@ function ThemePaletteButton() {
           top: pos.y,
           zIndex: 9999,
         }}
-        className="flex gap-1.5 rounded-lg border border-border bg-popover px-2.5 py-1.5 shadow-lg"
+        className="flex gap-1.5 rounded-control border border-border bg-popover px-2.5 py-1.5 shadow-lg"
       >
         {THEMES.map((t) => {
           const active = theme === t
@@ -334,7 +352,7 @@ function SidebarCollapseButton() {
     <button
       type="button"
       onClick={toggleSidebar}
-      className="group/collapse flex w-full items-center justify-between gap-2 rounded-xl border border-border/90 px-3 py-2 text-xs font-medium text-foreground/90 shadow-sm transition-all hover:border-border hover:bg-accent hover:text-foreground hover:shadow"
+      className="group/collapse flex w-full items-center justify-between gap-2 rounded-panel border border-border/90 px-3 py-2 text-xs font-medium text-foreground/90 shadow-sm transition-all hover:border-border hover:bg-accent hover:text-foreground hover:shadow"
       title="Collapse sidebar"
     >
       <span>Collapse sidebar</span>
@@ -347,7 +365,81 @@ export function AppShell({ children }: { children: ReactNode }) {
   const page = useAppStore((s) => s.page)
   const setPage = useAppStore((s) => s.setPage)
   const setRuntimeConfig = useAppStore((s) => s.setRuntimeConfig)
+  const serviceStarted = useAppStore((s) => s.serviceStarted)
+  const healthStatus = useAppStore((s) => s.healthStatus)
+  const healthChecked = useAppStore((s) => s.healthChecked)
+  // Info view (D6): one delegated listener for the whole app. Any control can carry a
+  // `data-help` string and have it explained in the status bar's info strip on hover or
+  // keyboard focus -- no per-control wiring, and nothing renders until there is something to
+  // say.
+  useEffect(() => {
+    const findHelp = (target: EventTarget | null): string | null => {
+      if (!(target instanceof Element)) return null
+      const owner = target.closest('[data-help]')
+      if (!(owner instanceof HTMLElement)) return null
+      return owner.dataset.help?.trim() || null
+    }
+    const onOver = (event: Event) => setHelpText(findHelp(event.target))
+    const onOut = () => setHelpText(null)
+    const onFocus = (event: Event) => setHelpText(findHelp(event.target))
+    const onBlur = () => setHelpText(null)
+    document.addEventListener('pointerover', onOver)
+    document.addEventListener('pointerout', onOut)
+    document.addEventListener('focusin', onFocus)
+    document.addEventListener('focusout', onBlur)
+    return () => {
+      document.removeEventListener('pointerover', onOver)
+      document.removeEventListener('pointerout', onOut)
+      document.removeEventListener('focusin', onFocus)
+      document.removeEventListener('focusout', onBlur)
+    }
+  }, [])
+
   const active = NAV_ITEMS.find((item) => item.page === page)
+
+  // The app-wide layer of the shortcut registry: navigation (one command per nav item, so the
+  // palette cannot drift from the sidebar), the two global keys, and focus-search. Pages
+  // register their own on top -- see hooks/useGlobalShortcuts.ts.
+  const appCommands = useMemo<ShortcutCommand[]>(
+    () => [
+      {
+        id: 'palette.open',
+        label: 'Open command palette',
+        keys: 'Cmd/Ctrl+K',
+        allowInEditable: true,
+        match: (event) => isPrimaryModifier(event) && (event.key === 'k' || event.key === 'K'),
+        run: openCommandPalette,
+      },
+      {
+        id: 'keymap.open',
+        // The wording the stitch-only dialog used, preserved: this row is that dialog's
+        // replacement, now listing every surface rather than one page's keys.
+        label: 'Show this dialog',
+        hint: 'Keyboard shortcuts',
+        keys: '?',
+        match: (event) => event.key === '?' && !event.repeat,
+        run: openShortcutKeymap,
+      },
+      {
+        id: 'search.focus',
+        label: 'Focus search',
+        hint: 'Current page',
+        run: () => {
+          const field = document.querySelector<HTMLInputElement>('input[type="search"], input[placeholder^="Search"]')
+          field?.focus()
+          field?.select()
+        },
+      },
+      ...NAV_ITEMS.map((item) => ({
+        id: `nav.${item.page}`,
+        label: item.label,
+        hint: item.description,
+        run: () => setPage(item.page),
+      })),
+    ],
+    [setPage],
+  )
+  useShortcutScope('app', 'Global', appCommands)
 
   // One-time fetch to initialize Pocket TTS banner state at startup
   useEffect(() => {
@@ -365,12 +457,21 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <SidebarProvider>
+
       <Sidebar collapsible="icon">
         <SidebarHeader className="px-3 py-4">
           <div className="flex items-center gap-2.5 px-1">
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm ring-1 ring-primary/20">
-              <AudioLines className="size-4" />
-            </div>
+            {/* The product mark (D7 = Signal Crucible). It carries its own Obsidian ground, so
+                it reads at 24 px on any theme without a glow behind it -- verified at 16/24/32/48
+                px on light and dark before wiring. */}
+            <img
+              data-testid="app-brand-mark"
+              src="/favicon.svg"
+              alt=""
+              width={24}
+              height={24}
+              className="size-6 shrink-0"
+            />
             <div className="flex flex-col group-data-[collapsible=icon]:hidden">
               <span className="text-sm font-semibold leading-none tracking-tight">Persona Forge</span>
               <span className="text-[11px] text-muted-foreground">Voice Studio</span>
@@ -419,6 +520,18 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="text-sm font-medium leading-none">{active?.label}</span>
             <span className="text-[11px] text-muted-foreground">{active?.description}</span>
           </div>
+          <button
+            type="button"
+            data-testid="command-palette-button"
+            onClick={openCommandPalette}
+            aria-label="Open command palette"
+            title="Search commands (Cmd/Ctrl+K)"
+            className="ml-auto inline-flex h-8 shrink-0 items-center gap-2 rounded-md border border-border bg-background px-2.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <Search className="size-3.5" />
+            <span className="hidden sm:inline">Search</span>
+            <kbd className="hidden rounded border border-border bg-muted px-1 font-mono text-[10px] sm:inline">⌘K</kbd>
+          </button>
         </header>
         <UpdateAvailableBanner />
         <HealthStatusBanner />
@@ -428,6 +541,16 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </SidebarInset>
       <ActivityStatusBar />
+      <TransportReadout />
+      <Announcer />
+      {/* Cold boot, as a layer rather than a replacement. The backend has answered and said it
+          has never started; until it answers at all the shell is what renders, because an
+          unasked question is not a cold boot. A startup failure resolves to the error banner
+          instead. Kept in the same tree so the palette, keymap and banners stay mounted -- they
+          are what the shell is for, and unmounting them mid-boot is a race no test should see. */}
+      {healthChecked && !serviceStarted && healthStatus !== 'error' && <StartupState />}
+      <CommandPalette />
+      <ShortcutKeymap />
     </SidebarProvider>
   )
 }

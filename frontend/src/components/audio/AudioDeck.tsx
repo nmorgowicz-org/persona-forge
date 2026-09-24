@@ -1,42 +1,24 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
-import { Download, Gauge, Pause, Play, Repeat, RotateCcw } from 'lucide-react'
+import { Download, Pause, Play, Repeat, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Waveform } from '@/components/Waveform'
-import { computePeaks } from '@/lib/waveform'
+import { useAudioSource } from '@/hooks/useAudioTransport'
+import { envelopeFromChannels, type AudioEnvelope } from '@/lib/waveform'
+import { getLoudness, type Loudness } from '@/lib/spectrogram'
+import { CLIP_DBFS } from '@/lib/signal'
+import { SpectrogramCanvas } from '@/components/waveform/SpectrogramCanvas'
+import { setSignalView, useSignalView } from '@/lib/spectrogram'
+import { motion } from 'motion/react'
+import { SPRING } from '@/lib/motion'
 import { cn } from '@/lib/utils'
 import { LevelMeter } from './LevelMeter'
-import { SpectralAccent } from './SpectralAccent'
+import { Knob } from '@/components/ui/knob'
 import { AudioStatsStrip } from '../waveform/AudioStatsStrip'
-
+import { useShortcutScope, type ShortcutCommand } from '@/hooks/useGlobalShortcuts'
 // 0.1-increment speed control, styled to match the segment Duration input in
 // SegmentRackRow.tsx so the two "adjust after generation" controls read as a matched pair.
-function SpeedStepper({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const clamp = (v: number) => Math.round(Math.max(0.5, Math.min(2, v)) * 10) / 10
-  return (
-    <div className="flex shrink-0 items-center gap-0.5">
-      <Gauge className="size-3 text-muted-foreground" />
-      <input
-        type="number"
-        min={0.5}
-        max={2}
-        step={0.1}
-        value={value}
-        onChange={(e) => {
-          const v = Number(e.target.value)
-          if (!Number.isNaN(v)) onChange(clamp(v))
-        }}
-        onBlur={(e) => {
-          const v = Number(e.target.value)
-          onChange(Number.isNaN(v) ? 1 : clamp(v))
-        }}
-        aria-label="Playback speed"
-        className="w-12 rounded-md border border-input bg-transparent px-1 py-0.5 text-[9px] outline-none transition-colors focus-visible:border-ring"
-      />
-      <span className="text-[9px] text-muted-foreground">x</span>
-    </div>
-  )
-}
-
+// A-1: drag-scrub + click-to-type + double-click reset to 1.0 + opt-in wheel nudge via the
+// shared useDragScrubValue gesture.
 interface AudioDeckProps {
   src: string
   blob?: Blob | null
@@ -48,7 +30,6 @@ interface AudioDeckProps {
   // rack, where the waveform is the primary thing being judged. 'inline' (default) keeps the
   // original single-row layout used by SpeakPage's result player.
   layout?: 'inline' | 'stacked'
-  showSpectralAccent?: boolean
   title?: string
   seed?: number | null
   metrics?: ComponentProps<typeof AudioStatsStrip>['metrics']
@@ -68,7 +49,6 @@ export function AudioDeck({
   autoPlay = true,
   compact = false,
   layout = 'inline',
-  showSpectralAccent = true,
   title = 'Audio result',
   seed = null,
   metrics = null,
@@ -78,12 +58,48 @@ export function AudioDeck({
   onSpeedChange,
 }: AudioDeckProps) {
   const audioRef = useRef<HTMLAudioElement>(null)
-  const [peaks, setPeaks] = useState<number[] | null>(null)
+  // The deck is one audio source among several (T1): starting it silences whichever was
+  // sounding, and it reports its position to the coordinator.
+  const source = useAudioSource('audio-deck', 'Audio deck')
+  const [envelope, setEnvelope] = useState<AudioEnvelope | null>(null)
+  const [decodeFailed, setDecodeFailed] = useState(false)
+  // Clip stats (P4 / D5): peak, RMS and BS.1770-4 integrated loudness for the whole file.
+  const [stats, setStats] = useState<Loudness | null>(null)
+  const [clipCleared, setClipCleared] = useState(false)
+  // Session-wide, so switching to Spectrum and coming back to the page does not undo it.
+  const view = useSignalView()
   const [isPlaying, setIsPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState<number | null>(null)
   const [isLooping, setIsLooping] = useState(false)
   const [playbackRate, setPlaybackRate] = useState(initialSpeed)
+
+  // The deck's transport joins the shared command registry (M4) so it is discoverable from the
+  // palette and documented in the `?` keymap alongside the rest of the app. It keeps its own
+  // keys to itself -- the deck has never had keyboard bindings, and adding them is not this
+  // card's job. The commands read live closures through a ref so their identity never churns
+  // (a re-registration per render would notify every registry subscriber).
+  const deckActionsRef = useRef({ togglePlay: () => {}, restart: () => {}, toggleLoop: () => {}, download: () => {} })
+  deckActionsRef.current = {
+    togglePlay,
+    restart: () => {
+      const audio = audioRef.current
+      if (audio) audio.currentTime = 0
+      setProgress(0)
+    },
+    toggleLoop: () => setIsLooping((looping) => !looping),
+    download,
+  }
+  const deckCommands = useMemo<ShortcutCommand[]>(
+    () => [
+      { id: 'deck.playPause', label: 'Play or pause this clip', run: () => deckActionsRef.current.togglePlay() },
+      { id: 'deck.restart', label: 'Restart this clip', run: () => deckActionsRef.current.restart() },
+      { id: 'deck.loop', label: 'Toggle looping for this clip', run: () => deckActionsRef.current.toggleLoop() },
+      { id: 'deck.download', label: 'Download this clip', run: () => deckActionsRef.current.download() },
+    ],
+    [],
+  )
+  useShortcutScope('deck', title, deckCommands)
 
   function changeSpeed(v: number) {
     setPlaybackRate(v)
@@ -92,38 +108,41 @@ export function AudioDeck({
   // A drag-selected slice (0..1 fractions) to audition on repeat; overrides whole-clip loop.
   const [region, setRegion] = useState<{ start: number; end: number } | null>(null)
 
-  const currentLevel = useMemo(() => {
-    if (!peaks || peaks.length === 0) return 0
-    const index = Math.max(0, Math.min(peaks.length - 1, Math.floor(progress * peaks.length)))
-    return peaks[index] ?? 0
-  }, [peaks, progress])
-
-  const peakLevel = useMemo(() => Math.max(...(peaks ?? [0])), [peaks])
+  // The clip LED latches on the file's own sample peak and stays latched until cleared -- it is
+  // a record that something clipped, not a live indicator that would blink away.
+  const clipped = !clipCleared && stats != null && stats.peakDbfs >= CLIP_DBFS
 
   useEffect(() => {
-    setPeaks(null)
+    setEnvelope(null)
+    setStats(null)
+    setClipCleared(false)
+    setDecodeFailed(false)
     setProgress(0)
     setIsPlaying(false)
     if (!blob) return
     let cancelled = false
-    computePeaks(blob).then((p) => {
-      if (!cancelled) setPeaks(p)
-    })
+    // One decode feeds both analyses: the waveform envelope (P2) and the loudness stats (P4),
+    // the second computed off-thread by the P3 worker.
+    const run = async () => {
+      try {
+        const ctx = new AudioContext()
+        const buffer = await ctx.decodeAudioData(await blob.arrayBuffer())
+        const samples = buffer.getChannelData(0)
+        const nextEnvelope = envelopeFromChannels([samples], buffer.sampleRate)
+        const nextStats = await getLoudness(`loudness:deck:${src}:${blob.size}`, samples, buffer.sampleRate)
+        void ctx.close()
+        if (cancelled) return
+        setEnvelope(nextEnvelope)
+        setStats(nextStats)
+      } catch {
+        if (!cancelled) setDecodeFailed(true)
+      }
+    }
+    void run()
     return () => {
       cancelled = true
     }
-  }, [blob])
-
-  useEffect(() => {
-    if (!blob || duration == null || !isFinite(duration)) return
-    let cancelled = false
-    computePeaks(blob, Math.max(24, Math.min(120, Math.round(duration * 24)))).then((p) => {
-      if (!cancelled) setPeaks(p)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [blob, duration])
+  }, [blob, src])
 
   useEffect(() => {
     if (!autoPlay) return
@@ -155,6 +174,16 @@ export function AudioDeck({
     audio.currentTime = pct * duration
   }
 
+  // Alt-drag scrub: move the playhead with the pointer. `progress` is mirrored immediately
+  // (a paused element does not reliably emit timeupdate on seek) so the deck's playhead
+  // tracks the gesture even when nothing is playing.
+  function handleScrub(pct: number) {
+    const audio = audioRef.current
+    if (!audio || duration == null) return
+    audio.currentTime = pct * duration
+    setProgress(pct)
+  }
+
   // A drag on the waveform selects a slice, then plays it; a click clears any slice.
   function handleSelectRegion(next: { start: number; end: number } | null) {
     setRegion(next)
@@ -174,7 +203,7 @@ export function AudioDeck({
   return (
     <section
       className={cn(
-        'rounded-lg border border-border bg-card/95 text-card-foreground shadow-sm ring-1 ring-white/5',
+        'rounded-control border border-border bg-card/95 text-card-foreground shadow-sm ring-1 ring-white/5',
         compact ? 'p-2' : 'p-3',
         className,
       )}
@@ -187,11 +216,19 @@ export function AudioDeck({
           const d = e.currentTarget.duration
           if (d != null && isFinite(d)) setDuration(d)
         }}
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
+        onPlay={() => {
+          setIsPlaying(true)
+          // One claim per deck: starting any deck silences whichever was sounding.
+          source.claim(() => audioRef.current?.pause())
+        }}
+        onPause={() => {
+          setIsPlaying(false)
+          source.release()
+        }}
         onEnded={() => {
           setIsPlaying(false)
           setProgress(0)
+          source.release()
         }}
         onTimeUpdate={(e) => {
           const audio = e.currentTarget
@@ -200,36 +237,107 @@ export function AudioDeck({
           if (region && audio.currentTime / audio.duration >= region.end) {
             audio.currentTime = region.start * audio.duration
           }
+          source.report(audio.currentTime, audio.duration)
           setProgress(audio.currentTime / audio.duration)
         }}
         className="hidden"
       />
 
+      {/* Clip stats (P4 / D5): peak, RMS and integrated loudness of the file itself. These are
+          properties of the audio, not of the playback, so they never move. */}
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className="micro-label">Clip</span>
+        <span className="readout" data-testid="deck-peak-readout">
+          {stats ? (stats.peakDbfs === -Infinity ? '−∞' : stats.peakDbfs.toFixed(1)) : '—'}
+          <span className="readout-unit">dBFS peak</span>
+        </span>
+        <span className="readout" data-testid="deck-lufs-readout">
+          {stats ? (stats.lufs === -Infinity ? '−∞' : stats.lufs.toFixed(1)) : '—'}
+          <span className="readout-unit">LUFS</span>
+        </span>
+        <button
+          type="button"
+          data-testid="deck-clip-led"
+          data-state={clipped ? 'on' : 'off'}
+          onClick={() => setClipCleared(true)}
+          title={clipped ? 'This clip reached full scale. Click to clear.' : 'No sample reached full scale.'}
+          className={cn(
+            'rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase transition-colors',
+            clipped
+              ? 'border-destructive/60 bg-destructive/20 text-destructive'
+              : 'border-border/60 text-muted-foreground/60',
+          )}
+        >
+          Clip
+        </button>
+      </div>
+
       {layout === 'stacked' ? (
-        <div className="flex flex-col gap-2">
-          <Waveform
-            peaks={peaks ?? Array(64).fill(0.15)}
-            progress={progress}
-            duration={duration}
-            className="h-28"
-            onClick={handleSeek}
-            selection={region}
-            onSelectRegion={handleSelectRegion}
-          />
+        <div data-testid="transport-strip" className="flex flex-col gap-2">
+          <div className="flex items-center gap-1">
+            {(['wave', 'spectrum'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                data-testid={mode === 'wave' ? 'view-wave' : 'view-spectrum'}
+                aria-pressed={view === mode}
+                onClick={() => setSignalView(mode)}
+                className={cn(
+                  'rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors',
+                  view === mode
+                    ? 'border-border bg-background text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {mode === 'wave' ? 'Wave' : 'Spectrum'}
+              </button>
+            ))}
+          </div>
+          {view === 'spectrum' ? (
+            <SpectrogramCanvas
+              blob={blob ?? null}
+              cacheKey={src ? `spectrogram:deck:${src}:${blob?.size ?? 0}` : null}
+              mediaRef={audioRef}
+              playing={isPlaying}
+              className="h-28 rounded-md"
+              testId="deck-spectrogram"
+            />
+          ) : (
+            <Waveform
+              envelope={envelope}
+              failed={decodeFailed}
+              mediaRef={audioRef}
+              playing={isPlaying}
+              progress={progress}
+              duration={duration}
+              className="h-28"
+              onClick={handleSeek}
+              selection={region}
+              onSelectRegion={handleSelectRegion}
+              onScrub={handleScrub}
+              testId="deck-waveform"
+            />
+          )}
           <div className="flex flex-wrap items-center gap-1">
             <Button
               type="button"
-              size="icon-sm"
+              size="icon"
               variant="secondary"
               className="rounded-full"
               onClick={togglePlay}
               aria-label={isPlaying ? 'Pause audio' : 'Play audio'}
             >
-              {isPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5 translate-x-px" />}
+              <motion.span
+                className="inline-flex items-center justify-center"
+                whileTap={{ scale: 0.92 }}
+                transition={SPRING.snappy}
+              >
+                {isPlaying ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
+              </motion.span>
             </Button>
             <Button
               type="button"
-              size="icon-sm"
+              size="icon"
               variant="ghost"
               onClick={() => {
                 const audio = audioRef.current
@@ -238,86 +346,164 @@ export function AudioDeck({
               }}
               aria-label="Restart audio"
             >
-              <RotateCcw className="size-3.5" />
+              <motion.span className="inline-flex items-center justify-center" whileTap={{ scale: 0.92 }} transition={SPRING.snappy}><RotateCcw className="size-4" /></motion.span>
             </Button>
             <Button
               type="button"
-              size="icon-sm"
+              size="icon"
               variant="ghost"
               onClick={() => setIsLooping(!isLooping)}
               tooltip="Toggle loop"
               aria-label="Toggle loop"
             >
-              <Repeat className={cn('size-3.5', isLooping ? 'text-primary' : 'text-muted-foreground')} />
+              <motion.span className="inline-flex items-center justify-center" whileTap={{ scale: 0.92 }} transition={SPRING.snappy}><Repeat className={cn('size-4', isLooping ? 'text-primary' : 'text-muted-foreground')} /></motion.span>
             </Button>
-            <LevelMeter level={currentLevel} peak={peakLevel} />
-            <SpeedStepper value={playbackRate} onChange={changeSpeed} />
-            <Button type="button" size="icon-sm" variant="ghost" onClick={download} tooltip="Download" aria-label="Download audio">
-              <Download className="size-3.5 text-muted-foreground" />
+            <LevelMeter
+              envelope={envelope}
+              mediaRef={audioRef}
+              playing={isPlaying}
+              progress={progress}
+              className="flex-1"
+            />
+            <Knob
+              testId="deck-speed"
+              label="Speed"
+              value={playbackRate}
+              min={0.5}
+              max={2}
+              step={0.1}
+              defaultValue={1}
+              size={30}
+              dragScale={0.01}
+              format={(v) => `${v.toFixed(1)}×`}
+              onChange={changeSpeed}
+            />
+            <Button type="button" size="icon" variant="ghost" onClick={download} tooltip="Download" aria-label="Download audio">
+              <Download className="size-4 text-muted-foreground" />
             </Button>
           </div>
         </div>
       ) : (
-        <div className={cn('grid gap-3', compact ? 'grid-cols-[auto_1fr_auto]' : 'grid-cols-[auto_1fr] md:grid-cols-[auto_1fr_9rem]')}>
+        <div data-testid="transport-strip" className={cn('grid gap-3', compact ? 'grid-cols-[auto_1fr_auto]' : 'grid-cols-[auto_1fr] md:grid-cols-[auto_1fr_9rem]')}>
           <div className="flex items-center gap-1.5">
             <Button
               type="button"
-              size={compact ? 'icon-sm' : 'icon'}
+              size="icon"
               variant="secondary"
               className="rounded-full"
               onClick={togglePlay}
               aria-label={isPlaying ? 'Pause audio' : 'Play audio'}
             >
-              {isPlaying ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
+              <motion.span
+                className="inline-flex items-center justify-center"
+                whileTap={{ scale: 0.92 }}
+                transition={SPRING.snappy}
+              >
+                {isPlaying ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
+              </motion.span>
+            </Button>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              onClick={() => {
+                const audio = audioRef.current
+                if (audio) audio.currentTime = 0
+                setProgress(0)
+              }}
+              aria-label="Restart audio"
+            >
+              <motion.span className="inline-flex items-center justify-center" whileTap={{ scale: 0.92 }} transition={SPRING.snappy}><RotateCcw className="size-4" /></motion.span>
             </Button>
             {!compact && (
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                onClick={() => {
-                  const audio = audioRef.current
-                  if (audio) audio.currentTime = 0
-                  setProgress(0)
-                }}
-                aria-label="Restart audio"
-              >
-                <RotateCcw className="size-3.5" />
-              </Button>
+              <div className="flex items-center gap-1">
+                {(['wave', 'spectrum'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    data-testid={mode === 'wave' ? 'view-wave' : 'view-spectrum'}
+                    aria-pressed={view === mode}
+                    onClick={() => setSignalView(mode)}
+                    className={cn(
+                      'rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors',
+                      view === mode
+                        ? 'border-border bg-background text-foreground'
+                        : 'border-transparent text-muted-foreground hover:text-foreground',
+                    )}
+                  >
+                    {mode === 'wave' ? 'Wave' : 'Spectrum'}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
 
           <div className="min-w-0">
+            {view === 'spectrum' && !compact ? (
+              // 112 px, not the waveform's 40: the log axis needs room before formants are
+              // readable, and this is the height the stacked deck already gives a signal view.
+              // Owner decision, 2026-09-23, from the three-way comparison in
+              // docs/screenshots/artifacts/_gates/B-P3/heights/.
+              <SpectrogramCanvas
+                blob={blob ?? null}
+                cacheKey={src ? `spectrogram:deck:${src}:${blob?.size ?? 0}` : null}
+                mediaRef={audioRef}
+                playing={isPlaying}
+                className="h-28 rounded-md"
+                testId="deck-spectrogram"
+              />
+            ) : (
             <Waveform
-              peaks={peaks ?? Array(64).fill(0.15)}
+              envelope={envelope}
+              failed={decodeFailed}
+              mediaRef={audioRef}
+              playing={isPlaying}
               progress={progress}
               duration={compact ? null : duration}
               className={compact ? 'h-10' : undefined}
               onClick={handleSeek}
               selection={region}
               onSelectRegion={handleSelectRegion}
+              onScrub={handleScrub}
+              testId="deck-waveform"
             />
-            {!compact && showSpectralAccent && <SpectralAccent peaks={peaks} className="mt-2" />}
+            )}
           </div>
 
           <div className={cn('flex items-center gap-1', compact ? '' : 'justify-end md:flex-col md:items-stretch')}>
-            {!compact && <LevelMeter level={currentLevel} peak={peakLevel} />}
+            <LevelMeter
+              envelope={envelope}
+              mediaRef={audioRef}
+              playing={isPlaying}
+              progress={progress}
+              className={compact ? 'min-w-20' : undefined}
+            />
             <div className="flex items-center justify-end gap-1">
               <Button
                 type="button"
-                size="icon-sm"
+                size="icon"
                 variant="ghost"
                 onClick={() => setIsLooping(!isLooping)}
                 tooltip="Toggle loop"
                 aria-label="Toggle loop"
               >
-                <Repeat className={cn('size-3.5', isLooping ? 'text-primary' : 'text-muted-foreground')} />
+                <motion.span className="inline-flex items-center justify-center" whileTap={{ scale: 0.92 }} transition={SPRING.snappy}><Repeat className={cn('size-4', isLooping ? 'text-primary' : 'text-muted-foreground')} /></motion.span>
               </Button>
-              {!compact && (
-                <SpeedStepper value={playbackRate} onChange={changeSpeed} />
-              )}
-              <Button type="button" size="icon-sm" variant="ghost" onClick={download} tooltip="Download" aria-label="Download audio">
-                <Download className="size-3.5 text-muted-foreground" />
+              <Knob
+              testId="deck-speed"
+              label="Speed"
+              value={playbackRate}
+              min={0.5}
+              max={2}
+              step={0.1}
+              defaultValue={1}
+              size={30}
+              dragScale={0.01}
+              format={(v) => `${v.toFixed(1)}×`}
+              onChange={changeSpeed}
+            />
+              <Button type="button" size="icon" variant="ghost" onClick={download} tooltip="Download" aria-label="Download audio">
+                <Download className="size-4 text-muted-foreground" />
               </Button>
             </div>
           </div>
