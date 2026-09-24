@@ -8,6 +8,12 @@ for the container-path-vs-native-path mapping).
 
 ## Quick start (pocket-tts, no export required)
 
+**What "ready" looks like.** Once `/health` reports `"model_loaded": true`, Speak generates
+immediately — no export step, no GPU. The take below came from the default pocket-tts engine on
+CPU.
+
+![Speak after generating](screenshots/speak-generate--pocket-tts--after-generate.png)
+
 Persona Forge's default backend is pocket-tts (self-contained, no export step). This section covers
 the zero-friction path. For optional Qwen3-TTS with OpenVINO acceleration, see the "Export
 (optional)" section below.

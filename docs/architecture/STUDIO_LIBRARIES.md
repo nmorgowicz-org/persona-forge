@@ -9,6 +9,13 @@ voices and segments.
 
 ## Voice library
 
+**The library as it looks.** Each card carries the voice's identity (family, project, source),
+its reference text, and a measured reference fingerprint — duration, speech rate, pause ratio,
+LUFS, peak and true peak, each with its unit. Variants live under the card, and the prosody
+controls open in place.
+
+![Voice library variants](../screenshots/voice-variant-list--neutral--variant-list.png)
+
 - Module: `src/persona_forge/voice_library.py`.
 - Container path: `/voices` (`VOICE_LIBRARY_DIR`; compose binds the host's
   `${VOICE_LIBRARY_PATH:-./data/voices}`).

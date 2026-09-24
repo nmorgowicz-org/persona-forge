@@ -59,6 +59,12 @@ Only one model may be loaded at a time.
 
 ## End-to-end workflow
 
+**Candidates per segment.** One accent, one script, several takes per segment — each auditioned
+in place before any of them is locked into the segment library. The lanes draw each candidate's
+own waveform, and only one of them can sound at a time.
+
+![OmniVoice candidates](../screenshots/omnivoice-audition--omnivoice--audition-candidates.png)
+
 1. Audition request
 
    - `POST /omnivoice/audition`:
