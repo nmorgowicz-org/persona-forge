@@ -7,7 +7,7 @@
 // slider role -- because a knob that behaved differently from the fields beside it would be
 // two controls pretending to be one.
 import { useCallback, useRef, useState } from 'react'
-import { NUMERIC_CONTROL_FOCUS_CLASS, parseNumericText, useDragScrubValue } from '@/hooks/useDragScrubValue'
+import { NUMERIC_CONTROL_FOCUS_CLASS, parseNumericText, quantiseToStep, useDragScrubValue } from '@/hooks/useDragScrubValue'
 import { cn } from '@/lib/utils'
 
 /** Sweep of the arc, centred on straight up: -135deg to +135deg. */
@@ -41,6 +41,8 @@ export interface KnobProps {
   size?: number
   /** Value units per dragged pixel. Defaults to the whole range over 140 px. */
   dragScale?: number
+  /** Override the settle rounding. Defaults to the nearest multiple of `step`. */
+  round?: (value: number) => number
   testId?: string
 }
 
@@ -56,6 +58,7 @@ export function Knob({
   disabled = false,
   size = 44,
   dragScale,
+  round,
   testId,
 }: KnobProps) {
   const [hovered, setHovered] = useState(false)
@@ -86,6 +89,9 @@ export function Knob({
     dragThreshold: 2,
     shiftStep: step * 5,
     parse: parseNumericText,
+    // On the step grid, not Math.round: a knob with a fractional step would otherwise snap
+    // every value to a whole number and appear not to move.
+    round: round ?? quantiseToStep(min, max, step),
     defaultValue,
     wheel: true,
     axis: 'y',

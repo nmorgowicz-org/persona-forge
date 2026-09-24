@@ -48,6 +48,22 @@ export function parseNumericText(raw: string): number | null {
  * arrow keys adjust the value, so the −/+ buttons stay out of the tab order. */
 export const NUMERIC_CONTROL_FOCUS_CLASS = 'outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50'
 
+/**
+ * A `round` for controls whose value lives on a step grid: the nearest multiple of `step`,
+ * clamped, with float dust removed.
+ *
+ * The hook's default (`Math.round`) is right for the millisecond fields, whose step is 1 or 10.
+ * It is wrong for anything with a fractional step: a knob whose step is 0.1 would snap every
+ * value to a whole number, so a drag would move the arc and leave the number where it was.
+ */
+export function quantiseToStep(min: number, max: number, step: number): (value: number) => number {
+  const grid = step > 0 ? step : 1
+  return (value) => {
+    const clamped = Math.max(min, Math.min(max, value))
+    return Number((Math.round(clamped / grid) * grid).toFixed(6))
+  }
+}
+
 /** Shared styling for the unit label that follows a numeric control's value. */
 export const NUMERIC_CONTROL_UNIT_CLASS = 'shrink-0 font-mono text-[10px] text-muted-foreground/70'
 

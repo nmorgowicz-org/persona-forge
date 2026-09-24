@@ -6,7 +6,7 @@
 // Shift for fine, double-click to reset, wheel to nudge, click to type, arrow keys, slider role,
 // and a value bubble while you drag.
 import { useCallback, useRef, useState } from 'react'
-import { NUMERIC_CONTROL_FOCUS_CLASS, parseNumericText, useDragScrubValue } from '@/hooks/useDragScrubValue'
+import { NUMERIC_CONTROL_FOCUS_CLASS, parseNumericText, quantiseToStep, useDragScrubValue } from '@/hooks/useDragScrubValue'
 import { cn } from '@/lib/utils'
 
 export interface FaderProps {
@@ -62,6 +62,8 @@ export function Fader({
     dragScale: (max - min) / width,
     dragThreshold: 2,
     shiftStep: step * 5,
+    // Same reason as the knob: on the step grid, not Math.round.
+    round: quantiseToStep(min, max, step),
     parse: parseNumericText,
     defaultValue,
     wheel: true,
