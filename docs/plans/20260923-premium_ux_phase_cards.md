@@ -744,6 +744,13 @@ dialog/menu primitives in `components/ui/`; transport buttons; `lib/motion.ts`
 markup; components rendering time/level readouts (class changes only); new
 `tests/ui/core/readouts.spec.js`; ledgers.
 
+**Allowed-files extension (owner-approved 2026-09-24):** `components/VoiceSelector.tsx`
+and `components/prosody/ProsodyControls.tsx` — the VOICE and Style Preset selects live
+there, so the RED's "every `select`" cannot pass without them. Also the readout
+components the sweep named beyond the card's list (`Waveform.tsx`,
+`stitch/TimelineRuler.tsx`, `StitchTimeline.tsx`, `waveform/AudioStatsStrip.tsx`,
+`pages/VoiceLibraryPage.tsx`) — all one-word `tabular-nums` additions.
+
 **RED:** every `select`/combobox on Speak, Voice Design, and Voice Edit has an
 accessible name matching a visible `.micro-label` (VOICE, LANGUAGE, and the
 `Off` control's real function — find what it controls in `SpeakPage.tsx`);

@@ -536,9 +536,9 @@ consumes its tokens; P2 before P3/P4 — both consume its envelope and clock.
 | P4 transport + metering | PASS 2026-09-23 (metering 5/5, suite 136/0/1 skipped) | 1e18747 | fixes A1, A2; true dBFS meter, BS.1770-4 LUFS, one strip in every deck |
 | P5 knob/fader | PASS 2026-09-23 (knob 6/6, 18/18 over repeats, suite 140/0/1 skipped) | bc8bffa | D2 = accepted; DSP row is knobs + one fader, deck speed is a compact knob |
 | P6 chrome | PASS 2026-09-23 (chrome 5/5, suite 142/0/1 skipped, four-theme shell captures) | 1c036d7 | fixes A10, A11; D6 info strip, D7 Signal Crucible mark wired after the 16/24/32/48 optical gate |
-| P7 motion | | | |
-| P8 readouts | | | |
-| P9 async states | | | |
+| P7 motion | PASS 2026-09-23 (motion 4/4, 8/8 over repeats; suite 142/0/1 skipped) | c159c31 | Tokens only — the reorder's real defect was a CSS transition interpolating against motion's `layout`. Recorded by that session in R §7; filled in here at B-P9 because P12 requires all three ledgers complete. |
+| P8 readouts | PASS 2026-09-24 (readouts 4/4; suite 156/0/1 skipped) | 06c0f22 | Labels name the parameter, not the value that happens to sit in it ("Off" was the tone/polish control's whole identity); every time and level readout is tabular, enforced as a shape rule rather than a testid list — which is how four surfaces the card never named were caught. Details in R §7. |
+| P9 async states | PASS 2026-09-24 (async-states 4/4, +1/1 under `slow_async`; suite 160/0/2 skipped) | b44bcad | N3/N4 absorbed: one announcer (`components/ui/announcer.tsx`, six call sites), radix `Progress` on Speak's real `progress_pct`, `EmptyState` with the startup field's motif on Stitch and Library, and a cold-boot splash (mark 72px over the dimmed field, stepped readout, gated on `/health` having answered). **N4's gate-in paid for itself:** the progress value was *not* real — the fake reported a flat 25% for every running job — so it was fixed at the source (`fake_runtime.py` derives the percentage from frames; the `slow_async` profile ramps them). Details and deviations in R §7. |
 | P10 residue + verdict | | | |
 | P11 docs + media | | | |
 | P12 archive + PR | | | |
