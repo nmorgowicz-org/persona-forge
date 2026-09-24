@@ -558,7 +558,7 @@ export const StitchTimeline = memo(function StitchTimeline({
               <button type="button" data-testid="stitch-zoom-in" className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={zoomIn} aria-label="Zoom in">
                 <Plus className="size-3.5" />
               </button>
-              <span data-testid="stitch-zoom-level" className="px-1 text-[10px] font-mono text-muted-foreground/70">{Math.round(pixelsPerSecond)}px/s</span>
+              <span data-testid="stitch-zoom-level" className="px-1 text-[10px] font-mono tabular-nums text-muted-foreground/70">{Math.round(pixelsPerSecond)}px/s</span>
             </div>
             <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-background px-2.5 text-xs hover:bg-muted" onClick={autoPace}>
               <Gauge className="size-3.5" /> Auto-pace

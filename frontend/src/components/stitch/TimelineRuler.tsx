@@ -186,7 +186,7 @@ export function TimelineRuler({
           className="absolute top-0 border-l border-border/20"
           style={{ left: tick.x, height: laneHeightPx }}
         >
-          <span className="absolute top-0 ml-1 whitespace-nowrap text-[10px] font-mono text-muted-foreground/50">
+          <span className="absolute top-0 ml-1 whitespace-nowrap text-[10px] font-mono tabular-nums text-muted-foreground/50">
             {tick.label}
           </span>
         </div>

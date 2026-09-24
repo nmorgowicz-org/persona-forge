@@ -1,4 +1,4 @@
-import { useMemo, useRef, useCallback, useState } from 'react'
+import { useMemo, useRef, useCallback, useId, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Disclose } from './Disclose'
 import { createVoiceDesign, saveVoiceDesign } from '../lib/api'
@@ -176,6 +176,11 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
     },
     [setManualDescription],
   )
+
+  // The labels above the parameter dropdowns name them by id, so the accessible name and the
+  // visible text cannot drift apart (B-P8).
+  const languageLabelId = useId()
+  const exampleLabelId = useId()
 
   const handleStop = useCallback(() => {
     if (!isGenerating) return
@@ -426,13 +431,18 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
           />
 
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-            <Select value="" onValueChange={applyExample}>
-              <SelectTrigger
-                data-testid="voice-design-example-select"
-                className="h-7 w-auto gap-1.5 border-none bg-transparent px-0 text-[11px] text-muted-foreground underline decoration-dotted hover:text-foreground"
-              >
-                <SelectValue placeholder="Insert a tried-and-true example…" />
-              </SelectTrigger>
+            <div className="flex flex-col gap-1">
+              <span id={exampleLabelId} className="micro-label">
+                Examples
+              </span>
+              <Select value="" onValueChange={applyExample}>
+                <SelectTrigger
+                  data-testid="voice-design-example-select"
+                  aria-labelledby={exampleLabelId}
+                  className="h-7 w-auto gap-1.5 border-none bg-transparent px-0 text-[11px] text-muted-foreground underline decoration-dotted hover:text-foreground"
+                >
+                  <SelectValue placeholder="Insert a tried-and-true example…" />
+                </SelectTrigger>
               <SelectContent>
                 {VOICE_DESIGN_EXAMPLES.map(
                   (example) => (
@@ -446,6 +456,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
                 )}
               </SelectContent>
             </Select>
+            </div>
             <button
               type="button"
               onClick={() =>
@@ -493,13 +504,17 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Select
-            value={language}
-            onValueChange={setLanguage}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
+          <div className="flex flex-col gap-1">
+            <span id={languageLabelId} className="micro-label">
+              Language
+            </span>
+            <Select
+              value={language}
+              onValueChange={setLanguage}
+            >
+              <SelectTrigger aria-labelledby={languageLabelId}>
+                <SelectValue />
+              </SelectTrigger>
             <SelectContent>
               <SelectItem value="English">
                 English
@@ -509,6 +524,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
               </SelectItem>
             </SelectContent>
           </Select>
+          </div>
 
           <Disclose level="expert" className="flex items-center gap-1">
             <input

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import {
   AlertCircle,
@@ -153,6 +153,10 @@ export function SpeakPage() {
     serviceStarted,
   } = useAppStore()
   const [language, setLanguage] = useState('English')
+  // The two parameter dropdowns get labels wired by id, so the name a screen reader reads is
+  // the same text that is visible above the control (B-P8).
+  const languageLabelId = useId()
+  const polishLabelId = useId()
   const [stylePreset, setStylePreset] = useState<(typeof POLISH_OPTIONS)[number]['id']>('off')
   const [seedInput, setSeedInput] = useState('')
   const [builtInVoices, setBuiltInVoices] = useState<BuiltInVoiceMeta[]>([])
@@ -364,33 +368,45 @@ export function SpeakPage() {
             onChange={handleVoiceChange}
           />
 
-          <Select value={language} onValueChange={setLanguage}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="English">English</SelectItem>
-              <SelectItem value="Chinese">Chinese</SelectItem>
-              <SelectItem value="French">French</SelectItem>
-              <SelectItem value="German">German</SelectItem>
-              <SelectItem value="Italian">Italian</SelectItem>
-              <SelectItem value="Portuguese">Portuguese</SelectItem>
-              <SelectItem value="Spanish">Spanish</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex flex-col gap-1">
+            <span id={languageLabelId} className="micro-label">
+              Language
+            </span>
+            <Select value={language} onValueChange={setLanguage}>
+              <SelectTrigger aria-labelledby={languageLabelId}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="English">English</SelectItem>
+                <SelectItem value="Chinese">Chinese</SelectItem>
+                <SelectItem value="French">French</SelectItem>
+                <SelectItem value="German">German</SelectItem>
+                <SelectItem value="Italian">Italian</SelectItem>
+                <SelectItem value="Portuguese">Portuguese</SelectItem>
+                <SelectItem value="Spanish">Spanish</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-          <Select value={stylePreset} onValueChange={(value) => setStylePreset(value as typeof stylePreset)}>
-            <SelectTrigger className="w-44">
-              <SelectValue placeholder="Tone / polish" />
-            </SelectTrigger>
-            <SelectContent>
-              {POLISH_OPTIONS.map((option) => (
-                <SelectItem key={option.id} value={option.id}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex flex-col gap-1">
+            {/* Its value reads "Off", which is a state, not a function. The label names what
+                the control does: post-processing applied to the finished render. */}
+            <span id={polishLabelId} className="micro-label">
+              Post-processing
+            </span>
+            <Select value={stylePreset} onValueChange={(value) => setStylePreset(value as typeof stylePreset)}>
+              <SelectTrigger className="w-44" aria-labelledby={polishLabelId}>
+                <SelectValue placeholder="Tone / polish" />
+              </SelectTrigger>
+              <SelectContent>
+                {POLISH_OPTIONS.map((option) => (
+                  <SelectItem key={option.id} value={option.id}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
            <InfoIcon 
              text="Tone / polish applies real post-processing after generation. Voice variants still control the performance; polish only finishes the rendered audio." 

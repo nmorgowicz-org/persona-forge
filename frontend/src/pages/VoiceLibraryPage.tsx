@@ -531,7 +531,7 @@ function VoiceMetricChip({
         </div>
       </div>
       <div className="flex items-center justify-between gap-2 mt-1">
-        <span className="truncate font-mono text-[10px] text-muted-foreground/60">{value}</span>
+        <span className="truncate font-mono text-[10px] tabular-nums text-muted-foreground/60">{value}</span>
         <div className="flex items-center gap-2">
           {delta && (
             <span className={cn('font-mono text-[10px] font-medium', delta.isPositive ? 'text-success' : 'text-destructive')}>
@@ -606,7 +606,7 @@ function VoiceMetricsPanel({ metrics, busy, onAnalyze, expanded, onToggle, previ
           <TriageBadge triage={metrics.triage} />
         </div>
         {finiteNumber(metrics.sample_rate) !== null && (
-          <span className="font-mono text-[10px] text-muted-foreground">
+          <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
             {formatNumber(metrics.sample_rate, 0, ' Hz')}
           </span>
         )}

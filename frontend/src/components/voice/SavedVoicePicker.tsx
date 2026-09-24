@@ -22,7 +22,7 @@ export function SavedVoicePicker({ voices, selectedId, onChange, search, onSearc
 
   return (
     <div className="flex flex-col gap-2">
-      <label className="text-xs font-medium text-muted-foreground" htmlFor="voice-edit-search">Saved voice</label>
+      <label className="micro-label" htmlFor="voice-edit-search">Search</label>
       <input
         id="voice-edit-search"
         value={search}
@@ -30,12 +30,13 @@ export function SavedVoicePicker({ voices, selectedId, onChange, search, onSearc
         placeholder="Search saved voices…"
         className="h-9 rounded-md border border-border bg-background px-3 text-sm"
       />
+      <label className="micro-label" htmlFor="voice-edit-picker">Saved voice</label>
       <select
+        id="voice-edit-picker"
         data-testid="voice-edit-picker"
         value={selectedId ?? ''}
         onChange={(event) => onChange(event.currentTarget.value)}
         className="h-10 rounded-md border border-border bg-background px-3 text-sm"
-        aria-label="Choose a saved voice"
       >
         <option value="" disabled>Choose a saved voice</option>
         {matches.map((voice) => (

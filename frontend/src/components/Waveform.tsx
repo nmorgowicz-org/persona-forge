@@ -202,7 +202,7 @@ export function Waveform({
             <span
               key={i}
               className={cn(
-                'absolute -bottom-0 text-[9px] font-mono text-muted-foreground/50',
+                'absolute -bottom-0 text-[9px] font-mono tabular-nums text-muted-foreground/50',
                 t.pos >= 99.5 ? '-translate-x-full' : '-translate-x-1/2',
               )}
               style={{ left: `${t.pos}%` }}
