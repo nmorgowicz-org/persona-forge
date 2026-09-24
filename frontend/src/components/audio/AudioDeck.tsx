@@ -430,12 +430,16 @@ export function AudioDeck({
 
           <div className="min-w-0">
             {view === 'spectrum' && !compact ? (
+              // 112 px, not the waveform's 40: the log axis needs room before formants are
+              // readable, and this is the height the stacked deck already gives a signal view.
+              // Owner decision, 2026-09-23, from the three-way comparison in
+              // docs/screenshots/artifacts/_gates/B-P3/heights/.
               <SpectrogramCanvas
                 blob={blob ?? null}
                 cacheKey={src ? `spectrogram:deck:${src}:${blob?.size ?? 0}` : null}
                 mediaRef={audioRef}
                 playing={isPlaying}
-                className="h-10 rounded-md"
+                className="h-28 rounded-md"
                 testId="deck-spectrogram"
               />
             ) : (
