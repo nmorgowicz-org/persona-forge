@@ -180,6 +180,7 @@ export function SpectrogramCanvas({
 
   return (
     <div
+      data-testid={testId}
       className={cn('relative flex h-full w-full items-center overflow-hidden', className)}
       onPointerMove={onPointerMove}
       onPointerLeave={() => {
@@ -196,10 +197,7 @@ export function SpectrogramCanvas({
           />
         </>
       ) : (
-        <div
-          data-testid={testId}
-          className="relative flex h-full w-full items-center justify-center overflow-hidden"
-        >
+        <div className="relative flex h-full w-full items-center justify-center overflow-hidden">
           <div className="h-1/3 w-2/3 animate-pulse rounded-sm bg-muted/40" />
           <div data-testid="spectrogram-skeleton" className="absolute inset-0" />
         </div>
