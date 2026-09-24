@@ -1,5 +1,69 @@
 # Changelog
 
+## [2.0.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.5.0...persona-forge-v2.0.0) (2026-09-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ui:** luminous instrument redesign and Signal Crucible rebrand
+
+### Features
+
+* **ui:** A/B plan snapshots ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** arrangement loop brace and exclusive audition ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** chrome depth, header grammar, info strip, and brand mark ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** clip, seam, and segment context menus ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** crafted async states ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** cursor-anchored zoom and hover time guide ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** drag-scrubbable numeric controls ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** exclusive audition for the last two audio owners ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** give the deck spectrogram the height its axis needs ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** global command palette ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** instrument transport strip with true dBFS metering ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** knob and fader instrument controls ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** label parameter dropdowns and make every readout tabular ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** luminous instrument redesign and Signal Crucible rebrand ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** luminous material, signal, and motion token layer ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** motion-as-feedback system ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** one hover time readout across every waveform surface ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** pointer-safe waveform and numeric grammar ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** residue sweep and craft verdict ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** shared audio transport coordinator ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** spectrogram view for decoded clips ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** stitch editor undo/redo ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** true-scale hi-res waveform renderer with RAF playhead ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **voice-design:** default to OmniVoice on every backend ([37a7cd9](https://github.com/nmorgowicz-org/persona-forge/commit/37a7cd92445fcc9456da7d496a5083e56eee39e0))
+* **voice-edit:** mount the prosody A/B strip on load ([37a7cd9](https://github.com/nmorgowicz-org/persona-forge/commit/37a7cd92445fcc9456da7d496a5083e56eee39e0))
+
+
+### Bug Fixes
+
+* **ci:** accept BREAKING CHANGE notes in Release Please override blocks ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **pocket-tts:** call the state exporter the library actually has ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **pocket-tts:** stop one missing attribute from breaking both voice paths ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **release:** update uv.lock's root version in release PRs ([8c8fd1f](https://github.com/nmorgowicz-org/persona-forge/commit/8c8fd1fb9a3e7fad43fd0a881010f7e8912cd233))
+* **test:** route the speak audio and never skip the play click ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **test:** stop the scrub specs gesturing below the fold, and assert the served favicon ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** make screenshots and GIFs show what they claim ([37a7cd9](https://github.com/nmorgowicz-org/persona-forge/commit/37a7cd92445fcc9456da7d496a5083e56eee39e0))
+
+
+### Tests
+
+* **ui:** add the signal-layer capture scenario ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **ui:** look-dev and brand-mark capture boards ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+
+
+### Documentation
+
+* refresh reference docs, walkthroughs, and published media ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+
+
+### Miscellaneous Chores
+
+* archive luminous-instrument planning docs ([b2cd9e3](https://github.com/nmorgowicz-org/persona-forge/commit/b2cd9e3dc07137ec48b0365b115e544cb7f99172))
+* **deps:** update dependency oxlint to v1.85.0 ([#314](https://github.com/nmorgowicz-org/persona-forge/issues/314)) ([a73d424](https://github.com/nmorgowicz-org/persona-forge/commit/a73d4248d12a7de95779c3913a491e0e02604d2f))
+* **deps:** update github/codeql-action digest to 2892aa5 ([#313](https://github.com/nmorgowicz-org/persona-forge/issues/313)) ([ccfee68](https://github.com/nmorgowicz-org/persona-forge/commit/ccfee68bf33680060c6b1cd32fce6efb41f1be22))
+
 ## [1.5.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.4.13...persona-forge-v1.5.0) (2026-09-22)
 
 
