@@ -14,7 +14,15 @@ export default async function (ctx) {
     // INTENT: Show the voice library with voices that have alignment data.
     await captureShot(page, 'prosody-adjustment-voice-library.png', { scrollToSelector: '[data-testid="voice-card"]' });
 
-    // Find a voice card that has alignment data (has an "Adjust prosody" button)
+    // Find a voice card whose prosody panel can actually run forced alignment.
+    //
+    // "Has an Adjust prosody button" is not sufficient, and assuming it was is what broke this
+    // scenario: Precise mode is *disabled* for a voice with no transcript (the panel says so
+    // itself — "Precise (forced alignment) needs reference text"), and clicking a disabled
+    // button is a silent no-op, so the run waited 30s for an alignment job that was never
+    // started and failed with an unhelpful "never reached a terminal UI state". The card is now
+    // only accepted if its Precise button is enabled; otherwise the panel is closed and the next
+    // card is tried.
     let foundProsodyBtn = false;
 
     const voiceCards = await page.$$('div[data-testid="voice-card"]');
@@ -30,31 +38,47 @@ export default async function (ctx) {
             return false;
         }, voiceCards[i]);
 
-        if (hasBtn) {
-            // Click the button to open the prosody settings panel
-            await page.evaluate((card) => {
-                const buttons = card.querySelectorAll('button');
-                for (const btn of buttons) {
-                    if (btn.textContent.includes('Adjust prosody')) {
-                        btn.click();
-                        return true;
-                    }
+        if (!hasBtn) continue;
+
+        // Click the button to open the prosody settings panel
+        await page.evaluate((card) => {
+            const buttons = card.querySelectorAll('button');
+            for (const btn of buttons) {
+                if (btn.textContent.includes('Adjust prosody')) {
+                    btn.click();
+                    return true;
                 }
-                return false;
-            }, voiceCards[i]);
+            }
+            return false;
+        }, voiceCards[i]);
 
-            // Wait for the prosody settings panel to appear
-            await page.waitForFunction(() => {
-                return document.body.innerText.includes('Prosody Settings');
-            }, { timeout: 10000 });
+        // Wait for the prosody settings panel to appear
+        await page.waitForFunction(() => {
+            return document.body.innerText.includes('Prosody Settings');
+        }, { timeout: 10000 });
 
+        const preciseEnabled = await page.evaluate(() => {
+            for (const el of document.querySelectorAll('button')) {
+                if (el.textContent.trim().toLowerCase() === 'precise') return !el.disabled;
+            }
+            return false;
+        });
+
+        if (preciseEnabled) {
             foundProsodyBtn = true;
             break;
         }
+
+        // No transcript on this voice, so Precise is disabled. Close the panel and try the next.
+        await page.keyboard.press('Escape');
+        await new Promise((resolve) => setTimeout(resolve, 400));
     }
 
     if (!foundProsodyBtn) {
-        throw new Error('Could not find a voice card with Adjust prosody button');
+        throw new Error(
+            'No voice card offers an enabled Precise mode (forced alignment needs a transcript — ' +
+                'every card in this library either lacks the prosody panel or has no reference text)',
+        );
     }
 
     // INTENT: Show the voice card with prosody settings panel open.
