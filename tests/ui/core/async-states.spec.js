@@ -79,6 +79,32 @@ test.describe('B-P9: crafted async states', () => {
     await expect(action).not.toBeEmpty()
   })
 
+  test('an empty library is not claimed before the load finishes', async ({ page }) => {
+    // The bug this guards: the store starts empty, so the surface used to say "No voices saved
+    // yet" during the fetch -- a false statement, and one a card count could not tell apart
+    // from the truth. Delaying the response is what makes the two states distinguishable.
+    await page.route('**/voices', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"voices":[]}' })
+    })
+    await page.route('**/omnivoice/segments', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '{"segments":[]}' }),
+    )
+
+    await page.goto('/')
+    await page.getByTestId('nav-voice-library').click()
+
+    // Working, and honest about it: no empty claim, and a marker for anyone who needs to wait.
+    await expect(page.getByTestId('library-loading')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByTestId('empty-state')).toBeHidden()
+    await expect(page.locator('[data-testid="voice-library"][data-loaded="false"]')).toBeVisible()
+
+    // Then the truth: loaded, and genuinely empty.
+    await expect(page.locator('[data-testid="voice-library"][data-loaded="true"]')).toBeVisible({ timeout: 15000 })
+    await expect(page.getByTestId('empty-state')).toBeVisible()
+    await expect(page.getByTestId('library-loading')).toBeHidden()
+  })
+
   test('an empty library offers an illustration and exactly one next action', async ({ page }) => {
     // The fixture library is populated, so emptiness is staged at the network boundary.
     // Shape matters: listVoices() unwraps `body.voices`.

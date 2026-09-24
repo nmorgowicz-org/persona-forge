@@ -4,6 +4,9 @@ async function ensureVoice(page) {
   await page.goto('/')
   if (!(await page.getByTestId('nav-voice-library').isVisible())) await page.getByRole('button', { name: 'Toggle Sidebar' }).click()
   await page.getByTestId('nav-voice-library').click()
+  // "Is the library empty?" is only answerable once a load has completed -- the store starts
+  // empty, so a card count taken before then says nothing.
+  await expect(page.locator('[data-testid="voice-library"][data-loaded="true"]')).toBeVisible()
   if (await page.locator('[data-testid="voice-card"]').count()) return
   if (!(await page.getByTestId('nav-voice-design').isVisible())) await page.getByRole('button', { name: 'Toggle Sidebar' }).click()
   await page.getByTestId('nav-voice-design').click()

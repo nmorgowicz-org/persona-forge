@@ -58,6 +58,7 @@ import { hasChipSelections, type ChipSelections } from '@/lib/voiceDesignChips'
 import { MiniAudioDeck } from '@/components/audio/MiniAudioDeck'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Skeleton } from '@/components/ui/skeleton'
 import { createStitchClipFromSegment } from '@/lib/stitchClips'
 import { useAppStore, type StitchPlanClip, type StitchPlanDsp } from '@/store'
 import { VariantCompare } from '@/components/VariantCompare'
@@ -1236,8 +1237,14 @@ export function VoiceLibraryPage() {
     setProjects(projs)
   }
 
+  // Whether a load has ever completed. The store starts empty, so without this "you have no
+  // voices" and "we have not asked yet" are the same state and the empty surfaces claim the
+  // former while the latter is true. It is also the signal automation waits on before judging
+  // the library empty, instead of inferring it from a card count that is briefly zero.
+  const [loaded, setLoaded] = useState(false)
+
   useEffect(() => {
-    void refresh()
+    void refresh().finally(() => setLoaded(true))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -1769,7 +1776,11 @@ export function VoiceLibraryPage() {
   )
 
   return (
-    <div className="flex flex-col gap-6">
+    <div
+      data-testid="voice-library"
+      data-loaded={loaded ? 'true' : 'false'}
+      className="flex flex-col gap-6"
+    >
         <motion.div
           initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: reducedMotion ? 0 : 0 }}
@@ -1810,8 +1821,16 @@ export function VoiceLibraryPage() {
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      {/* Voices */}
-      {voices.length === 0 && segments.length === 0 && !error ? (
+      {/* Voices. The empty claims below are only made once a load has completed; until then the
+          surface is honestly "working", which is also what automation waits on. */}
+      {!loaded && voices.length === 0 && segments.length === 0 ? (
+        <div data-testid="library-loading" aria-busy="true" className="flex flex-col gap-2">
+          <p className="sr-only">Loading saved voices and segments…</p>
+          {[0, 1, 2].map((row) => (
+            <Skeleton key={row} className="h-16 w-full rounded-panel" />
+          ))}
+        </div>
+      ) : voices.length === 0 && segments.length === 0 && !error ? (
         <EmptyState
           className="py-16"
           title="No voices saved yet"

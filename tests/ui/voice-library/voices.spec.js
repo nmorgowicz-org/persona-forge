@@ -5,7 +5,9 @@ test.describe('voice library', () => {
     await page.goto('/')
     await page.getByTestId('nav-voice-library').click()
 
-    // Check if voices exist; if not, create one
+    // Check if voices exist; if not, create one. The load must have finished first: the store
+    // starts empty, so a card count before then cannot distinguish "none" from "not yet".
+    await expect(page.locator('[data-testid="voice-library"][data-loaded="true"]')).toBeVisible()
     const hasCards = await page.locator('[data-testid="voice-card"]').first().isVisible()
     if (!hasCards) {
       await page.getByTestId('nav-voice-design').click()
