@@ -1,10 +1,15 @@
 # Premium Audio-Plugin UX: Interaction Craft Pass
 
+> **Archived 2026-09-24.** Executed to completion on branch
+> `feat/premium-audio-plugin-ux-20260923`; the last phase commit before archiving is `e32498e`,
+> and the per-phase results (gate, commit, evidence) are recorded in the runbook's §7 ledger.
+> Kept for provenance — this is not a live plan; active plans live in `docs/plans/`.
+
 Date: 2026-09-22
 Status: **APPROVED FOR EXECUTION** — Phases 0–5 below are approved; M3–M5,
 T1–T3, and all N-candidates are owner-gated and are decided **once, up front,
 at Checkpoint 0** of the master runbook
-(`docs/plans/20260923-premium_ux_execution.md`), recorded in the §7 ledger.
+(`docs/archive/luminous-instrument/20260923-premium_ux_execution.md`), recorded in the §7 ledger.
 V1–V4 are superseded by the presentation plan (see §8 notes).
 
 ## Goal statement

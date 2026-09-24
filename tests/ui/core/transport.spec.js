@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test'
 // (kind + label), *claims* playback when it starts, and *reports* its position -- so there is
 // a single answer to "what is audible right now, and where is it". Each surface keeps its own
 // element, transport logic and playback contract; the coordinator only observes and arbitrates.
-// Plan: docs/plans/20260922-premium_audio_plugin_ux.md section 4 T1; runbook card A-9.
+// Plan: docs/archive/luminous-instrument/20260922-premium_audio_plugin_ux.md section 4 T1; runbook card A-9.
 //
 // The readout the spec asserts on is the sr-only `transport-active-source` element AppShell
 // renders on every page. It is written imperatively from the coordinator's notifications --

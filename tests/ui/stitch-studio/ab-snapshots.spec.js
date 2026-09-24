@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 
 // A-8 (M5): A/B plan snapshots for the stitch plan -- capture the plan as A, edit to B, switch
 // between them without losing either, and audition each. Session-local, existing stitch
-// payloads, no backend change. Plan: docs/plans/20260922-premium_audio_plugin_ux.md M5;
+// payloads, no backend change. Plan: docs/archive/luminous-instrument/20260922-premium_audio_plugin_ux.md M5;
 // runbook card A-8.
 //
 // RED-first: every test must fail on unmodified code because the feature is missing.

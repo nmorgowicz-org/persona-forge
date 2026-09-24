@@ -2,7 +2,7 @@
 // hero states, then for every candidate look x accent injects candidate token CSS (no
 // frontend/src edits) and shoots the viewport; composes per-look and accent-check contact sheets;
 // renders a signal-palette board from a real decoded fixture voice.
-// Plan: docs/plans/20260923-luminous_instrument_redesign.md "P0".
+// Plan: docs/archive/luminous-instrument/20260923-luminous_instrument_redesign.md "P0".
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gotoPage } from '../../harness/browser.mjs';

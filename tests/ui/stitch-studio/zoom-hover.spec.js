@@ -1,7 +1,7 @@
 // A-2 (S2): cursor-anchored Ctrl-wheel zoom and hover time guide. RED-first: every test
 // must fail on unmodified code (wheel zoom currently zooms around the scroll origin, no
 // hover guide exists), then pass after the GREEN implementation. Plan:
-// docs/plans/20260922-premium_audio_plugin_ux.md S2; runbook card A-2.
+// docs/archive/luminous-instrument/20260922-premium_audio_plugin_ux.md S2; runbook card A-2.
 //
 // Invariance measurement: a ruler tick is a fixed point of the arrangement. Its viewport
 // x = contentX(pps) - scrollLeft. If the time under the pointer is preserved, then for the

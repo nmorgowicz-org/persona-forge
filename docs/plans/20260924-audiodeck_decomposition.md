@@ -5,7 +5,7 @@ merges (see "Sequencing"). Owner-requested follow-up from the B-P10 gate
 (2026-09-24): §8 listed "split `AudioDeck.tsx`" as residue, and the owner asked
 for it as its own planning doc rather than in-arc work.
 
-**Read first:** `docs/plans/20260923-premium_ux_execution.md` §3 (per-phase loop)
+**Read first:** `docs/archive/luminous-instrument/20260923-premium_ux_execution.md` §3 (per-phase loop)
 and §7 (the B-P4/B-P10 rows), `docs/dev/DESIGN_SYSTEM.md`.
 
 ---

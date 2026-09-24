@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test'
 // numeric grammar (units, tab order, focus ring) across the trim / fade / gap controls.
 // RED-first: every test must fail on unmodified code because the feature is missing, then
 // pass after the Waveform pointer-event migration and the shared ms-format helper.
-// Plan: docs/plans/20260922-premium_audio_plugin_ux.md S3 + S4; runbook card A-3.
+// Plan: docs/archive/luminous-instrument/20260922-premium_audio_plugin_ux.md S3 + S4; runbook card A-3.
 
 async function generateResult(page) {
   await page.goto('/')

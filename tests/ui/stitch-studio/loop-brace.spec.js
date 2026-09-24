@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test'
 // (dragging the ruler only seeks), so every test here fails on the missing feature, then
 // passes once the brace is implemented. The third test also carries the regression guard the
 // card asks for -- a per-clip range play must still play only its clip, loop or no loop.
-// Plan: docs/plans/20260922-premium_audio_plugin_ux.md M1; runbook card A-4.
+// Plan: docs/archive/luminous-instrument/20260922-premium_audio_plugin_ux.md M1; runbook card A-4.
 
 async function insertSegments(page, n) {
   await page.goto('/')

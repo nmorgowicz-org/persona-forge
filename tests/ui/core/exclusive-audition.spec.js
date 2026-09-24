@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 
 // A-4 (N6): exclusive audition -- one sound at a time. RED-first: on unmodified code every
 // deck owns its own <audio> element with no coordination, so a second deck starting leaves
-// the first one sounding. Plan: docs/plans/20260922-premium_audio_plugin_ux.md N6; runbook
+// the first one sounding. Plan: docs/archive/luminous-instrument/20260922-premium_audio_plugin_ux.md N6; runbook
 // card A-4.
 //
 // The Voice Library's Segments tab is the one surface with several independent decks on a

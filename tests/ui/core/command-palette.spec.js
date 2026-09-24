@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 
 // A-7 (M4): one global shortcut/command registry feeding both the Cmd/Ctrl+K command palette
 // and the `?` keymap. Pages register their own commands and keys; both surfaces read the same
-// registry. Plan: docs/plans/20260922-premium_audio_plugin_ux.md M4; runbook card A-7.
+// registry. Plan: docs/archive/luminous-instrument/20260922-premium_audio_plugin_ux.md M4; runbook card A-7.
 //
 // RED-first: every test must fail on unmodified code because the feature is missing.
 

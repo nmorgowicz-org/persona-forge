@@ -1,12 +1,17 @@
 # Luminous Instrument — Presentation Overhaul
 
+> **Archived 2026-09-24.** Executed to completion on branch
+> `feat/premium-audio-plugin-ux-20260923`; the last phase commit before archiving is `e32498e`,
+> and the per-phase results (gate, commit, evidence) are recorded in the runbook's §7 ledger.
+> Kept for provenance — this is not a live plan; active plans live in `docs/plans/`.
+
 Date: 2026-09-23 (revised same day after a code-truth audit, §"Baseline truth audit")
 Status: **ACCEPTED FOR EXECUTION** — every decision closed at CP0a/CP0b and
 the owner-selected Signal Crucible refinement: D1 **Obsidian**, D7 **Signal
 Crucible**, D9 **S-c hybrid** signal palette.
 Execution order, gates, and the step-by-step phase cards live in the
-runbook `docs/plans/20260923-premium_ux_execution.md` and
-`docs/plans/20260923-premium_ux_phase_cards.md`.
+runbook `docs/archive/luminous-instrument/20260923-premium_ux_execution.md` and
+`docs/archive/luminous-instrument/20260923-premium_ux_phase_cards.md`.
 Branch: `feat/premium-audio-plugin-ux-20260923` (same branch as the interaction
 plan; this doc is its visual sibling, sequenced **after** interaction Phases 0–5
 land — except P0 look-dev, which runs before anything, see runbook).

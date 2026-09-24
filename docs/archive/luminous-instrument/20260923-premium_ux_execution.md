@@ -1,9 +1,14 @@
 # Premium UX Execution — Master Runbook
 
+> **Archived 2026-09-24.** Executed to completion on branch
+> `feat/premium-audio-plugin-ux-20260923`; the last phase commit before archiving is `e32498e`,
+> and the per-phase results (gate, commit, evidence) are recorded in the runbook's §7 ledger.
+> Kept for provenance — this is not a live plan; active plans live in `docs/plans/`.
+
 Date: 2026-09-23 (revised same day: CP0a and CP0b closed; executor protocol
 and phase cards added)
 Status: **READY TO EXECUTE.** Every owner decision is closed (§4, §7). Next
-step: phase card **A-0** in `docs/plans/20260923-premium_ux_phase_cards.md`.
+step: phase card **A-0** in `docs/archive/luminous-instrument/20260923-premium_ux_phase_cards.md`.
 This file is process only: order, decisions, gates, scorecard, executor
 protocol. Design content lives in the two planning docs; step-by-step
 instructions live in the phase cards.
@@ -82,9 +87,9 @@ this phase's hunk, that is stop condition 6.
 
 | # | Doc | Layer | Phases |
 | --- | --- | --- | --- |
-| A | `docs/plans/20260922-premium_audio_plugin_ux.md` | Interaction — how the app **behaves** | Phases 0–10 (see §2); T3 deferred; V1–V4 superseded by B |
-| B | `docs/plans/20260923-luminous_instrument_redesign.md` | Presentation + signal display — how it **reads** and how its **sound is shown** | P0 done; P1–P12 |
-| C | `docs/plans/20260923-premium_ux_phase_cards.md` | **Executor instructions** — one card per phase, in run order | Execute cards top to bottom |
+| A | `docs/archive/luminous-instrument/20260922-premium_audio_plugin_ux.md` | Interaction — how the app **behaves** | Phases 0–10 (see §2); T3 deferred; V1–V4 superseded by B |
+| B | `docs/archive/luminous-instrument/20260923-luminous_instrument_redesign.md` | Presentation + signal display — how it **reads** and how its **sound is shown** | P0 done; P1–P12 |
+| C | `docs/archive/luminous-instrument/20260923-premium_ux_phase_cards.md` | **Executor instructions** — one card per phase, in run order | Execute cards top to bottom |
 
 An executor reads §0 (above), then the next unfinished card in C. The card
 says exactly which sections of A and B to read for that phase.

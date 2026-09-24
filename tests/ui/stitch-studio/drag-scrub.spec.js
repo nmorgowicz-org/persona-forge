@@ -4,7 +4,7 @@ import { settledBox, suppressUpdateBanner } from '../fixtures/pointer.mjs'
 // A-1 (S1 + N1 + N2): drag-scrub, click-to-type, double-click reset, and wheel adjust on the
 // stitch numeric controls, plus deck playback speed. RED-first: every test must fail on
 // unmodified code because the feature is missing, then pass after the useDragScrubValue
-// migration. Plan: docs/plans/20260922-premium_audio_plugin_ux.md S1, N1, N2; runbook card A-1.
+// migration. Plan: docs/archive/luminous-instrument/20260922-premium_audio_plugin_ux.md S1, N1, N2; runbook card A-1.
 
 async function insertSegments(page, n) {
   await page.goto('/')

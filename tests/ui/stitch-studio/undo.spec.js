@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { settledBox, suppressUpdateBanner } from '../fixtures/pointer.mjs'
 
 // A-6 (T2): bounded, session-local undo/redo of complete StitchPlanState snapshots.
-// Plan: docs/plans/20260922-premium_audio_plugin_ux.md T2 (a deliberate, owner-approved
+// Plan: docs/archive/luminous-instrument/20260922-premium_audio_plugin_ux.md T2 (a deliberate, owner-approved
 // exception to the 2026-09-20 "no undo/history" constraint); runbook card A-6.
 //
 // RED-first: every test must fail on unmodified code because the feature is missing.

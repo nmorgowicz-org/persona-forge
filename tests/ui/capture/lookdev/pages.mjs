@@ -1,4 +1,4 @@
-// Look-dev board builders for B-P0 (docs/plans/20260923-luminous_instrument_redesign.md).
+// Look-dev board builders for B-P0 (docs/archive/luminous-instrument/20260923-luminous_instrument_redesign.md).
 // Pure helpers: candidate CSS loading, and HTML/in-page renderers for the contact sheets,
 // the D9 signal-palette board, and the D7 brand board. The scenarios in
 // scenarios/lookdev/ drive the app and call these; nothing here touches frontend/src.

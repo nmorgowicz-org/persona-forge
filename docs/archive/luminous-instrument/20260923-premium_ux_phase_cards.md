@@ -1,13 +1,18 @@
 # Premium UX — Phase Cards (executor instructions)
 
+> **Archived 2026-09-24.** Executed to completion on branch
+> `feat/premium-audio-plugin-ux-20260923`; the last phase commit before archiving is `e32498e`,
+> and the per-phase results (gate, commit, evidence) are recorded in the runbook's §7 ledger.
+> Kept for provenance — this is not a live plan; active plans live in `docs/plans/`.
+
 Date: 2026-09-23
 Status: **READY.** Execute top to bottom, one card per session, and **STOP at
 every gate**. The protocol, stop conditions, standard commands, and gate
-report template are in `docs/plans/20260923-premium_ux_execution.md` §0 —
+report template are in `docs/archive/luminous-instrument/20260923-premium_ux_execution.md` §0 —
 read that first, every session.
 
-Abbreviations: **A** = `docs/plans/20260922-premium_audio_plugin_ux.md`
-(interaction), **B** = `docs/plans/20260923-luminous_instrument_redesign.md`
+Abbreviations: **A** = `docs/archive/luminous-instrument/20260922-premium_audio_plugin_ux.md`
+(interaction), **B** = `docs/archive/luminous-instrument/20260923-luminous_instrument_redesign.md`
 (presentation), **R** = the runbook. Paths without a prefix are under
 `frontend/src/`. Line numbers were taken at commit `abfe76e`. If code has
 moved, locate the symbol by name; if it is gone, apply stop condition 1.
@@ -97,6 +102,7 @@ as `tests/ui/fixtures/largeSegmentLibrary.mjs` does.
 Build, run: all five fail on unmodified code for "feature missing" reasons.
 
 **GREEN:**
+
 1. Extract `useDragScrubValue` **from GapControl's existing code** (pointer
    capture, ladder snapping with Alt bypass, click-to-type with
    Enter/Escape/blur, Shift fine steps). Add options `defaultValue`

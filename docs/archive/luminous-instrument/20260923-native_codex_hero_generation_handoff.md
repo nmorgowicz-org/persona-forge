@@ -1,5 +1,10 @@
 # Native Codex Handoff — Persona Forge Hero Exploration
 
+> **Archived 2026-09-24.** Executed to completion on branch
+> `feat/premium-audio-plugin-ux-20260923`; the last phase commit before archiving is `e32498e`,
+> and the per-phase results (gate, commit, evidence) are recorded in the runbook's §7 ledger.
+> Kept for provenance — this is not a live plan; active plans live in `docs/plans/`.
+
 Date: 2026-09-23
 Status: Exploration complete — Signal Crucible selected; production integration pending
 
@@ -15,8 +20,8 @@ Work in:
 
 Read these sources before generation:
 
-1. `docs/plans/20260923-luminous_instrument_redesign.md`
-2. `docs/plans/20260923-premium_ux_execution.md`
+1. `docs/archive/luminous-instrument/20260923-luminous_instrument_redesign.md`
+2. `docs/archive/luminous-instrument/20260923-premium_ux_execution.md`
 3. `docs/screenshots/artifacts/lookdev/lookdev-board--neutral--signal-palettes.png`
 4. `docs/screenshots/artifacts/lookdev/lookdev-board--neutral--sheet-obsidian.png`
 5. `assets/brand/concepts/persona-forge/hero-v2/finalists/signal-crucible/app-hero.png`
