@@ -77,18 +77,26 @@ export interface UseDragScrubValueOptions {
   defaultValue?: number
   /** N2 opt-in wheel nudge (native non-passive listener on the attached element). */
   wheel?: boolean
+  /** Drag axis. Knobs and faders use 'y' (up increases), the numeric fields use 'x'. */
+  axis?: 'x' | 'y'
   disabled?: boolean
 }
 
 interface GestureState {
   pointerId: number
-  startClientX: number
+  startClient: number
+  axis: 'x' | 'y'
   startValue: number
   scale: number
   fineScale: number
   threshold: number
   moved: boolean
   openEditorOnRelease: boolean
+}
+
+/** Pointer travel along the control's own axis, in the direction that increases the value. */
+function dragDelta(state: GestureState, event: PointerEvent): number {
+  return state.axis === 'y' ? state.startClient - event.clientY : event.clientX - state.startClient
 }
 
 export function useDragScrubValue({
@@ -107,6 +115,7 @@ export function useDragScrubValue({
   round = Math.round,
   defaultValue,
   wheel = false,
+  axis = 'x',
   disabled = false,
 }: UseDragScrubValueOptions) {
   const [editing, setEditing] = useState(false)
@@ -159,7 +168,7 @@ export function useDragScrubValue({
   const handlePointerMove = useCallback((event: PointerEvent) => {
     const state = dragStateRef.current
     if (!state || state.pointerId !== event.pointerId) return
-    const dx = event.clientX - state.startClientX
+    const dx = dragDelta(state, event)
     if (!state.moved && Math.abs(dx) < state.threshold) return
     state.moved = true
     const l = latestRef.current
@@ -186,7 +195,7 @@ export function useDragScrubValue({
       // fast pointerup. threshold === 0 keeps GapControl's reference semantics: even a
       // no-travel release (and a pointercancel) commits the snap of the start value.
       const l = latestRef.current
-      const dx = event.clientX - state.startClientX
+      const dx = dragDelta(state, event)
       const scale = event.shiftKey ? state.fineScale : state.scale
       let next = state.startValue + dx * scale
       if (l.snap && !event.altKey) next = l.snap(next)
@@ -210,7 +219,8 @@ export function useDragScrubValue({
       // selection is prevented by the controls' select-none class instead.
       dragStateRef.current = {
         pointerId: event.pointerId,
-        startClientX: event.clientX,
+        startClient: axis === 'y' ? event.clientY : event.clientX,
+        axis,
         startValue: l.value,
         scale: l.dragScale,
         fineScale: l.fineScale,
@@ -223,7 +233,10 @@ export function useDragScrubValue({
       window.addEventListener('pointerup', endDrag)
       window.addEventListener('pointercancel', endDrag)
     },
-    [handlePointerMove, endDrag],
+    // `axis` belongs here: the drag state records it at gesture start, and a stale closure
+    // would capture the initial axis for the life of the control (a vertical drag then reads
+    // as zero travel and silently commits the starting value).
+    [handlePointerMove, endDrag, axis],
   )
 
   // The gesture listeners live on window and are normally removed by the end handlers, so

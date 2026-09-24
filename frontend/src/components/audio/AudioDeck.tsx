@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
-import { Download, Gauge, Pause, Play, Repeat, RotateCcw } from 'lucide-react'
+import { Download, Pause, Play, Repeat, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Waveform } from '@/components/Waveform'
 import { useAudioSource } from '@/hooks/useAudioTransport'
@@ -10,71 +10,13 @@ import { SpectrogramCanvas } from '@/components/waveform/SpectrogramCanvas'
 import { setSignalView, useSignalView } from '@/lib/spectrogram'
 import { cn } from '@/lib/utils'
 import { LevelMeter } from './LevelMeter'
+import { Knob } from '@/components/ui/knob'
 import { AudioStatsStrip } from '../waveform/AudioStatsStrip'
-import { useDragScrubValue, parseNumericText } from '@/hooks/useDragScrubValue'
 import { useShortcutScope, type ShortcutCommand } from '@/hooks/useGlobalShortcuts'
 // 0.1-increment speed control, styled to match the segment Duration input in
 // SegmentRackRow.tsx so the two "adjust after generation" controls read as a matched pair.
 // A-1: drag-scrub + click-to-type + double-click reset to 1.0 + opt-in wheel nudge via the
 // shared useDragScrubValue gesture.
-function SpeedStepper({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const roundStep = (v: number) => Math.round(Math.max(0.5, Math.min(2, v)) * 10) / 10
-  const {
-    editing,
-    draftText,
-    setDraftText,
-    commitEdit,
-    displayValue,
-    beginScrub,
-    handleKeyDown,
-    handleDoubleClick,
-    wheelTargetRef,
-  } = useDragScrubValue({
-    value,
-    min: 0.5,
-    max: 2,
-    dragScale: 0.01,
-    step: 0.1,
-    onChange,
-    dragThreshold: 2,
-    shiftStep: 0.5,
-    parse: parseNumericText,
-    format: (v) => v.toFixed(1),
-    round: roundStep,
-    defaultValue: 1,
-    wheel: true,
-  })
-  return (
-    <div
-      data-testid="deck-speed"
-      data-speed={displayValue}
-      ref={(node) => { wheelTargetRef.current = node }}
-      className="flex shrink-0 cursor-ew-resize touch-none select-none items-center gap-0.5"
-      onPointerDown={(e) => { if (!(e.target as HTMLElement).closest('button, input')) beginScrub(e.nativeEvent, e.currentTarget, { openEditorOnRelease: true }) }}
-      onDoubleClick={handleDoubleClick}
-      title="Playback speed"
-    >
-      <Gauge className="size-3 text-muted-foreground" />
-      {editing ? (
-        <input
-          type="text"
-          inputMode="decimal"
-          value={draftText}
-          aria-label="Playback speed"
-          onChange={(e) => setDraftText(e.target.value)}
-          onBlur={commitEdit}
-          onKeyDown={handleKeyDown}
-          className="w-10 rounded-md border border-input bg-transparent px-1 py-0.5 text-[9px] outline-none transition-colors focus-visible:border-ring"
-          autoFocus
-        />
-      ) : (
-        <span className="font-mono tabular-nums text-[9px] text-foreground">{displayValue.toFixed(1)}</span>
-      )}
-      <span className="text-[9px] text-muted-foreground">x</span>
-    </div>
-  )
-}
-
 interface AudioDeckProps {
   src: string
   blob?: Blob | null
@@ -415,8 +357,19 @@ export function AudioDeck({
               progress={progress}
               className="flex-1"
             />
-            <span className="micro-label">Speed</span>
-            <SpeedStepper value={playbackRate} onChange={changeSpeed} />
+            <Knob
+              testId="deck-speed"
+              label="Speed"
+              value={playbackRate}
+              min={0.5}
+              max={2}
+              step={0.1}
+              defaultValue={1}
+              size={30}
+              dragScale={0.01}
+              format={(v) => `${v.toFixed(1)}×`}
+              onChange={changeSpeed}
+            />
             <Button type="button" size="icon" variant="ghost" onClick={download} tooltip="Download" aria-label="Download audio">
               <Download className="size-4 text-muted-foreground" />
             </Button>
@@ -522,9 +475,19 @@ export function AudioDeck({
               >
                 <Repeat className={cn('size-4', isLooping ? 'text-primary' : 'text-muted-foreground')} />
               </Button>
-              {!compact && (
-                <SpeedStepper value={playbackRate} onChange={changeSpeed} />
-              )}
+              <Knob
+              testId="deck-speed"
+              label="Speed"
+              value={playbackRate}
+              min={0.5}
+              max={2}
+              step={0.1}
+              defaultValue={1}
+              size={30}
+              dragScale={0.01}
+              format={(v) => `${v.toFixed(1)}×`}
+              onChange={changeSpeed}
+            />
               <Button type="button" size="icon" variant="ghost" onClick={download} tooltip="Download" aria-label="Download audio">
                 <Download className="size-4 text-muted-foreground" />
               </Button>

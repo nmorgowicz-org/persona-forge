@@ -32,9 +32,9 @@ import {
   type ShortcutCommand,
 } from '@/hooks/useGlobalShortcuts'
 import { SegmentBrowserModal, type SegmentBrowserModalController } from './stitch/SegmentBrowserModal'
-import { useDragScrubValue, parseNumericText } from '@/hooks/useDragScrubValue'
+import { Knob } from '@/components/ui/knob'
+import { Fader } from '@/components/ui/fader'
 import { HOVER_TIME_GUIDE_LABEL_CLASS, HOVER_TIME_GUIDE_LINE_CLASS, useHoverTimeGuide } from '@/hooks/useHoverTimeGuide'
-import { cn } from '@/lib/utils'
 import { TimelineRuler } from './stitch/TimelineRuler'
 import { GapControl } from './stitch/GapControl'
 import { StitchClipCard } from './stitch/StitchClipCard'
@@ -711,27 +711,34 @@ export function StitchDspControls({
             initial={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={reducedMotion ? { opacity: 0 } : { opacity: 0, height: 0 }}
-            className="grid grid-cols-2 gap-x-6 gap-y-3 overflow-hidden rounded-lg border border-border/60 bg-muted/40 px-4 py-3"
+            className="flex flex-col gap-4 overflow-hidden rounded-lg border border-border/60 bg-muted/40 px-4 py-3"
           >
-            <SliderField label="Segment target" value={dsp.segmentTargetDbfs} min={-40} max={-10} step={0.5} defaultValue={-20} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ segmentTargetDbfs: v })} />
-            <SliderField label="Final target" value={dsp.finalTargetDbfs} min={-40} max={-10} step={0.5} defaultValue={-18} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ finalTargetDbfs: v })} />
-            <SliderField label="Final ceiling" value={dsp.finalCeilingDb} min={-6} max={0} step={0.2} defaultValue={-1} format={(v) => `${v} dB`} onChange={(v) => setDsp({ finalCeilingDb: v })} />
-            <SliderField label="Crossfade" value={dsp.crossfadeMs} min={0} max={400} step={5} defaultValue={100} format={(v) => `${v} ms`} onChange={(v) => setDsp({ crossfadeMs: v })} />
+            {/* Knobs for the parameters you tune by feel; the compressor threshold keeps a
+                fader because its 48 dB range would spend most of an arc on territory nobody
+                uses (B-P5). */}
+            <div className="flex flex-wrap items-start gap-5">
+              <Knob testId="dsp-knob-segment-target" label="Segment target" value={dsp.segmentTargetDbfs} min={-40} max={-10} step={0.5} defaultValue={-20} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ segmentTargetDbfs: v })} />
+              <Knob testId="dsp-knob-final-target" label="Final target" value={dsp.finalTargetDbfs} min={-40} max={-10} step={0.5} defaultValue={-18} format={(v) => `${v} dBFS`} onChange={(v) => setDsp({ finalTargetDbfs: v })} />
+              <Knob testId="dsp-knob-final-ceiling" label="Final ceiling" value={dsp.finalCeilingDb} min={-6} max={0} step={0.2} defaultValue={-1} format={(v) => `${v} dB`} onChange={(v) => setDsp({ finalCeilingDb: v })} />
+              <Knob testId="dsp-knob-crossfade" label="Crossfade" value={dsp.crossfadeMs} min={0} max={400} step={5} defaultValue={100} format={(v) => `${v} ms`} onChange={(v) => setDsp({ crossfadeMs: v })} />
+            </div>
             <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
               Pacing style
               <select value={dsp.prosodyStylePreset} onChange={(e) => setDsp({ prosodyStylePreset: e.currentTarget.value as typeof dsp.prosodyStylePreset })} className="rounded border border-border bg-background px-2 py-1 text-xs text-foreground">
                 {['Neutral', 'Storyteller', 'Calm', 'Energetic', 'Broadcast', 'Clean'].map((name) => <option key={name} value={name}>{name}</option>)}
               </select>
             </label>
-            <SliderField label="Pace" value={dsp.paceMultiplier} min={0.5} max={2} step={0.05} defaultValue={1} format={(v) => `${v.toFixed(2)}×`} onChange={(v) => setDsp({ paceMultiplier: v })} />
+            <div className="flex flex-wrap items-start gap-5">
+              <Knob testId="dsp-knob-pace" label="Pace" value={dsp.paceMultiplier} min={0.5} max={2} step={0.05} defaultValue={1} format={(v) => `${v.toFixed(2)}×`} onChange={(v) => setDsp({ paceMultiplier: v })} />
+            </div>
             <div className="col-span-2 flex items-center justify-between pt-1">
               <label className="flex items-center gap-2 text-xs text-foreground">
                 <input type="checkbox" checked={dsp.compressEnabled} onChange={(e) => setDsp({ compressEnabled: e.currentTarget.checked })} className="h-3.5 w-3.5 accent-cyan-500" />
                 Compression
               </label>
               <div className="flex items-center gap-4">
-                <SliderField label="Threshold" value={dsp.compressThresholdDb} min={-60} max={-12} step={0.5} defaultValue={-24} format={(v) => `${v} dB`} onChange={(v) => setDsp({ compressThresholdDb: v })} disabled={!dsp.compressEnabled} />
-                <SliderField label="Ratio" value={dsp.compressRatio} min={1} max={10} step={0.1} defaultValue={2.5} format={(v) => `${v}:1`} onChange={(v) => setDsp({ compressRatio: v })} disabled={!dsp.compressEnabled} />
+                <Fader testId="dsp-fader-threshold" label="Threshold" value={dsp.compressThresholdDb} min={-60} max={-12} step={0.5} defaultValue={-24} format={(v) => `${v} dB`} onChange={(v) => setDsp({ compressThresholdDb: v })} disabled={!dsp.compressEnabled} />
+                <Knob testId="dsp-knob-ratio" label="Ratio" value={dsp.compressRatio} min={1} max={10} step={0.1} defaultValue={2.5} format={(v) => `${v}:1`} onChange={(v) => setDsp({ compressRatio: v })} disabled={!dsp.compressEnabled} />
               </div>
             </div>
           </motion.div>
@@ -740,87 +747,6 @@ export function StitchDspControls({
     </div>
   )
 }
-function SliderField({
-  label,
-  value,
-  min,
-  max,
-  step,
-  format,
-  onChange,
-  disabled,
-  defaultValue,
-}: {
-  label: string
-  value: number
-  min: number
-  max: number
-  step: number
-  format: (v: number) => string
-  onChange: (v: number) => void
-  disabled?: boolean
-  /** N1 double-click reset target (the plan-start value from store.ts). */
-  defaultValue?: number
-}) {
-  const {
-    editing,
-    draftText,
-    setDraftText,
-    commitEdit,
-    displayValue,
-    beginScrub,
-    handleKeyDown,
-    handleDoubleClick,
-  } = useDragScrubValue({
-    value,
-    min,
-    max,
-    step,
-    onChange,
-    dragScale: (max - min) / 160,
-    dragThreshold: 2,
-    shiftStep: step * 5,
-    parse: parseNumericText,
-    defaultValue,
-    disabled,
-  })
-  return (
-    <div
-      className={cn('flex flex-col gap-1 select-none', disabled && 'opacity-50')}
-      onPointerDown={(e) => { if (!(e.target as HTMLElement).closest('input')) beginScrub(e.nativeEvent, e.currentTarget, { openEditorOnRelease: true }) }}
-      onDoubleClick={handleDoubleClick}
-    >
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] text-muted-foreground">{label}</span>
-        {editing ? (
-          <input
-            type="text"
-            inputMode="decimal"
-            value={draftText}
-            aria-label={label}
-            onChange={(event) => setDraftText(event.target.value)}
-            onBlur={commitEdit}
-            onKeyDown={handleKeyDown}
-            className="w-16 rounded border border-cyan-500/40 bg-muted/40 px-1 text-right text-[11px] font-mono tabular-nums text-foreground outline-none"
-            autoFocus
-          />
-        ) : (
-          <span className="text-[11px] font-mono tabular-nums text-foreground">
-            {format(displayValue)}
-          </span>
-        )}
-      </div>
-      <div
-        className="h-1.5 w-full rounded bg-muted"
-        aria-hidden
-        style={{
-          background: `linear-gradient(to right, var(--color-cyan-500) ${((displayValue - min) / (max - min)) * 100}%, var(--color-muted) ${((displayValue - min) / (max - min)) * 100}%)`,
-        }}
-      />
-    </div>
-  )
-}
-
 /* ---------- Editor shell ---------- */
 
 interface StitchEditorCommonProps {

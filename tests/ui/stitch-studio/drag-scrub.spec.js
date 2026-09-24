@@ -136,16 +136,20 @@ test.describe('drag-scrub numeric controls (A-1: S1, N1, N2)', () => {
     const deck = page.getByTestId('deck-speed')
     await expect(deck).toBeVisible()
 
+    // B-P5: the deck's speed control is a knob now, so its drag axis is vertical and its value
+    // is the slider's own aria-valuenow. The contract is unchanged: a drag changes the value,
+    // a double-click resets it.
     const box = await deck.boundingBox()
+    const x = box.x + box.width / 2
     const y = box.y + box.height / 2
-    await page.mouse.move(box.x + box.width / 2, y)
+    await page.mouse.move(x, y)
     await page.mouse.down()
-    await page.mouse.move(box.x + box.width / 2 + 40, y, { steps: 4 })
+    await page.mouse.move(x, y - 40, { steps: 4 })
     await page.mouse.up()
-    await expect(deck).toHaveAttribute('data-speed', '1.4')
+    await expect(deck).toHaveAttribute('aria-valuenow', '1.4')
 
-    // Reset targets the container, not the value: the value's click opens the editor.
-    await deck.dblclick({ position: { x: 4, y: y - box.y } })
-    await expect(deck).toHaveAttribute('data-speed', '1')
+    // Reset targets the control, not the value: the value's click opens the editor.
+    await deck.dblclick({ position: { x: 4, y: 4 } })
+    await expect(deck).toHaveAttribute('aria-valuenow', '1')
   })
 })
