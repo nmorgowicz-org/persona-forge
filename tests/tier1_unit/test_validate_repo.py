@@ -50,5 +50,70 @@ END_COMMIT_OVERRIDE
 """
             )
 
+    def test_accepts_a_single_line_breaking_change_footer(self):
+        validate_pr_override_body(
+            """BEGIN_COMMIT_OVERRIDE
+feat(ui)!: redesign the deck
+
+BREAKING CHANGE: the deck payload changed shape.
+END_COMMIT_OVERRIDE
+"""
+        )
+
+    def test_accepts_a_multi_line_breaking_change_note(self):
+        """The form that failed CI: a footer paragraph is valid, and honoured.
+
+        Release Please reads the block as the commit message and extracts
+        BREAKING CHANGE notes from the summary, body, or footer, so rejecting a
+        paragraph rejected a working way to declare a major bump.
+        """
+        validate_pr_override_body(
+            """Some prose before the block.
+BEGIN_COMMIT_OVERRIDE
+feat(ui)!: redesign the deck
+
+fix(runtime): stop dropping the tail
+chore: archive the plan
+
+BREAKING CHANGE: the deck payload changed shape, and the planning documents
+moved. No HTTP contract changed.
+END_COMMIT_OVERRIDE
+"""
+        )
+
+    def test_accepts_an_entry_after_a_note(self):
+        validate_pr_override_body(
+            """BEGIN_COMMIT_OVERRIDE
+feat(ui): first
+
+BREAKING CHANGE: the first entry breaks.
+docs: record it
+END_COMMIT_OVERRIDE
+"""
+        )
+
+    def test_rejects_prose_that_is_not_a_note(self):
+        with pytest.raises(RuntimeError, match="invalid entries"):
+            validate_pr_override_body(
+                """BEGIN_COMMIT_OVERRIDE
+feat(ui): redesign the deck
+
+This paragraph is not an entry and not a note, so it would be dropped.
+END_COMMIT_OVERRIDE
+"""
+            )
+
+    def test_rejects_markdown_lists_inside_a_note(self):
+        with pytest.raises(RuntimeError, match="invalid entries"):
+            validate_pr_override_body(
+                """BEGIN_COMMIT_OVERRIDE
+feat(ui)!: redesign the deck
+
+BREAKING CHANGE: the deck payload changed shape.
+- deck.foo is now an object
+END_COMMIT_OVERRIDE
+"""
+            )
+
     def test_ignores_bodies_without_an_override(self):
         validate_pr_override_body("Renovate dependency update")
