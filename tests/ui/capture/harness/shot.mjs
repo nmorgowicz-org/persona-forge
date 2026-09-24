@@ -132,9 +132,23 @@ export async function captureShot(page, rawFilename, options = {}) {
     // single normal-viewport-sized frame — same as what a visitor actually
     // sees, just scrolled to the interesting part.
     if (scrollToSelector) {
-        await page.evaluate((sel) => {
-            document.querySelector(sel)?.scrollIntoView({ behavior: 'instant', block: 'center' });
+        // The selector names the *subject* of the shot, so a miss must not degrade quietly: the
+        // optional-chained version of this scrolled nowhere and captured the viewport wherever
+        // it happened to be, which is how `prosody-adjustment` shipped a frame of the voice
+        // library while claiming to show the A/B lanes. Fail closed and name the file.
+        const scrolled = await page.evaluate((sel) => {
+            const el = document.querySelector(sel);
+            if (!el) return false;
+            el.scrollIntoView({ behavior: 'instant', block: 'center' });
+            return true;
         }, scrollToSelector);
+        if (!scrolled) {
+            throw new Error(
+                `[CAPTURE] scrollToSelector ${JSON.stringify(scrollToSelector)} matched nothing while ` +
+                    `capturing ${filename} — the subject is absent, so the shot would be a frame of ` +
+                    `whatever the viewport shows. Wait for the element instead of capturing around it.`,
+            );
+        }
         await sleep(300);
         await page.screenshot({ path: join(currentArtifactsDir(), filename), fullPage: false, ...screenshotOptions });
         recordCapture(filename, page.viewport());
