@@ -1541,7 +1541,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
             {/* Script control-panel card */}
             <div className="flex flex-col rounded-control border border-border bg-card">
               {/* Header bar */}
-              <div className="flex items-center justify-between gap-2 rounded-t-lg border-b border-border bg-muted/50 px-2.5 py-1.5">
+              <div className="flex items-center justify-between gap-2 rounded-t-control border-b border-border bg-muted/50 px-2.5 py-1.5">
               <div className="flex items-center gap-2">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-foreground/90">
                   Script
