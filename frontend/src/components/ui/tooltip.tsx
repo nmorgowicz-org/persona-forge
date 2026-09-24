@@ -118,8 +118,16 @@ export function TitleTooltipBridge() {
         if (!title) continue
         element.setAttribute('data-app-tooltip', title)
         // The tooltip is not in the accessibility tree, so removing `title` would leave an
-        // icon-only control with no name at all. Give it one, unless the author already did.
-        if (!element.hasAttribute('aria-label') && !element.hasAttribute('aria-labelledby')) {
+        // icon-only control with no name at all -- native `title` does supply one and this
+        // keeps that. But only for controls that have no name of their own: `aria-label`
+        // *overrides* an element's own text, so naming a labelled button from its tooltip
+        // renames it. These tooltips describe what the control will do next ("Play from
+        // playhead", "Pause"), which is not the control's name and changes as it is used.
+        const hasOwnName =
+          element.hasAttribute('aria-label') ||
+          element.hasAttribute('aria-labelledby') ||
+          (element.textContent ?? '').trim().length > 0
+        if (!hasOwnName) {
           element.setAttribute('aria-label', title)
         }
         element.removeAttribute('title')

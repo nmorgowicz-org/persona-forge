@@ -110,4 +110,38 @@ test.describe('B-P6: chrome, header grammar, and brand', () => {
       expect((await header.getByTestId('page-title').textContent())?.trim().length).toBeGreaterThan(2)
     }
   })
+
+  test('a tooltip names an icon-only control but never renames a labelled one', async ({ page }) => {
+    // The app's tooltip layer moves `title` to `data-app-tooltip` and removes the attribute.
+    // Native `title` does supply an accessible name, so an icon-only control must keep one --
+    // but an `aria-label` *overrides* a button's own text, so copying the tooltip onto a
+    // labelled control renames it. These tooltips describe what the control will do next
+    // ("Play from playhead", "Pause"), which is not the control's name.
+    await page.goto('/')
+    await page.evaluate(() => {
+      const bare = document.createElement('button')
+      bare.id = 'probe-bare'
+      bare.setAttribute('title', 'Restart the transport')
+      document.body.appendChild(bare)
+
+      const labelled = document.createElement('button')
+      labelled.id = 'probe-labelled'
+      labelled.setAttribute('title', 'Play from playhead')
+      labelled.textContent = 'Original'
+      document.body.appendChild(labelled)
+    })
+
+    await expect
+      .poll(() => page.evaluate(() => document.getElementById('probe-bare')?.getAttribute('aria-label')))
+      .toBe('Restart the transport')
+    expect(await page.evaluate(() => document.getElementById('probe-labelled')?.hasAttribute('aria-label'))).toBe(false)
+    await expect(page.locator('#probe-labelled')).toHaveAccessibleName('Original')
+
+    // ...and the surface that broke: the A/B lane buttons keep their visible names, so a
+    // consumer can still find them by what they say.
+    await page.getByTestId('nav-voice-edit').click()
+    await expect(page.getByTestId('voice-edit-page')).toBeVisible({ timeout: 15000 })
+    await page.getByTestId('voice-edit-picker').selectOption({ index: 1 })
+    await expect(page.getByTestId('alignment-compare').getByRole('button', { name: 'Original' })).toBeVisible({ timeout: 20000 })
+  })
 })

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { settledBox, suppressUpdateBanner } from '../fixtures/pointer.mjs'
 
 // A-6 (T2): bounded, session-local undo/redo of complete StitchPlanState snapshots.
 // Plan: docs/plans/20260922-premium_audio_plugin_ux.md T2 (a deliberate, owner-approved
@@ -31,7 +32,7 @@ const depth = (page) => page.getByTestId('stitch-undo').getAttribute('data-histo
 
 /** Drags an element horizontally by `dx` pixels with real pointer events. */
 async function dragBy(page, locator, dx) {
-  const box = await locator.boundingBox()
+  const box = await settledBox(locator)
   const y = box.y + box.height / 2
   await page.mouse.move(box.x + box.width / 2, y)
   await page.mouse.down()
@@ -40,6 +41,10 @@ async function dragBy(page, locator, dx) {
 }
 
 test.describe('A-6: stitch editor undo/redo', () => {
+  // The update banner inserts itself above the content 5s after startup and shifts everything
+  // below it, which invalidates any box these pointer tests measured before then.
+  test.beforeEach(async ({ page }) => { await suppressUpdateBanner(page) })
+
   test('undo and redo restore a removed clip from the keyboard', async ({ page }) => {
     await insertSegments(page, 2)
     await page.getByTestId('stitch-clip').first().getByRole('button', { name: 'Remove clip' }).click()
@@ -93,7 +98,7 @@ test.describe('A-6: stitch editor undo/redo', () => {
     // The wheel handler commits once per event, so a burst is several plan writes. They are
     // one adjustment to the user, and must therefore be one entry. (The seam deliberately has
     // no wheel -- it lives in the horizontal scroll container -- so this uses a stepper.)
-    const box = await trimStart.boundingBox()
+    const box = await settledBox(trimStart)
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
     for (let i = 0; i < 3; i++) await page.mouse.wheel(0, -100)
     await expect(trimStart).toHaveText('30')

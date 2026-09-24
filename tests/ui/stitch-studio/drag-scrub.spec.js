@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { settledBox, suppressUpdateBanner } from '../fixtures/pointer.mjs'
 
 // A-1 (S1 + N1 + N2): drag-scrub, click-to-type, double-click reset, and wheel adjust on the
 // stitch numeric controls, plus deck playback speed. RED-first: every test must fail on
@@ -34,13 +35,17 @@ function clipIds(page) {
 }
 
 test.describe('drag-scrub numeric controls (A-1: S1, N1, N2)', () => {
+  // The update banner inserts itself above the content 5s after startup and shifts everything
+  // below it, which invalidates any box these pointer tests measured before then.
+  test.beforeEach(async ({ page }) => { await suppressUpdateBanner(page) })
+
   test('horizontal drag scrubs trim start; Shift drags by less', async ({ page }) => {
     await insertSegments(page, 1)
     await openFirstClipEditor(page)
     const stepper = page.getByTestId('stitch-stepper-trim-start-value').first()
     const idsBefore = await clipIds(page)
 
-    const box = await stepper.boundingBox()
+    const box = await settledBox(stepper)
     const y = box.y + box.height / 2
     await page.mouse.move(box.x + box.width / 2, y)
     await page.mouse.down()
@@ -54,7 +59,7 @@ test.describe('drag-scrub numeric controls (A-1: S1, N1, N2)', () => {
 
     // Trimming changes the clip's effective width, so recapture the position before the
     // second gesture (same discipline as the trim-drag test in studio.spec.js).
-    const box2 = await stepper.boundingBox()
+    const box2 = await settledBox(stepper)
     const y2 = box2.y + box2.height / 2
     await page.keyboard.down('Shift')
     await page.mouse.move(box2.x + box2.width / 2, y2)
@@ -100,7 +105,7 @@ test.describe('drag-scrub numeric controls (A-1: S1, N1, N2)', () => {
     // value's single click opens the typed-entry editor, which replaces the value before a
     // second click could land on it.
     const row = rowOf(stepper)
-    const rowBox = await row.boundingBox()
+    const rowBox = await settledBox(row)
     await row.dblclick({ position: { x: 8, y: rowBox.height / 2 } })
     await expect(stepper).toHaveText('0')
   })
@@ -109,7 +114,7 @@ test.describe('drag-scrub numeric controls (A-1: S1, N1, N2)', () => {
     await insertSegments(page, 3)
     await openFirstClipEditor(page)
     const stepper = page.getByTestId('stitch-stepper-trim-start-value').first()
-    const box = await stepper.boundingBox()
+    const box = await settledBox(stepper)
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
     await page.mouse.wheel(0, -100)
     await expect(stepper).toHaveText('10')
@@ -120,7 +125,7 @@ test.describe('drag-scrub numeric controls (A-1: S1, N1, N2)', () => {
     // clips keep auto-Fit below the 400px/s clamp, so a zoom step must visibly change it.
     const zoomBefore = await page.getByTestId('stitch-zoom-level').textContent()
     const ruler = page.getByTestId('stitch-ruler-tick').first()
-    const rulerBox = await ruler.boundingBox()
+    const rulerBox = await settledBox(ruler)
     await page.keyboard.down('Control')
     await page.mouse.move(rulerBox.x + rulerBox.width / 2, rulerBox.y + rulerBox.height / 2)
     await page.mouse.wheel(0, -100)
@@ -139,7 +144,7 @@ test.describe('drag-scrub numeric controls (A-1: S1, N1, N2)', () => {
     // B-P5: the deck's speed control is a knob now, so its drag axis is vertical and its value
     // is the slider's own aria-valuenow. The contract is unchanged: a drag changes the value,
     // a double-click resets it.
-    const box = await deck.boundingBox()
+    const box = await settledBox(deck)
     const x = box.x + box.width / 2
     const y = box.y + box.height / 2
     await page.mouse.move(x, y)
