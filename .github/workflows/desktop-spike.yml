@@ -291,8 +291,28 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install tauri-cli
-        run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked
+      - name: Bootstrap Rust toolchain + tauri-cli (job-local, cached in runner _tool)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TOOL_CACHE/desktop-rust"
+          export RUSTUP_HOME="$ROOT/rustup"
+          export CARGO_HOME="$ROOT/cargo"
+          export PATH="$CARGO_HOME/bin:$PATH"
+          if [ ! -x "$CARGO_HOME/bin/cargo.exe" ]; then
+            curl -o /tmp/rustup-init.exe -sSL https://win.rustup.rs/x86_64
+            /tmp/rustup-init.exe -y --default-toolchain 1.98-x86_64-pc-windows-msvc \
+              --profile minimal --no-modify-path
+          fi
+          cargo --version
+          if [ ! -x "$CARGO_HOME/bin/cargo-tauri.exe" ]; then
+            cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked
+          fi
+          cargo tauri --version
+          # persist for later steps of this job
+          echo "RUSTUP_HOME=$RUSTUP_HOME" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$CARGO_HOME" >> "$GITHUB_ENV"
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
 
       - name: Generate dummy resource
         shell: powershell
