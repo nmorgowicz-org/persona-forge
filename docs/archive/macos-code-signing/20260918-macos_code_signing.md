@@ -1,7 +1,9 @@
 # macOS Code Signing and Notarization
 
 Date: 2026-09-18
-Status: Proposed — implementation blocked on Apple Developer account activation
+Status: Resolved — implemented in `.github/workflows/release-launcher.yml`
+(2026-09-24). This document is kept as the historical record of the signing
+setup; see that workflow file for the current pipeline.
 
 This document describes the plan to code-sign and notarize the macOS
 launcher binary so it launches without Gatekeeper quarantine prompts. It
@@ -317,31 +319,37 @@ codesign -dv --verbose=4 persona-forge-launcher  # shows signing info
 spctl --assess --verbose=4 persona-forge-launcher  # shows Gatekeeper verdict
 ```
 
-## Pending items (blocked on account activation)
+## Completed items
 
-The following steps are required before implementation can be fully tested:
+All items below are done as of 2026-09-24:
 
-1. **Apple Developer account activation** — The account was enrolled on
-   2026-09-12. Apple typically takes a few days to a week to complete
-   activation, sometimes longer if manual identity verification is triggered.
-   Wait for the activation email before proceeding.
+1. **Apple Developer account activation** — completed.
 
-2. **Generate Developer ID Application certificate** — After activation:
-   - Developer Portal → Certificates, Identifiers & Profiles → Certificates
-   - Create a **Developer ID Application** certificate
-   - Download the `.cer` file, import into Keychain Access, and export the
-     private key + certificate as PEM files
+2. **Developer ID Application certificate generated** — CSR created via
+   Keychain Access on a local Mac (required for the cert to be paired with
+   a private key only the account holder holds), submitted in the Developer
+   Portal, downloaded, imported into Keychain Access, and exported as PEM
+   cert + key files.
 
-3. **Generate App Store Connect API key** — After activation:
-   - App Store Connect → Users and Access → API Keys
-   - Create a key with **Developer** role
-   - Save the Issuer ID, Key ID, and download the `.p8` file (one-time)
+3. **App Store Connect API key generated** — Issuer ID, Key ID, and `.p8`
+   private key obtained with the Developer role.
 
-4. **Add secrets** to the repository Actions settings.
+4. **Secrets added** — all five (`MACOS_KEY_PEM`, `MACOS_CERT_PEM`,
+   `APPLE_ISSUER_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`) added as
+   **organization-level** secrets (not repo-level), scoped to
+   `persona-forge` and `local-llm-foundry` so both repos can reuse the same
+   Developer ID identity and API key.
 
-5. **Trigger a test run** — Use `workflow_dispatch` on
-   `release-launcher.yml` with a test tag to verify the full signing flow
-   end-to-end before a production release.
+5. **CI workflow implemented** — the five signing/notarizing/verifying
+   steps landed in `.github/workflows/release-launcher.yml`, gated on the
+   `aarch64-apple-darwin` matrix target.
+
+### Remaining follow-up (not blocking merge)
+
+- **Trigger a live test run** — Use `workflow_dispatch` on
+  `release-launcher.yml` with a test tag to verify the full signing flow
+  end-to-end (the exact `rcodesign` CLI flags below were verified against
+  published docs, not by running the binary in this environment).
 
 ## Alternatives considered
 
