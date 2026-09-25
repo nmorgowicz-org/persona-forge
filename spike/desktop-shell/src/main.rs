@@ -108,8 +108,11 @@ fn run_ci_update(app: tauri::AppHandle, out_path: PathBuf) -> Result<(), String>
     });
 
     let result: Result<(), String> = tauri::async_runtime::block_on(async {
+        let endpoint = format!("{}/latest.json", feed_base());
         let updater = app
             .updater_builder()
+            .endpoints(vec![endpoint.parse().expect("valid endpoint")])
+            .map_err(|e| e.to_string())?
             .build()
             .map_err(|e| e.to_string())?;
         let update = match updater.check().await {
@@ -126,18 +129,13 @@ fn run_ci_update(app: tauri::AppHandle, out_path: PathBuf) -> Result<(), String>
                 return Err(e.to_string());
             }
         };
-        let mut downloaded: Vec<u8> = Vec::new();
-        update
-            .download(
-                &mut |chunk, _total| {
-                    downloaded.extend_from_slice(chunk);
-                },
-                &mut || {},
-            )
+        // download returns the verified bytes (progress closures only)
+        let bytes = update
+            .download(&mut |_len, _total| {}, &mut || {})
             .await
             .map_err(|e| e.to_string())?;
         json["phase"] = serde_json::Value::String("installing".into());
-        update.install(&mut downloaded.as_slice()).map_err(|e| e.to_string())?;
+        update.install(bytes.as_slice()).map_err(|e| e.to_string())?;
         Ok(())
     });
 
@@ -154,6 +152,39 @@ fn run_ci_update(app: tauri::AppHandle, out_path: PathBuf) -> Result<(), String>
         std::process::exit(0);
     }
     std::process::exit(1);
+}
+
+// menu-triggered check + install (Win/Linux); endpoints per call site
+#[cfg(not(target_os = "macos"))]
+async fn check_and_install(app: &tauri::AppHandle) {
+    use tauri_plugin_updater::UpdaterExt;
+    let endpoint = format!("{}/latest.json", feed_base());
+    let run = async {
+        let updater = app
+            .updater_builder()
+            .endpoints(vec![endpoint.parse().expect("valid endpoint")])
+            .map_err(|e| e.to_string())?
+            .build()
+            .map_err(|e| e.to_string())?;
+        match updater.check().await.map_err(|e| e.to_string())? {
+            Some(update) => {
+                eprintln!("[update] offering {}", update.version);
+                let bytes = update
+                    .download(&mut |_len, _total| {}, &mut || {})
+                    .await
+                    .map_err(|e| e.to_string())?;
+                update.install(bytes.as_slice()).map_err(|e| e.to_string())?;
+                Ok(())
+            }
+            None => {
+                eprintln!("[update] no update available");
+                Ok(())
+            }
+        }
+    };
+    if let Err(e) = run.await {
+        eprintln!("[update] failed: {e}");
+    }
 }
 
 fn main() {
@@ -258,12 +289,7 @@ fn build_app(_test_port: Option<u16>) -> tauri::Result<tauri::App> {
             // spike updater plugins
             #[cfg(not(target_os = "macos"))]
             {
-                let endpoint = format!("{}/latest.json", feed_base());
-                app.handle().plugin(
-                    tauri_plugin_updater::Builder::new()
-                        .endpoints(vec![endpoint.parse().expect("valid endpoint")])
-                        .build(),
-                )?;
+                app.handle().plugin(tauri_plugin_updater::init())?;
             }
             #[cfg(target_os = "macos")]
             {
@@ -275,27 +301,8 @@ fn build_app(_test_port: Option<u16>) -> tauri::Result<tauri::App> {
             if event.id().0 == "check_updates" {
                 #[cfg(not(target_os = "macos"))]
                 {
-                    use tauri_plugin_updater::UpdaterExt;
                     let app = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        match app.updater_builder().check().await {
-                            Ok(Some(update)) => {
-                                eprintln!("[update] offering {}", update.version);
-                                let mut buf = Vec::new();
-                                let _ = update
-                                    .download(
-                                        &mut |chunk, _total| buf.extend_from_slice(chunk),
-                                        &mut |_| {},
-                                    )
-                                    .await;
-                                if let Err(e) = update.install(&mut buf.as_slice()) {
-                                    eprintln!("[update] install failed: {e}");
-                                }
-                            }
-                            Ok(None) => eprintln!("[update] no update available"),
-                            Err(e) => eprintln!("[update] check failed: {e}"),
-                        }
-                    });
+                    tauri::async_runtime::spawn(async move { check_and_install(&app).await });
                 }
                 #[cfg(target_os = "macos")]
                 {
