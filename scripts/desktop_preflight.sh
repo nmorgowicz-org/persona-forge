@@ -69,6 +69,21 @@ else
   echo "WARN    uv: not on PATH (warn-only; jobs fetch a pinned uv)"
 fi
 
+# python3: on Windows the desktop lane only needs `uv run python` + the venv
+# interpreter, so accepting `python` is the plan's sanctioned relax option
+# (execution plan Phase 0R / OA-6 decision, 2026-09-25).
+if [ "$OS_ARG" = "windows" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    ok "python3" "$(python3 --version 2>&1)"
+  elif command -v python >/dev/null 2>&1; then
+    ok "python (python3 not on PATH; accepted on windows)" "$(python --version 2>&1)"
+  else
+    missing "python3"
+  fi
+else
+  check_tool "python3" python3 --version
+fi
+
 # --- macOS ------------------------------------------------------------------
 
 if [ "$OS_ARG" = "macos" ]; then
