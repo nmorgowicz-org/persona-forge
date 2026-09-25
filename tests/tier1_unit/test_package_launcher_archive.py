@@ -18,13 +18,13 @@ import pytest
 import scripts.package_launcher_archive as pla
 
 
-def _fake_uv_pip_compile_ok(cmd, capture_output=True, text=True):
+def _fake_uv_pip_compile_ok(cmd, capture_output=True, text=True, env=None):
     out_path = Path(cmd[cmd.index("-o") + 1])
     out_path.write_text("persona-forge==1.3.0\n", encoding="utf-8")
     return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
 
-def _fake_uv_pip_compile_fails(cmd, capture_output=True, text=True):
+def _fake_uv_pip_compile_fails(cmd, capture_output=True, text=True, env=None):
     return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="no solution found")
 
 
