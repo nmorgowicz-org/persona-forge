@@ -35,10 +35,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Windows preflight (Git Bash)
-        # `shell: bash` resolves to C:\WINDOWS\system32\bash.EXE (WSL) on this
-        # runner, which has no distro installed (run 36186476248). Pin Git Bash.
-        shell: '"C:/Program Files/Git/bin/bash.exe" --noprofile --norc -eo pipefail {0}'
-        run: scripts/desktop_preflight.sh windows
+        # `shell: bash` resolves to C:\WINDOWS\system32\bash.EXE (WSL, no distro) on
+        # this runner, and a custom bash shell line breaks under the runner's cmd
+        # wrapper (run 36186911975). Invoke Git Bash explicitly from PowerShell and
+        # propagate the exit code — the script is still the fail-closed source of truth.
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & 'C:\Program Files\Git\bin\bash.exe' --noprofile --norc -eo pipefail 'scripts/desktop_preflight.sh' 'windows'
+          if ($LASTEXITCODE -ne 0) { throw "desktop_preflight.sh windows failed with exit code $LASTEXITCODE" }
 
       - name: OS probe (PowerShell)
         shell: powershell
