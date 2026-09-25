@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.3](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v2.1.2...persona-forge-v2.1.3) (2026-09-25)
+
+
+### Bug Fixes
+
+* **ci:** use --for-notarization instead of manual runtime flag ([#324](https://github.com/nmorgowicz-org/persona-forge/issues/324)) ([bc76fb4](https://github.com/nmorgowicz-org/persona-forge/commit/bc76fb49f58e1b44dea3950dda855bf75c6d7e0a))
+
 ## [2.1.2](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v2.1.1...persona-forge-v2.1.2) (2026-09-25)
 
 
