@@ -176,10 +176,14 @@ pinned uv binary" and before "Package launcher archive".
   run: |
     set -euo pipefail
     RCODESIGN_VERSION="apple-codesign-0.29.0"
-    wget -qO rcodesign \
+    curl --fail --location --silent --show-error -o rcodesign \
       "https://github.com/indygreg/apple-platform-rs/releases/download/${RCODESIGN_VERSION}/rcodesign-x86_64-unknown-linux-gnu"
     chmod +x rcodesign
 ```
+
+(Using `curl`, not `wget` — the `arc-llama-monitor` runner image doesn't ship
+`wget`, which caused the first live run to fail with
+`wget: command not found`.)
 
 Fallback to `cargo install apple-codesign --locked` if the musl/glibc binary
 has issues on the specific runner distro.
