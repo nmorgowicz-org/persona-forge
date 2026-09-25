@@ -35,8 +35,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Windows preflight (Git Bash)
-        shell: bash
-        run: bash scripts/desktop_preflight.sh windows
+        # `shell: bash` resolves to C:\WINDOWS\system32\bash.EXE (WSL) on this
+        # runner, which has no distro installed (run 36186476248). Pin Git Bash.
+        shell: '"C:/Program Files/Git/bin/bash.exe" --noprofile --norc -eo pipefail {0}'
+        run: scripts/desktop_preflight.sh windows
 
       - name: OS probe (PowerShell)
         shell: powershell
