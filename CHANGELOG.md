@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.1.2](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v2.1.1...persona-forge-v2.1.2) (2026-09-25)
+
+
+### Bug Fixes
+
+* **ci:** correct rcodesign download URL and archive extraction ([#322](https://github.com/nmorgowicz-org/persona-forge/issues/322)) ([1492509](https://github.com/nmorgowicz-org/persona-forge/commit/14925099c0c848a3b64ba7641b2581c9806f719b))
+
+
+### Miscellaneous Chores
+
+* **config:** migrate config renovate.json ([698b563](https://github.com/nmorgowicz-org/persona-forge/commit/698b563d7f70c55fe75ffb2ed25ac439d06558d0))
+* **config:** migrate Renovate config ([#321](https://github.com/nmorgowicz-org/persona-forge/issues/321)) ([698b563](https://github.com/nmorgowicz-org/persona-forge/commit/698b563d7f70c55fe75ffb2ed25ac439d06558d0))
+
 ## [2.1.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v2.1.0...persona-forge-v2.1.1) (2026-09-25)
 
 
