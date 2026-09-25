@@ -66,7 +66,7 @@ enum Args {
 }
 
 fn parse_args() -> Args {
-    let mut it = std::env::args().skip(1);
+    let it = std::env::args().skip(1);
     for arg in it {
         match arg.as_str() {
             "--version" => return Args::Version,
@@ -107,34 +107,38 @@ fn run_ci_update(app: tauri::AppHandle, out_path: PathBuf) -> Result<(), String>
         "error": serde_json::Value::Null,
     });
 
-    let result = tauri::async_runtime::block_on(async {
-        let updater = app.updater_builder().build()?;
-        match updater.check().await {
+    let result: Result<(), String> = tauri::async_runtime::block_on(async {
+        let updater = app
+            .updater_builder()
+            .build()
+            .map_err(|e| e.to_string())?;
+        let update = match updater.check().await {
             Ok(Some(update)) => {
                 json["to_version"] = serde_json::Value::String(update.version.clone());
-                let mut downloaded: Vec<u8> = Vec::new();
                 update
-                    .download(
-                        &mut |chunk| {
-                            downloaded.extend_from_slice(chunk);
-                            Ok(())
-                        },
-                        &mut |_| {},
-                    )
-                    .await?;
-                json["phase"] = serde_json::Value::String("installing".into());
-                update.install(&mut downloaded.as_slice()).map_err(|e| e.to_string())?;
-                Ok(())
             }
             Ok(None) => {
                 json["phase"] = serde_json::Value::String("noupdate".into());
-                Err("no update available".into())
+                return Err("no update available".into());
             }
             Err(e) => {
                 json["phase"] = serde_json::Value::String("verify".into());
-                Err(e.to_string())
+                return Err(e.to_string());
             }
-        }
+        };
+        let mut downloaded: Vec<u8> = Vec::new();
+        update
+            .download(
+                &mut |chunk, _total| {
+                    downloaded.extend_from_slice(chunk);
+                },
+                &mut || {},
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        json["phase"] = serde_json::Value::String("installing".into());
+        update.install(&mut downloaded.as_slice()).map_err(|e| e.to_string())?;
+        Ok(())
     });
 
     if let Err(e) = result {

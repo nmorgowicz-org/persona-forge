@@ -110,7 +110,7 @@ jobs:
           ../rcodesign sign \
             --pem-file key.pem --pem-file cert.pem \
             --for-notarization \
-            --entitlements-xml-file ../../spike/desktop-shell/entitlements.plist \
+            --entitlements-xml-file ../spike/desktop-shell/entitlements.plist \
             "desktop-spike.app"
           ../rcodesign notary-submit \
             --api-key-file ~/.appstoreconnect/key.json \
