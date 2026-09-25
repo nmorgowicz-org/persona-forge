@@ -1,0 +1,26 @@
+# STUB (execution plan Phase 0, task 4 / contract §5 workflow bootstrap rule).
+# Phase 1 replaces this stub ON THE SPIKE BRANCH ONLY (spike/desktop); the stub
+# on main is deleted again in Phase 1's results PR.
+name: Desktop Spike
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Spike app version (0.1.0 or 0.1.1 for the macOS runs)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  stub:
+    name: stub
+    runs-on: arc-general
+    timeout-minutes: 5
+    steps:
+      - name: Stub — replaced on the spike branch in Phase 1
+        run: |
+          echo "stub: implemented in a later phase"
+          exit 1

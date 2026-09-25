@@ -1,0 +1,68 @@
+# Desktop toolchain preflight (execution plan Phase 0, task 3).
+#
+# Dispatch-only; no secrets. The Linux job stays queued until Phase 0R has
+# created the arc-persona-forge-desktop scale set; that is expected (Gate 0:
+# cancel the run after the other jobs finish). runner-label-probe confirms the
+# shared arc-llama-monitor runner's OS (Ubuntu 26.04 expected), which Phase 4
+# uses as the "newest distro" headless smoke target.
+name: Desktop Preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight-macos:
+    name: preflight-macos
+    runs-on: self-hosted-macos
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: macOS preflight
+        run: bash scripts/desktop_preflight.sh macos
+
+      - name: OS version
+        run: sw_vers
+
+  preflight-windows:
+    name: preflight-windows
+    runs-on: self-hosted-windows
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Windows preflight (Git Bash)
+        shell: bash
+        run: bash scripts/desktop_preflight.sh windows
+
+      - name: OS probe (PowerShell)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Get-CimInstance Win32_OperatingSystem |
+            Select-Object Caption, Version, OSArchitecture |
+            Format-List
+
+  preflight-linux:
+    name: preflight-linux
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Linux preflight
+        run: bash scripts/desktop_preflight.sh linux
+
+  runner-label-probe:
+    name: runner-label-probe
+    runs-on: arc-llama-monitor
+    timeout-minutes: 5
+    steps:
+      - name: Probe shared runner OS
+        run: |
+          uname -a
+          cat /etc/os-release
+          ldd --version | sed -n 1p

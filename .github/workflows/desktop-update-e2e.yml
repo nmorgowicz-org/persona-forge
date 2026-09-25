@@ -1,0 +1,36 @@
+# STUB (execution plan Phase 0, task 4 / contract §5 workflow bootstrap rule).
+# Replaced by the real update end-to-end workflow in Phase 6B.
+name: Desktop Update E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      n_run_id:
+        description: "desktop-build run id for version N"
+        required: true
+        type: string
+      n1_run_id:
+        description: "desktop-build run id for version N+1"
+        required: true
+        type: string
+      mode:
+        description: "good = install the update; badsig = it must be rejected"
+        default: good
+        type: choice
+        options:
+          - good
+          - badsig
+
+permissions:
+  contents: read
+
+jobs:
+  stub:
+    name: stub
+    runs-on: arc-general
+    timeout-minutes: 5
+    steps:
+      - name: Stub — replaced in Phase 6B
+        run: |
+          echo "stub: implemented in a later phase"
+          exit 1

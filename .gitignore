@@ -268,6 +268,10 @@ CLAUDE.local.md
 .serena/
 .codegraph
 
+# Agent scratch space: throwaway scripts, drafts, plans-in-progress. Nothing in
+# tmp/ is ever tracked; durable content belongs in docs/ or a real location.
+/tmp/
+
 # Local brand exploration; only the selected Signal Crucible finalist is published.
 /assets/brand/concepts/persona-forge/hero-options/
 /assets/brand/concepts/persona-forge/social-ready/
