@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.4](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v2.1.3...persona-forge-v2.1.4) (2026-09-25)
+
+
+### Bug Fixes
+
+* **launcher:** resolve macOS torch wheel platform-tag mismatch in requirements export ([#326](https://github.com/nmorgowicz-org/persona-forge/issues/326)) ([87d6547](https://github.com/nmorgowicz-org/persona-forge/commit/87d65473d789949c14fd31cc1dd56269b6d6220c))
+
 ## [2.1.3](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v2.1.2...persona-forge-v2.1.3) (2026-09-25)
 
 
