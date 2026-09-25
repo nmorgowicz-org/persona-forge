@@ -70,7 +70,15 @@ Installation options (all valid on Linux):
 
 ```bash
 # Option A: download pre-built binary (fastest, recommended)
-wget -O rcodesign https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign-0.29.0/rcodesign-x86_64-unknown-linux-gnu
+# NOTE: release tags use a `apple-codesign/X.Y.Z` (slash) format, and assets
+# are named `apple-codesign-X.Y.Z-<target>.tar.gz` archives (not bare
+# binaries) - there is no `-unknown-linux-gnu` asset, only
+# `-unknown-linux-musl`. The URL below was corrected after the first live
+# CI run 404'd on the originally-assumed URL shape.
+curl -fL -o rcodesign.tar.gz \
+  "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz"
+tar -xzf rcodesign.tar.gz apple-codesign-0.29.0-x86_64-unknown-linux-musl/rcodesign
+mv apple-codesign-0.29.0-x86_64-unknown-linux-musl/rcodesign ./rcodesign
 chmod +x rcodesign
 
 # Option B: cargo install
@@ -175,18 +183,25 @@ pinned uv binary" and before "Package launcher archive".
   if: matrix.target == 'aarch64-apple-darwin'
   run: |
     set -euo pipefail
-    RCODESIGN_VERSION="apple-codesign-0.29.0"
-    curl --fail --location --silent --show-error -o rcodesign \
-      "https://github.com/indygreg/apple-platform-rs/releases/download/${RCODESIGN_VERSION}/rcodesign-x86_64-unknown-linux-gnu"
+    RCODESIGN_VERSION="0.29.0"
+    RCODESIGN_ASSET="apple-codesign-${RCODESIGN_VERSION}-x86_64-unknown-linux-musl"
+    curl --fail --location --silent --show-error -o rcodesign.tar.gz \
+      "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F${RCODESIGN_VERSION}/${RCODESIGN_ASSET}.tar.gz"
+    tar -xzf rcodesign.tar.gz "${RCODESIGN_ASSET}/rcodesign"
+    mv "${RCODESIGN_ASSET}/rcodesign" ./rcodesign
     chmod +x rcodesign
 ```
 
-(Using `curl`, not `wget` — the `arc-llama-monitor` runner image doesn't ship
-`wget`, which caused the first live run to fail with
-`wget: command not found`.)
+(Using `curl`, not `wget` — the `arc-llama-monitor` runner image didn't ship
+`wget` at the time, which caused the first live run to fail with
+`wget: command not found`; `wget` has since been added to the runner image
+as well.)
 
-Fallback to `cargo install apple-codesign --locked` if the musl/glibc binary
-has issues on the specific runner distro.
+The second live run then hit a 404: release tags on this repo use a
+`apple-codesign/X.Y.Z` (slash) format, not `apple-codesign-X.Y.Z` (hyphen),
+and there is no bare `rcodesign-x86_64-unknown-linux-gnu` asset — only
+`.tar.gz` archives, and only for the `musl` target (no glibc Linux build).
+The snippet above reflects the corrected download.
 
 **Step 2: Prepare App Store Connect API key**
 
