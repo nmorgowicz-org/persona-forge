@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v2.1.0...persona-forge-v2.1.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* **ci:** use curl instead of wget to fetch rcodesign ([#319](https://github.com/nmorgowicz-org/persona-forge/issues/319)) ([0e7c856](https://github.com/nmorgowicz-org/persona-forge/commit/0e7c856d479a3fbbde5fe088c749d6edf55d2e47))
+
 ## [2.1.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v2.0.0...persona-forge-v2.1.0) (2026-09-25)
 
 
