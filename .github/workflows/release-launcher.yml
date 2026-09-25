@@ -115,6 +115,67 @@ jobs:
       - name: Fetch + verify pinned uv binary (${{ matrix.uv_target }})
         run: bash scripts/fetch_uv_binary.sh ${{ env.UV_VERSION }} ${{ matrix.uv_target }} uv-bin
 
+      - name: Install rcodesign (macOS signing)
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          set -euo pipefail
+          RCODESIGN_VERSION="apple-codesign-0.29.0"
+          wget -qO rcodesign \
+            "https://github.com/indygreg/apple-platform-rs/releases/download/${RCODESIGN_VERSION}/rcodesign-x86_64-unknown-linux-gnu"
+          chmod +x rcodesign
+
+      - name: Prepare App Store Connect API key
+        if: matrix.target == 'aarch64-apple-darwin'
+        env:
+          APPLE_ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
+          APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+          APPLE_PRIVATE_KEY: ${{ secrets.APPLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.appstoreconnect
+          echo "$APPLE_PRIVATE_KEY" > /tmp/AuthKey.pem
+          ./rcodesign encode-app-store-connect-api-key \
+            -o ~/.appstoreconnect/key.json \
+            "$APPLE_ISSUER_ID" "$APPLE_KEY_ID" /tmp/AuthKey.pem
+
+      - name: Sign launcher binary (macOS)
+        if: matrix.target == 'aarch64-apple-darwin'
+        env:
+          MACOS_KEY_PEM: ${{ secrets.MACOS_KEY_PEM }}
+          MACOS_CERT_PEM: ${{ secrets.MACOS_CERT_PEM }}
+        run: |
+          set -euo pipefail
+          echo "$MACOS_KEY_PEM" > key.pem
+          echo "$MACOS_CERT_PEM" > cert.pem
+          LAUNCHER="launcher/target/aarch64-apple-darwin/release/persona-forge-launcher"
+          ./rcodesign sign \
+            --pem-file key.pem --pem-file cert.pem \
+            --code-signature-flags runtime \
+            "$LAUNCHER"
+
+      - name: Notarize launcher binary (macOS)
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          set -euo pipefail
+          # notary-submit does not accept a bare Mach-O binary; it must be
+          # zipped first. Stapling a plain executable is not supported by
+          # Apple (only .app/.pkg/.dmg), so we notarize but do not staple.
+          # Gatekeeper falls back to an online check on first launch, which
+          # still clears the quarantine warning.
+          LAUNCHER="launcher/target/aarch64-apple-darwin/release/persona-forge-launcher"
+          zip notarize.zip "$LAUNCHER"
+          ./rcodesign notary-submit \
+            --api-key-file ~/.appstoreconnect/key.json \
+            --wait \
+            notarize.zip
+
+      - name: Verify launcher signature (macOS)
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          set -euo pipefail
+          LAUNCHER="launcher/target/aarch64-apple-darwin/release/persona-forge-launcher"
+          ./rcodesign verify "$LAUNCHER"
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: wheel-and-sdist

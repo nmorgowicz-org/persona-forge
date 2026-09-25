@@ -169,9 +169,9 @@ below for pinned version/digest tags.
 > [RUN_LOCAL.md](docs/RUN_LOCAL.md); to move an
 > existing Docker deployment's data over, see [MIGRATION.md](docs/MIGRATION.md).
 
-> On macOS, verify the release checksum first. If Gatekeeper blocks the extracted launcher, run
-> `xattr -dr com.apple.quarantine .` from that archive's directory. See [native setup](docs/RUN_LOCAL.md)
-> for the safety note.
+> On macOS, verify the release checksum first. The launcher is code-signed and notarized by
+> Apple; Gatekeeper verifies this online on first launch (requires internet connectivity once),
+> no manual quarantine removal needed. See [native setup](docs/RUN_LOCAL.md) for the safety note.
 
 ### Run natively (no Docker)
 
@@ -196,12 +196,9 @@ chmod +x persona-forge-launcher
 ./persona-forge-launcher serve
 ```
 
-On Apple Silicon macOS, if Gatekeeper blocks the extracted launcher, run the following from the
-verified archive directory before `doctor`:
-
-```bash
-xattr -dr com.apple.quarantine .
-```
+On Apple Silicon macOS, the launcher is code-signed and notarized by Apple. Gatekeeper
+verifies this online on first launch (requires internet connectivity once) - no manual
+quarantine removal needed.
 
 On Windows PowerShell:
 

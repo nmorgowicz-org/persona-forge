@@ -40,9 +40,9 @@ It does not contain the Python runtime, large ML dependency wheels, or model wei
 Those are downloaded from their normal package/model sources on first use.
 
 Before running the launcher, verify this archive against checksums.json from the same
-GitHub Release. On macOS, if Gatekeeper blocks the extracted binary, first run:
-  xattr -dr com.apple.quarantine .
-Only run that command inside this verified archive directory.
+GitHub Release. The macOS launcher is code-signed and notarized by Apple. Gatekeeper
+verifies this online on first launch (requires internet connectivity once); no manual
+quarantine removal is needed.
 
 Usage on Linux/macOS:
   ./persona-forge-launcher doctor --json

@@ -65,8 +65,9 @@ Open <http://127.0.0.1:8318> after the server starts. Stop it with `Ctrl-C`.
 
 ### Download, verify, and run on Apple Silicon macOS
 
-Use the same flow with the macOS archive. The `xattr` command is needed only when macOS
-quarantines the launcher extracted from a browser download.
+Use the same flow with the macOS archive. The launcher is code-signed and notarized by
+Apple, so Gatekeeper verifies it online on first launch (requires internet connectivity
+once) instead of quarantining it — no `xattr` step needed.
 
 ```bash
 VERSION=1.4.7
@@ -80,7 +81,6 @@ ACTUAL=$(shasum -a 256 "${ARCHIVE}" | awk '{print $1}')
 [ -n "${EXPECTED}" ] && [ "${ACTUAL}" = "${EXPECTED}" ] || { echo "checksum verification failed" >&2; exit 1; }
 tar -xzf "${ARCHIVE}"
 chmod +x persona-forge-launcher
-xattr -dr com.apple.quarantine .  # only in this verified archive directory
 ./persona-forge-launcher doctor --json
 ./persona-forge-launcher setup
 ./persona-forge-launcher serve
