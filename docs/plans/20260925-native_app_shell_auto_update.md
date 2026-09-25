@@ -1849,3 +1849,74 @@ plus the two backups are how you recover if a secret is ever deleted.
 - Replacing a key later: Sparkle allows changing either the Sparkle key or the Apple Developer ID
   certificate in one release, never both at once. A new Tauri key needs every Windows and Linux
   user to reinstall once, so avoid it unless the old key leaked.
+
+---
+
+## Phase 0 results
+
+Recorded 2026-09-25. Gate 0 runs: 36186476248 (initial; Windows job mis-fired on WSL bash),
+36186911975 (custom-shell quoting attempt), **36187051719 (valid run, evidence below)**.
+Two workflow fixes rode along on `desktop/p0-results`: `shell: bash` resolves to WSL's
+`C:\WINDOWS\system32\bash.EXE` (no distro installed) on `self-hosted-windows`, so the preflight
+is now invoked via PowerShell calling Git Bash explicitly, with the exit code propagated.
+
+### Preflight — `self-hosted-macos` (run 36187051719, job `preflight-macos`: green)
+
+- macOS 26.5.1 (BuildVersion 25F80), Apple Silicon — D6's arm64 build-host assumption holds;
+  no Gate 0 stop condition.
+- `rustc`/`cargo` 1.98.0; rustup targets `aarch64-apple-darwin`, `x86_64-pc-windows-gnu`;
+  `python3` 3.14.7; `uv` 0.12.12 (warn-only check).
+- `xcode-select -p` → Xcode 26.6.0; `hdiutil`, `codesign`, `spctl`, `xcrun stapler` all present.
+- Free disk on `$RUNNER_TEMP`: 980 GB (>= 10 GB).
+- **0 missing.** OA-6 macOS items: already satisfied.
+
+### Preflight — `self-hosted-windows` (job `preflight-windows`: failed with the precise
+missing-tool list, which is Gate 0's documented pass path)
+
+Present: VS 2022 BuildTools with VC.Tools.x86.x64 (`vswhere` → `C:\Program Files (x86)\Microsoft
+Visual Studio\2022\BuildTools`), Windows SDK 10.0.26100.0, WebView2 Evergreen runtime registry
+entry. Missing (→ **OA-6 Windows task**):
+
+1. `rustc`, `cargo`, `rustup` — rustup is not installed on the runner. Install rustup with the
+   `x86_64-pc-windows-msvc` host and toolchain `1.98` (matching `release-launcher.yml`'s
+   `RUST_VERSION`).
+2. `python3` — no `python3` on Git Bash's PATH. Either install Python 3.13 so `python3`
+   resolves inside Git Bash, or (simpler) relax the all-OS check to accept `python` on
+   Windows — decide at install time; the desktop lane itself only needs `uv run python` and
+   the venv's own interpreter.
+
+### Runner-label probe — `arc-llama-monitor` (green)
+
+`Linux ... 6.8.0-142-generic x86_64`, `PRETTY_NAME="Ubuntu 26.04 LTS"`, glibc **2.43**
+(`ldd` 2.43-2ubuntu2). Confirms contract §11's "shared runner image is Ubuntu 26.04" and its
+use as the newest-distro smoke target.
+
+### Preflight — `arc-persona-forge-desktop`
+
+Not run: the scale set does not exist until Phase 0R. Both valid runs were cancelled after the
+other jobs finished (Gate 0's documented handling). This job must go green at Gate 0R.
+
+### Secret presence and scope (2026-09-25, `gh secret list`, no values)
+
+| Secret | Scope |
+| --- | --- |
+| `APPLE_ISSUER_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`, `MACOS_CERT_PEM`, `MACOS_KEY_PEM` | org, SELECTED repos |
+| `GH_APP_PRIVATE_KEY` | org ALL + repo copy |
+| `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` | repo |
+| `SPARKLE_ED_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` | **not present yet** — created at OA-3/OA-4 (Appendix A), before Phase 1 |
+
+SELECTED scope means this repo's inclusion cannot be proven from `gh secret list` alone; the
+Phase 1A signing jobs will prove it (a permission error there is recorded as-is per Phase 0
+task 6).
+
+### Open OA items after Phase 0
+
+- **OA-6 Windows half**: rustup (msvc host, toolchain 1.98) + the `python3` decision above.
+- **OA-3 / OA-4**: update signing keys (Appendix A) — before Phase 1.
+- **OA-5**: Phase 0R paired session — next in strict sequence.
+- **OA-7 / OA-8**: test machines / spike pre-releases — needed at Phases 1 and 6.
+
+### Workflow stubs on `main`
+
+`desktop-preflight.yml`, `desktop-build.yml`, `desktop-update-e2e.yml`, `desktop-spike.yml` all
+exist on `main` (PR #328) and are dispatchable (`gh workflow list` shows all four).
