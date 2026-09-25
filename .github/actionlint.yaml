@@ -1,0 +1,12 @@
+# actionlint configuration: custom labels of this org's self-hosted runners.
+# These labels are already used by release-launcher.yml and ci-packaging.yml;
+# without this file actionlint reports them as unknown GitHub-hosted labels.
+self-hosted-runner:
+  labels:
+    - arc-general
+    - arc-general-docker
+    - arc-llama-monitor
+    - arc-llama-monitor-fast
+    - arc-persona-forge-desktop
+    - self-hosted-macos
+    - self-hosted-windows
