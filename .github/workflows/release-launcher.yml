@@ -153,7 +153,7 @@ jobs:
           LAUNCHER="launcher/target/aarch64-apple-darwin/release/persona-forge-launcher"
           ./rcodesign sign \
             --pem-file key.pem --pem-file cert.pem \
-            --code-signature-flags runtime \
+            --for-notarization \
             "$LAUNCHER"
 
       - name: Notarize launcher binary (macOS)

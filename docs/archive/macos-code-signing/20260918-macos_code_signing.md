@@ -119,7 +119,7 @@ The complete flow for the macOS binary:
 1. Sign the binary (in place)
    rcodesign sign \
      --pem-file key.pem --pem-file cert.pem \
-     --code-signature-flags runtime \
+     --for-notarization \
      launcher-binary
 
 2. Notarize the signed binary (must be zipped — rcodesign does not
@@ -236,9 +236,20 @@ The snippet above reflects the corrected download.
     LAUNCHER="launcher/target/aarch64-apple-darwin/release/persona-forge-launcher"
     ./rcodesign sign \
       --pem-file key.pem --pem-file cert.pem \
-      --code-signature-flags runtime \
+      --for-notarization \
       "$LAUNCHER"
 ```
+
+`--for-notarization` is rcodesign's purpose-built flag for this flow: it requires a
+Developer ID cert, requires a secure timestamp, and enables the hardened runtime
+(equivalent of `--code-signature-flags runtime`) in one place. An earlier iteration
+used only `--code-signature-flags runtime` directly, which does *not* force the
+timestamp requirement — the notary service rejected those binaries with "signature
+does not include a secure timestamp" and (likely a fallout of the same incomplete
+signature) "not signed with a valid Developer ID certificate." A CA-chain fix
+(appending Apple's Developer ID intermediate + root certs to `MACOS_CERT_PEM`) was
+tried first and did not resolve it, confirming the missing timestamp was the actual
+cause, not the certificate chain.
 
 **Step 4: Notarize the signed binary**
 
