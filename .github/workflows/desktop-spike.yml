@@ -1,26 +1,407 @@
-# STUB (execution plan Phase 0, task 4 / contract §5 workflow bootstrap rule).
-# Phase 1 replaces this stub ON THE SPIKE BRANCH ONLY (spike/desktop); the stub
-# on main is deleted again in Phase 1's results PR.
+# Phase 1 spike workflow (persona-forge desktop execution plan).
+# Replaces the Phase 0 stub ON THE SPIKE BRANCH ONLY; deleted again in the
+# Phase 1 results PR. Proves the four risky integrations with real runs.
 name: Desktop Spike
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Spike app version (0.1.0 or 0.1.1 for the macOS runs)"
+        description: "Version for the macOS spike builds (0.1.0 / 0.1.1). Windows+Linux always build both N=0.1.0 and N+1=0.1.1."
         required: true
         type: string
 
 permissions:
   contents: read
 
+concurrency:
+  group: desktop-spike
+  cancel-in-progress: true
+
+env:
+  TAURI_CLI_VERSION: "2.11.5"
+  SPIKE_FEED_BASE: "https://github.com/nmorgowicz-org/persona-forge/releases/download/desktop-spike"
+  SPIKE_FEED_BASE_BADSIG: "https://github.com/nmorgowicz-org/persona-forge/releases/download/desktop-spike-badsig"
+
 jobs:
-  stub:
-    name: stub
-    runs-on: arc-general
-    timeout-minutes: 5
+  # ── 1A macOS chain ─────────────────────────────────────────────────────────
+  spike-macos-build:
+    name: spike-macos-build (${{ inputs.version }})
+    runs-on: self-hosted-macos
+    timeout-minutes: 90
     steps:
-      - name: Stub — replaced on the spike branch in Phase 1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked
+
+      - name: Download Sparkle framework (plugin build dependency)
         run: |
-          echo "stub: implemented in a later phase"
-          exit 1
+          cd spike/desktop-shell
+          curl -fsSL https://raw.githubusercontent.com/ahonn/tauri-plugin-sparkle-updater/refs/heads/master/scripts/download-sparkle.sh | bash -s -- .
+
+      - name: Generate dummy resource (10 MB, never committed)
+        run: |
+          cd spike/desktop-shell && mkdir -p resources
+          dd if=/dev/urandom of=resources/dummy.bin bs=1048576 count=10
+
+      - name: Build unsigned .app
+        run: |
+          cd spike/desktop-shell
+          cargo tauri build --no-sign --bundles app --target aarch64-apple-darwin \
+            --config '{"version":"${{ inputs.version }}"}'
+
+      - name: Zip .app (ditto keeps symlinks)
+        run: |
+          cd spike/desktop-shell/target/aarch64-apple-darwin/release/bundle/macos
+          ditto -c -k --keepParent "desktop-spike.app" "../../../desktop-spike-${{ inputs.version }}.app.zip"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: spike-macos-app-${{ inputs.version }}
+          path: spike/desktop-shell/target/desktop-spike-${{ inputs.version }}.app.zip
+          if-no-files-found: error
+
+  spike-macos-sign-app:
+    name: spike-macos-sign-app (${{ inputs.version }})
+    needs: spike-macos-build
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: spike-macos-app-${{ inputs.version }}
+          path: artifact
+
+      - name: Install rcodesign
+        run: |
+          set -euo pipefail
+          RCODESIGN_VERSION="0.29.0"
+          RCODESIGN_ASSET="apple-codesign-${RCODESIGN_VERSION}-x86_64-unknown-linux-musl"
+          curl --fail --location --silent --show-error -o rcodesign.tar.gz \
+            "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F${RCODESIGN_VERSION}/${RCODESIGN_ASSET}.tar.gz"
+          tar -xzf rcodesign.tar.gz "${RCODESIGN_ASSET}/rcodesign"
+          mv "${RCODESIGN_ASSET}/rcodesign" ./rcodesign && chmod +x rcodesign
+
+      - name: Prepare App Store Connect API key
+        env:
+          APPLE_ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
+          APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+          APPLE_PRIVATE_KEY: ${{ secrets.APPLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.appstoreconnect
+          echo "$APPLE_PRIVATE_KEY" > /tmp/AuthKey.pem
+          ./rcodesign encode-app-store-connect-api-key \
+            -o ~/.appstoreconnect/key.json \
+            "$APPLE_ISSUER_ID" "$APPLE_KEY_ID" /tmp/AuthKey.pem
+
+      - name: Sign, notarize, staple the .app
+        env:
+          MACOS_KEY_PEM: ${{ secrets.MACOS_KEY_PEM }}
+          MACOS_CERT_PEM: ${{ secrets.MACOS_CERT_PEM }}
+        run: |
+          set -euo pipefail
+          cd artifact && unzip -q desktop-spike-${{ inputs.version }}.app.zip
+          echo "$MACOS_KEY_PEM" > key.pem
+          echo "$MACOS_CERT_PEM" > cert.pem
+          ../rcodesign sign \
+            --pem-file key.pem --pem-file cert.pem \
+            --for-notarization \
+            --entitlements-xml-file ../../spike/desktop-shell/entitlements.plist \
+            "desktop-spike.app"
+          ../rcodesign notary-submit \
+            --api-key-file ~/.appstoreconnect/key.json \
+            --wait --staple "desktop-spike.app"
+          rm -f key.pem cert.pem
+          zip -q -r signed-app.zip "desktop-spike.app"
+
+      - name: Remove key material
+        if: always()
+        run: rm -rf ~/.appstoreconnect /tmp/AuthKey.pem
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: spike-macos-app-signed-${{ inputs.version }}
+          path: artifact/signed-app.zip
+          if-no-files-found: error
+
+  spike-macos-dmg:
+    name: spike-macos-dmg (${{ inputs.version }})
+    needs: spike-macos-sign-app
+    runs-on: self-hosted-macos
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: spike-macos-app-signed-${{ inputs.version }}
+          path: artifact
+
+      - name: Build DMG (signed .app + Applications symlink)
+        run: |
+          set -euo pipefail
+          cd artifact && unzip -q signed-app.zip
+          STAGING=$(mktemp -d)
+          cp -R "desktop-spike.app" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create -volname "desktop-spike" -srcfolder "$STAGING" -ov -format UDZO \
+            "desktop-spike-${{ inputs.version }}.dmg"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: spike-macos-dmg-unsigned-${{ inputs.version }}
+          path: artifact/desktop-spike-${{ inputs.version }}.dmg
+          if-no-files-found: error
+
+  spike-macos-sign-dmg:
+    name: spike-macos-sign-dmg (${{ inputs.version }})
+    needs: spike-macos-dmg
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: spike-macos-dmg-unsigned-${{ inputs.version }}
+          path: artifact
+
+      - name: Install rcodesign
+        run: |
+          set -euo pipefail
+          RCODESIGN_VERSION="0.29.0"
+          RCODESIGN_ASSET="apple-codesign-${RCODESIGN_VERSION}-x86_64-unknown-linux-musl"
+          curl --fail --location --silent --show-error -o rcodesign.tar.gz \
+            "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F${RCODESIGN_VERSION}/${RCODESIGN_ASSET}.tar.gz"
+          tar -xzf rcodesign.tar.gz "${RCODESIGN_ASSET}/rcodesign"
+          mv "${RCODESIGN_ASSET}/rcodesign" ./rcodesign && chmod +x rcodesign
+
+      - name: Prepare App Store Connect API key
+        env:
+          APPLE_ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
+          APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+          APPLE_PRIVATE_KEY: ${{ secrets.APPLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.appstoreconnect
+          echo "$APPLE_PRIVATE_KEY" > /tmp/AuthKey.pem
+          ./rcodesign encode-app-store-connect-api-key \
+            -o ~/.appstoreconnect/key.json \
+            "$APPLE_ISSUER_ID" "$APPLE_KEY_ID" /tmp/AuthKey.pem
+
+      - name: Sign, notarize, staple the DMG
+        env:
+          MACOS_KEY_PEM: ${{ secrets.MACOS_KEY_PEM }}
+          MACOS_CERT_PEM: ${{ secrets.MACOS_CERT_PEM }}
+        run: |
+          set -euo pipefail
+          cd artifact
+          echo "$MACOS_KEY_PEM" > key.pem
+          echo "$MACOS_CERT_PEM" > cert.pem
+          ../rcodesign sign --pem-file key.pem --pem-file cert.pem \
+            "desktop-spike-${{ inputs.version }}.dmg"
+          ../rcodesign notary-submit \
+            --api-key-file ~/.appstoreconnect/key.json \
+            --wait --staple "desktop-spike-${{ inputs.version }}.dmg"
+          rm -f key.pem cert.pem
+
+      - name: Remove key material
+        if: always()
+        run: rm -rf ~/.appstoreconnect /tmp/AuthKey.pem
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: spike-macos-dmg-signed-${{ inputs.version }}
+          path: artifact/desktop-spike-${{ inputs.version }}.dmg
+          if-no-files-found: error
+
+  spike-macos-verify:
+    name: spike-macos-verify (${{ inputs.version }})
+    needs: spike-macos-sign-dmg
+    runs-on: self-hosted-macos
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: spike-macos-dmg-signed-${{ inputs.version }}
+          path: dmg
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: spike-macos-app-signed-${{ inputs.version }}
+          path: appzip
+
+      - name: Verify stapling + signatures (rcodesign #169: only stapler counts)
+        run: |
+          set -euo pipefail
+          cd appzip && unzip -q signed-app.zip
+          xcrun stapler validate "desktop-spike.app"
+          codesign --verify --deep --strict --verbose=2 "desktop-spike.app"
+          spctl --assess --type execute --verbose=4 "desktop-spike.app"
+          cd ../dmg
+          xcrun stapler validate "desktop-spike-${{ inputs.version }}.dmg"
+          spctl --assess --type open --context context:primary-signature --verbose=4 \
+            "desktop-spike-${{ inputs.version }}.dmg"
+          # XPC helpers signed with our Team ID
+          codesign -dv --verbose=4 \
+            "desktop-spike.app/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate" 2>&1 | grep TeamIdentifier
+
+  spike-sparkle-sig:
+    name: spike-sparkle-sig (${{ inputs.version }})
+    needs: spike-macos-sign-dmg
+    runs-on: arc-general
+    timeout-minutes: 15
+    outputs:
+      signature: ${{ steps.sig.outputs.signature }}
+      length: ${{ steps.sig.outputs.length }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: spike-macos-dmg-signed-${{ inputs.version }}
+          path: artifact
+
+      - name: Sign with Sparkle EdDSA (OpenSSL 3 -rawin recipe, contract §9.2)
+        id: sig
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          OPENSSL: openssl
+        run: |
+          set -euo pipefail
+          DMG="artifact/desktop-spike-${{ inputs.version }}.dmg"
+          LENGTH=$(stat -c%s "$DMG")
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | base64 -d > /tmp/seed.bin
+          python3 spike/desktop-shell/scripts/seed_to_pem.py /tmp/seed.bin /tmp/ed25519.pem
+          chmod 600 /tmp/ed25519.pem
+          SIG=$($OPENSSL pkeyutl -sign -inkey /tmp/ed25519.pem -rawin -in "$DMG" | base64 -w0)
+          rm -f /tmp/ed25519.pem /tmp/seed.bin
+          echo "signature=$SIG" >> "$GITHUB_OUTPUT"
+          echo "length=$LENGTH" >> "$GITHUB_OUTPUT"
+
+  # ── 1B Windows ──────────────────────────────────────────────────────────────
+  spike-windows-build:
+    name: spike-windows-build (${{ matrix.version }})
+    runs-on: self-hosted-windows
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ["0.1.0", "0.1.1"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked
+
+      - name: Generate dummy resource
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path spike/desktop-shell/resources | Out-Null
+          $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+          $buf = New-Object byte[] (10MB)
+          $rng.GetBytes($buf)
+          [System.IO.File]::WriteAllBytes("$PWD/spike/desktop-shell/resources/dummy.bin", $buf)
+
+      - name: Build NSIS installer
+        shell: bash
+        run: |
+          cd spike/desktop-shell
+          cargo tauri build --bundles nsis --target x86_64-pc-windows-msvc \
+            --config '{"version":"${{ matrix.version }}","bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Rename installer
+        shell: bash
+        run: |
+          cd spike/desktop-shell/target/x86_64-pc-windows-msvc/release/bundle/nsis
+          mv desktop-spike_0.1.0_x64-setup.exe desktop-spike-setup.exe 2>/dev/null || \
+            mv desktop-spike_0.1.1_x64-setup.exe desktop-spike-setup.exe
+          mv desktop-spike-setup.exe ../../../../../desktop-spike-${{ matrix.version }}-setup.exe
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: spike-windows-setup-${{ matrix.version }}
+          path: spike/desktop-shell/desktop-spike-${{ matrix.version }}-setup.exe
+          if-no-files-found: error
+
+  # ── 1C Linux ────────────────────────────────────────────────────────────────
+  spike-linux-build:
+    name: spike-linux-build (${{ matrix.version }} / ${{ matrix.feed }})
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: "0.1.0"
+            feed: good
+          - version: "0.1.0"
+            feed: badsig
+          - version: "0.1.1"
+            feed: good
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Generate dummy resource
+        run: |
+          cd spike/desktop-shell && mkdir -p resources
+          dd if=/dev/urandom of=resources/dummy.bin bs=1048576 count=10
+
+      - name: Build AppImage
+        env:
+          SPIKE_FEED_BASE: ${{ matrix.feed == 'good' && env.SPIKE_FEED_BASE || env.SPIKE_FEED_BASE_BADSIG }}
+        run: |
+          cd spike/desktop-shell
+          # feed base is compiled in (option_env!)
+          cargo tauri build --bundles appimage \
+            --config '{"version":"${{ matrix.version }}","bundle":{"createUpdaterArtifacts":false,"linux":{"appimage":{"bundleMediaFramework":true}}}}'
+          BIN=target/release/desktop-spike
+          MAX_GLIBC=$(objdump -T "$BIN" | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1)
+          echo "max glibc symbol: $MAX_GLIBC"
+          # fail closed: must be <= GLIBC_2.35 (contract D8: oldest supported distro)
+          [ "$(printf '%s\nGLIBC_2.35\n' "$MAX_GLIBC" | sort -V | head -1)" = "$MAX_GLIBC" ]
+
+      - name: Rename AppImage
+        run: |
+          cd spike/desktop-shell/target/release/bundle/appimage
+          mv desktop-spike.AppImage "../../../../../desktop-spike-${{ matrix.version }}-${{ matrix.feed }}.AppImage"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: spike-linux-appimage-${{ matrix.version }}-${{ matrix.feed }}
+          path: spike/desktop-shell/desktop-spike-${{ matrix.version }}-${{ matrix.feed }}.AppImage
+          if-no-files-found: error
+
+  spike-updater-sigs:
+    name: spike-updater-sigs
+    needs: [spike-windows-build, spike-linux-build]
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download installers
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: artifacts
+          pattern: spike-*0.1.1*
+
+      - name: Sign with Tauri minisign
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APPIMAGE=$(find artifacts -name '*0.1.1-good.AppImage' | head -1)
+          SETUP=$(find artifacts -name '*0.1.1-setup.exe' | head -1)
+          cargo tauri signer sign -f <(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY") \
+            -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$APPIMAGE"
+          cargo tauri signer sign -f <(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY") \
+            -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$SETUP"
+          find artifacts -name '*.sig' -type f
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: spike-updater-sigs
+          path: artifacts/**/*.sig
+          if-no-files-found: error

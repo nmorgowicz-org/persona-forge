@@ -1,0 +1,7 @@
+# Build-time generated artifacts (never committed)
+spike/desktop-shell/resources/
+spike/desktop-shell/target/
+spike/desktop-shell/gen/
+
+Sparkle.framework/
+sparkle-bin/

@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>desktop-spike test page</title>
+    <style>
+      body { font-family: -apple-system, sans-serif; background: #16121f; color: #eee; margin: 24px; }
+      section { border: 1px solid #333; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; }
+      h3 { margin: 4px 0 8px; font-size: 14px; opacity: 0.7 }
+      a { color: #8ab4ff }
+      audio { width: 100%; }
+    </style>
+  </head>
+  <body>
+    <h1>desktop-spike test page</h1>
+
+    <section>
+      <h3>1. downloads — #dl-blob (JS WAV blob) and #dl-http (same-origin URL, AudioDeck's shape)</h3>
+      <a id="dl-blob" download="tone.wav" href="#">download tone.wav (blob)</a><br />
+      <a id="dl-http" download="tone.wav" href="tone.wav">download tone.wav (same-origin URL)</a>
+    </section>
+
+    <section>
+      <h3>2/9. audio elements</h3>
+      <audio id="wav" controls src="#"></audio>
+      <audio id="mp3" controls src="tone.mp3"></audio>
+    </section>
+
+    <section>
+      <h3>3. target=_blank link</h3>
+      <a target="_blank" rel="noopener noreferrer" href="https://example.com">open example.com in new window</a>
+    </section>
+
+    <section>
+      <h3>4. window.open</h3>
+      <button onclick="window.open('https://example.com')">window.open('https://example.com')</button>
+    </section>
+
+    <section>
+      <h3>5. file picker</h3>
+      <input type="file" />
+    </section>
+
+    <section>
+      <h3>6. clipboard shortcuts (Cmd/Ctrl+C/V/Z/A)</h3>
+      <textarea rows="3" style="width: 100%">edit me</textarea>
+    </section>
+
+    <section>
+      <h3>7. localStorage counter (must survive app restart)</h3>
+      <div id="count">-</div>
+    </section>
+
+    <section>
+      <h3>8. same-window external navigation (must be blocked/opened externally)</h3>
+      <a href="https://example.com">same-window link to example.com</a>
+    </section>
+
+    <script>
+      // item 1: build a 1 s sine WAV through OfflineAudioContext
+      async function makeWav() {
+        const ctx = new OfflineAudioContext(1, 44100, 44100)
+        const osc = ctx.createOscillator()
+        osc.frequency.value = 440
+        osc.connect(ctx.destination)
+        osc.start()
+        const buf = await ctx.startRendering()
+        const n = buf.length
+        const view = new DataView(new ArrayBuffer(44 + n * 2))
+        const w = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)) }
+        w(0, 'RIFF'); view.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt ')
+        view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true)
+        view.setUint32(24, 44100, true); view.setUint32(28, 44100 * 2, true)
+        view.setUint16(32, 2, true); view.setUint16(34, 16, true); w(36, 'data')
+        view.setUint32(40, n * 2, true)
+        for (let i = 0; i < n; i++) view.setInt16(44 + i * 2, buf.getChannelData(0)[i] * 32767, true)
+        return URL.createObjectURL(new Blob([view], { type: 'audio/wav' }))
+      }
+      makeWav().then(function (url) {
+        document.getElementById('dl-blob').href = url
+        document.getElementById('wav').src = url
+      })
+
+      // item 7: localStorage counter
+      var c = parseInt(localStorage.getItem('spike-counter') || '0', 10) + 1
+      localStorage.setItem('spike-counter', String(c))
+      document.getElementById('count').textContent = 'loads: ' + c
+    </script>
+  </body>
+</html>
