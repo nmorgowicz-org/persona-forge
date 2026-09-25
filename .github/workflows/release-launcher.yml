@@ -119,9 +119,12 @@ jobs:
         if: matrix.target == 'aarch64-apple-darwin'
         run: |
           set -euo pipefail
-          RCODESIGN_VERSION="apple-codesign-0.29.0"
-          curl --fail --location --silent --show-error -o rcodesign \
-            "https://github.com/indygreg/apple-platform-rs/releases/download/${RCODESIGN_VERSION}/rcodesign-x86_64-unknown-linux-gnu"
+          RCODESIGN_VERSION="0.29.0"
+          RCODESIGN_ASSET="apple-codesign-${RCODESIGN_VERSION}-x86_64-unknown-linux-musl"
+          curl --fail --location --silent --show-error -o rcodesign.tar.gz \
+            "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F${RCODESIGN_VERSION}/${RCODESIGN_ASSET}.tar.gz"
+          tar -xzf rcodesign.tar.gz "${RCODESIGN_ASSET}/rcodesign"
+          mv "${RCODESIGN_ASSET}/rcodesign" ./rcodesign
           chmod +x rcodesign
 
       - name: Prepare App Store Connect API key
