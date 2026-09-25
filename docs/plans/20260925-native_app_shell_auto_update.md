@@ -1871,6 +1871,7 @@ is now invoked via PowerShell calling Git Bash explicitly, with the exit code pr
 - **0 missing.** OA-6 macOS items: already satisfied.
 
 ### Preflight — `self-hosted-windows` (job `preflight-windows`: failed with the precise
+
 missing-tool list, which is Gate 0's documented pass path)
 
 Present: VS 2022 BuildTools with VC.Tools.x86.x64 (`vswhere` → `C:\Program Files (x86)\Microsoft
@@ -1920,3 +1921,54 @@ task 6).
 
 `desktop-preflight.yml`, `desktop-build.yml`, `desktop-update-e2e.yml`, `desktop-spike.yml` all
 exist on `main` (PR #328) and are dispatchable (`gh workflow list` shows all four).
+
+### Phase 0R session log (2026-09-25, paired; agent drove, owner approved each mutation)
+
+**R0 (read-only):** all releases on `gha-runner-scale-set-0.14.2`. Backup of the doomed release
+saved (`/tmp/arc-persona-forge-release.values.backup.yaml`, 59 lines). Label grep in
+`.github/` clean. **Unexpected finding:** `arc-llama-monitor` had a second, crash-looping
+listener (`...69854b7f`) pointing at `https://github.com/nmorgowicz-org/local-llm-foundry`
+with `runnerScaleSetId: 23` — an orphan from the pre-Sep-5 repo-scoped install, 404ing
+(`RunnerScaleSetNotFoundException`) since its scale set was deleted. The working org-scoped
+listener (id 3) was untouched. Owner investigated (the trigger was the llama-monitor wget
+image push, unrelated and healthy); fix approved.
+
+**Fix:** `kubectl delete autoscalinglistener arc-llama-monitor-69854b7f-listener -n arc-systems`
+(owner-approved). Verified after a 2.5-minute cooldown: did not resurrect; org-scoped listener
+and `arc-llama-monitor-fast` (repo-scoped by design) unaffected. The stale
+`deploy/arc-llama-monitor-values.yaml` URL was corrected in the runner repo (no redeploy).
+
+**R1:** branch `feat/persona-forge-desktop-runner` in `../llama-monitor-runner`; owner ruled
+direct-to-`main` is allowed there, then chose PR review after the guard blocked the main push.
+Landed as **PR #28** (merged): `desktop-linux/Dockerfile` (Ubuntu 22.04 @
+`sha256:b8b6ee6a…`; Rust 1.98; tauri-cli 2.11.5; tauri-driver 2.0.6; rcodesign 0.29.0; uv
+0.12.9 + Python 3.13; GStreamer/webkit2gtk-driver/xvfb; `APPIMAGE_EXTRACT_AND_RUN=1`),
+`desktop-linux-runner-image.yml` (no schedule, no cleanup), new scale-set values, stale values
+fix, forge-release values deleted, docs updated. One build fix during check
+(`/opt/uv-python` ownership, commit 65dd51d).
+
+**R2:** image built green — runs 36190896541 (branch) and 36192595298 (main). Digest pinned in
+`deploy/arc-persona-forge-desktop-values.yaml` via **PR #29** (merged):
+`sha256:04d372979cbd5a6b093630ac25f1c248a9cd84654e60a296ebbfb0503474463a`.
+
+**R3 (owner-approved):** `helm upgrade --install arc-persona-forge-desktop` — run from the Mac
+with `KUBECONFIG` (the arc-runner host has no GHCR auth for the chart pull; helm logged in via
+a `read:packages` token). Verified: release `deployed`, ARS `arc-persona-forge-desktop`
+(0–2), listener `Running` with a clean message session.
+
+**R4 (Gate 0 Linux job):** run 36193334468, job `preflight-linux`: **green, 0 missing** —
+rustc/cargo 1.98.1, Python 3.13.15, uv 0.12.9, glibc ≤ 2.35, WebKitGTK 2.50.4, GTK 3.24.33,
+ayatana-appindicator 0.5.90, GStreamer 1.20.3, patchelf/xvfb-run/WebKitWebDriver/tauri-driver/
+rcodesign 0.29.0/OpenSSL 3.0.2. Windows stayed on the known OA-6 missing list (rustup,
+python3). **Gate 0 is now fully green on Linux; OA-6 Windows half remains.**
+
+**R5:** no jobs on `arc-persona-forge-release` in the last 50 runs; zero ephemeral runners.
+
+**R6 (owner-approved):** `helm uninstall arc-persona-forge-release -n arc-runners`. Verified:
+release gone; every other release at its R0 revision; five healthy listeners remain
+(`arc-general`, `arc-general-docker`, `arc-llama-monitor`, `arc-llama-monitor-fast`,
+`arc-persona-forge-desktop`).
+
+**Gate 0R: PASS.** All plan stop conditions clear.
+
+**Phase 0R commits:** llama-monitor-runner PR #28 (`69f961a` + `65dd51d`), PR #29 (`54a34fd`).
