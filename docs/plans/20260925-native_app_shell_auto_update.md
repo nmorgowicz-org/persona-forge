@@ -146,6 +146,76 @@ It **already has a working, shipped self-update mechanism**
   purpose-built tool (e.g. `create-dmg`, or `rcodesign`'s own bundling helpers) rather than getting
   it "for free" the way Tauri's bundler provides it.
 
+## Update mechanism options (orthogonal to the shell choice)
+
+The shell choice (Options A-D above) and the *update mechanism* are separate decisions — a
+Tauri, wry, or bare-CLI shell can each pair with different update machinery. Researched
+2026-09-25 (not part of the original draft, added after the owner asked to reconsider against
+current industry practice rather than defer entirely to the in-org precedent):
+
+### Mechanism 1 — Reuse `local-llm-foundry`'s DIY approach (atomic rename / detached batch)
+
+The mechanism described under Option C above: no signed update-manifest format of its own, just
+re-downloads the same release asset already covered by this repo's existing signing/notarization,
+verifies it, and swaps the binary in place (atomic `rename()` on Unix; detached-`.bat`-helper
+relaunch on Windows).
+
+- **Pros:** Zero new dependencies, zero new signing scheme, works identically for a bare CLI
+  binary or a `wry`-shell binary, and is proven, shipped code in this org today.
+- **Cons:** It is a hand-rolled mechanism, not an industry-standard one — no appcast, no delta
+  updates, no phased rollout, no "critical update" flagging, and (per the production incident
+  below) the naive in-process-replace-and-relaunch approach has a known real-world failure mode.
+
+### Mechanism 2 — Sparkle (macOS) + WinSparkle (Windows), the de facto native-app standard
+
+Sparkle is the standard self-update framework for non-App-Store macOS apps (used by countless
+mature macOS apps); WinSparkle is its Windows counterpart, explicitly modeled on Sparkle's UX.
+Both are appcast-based (an XML/RSS feed listing versions + signed download URLs) and both verify
+updates with **EdDSA (Ed25519) signatures** — a real signature scheme, not just a checksum
+(checksums alone prove integrity, not authenticity — a compromised distribution channel could
+serve a checksummed-but-malicious binary; this is a specific point raised against DIY
+checksum-only approaches in current write-ups).
+
+- Sparkle does not require Xcode — it's a framework bundle (`Sparkle.framework`) plus an
+  `SUFeedURL` key in `Info.plist`; a Rust binary can drive it via the `sparkle-updater` crate
+  (wraps `Sparkle.framework` on macOS and `WinSparkle.dll` on Windows behind one API) or via direct
+  FFI. This fits a `wry`-based (or bare-CLI-in-an-`.app`) shell without adopting Tauri.
+- **A real production gotcha that's directly relevant here:** a Tauri app (socadb-desktop) found
+  that `tauri-plugin-updater`'s default in-process install *blocks the app for 20-30 seconds*
+  while the `.app` bundle is replaced, and switched to `tauri-plugin-sparkle-updater` specifically
+  to move the install into Sparkle's out-of-process XPC helper and avoid that freeze. This is a
+  concrete argument for Sparkle/WinSparkle over a naive in-process swap, independent of which
+  shell option is chosen — worth explicitly testing for in Phase 2 (does our detached-process
+  swap already avoid this, or does it have the same freeze?).
+- **Another real gotcha:** Sparkle refuses to update an app running "translocated" (macOS's App
+  Translocation — launched from the exact place it was downloaded/quarantined rather than moved to
+  `/Applications`), and translocated launches were also observed triggering XProtect behavioral
+  detection in one team's testing. Mitigation is a "move to Applications" prompt on first launch —
+  worth adding regardless of update mechanism chosen, since it also affects Gatekeeper/staple
+  behavior generally.
+- WinSparkle's default mode fetches and launches a **signed installer package**, not an in-place
+  `.exe` patch — different from the llama-monitor DIY approach's in-place swap. This is a real
+  design fork for Windows specifically: if this plan wants a true installer-based Windows
+  experience (more standard, cleaner uninstall/upgrade story) that's a bigger scope addition than
+  reusing llama-monitor's detached-batch in-place-swap trick.
+- **Cons:** New dependency (Sparkle/WinSparkle, or the `sparkle-updater` crate), a new signing
+  keypair to generate and protect (EdDSA, separate from the Apple Developer ID / Authenticode
+  identities already in play), a new appcast feed to host and keep in sync with GitHub Releases
+  (unless a tool bridges the two — needs research in Phase 0), and unproven in this org (no
+  existing usage to draw on, unlike Option C's shell).
+
+### Recommendation on mechanism
+
+Use **Phase 0's spike to answer this too**, not just the shell question — specifically: (a) whether
+the llama-monitor-style detached-swap already avoids the 20-30s in-process-freeze problem Tauri hit
+(if so, that's a point in its favor since it sidesteps Sparkle's main advantage for free), and (b)
+how much work it is to generate a GitHub-Releases-backed appcast feed automatically as part of
+`release-launcher.yml` (if trivial, Sparkle/WinSparkle's better signature scheme and native update
+UI probably outweigh the extra dependency). Do not lock in the mechanism before Phase 0 reports
+back — this is exactly the kind of "how do real 2026 apps do this" question the owner asked to
+defer to research on, and the two production incidents above (blocking install, translocation
+refusal) are the kind of thing only surfaces by testing, not by reasoning in the abstract.
+
 ### Option D — No GUI shell; self-update the existing CLI launcher only
 
 Keep `persona-forge-launcher` exactly as it is (a CLI binary that starts a server and the user
@@ -172,10 +242,12 @@ Tauri before the `local-llm-foundry` precedent was found). Reasoning:
    persona-forge already depends on — Tauri's macOS bundling step through osxcross is an unknown
    that would need its own spike with a real chance of failure, whereas `wry`+`tray-icon` cross-
    compiling through that runner is already a settled fact.
-2. Its self-update mechanism reuses infrastructure this repo effectively already has (GitHub
-   release-asset download, atomic replace) rather than adopting a new update-manifest/signing
-   scheme (Tauri's updater wants Ed25519/minisign signing on top of what Apple/Microsoft already
-   require).
+2. It leaves the update *mechanism* undecided rather than coupling it to the shell framework —
+   `local-llm-foundry`'s DIY atomic-swap approach is available for free, but so is layering
+   Sparkle/WinSparkle on top of a `wry` shell if Phase 0 finds that's worth the extra dependency
+   (see "Update mechanism options" above). Tauri, by contrast, couples you to its own
+   minisign-signed-manifest updater by default (with Sparkle only available via a third-party
+   bridge plugin) — one more framework opinion to either accept or fight.
 3. It keeps the "thin bootstrap, no bundled heavy runtime" philosophy that motivated the launcher
    architecture in the first place (`docs/archive/no-docker/20260829-no_more_docker_architecture.md`
    §9); Tauri is close to this too, but pulls in a materially larger build/plugin surface for
@@ -243,7 +315,8 @@ gh run watch <run-id>
 
 ---
 
-## Phase 0 — Spike: prove the chosen shell cross-compiles, signs, notarizes, and staples
+## Phase 0 — Spike: prove the chosen shell cross-compiles, signs, notarizes, and staples;
+settle the update mechanism
 
 ### Objective
 
@@ -255,6 +328,12 @@ pipeline explicitly cannot use), and (e) launched on a real Mac with Gatekeeper 
 and no network check on second launch (proving the staple, not just the online check, is what's
 satisfied). This phase is throwaway-code-friendly: its deliverable is a written verdict plus
 receipts, not production code.
+
+This phase also settles the **update mechanism** question (see "Update mechanism options" above):
+whether to reuse `local-llm-foundry`'s DIY atomic-swap approach, adopt Sparkle/WinSparkle, or some
+hybrid — by testing for the two concrete failure modes real teams have hit (in-process install
+blocking the app for 20-30s; Sparkle's refusal to update a translocated `.app`), not by reasoning
+about it in the abstract.
 
 ### References to read completely
 
@@ -272,6 +351,12 @@ receipts, not production code.
 - `scripts/build_launcher_target.sh` and `scripts/launcher_preflight.sh` (current osxcross
   cross-build mechanics the spike must fit within, or explicitly diverge from with a documented
   reason).
+- Sparkle docs (<https://sparkle-project.org/documentation/>) and the `sparkle-updater` crate — read
+  the App Translocation / read-only-mount caveats specifically
+  (Sparkle silently no-ops on a translocated app by default).
+- WinSparkle docs (<https://winsparkle.org/>) — confirm whether its default installer-package flow
+  is compatible with this launcher's no-installer distribution model, or whether it would require
+  adding a Windows installer this plan doesn't currently have.
 
 ### Tasks
 
@@ -298,11 +383,23 @@ receipts, not production code.
    `arc-llama-monitor` Linux runner via osxcross, without needing a native macOS build host? Record
    a pass/fail/blocked verdict; do not fully productionize this path regardless of outcome — it
    exists only to confirm or refute the Option A "cons" risk called out above.
-7. Write up findings as a short addendum to this doc (new `## Phase 0 results` section) — what
-   worked, exact commands, exact CI run IDs/URLs, and whether the Recommendation above still holds.
-8. Delete the throwaway CI job and spike branch's experimental workflow file before merging
-   anything from this phase into a real phase branch (the spike's *findings* persist in this doc;
-   its scaffolding code does not need to).
+7. Build a throwaway "old version" and "new version" of the spike binary, wire in the
+   llama-monitor-style atomic-swap self-update from a local test HTTP server (not the real GitHub
+   Releases feed yet), and time the install step end-to-end — record whether the app UI freezes and
+   for how long, to directly test for the blocking-install problem the socadb-desktop Tauri
+   migration hit.
+8. Separately, spend a time-boxed session (recommend: half a day) wiring the same spike `.app`
+   through Sparkle (`sparkle-updater` crate or direct `Sparkle.framework` embed) against a hand-
+   written test appcast, and deliberately reproduce the App Translocation scenario (launch the
+   `.app` directly from a Downloads-folder-like quarantined location rather than `/Applications`)
+   to confirm whether it silently refuses to update, as the research above describes.
+9. Write up findings as a short addendum to this doc (new `## Phase 0 results` section) — what
+   worked, exact commands, exact CI run IDs/URLs, measured install-freeze duration for the DIY
+   mechanism, translocation behavior for Sparkle, and whether the Recommendation above (shell
+   *and* update mechanism) still holds.
+10. Delete the throwaway CI job and spike branch's experimental workflow file before merging
+    anything from this phase into a real phase branch (the spike's *findings* persist in this doc;
+    its scaffolding code does not need to).
 
 ### Gate 0
 
@@ -379,22 +476,35 @@ spctl --assess --verbose=4 PersonaForge.app
 
 ### Objective
 
-Port `local-llm-foundry`'s proven self-update mechanism
-(`docs/archive/implementation/20260429-app_update_capability.md`) onto `persona-forge-launcher`,
-without yet adding tray/webview UI. Unix/macOS atomic rename-in-place; Windows detached-batch
-relaunch; a small HTTP endpoint + frontend pill reusing the existing Flask app, matching the
-llama-monitor UX pattern.
+Implement whichever update mechanism Phase 0 settled on for `persona-forge-launcher`, without yet
+adding tray/webview UI. The two shapes this objective covers, chosen by Phase 0's findings (default
+to the DIY path below if Phase 0's results are inconclusive, since it's the lower-risk, already-
+proven-in-org option — but Phase 0's written recommendation governs):
+
+- **If DIY (`local-llm-foundry`-style):** port the mechanism in
+  `docs/archive/implementation/20260429-app_update_capability.md` — Unix/macOS atomic
+  rename-in-place, Windows detached-batch relaunch, a small HTTP endpoint + frontend pill reusing
+  the existing Flask app, matching the llama-monitor UX pattern.
+- **If Sparkle/WinSparkle:** integrate the `sparkle-updater` crate (or direct framework embed),
+  generate an EdDSA signing keypair (private half in a new CI secret, alongside the existing
+  `MACOS_KEY_PEM`-family secrets, public half embedded in the binary), and add an appcast-generation
+  step to `release-launcher.yml` that runs after `release` publishes GitHub Release assets (an
+  appcast entry needs the final download URL, so it is generated from the already-published
+  release, not before).
 
 ### References to read completely
 
-- `docs/archive/implementation/20260429-app_update_capability.md` (full mechanism, already
-  summarized above — read the original for exact code).
+- Phase 0 results section — **read this first**; it determines which of the two task lists below
+  applies.
+- `docs/archive/implementation/20260429-app_update_capability.md` (DIY mechanism, if chosen).
+- Sparkle/`sparkle-updater`/WinSparkle docs (if chosen), plus Phase 0's translocation and
+  install-freeze findings.
 - `launcher/src/{main.rs,bootstrap.rs,manifest.rs,paths.rs}` (current launcher structure this
-  extends).
-- `docs/architecture/FRONTEND_OVERVIEW.md` (where the update-pill UI plugs into the existing React
-  app).
+  extends either way).
+- `docs/architecture/FRONTEND_OVERVIEW.md` (where any update-pill UI plugs into the existing React
+  app, if the DIY path's in-app UI is kept even alongside Sparkle's native dialog).
 
-### Tasks
+### Tasks (DIY mechanism)
 
 1. Branch `feat/launcher-self-update`.
 2. Add an `update` module to `launcher/src/` implementing: check-latest-release (reuse whatever
@@ -410,6 +520,22 @@ llama-monitor UX pattern.
 5. Unit-test the update module's pure logic (path selection, checksum verification, version
    comparison) with fakes for the network/filesystem boundary, matching the existing
    `test_package_launcher_archive.py` fake-subprocess convention.
+
+### Tasks (Sparkle/WinSparkle mechanism)
+
+1. Branch `feat/launcher-self-update`.
+2. Generate an EdDSA signing keypair; add the private key as a new CI secret and embed the public
+   key (`SUPublicEDKey`) in the bundle's `Info.plist` (macOS) / binary resources (Windows).
+3. Add an appcast-generation step to `release-launcher.yml`'s `release` job (after assets publish)
+   that emits `appcast.xml` from the release's assets/checksums and publishes it as a release asset
+   or to a stable URL the app's `SUFeedURL` points at.
+4. Wire `sparkle-updater` (or direct framework calls) into `launcher/src/main.rs`, gated to the
+   `.app`-bundle build shape from Phase 1.
+5. Add the "move to Applications" first-launch prompt (mitigates the App Translocation refusal
+   Phase 0 is expected to reproduce).
+6. Unit/integration-test what's testable without a real macOS/Windows signing round-trip (appcast
+   XML generation, keypair handling); the signature verification itself is exercised by Gate 2
+   below on real runners, not by unit tests.
 
 ### Gate 2
 
@@ -526,3 +652,7 @@ To be specified in a doc revision once Phases 0-2's exact deliverables are known
   `local-llm-foundry/docs/archive/implementation/20260429-app_update_capability.md` (287 lines) —
   the reference implementation and its design doc; both external to this repo, read via the
   sibling checkout at `/Users/nick/SCRIPTS/CLAUDE/local-llm-foundry`.
+- Sparkle: <https://sparkle-project.org/documentation/>, source at
+  <https://github.com/sparkle-project/Sparkle>. WinSparkle: <https://winsparkle.org/>, source at
+  <https://github.com/vslavik/winsparkle>. Rust binding: `sparkle-updater` crate (wraps both). All
+  external, researched 2026-09-25, no in-repo or in-org usage yet — see "Update mechanism options."
