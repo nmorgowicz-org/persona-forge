@@ -54,12 +54,12 @@ jobs:
       - name: Zip .app (ditto keeps symlinks)
         run: |
           cd spike/desktop-shell/target/aarch64-apple-darwin/release/bundle/macos
-          ditto -c -k --keepParent "desktop-spike.app" "../../../desktop-spike-${{ inputs.version }}.app.zip"
+          ditto -c -k --keepParent "desktop-spike.app" "$GITHUB_WORKSPACE/desktop-spike-${{ inputs.version }}.app.zip"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: spike-macos-app-${{ inputs.version }}
-          path: spike/desktop-shell/target/desktop-spike-${{ inputs.version }}.app.zip
+          path: desktop-spike-${{ inputs.version }}.app.zip
           if-no-files-found: error
 
   spike-macos-sign-app:
@@ -316,12 +316,12 @@ jobs:
           cd spike/desktop-shell/target/x86_64-pc-windows-msvc/release/bundle/nsis
           mv desktop-spike_0.1.0_x64-setup.exe desktop-spike-setup.exe 2>/dev/null || \
             mv desktop-spike_0.1.1_x64-setup.exe desktop-spike-setup.exe
-          mv desktop-spike-setup.exe ../../../../../desktop-spike-${{ matrix.version }}-setup.exe
+          mv desktop-spike-setup.exe "$GITHUB_WORKSPACE/desktop-spike-${{ matrix.version }}-setup.exe"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: spike-windows-setup-${{ matrix.version }}
-          path: spike/desktop-shell/desktop-spike-${{ matrix.version }}-setup.exe
+          path: desktop-spike-${{ matrix.version }}-setup.exe
           if-no-files-found: error
 
   # ── 1C Linux ────────────────────────────────────────────────────────────────
@@ -364,12 +364,12 @@ jobs:
       - name: Rename AppImage
         run: |
           cd spike/desktop-shell/target/release/bundle/appimage
-          mv desktop-spike.AppImage "../../../../../desktop-spike-${{ matrix.version }}-${{ matrix.feed }}.AppImage"
+          mv desktop-spike.AppImage "$GITHUB_WORKSPACE/desktop-spike-${{ matrix.version }}-${{ matrix.feed }}.AppImage"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: spike-linux-appimage-${{ matrix.version }}-${{ matrix.feed }}
-          path: spike/desktop-shell/desktop-spike-${{ matrix.version }}-${{ matrix.feed }}.AppImage
+          path: desktop-spike-${{ matrix.version }}-${{ matrix.feed }}.AppImage
           if-no-files-found: error
 
   spike-updater-sigs:
