@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -86,7 +87,13 @@ def export_requirements(target_platform: str, out_path: Path) -> None:
         "-o",
         str(out_path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    env = os.environ.copy()
+    if target_platform == "aarch64-apple-darwin":
+        # uv's --python-platform default macOS deployment target (13.0) is older than the
+        # macosx_14_0_arm64-only wheels torch>=2.12 publishes, so resolution fails with "no
+        # wheels with a matching platform tag" unless this is raised to match (astral-sh/uv#12487).
+        env["MACOSX_DEPLOYMENT_TARGET"] = "14.0"
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if result.returncode != 0:
         raise SystemExit(
             f"uv pip compile failed for --python-platform {target_platform}:\n{result.stdout}\n{result.stderr}"
