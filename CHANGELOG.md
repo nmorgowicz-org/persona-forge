@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v2.0.0...persona-forge-v2.1.0) (2026-09-25)
+
+
+### Features
+
+* **ci:** sign and notarize macOS launcher with rcodesign ([#317](https://github.com/nmorgowicz-org/persona-forge/issues/317)) ([bfd9272](https://github.com/nmorgowicz-org/persona-forge/commit/bfd9272684113d63e376f361323073071f8cfe07))
+
 ## [2.0.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v1.5.0...persona-forge-v2.0.0) (2026-09-24)
 
 
