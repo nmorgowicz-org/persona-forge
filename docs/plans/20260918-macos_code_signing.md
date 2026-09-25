@@ -3,7 +3,7 @@
 Date: 2026-09-18
 Status: Proposed — implementation blocked on Apple Developer account activation
 
-This document describes the plan to code-sign, notarize, and staple the macOS
+This document describes the plan to code-sign and notarize the macOS
 launcher binary so it launches without Gatekeeper quarantine prompts. It
 replaces the current workaround documented in
 `scripts/package_launcher_archive.py` (the `xattr -dr com.apple.quarantine`
@@ -28,9 +28,12 @@ Produce a launcher binary that:
 
 1. Is signed with an Apple **Developer ID Application** certificate.
 2. Is notarized by Apple's notary service.
-3. Has the notarization ticket stapled to it.
-4. Launches without Gatekeeper prompts on macOS 13+ (and works offline via
-   the staple).
+3. Launches without Gatekeeper prompts on macOS 13+. Apple does not support
+   stapling notarization tickets to a bare Mach-O executable (only
+   `.app`/`.pkg`/`.dmg`), so first launch performs Apple's normal online
+   Gatekeeper check instead of using a stapled ticket. This still eliminates
+   the quarantine dialog and manual `xattr` workaround; it just requires
+   internet connectivity on first launch.
 
 ### Constraint: all-Linux pipeline
 
@@ -103,27 +106,27 @@ into a single JSON file for easier secret management.
 The complete flow for the macOS binary:
 
 ```
-1. Sign the binary
-   rcodesign codesign-sign \
-     --pem key.pem cert.pem \
-     --timestamped \
-     --option runtime \
-     --output signed-launcher launcher-binary
+1. Sign the binary (in place)
+   rcodesign sign \
+     --pem-file key.pem --pem-file cert.pem \
+     --code-signature-flags runtime \
+     launcher-binary
 
-2. Notarize the signed binary
-   rcodesign codesign-notarize-submit \
-     --key ~/.appstoreconnect/key.json \
+2. Notarize the signed binary (must be zipped — rcodesign does not
+   notarize a bare Mach-O binary directly)
+   zip notarize.zip launcher-binary
+   rcodesign notary-submit \
+     --api-key-file ~/.appstoreconnect/key.json \
      --wait \
-     --output notarized-launcher signed-launcher
+     notarize.zip
 
-3. Staple the ticket to the binary
-   rcodesign codesign-staple \
-     --key ~/.appstoreconnect/key.json \
-     notarized-launcher launcher-binary
-
-4. Verify
-   rcodesign codesign-verify --all --verbose launcher-binary
+3. Verify
+   rcodesign verify launcher-binary
 ```
+
+No staple step: Apple only supports stapling on `.app`/`.pkg`/`.dmg`, not a
+bare executable. The binary is signed and notarized; Gatekeeper performs its
+normal online ticket check on first launch instead of reading a local staple.
 
 ### Requirements enforced by Apple's notary service
 
@@ -207,14 +210,13 @@ has issues on the specific runner distro.
     MACOS_CERT_PEM: ${{ secrets.MACOS_CERT_PEM }}
   run: |
     set -euo pipefail
-    echo "$MACOS_KEY_PEM" | tr ' ' '\n' > key.pem
-    echo "$MACOS_CERT_PEM" | tr ' ' '\n' > cert.pem
+    echo "$MACOS_KEY_PEM" > key.pem
+    echo "$MACOS_CERT_PEM" > cert.pem
     LAUNCHER="launcher/target/aarch64-apple-darwin/release/persona-forge-launcher"
-    ./rcodesign codesign-sign \
-      --pem key.pem cert.pem \
-      --timestamped \
-      --option runtime \
-      --output signed-launcher "$LAUNCHER"
+    ./rcodesign sign \
+      --pem-file key.pem --pem-file cert.pem \
+      --code-signature-flags runtime \
+      "$LAUNCHER"
 ```
 
 **Step 4: Notarize the signed binary**
@@ -224,43 +226,45 @@ has issues on the specific runner distro.
   if: matrix.target == 'aarch64-apple-darwin'
   run: |
     set -euo pipefail
+    # rcodesign does not notarize a bare Mach-O binary; it must be zipped.
     LAUNCHER="launcher/target/aarch64-apple-darwin/release/persona-forge-launcher"
-    ./rcodesign codesign-notarize-submit \
-      --key ~/.appstoreconnect/key.json \
+    zip notarize.zip "$LAUNCHER"
+    ./rcodesign notary-submit \
+      --api-key-file ~/.appstoreconnect/key.json \
       --wait \
-      --output notarized-launcher signed-launcher
+      notarize.zip
 ```
 
-**Step 5: Staple the ticket**
+**Step 5: Verify**
 
 ```yaml
-- name: Staple notarization ticket (macOS)
+- name: Verify launcher signature (macOS)
   if: matrix.target == 'aarch64-apple-darwin'
   run: |
     set -euo pipefail
     LAUNCHER="launcher/target/aarch64-apple-darwin/release/persona-forge-launcher"
-    ./rcodesign codesign-staple \
-      --key ~/.appstoreconnect/key.json \
-      notarized-launcher "$LAUNCHER"
-    # Verify the signature and staple are valid
-    ./rcodesign codesign-verify --all --verbose "$LAUNCHER"
+    ./rcodesign verify "$LAUNCHER"
 ```
 
-The existing "Package launcher archive" step then bundles the already-signed,
-notarized, and stapled binary. Linux and Windows targets are unaffected — the
-steps are gated on the macOS target.
+No staple step — Apple does not support stapling a notarization ticket to a
+bare executable (only `.app`/`.pkg`/`.dmg`). The signed, notarized binary
+relies on Apple's online Gatekeeper check on first launch instead.
+
+The existing "Package launcher archive" step then bundles the already-signed
+and notarized binary. Linux and Windows targets are unaffected — the steps
+are gated on the macOS target.
 
 ### Timing considerations
 
-- `codesign-sign` is fast (milliseconds).
-- `codesign-notarize-submit --wait` blocks while Apple scans the binary.
+- `rcodesign sign` is fast (milliseconds).
+- `rcodesign notary-submit --wait` blocks while Apple scans the binary.
   Typical wait is 1–5 minutes. The `build-launcher` job has a 45-minute
   timeout, which is sufficient.
-- `codesign-staple` is fast (milliseconds).
+- `rcodesign verify` is fast (milliseconds).
 
 If notarization timeout becomes an issue, the `--wait` flag can be removed and
-the job can poll `codesign-notarize-history` until the submission succeeds, but
-this is unlikely to be needed.
+the job can poll the submission ID until it succeeds, but this is unlikely to
+be needed.
 
 ## Documentation changes
 
@@ -273,11 +277,12 @@ Remove the Gatekeeper quarantine instruction from `README_TEMPLATE`:
 -GitHub Release. On macOS, if Gatekeeper blocks the extracted binary, first run:
 -  xattr -dr com.apple.quarantine .
 -Only run that command inside this verified archive directory.
-+GitHub Release. The macOS launcher is code-signed and notarized by Apple;
-+Gatekeeper accepts it automatically on first launch.
++GitHub Release. The macOS launcher is code-signed and notarized by Apple.
++Gatekeeper verifies this online on first launch (requires internet
++connectivity once); no manual quarantine removal is needed.
 ```
 
-Keep the archive verification instruction. The notarized/stapled binary does
+Keep the archive verification instruction. The signed/notarized binary does
 not require manual quarantine removal.
 
 ## Local development flow
@@ -291,17 +296,18 @@ codesign -s - ./persona-forge-launcher  # ad-hoc sign
 xattr -dr com.apple.quarantine ./persona-forge-launcher  # strip quarantine
 ```
 
-Full Developer ID signing + notarization + stapling runs only in CI on release.
+Full Developer ID signing + notarization runs only in CI on release.
 
 ## Verification
 
 After the CI workflow runs, the macOS release binary should:
 
-1. Pass `rcodesign codesign-verify --all --verbose` on Linux.
+1. Pass `rcodesign verify` on Linux.
 2. Pass `codesign --verify --deep --strict --verbose=2` on macOS.
-3. Launch on macOS without a Gatekeeper quarantine dialog.
-4. On a machine with no internet, still launch (the staple provides the
-   notarization ticket locally).
+3. Launch on macOS without a Gatekeeper quarantine dialog. First launch
+   performs Apple's normal online notarization check (requires internet);
+   there is no local staple, since Apple does not support stapling to a
+   bare executable.
 
 To verify locally once the workflow produces an artifact:
 
