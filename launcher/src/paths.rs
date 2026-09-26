@@ -36,22 +36,31 @@ fn expand(value: &str, home: &Path) -> PathBuf {
 /// this as an unrecoverable configuration error, not a value the caller should route around.
 pub fn app_data_root(environ: &Environ, platform: &str, home: &Path) -> PathBuf {
     let root = resolve_app_data_root(environ, platform, home);
-    assert_ne!(
-        root.as_os_str(),
-        root_anchor(&root).as_os_str(),
+    assert!(
+        !is_bare_root(&root),
         "PERSONA_FORGE_HOME must not resolve to a filesystem root: {}",
         root.display()
     );
     root
 }
 
-/// The filesystem root a path is anchored to (`/` on Unix, `C:\` on Windows), or an empty path
-/// if `path` has no root component at all.
-fn root_anchor(path: &Path) -> PathBuf {
-    path.components()
-        .next()
-        .map(|c| PathBuf::from(c.as_os_str()))
-        .unwrap_or_default()
+/// True if `path` has no `Normal` component at all -- just a root and/or a Windows drive
+/// prefix (`/`, `C:\`, `C:/`, `\\server\share\`, ...). Comparing rendered strings against a
+/// hand-built anchor is fragile here: on Windows, `PathBuf::from("/")` and a
+/// component-reconstructed anchor can render with different separators (`/` vs `\`) even when
+/// they're the same path, so a plain `==` on `OsStr` silently never fires. Walking
+/// `Path::components()` sidesteps that entirely.
+fn is_bare_root(path: &Path) -> bool {
+    let mut components = path.components().peekable();
+    if components.peek().is_none() {
+        return false; // an empty path is not a root
+    }
+    components.all(|c| {
+        matches!(
+            c,
+            std::path::Component::Prefix(_) | std::path::Component::RootDir
+        )
+    })
 }
 
 fn resolve_app_data_root(environ: &Environ, platform: &str, home: &Path) -> PathBuf {
@@ -151,6 +160,18 @@ mod tests {
     fn rejects_an_override_that_resolves_to_a_filesystem_root() {
         let home = PathBuf::from("/home/nick");
         let e = env(&[("PERSONA_FORGE_HOME", "/")]);
+        app_data_root(&e, "linux", &home);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[should_panic(expected = "must not resolve to a filesystem root")]
+    fn rejects_an_override_that_resolves_to_a_windows_drive_root() {
+        // `C:\` only parses as a drive-prefix + root on a Windows host; on Unix it's just one
+        // opaque `Normal` component, so this case is meaningless (and would falsely never
+        // panic) off Windows.
+        let home = PathBuf::from("/home/nick");
+        let e = env(&[("PERSONA_FORGE_HOME", "C:\\")]);
         app_data_root(&e, "linux", &home);
     }
 
