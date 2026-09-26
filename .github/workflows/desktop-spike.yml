@@ -63,7 +63,9 @@ jobs:
       - name: Zip .app (ditto keeps symlinks)
         run: |
           cd spike/desktop-shell/target/aarch64-apple-darwin/release/bundle/macos
-          ditto -c -k --keepParent "desktop-spike.app" "$GITHUB_WORKSPACE/desktop-spike-${{ inputs.version }}.app.zip"
+          # --norsrc/--noextattr: no AppleDouble ._ entries — they break Linux
+          # unzip -> sign -> notarize (AppleDouble junk invalidates signatures)
+          ditto -c -k --norsrc --noextattr --keepParent "desktop-spike.app" "$GITHUB_WORKSPACE/desktop-spike-${{ inputs.version }}.app.zip"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -106,6 +108,9 @@ jobs:
           ./rcodesign encode-app-store-connect-api-key \
             -o ~/.appstoreconnect/key.json \
             "$APPLE_ISSUER_ID" "$APPLE_KEY_ID" /tmp/AuthKey.pem
+
+      - name: Remove AppleDouble junk from extraction
+        run: find artifact -name "._*" -delete
 
       - name: Sign, notarize, staple the .app
         env:
