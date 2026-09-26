@@ -2,9 +2,9 @@
 //! before any Tauri/webview initialization) and the GUI bootstrap path, so both resolve the
 //! bundle the same way.
 
-use std::path::PathBuf;
 #[cfg(debug_assertions)]
 use std::path::Path;
+use std::path::PathBuf;
 use tauri::utils::platform::{current_exe, resource_dir};
 use tauri::utils::Env;
 use tauri::PackageInfo;
