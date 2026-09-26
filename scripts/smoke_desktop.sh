@@ -38,7 +38,16 @@ no_server_left_behind() {
 trap no_server_left_behind EXIT
 
 echo "--- smoke run: --smoke-test $SMOKE_JSON"
-"$BINARY" --smoke-test "$SMOKE_JSON"
+if ! "$BINARY" --smoke-test "$SMOKE_JSON"; then
+  echo "FAIL: --smoke-test exited non-zero; server/bootstrap logs:" >&2
+  for LOG in "$PERSONA_FORGE_HOME"/desktop/logs/*.log; do
+    if [ -f "$LOG" ]; then
+      echo "===== $LOG =====" >&2
+      tail -n 120 "$LOG" >&2
+    fi
+  done
+  exit 1
+fi
 
 echo "--- smoke JSON:"
 cat "$SMOKE_JSON"

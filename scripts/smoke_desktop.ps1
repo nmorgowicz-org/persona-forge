@@ -35,6 +35,12 @@ try {
     Write-Host "--- smoke run: --smoke-test $SmokeJson"
     $p = Start-Process -FilePath $Exe -ArgumentList '--smoke-test', $SmokeJson -Wait -PassThru
     if ($p.ExitCode -ne 0) {
+        Write-Host "FAIL: --smoke-test exited with $($p.ExitCode); server/bootstrap logs:"
+        Get-ChildItem (Join-Path $env:PERSONA_FORGE_HOME 'desktop\logs') -Filter '*.log' -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                Write-Host "===== $($_.Name) ====="
+                Get-Content -LiteralPath $_.FullName -Tail 120 | Write-Host
+            }
         throw "FAIL: --smoke-test exited with $($p.ExitCode)"
     }
 
