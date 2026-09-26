@@ -69,7 +69,9 @@ try {
     Write-Host 'PASS: updated to 0.1.1 (registry DisplayVersion)'
 }
 finally {
-    # the passive installer relaunches the app after the update
-    Get-Process -Name $Name -ErrorAction SilentlyContinue | Stop-Process -Force
+    # the passive installer relaunches the app after the update, in the interactive
+    # session; NetworkService cannot kill it (access denied), so silence and fall back
+    Get-Process -Name $Name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    taskkill /IM "$Name.exe" /F 2>$null | Out-Null
     Uninstall-Spike
 }
