@@ -211,6 +211,15 @@ fn run_ci_update(app: tauri::AppHandle, out_path: PathBuf) -> Result<(), String>
             }
         };
         json["phase"] = serde_json::Value::String("installing".into());
+        // Windows: the NSIS installer exits this process during install() (contract §6.12),
+        // so persist "installing" first; if install() fails and returns, the final write
+        // below replaces it with the error.
+        #[cfg(windows)]
+        {
+            let mut early = json.clone();
+            early["ok"] = serde_json::Value::Bool(true);
+            std::fs::write(&out_path, early.to_string()).map_err(|e| e.to_string())?;
+        }
         update.install(bytes.as_slice()).map_err(|e| e.to_string())?;
         Ok::<(), String>(())
     });
@@ -414,8 +423,16 @@ fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
                 }
                 #[cfg(target_os = "macos")]
                 {
-                    eprintln!("[update] macOS updates are handled by Sparkle's UI");
-                    let _ = app;
+                    // Sparkle shows its own UI (offer, download, install on quit, relaunch)
+                    use tauri_plugin_sparkle_updater::SparkleUpdaterExt;
+                    match app.sparkle_updater() {
+                        Some(updater) => {
+                            if let Err(e) = updater.check_for_updates() {
+                                eprintln!("[update] Sparkle check failed: {e}");
+                            }
+                        }
+                        None => eprintln!("[update] Sparkle updater not initialized"),
+                    }
                 }
             }
         })

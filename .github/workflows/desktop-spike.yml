@@ -309,6 +309,66 @@ jobs:
           echo "signature=$SIG" >> "$GITHUB_OUTPUT"
           echo "length=$LENGTH" >> "$GITHUB_OUTPUT"
 
+  # ── 1A task 2: publish N+1's DMG + appcast (only on the version=0.1.1 dispatch) ─
+  spike-macos-publish:
+    name: spike-macos-publish (${{ inputs.version }})
+    if: inputs.version == '0.1.1'
+    needs: [spike-sparkle-sig, spike-macos-verify]
+    # our desktop image carries a pinned gh; the stock arc-general image has none
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: spike-macos-dmg-signed-${{ inputs.version }}
+          path: artifact
+
+      - name: Upload DMG and appcast.xml to the desktop-spike pre-release
+        env:
+          SIGNATURE: ${{ needs.spike-sparkle-sig.outputs.signature }}
+          LENGTH: ${{ needs.spike-sparkle-sig.outputs.length }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          DMG="artifact/desktop-spike-$VERSION.dmg"
+          ACTUAL=$(stat -c%s "$DMG")
+          # the signature and length must describe exactly this file
+          [ "$ACTUAL" = "$LENGTH" ] || { echo "::error::DMG is $ACTUAL bytes, signed length is $LENGTH"; exit 1; }
+          URL="https://github.com/$GH_REPO/releases/download/desktop-spike/desktop-spike-$VERSION.dmg"
+          python3 spike/desktop-shell/scripts/make_appcast.py --version "$VERSION" --url "$URL" \
+            --length "$LENGTH" --signature "$SIGNATURE" --out appcast.xml
+          cat appcast.xml
+          gh release upload desktop-spike "$DMG" appcast.xml --clobber
+
+  # ── 1B task 4: automated Windows update N -> N+1 (no secrets) ────────────────
+  spike-windows-update:
+    name: spike-windows-update
+    needs: [spike-windows-build, spike-linux-publish]
+    runs-on: self-hosted-windows
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: spike-windows-setup-0.1.0
+          path: setup
+
+      - name: Silent install 0.1.0, --ci-update, wait for 0.1.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & spike/desktop-shell/scripts/windows_update_test.ps1 `
+            -Setup "$PWD\setup\desktop-spike-0.1.0-setup.exe" `
+            -OutJson "$env:RUNNER_TEMP\ci-update-out.json"
+
   # ── 1B Windows ──────────────────────────────────────────────────────────────
   spike-windows-build:
     name: spike-windows-build (${{ matrix.version }})

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged by Tauri into the bundle's Info.plist (spike 1A; contract §9.1/§9.2).
+     SUPublicEDKey is the PUBLIC half of the Sparkle EdDSA key (~/.persona-forge-keys/sparkle_ed_public.b64). -->
+<plist version="1.0">
+<dict>
+    <key>SUFeedURL</key>
+    <string>https://github.com/nmorgowicz-org/persona-forge/releases/download/desktop-spike/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>bjvLLUgQw9CAR+2fX/ZpHz2GAIY97/FaZyWEbwILOUM=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <false/>
+</dict>
+</plist>
