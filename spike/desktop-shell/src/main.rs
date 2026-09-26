@@ -340,11 +340,30 @@ fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
             .inner_size(1100.0, 760.0)
             .menu(menu);
 
+            // open_url failures were previously swallowed (`let _ =`); log them so the
+            // 1D matrix can distinguish "not classified" from "open failed"
+            fn open_external(url: tauri::Url) {
+                eprintln!("[nav] OpenExternal {url}");
+                if let Err(e) = tauri_plugin_opener::open_url(url.as_str(), None::<&str>) {
+                    eprintln!("[nav] open_url failed: {e}");
+                }
+            }
+
+            // target=_blank / window.open never reach on_navigation (wry drops new-window
+            // requests unless on_new_window is set; Phase 1 1D finding on macOS + Windows)
+            builder = builder.on_new_window(|url, _| {
+                if classify(&url) == Decision::OpenExternal {
+                    open_external(url.clone());
+                } else {
+                    eprintln!("[nav] new window to non-external {url}: denied");
+                }
+                tauri::webview::NewWindowResponse::Deny
+            });
+
             builder = builder.on_navigation(|url| match classify(url) {
                 Decision::Allow => true,
                 Decision::OpenExternal => {
-                    eprintln!("[nav] OpenExternal {url}");
-                    let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+                    open_external(url.clone());
                     false
                 }
                 Decision::Deny => {
