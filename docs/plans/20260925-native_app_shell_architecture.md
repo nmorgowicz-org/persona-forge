@@ -5,6 +5,10 @@
 When the two docs conflict, **this doc wins**. The execution plan may not relax a decision here.
 To change a decision, amend this doc in a separate commit and get owner sign-off.
 
+**Amendment 2026-09-26 (owner-approved):** D20 (macOS window polish) and D21 (downloads never
+block; Downloads folder by default, optional "Ask where to save"). They change §6.4, §6.5, §6.7,
+§6.10, §6.13, §13, §14 and §15.
+
 **Baseline:** `1e2f520` (the plan-draft commits on top of `87d6547`, PR #326).
 
 **Supersedes:** the "Options considered", "Update mechanism options" and "Recommendation"
@@ -74,6 +78,8 @@ behavior, for headless and server users.
 | D17 | **UI preferences are stored by the server**, in `ui_preferences.json` in `paths.runtime_data_dir()`, the same directory as `runtime.json` (the same pattern as `runtime_store.py`). This applies in every deployment: desktop, CLI and Docker. The SPA keeps a `localStorage` copy only for instant first paint (§6.11). | Preferences survive port changes (D11) and are shared by the app window and every browser that uses the same server. `runtime_data_dir()` defaults to the voice library directory, so on a native macOS install the file is `~/.config/persona-forge/voices/ui_preferences.json`; in Docker, `runtime_data_dir()` resolves through the `VOICE_LIBRARY_DIR` the compose file sets today (the resolver's `DATA_DIR` override takes precedence when set). | Keeping them in browser storage. Having the desktop shell store them (it cannot see the SPA's state without IPC, D10). |
 | D18 | **Network access is a user setting, off by default.** Off = the server binds `127.0.0.1`. On = it binds `0.0.0.0`, and Settings shows every LAN address to use. No authentication and no Host-header allowlist are added in this initiative (owner, 2026-09-25: API keys and related hardening come later). | The owner wants other machines' tools to reach the TTS server, matching how the container is used. Off by default because the server has no auth, and because the OS firewall prompt (§10) should appear only when the user asks for network access. A Host allowlist (IP literals, `localhost`, the machine's own names) would **not** break LAN-IP access and would block DNS rebinding; it is deferred only because Docker and reverse-proxy users reach the server by custom hostnames and need a configuration story (§10 follow-up). | On by default. Waiting for auth before shipping network access. |
 | D19 | **Signing secrets are used only on ephemeral runners.** `self-hosted-macos` and `self-hosted-windows` are persistent machines that also run same-repo PR lanes (Renovate branches included); a malicious dependency's build script could leave something behind that reads keys during a later release. So no job on them ever receives `MACOS_*`, `APPLE_*`, `SPARKLE_ED_PRIVATE_KEY` or `TAURI_SIGNING_*`. All signing happens on fresh ARC pods (`arc-persona-forge-desktop` for code signing and updater signatures, `arc-general` for feed generation). Build outputs move between jobs as workflow artifacts. | Keeps the release keys off machines that run untrusted-ish code, at the cost of a few extra artifact hops. | Writing secrets to `$RUNNER_TEMP` on the persistent runners and deleting them afterwards (does not help if the machine is already compromised). |
+| D20 | **macOS window polish, no SPA IPC.** On macOS the main window uses `titleBarStyle` **`Transparent`** with a hidden title, a transparent window, and the native **`sidebar`** vibrancy material (`windowEffects`, state `followsWindowActiveState`). This needs `app.macOSPrivateApi: true` (Tauri's `macos-private-api` feature). The shell tells the SPA it is inside the desktop window with an **initialization script**, not IPC (§6.10). Only then does the SPA apply its desktop-only CSS: transparent page and sidebar backgrounds so the material shows through, opaque content area. Windows and Linux windows are unchanged. | Owner, 2026-09-26: "native feel" on macOS with one UI for all three platforms. `Transparent` (unlike `Overlay`) keeps the native title strip, so dragging and double-click-to-zoom stay native; `Overlay` would need HTML drag regions, which call `plugin:window\|start_dragging` over IPC (Tauri `drag.js`) and so break D10. Translucency comes only from the native material, because WebKit does not support `prefers-reduced-transparency` (the SPA cannot see that setting). AppKit's material is expected to turn opaque when Reduce Transparency is on; Gate 3 checks it on the Mac. | A separate native (SwiftUI/AppKit) UI (owner: no second UI to maintain). `titleBarStyle: Overlay` + drag regions (needs a D10 exception). Private Liquid Glass (`NSGlassEffectView`, §13). |
+| D21 | **Downloads never block, and go to the Downloads folder by default.** `on_download` `Requested` returns immediately with a destination in the user's Downloads folder (a unique name if taken). A Settings switch **"Ask where to save each file"** (off by default) instead downloads to a temp file and, on `Finished`, opens the **non-blocking** Save dialog and moves the file there (Cancel deletes it). | Phase 1 (1C, 2026-09-26): showing the Save dialog from `on_download` deadlocks the app on every OS. `blocking_save_file()` queues the dialog onto the main thread and waits for it, but `on_download` already runs on the main thread (the CI app's main thread sat in `futex_wait` with no event loop). Downloads-folder-by-default matches Safari and Chrome. The switch keeps a Save-As flow for users who want one (owner, 2026-09-26). | A Save dialog inside `on_download` (deadlock). Always Save-As after download (a dialog on every download). |
 
 ## 3. Review of the first draft: what changed and why
 
@@ -104,7 +110,7 @@ flowchart LR
   end
   subgraph Data["App-data root (paths.rs), writable"]
     ENV["launcher/versions/<ver>/ venv"]
-    DS["desktop/: settings.json, logs/, server.pid, webview/"]
+    DS["desktop/: settings.json, logs/, server.pid, webview/, downloads-tmp/"]
     UP["ui_preferences.json + runtime.json (next to voices)"]
     ST["voices, models, projects (unchanged)"]
   end
@@ -145,11 +151,11 @@ desktop/                        NEW Cargo package persona-forge-desktop (Tauri v
   src/args.rs                   strict argument parsing; unknown `--` flags exit 2 (§6.8)
   src/bundle_paths.rs           payload dir + uv path without an initialized Tauri app (§6.8)
   src/app.rs                    startup state machine, window/menu/tray wiring
-  src/settings.rs               desktop/settings.json (port, network access, tray)
+  src/settings.rs               desktop/settings.json (port, network access, tray, ask-where-to-save)
   src/netinfo.rs                LAN addresses shown in Settings and "Copy Server Address"
   src/port.rs                   D11 port selection (pure, unit-tested)
   src/nav.rs                    navigation classification (pure, unit-tested)
-  src/downloads.rs              Save-dialog download handling
+  src/downloads.rs              non-blocking download handling: Downloads folder or ask-where-to-save (D21)
   src/translocation.rs          macOS App Translocation guard (§6.9)
   src/menu.rs, src/tray.rs, src/logs.rs, src/updates.rs, src/smoke.rs
   src/ci_hooks.rs               test-only update driver, compiled only with `--features ci-hooks` (§6.12)
@@ -173,8 +179,9 @@ scripts/desktop_gui_check.py          NEW: Linux WebDriver GUI check
 
 `src/persona_forge` changes: `cli.py` `serve` becomes supervisable (§6.2), one `/health` field
 (§6.10), one env var, and the UI-preferences store plus its two endpoints (§6.11). `frontend/`
-changes: `UpdateAvailableBanner` hides itself (D13) and preferences go through the new store
-(§6.11).
+changes: `UpdateAvailableBanner` hides itself (D13), preferences go through the new store
+(§6.11), and the desktop marker plus macOS-only CSS (D20, §6.10) under
+`html[data-desktop='macos']`, which leaves every other environment unchanged.
 
 **Workflow bootstrap rule.** GitHub only dispatches a `workflow_dispatch` workflow whose file
 exists on the default branch. Every new dispatchable workflow above therefore lands on `main`
@@ -289,6 +296,23 @@ where `PortState = Free | PersonaForge | Other`. The probe is:
 
 - One main window, label `main`. It starts at 1280×832, with a minimum of 960×640. Use
   `tauri-plugin-window-state` for size, position and maximized state.
+- **macOS window appearance (D20).** The `main` window builder (macOS only) sets
+  `title_bar_style(TitleBarStyle::Transparent)`, `hidden_title(true)`, `transparent(true)` and
+  `effects(WindowEffectsConfig { effects: [WindowEffect::Sidebar], state:
+  FollowsWindowActiveState })`. `tauri.conf.json` sets `app.macOSPrivateApi: true`, and the
+  `tauri` crate enables the matching `macos-private-api` feature (`tauri-build` rejects a
+  mismatch). The title strip shows the traffic lights on the translucent material and stays a
+  native drag and double-click-to-zoom area; there are no HTML drag regions. The splash page
+  uses a transparent `body` background so the material shows behind it too. The `settings`
+  window keeps the default opaque look.
+- Notes on the Tauri options (verified in `tauri-utils` 2.9.3 / `tauri-build` 2.6.3):
+  `windowEffects` requires a transparent window and is ignored on Linux; transparent windows on
+  macOS require `macOSPrivateApi`, which Tauri documents as ruling out the Mac App Store
+  (already a non-goal, §13). Developer ID notarization is expected to accept it; Phase 5's
+  notarized build is the proof (stop and report if Apple rejects it). `titleBarStyle` parses
+  case-insensitively and falls back to `Visible` on any unknown value **without an error**, so
+  it is set only on the Rust builder (the `TitleBarStyle` enum, where a typo does not compile),
+  never as a string in `tauri.conf.json`.
 - Menus (built with the Tauri menu API; macOS names in parentheses where they differ):
   - **App menu (macOS):** About, Check for Updates…, Settings… (Cmd+,), Hide, Quit.
   - **File:** Open in Browser, Copy Server Address, Show Logs, and on Windows/Linux also
@@ -324,20 +348,35 @@ where `PortState = Free | PersonaForge | Other`. The probe is:
     (`tauri://localhost`, `http://tauri.localhost` on Windows).
   - `OpenExternal`: `https:`/`http:` to any other host, and `mailto:`.
   - `Deny`: everything else (`file:`, `javascript:`, `data:`, other ports, `localhost`).
+  - A `blob:` URL carries its origin inside its path (`blob:http://127.0.0.1:8318/<uuid>`), so
+    `Url::host_str()` is `None` for it. `classify` parses the inner URL and applies the
+    `127.0.0.1:<port>` rule to that (Phase 1 found every blob denied without this).
 - `on_navigation` enforces `classify` for the main window. `OpenExternal` goes to
   `tauri-plugin-opener`. `target="_blank"` / `window.open` (for example the
   `UpdateAvailableBanner` link) follow the same rule. Phase 1 verifies which Tauri 2 hook catches
   new-window requests on each OS.
-- Downloads: `AudioDeck.tsx` downloads via `<a download>` with a **same-origin server URL**
+- Downloads (D21): `AudioDeck.tsx` downloads via `<a download>` with a **same-origin server URL**
   (`a.href = src`; reviewed 2026-09-25: there is no `URL.createObjectURL` in its download path;
   other SPA flows may still produce `blob:` object URLs, which the `classify` allowlist covers
-  anyway): `on_download` handles
-  `Requested` by showing a native Save dialog (`tauri-plugin-dialog`) seeded with the suggested
-  filename, and sets the destination. `Finished` shows a notification with "Show in
-  Folder/Finder". Cancel aborts the download. **Phase 1 must prove that the SPA's real download
-  shape (same-origin URL) *and* a `blob:`-URL download both reach `on_download` on all three
-  webviews.** If either does not, stop and report (the fallback needs a frontend change and
-  owner sign-off).
+  anyway). Phase 1 (1C) saw a `blob:` download reach `on_download` on WebKitGTK; the 1C GUI job
+  asserts both shapes, and Mac and Windows are in the 1D matrix. **`on_download` never
+  blocks**: it runs on the main thread, and any blocking dialog there deadlocks the app.
+  - `Requested`, default: set the destination to `<Downloads>/<suggested name>`, using
+    `<stem> (1).<ext>`, `<stem> (2).<ext>`, ... when the name exists on disk **or** is already
+    reserved by another in-flight download. `<Downloads>` is `app.path().download_dir()`; if
+    that fails, the Tauri temp dir, with a log line. Return `true` at once.
+  - `Requested`, with `ask_where_to_save` on (§6.7): the destination is a unique name in
+    `<app_data_root>/desktop/downloads-tmp/`. Return `true` at once.
+  - Remember each destination (keyed by URL) at `Requested`: Tauri documents that `Finished`'s
+    `path` can be `None` even on success.
+  - `Finished`, success, default: a notification "Saved <name>" with "Show in Finder / Show in
+    Folder" (`opener::reveal_item_in_dir`).
+  - `Finished`, success, with `ask_where_to_save`: open the **non-blocking** Save dialog
+    (`dialog().file().set_file_name(name).save_file(callback)`, never `blocking_save_file`).
+    Chosen path → move the temp file there (rename, else copy + delete across volumes), then
+    the same notification. Cancel → delete the temp file.
+  - `Finished`, failure: delete any partial file, and show a notification "Download failed".
+  - At startup, delete leftovers in `downloads-tmp/`.
 - Uploads (`<input type=file>`, drag-drop) use the webview's native pickers. Phase 1 verifies
   them.
 
@@ -359,9 +398,11 @@ where `PortState = Free | PersonaForge | Other`. The probe is:
 honors `PERSONA_FORGE_HOME`):
 
 - `settings.json`:
-  `{"schema_version":1,"port_mode":"auto","port":8318,"network_access":false,"tray_enabled":true}`.
+  `{"schema_version":1,"port_mode":"auto","port":8318,"network_access":false,"tray_enabled":true,"ask_where_to_save":false}`.
   `port` is `null` until the first run picks one. Unknown keys are preserved when writing.
-  Writes are atomic (temp file + rename).
+  Writes are atomic (temp file + rename). A file without `ask_where_to_save` reads as `false`
+  (no schema bump).
+- `downloads-tmp/`: in-flight downloads while "Ask where to save" is on (§6.5, D21).
 - `logs/desktop.log` (via `tauri-plugin-log`), `logs/server.log`, `logs/bootstrap.log`.
 - `server.pid` (§6.2).
 - `webview/`: the WebView2 user-data folder on Windows, set explicitly with the webview builder's
@@ -425,6 +466,38 @@ unless Phase 1 finds a maintained one.
   `PERSONA_FORGE_SHELL` to `docs/ENV_REFERENCE.md` and the `/health` field to
   `docs/api/HTTP_API_REFERENCE.md`.
 - `UpdateAvailableBanner` returns `null` when `health.shell === "desktop"`.
+- **Desktop marker (D20).** `/health`'s `shell` describes the *server*: a browser on another
+  machine reaching a desktop-hosted server (D18) also sees `"desktop"`. Desktop-only styling
+  must mean "this page is inside the desktop window", so the shell sets it with the `main`
+  window's **initialization script** (Tauri: runs before the document is parsed and before any
+  page script, on every top-level navigation, main frame only). It is not IPC and grants
+  nothing (D10 holds):
+  ```js
+  if ((location.protocol === 'http:' && location.hostname === '127.0.0.1') ||
+      location.protocol === 'tauri:' || location.hostname === 'tauri.localhost') {
+    window.__PERSONA_FORGE_DESKTOP__ = Object.freeze({ platform: '<macos|windows|linux>' });
+  }
+  ```
+  `platform` is fixed at compile time (`cfg!(target_os)`).
+- SPA: `frontend/src/lib/desktopShell.ts` exports `desktopPlatform(): 'macos' | 'windows' |
+  'linux' | null`, read from that global. `main.tsx` sets `document.documentElement.dataset.desktop
+  = platform` **before** the first render, so there is no flash. All desktop CSS is scoped
+  under `html[data-desktop='macos']` in `index.css`, so browsers, Docker and the Windows/Linux
+  app render exactly as today:
+  - `body`, the sidebar wrapper (`[data-slot=sidebar-wrapper]`) and the sidebar surface
+    (`bg-sidebar`) become transparent, so the native material shows through the sidebar.
+  - `SidebarInset` (content column) gets an opaque `bg-background`, so page content never sits
+    on the material.
+  - `--font-sans` becomes `-apple-system, 'Geist Variable', sans-serif` (the system font),
+    and `Geist Mono` stays for readouts.
+  - Do not set `accent-color` on native form controls: WebKit on macOS paints them in the
+    system accent color by default (it picks up a change on the next launch). The brand theme
+    (`data-theme`) stays the app's own accent.
+  - No `prefers-reduced-transparency` handling: WebKit does not support it (MDN compat data),
+    and the only translucency is the native material. Existing `prefers-reduced-motion`
+    handling is unchanged.
+- Splash (`desktop/splash/`): the same marker; under `html[data-desktop='macos']` its `body`
+  background is transparent, otherwise it keeps the opaque dark colors.
 
 ### 6.11 Server-side UI preferences (D17)
 
@@ -501,6 +574,8 @@ release artifact and asserts **exit code 2** (§6.8 argument parsing).
   - **Allow other devices on my network:** a switch. Under it, a warning line: "Anyone on your
     network can use Persona Forge and read your voices. There is no password yet."
   - **Keep running in the menu bar / system tray:** a switch.
+  - **Ask where to save each file:** a switch, off by default (D21). Applies to the next
+    download; no restart.
   - **Server addresses:** read-only list with a Copy button per row. It shows
     `http://127.0.0.1:<port>` always, and every non-loopback IPv4 address when network access
     is on, each also as an OpenAI-compatible base URL `http://<ip>:<port>/v1`.
@@ -720,7 +795,13 @@ Plan (the owner asked the agent to drive this with the owner present; execution 
 - Linux aarch64, Linux `.deb`/`.rpm`, Flatpak, Snap, and apt/yum repositories.
 - Mac App Store and Microsoft Store.
 - Intel macOS.
-- A native (non-web) UI. SPA changes beyond D13 and D17.
+- A native (non-web) UI. SPA changes beyond D13, D17 and D20's desktop marker and
+  `html[data-desktop='macos']`-scoped CSS.
+- Liquid Glass (`NSGlassEffectView`, macOS 26). The only Tauri route today is the third-party
+  `tauri-plugin-liquid-glass` (0.x, one maintainer) over a **private** AppKit API. D20's public
+  `NSVisualEffectView` material covers the need; revisit when Tauri exposes the public API.
+- Windows 11 Mica / Acrylic window materials (the same `windowEffects` mechanism supports them;
+  a later, separate decision).
 - Changing the Docker path or the CLI bootstrap archive's behavior (except D14 retention and the
   D17 preferences store, which the Docker and CLI servers also get).
 - API authentication (§10 follow-up, roadmap §5.1).
@@ -749,6 +830,10 @@ Plan (the owner asked the agent to drive this with the owner present; execution 
 | An orphaned server after a hard kill of the shell on macOS/Linux | M | pidfile recovery (§6.2), gate test in Phase 3 |
 | First-run provisioning fails offline or behind a proxy | M | Error screen plus logs. uv honors the standard proxy env vars. Documented. |
 | Two installs (CLI serve and desktop) share one state dir at the same time | L | §6.3 step 2 refuses to attach. Documented. |
+| Transparent window + vibrancy costs GPU/battery or shows artifacts in WKWebView (D20) | L–M | Gate 3 owner checks (window resize, full screen, light/dark, inactive window); fallback is to drop `windowEffects` + `transparent` on macOS, which changes only the look |
+| Apple notarization rejects the `macos-private-api` build (D20) | L | Phase 5's notarized build is the gate; stop and report |
+| A future SPA change paints an opaque background over the sidebar and hides the material (D20) | M | Playwright spec (execution plan Phase 3) asserts the sidebar surface is transparent under `html[data-desktop='macos']` and opaque without it |
+| A download handler change reintroduces a blocking dialog (D21) | M | Code rule in §6.5 plus the 1C-style GUI check that the app answers WebDriver while a Save dialog is open (Phase 4 GUI check) |
 
 ## 15. Sources (researched 2026-09-25)
 
@@ -781,3 +866,17 @@ primary sources they relied on are listed here:
 - Velopack (rejected): <https://docs.velopack.io/packaging/cross-compiling>,
   <https://github.com/velopack/velopack/issues/975>
 - cargo-packager (rejected): <https://github.com/crabnebula-dev/cargo-packager>
+- Amendment 2026-09-26 (D20/D21), read from the pinned sources in the local cargo registry:
+  `tauri-utils` 2.9.3 `src/config.rs` (`transparent`, `window_effects`,
+  `traffic_light_position`, `macos_private_api`) and `src/lib.rs` (`WindowEffect`,
+  `TitleBarStyle` parsing); `tauri-build` 2.6.3 `src/manifest.rs` (`check_features`); `tauri`
+  2.11.6 `src/window/scripts/drag.js` (drag regions invoke `plugin:window|start_dragging`) and
+  `src/webview/webview_window.rs` (`initialization_script` timing); `tauri-plugin-dialog` 2.7.3
+  `src/lib.rs` (`blocking_fn!`, "should NOT be used when running on the main thread").
+- WebKit support: MDN browser-compat-data (`prefers-reduced-transparency`: Safari not
+  supported, <https://webkit.org/b/175497>); CSS `AccentColor` keyword:
+  <https://github.com/WebKit/standards-positions/issues/136> (open); native controls follow the
+  system accent: <https://github.com/WebKit/standards-positions/issues/485>.
+- Tauri issue #4316 (drag in an unfocused overlay window):
+  <https://github.com/tauri-apps/tauri/issues/4316>. Liquid Glass plugin:
+  <https://github.com/hkandala/tauri-plugin-liquid-glass>.
