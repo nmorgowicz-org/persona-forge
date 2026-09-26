@@ -420,7 +420,8 @@ jobs:
             Where-Object { $_.GetValue('DisplayName') -eq 'Persona Forge' } |
             Select-Object -First 1
           if (-not $entry) { throw "no HKCU uninstall entry with DisplayName 'Persona Forge'" }
-          $installLocation = $entry.GetValue('InstallLocation')
+          # NSIS writes the InstallLocation value wrapped in literal double quotes.
+          $installLocation = $entry.GetValue('InstallLocation').Trim('"')
           if (-not $installLocation) { throw "uninstall entry has no InstallLocation" }
           $exe = Join-Path $installLocation 'persona-forge-desktop.exe'
           if (-not (Test-Path $exe)) { throw "installed exe is missing: $exe" }

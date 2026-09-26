@@ -212,7 +212,10 @@ def main() -> None:
     if not state.is_dir():
         fail(f"state dir is missing: {state}")
 
-    options = webdriver.ChromeOptions()
+    # Bare options: ChromeOptions would add browserName:"chrome" + goog:chromeOptions to
+    # alwaysMatch, which tauri-driver's capability matcher rejects ("Failed to match
+    # capabilities" — Phase 4 run 6).
+    options = webdriver.ChromiumOptions.__bases__[0]()  # selenium BaseOptions
     options.set_capability("tauri:options", {"application": str(app)})
     driver = webdriver.Remote(command_executor=args.driver_url, options=options)
     try:
