@@ -11,10 +11,12 @@ use tauri::{
     WebviewUrl, WebviewWindowBuilder,
 };
 
+#[cfg(not(target_os = "macos"))]
 const DEFAULT_FEED_BASE: &str =
     "https://github.com/nmorgowicz-org/persona-forge/releases/download/desktop-spike";
 const TEST_ORIGIN_PORT: u16 = 8318;
 
+#[cfg(not(target_os = "macos"))]
 fn feed_base() -> &'static str {
     option_env!("SPIKE_FEED_BASE").unwrap_or(DEFAULT_FEED_BASE)
 }
@@ -61,21 +63,23 @@ fn classify(url: &tauri::Url) -> Decision {
 // ── strict argument parsing (contract §6.8 shape) ────────────────────────────
 enum Args {
     Version,
+    #[cfg(not(target_os = "macos"))]
     CiUpdate(PathBuf),
     Gui,
 }
 
+#[cfg_attr(target_os = "macos", allow(unused_variables))]
 fn parse_args() -> Args {
-    let mut it = std::env::args().skip(1);
-    for arg in it {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    for (idx, arg) in args.iter().enumerate() {
         match arg.as_str() {
             "--version" => return Args::Version,
             #[cfg(not(target_os = "macos"))]
             "--ci-update" => {
-                if let Some(out) = it.next() {
-                    return Args::CiUpdate(PathBuf::from(out));
+                match args.get(idx + 1) {
+                    Some(out) => return Args::CiUpdate(PathBuf::from(out)),
+                    None => fail_unknown("--ci-update (missing <out.json>)"),
                 }
-                fail_unknown("--ci-update (missing <out.json>)");
             }
             other => {
                 if other.starts_with("--") {
@@ -194,8 +198,7 @@ fn main() {
             println!("desktop-spike {}", env!("CARGO_PKG_VERSION"));
             return;
         }
-        #[cfg(target_os = "macos")]
-        Args::CiUpdate(_) => fail_unknown("--ci-update (macOS builds use Sparkle)"),
+        // macOS: "--ci-update" is intentionally unknown here -> exit 2
         #[cfg(not(target_os = "macos"))]
         Args::CiUpdate(out_path) => {
             // updater plugins need an app context; build one with no windows
