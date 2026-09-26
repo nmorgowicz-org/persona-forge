@@ -66,7 +66,7 @@ enum Args {
 }
 
 fn parse_args() -> Args {
-    let it = std::env::args().skip(1);
+    let mut it = std::env::args().skip(1);
     for arg in it {
         match arg.as_str() {
             "--version" => return Args::Version,
@@ -289,7 +289,9 @@ fn build_app(_test_port: Option<u16>) -> tauri::Result<tauri::App> {
             // spike updater plugins
             #[cfg(not(target_os = "macos"))]
             {
-                app.handle().plugin(tauri_plugin_updater::init())?;
+                app.handle().plugin(
+                    tauri_plugin_updater::Builder::new().build(),
+                )?;
             }
             #[cfg(target_os = "macos")]
             {
