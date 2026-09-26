@@ -3,7 +3,9 @@
 // integrations before the real `desktop/` crate exists. NOTHING from this crate
 // merges except the results write-up.
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use tauri::{
     menu::{MenuBuilder, SubmenuBuilder},
@@ -49,10 +51,9 @@ fn classify(url: &tauri::Url) -> Decision {
         // splash origins: tauri://localhost (macOS/Linux), http://tauri.localhost (Windows)
         "tauri" => Decision::Allow,
         "http" | "https" => {
-            let host = url.host_str().unwrap_or("");
-            if url.scheme() == "http" && host == "tauri.localhost" {
-                Decision::Allow
-            } else if is_test_origin(url) {
+            let windows_splash =
+                url.scheme() == "http" && url.host_str() == Some("tauri.localhost");
+            if windows_splash || is_test_origin(url) {
                 Decision::Allow
             } else {
                 Decision::OpenExternal
@@ -66,6 +67,57 @@ fn classify(url: &tauri::Url) -> Decision {
         },
         _ => Decision::Deny,
     }
+}
+
+// ── downloads (contract §6.5 prototype) ──────────────────────────────────────
+/// Spike stand-in for the Settings toggle "Ask where to save each file" (default off).
+fn ask_where_to_save() -> bool {
+    std::env::var_os("SPIKE_ASK_WHERE_TO_SAVE").is_some()
+}
+
+/// The user's Downloads folder; `SPIKE_DOWNLOAD_DIR` overrides it for CI.
+fn downloads_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
+    if let Some(dir) = std::env::var_os("SPIKE_DOWNLOAD_DIR") {
+        return PathBuf::from(dir);
+    }
+    use tauri::Manager;
+    app.path().download_dir().unwrap_or_else(|_| std::env::temp_dir())
+}
+
+type Pending = HashMap<String, (PathBuf, String)>;
+
+/// In-flight downloads: URL -> (assigned destination, suggested file name).
+fn pending_downloads() -> &'static Mutex<Pending> {
+    static PENDING: OnceLock<Mutex<Pending>> = OnceLock::new();
+    PENDING.get_or_init(Default::default)
+}
+
+/// `name`, else `stem (1).ext`, `stem (2).ext`, ...: skipping files that exist and
+/// destinations already reserved by in-flight downloads.
+fn unique_path(dir: &Path, name: &str, pending: &Pending) -> PathBuf {
+    let taken = |p: &Path| p.exists() || pending.values().any(|(d, _)| d == p);
+    let first = dir.join(name);
+    if !taken(&first) {
+        return first;
+    }
+    let as_path = Path::new(name);
+    let stem = as_path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let ext = as_path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    (1..)
+        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
+        .find(|p| !taken(p))
+        .expect("an unused name exists")
+}
+
+/// rename, falling back to copy + remove across filesystems (temp dir -> another volume).
+fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::rename(from, to).or_else(|_| {
+        std::fs::copy(from, to)?;
+        std::fs::remove_file(from)
+    })
 }
 
 // ── strict argument parsing (contract §6.8 shape) ────────────────────────────
@@ -287,32 +339,59 @@ fn build_app(_test_port: Option<u16>) -> tauri::Result<tauri::App> {
                 }
             });
 
-            builder = builder.on_download(|_webview, event| match event {
+            builder = builder.on_download(|webview, event| match event {
+                // Never block in this callback: it runs on the main thread, and a blocking
+                // dialog waits on the main thread itself (Phase 1 finding: deadlock on every OS).
                 DownloadEvent::Requested { url, destination } => {
-                    eprintln!("[download] Requested {url}");
-                    let suggested = destination
+                    let name = destination
                         .file_name()
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| "download".into());
-                    // native Save dialog seeded with the suggested filename (contract §6.5)
-                    match tauri_plugin_dialog::DialogExt::dialog(&_webview)
-                        .file()
-                        .set_file_name(&suggested)
-                        .blocking_save_file()
-                    {
-                        Some(path) => {
-                            let p = match &path {
-                                tauri_plugin_dialog::FilePath::Path(p) => p.clone(),
-                                tauri_plugin_dialog::FilePath::Url(u) => PathBuf::from(u.path()),
-                            };
-                            *destination = p;
-                            true
-                        }
-                        None => false, // cancelled
+                    let dir = if ask_where_to_save() {
+                        std::env::temp_dir().join("desktop-spike-downloads")
+                    } else {
+                        downloads_dir(tauri::Manager::app_handle(&webview))
+                    };
+                    if let Err(e) = std::fs::create_dir_all(&dir) {
+                        eprintln!("[download] cannot create {dir:?}: {e}");
+                        return false;
                     }
+                    let mut pending = pending_downloads().lock().unwrap();
+                    let target = unique_path(&dir, &name, &pending);
+                    eprintln!("[download] Requested {url} -> {target:?}");
+                    pending.insert(url.to_string(), (target.clone(), name));
+                    *destination = target;
+                    true
                 }
                 DownloadEvent::Finished { url, path, success } => {
                     eprintln!("[download] Finished {url} -> {path:?} success={success}");
+                    // `path` may be None even on success; use the destination we assigned
+                    let entry = pending_downloads().lock().unwrap().remove(url.as_str());
+                    if let (true, true, Some((tmp, name))) = (success, ask_where_to_save(), entry) {
+                        // non-blocking Save dialog; its callback moves the finished temp file
+                        tauri_plugin_dialog::DialogExt::dialog(&webview)
+                            .file()
+                            .set_file_name(&name)
+                            .save_file(move |choice| {
+                                let chosen = match choice {
+                                    Some(tauri_plugin_dialog::FilePath::Path(p)) => Some(p),
+                                    Some(tauri_plugin_dialog::FilePath::Url(u)) => {
+                                        Some(PathBuf::from(u.path()))
+                                    }
+                                    None => None,
+                                };
+                                match chosen {
+                                    Some(dest) => match move_file(&tmp, &dest) {
+                                        Ok(()) => eprintln!("[download] Saved {dest:?}"),
+                                        Err(e) => eprintln!("[download] move to {dest:?} failed: {e}"),
+                                    },
+                                    None => {
+                                        let _ = std::fs::remove_file(&tmp);
+                                        eprintln!("[download] Save cancelled; removed {tmp:?}");
+                                    }
+                                }
+                            });
+                    }
                     true
                 }
                 _ => true,

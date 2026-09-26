@@ -587,17 +587,29 @@ jobs:
           for _ in $(seq 1 40); do curl -fsS -o /dev/null http://127.0.0.1:8318/tone.mp3 && break; sleep 0.5; done
           curl -fsS -o /dev/null http://127.0.0.1:8318/
 
-      - name: Drive the AppImage through tauri-driver
+      - name: Drive the AppImage through tauri-driver (downloads to a folder)
         run: |
           set -euo pipefail
           APP="$PWD/app/desktop-spike-0.1.0-good.AppImage"
           chmod +x "$APP"
-          dbus-run-session -- xvfb-run -a \
-            spike/desktop-shell/scripts/run_gui_check.sh "$APP" "$RUNNER_TEMP/app-stderr.log"
+          dbus-run-session -- xvfb-run -a spike/desktop-shell/scripts/run_gui_check.sh \
+            full "$APP" "$RUNNER_TEMP/app-full.log" "$RUNNER_TEMP/downloads"
 
-      - name: App and driver log
+      - name: Ask-where-to-save mode (Save dialog must not freeze the app)
+        # independent evidence (the deadlock fix): run even when the full check failed
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          APP="$PWD/app/desktop-spike-0.1.0-good.AppImage"
+          dbus-run-session -- xvfb-run -a spike/desktop-shell/scripts/run_gui_check.sh \
+            ask "$APP" "$RUNNER_TEMP/app-ask.log" "$RUNNER_TEMP/downloads-ask"
+
+      - name: App and driver logs
         if: always()
-        run: cat "$RUNNER_TEMP/app-stderr.log" || true
+        run: |
+          for f in "$RUNNER_TEMP"/app-full.log "$RUNNER_TEMP"/app-ask.log; do
+            echo "===== $f"; cat "$f" 2>/dev/null || echo "(missing)"
+          done
 
   # ── 1C task 6: newest distro (Ubuntu 26.04, no FUSE in pods) ────────────────
   spike-linux-newest:
