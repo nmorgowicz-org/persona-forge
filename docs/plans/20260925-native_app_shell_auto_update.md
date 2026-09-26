@@ -554,7 +554,8 @@ Fill this table. It goes into the results section:
 | Check | macOS 26 | Windows 11 | Linux (1C, automated) |
 | --- | --- | --- | --- |
 | Page at `http://127.0.0.1:8318` loads (ATS on macOS) | | | |
-| `#dl-blob` and `#dl-http` downloads reach `on_download`; Save dialog; file written | | | n/a |
+| `#dl-blob` and `#dl-http` reach `on_download` and are saved to Downloads (`tone.wav`, `tone (1).wav`), no dialog (contract D21) | | | |
+| Ask mode (launch with `SPIKE_ASK_WHERE_TO_SAVE=1`): after a download the Save dialog opens, the app stays responsive while it is open, Save moves the file, Cancel removes the temp file | | | responsive only (1C) |
 | `<audio>` blob WAV plays | | | |
 | MP3 plays (test page; on Mac/Windows also the real SPA Speak page) | | | |
 | `target=_blank` link: which hook fires; opens the system browser | | | n/a |
@@ -959,7 +960,7 @@ Python `/health` field and the frontend banner change (§6.10).
 
 ### Read first
 
-- Contract §6 in full (including §6.11–§6.13), D2, D10, D11, D13, D16, D17, D18.
+- Contract §6 in full (including §6.11–§6.13), D2, D10, D11, D13, D16, D17, D18, D20, D21.
 - Phase 2b must be merged first (the Settings window assumes server-side preferences).
 - `## Phase 1 results`, especially the hook names and every API difference.
 - The Phase 2 lib API (`launcher/src/lib.rs` and its modules).
@@ -979,6 +980,10 @@ Python `/health` field and the frontend banner change (§6.10).
 - Modify `src/persona_forge/app.py` (`health()` adds `"shell"`, contract §6.10) and
   `tests/tier2_backend/test_app_health.py` (both the normal and the startup-failed case).
 - Modify `frontend/src/components/UpdateAvailableBanner.tsx` and the `getHealth` response type.
+- Desktop marker and macOS styling (contract D20, §6.10): create `frontend/src/lib/desktopShell.ts`;
+  modify `frontend/src/main.tsx` (set `data-desktop` before the first render) and
+  `frontend/src/index.css` (rules scoped under `html[data-desktop='macos']` only). Create one
+  Playwright spec under `tests/ui/` (follow the existing layout).
 - Modify `docs/ENV_REFERENCE.md` (`PERSONA_FORGE_SHELL`) and `docs/api/HTTP_API_REFERENCE.md`
   (the `shell` field).
 - Icons (contract D16), all committed:
@@ -1036,6 +1041,10 @@ usage: stage_desktop_payload.py --target <triple> --version X.Y.Z --wheel <whl> 
 - `bundle.macOS.minimumSystemVersion` "14.0". `bundle.windows.nsis.installMode` "currentUser".
   `bundle.windows.webviewInstallMode` `{"type":"embedBootstrapper"}`.
 - `bundle.linux.appimage.bundleMediaFramework` true. No `deb` configuration (contract D8).
+- `app.macOSPrivateApi` true (contract D20), and `tauri` features `["tray-icon",
+  "macos-private-api"]` in `Cargo.toml`; `tauri-build` fails the build if the two disagree. Do
+  **not** put `titleBarStyle`, `transparent` or `windowEffects` in `tauri.conf.json`: the main
+  window is built in Rust (task 17).
 - `capabilities/splash.json` and `capabilities/settings.json` exactly as in contract §6.6. No
   `remote` key anywhere.
 
@@ -1051,7 +1060,8 @@ usage: stage_desktop_payload.py --target <triple> --version X.Y.Z --wheel <whl> 
 2. `settings.rs`: load/save `desktop/settings.json` (§6.7) under
    `paths::app_data_root(...)`, using the same `environ`/`home` resolution as the CLI `main.rs`
    (factor a `paths::resolve_app_data_root_from_env()` helper into the lib if needed). Unknown
-   keys are preserved (store a `serde_json::Map` for extras). Writes are atomic.
+   keys are preserved (store a `serde_json::Map` for extras). Writes are atomic. The fields
+   include `ask_where_to_save` (default `false`; missing reads as `false`, contract §6.7).
 3. `port.rs`: `select_port(mode, persisted, probe)` (§6.3) as a pure function. It returns
    `PortDecision { Use(u16), Moved { from: u16, to: u16 }, ExternalPersonaForge(u16),
    FixedPortBusy(u16), NoneFree }`. The dialogs and the one-time "port moved" notification live
@@ -1070,8 +1080,20 @@ usage: stage_desktop_payload.py --target <triple> --version X.Y.Z --wheel <whl> 
 5. `nav.rs`: `classify(url, port)` (§6.5), a pure function. `app.rs` wires it into
    `on_navigation` and into whichever new-window hook Phase 1 found. `OpenExternal` goes to
    `tauri_plugin_opener::open_url`.
-6. `downloads.rs`: `on_download` → the Save dialog → set the destination. On success, notify with
-   "Show in Folder" (`opener::reveal_item_in_dir`).
+6. `downloads.rs` (contract §6.5, D21). **Nothing in the `on_download` callback blocks**: it runs
+   on the main thread, and `blocking_save_file()` there deadlocks the app (Phase 1 proved it).
+   - pure `unique_path(dir, name, reserved: &[PathBuf]) -> PathBuf`: `name`, else
+     `<stem> (1).<ext>`, `<stem> (2).<ext>`, ..., skipping names that exist on disk or are
+     reserved by in-flight downloads
+   - `Requested`: destination = `unique_path(<Downloads or downloads-tmp>, suggested name, ...)`
+     (§6.5), recorded in a `Mutex<HashMap<url, (dest, name)>>` in managed state; log one line
+     `download destination <url> -> <path>`; return `true`
+   - `Finished` uses the recorded destination (its own `path` may be `None`): default → the
+     "Saved" notification with "Show in Folder" (`opener::reveal_item_in_dir`); ask mode →
+     `dialog().file().set_file_name(..).save_file(callback)`, the callback moves the file
+     (rename, else copy + delete) or deletes it on Cancel; failure → delete the partial file,
+     "Download failed" notification
+   - at startup, empty `desktop/downloads-tmp/`
 7. `menu.rs`, `tray.rs`: exactly the menus and close behavior in §6.4. "Open in Browser" calls
    `opener::open_url(http://127.0.0.1:<port>/)`. "Show Logs" calls `reveal_item_in_dir(logs dir)`.
    "Check for Updates…" exists but stays disabled until Phase 6A. Tray creation failure disables
@@ -1092,9 +1114,19 @@ usage: stage_desktop_payload.py --target <triple> --version X.Y.Z --wheel <whl> 
     startup-failed response too.
 13. Frontend: `UpdateAvailableBanner` returns `null` when `health.shell === 'desktop'`. Add
     `shell?: string | null` to the health type. Run `npm run --prefix frontend check`.
+    Desktop marker (contract §6.10): `desktopShell.ts` exports `desktopPlatform()`, reading
+    `window.__PERSONA_FORGE_DESKTOP__?.platform` (declare the global type; anything other than
+    `'macos' | 'windows' | 'linux'` → `null`). In `main.tsx`, before `createRoot(...).render`,
+    set `document.documentElement.dataset.desktop` when it is non-null. In `index.css`, only under
+    `html[data-desktop='macos']`: transparent `body`, `[data-slot=sidebar-wrapper]` and the
+    sidebar surface (`bg-sidebar`); opaque `bg-background` on `SidebarInset`; `--font-sans:
+    -apple-system, 'Geist Variable', sans-serif`. No `accent-color` override and no
+    `prefers-reduced-transparency` rules (contract §6.10).
 14. Settings window (§6.13): `desktop/splash/settings.html` + `settings.js`, loaded as
     `WebviewUrl::App("settings.html")`, the `settings` window
     created on demand (only one at a time; focus it if already open), and the commands in §6.6.
+    It includes the **Ask where to save each file** switch (§6.13); it applies to the next
+    download without a restart.
     `apply_settings` validates the port (1024–65535, integer), writes `settings.json`, and
     restarts the server only when `port_mode`, `port` or `network_access` changed. When
     `network_access` turns on, show the firewall hint text recorded in the Phase 1 results.
@@ -1105,6 +1137,14 @@ usage: stage_desktop_payload.py --target <triple> --version X.Y.Z --wheel <whl> 
 16. Windows only: create the main webview with the WebView2 data directory set to
     `<app_data_root>/desktop/webview` (the webview builder's data-directory option; verify the
     name in the pinned Tauri version), so it follows `PERSONA_FORGE_HOME` (contract §6.7).
+17. macOS window appearance (contract §6.4, D20), in `app.rs` where `main` is built, under
+    `#[cfg(target_os = "macos")]`: `.title_bar_style(TitleBarStyle::Transparent)`,
+    `.hidden_title(true)`, `.transparent(true)`, `.effects(WindowEffectsConfig { effects:
+    vec![WindowEffect::Sidebar], state: Some(WindowEffectState::FollowsWindowActiveState),
+    ..Default::default() })`. On every OS: `.initialization_script(desktop_marker_script())`,
+    where `desktop_marker_script()` returns the script in contract §6.10 with the platform from
+    `cfg!(target_os)`. `splash.css`: `html[data-desktop='macos'] body { background: transparent }`,
+    and `splash.js` sets `data-desktop` from the same global before first paint.
 
 ### Tests first (Rust unit tests in `desktop/`)
 
@@ -1129,7 +1169,24 @@ usage: stage_desktop_payload.py --target <triple> --version X.Y.Z --wheel <whl> 
   `tray_enabled: true`); unknown keys survive a round trip; an out-of-range port is rejected; a
   corrupt file → defaults, and the corrupt file is renamed to `settings.json.bad` and a log line
   written.
+- `downloads::unique_path`: a free name is kept; an existing `tone.wav` → `tone (1).wav`; a name
+  reserved by an in-flight download is skipped (`tone (2).wav`); a name without an extension →
+  `README (1)`.
+- `settings`: `ask_where_to_save` defaults to `false`, and a file without the key reads as
+  `false`.
+- `desktop_marker_script()`: contains the origin guard for `127.0.0.1`, `tauri:` and
+  `tauri.localhost`, and the platform string for the current `target_os`.
 - `smoke`: JSON shape serialization. The end-to-end behavior is covered by the gate.
+
+Frontend (Playwright spec under `tests/ui/`, contract D20):
+
+- With `page.addInitScript(() => { window.__PERSONA_FORGE_DESKTOP__ = { platform: 'macos' } })`:
+  `<html>` has `data-desktop="macos"` before any app code reads it; the computed background of
+  `body` and of the sidebar surface is fully transparent (`rgba(0, 0, 0, 0)`); the content
+  column (`SidebarInset`) is opaque.
+- With `platform: 'windows'`: `data-desktop="windows"` and the backgrounds are opaque (the CSS is
+  macOS-only).
+- Without the init script (a normal browser): no `data-desktop` attribute, and `body` is opaque.
 
 ### Local dev loop (the developer's Mac)
 
@@ -1159,7 +1216,8 @@ python3 -c "import json;d=json.load(open('/tmp/pf-smoke.json'));assert d['ok'],d
 python scripts/validate_repo.py && git diff --check
 ```
 
-Plus `ci-desktop.yml` green on all six jobs.
+Plus `ci-desktop.yml` green on all six jobs, and the Playwright spec run per `tests/ui/README.md`
+with its output in the PR.
 
 Plus an **OWNER / implementer-at-the-Mac** interactive checklist, run through `cargo tauri dev`.
 Record each item with a screenshot or log line in the PR:
@@ -1168,8 +1226,11 @@ Record each item with a screenshot or log line in the PR:
 - [ ] Second launch while running: the existing window focuses, and no second server
       (`pgrep -fl persona_forge.app:app` shows one server process group).
 - [ ] Cmd+C/V/Z/A work in the Speak page textarea.
-- [ ] Speak → download audio → the Save dialog appears → the file is written → the notification
-      reveals it.
+- [ ] Speak → download audio → the file appears in `~/Downloads` (a second download of the same
+      name gets ` (1)`), with no dialog → the "Saved" notification reveals it in Finder.
+- [ ] Settings → Ask where to save each file → on → download → the Save dialog opens and the app
+      stays responsive while it is open (scroll, click the sidebar) → Save puts the file there;
+      a second download → Cancel → nothing left in `desktop/downloads-tmp/`.
 - [ ] "See what's new"-style external links open the system browser. The `UpdateAvailableBanner`
       is **not** shown (`/health` has `shell: "desktop"`).
 - [ ] Close the window → the app stays (Dock). Dock click → the window returns. Cmd+Q → within 10
@@ -1196,6 +1257,20 @@ Record each item with a screenshot or log line in the PR:
 - [ ] Window size and position persist across restarts.
 - [ ] Break the payload (edit `desktop/payload/manifest.json` wheel sha) → the error screen with
       Retry / Show Logs / Quit.
+- [ ] macOS appearance (D20), screenshots in light **and** dark mode: the sidebar and the title
+      strip show the translucent material (the desktop picture shows through, blurred), the
+      content column is opaque, and the traffic lights sit on the material. Dragging the title
+      strip moves the window; double-clicking it zooms.
+- [ ] Deactivate the window (click another app): the material dims as native apps do
+      (`followsWindowActiveState`). Resize and enter/leave full screen: no flicker or blank
+      frames.
+- [ ] System Settings → Accessibility → Display → Reduce transparency on: the sidebar turns
+      opaque without an app change (contract D20 expects AppKit to do this; record what
+      happens).
+- [ ] Change the macOS accent color, relaunch: native checkboxes/radios/sliders (if any on the
+      page) use it; the brand theme is unchanged.
+- [ ] Open the same server in Safari (`http://127.0.0.1:<port>/`): it looks exactly as before
+      this phase (no `data-desktop` on `<html>`, opaque background).
 
 **Stop condition:** a Phase 1 fallback turns out to be needed that the owner has not approved.
 
@@ -1206,6 +1281,8 @@ BEGIN_COMMIT_OVERRIDE
 feat(desktop): add Tauri desktop shell with managed local server
 
 feat(api): report desktop shell in /health and hide web update banner in the desktop app
+
+feat(frontend): native macOS window styling inside the desktop app
 
 ci(desktop): build and test the desktop crate on Linux, macOS and Windows
 END_COMMIT_OVERRIDE
@@ -1289,6 +1366,11 @@ build` (contract §8: one version input; updater `.sig` files come from Phase 6B
        guard)
      - after `POST /ui/preferences {"values":{"theme":"<a non-default theme from theme.ts>"}}`
        and a reload, `document.documentElement.dataset.theme` equals that theme (D17 end to end)
+     - `document.documentElement.dataset.desktop == "linux"` (the D20 marker reaches the SPA)
+     - downloads (D21, no model needed): inject `<a download href="/health">` with
+       `execute_script`, click it twice; within 15 s two `download destination` log lines name
+       different paths, both files exist and parse as JSON, and the app still answers
+       `execute_script("return 1")`
      - it ends the session by sending the app `SIGTERM` (the §6.2 signal path), then asserts
        within 15 s that `pgrep -f persona_forge.app:app` finds nothing and the port is free
 8. `smoke-linux-newest` on `arc-llama-monitor` (Ubuntu 26.04), with `env:
