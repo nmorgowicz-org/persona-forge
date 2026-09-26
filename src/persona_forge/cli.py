@@ -287,9 +287,13 @@ def _port_in_use(host: str, port: int) -> bool:
 def _server_command(host: str, port: int, *, platform: str = sys.platform) -> list[str]:
     """Exact POSIX/Windows argv per docs/plans/20260829-no_more_docker_architecture.md §5.
 
-    POSIX: one Gunicorn worker, gthread, four threads, 300s timeout, no preload. Windows:
-    Waitress, four threads. The WSGI target is overridable via ``PERSONA_FORGE_WSGI_TARGET``
-    only for the model-free acceptance fixture (Task 8) — production always uses the default.
+    POSIX: one Gunicorn worker, gthread, four threads, 300s timeout, no preload, run as
+    ``<sys.executable> -m gunicorn`` so ``cmd_serve`` never relies on a PATH lookup for the
+    ``gunicorn`` console script (a native launcher's environment has no ``.venv/bin`` on
+    PATH). Windows serves in-process instead (see ``cmd_serve``); this still returns the
+    equivalent ``waitress-serve`` argv for the ``[serve] ... exec:`` log line and the existing
+    unit tests. The WSGI target is overridable via ``PERSONA_FORGE_WSGI_TARGET`` only for the
+    model-free acceptance fixture (Task 8) — production always uses the default.
     """
     target = os.environ.get("PERSONA_FORGE_WSGI_TARGET", "persona_forge.app:app")
     if platform.startswith("win"):
@@ -301,6 +305,8 @@ def _server_command(host: str, port: int, *, platform: str = sys.platform) -> li
             target,
         ]
     return [
+        sys.executable,
+        "-m",
         "gunicorn",
         target,
         "-w",
@@ -316,6 +322,21 @@ def _server_command(host: str, port: int, *, platform: str = sys.platform) -> li
         "--log-level",
         "info",
     ]
+
+
+def _serve_windows_in_process(host: str, port: int) -> int:
+    """Windows has no equivalent of POSIX ``exec``: importing and calling ``waitress.serve``
+    directly avoids a PATH lookup for the ``waitress-serve`` console script, same rationale as
+    the POSIX ``-m gunicorn`` change above."""
+    import importlib
+
+    import waitress
+
+    target = os.environ.get("PERSONA_FORGE_WSGI_TARGET", "persona_forge.app:app")
+    module_name, _, attr = target.partition(":")
+    app = getattr(importlib.import_module(module_name), attr)
+    waitress.serve(app, host=host, port=port, threads=4)
+    return 0
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -335,8 +356,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     command = _server_command(args.host, args.port, platform=sys.platform)
     print(f"[serve] backend={environ.get('TTS_BACKEND')} exec: {' '.join(command)}")
-    os.execvp(command[0], command)
-    raise RuntimeError("unreachable: os.execvp replaces the process")  # pragma: no cover
+
+    if sys.platform.startswith("win"):
+        return _serve_windows_in_process(args.host, args.port)
+
+    os.execv(sys.executable, command)
+    raise RuntimeError("unreachable: os.execv replaces the process")  # pragma: no cover
 
 
 def build_parser() -> argparse.ArgumentParser:

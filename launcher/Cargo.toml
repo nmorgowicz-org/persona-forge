@@ -2,10 +2,14 @@
 name = "persona-forge-launcher"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.87"
 license = "MIT"
 description = "Thin native bootstrap for Persona Forge release archives (docs/plans/20260829-no_more_docker_requirement.md Phase 7)"
 publish = false
+
+[lib]
+name = "persona_forge_launcher"
+path = "src/lib.rs"
 
 [[bin]]
 name = "persona-forge-launcher"
@@ -15,6 +19,15 @@ path = "src/main.rs"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
+process-wrap = { version = "=10.0.1", features = ["std", "process-group", "job-object", "kill-on-drop"] }
+sysinfo = "=0.36.1"
+semver = "=1.0.28"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "=0.62.2", features = ["Win32_System_Threading"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.189"
 
 [dev-dependencies]
 tempfile = "=3.27.0"

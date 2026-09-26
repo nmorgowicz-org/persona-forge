@@ -1,0 +1,83 @@
+# Rust CI lane for the launcher crate (execution plan Phase 2, D19: no secrets, ever).
+#
+# Fork PRs never reach jobs that could touch a self-hosted runner with repo context beyond a
+# checkout: every job below is guarded so it only runs for same-repo pull requests or a manual
+# dispatch, matching the fork-guard convention documented in ci-packaging.yml.
+name: CI Desktop
+
+on:
+  pull_request:
+    paths:
+      - "launcher/**"
+      - "desktop/**"
+      - ".github/workflows/ci-desktop.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RUST_VERSION: "1.98"
+
+jobs:
+  launcher-linux:
+    name: launcher-linux
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust ${{ env.RUST_VERSION }}
+        env:
+          RUSTUP_TOOLCHAIN: ${{ env.RUST_VERSION }}
+        run: |
+          rustup toolchain install "${RUSTUP_TOOLCHAIN}" --profile minimal --component rustfmt --component clippy
+          rustup default "${RUSTUP_TOOLCHAIN}"
+
+      - name: cargo fmt --check
+        run: cargo fmt --manifest-path launcher/Cargo.toml --check
+
+      - name: cargo clippy -D warnings
+        run: cargo clippy --manifest-path launcher/Cargo.toml --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --manifest-path launcher/Cargo.toml
+
+  launcher-windows:
+    name: launcher-windows
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: self-hosted-windows
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust ${{ env.RUST_VERSION }}
+        shell: bash
+        env:
+          RUSTUP_TOOLCHAIN: ${{ env.RUST_VERSION }}
+        run: |
+          rustup toolchain install "${RUSTUP_TOOLCHAIN}" --profile minimal
+          rustup default "${RUSTUP_TOOLCHAIN}"
+
+      - name: cargo test
+        shell: bash
+        run: cargo test --manifest-path launcher/Cargo.toml
+
+  launcher-macos:
+    name: launcher-macos
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: self-hosted-macos
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust ${{ env.RUST_VERSION }}
+        env:
+          RUSTUP_TOOLCHAIN: ${{ env.RUST_VERSION }}
+        run: |
+          rustup toolchain install "${RUSTUP_TOOLCHAIN}" --profile minimal
+          rustup default "${RUSTUP_TOOLCHAIN}"
+
+      - name: cargo test
+        run: cargo test --manifest-path launcher/Cargo.toml
