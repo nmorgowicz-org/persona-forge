@@ -41,6 +41,13 @@ try {
                 Write-Host "===== $($_.Name) ====="
                 Get-Content -LiteralPath $_.FullName -Tail 120 | Write-Host
             }
+        # Smoke-mode servers log to %TEMP%\persona-forge-smoke-<pid>.log (smoke.rs), not
+        # desktop\logs.
+        Get-ChildItem $env:TEMP -Filter 'persona-forge-smoke-*.log' -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                Write-Host "===== $($_.Name) ====="
+                Get-Content -LiteralPath $_.FullName -Tail 120 | Write-Host
+            }
         throw "FAIL: --smoke-test exited with $($p.ExitCode)"
     }
 

@@ -475,7 +475,9 @@ jobs:
               curl --silent --output /dev/null http://127.0.0.1:4444/status && break
               sleep 1
             done
-            uv run --with selenium==4.35.0 --with requests \
+            # --no-project: otherwise uv builds the persona-forge repo project and syncs its
+            # full dependency set just to run this script.
+            uv run --no-project --with selenium==4.35.0 --with requests \
               python scripts/desktop_gui_check.py \
                 --app "$APPIMAGE" --state "$PERSONA_FORGE_HOME"
           '
