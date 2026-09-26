@@ -265,24 +265,29 @@ async fn check_and_install(app: &tauri::AppHandle) {
 }
 
 fn main() {
+    // The version comes from the Tauri context: `cargo tauri build --config {"version":..}`
+    // sets it, while CARGO_PKG_VERSION (Cargo.toml) stays 0.1.0 for every build.
+    let context = tauri::generate_context!();
+
     // 1. strict argument parsing before anything else
     match parse_args() {
         Args::Version => {
-            println!("desktop-spike {}", env!("CARGO_PKG_VERSION"));
+            println!("desktop-spike {}", context.package_info().version);
             return;
         }
         // macOS: "--ci-update" is intentionally unknown here -> exit 2
         #[cfg(not(target_os = "macos"))]
         Args::CiUpdate(out_path) => {
             // updater plugins need an app context; build one with no windows
-            let app = build_app(None).expect("failed to build spike app");
+            let app = build_app(context).expect("failed to build spike app");
             let _ = run_ci_update(app.handle().clone(), out_path); // exits the process internally
+            return;
         }
         Args::Gui => {}
     }
 
     // 2. GUI run
-    let app = build_app(Some(TEST_ORIGIN_PORT)).expect("failed to build spike app");
+    let app = build_app(context).expect("failed to build spike app");
     app.run(|_app, event| {
         if let tauri::RunEvent::ExitRequested { .. } = event {
             // spike: nothing to stop
@@ -290,7 +295,7 @@ fn main() {
     });
 }
 
-fn build_app(_test_port: Option<u16>) -> tauri::Result<tauri::App> {
+fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
     // All plugins go on the Builder: they are initialized in build(), before run().
     // Plugins added inside .setup() only exist once run() starts the event loop, which
     // the --ci-update path never calls (it drives the updater right after build()).
@@ -414,5 +419,5 @@ fn build_app(_test_port: Option<u16>) -> tauri::Result<tauri::App> {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
 }
