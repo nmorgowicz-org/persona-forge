@@ -13,6 +13,7 @@ import {
   storeExperienceLevel,
   type ExperienceLevel,
 } from './lib/experienceLevel'
+import { setPref } from './lib/uiPreferences'
 import type { ChipSelections } from './lib/voiceDesignChips'
 import type { OmniVoiceSelections } from './lib/omnivoiceChips'
 import {
@@ -409,10 +410,12 @@ export const useAppStore = create<StoreState>((set) => ({
     setPage: (page) => set({ page }),
   setTheme: (theme) => {
     applyTheme(theme)
+    setPref('theme', theme) // server persistence for user changes; boot writes stay local
     set({ theme })
   },
   setUiExperienceLevel: (uiExperienceLevel) => {
     storeExperienceLevel(uiExperienceLevel)
+    setPref('experienceLevel', uiExperienceLevel)
     set({ uiExperienceLevel })
   },
   setModelLoaded: (modelLoaded) => set({ modelLoaded }),

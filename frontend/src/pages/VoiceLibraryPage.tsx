@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
+import { getPref, setPref } from '../lib/uiPreferences'
 import {
   AlertTriangle,
   AudioWaveform,
@@ -849,7 +850,7 @@ function VoiceCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusOnMount])
 
-  const [analysisExpanded, setAnalysisExpanded] = useState(() => localStorage.getItem('voice-library-analysis-expanded') !== 'false')
+  const [analysisExpanded, setAnalysisExpanded] = useState(() => getPref('voiceLibrary.analysisExpanded', true))
   const [preserveOriginal, setPreserveOriginal] = useState(true)
   const [editorVoiceId, setEditorVoiceId] = useState(voice.voice_id)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
@@ -1070,7 +1071,7 @@ function VoiceCard({
          onFixAll={onFixAll}
        />
 
-          <VoiceMetricsPanel metrics={metrics} busy={busy} onAnalyze={onAnalyze} expanded={analysisExpanded} onToggle={() => setAnalysisExpanded((value) => { localStorage.setItem('voice-library-analysis-expanded', String(!value)); return !value })} previewMetrics={editor.previewMetrics} layoutMode={layoutMode} />
+          <VoiceMetricsPanel metrics={metrics} busy={busy} onAnalyze={onAnalyze} expanded={analysisExpanded} onToggle={() => setAnalysisExpanded((value) => { setPref('voiceLibrary.analysisExpanded', !value); return !value })} previewMetrics={editor.previewMetrics} layoutMode={layoutMode} />
 
 
 
@@ -1196,20 +1197,15 @@ export function VoiceLibraryPage() {
 
   const [segSearch, setSegSearch] = useState('')
   const [compareMode, setCompareMode] = useState(false)
-  const [layoutMode, setLayoutMode] = useState(() => {
-    if (typeof window === 'undefined') return 'grid-1'
-    return localStorage.getItem('voice-library-layout') || 'grid-1'
-  })
+  const [layoutMode, setLayoutMode] = useState(() => getPref('voiceLibrary.layout', 'grid-1'))
   const [projects, setProjects] = useState<Project[]>([])
   const [groupByProject, setGroupByProject] = useState(false)
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
-  const [activeTab, setActiveTab] = useState<'voices' | 'segments'>(() => {
-    if (typeof window === 'undefined') return 'voices'
-    const stored = localStorage.getItem('voice-library-tab')
-    return stored === 'segments' ? 'segments' : 'voices'
-  })
+  const [activeTab, setActiveTab] = useState<'voices' | 'segments'>(() =>
+    getPref<'voices' | 'segments'>('voiceLibrary.tab', 'voices'),
+  )
   useEffect(() => {
-    localStorage.setItem('voice-library-tab', activeTab)
+    setPref('voiceLibrary.tab', activeTab)
   }, [activeTab])
   const setVoiceId = useAppStore((s) => s.setVoiceId)
 
@@ -1258,7 +1254,7 @@ export function VoiceLibraryPage() {
   }, [segments, segSearch])
 
   useEffect(() => {
-    localStorage.setItem('voice-library-layout', layoutMode)
+    setPref('voiceLibrary.layout', layoutMode)
   }, [layoutMode])
 
   async function insertSegmentIntoStitchEditor(seg: SegmentMeta) {
