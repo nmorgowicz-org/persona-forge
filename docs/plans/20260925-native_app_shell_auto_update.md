@@ -2202,3 +2202,75 @@ release gone; every other release at its R0 revision; five healthy listeners rem
 **Gate 0R: PASS.** All plan stop conditions clear.
 
 **Phase 0R commits:** llama-monitor-runner PR #28 (`69f961a` + `65dd51d`), PR #29 (`54a34fd`).
+
+## Phase 1 results
+
+**Status: COMPLETE — Phase 1 closed 2026-09-26.** Spike head tagged `desktop-spike-final`; `spike/`
+removed and the `desktop-spike.yml` stub restored in the same close. Runs are
+`desktop-spike.yml` run IDs (stable).
+
+### Criteria so far
+
+| Criterion | Result | Evidence |
+| --- | --- | --- |
+| 1A: `.app` signed with rcodesign on Linux, notarized, stapled | PASS | runs 36230861333, 36233400916: `spctl` "accepted, source=Notarized Developer ID" |
+| 1A: DMG signed, notarized, stapled | PASS | same runs |
+| 1A: Sparkle.framework bundled; its 4 helpers (`Autoupdate`, `Updater.app`, `Downloader.xpc`, `Installer.xpc`) carry our Team ID | PASS | run 36233400916 `spike-macos-verify` |
+| 1A: notarized app launches | PASS | owner Mac: `desktop-spike 0.1.0`, `codesign --verify --deep --strict` clean |
+| 1A: Sparkle EdDSA signature of the DMG | PASS | `spike-sparkle-sig` green since `d393907` |
+| 1A: owner offline install + launch from the DMG | **PASS** | owner, Wi-Fi off: DMG → Applications → launch, no Gatekeeper failure — the staple works offline. Sparkle's 0.1.0 → 0.1.1 offer/install/relaunch was **not exercised on the Mac** (only the "up to date" panel at 0.1.1); Phase 6B re-covers update mechanics |
+| 1B: NSIS 0.1.0 / 0.1.1 build on `self-hosted-windows` | PASS | run 36230861333 onward |
+| 1B: automated Windows update 0.1.0 → 0.1.1: silent install, `--ci-update` exits reporting `phase: "installing"` (§6.12), registry `DisplayVersion` reaches 0.1.1 within 20 s | PASS | run 36237430299 (rerun) `spike-windows-update`; owner SmartScreen/SAC record still open (SmartScreen off on the runner PC) |
+| 1C: AppImage builds (3), glibc ≤ 2.35 | PASS | every run since `8442e78` |
+| 1C: updater `.sig` for N+1 AppImage + setup exe | PASS | since `90f973d`; key id `CA027814994FBE6D` matches `tauri-updater.key.pub` |
+| 1C: publish good + badsig feeds | PASS | run 36234077653 `spike-linux-publish` |
+| 1C: **badsig rejected at signature verification, file stays 0.1.0** | PASS | run 36234077653 `spike-linux-update (badsig)` |
+| 1C: good update: installs 0.1.1 and the AppImage on disk prints 0.1.1 | PASS | run 36236004149 `spike-linux-update (good)` (first fully green run, all 17 jobs) |
+| 1C: GUI: splash → test origin, external link kept out, WAV + MP3 play, localStorage survives restart | PASS | run 36233400916 `spike-linux-gui` (7 checks) |
+| 1C: GUI downloads: `blob:` + same-origin saved as `tone.wav` / `tone (1).wav` WAVs; ask mode keeps the app responsive with the Save dialog open | PASS | runs 36235228235, 36236004149 `spike-linux-gui` |
+| 1C: newest distro (Ubuntu 26.04) `--version` | PASS | run 36233400916 |
+| 1D: owner webview matrix (Mac, Windows) | **PASS with one open finding** | owner tests 2026-09-26, final build `3db90a8` (run 36244193928): downloads ✅ both shapes, both save modes, both OSes; `window.open` → system browser ✅ Windows; up-to-date feedback: Mac native Sparkle panel ✅, Windows dialog ✅ (owner: "native ugly toast" — Phase 6A designs the real update UX); menus ✅ both OSes (after the app-menu fix). **Open finding:** `<a target="_blank">` is silently dropped on both macOS and Windows — see Findings |
+
+### Findings that change later phases
+
+| Finding | Fix (spike commit) | Applies to |
+| --- | --- | --- |
+| macOS zips made with `ditto -c -k` carry AppleDouble `._*` entries; Linux `unzip` turns them into real files beside the binary, and Apple then reports "signature of the binary is invalid" | `ditto --norsrc --noextattr`, plus `find -name '._*' -delete` after every Linux unzip (`97126fd`) | Phase 5 |
+| rcodesign 0.29.0 cannot re-sign the Xcode 26 linker signature | strip it first with `codesign --remove-signature` on the Mac (`0a016e7`) | Phase 5 |
+| Zipping the signed `.app` with plain `zip -r` follows symlinks and breaks `Sparkle.framework` | `zip -r -y` (`d393907`) | Phase 5 |
+| The plugin links `@rpath/Sparkle.framework`, but nothing embeds it unless `bundle.macOS.frameworks` lists it: the notarized app crashed at launch (`dyld: Library not loaded … no LC_RPATH's found`). Listing it makes Tauri add `@executable_path/../Frameworks` | `d393907` | Phase 3 / 6A config |
+| `seed_to_pem` must write base64 DER (not hex) and read the seed as raw bytes | `d393907` | Phase 6B feed signing |
+| `tauri-plugin-updater` panics at startup without `plugins.updater.pubkey` | `9d606c6` | Phase 3 / 6A config |
+| Plugins registered inside `.setup()` exist only after `run()`; `--ci-update` drives the updater right after `build()`, so register every plugin on the `Builder` | `e1808cf` | Phase 3 / 6A |
+| `blob:` URLs have no host (`host_str()` is `None`), so a host-based `classify` denied every blob | parse the inner URL (`aa2e88a`) | Phase 3 (now contract §6.5) |
+| A Save dialog in `on_download` deadlocks every OS (`blocking_save_file` waits on the main thread it runs on) | Downloads by default + non-blocking ask mode (`18a3515`) | contract D21 (PR #334) |
+| `cargo tauri signer sign` binds `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` from env; passing `-f`/`-p` too is a CLI conflict | env only (`90f973d`) | Phase 6B |
+| The stock `actions-runner` image behind `arc-general` has **no `gh`** | publish from `arc-persona-forge-desktop`, whose image now ships pinned gh 2.101.0 (`754ff14`; llama-monitor-runner #36, #38) | **contract D19** says feed generation runs on `arc-general`: correct it at Phase 1 close; Phase 6B/7 |
+| Windows runner has no WSL: `shell: bash` resolves to WSL | PowerShell steps (`f512387`) | Phase 4 |
+| An interrupted rustup-init leaves a `cargo.exe` shim with no toolchain | always `rustup toolchain install` + `default`; call tools by path; fail on nonzero exit (`676553b`) | Phase 4 |
+| The owner's Windows app firewall blocks rustup/cargo (`os error 10013`) | owner allow-listed `_work/_tool/desktop-rust` | Phase 4 runner notes |
+| The same firewall blocked the freshly installed spike app (runner service profile: `C:\WINDOWS\ServiceProfiles\NetworkService\AppData\Local\desktop-spike\desktop-spike.exe`) | owner allow-listed that exact path (a path rule survives the test's uninstall; the folder only exists during a run) | Phase 4 smoke: the installed app downloads updates itself, so its exe must be allowed on `self-hosted-windows` |
+| `<a target="_blank">` is silently dropped on **both macOS and Windows** (no `on_navigation`, no `on_new_window`), while `window.open` fires `on_new_window` and opens externally (owner-confirmed both OSes on build `3db90a8`). The SPA has external links (docs, update banner for browser users), so Phase 3 must resolve it: dig into the wry 0.57 new-window handlers for anchor-initiated windows, or fall back to a frontend rule (needs owner sign-off, D10 friction) | open — Phase 3 task | Phase 3 |
+| The Windows updater relaunches the updated app in the **interactive user's** session, which the runner service (NetworkService) cannot kill — cleanup must never fail the job over it | cleanup silenced + `taskkill` fallback (`f285782`); Phase 6B's install-wait logic should also stop the relaunched app before uninstalling | Phase 6B |
+| AppImage bundle filename is `desktop-spike_<version>_amd64.AppImage` | `8442e78` | Phase 4 |
+| `CARGO_PKG_VERSION` stays at `Cargo.toml`'s value; `cargo tauri build --config '{"version":..}'` changes only the Tauri config version, so any version printed or compared must come from `package_info()` | print `context.package_info().version` (`f575ba6`) | Phase 3 (`--smoke-test` version), 6A/6B |
+
+### AppImage update target (resolved)
+
+The good update first looked like a wrong install target: `installed`/0.1.1 reported, file still
+printing 0.1.0. The `487c2f0` diagnostics showed `APPIMAGE` **was** set to the real AppImage path
+(extract-and-run mode keeps it), and the plugin writes the new bytes there. The real cause was the
+spike's `--version`, which printed `CARGO_PKG_VERSION` (always 0.1.0). With `f575ba6` the check
+passes: the updater replaces the AppImage correctly even in extract-and-run mode.
+
+### Runner operations (llama-monitor-runner)
+
+- `helm upgrade` on a scale set recreates its listener and **pauses new job pickups until its
+  running jobs finish**; upgrade only while the set is idle.
+- Runners pull `:latest` with `imagePullPolicy: Always`; image workflows now build on push to
+  `main` only (#36 desktop, #37 llama-monitor), so branch pushes cannot change live runners.
+- A root-run build layer with `HOME=/home/runner` must not run tools that write to `$HOME`
+  (`gh --version` created a root-owned `~/.local`, breaking the next `USER 1000` step; #38).
+- Capacity (arc-runner at 24 GB, 21.2Gi allocatable): three concurrent desktop builds use ~2.7Gi
+  peak each; CPU (96% of 13 cores) is the limit. `maxRunners` raised by one on every set (#35,
+  #39).
