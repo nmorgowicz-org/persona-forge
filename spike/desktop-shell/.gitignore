@@ -1,7 +1,8 @@
-# Build-time generated artifacts (never committed)
-spike/desktop-shell/resources/
-spike/desktop-shell/target/
-spike/desktop-shell/gen/
+# Build-time generated artifacts (never committed).
+# Leading "/" anchors to this directory (spike/desktop-shell/), not the repo root.
+/resources/
+/target/
+/gen/
 
-Sparkle.framework/
-sparkle-bin/
+/Sparkle.framework/
+/sparkle-bin/
