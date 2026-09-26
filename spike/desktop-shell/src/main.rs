@@ -178,11 +178,11 @@ async fn check_and_install(app: &tauri::AppHandle) {
                     .await
                     .map_err(|e| e.to_string())?;
                 update.install(bytes.as_slice()).map_err(|e| e.to_string())?;
-                Ok(())
+                Ok::<(), String>(())
             }
             None => {
                 eprintln!("[update] no update available");
-                Ok(())
+                Ok::<(), String>(())
             }
         }
     };
