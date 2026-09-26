@@ -2206,8 +2206,9 @@ release gone; every other release at its R0 revision; five healthy listeners rem
 ## Phase 1 results
 
 **Status: DRAFT, in progress (2026-09-26).** Written on `spike/desktop` as findings land, and
-cherry-picked into `desktop/p1-results` at Phase 1 close (Phase 1 deliverable). Commit SHAs are
-from `spike/desktop` after its rebase onto `073d91b`; runs are `desktop-spike.yml` run IDs.
+cherry-picked into `desktop/p1-results` at Phase 1 close (Phase 1 deliverable). `spike/desktop` is
+rebased onto `main` as it moves, so the commit SHAs below go stale; they are refreshed from the
+commit subjects once, at Phase 1 close. Runs are `desktop-spike.yml` run IDs (stable).
 
 ### Criteria so far
 
@@ -2225,9 +2226,9 @@ from `spike/desktop` after its rebase onto `073d91b`; runs are `desktop-spike.ym
 | 1C: updater `.sig` for N+1 AppImage + setup exe | PASS | since `90f973d`; key id `CA027814994FBE6D` matches `tauri-updater.key.pub` |
 | 1C: publish good + badsig feeds | PASS | run 36234077653 `spike-linux-publish` |
 | 1C: **badsig rejected at signature verification, file stays 0.1.0** | PASS | run 36234077653 `spike-linux-update (badsig)` |
-| 1C: good update | FAIL (open) | reports `installed`/0.1.1, but the AppImage on disk still prints 0.1.0; see "AppImage update target" |
+| 1C: good update: installs 0.1.1 and the AppImage on disk prints 0.1.1 | PASS | run 36236004149 `spike-linux-update (good)` (first fully green run, all 17 jobs) |
 | 1C: GUI: splash → test origin, external link kept out, WAV + MP3 play, localStorage survives restart | PASS | run 36233400916 `spike-linux-gui` (7 checks) |
-| 1C: GUI downloads (both shapes, both modes) | in progress | run 36235228235 |
+| 1C: GUI downloads: `blob:` + same-origin saved as `tone.wav` / `tone (1).wav` WAVs; ask mode keeps the app responsive with the Save dialog open | PASS | runs 36235228235, 36236004149 `spike-linux-gui` |
 | 1C: newest distro (Ubuntu 26.04) `--version` | PASS | run 36233400916 |
 | 1D: owner webview matrix (Mac, Windows) | open | owner |
 
@@ -2250,15 +2251,15 @@ from `spike/desktop` after its rebase onto `073d91b`; runs are `desktop-spike.ym
 | An interrupted rustup-init leaves a `cargo.exe` shim with no toolchain | always `rustup toolchain install` + `default`; call tools by path; fail on nonzero exit (`676553b`) | Phase 4 |
 | The owner's Windows app firewall blocks rustup/cargo (`os error 10013`) | owner allow-listed `_work/_tool/desktop-rust` | Phase 4 runner notes |
 | AppImage bundle filename is `desktop-spike_<version>_amd64.AppImage` | `8442e78` | Phase 4 |
+| `CARGO_PKG_VERSION` stays at `Cargo.toml`'s value; `cargo tauri build --config '{"version":..}'` changes only the Tauri config version, so any version printed or compared must come from `package_info()` | print `context.package_info().version` (`f575ba6`) | Phase 3 (`--smoke-test` version), 6A/6B |
 
-### AppImage update target (open)
+### AppImage update target (resolved)
 
-In CI the AppImage runs in extract-and-run mode (`APPIMAGE_EXTRACT_AND_RUN=1`, pods have no FUSE).
-On Linux the updater replaces `$APPIMAGE` if set, else `current_exe()` (`tauri-plugin-updater`
-2.12.0 `lib.rs`/`updater.rs`). The good update reported `installed` while the file on disk kept
-0.1.0, which fits `$APPIMAGE` being unset in extract-and-run mode, so the updater replaced the
-extracted temp binary. `487c2f0` records `APPIMAGE` and `current_exe` in `out.json`; run 36235228235
-confirms or refutes this before the test harness changes.
+The good update first looked like a wrong install target: `installed`/0.1.1 reported, file still
+printing 0.1.0. The `487c2f0` diagnostics showed `APPIMAGE` **was** set to the real AppImage path
+(extract-and-run mode keeps it), and the plugin writes the new bytes there. The real cause was the
+spike's `--version`, which printed `CARGO_PKG_VERSION` (always 0.1.0). With `f575ba6` the check
+passes: the updater replaces the AppImage correctly even in extract-and-run mode.
 
 ### Runner operations (llama-monitor-runner)
 
