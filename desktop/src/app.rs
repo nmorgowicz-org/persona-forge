@@ -205,6 +205,12 @@ fn copy_text<R: Runtime>(app: AppHandle<R>, text: String) -> Result<(), String> 
 // ---------------------------------------------------------------------------------------------
 
 pub fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
+    // The app log must land in <state>/desktop/logs/desktop.log (contract §6.2, "Show Logs"),
+    // not the OS log dir — the plugin's default targets never write a file at all.
+    let log_dir = paths::app_data_root(&environ(), current_platform(), &home_dir())
+        .join("desktop")
+        .join("logs");
+    let _ = std::fs::create_dir_all(&log_dir);
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
@@ -221,7 +227,17 @@ pub fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_log::Builder::new().build());
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
+                        path: log_dir,
+                        file_name: Some("desktop.log".into()),
+                    }),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                ])
+                .build(),
+        );
 
     // macOS 26+'s NSVisualEffectView-based window effects stopped compositing reliably
     // (tauri-apps/window-vibrancy#229); Liquid Glass is Apple's replacement API there, and the
