@@ -45,6 +45,7 @@ Recommended (simple knobs):
 
 | Var | Default | Description |
 |-----|---------|-------------|
+| `PERSONA_FORGE_SHELL` | unset | Set to `desktop` by the desktop shell's `ServerSpec` (contract §6.10). `/health` reports it as `shell` so the SPA knows it's inside the desktop app (hides the web update banner, D13). Only the *server*'s host context — a browser on another machine reaching a desktop-hosted server also sees `desktop`. |
 | `TTS_BACKEND` | `pocket_tts` | `pocket_tts` (default, self-contained, no export needed), `openvino` (opt-in accelerated Qwen path on Intel CPUs, requires export), or `pytorch` (portable rollback, slower). When the Qwen3-TTS engine is invoked without an explicit value, the preset fallback auto-selects `openvino` if a valid IR export already exists on disk, else `pytorch` — it never triggers the export itself. `/health` reports `backend_source`/`backend_fallback_choice`. |
 | `TTS_DEVICE` | auto-detect | Forces the torch device the Qwen3-TTS PyTorch backend and OmniVoice load onto: `cuda`, `xpu`, `mps`, or `cpu`. Unset auto-detects the best available (`cuda` > `xpu` > `mps` > `cpu`). A forced-but-unavailable device warns and falls back to `cpu` rather than failing. `DEVICE` is accepted as a legacy alias. |
 | `OPENVINO_DEVICE` | `AUTO` | OpenVINO compile target for the talker/main/predictor cores (`CPU`/`GPU`/`AUTO`); `GPU` targets an Intel iGPU. Separate from the vocoder's own `OPENVINO_VOCODER_DEVICE`. |

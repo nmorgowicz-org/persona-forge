@@ -284,3 +284,8 @@ CLAUDE.local.md
 # Local capture/media scratch: real voice data copied from the deployment box for
 # screenshots. Never published, never committed.
 .devdata/
+
+# Desktop app staged payload (wheel/requirements/manifest) and bundled uv binaries — built by
+# scripts/stage_desktop_payload.py, never committed (docs/plans/20260925-native_app_shell_architecture.md §5).
+/desktop/payload/
+/desktop/binaries/

@@ -394,3 +394,34 @@ html {
     contain-intrinsic-size: 0 52px;
   }
 }
+
+/* ── Desktop-only macOS styling (contract D20/§6.10) ─────────────────────────────
+   Everything here is scoped under html[data-desktop='macos'], which the desktop shell's
+   initialization marker sets before first paint. Browsers, Docker and the Windows/Linux app
+   have no data-desktop and render exactly as before. No `accent-color` override and no
+   `prefers-reduced-transparency` handling (contract: WebKit paints native controls in the
+   system accent and does not support prefers-reduced-transparency). */
+html[data-desktop='macos'] {
+  /* The system font (contract §6.10): -apple-system first, Geist Variable as the fallback
+     for when the system stack doesn't resolve. Geist Mono readouts are declared separately
+     above and stay as-is. */
+  --font-sans: -apple-system, 'Geist Variable', sans-serif;
+}
+
+html[data-desktop='macos'] body {
+  background: transparent;
+}
+
+/* The sidebar surface is intentionally transparent and the content column
+   (data-slot='sidebar-inset') intentionally opaque in the app's own design already, so the
+   native material shows through the sidebar and page content never sits on it by default.
+   These explicit rules pin that contract under macOS so a future sidebar-styling change
+   cannot silently make the content column translucent inside the desktop window. */
+html[data-desktop='macos'] [data-slot='sidebar-wrapper'],
+html[data-desktop='macos'] [data-slot='sidebar'] {
+  background: transparent;
+}
+
+html[data-desktop='macos'] [data-slot='sidebar-inset'] {
+  background: var(--background);
+}

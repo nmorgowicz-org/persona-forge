@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src ipc: http://ipc.localhost" />
+<title>Persona Forge</title>
+<link rel="stylesheet" href="splash.css" />
+</head>
+<body>
+<main id="app" data-state="booting">
+  <div class="brand">
+    <div class="mark" aria-hidden="true"></div>
+    <h1>Persona Forge</h1>
+  </div>
+
+  <ol id="steps" class="steps" aria-label="Startup progress">
+    <li data-step="verify">Verifying files</li>
+    <li data-step="venv">Preparing environment</li>
+    <li data-step="sync">Installing dependencies</li>
+    <li data-step="install">Installing Persona Forge</li>
+    <li data-step="start">Starting server</li>
+    <li data-step="wait">Waiting for server</li>
+  </ol>
+
+  <pre id="log-tail" class="log-tail" aria-label="Recent log output"></pre>
+
+  <section id="error-panel" class="error-panel" hidden>
+    <p id="error-message" class="error-message"></p>
+    <pre id="error-log" class="error-log"></pre>
+    <div class="error-actions">
+      <button id="retry-button" type="button">Retry</button>
+      <button id="show-logs-button" type="button">Show Logs</button>
+      <button id="quit-button" type="button">Quit</button>
+    </div>
+  </section>
+</main>
+<script src="splash.js"></script>
+</body>
+</html>

@@ -304,6 +304,9 @@ Response (JSON):
   - `reconfig_in_progress` — whether a runtime config reload is in progress.
   - `omnivoice_loaded` — whether the OmniVoice checkpoint is resident.
   - `loading_message` — present if service is still loading (e.g. "Loading model…").
+  - `shell` — the server's host context (`"desktop"` when spawned by the desktop shell via
+    `PERSONA_FORGE_SHELL=desktop`, else `null`). The SPA hides its web update banner when this
+    is `"desktop"` (contract D13).
   - `ref_text_validation` — startup validation for the configured reference audio/text.
   - `ref_text_diagnostic` — when `REF_AUDIO` is a readable file, identifies the mounted
     library voice (`voice_id`), `audio_path`, text source, and persisted

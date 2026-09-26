@@ -256,6 +256,11 @@ def health():
     elif omnivoice_engine.swap_in_progress() and not state["omnivoice_loaded"]:
         state["loading_message"] = "Loading OmniVoice…"
 
+    # Contract §6.10 (D13): the *server*'s host context. A browser on another machine reaching
+    # a desktop-hosted server (D18) also sees "desktop" — the SPA reads this only to hide the
+    # web update banner; desktop-only *styling* comes from the shell's own marker, never this.
+    state["shell"] = os.environ.get("PERSONA_FORGE_SHELL") or None
+
     return jsonify(state)
 
 

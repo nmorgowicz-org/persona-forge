@@ -51,6 +51,10 @@ pub enum ManifestError {
         expected: String,
         actual: String,
     },
+    /// The manifest's wheel sha256 is the all-zero sentinel
+    /// `scripts/stage_desktop_payload.py --fake` writes for CI compile/test lanes; a real build
+    /// can never produce it (sha256 of any real content is not all zeros).
+    FakePayload,
 }
 
 impl fmt::Display for ManifestError {
@@ -72,6 +76,10 @@ impl fmt::Display for ManifestError {
             } => write!(
                 f,
                 "sha256 mismatch for {member}: manifest says {expected}, computed {actual}"
+            ),
+            ManifestError::FakePayload => write!(
+                f,
+                "manifest.json is a fake payload (scripts/stage_desktop_payload.py --fake) and cannot be provisioned"
             ),
         }
     }
@@ -105,12 +113,24 @@ pub fn load(bundle_dir: &Path) -> Result<Manifest, ManifestError> {
     Ok(manifest)
 }
 
+/// A manifest with this sha256 (and only this one) can never come from a real build; it marks
+/// a `scripts/stage_desktop_payload.py --fake` payload (CI compile/test lanes only).
+const FAKE_PAYLOAD_SHA256: &str =
+    "0000000000000000000000000000000000000000000000000000000000000000";
+
 /// Verify the wheel and requirements file the manifest references exist in `bundle_dir` and
 /// match their declared SHA-256. Fail-closed: the first mismatch or missing file aborts before
 /// anything is mutated. Excludes `uv` (bundled once, verified only by `verify_bundle`; the
 /// supervisor/retention paths that consume a manifest already-verified-for-provisioning never
 /// need the `uv` binary itself).
 pub fn verify_payload(manifest: &Manifest, bundle_dir: &Path) -> Result<(), ManifestError> {
+    if manifest
+        .wheel
+        .sha256
+        .eq_ignore_ascii_case(FAKE_PAYLOAD_SHA256)
+    {
+        return Err(ManifestError::FakePayload);
+    }
     verify_member(bundle_dir, &manifest.wheel.file, &manifest.wheel.sha256)?;
     verify_member(
         bundle_dir,
@@ -271,7 +291,7 @@ mod tests {
             dir.path(),
             "manifest.json",
             sample_manifest_json(
-                "0000000000000000000000000000000000000000000000000000000000000000",
+                "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
                 "y",
                 "z",
             )
@@ -328,7 +348,7 @@ mod tests {
             "requirements-x86_64-unknown-linux-gnu.txt",
             b"foo==1.0\n",
         );
-        let bad_sha = "0".repeat(64);
+        let bad_sha = "f".repeat(64);
 
         let req_sha =
             sha256_file(&dir.path().join("requirements-x86_64-unknown-linux-gnu.txt")).unwrap();
@@ -355,5 +375,27 @@ mod tests {
         assert!(
             matches!(err, ManifestError::HashMismatch { member, .. } if member == "requirements-x86_64-unknown-linux-gnu.txt")
         );
+    }
+
+    #[test]
+    fn verify_payload_rejects_the_fake_payload_sentinel() {
+        // scripts/stage_desktop_payload.py --fake writes this exact all-zero sha256; a real
+        // build can never produce it, so verify_payload must refuse to even look at the
+        // filesystem and name it explicitly instead of a generic hash mismatch.
+        let dir = tempfile::tempdir().unwrap();
+        write_file(
+            dir.path(),
+            "manifest.json",
+            sample_manifest_json(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+                "irrelevant",
+                "irrelevant",
+            )
+            .as_bytes(),
+        );
+        let manifest = load(dir.path()).unwrap();
+        let err = verify_payload(&manifest, dir.path()).unwrap_err();
+        assert!(matches!(err, ManifestError::FakePayload));
+        assert!(err.to_string().contains("fake payload"));
     }
 }

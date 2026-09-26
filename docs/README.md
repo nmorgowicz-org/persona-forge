@@ -38,6 +38,7 @@ live spectrogram, all drawn from one media clock:
 | [dev/LOCAL_SETUP.md](dev/LOCAL_SETUP.md) | `uv`-managed local environment |
 | [DEV_TEST_LOOP.md](DEV_TEST_LOOP.md) | The edit → test → deploy loop |
 | [TEST_STRATEGY.md](TEST_STRATEGY.md) | Test tiers and what belongs in each |
+| [DESKTOP_TEST_PLAN.md](DESKTOP_TEST_PLAN.md) | Manual desktop release-gate test plan (run near release, not during build-out) |
 | [dev/DESIGN_SYSTEM.md](dev/DESIGN_SYSTEM.md) | Frontend design tokens and component primitives |
 | [dev/validation_checks.md](dev/validation_checks.md) | Pre-merge validation commands |
 | [dev/PROSODY_HARDENING.md](dev/PROSODY_HARDENING.md) | Prosody alignment hardening: shared edit/repair contracts |

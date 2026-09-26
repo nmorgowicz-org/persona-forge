@@ -1,0 +1,57 @@
+[package]
+name = "persona-forge-desktop"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.87"
+license = "MIT"
+description = "Persona Forge desktop shell: a Tauri v2 app that manages a local Persona Forge server (docs/plans/20260925-native_app_shell_architecture.md)"
+publish = false
+
+[[bin]]
+name = "persona-forge-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[dependencies]
+persona-forge-launcher = { path = "../launcher" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "=2.11.6", features = ["tray-icon", "macos-private-api", "image-png"] }
+# Pinned exactly: tauri 2.11.6 itself declares these as its minimum versions, but Cargo's
+# semver-compatible resolution can float them to newer patches with API drift that breaks the
+# build (observed: tauri-runtime 2.12.0 / tauri-macros 2.7.0 against tauri 2.11.6). Declaring
+# them directly, even though nothing here calls them directly, pins the whole graph.
+tauri-runtime = "=2.11.3"
+tauri-runtime-wry = "=2.11.4"
+tauri-macros = "=2.6.3"
+tauri-utils = "=2.9.3"
+tauri-plugin-single-instance = "=2.4.5"
+tauri-plugin-window-state = "=2.4.1"
+tauri-plugin-dialog = "=2.7.3"
+tauri-plugin-opener = "=2.5.5"
+tauri-plugin-notification = "=2.4.0"
+tauri-plugin-log = "=2.9.2"
+tauri-plugin-clipboard-manager = "=2.3.3"
+if-addrs = "=0.13.4"
+log = "0.4"
+parking_lot = "0.12"
+
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.189"
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+
+[features]
+# Never enabled in release builds (contract §6.12): adds --ci-update for Phase 6A/6B automated
+# update testing. Wired in those phases; the Cargo feature exists now so ci-desktop.yml can gate
+# on it from Phase 3 onward.
+ci-hooks = []
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

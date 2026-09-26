@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "splash-capability",
+  "description": "Bootstrap/splash IPC for the main window. Bundled local origin only: no remote key, so this never applies once the main window navigates to the local server (contract D10).",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default"
+  ]
+}

@@ -718,6 +718,8 @@ export interface HealthState {
   resolved_backend?: string
   model: string
   loading_message?: string
+  // Contract §6.10/D13: the *server* host context. "desktop" hides the web update banner.
+  shell?: string | null
   [key: string]: unknown
 }
 

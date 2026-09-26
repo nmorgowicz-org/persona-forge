@@ -259,10 +259,19 @@ mod tests {
             fs::set_permissions(&sleep_copy, perms).unwrap();
         }
 
-        let mut child = std::process::Command::new(&sleep_copy)
-            .arg("5")
-            .spawn()
-            .unwrap();
+        // Linux errors with "Text file busy" (ETXTBSY) if we exec the freshly-copied ELF before
+        // the copy is fully flushed; retry briefly, which is the canonical workaround.
+        let mut child: Option<std::process::Child> = None;
+        for _ in 0..10 {
+            if let Ok(c) = std::process::Command::new(&sleep_copy).arg("5").spawn() {
+                child = Some(c);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let Some(mut child) = child else {
+            panic!("could not spawn the copied sleep binary")
+        };
 
         assert!(SysinfoInUse.is_in_use(&root.path().join("old")));
 

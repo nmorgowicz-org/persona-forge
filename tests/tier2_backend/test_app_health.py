@@ -13,6 +13,8 @@ class TestAppHealth:
         assert data["status"] == "ok"
         assert data["service_started"] is True
         assert data["model_loaded"] is True
+        # Contract §6.10: shell is None by default (no PERSONA_FORGE_SHELL).
+        assert data.get("shell") is None
 
     def test_health_not_started_still_200(self, app_module, rt):
         orig_started = rt._service_started
@@ -41,6 +43,29 @@ class TestAppHealth:
             data = resp.get_json()
             assert data["status"] == "error"
             assert data["service_started"] is False
+            # Contract §6.10: shell present in the startup-failed branch too.
+            assert "shell" in data
+        finally:
+            rt._service_started = orig_started
+            rt._startup_failed = orig_failed
+
+    def test_health_shell_is_desktop_when_env_set(self, app_module, rt, monkeypatch):
+        monkeypatch.setenv("PERSONA_FORGE_SHELL", "desktop")
+        resp = app_module.app.test_client().get("/health")
+        data = resp.get_json()
+        assert data["shell"] == "desktop"
+
+    def test_health_shell_reports_desktop_in_startup_failed_too(self, app_module, rt, monkeypatch):
+        monkeypatch.setenv("PERSONA_FORGE_SHELL", "desktop")
+        orig_started = rt._service_started
+        orig_failed = rt._startup_failed
+        rt._service_started = False
+        rt._startup_failed = True
+        try:
+            resp = app_module.app.test_client().get("/health")
+            data = resp.get_json()
+            assert data["shell"] == "desktop"
+            assert data["status"] == "error"
         finally:
             rt._service_started = orig_started
             rt._startup_failed = orig_failed
