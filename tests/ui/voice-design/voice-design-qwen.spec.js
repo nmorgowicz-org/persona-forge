@@ -38,6 +38,9 @@ test.describe('voice design (Qwen engine)', () => {
     // The fake server seeds committed fixture voices, so assert on the specific
     // card rather than an absolute total count.
     await page.getByTestId('nav-voice-library').click()
+    // The library's active tab persists across sessions on the server now; a prior spec may
+    // have left it on "segments", which does not render voice-card.
+    await page.getByTestId('voice-library-tab-voices').click()
     const savedCard = page.locator('[data-testid="voice-card"]', { hasText: savedVoiceId })
     await expect(savedCard).toBeVisible({ timeout: 20000 })
   })

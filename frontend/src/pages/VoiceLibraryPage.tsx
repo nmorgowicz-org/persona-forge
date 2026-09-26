@@ -1204,9 +1204,14 @@ export function VoiceLibraryPage() {
   const [activeTab, setActiveTab] = useState<'voices' | 'segments'>(() =>
     getPref<'voices' | 'segments'>('voiceLibrary.tab', 'voices'),
   )
-  useEffect(() => {
-    setPref('voiceLibrary.tab', activeTab)
-  }, [activeTab])
+  // setPref only on genuine user/system-driven changes below (Tabs onValueChange, the
+  // deep-link effect) -- not here. A useEffect keyed on activeTab also fires on the initial
+  // mount, which would silently write the *default* value to the server the first time
+  // anyone opens the library, before the user has chosen anything.
+  function selectTab(tab: 'voices' | 'segments') {
+    setActiveTab(tab)
+    setPref('voiceLibrary.tab', tab)
+  }
   const setVoiceId = useAppStore((s) => s.setVoiceId)
 
   const setPage = useAppStore((s) => s.setPage)
@@ -1218,6 +1223,15 @@ export function VoiceLibraryPage() {
   const setDeepLinkProsodyVoiceId = useAppStore((s) => s.setDeepLinkProsodyVoiceId)
   const voiceLibraryFocusVoiceId = useAppStore((s) => s.voiceLibraryFocusVoiceId)
   const setVoiceLibraryFocusVoiceId = useAppStore((s) => s.setVoiceLibraryFocusVoiceId)
+
+  // Both deep-link targets identify a voice, which only renders under the "voices" tab.
+  // Without this, a stale persisted "segments" tab (from an earlier session or, in E2E,
+  // an earlier spec) hides the card the caller is trying to focus.
+  useEffect(() => {
+    if ((voiceLibraryFocusVoiceId || deepLinkProsodyVoiceId) && activeTab !== 'voices') {
+      setActiveTab('voices')
+    }
+  }, [voiceLibraryFocusVoiceId, deepLinkProsodyVoiceId, activeTab])
 
   async function refresh() {
     const [v, segs, projs] = await Promise.all([
@@ -1253,9 +1267,10 @@ export function VoiceLibraryPage() {
     })
   }, [segments, segSearch])
 
-  useEffect(() => {
-    setPref('voiceLibrary.layout', layoutMode)
-  }, [layoutMode])
+  function selectLayout(mode: typeof layoutMode) {
+    setLayoutMode(mode)
+    setPref('voiceLibrary.layout', mode)
+  }
 
   async function insertSegmentIntoStitchEditor(seg: SegmentMeta) {
     setError(null)
@@ -1835,7 +1850,7 @@ export function VoiceLibraryPage() {
           onAction={() => setPage('voice-design')}
         />
       ) : (
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v === 'segments' ? 'segments' : 'voices')}>
+        <Tabs value={activeTab} onValueChange={(v) => selectTab(v === 'segments' ? 'segments' : 'voices')}>
           <TabsList>
             <TabsTrigger value="voices" data-testid="voice-library-tab-voices">Reference voices</TabsTrigger>
             <TabsTrigger value="segments" data-testid="voice-library-tab-segments">Segments</TabsTrigger>
@@ -1872,7 +1887,7 @@ export function VoiceLibraryPage() {
                      <Button
                        variant={layoutMode === 'grid-1' ? 'secondary' : 'ghost'}
                        size="icon-sm"
-                       onClick={() => setLayoutMode('grid-1')}
+                      onClick={() => selectLayout('grid-1')}
                        title="Single column"
                      >
                        <LayoutGrid className="size-3.5" />
@@ -1880,7 +1895,7 @@ export function VoiceLibraryPage() {
                      <Button
                        variant={layoutMode === 'grid-2' ? 'secondary' : 'ghost'}
                        size="icon-sm"
-                       onClick={() => setLayoutMode('grid-2')}
+                      onClick={() => selectLayout('grid-2')}
                        title="Two columns"
                      >
                        <Columns2 className="size-3.5" />
@@ -1888,7 +1903,7 @@ export function VoiceLibraryPage() {
                      <Button
                        variant={layoutMode === 'grid-3' ? 'secondary' : 'ghost'}
                        size="icon-sm"
-                       onClick={() => setLayoutMode('grid-3')}
+                      onClick={() => selectLayout('grid-3')}
                        title="Three columns"
                      >
                        <Columns3 className="size-3.5" />
@@ -1896,7 +1911,7 @@ export function VoiceLibraryPage() {
                      <Button
                        variant={layoutMode === 'list' ? 'secondary' : 'ghost'}
                        size="icon-sm"
-                       onClick={() => setLayoutMode('list')}
+                      onClick={() => selectLayout('list')}
                        title="List view"
                      >
                        <Rows className="size-3.5" />

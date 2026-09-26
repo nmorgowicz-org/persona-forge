@@ -16,6 +16,9 @@ test.describe('voice design', () => {
     await page.getByRole('button', { name: /save to library/i }).first().click()
 
     await page.getByTestId('nav-voice-library').click()
+    // The library's active tab persists across sessions on the server now; a prior spec may
+    // have left it on "segments", which does not render voice-card.
+    await page.getByTestId('voice-library-tab-voices').click()
     await expect(page.getByTestId('voice-card').first()).toBeVisible({ timeout: 20000 })
   })
 
