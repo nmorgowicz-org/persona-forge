@@ -412,18 +412,13 @@ html[data-desktop='macos'] body {
   background: transparent;
 }
 
-/* The sidebar wrapper and the sidebar surface (shadcn `bg-sidebar`, data-slot='sidebar')
-   become transparent, so the native window material (WindowEffect::Sidebar) shows through the
-   sidebar; the content column (data-slot='sidebar-inset', the SidebarInset content region)
-   gets an opaque bg-background so page content never sits on the material. The sidebar
-   variants that don't fill the full-height surface (floating/inset) are styled independently
-   and are not touched — only the app's default full-height sidebar. */
-html[data-desktop='macos'] [data-slot='sidebar-wrapper'] {
-  background: transparent;
-}
-
-html[data-desktop='macos'] [data-slot='sidebar']:not([data-variant='floating']):not([data-variant='inset']),
-html[data-desktop='macos'] [data-slot='sidebar'][data-variant='inset'] {
+/* The sidebar surface is intentionally transparent and the content column
+   (data-slot='sidebar-inset') intentionally opaque in the app's own design already, so the
+   native material shows through the sidebar and page content never sits on it by default.
+   These explicit rules pin that contract under macOS so a future sidebar-styling change
+   cannot silently make the content column translucent inside the desktop window. */
+html[data-desktop='macos'] [data-slot='sidebar-wrapper'],
+html[data-desktop='macos'] [data-slot='sidebar'] {
   background: transparent;
 }
 

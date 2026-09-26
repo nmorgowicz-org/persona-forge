@@ -32,19 +32,18 @@ test.describe('desktop shell marker (D20)', () => {
     expect(await insetBg).not.toBe('rgba(0, 0, 0, 0)')
   })
 
-  test('windows: data-desktop tag but opaque backgrounds (CSS is macOS-only)', async ({ page }) => {
+  test('windows: data-desktop tag, but body stays opaque (the transparent body is macOS-only)', async ({ page }) => {
     await page.addInitScript(() => {
       window.__PERSONA_FORGE_DESKTOP__ = { platform: 'windows' }
     })
     await page.goto('/')
     await expect(page.locator('html')).toHaveAttribute('data-desktop', 'windows')
 
-    const sidebarBg = page
-      .locator('[data-slot="sidebar"]')
-      .first()
-      .evaluate((el) => getComputedStyle(el).backgroundColor)
-    // Not a macOS-transparent value; anything opaque (the default sidebar surface) is fine.
-    expect(await sidebarBg).not.toBe('rgba(0, 0, 0, 0)')
+    // The macOS-only body rule must not apply: a Windows/Linux desktop app renders exactly as
+    // a browser does (body opaque). The sidebar surface is intentionally transparent in the
+    // base app design, so its opacity is not asserted here.
+    const bodyBg = page.locator('body').evaluate((el) => getComputedStyle(el).backgroundColor)
+    expect(await bodyBg).not.toBe('rgba(0, 0, 0, 0)')
   })
 
   test('a plain browser: no data-desktop attribute, opaque body', async ({ page }) => {
