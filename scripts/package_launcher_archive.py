@@ -70,12 +70,14 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def export_requirements(target_platform: str, out_path: Path) -> None:
+def export_requirements(target_platform: str, out_path: Path, uv_path: str = "uv") -> None:
     # `uv export` resolves only for the host platform's existing uv.lock; getting a hash-locked
     # requirements file for a *different* target needs the pip-compatible resolver instead, which
     # accepts a full target triple via --python-platform (docs/plans/20260829-no_more_docker_architecture.md §9).
+    # `uv_path` lets callers resolve with the exact pinned, checksum-verified binary they bundle
+    # (desktop-build.yml) instead of whatever uv happens to be on PATH.
     cmd = [
-        "uv",
+        uv_path,
         "pip",
         "compile",
         "pyproject.toml",
