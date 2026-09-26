@@ -330,6 +330,9 @@ fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
                 .build(app)?;
             let help = SubmenuBuilder::new(app, "Help").item(&check).build()?;
             let menu = MenuBuilder::new(app).items(&[&edit, &help]).build()?;
+            // macOS ignores per-window menus: the app menu is what the menu bar shows, so
+            // set it app-wide (1D finding: the default menu appeared, with an empty Help)
+            app.set_menu(menu.clone())?;
 
             let mut builder = WebviewWindowBuilder::new(
                 app,
