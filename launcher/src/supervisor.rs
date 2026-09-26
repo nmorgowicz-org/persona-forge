@@ -98,6 +98,25 @@ impl ServerHandle {
             command.stdin(Stdio::null());
             command.stdout(log_file);
             command.stderr(log_file_err);
+            #[cfg(unix)]
+            {
+                // The parent blocks SIGTERM/SIGINT/SIGHUP process-wide (see main.rs) so its
+                // sigwait thread owns them; the server child must receive SIGTERM normally
+                // or graceful stop would always degrade to SIGKILL after the grace period.
+                use std::os::unix::process::CommandExt;
+                unsafe {
+                    command.pre_exec(|| {
+                        // SAFETY: sigset_t is zeroable/POD; pthread_sigmask is async-signal-safe.
+                        let mut set: libc::sigset_t = std::mem::zeroed();
+                        libc::sigemptyset(&mut set);
+                        for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+                            libc::sigaddset(&mut set, sig);
+                        }
+                        libc::pthread_sigmask(libc::SIG_UNBLOCK, &set, std::ptr::null_mut());
+                        Ok(())
+                    });
+                }
+            }
             #[cfg(windows)]
             {
                 use std::os::windows::process::CommandExt;
