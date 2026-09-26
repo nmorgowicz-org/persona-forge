@@ -254,7 +254,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          & cargo tauri build --bundles nsis --target x86_64-pc-windows-msvc --config $env:TAURI_CONFIG
+          & cargo tauri build --bundles nsis --target x86_64-pc-windows-msvc --config "$env:TAURI_CONFIG"
           if ($LASTEXITCODE -ne 0) { throw "cargo tauri build failed: $LASTEXITCODE" }
 
       - name: Collect setup exe
