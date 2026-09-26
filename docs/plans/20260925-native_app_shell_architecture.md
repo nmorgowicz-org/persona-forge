@@ -9,6 +9,10 @@ To change a decision, amend this doc in a separate commit and get owner sign-off
 block; Downloads folder by default, optional "Ask where to save"). They change §6.4, §6.5, §6.7,
 §6.10, §6.13, §13, §14 and §15.
 
+**Amendment 2026-09-26 (owner-approved):** D22 (release assets: the macOS and Windows CLI
+archives are dropped) and D23 (automatic GPU acceleration, after v1). They change §1, §8, §13,
+§14 and §15.
+
 **Baseline:** `1e2f520` (the plan-draft commits on top of `87d6547`, PR #326).
 
 **Supersedes:** the "Options considered", "Update mechanism options" and "Recommendation"
@@ -52,8 +56,9 @@ without rewriting them.
     preferences are saved by the server next to `runtime.json`, so they survive port changes and
     are the same in the app window and in any browser pointed at the server.
 
-The existing CLI bootstrap archive (`persona-forge-bootstrap-*`) keeps shipping, unchanged in
-behavior, for headless and server users.
+The Linux x86_64 CLI bootstrap archive (`persona-forge-bootstrap-linux-x86_64.tar.gz`) keeps
+shipping, unchanged in behavior, for headless Linux users without Docker. The macOS and Windows
+archives stop with the first release that contains desktop assets (D22).
 
 ## 2. Decisions
 
@@ -80,6 +85,8 @@ behavior, for headless and server users.
 | D19 | **Signing secrets are used only on ephemeral runners.** `self-hosted-macos` and `self-hosted-windows` are persistent machines that also run same-repo PR lanes (Renovate branches included); a malicious dependency's build script could leave something behind that reads keys during a later release. So no job on them ever receives `MACOS_*`, `APPLE_*`, `SPARKLE_ED_PRIVATE_KEY` or `TAURI_SIGNING_*`. All signing happens on fresh ARC pods (`arc-persona-forge-desktop` for code signing and updater signatures, `arc-general` for feed generation). Build outputs move between jobs as workflow artifacts. | Keeps the release keys off machines that run untrusted-ish code, at the cost of a few extra artifact hops. | Writing secrets to `$RUNNER_TEMP` on the persistent runners and deleting them afterwards (does not help if the machine is already compromised). |
 | D20 | **macOS window polish, no SPA IPC.** On macOS the main window uses `titleBarStyle` **`Transparent`** with a hidden title, a transparent window, and the native **`sidebar`** vibrancy material (`windowEffects`, state `followsWindowActiveState`). This needs `app.macOSPrivateApi: true` (Tauri's `macos-private-api` feature). The shell tells the SPA it is inside the desktop window with an **initialization script**, not IPC (§6.10). Only then does the SPA apply its desktop-only CSS: transparent page and sidebar backgrounds so the material shows through, opaque content area. Windows and Linux windows are unchanged. | Owner, 2026-09-26: "native feel" on macOS with one UI for all three platforms. `Transparent` (unlike `Overlay`) keeps the native title strip, so dragging and double-click-to-zoom stay native; `Overlay` would need HTML drag regions, which call `plugin:window\|start_dragging` over IPC (Tauri `drag.js`) and so break D10. Translucency comes only from the native material, because WebKit does not support `prefers-reduced-transparency` (the SPA cannot see that setting). AppKit's material is expected to turn opaque when Reduce Transparency is on; Gate 3 checks it on the Mac. | A separate native (SwiftUI/AppKit) UI (owner: no second UI to maintain). `titleBarStyle: Overlay` + drag regions (needs a D10 exception). Private Liquid Glass (`NSGlassEffectView`, §13). |
 | D21 | **Downloads never block, and go to the Downloads folder by default.** `on_download` `Requested` returns immediately with a destination in the user's Downloads folder (a unique name if taken). A Settings switch **"Ask where to save each file"** (off by default) instead downloads to a temp file and, on `Finished`, opens the **non-blocking** Save dialog and moves the file there (Cancel deletes it). | Phase 1 (1C, 2026-09-26): showing the Save dialog from `on_download` deadlocks the app on every OS. `blocking_save_file()` queues the dialog onto the main thread and waits for it, but `on_download` already runs on the main thread (the CI app's main thread sat in `futex_wait` with no event loop). Downloads-folder-by-default matches Safari and Chrome. The switch keeps a Save-As flow for users who want one (owner, 2026-09-26). | A Save dialog inside `on_download` (deadlock). Always Save-As after download (a dialog on every download). |
+| D22 | **Release assets after desktop lands:** the container image (unchanged); the desktop apps (macOS DMG, Windows installer, Linux AppImage preview) and their update feeds; the **Linux x86_64 CLI archive**; the wheel and sdist; `checksums.json`. The **macOS and Windows CLI archives are removed in the first release that contains desktop assets**, with no deprecation release (owner, 2026-09-26). `package_launcher_archive.TARGETS` keeps its macOS/Windows entries, because `stage_desktop_payload.py` reuses their `--python-platform` values (§8); only the release workflow stops building, smoking, signing and publishing those two archives. Headless macOS/Windows users use the wheel (`uv tool install persona-forge` / `uvx persona-forge serve`). | The desktop app covers everything those archives did on macOS and Windows (serve, network access, same data dir §6.7, so switching keeps voices and settings), with signed updates. Fewer release jobs: the macOS launcher notarization and the macOS/Windows archive smokes go away. The Linux archive stays because the AppImage needs a display and WebKit, so it cannot serve headless boxes. | Keeping all three archives. A deprecation release first (owner: not needed). Dropping the Linux archive (no non-Docker headless option left). |
+| D23 | **Automatic GPU acceleration, one installer per OS.** v1 ships **CPU-only** on Windows and Linux (macOS uses the default torch wheel, which includes Metal/MPS; nothing to add). A later phase (execution plan Phase 9) adds: a torch-independent **GPU family detector in the core lib** (Rust, because it must run before any Python env exists), the per-family hashed requirements in the payload, and provisioning of the matching torch into a family-keyed env `versions/<version>+<family>/`. Default **Automatic**; Settings adds "Acceleration: Automatic / CPU only / NVIDIA / Intel / AMD (Linux)". If the accelerated install fails, or torch cannot use the device afterwards, the app falls back to CPU and says so. **CUDA build selection:** compute capability ≥ 7.5 **and** a driver that supports CUDA 13 → `cu130`; otherwise `cu126`. The same rule replaces `accelerator_manifest.pin_for_family`'s "first matching pin" for the container. | Owner, 2026-09-26: automatic, no per-GPU binaries. The torch env already lives outside the signed bundle and is provisioned at first run (D5), so the GPU part is a download, not an installer. PyTorch index, checked 2026-09-26: cu126/cu130 and xpu have Windows and Linux wheels; ROCm has **Linux only**. `pin_for_family("cuda")` returns `cuda12` (cu126) today, which is expected to lack Blackwell (RTX 50) kernels; the owner's RTX 5090 validates both builds before the container rule changes. GPU speeds up the Qwen3-TTS PyTorch backend and OmniVoice; Pocket-TTS (the default) is CPU-only by design. | A separate installer per GPU family. Every GPU runtime inside the installer (10+ GB). PyTorch wheel variants (not stable enough to depend on yet). |
 
 ## 3. Review of the first draft: what changed and why
 
@@ -624,7 +631,8 @@ Jobs in `desktop-build.yml`, in dependency order. "No secrets" is enforced by D1
 - The wheel is built once (the existing `build-wheel` job) and downloaded by every desktop job.
 - `scripts/stage_desktop_payload.py` reuses `package_launcher_archive.export_requirements` and
   `sha256_file`. It does not re-implement them, and it does not add keys to that script's
-  `TARGETS` (which drives the CLI archive's target choices).
+  `TARGETS` (which drives the CLI archive's target choices). `TARGETS` keeps its macOS and
+  Windows entries after D22: the desktop staging reads their `--python-platform` values.
 - Every job that holds secrets runs only on `release`, `workflow_call` from a release, and
   `workflow_dispatch`, never on `pull_request`, and only on ephemeral ARC runners (D19).
 
@@ -802,8 +810,11 @@ Plan (the owner asked the agent to drive this with the owner present; execution 
   `NSVisualEffectView` material covers the need; revisit when Tauri exposes the public API.
 - Windows 11 Mica / Acrylic window materials (the same `windowEffects` mechanism supports them;
   a later, separate decision).
-- Changing the Docker path or the CLI bootstrap archive's behavior (except D14 retention and the
-  D17 preferences store, which the Docker and CLI servers also get).
+- Changing the Docker path or the Linux CLI bootstrap archive's behavior (except D14 retention
+  and the D17 preferences store, which the Docker and CLI servers also get).
+- GPU acceleration in v1 (D23; Phase 9 after the first desktop release). AMD GPUs on Windows
+  even then: pytorch.org publishes no Windows ROCm wheels; AMD's own Windows builds (ROCm 7.2,
+  RDNA 3/4, driver 26.2.2+) would be a separate decision.
 - API authentication (§10 follow-up, roadmap §5.1).
 - Migrating the macOS data root from `~/.config/persona-forge` to `~/Library/Application Support`.
   The current path is non-standard but shared with the CLI, and moving it is a separate
@@ -834,6 +845,10 @@ Plan (the owner asked the agent to drive this with the owner present; execution 
 | Apple notarization rejects the `macos-private-api` build (D20) | L | Phase 5's notarized build is the gate; stop and report |
 | A future SPA change paints an opaque background over the sidebar and hides the material (D20) | M | Playwright spec (execution plan Phase 3) asserts the sidebar surface is transparent under `html[data-desktop='macos']` and opaque without it |
 | A download handler change reintroduces a blocking dialog (D21) | M | Code rule in §6.5 plus the 1C-style GUI check that the app answers WebDriver while a Save dialog is open (Phase 4 GUI check) |
+| A macOS/Windows user scripts downloads of the removed CLI archives (D22) | L | Release notes of the first desktop release name the replacements (desktop app; the wheel for headless use) |
+| First-run GPU provisioning downloads several GB (CUDA/ROCm torch) and fails midway (D23) | M | The family env is staged then promoted like every env (D5 staging → promote → `current.txt`); on failure the CPU env is used and the user is told; Retry in Settings |
+| The `cu126` build lacks kernels for new NVIDIA GPUs (RTX 50 / compute 12.0), so the container's `GPU_FAMILY=cuda` fails on them today (D23) | M | Validate cu126 vs cu130 on the owner's RTX 5090 (`self-hosted-windows`) before changing `pin_for_family`; D23's selection rule prefers cu130 |
+| CUDA and ROCm stay unvalidated on real hardware except the owner's RTX 5090 (D23) | M | Families without a hardware pass ship as "preview" in Phase 9; Intel XPU is validated (`plexxie`) |
 
 ## 15. Sources (researched 2026-09-25)
 
@@ -880,3 +895,10 @@ primary sources they relied on are listed here:
 - Tauri issue #4316 (drag in an unfocused overlay window):
   <https://github.com/tauri-apps/tauri/issues/4316>. Liquid Glass plugin:
   <https://github.com/hkandala/tauri-plugin-liquid-glass>.
+- D22/D23 (2026-09-26): current release assets from `gh release view persona-forge-v2.1.4`;
+  `.github/workflows/release-launcher.yml` matrix; `src/persona_forge/accelerator_manifest.py`
+  (`ACCELERATOR_PINS`, `pin_for_family`); `docs/architecture/ACCELERATOR_FAMILIES.md`;
+  download.pytorch.org `whl/{cu126,cu130,xpu,rocm7.1,rocm7.14}/torch/` listings (Windows
+  `win_amd64` wheels for cu126/cu130/xpu, none for ROCm); PyTorch 2.14 release notes
+  <https://pytorch.org/blog/pytorch-2-14-release-blog/>; AMD PyTorch on Windows (ROCm 7.2)
+  <https://www.amd.com/en/resources/support-articles/release-notes/RN-AMDGPU-WINDOWS-PYTORCH-7-2.html>.

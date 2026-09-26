@@ -3,7 +3,7 @@
 Status: **draft. The owner reviews it together with the architecture contract before Phase 0.**
 
 **Architecture contract (binding):** `docs/plans/20260925-native_app_shell_architecture.md`.
-Every decision ID (`D1`…`D19`) and section reference (`§6.2` etc.) below points into that doc.
+Every decision ID (`D1`…`D23`) and section reference (`§6.2` etc.) below points into that doc.
 If this plan and the contract disagree, the contract wins. **Stop and report**; do not pick one
 yourself.
 
@@ -1689,14 +1689,15 @@ PR title: `feat(desktop): signed update feeds and automated update gates`
 ### Objective
 
 Every published release ships the desktop artifacts and feeds, validated by the release contract,
-alongside the existing CLI archives. Update the active docs.
+with the Linux CLI archive; the macOS and Windows CLI archives are removed (contract D22). Update
+the active docs.
 
 ### Read first
 
 - `.github/workflows/release-launcher.yml`, `scripts/validate_release_contract.py` and its
   tests, `scripts/validate_docs_semantics.py` (the `ACTIVE_DOCS` list and banned phrases),
   `renovate.json`.
-- Contract §8, §9.1, §12, §13, D19.
+- Contract §8, §9.1, §12, §13, D19, D22.
 
 ### Tasks
 
@@ -1709,6 +1710,13 @@ alongside the existing CLI archives. Update the active docs.
      artifact instead of building a second wheel; one wheel per release.
    - the `release` job `needs:` gains `desktop`, and it downloads the desktop artifacts into
      `release/`.
+   - contract D22: remove `aarch64-apple-darwin` and `x86_64-pc-windows-gnu` from the
+     `build-launcher` and `smoke-launcher` matrices, and delete the steps that only run for the
+     macOS target (rcodesign install, App Store Connect key, launcher sign/notarize/verify). The
+     Linux x86_64 archive jobs are unchanged. Keep `package_launcher_archive.TARGETS` as it is
+     (the desktop staging reads its macOS/Windows `--python-platform` values). Read
+     `ci-packaging.yml`: drop jobs that only smoke the macOS/Windows **archives**, and keep any
+     check of the per-platform requirements export that `stage_desktop_payload.py` reuses.
    - the `release` job step order becomes: download artifacts → determine release version →
      `generate_update_feeds.py` (with `SPARKLE_ED_PRIVATE_KEY`; the `release` job already runs on
      the ephemeral `arc-general`, D19) → generate SHA-256 checksums (so the feeds are covered) →
@@ -1721,11 +1729,17 @@ alongside the existing CLI archives. Update the active docs.
      existing asset name and every `signature` equals that asset's `.sig` contents; the appcast
      `sparkle:version` == release version and the enclosure length == DMG size
    - tests: positive, a missing desktop asset, a version mismatch, a signature mismatch
+   - contract D22: `expected_assets()` no longer lists
+     `persona-forge-bootstrap-macos-aarch64.tar.gz` or
+     `persona-forge-bootstrap-windows-x86_64.zip`; a test asserts a release **containing** either
+     one fails validation (unexpected asset), so they cannot come back by accident.
 3. Documentation:
    - `README.md`: an "Install the desktop app" section (macOS DMG; Linux AppImage "preview" with
-     the GNOME AppIndicator note; Windows preview with the note below). The CLI archive stays
-     documented as the headless option. Windows note, near the top of the Windows install steps
-     (owner, 2026-09-25: no code-signing certificate will be bought):
+     the GNOME AppIndicator note; Windows preview with the note below). Headless installs: the
+     container (any OS, GPUs) and the Linux CLI archive; on macOS/Windows without the app,
+     `uv tool install persona-forge` (contract D22). Remove the macOS and Windows archive
+     instructions. Windows note, near the top of the Windows install steps (owner, 2026-09-25:
+     no code-signing certificate will be bought):
 
      > **Windows: the installer is not code-signed.** Windows SmartScreen will show "Windows
      > protected your PC". Click **More info → Run anyway**. This allows only this installer; you
@@ -1772,8 +1786,9 @@ gh workflow run release-launcher.yml --ref desktop/p7-release -f tag_name="perso
 gh run watch <run-id>
 ```
 
-Pass: the full dry-run release is green: CLI archives, desktop builds, smokes, feeds,
-checksums, and the contract validation over the complete asset set. Nothing is published. The
+Pass: the full dry-run release is green: the Linux CLI archive, desktop builds, smokes, feeds,
+checksums, and the contract validation over the complete asset set (no macOS/Windows archives).
+Nothing is published. The
 first real publication is the next Release Please release, and Phase 8 covers it.
 
 PR title: `feat(release): publish signed desktop apps and update feeds with each release`
@@ -1817,8 +1832,9 @@ Follow-ups: Windows signing, API auth, macOS data-root migration, Linux aarch64,
 - A bad desktop release: publish a fixed N+2. Updaters only move forward. Do not delete the
   release that has the bad assets until N+2 is live; deleting it makes `latest` point at an older
   release, and clients then see "no update".
-- Stop shipping desktop entirely: revert the Phase 7 commit. The CLI archives are unaffected,
-  because they are independent jobs. Installed desktop apps keep working and stop seeing updates
+- Stop shipping desktop entirely: revert the Phase 7 commit. That also restores the macOS and
+  Windows CLI archives (D22), because their removal lands in the same commit. The Linux archive
+  is unaffected. Installed desktop apps keep working and stop seeing updates
   (the feeds 404 → "no update").
 - Key compromise: rotate per contract §9.2. For Sparkle, ship one release signed with the old
   Developer ID and a new EdDSA key, never both changed at once. For Tauri, installed apps trust
@@ -1826,8 +1842,140 @@ Follow-ups: Windows signing, API auth, macOS data-root migration, Linux aarch64,
 
 ### Archive
 
-Once acceptance passes, move both plan docs to `docs/archive/desktop-app/` and mark them
-complete. `docs/architecture/DESKTOP_APP.md` remains the active reference.
+Once Phase 9 is also done, move both plan docs to `docs/archive/desktop-app/` and mark them
+complete; until then they stay active, because Phase 9 runs after this acceptance.
+`docs/architecture/DESKTOP_APP.md` remains the active reference.
+
+---
+
+## Phase 9 — Automatic GPU acceleration (after the first desktop release)
+
+### Objective
+
+Implement contract D23 for the desktop app and the Linux CLI archive (they share the core lib),
+and fix the container's CUDA build choice. One installer per OS: the app detects the GPU family,
+provisions the matching torch into `versions/<version>+<family>/`, verifies it, and falls back
+to CPU with a notice when anything fails. macOS is unchanged (the default wheel has MPS).
+
+### Prerequisites and read first
+
+- Phase 8 accepted (a desktop release is out). Contract D5, D14, D23.
+- `docs/architecture/ACCELERATOR_FAMILIES.md`, `src/persona_forge/gpu_family.py` +
+  `tests/tier1_unit/test_gpu_family.py`, `src/persona_forge/accelerator_manifest.py`,
+  `src/persona_forge/device.py`, the family section of `scripts/entrypoint.sh`,
+  `launcher/src/bootstrap.rs` and `retention.rs`, `scripts/stage_desktop_payload.py`.
+
+### Task 0 — Hardware evidence first (the owner's RTX 5090 on `self-hosted-windows`)
+
+Add `.github/workflows/gpu-validate.yml` (`workflow_dispatch`, input `extra` = `cuda12` |
+`cuda13` | `xpu`, input `runner` label; no secrets). It creates a Python 3.13 venv with the
+pinned uv, installs torch/torchaudio from that extra's manifest index and version, and runs a
+probe that prints JSON: `torch.__version__`, `torch.version.cuda`,
+`torch.cuda.is_available()`, `torch.cuda.get_device_name(0)`,
+`torch.cuda.get_device_capability(0)`, `torch.cuda.get_arch_list()`, and the result of a
+1024×1024 float32 matmul on the device compared to CPU (`allclose`, rtol 1e-3). The owner may
+need to allow `uv.exe` / `python.exe` through the Windows app firewall once (Phase 1 lesson).
+Run it for `cuda13` and `cuda12` on the RTX 5090 and record both JSON outputs in
+`## Phase 9 results`. Expected: `cuda13` passes with `sm_120` in the arch list; `cuda12` fails
+the matmul ("no kernel image") or lacks `sm_120`.
+**Stop condition:** `cuda13` fails on the RTX 5090. Stop and report; D23's rule is wrong.
+
+### Task 1 — CUDA build selection (Python; also fixes the container)
+
+- `accelerator_manifest.py`: `select_cuda_pin(compute_capability: tuple[int, int] | None,
+  driver_cuda_major: int | None) -> AcceleratorPin`: capability ≥ (7, 5) **and**
+  `driver_cuda_major >= 13` → `cuda13`; anything else, including unknowns, → `cuda12`.
+  `pin_for_family("cuda")` calls it with values from `nvidia-smi
+  --query-gpu=compute_cap --format=csv,noheader` and the `CUDA Version: X.Y` line of plain
+  `nvidia-smi` output (the driver's supported CUDA; the installed toolkit does not matter,
+  because the wheels carry their own runtime). Replace "first matching pin" everywhere.
+- Update `ACCELERATOR_FAMILIES.md` (cuda row, validation status from Task 0).
+- Tests (`test_accelerator_manifest.py` or the existing manifest test): (12, 0) + 13 →
+  `cuda13`; (8, 6) + 13 → `cuda13`; (6, 1) + 13 → `cuda12`; (12, 0) + 12 → `cuda12`;
+  `None` + 13 → `cuda12`; the `nvidia-smi` output parsers on captured real outputs (including
+  the owner's RTX 5090 from Task 0).
+
+### Task 2 — GPU family detector in the core lib (Rust)
+
+- `launcher/src/gpu.rs`: `pub enum Accel { Cpu, Cuda12, Cuda13, IntelXpu, Rocm }` and a pure
+  `pub fn detect(p: &dyn GpuProbe, os: Os) -> Accel` over an injectable probe:
+  - Linux: the `gpu_family.py` rules exactly (PCI vendor IDs from `/sys/bus/pci/devices/*/vendor`,
+    device nodes `/dev/nvidia*`, `/dev/kfd`, `/dev/dri/renderD*`, and `nvidia-smi`), priority
+    `cuda > rocm > intel-xpu`, then Task 1's CUDA rule.
+  - Windows: `nvidia-smi` → Task 1's rule; otherwise an Intel adapter (vendor `0x8086`, from
+    the display-adapter enumeration; choose a maintained crate and verify its current API) →
+    `IntelXpu`; AMD → `Cpu` (contract D23).
+  - macOS → `Cpu`.
+- Shared test vectors: `tests/fixtures/gpu_family_cases.json` (probe inputs → expected family and
+  CUDA extra), read by both `test_gpu_family.py` and `gpu.rs` tests, so Python and Rust cannot
+  drift.
+
+### Task 3 — Per-family requirements in the payload and the Linux archive
+
+`stage_desktop_payload.py` and `package_launcher_archive.py` export hashed
+`requirements-<extra>.txt` for each extra available on the target (Windows: `cuda12`,
+`cuda13`, `xpu`; Linux: those plus `rocm`; macOS: none), from the same uv extras, and list them
+with sha256 in `manifest.json`. `verify_payload` checks them like the base requirements.
+
+### Task 4 — Provisioning, verification, fallback, retention
+
+- `bootstrap.rs`: the CPU env keeps its name `<version>`; an accelerated env is
+  `<version>+<extra>` (for example `2.2.0+cuda13`), staged and promoted exactly like today's env
+  (D5). After install, run `<venv python> -m persona_forge.gpu_probe` (new module: the Task 0
+  probe as a function; exit 0 and JSON when the device works).
+- On any failure (install, probe): record `acceleration_status` in `desktop/settings.json`
+  (`{"extra", "version", "error"}`), provision/use the CPU env, and show a notification
+  "GPU acceleration is unavailable; using CPU. Details in Settings." Never retry automatically
+  on every launch; Settings has **Retry**.
+- Retention (extends D14): compare versions ignoring the `+<extra>` suffix (semver build
+  metadata); keep the active env, the same extra's previous version, and the current version's
+  CPU env (the fallback); everything else is pruned as today.
+- The server gets `GPU_FAMILY=<family>` in its env (visible in `doctor` and logs); `TTS_DEVICE`
+  stays unset so `device.py` auto-picks the accelerator.
+
+### Task 5 — Settings
+
+"Acceleration: Automatic / CPU only / NVIDIA / Intel / AMD" (AMD only on Linux), the detected
+device name, and the `acceleration_status` error with **Retry**. Applying a change runs the
+splash re-provision path and restarts the server.
+
+### Tests first
+
+- `gpu.rs`: every case in `gpu_family_cases.json`; Windows AMD → `Cpu`; macOS → `Cpu`.
+- `bootstrap`: env naming (`<version>` vs `<version>+<extra>`); a failed probe selects the CPU env
+  and records `acceleration_status`.
+- `retention`: the D23 keep set, with `+<extra>` dirs of the same version.
+- `select_cuda_pin` table (Task 1); `gpu_probe` JSON shape.
+
+### Gate 9
+
+```bash
+cargo test --manifest-path launcher/Cargo.toml
+cargo test --manifest-path desktop/Cargo.toml
+PYTHONPATH=src:src/export uv run --frozen python -m pytest tests/tier1_unit -q
+python scripts/validate_repo.py && git diff --check
+gh workflow run gpu-validate.yml -f extra=cuda13 -f runner=self-hosted-windows   # green
+```
+
+Plus, **OWNER on the RTX 5090 PC**, with a build of this branch installed: first run on
+Automatic provisions `+cuda13`; a Qwen3-TTS PyTorch generation shows the server's
+`python.exe` in `nvidia-smi`'s process list; switching to CPU only re-provisions and the
+generation no longer appears there; blocking the network during the accelerated install ends in
+the CPU fallback notice with a working app. Intel XPU on `plexxie` (Linux) is optional;
+ROCm has no hardware and ships marked "preview".
+
+**Stop conditions:** Task 0's stop condition; the probe passes while real generation fails on
+the GPU (the probe is not representative; report).
+
+PR title: `feat(desktop): automatic GPU acceleration with CPU fallback`
+
+```text
+BEGIN_COMMIT_OVERRIDE
+feat(desktop): automatic GPU acceleration with CPU fallback
+
+fix(runtime): choose the CUDA 13 torch build for GPUs that support it
+END_COMMIT_OVERRIDE
+```
 
 ---
 
