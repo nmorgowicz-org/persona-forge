@@ -28,6 +28,19 @@ _FILENAME = "ui_preferences.json"
 Validator = Callable[[Any], str | None]
 
 
+class PreferencesInvalid(ValueError):
+    """A preference update was rejected.
+
+    Raised with the key and a validator reason only, so the message is safe to return
+    to API clients (CodeQL py/information-exposure-through-exception: routes must use
+    ``safe_message``, never ``str(exc)``).
+    """
+
+    def __init__(self, key: str, reason: str) -> None:
+        self.safe_message = f"{key}: {reason}"
+        super().__init__(self.safe_message)
+
+
 def _string(max_length: int) -> Validator:
     def validate(value: Any) -> str | None:
         if not isinstance(value, str):
@@ -99,10 +112,10 @@ def _validate(update: Mapping[str, Any]) -> None:
     for key, value in update.items():
         validator = ALLOWED_KEYS.get(key)
         if validator is None:
-            raise ValueError(f"{key}: unknown preference")
+            raise PreferencesInvalid(key, "unknown preference")
         reason = validator(value)
         if reason is not None:
-            raise ValueError(f"{key}: {reason}")
+            raise PreferencesInvalid(key, reason)
 
 
 def _write(values: Mapping[str, Any], p: Path) -> None:

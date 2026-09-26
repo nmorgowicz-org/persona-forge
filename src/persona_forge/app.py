@@ -2275,8 +2275,10 @@ def ui_preferences_post():
         return jsonify({"error": "Body must be a JSON object with a 'values' object"}), 400
     try:
         merged = ui_preferences_store.merge_and_save(values)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+    except ui_preferences_store.PreferencesInvalid as exc:
+        # safe_message is built from the key and a validator reason only (CodeQL:
+        # py/information-exposure-through-exception)
+        return jsonify({"error": exc.safe_message}), 400
     return jsonify({"values": merged})
 
 
