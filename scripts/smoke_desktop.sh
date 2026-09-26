@@ -38,6 +38,10 @@ no_server_left_behind() {
 trap no_server_left_behind EXIT
 
 echo "--- smoke run: --smoke-test $SMOKE_JSON"
+# A server leaked by an earlier failed attempt on a persistent runner would fail the port
+# probe below with "port 8318 is not free"; kill only our own leftovers first.
+pkill -f 'persona_forge.app:app' 2>/dev/null || true
+sleep 1
 if ! "$BINARY" --smoke-test "$SMOKE_JSON"; then
   echo "FAIL: --smoke-test exited non-zero; server/bootstrap logs:" >&2
   for LOG in \

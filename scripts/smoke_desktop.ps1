@@ -33,6 +33,12 @@ function Assert-NoServerLeftBehind {
 
 try {
     Write-Host "--- smoke run: --smoke-test $SmokeJson"
+    # Kill only our own leftovers: a server leaked by an earlier failed attempt on this
+    # persistent runner would fail the app's port probe with "port 8318 is not free".
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match 'persona_forge\.app:app' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 1
     # Redirect: Start-Process discards stdout/stderr otherwise, and the bootstrap's uv
     # errors (e.g. firewall-blocked pypi fetches) only appear there.
     $outTxt = "$SmokeJson.stdout.txt"
