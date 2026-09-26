@@ -356,6 +356,16 @@ Copy this block into the PR (or a gist) and fill it in near release. `pass` / `F
 
 ---
 
+## Known findings
+
+- **Dependabot alert #47 (glib < 0.20.0, medium) — dismissed as tolerable risk.** glib arrives
+  only transitively (tauri 2.x → gtk 0.18; every stable tauri 2.x, incl. 2.12.0, pins gtk
+  ^0.18, so the patched glib 0.20 line is unreachable without tauri 3). The unsound API
+  (`glib::VariantStrIter`) is not referenced anywhere in `desktop/src`; glib is not a direct
+  dependency. Revisit at the tauri 3 upgrade.
+
+---
+
 ## Bug-reporting convention
 
 - File against the release; open **fix-PRs** after the fact (the user has confirmed this is the
