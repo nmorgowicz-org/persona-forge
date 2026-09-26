@@ -62,6 +62,17 @@ def read_port(state: Path) -> int:
         except (OSError, ValueError, KeyError, json.JSONDecodeError):
             pass
         time.sleep(1)
+    # Blindness here cost several debug cycles: dump everything we have about the app's
+    # bootstrap before failing.
+    print(f"--- diagnostics: {settings} never became usable", file=sys.stderr)
+    for log in sorted((state / "desktop" / "logs").glob("*.log")):
+        print(f"===== {log} =====", file=sys.stderr)
+        print("\n".join(log.read_text(encoding="utf-8", errors="replace").splitlines()[-80:]),
+              file=sys.stderr)
+    processes = subprocess.run(
+        ["pgrep", "-af", "persona"], capture_output=True, text=True
+    )
+    print(f"--- persona processes:\n{processes.stdout}", file=sys.stderr)
     fail(f"no usable port appeared in {settings} within {NAV_TIMEOUT_S}s")
     raise AssertionError("unreachable")  # fail() exits
 
