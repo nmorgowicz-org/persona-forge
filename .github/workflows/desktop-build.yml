@@ -254,7 +254,10 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          & cargo tauri build --bundles nsis --target x86_64-pc-windows-msvc --config "$env:TAURI_CONFIG"
+          # PowerShell 5.1 mangles embedded double quotes when passing native args (even
+          # quoted expansions), so hand tauri a config FILE instead of a JSON string.
+          Set-Content -Path desktop\tauri.build.json -Value $env:TAURI_CONFIG -Encoding utf8
+          & cargo tauri build --bundles nsis --target x86_64-pc-windows-msvc --config desktop\tauri.build.json
           if ($LASTEXITCODE -ne 0) { throw "cargo tauri build failed: $LASTEXITCODE" }
 
       - name: Collect setup exe
