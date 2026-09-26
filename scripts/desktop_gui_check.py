@@ -39,7 +39,7 @@ from selenium.common.exceptions import WebDriverException
 
 NAV_TIMEOUT_S = 180
 DOWNLOAD_TIMEOUT_S = 15
-SHUTDOWN_TIMEOUT_S = 15
+SHUTDOWN_TIMEOUT_S = 30  # do_quit: up to STOP_GRACE(10s) server stop + GTK teardown
 SERVER_PROCESS_PATTERN = "persona_forge.app:app"
 APP_PROCESS_PATTERN = "persona-forge-desktop"
 THEME = "teal"  # non-default (theme.ts default is violet)
@@ -206,6 +206,12 @@ def shutdown_and_verify(state: Path) -> None:
                 print("SIGTERM shutdown: no server left, port free")
                 return
         time.sleep(1)
+    # Evidence before failing: the app's own log says how far do_quit got.
+    log_file = state / "desktop" / "logs" / "desktop.log"
+    if log_file.is_file():
+        print("--- desktop.log tail:", file=sys.stderr)
+        print("\n".join(log_file.read_text(encoding="utf-8", errors="replace").splitlines()[-60:]),
+              file=sys.stderr)
     fail(f"server or app still alive after SIGTERM within {SHUTDOWN_TIMEOUT_S}s")
 
 
