@@ -1,0 +1,180 @@
+/* Persona Forge splash — plain CSS, no build step (contract §6, task 11). Follows the SPA's
+   dark theme colors so the transition from splash to the running app has no visible jump. */
+
+:root {
+  color-scheme: dark;
+  --bg: #0b0b0f;
+  --panel: #16161d;
+  --border: #2a2a35;
+  --text: #e7e7ee;
+  --muted: #9797a8;
+  --accent: #7c6cf0;
+  --danger: #ef5b6a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+/* Desktop marker (contract D20, §6.10): the same global the SPA reads. Only macOS gets a
+   transparent body, so the native sidebar material shows through the window chrome even on
+   the splash screen; every other platform keeps the opaque dark background below. */
+html[data-desktop='macos'] body {
+  background: transparent;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    -apple-system,
+    'Geist Variable',
+    system-ui,
+    sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#app {
+  width: min(480px, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand .mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent), #4d3fb0);
+}
+
+.brand h1 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 16px;
+}
+
+.steps li {
+  color: var(--muted);
+  font-size: 13px;
+  position: relative;
+  padding-left: 20px;
+}
+
+.steps li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.steps li[data-status='active'] {
+  color: var(--text);
+}
+
+.steps li[data-status='active']::before {
+  background: var(--accent);
+}
+
+.steps li[data-status='done']::before {
+  background: #4dbf7a;
+}
+
+.log-tail {
+  max-height: 120px;
+  overflow-y: auto;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.error-panel {
+  border: 1px solid var(--danger);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.error-message {
+  margin: 0;
+  color: var(--danger);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.error-log {
+  max-height: 160px;
+  overflow-y: auto;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+.error-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.error-actions button {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.error-actions button:hover {
+  border-color: var(--accent);
+}
+
+#retry-button {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}

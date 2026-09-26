@@ -18,6 +18,12 @@ export function UpdateAvailableBanner() {
     const run = async () => {
       try {
         const health = await getHealth()
+        // Contract D13/§6.10: the desktop shell owns the update UX, so the web banner never
+        // shows inside the desktop app (a browser user on the same server still gets it).
+        if (health.shell === 'desktop') {
+          setUpdate(null)
+          return
+        }
         const currentVersion = typeof health.version === 'string' ? health.version : null
         if (!currentVersion || cancelled) return
         const found = await checkForUpdate(currentVersion)

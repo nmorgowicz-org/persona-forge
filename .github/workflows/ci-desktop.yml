@@ -20,6 +20,104 @@ env:
   RUST_VERSION: "1.98"
 
 jobs:
+  desktop-linux:
+    name: desktop-linux
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The desktop crate's tauri.conf.json bundles payload/ and binaries/uv-<target> (the
+      # externalBin resource), so a compile/test lane needs them present. --fake writes
+      # placeholders without ever running `uv pip compile` (no network, no real wheel).
+      - name: Stage fake desktop payload
+        run: python scripts/stage_desktop_payload.py --target x86_64-unknown-linux-gnu \
+          --version 0.0.0 --wheel /nonexistent.whl --uv-binary /nonexistent-uv --uv-version 0.12.9 \
+          --out-root desktop --fake
+
+      - name: Install Rust ${{ env.RUST_VERSION }}
+        env:
+          RUSTUP_TOOLCHAIN: ${{ env.RUST_VERSION }}
+        run: |
+          rustup toolchain install "${RUSTUP_TOOLCHAIN}" --profile minimal --component rustfmt --component clippy
+          rustup default "${RUSTUP_TOOLCHAIN}"
+
+      - name: cargo fmt --check (desktop)
+        run: cargo fmt --manifest-path desktop/Cargo.toml --check
+
+      - name: cargo clippy -D warnings (desktop)
+        run: cargo clippy --manifest-path desktop/Cargo.toml --all-targets -- -D warnings
+
+      - name: cargo test (desktop)
+        run: cargo test --manifest-path desktop/Cargo.toml
+
+  desktop-macos:
+    name: desktop-macos
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: self-hosted-macos
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Stage fake desktop payload
+        run: python scripts/stage_desktop_payload.py --target aarch64-apple-darwin \
+          --version 0.0.0 --wheel /nonexistent.whl --uv-binary /nonexistent-uv --uv-version 0.12.9 \
+          --out-root desktop --fake
+
+      - name: Install Rust ${{ env.RUST_VERSION }}
+        env:
+          RUSTUP_TOOLCHAIN: ${{ env.RUST_VERSION }}
+        run: |
+          rustup toolchain install "${RUSTUP_TOOLCHAIN}" --profile minimal
+          rustup default "${RUSTUP_TOOLCHAIN}"
+
+      - name: cargo check (desktop)
+        run: cargo check --manifest-path desktop/Cargo.toml
+
+      - name: cargo test (desktop)
+        run: cargo test --manifest-path desktop/Cargo.toml
+
+  desktop-windows:
+    name: desktop-windows
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: self-hosted-windows
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Stage fake desktop payload
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/stage_desktop_payload.py --target x86_64-pc-windows-msvc --version 0.0.0 --wheel C:\nonexistent.whl --uv-binary C:\nonexistent-uv --uv-version 0.12.9 --out-root desktop --fake
+          if ($LASTEXITCODE -ne 0) { throw "stage_desktop_payload.py failed with exit code $LASTEXITCODE" }
+
+      - name: Install Rust ${{ env.RUST_VERSION }}
+        shell: powershell
+        env:
+          RUSTUP_TOOLCHAIN: ${{ env.RUST_VERSION }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          rustup toolchain install $env:RUSTUP_TOOLCHAIN --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw "rustup toolchain install failed with exit code $LASTEXITCODE" }
+          rustup default $env:RUSTUP_TOOLCHAIN
+          if ($LASTEXITCODE -ne 0) { throw "rustup default failed with exit code $LASTEXITCODE" }
+
+      - name: cargo check (desktop)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo check --manifest-path desktop/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw "cargo check failed with exit code $LASTEXITCODE" }
+
+      - name: cargo test (desktop)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --manifest-path desktop/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw "cargo test failed with exit code $LASTEXITCODE" }
+
   launcher-linux:
     name: launcher-linux
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository

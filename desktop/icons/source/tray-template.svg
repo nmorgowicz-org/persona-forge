@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-labelledby="title">
+  <title id="title">Persona Forge tray mark (template)</title>
+  <!-- Single-color reduction of assets/brand/concepts/persona-forge/hero-v2/finalists/
+       signal-crucible/svg/mark-small.svg for macOS icon_as_template (contract §6.4): every
+       stroke and fill is #000000, gradients and filters removed, shape opacity kept, and no
+       filled background (a macOS template image is a transparent-background silhouette; the OS
+       paints the alpha channel in the current menu-bar color, so a filled background square
+       would render as one solid tinted block instead of a legible mark). -->
+  <g stroke="#000000" stroke-width="7" stroke-linecap="butt" opacity="0.9">
+    <path d="M29 8A25 25 0 0 1 50 20"/>
+    <path d="M56 27A25 25 0 0 1 51 44"/>
+    <path d="M44 53A25 25 0 0 1 25 55"/>
+    <path d="M13 48A25 25 0 0 1 8 34"/>
+  </g>
+  <path d="M10 32C17 26 23 37 29 32C35 27 36 37 42 32C47 28 48 35 55 32" stroke="#000000" stroke-width="2.5" stroke-linecap="round" opacity="0.9"/>
+  <circle cx="32" cy="32" r="2.5" fill="#000000"/>
+</svg>
