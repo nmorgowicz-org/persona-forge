@@ -2205,10 +2205,9 @@ release gone; every other release at its R0 revision; five healthy listeners rem
 
 ## Phase 1 results
 
-**Status: DRAFT, in progress (2026-09-26).** Written on `spike/desktop` as findings land, and
-cherry-picked into `desktop/p1-results` at Phase 1 close (Phase 1 deliverable). `spike/desktop` is
-rebased onto `main` as it moves, so the commit SHAs below go stale; they are refreshed from the
-commit subjects once, at Phase 1 close. Runs are `desktop-spike.yml` run IDs (stable).
+**Status: COMPLETE — Phase 1 closed 2026-09-26.** Spike head tagged `desktop-spike-final`; `spike/`
+removed and the `desktop-spike.yml` stub restored in the same close. Runs are
+`desktop-spike.yml` run IDs (stable); spike commit SHAs were refreshed at close.
 
 ### Criteria so far
 
@@ -2219,7 +2218,7 @@ commit subjects once, at Phase 1 close. Runs are `desktop-spike.yml` run IDs (st
 | 1A: Sparkle.framework bundled; its 4 helpers (`Autoupdate`, `Updater.app`, `Downloader.xpc`, `Installer.xpc`) carry our Team ID | PASS | run 36233400916 `spike-macos-verify` |
 | 1A: notarized app launches | PASS | owner Mac: `desktop-spike 0.1.0`, `codesign --verify --deep --strict` clean |
 | 1A: Sparkle EdDSA signature of the DMG | PASS | `spike-sparkle-sig` green since `d393907` |
-| 1A: owner offline install + launch from the DMG | open | owner |
+| 1A: owner offline install + launch from the DMG | **PASS** | owner, Wi-Fi off: DMG → Applications → launch, no Gatekeeper failure — the staple works offline. Sparkle's 0.1.0 → 0.1.1 offer/install/relaunch was **not exercised on the Mac** (only the "up to date" panel at 0.1.1); Phase 6B re-covers update mechanics |
 | 1B: NSIS 0.1.0 / 0.1.1 build on `self-hosted-windows` | PASS | run 36230861333 onward |
 | 1B: automated Windows update 0.1.0 → 0.1.1: silent install, `--ci-update` exits reporting `phase: "installing"` (§6.12), registry `DisplayVersion` reaches 0.1.1, and the updated app **relaunches** in the interactive session | PASS | run 36242159413 `spike-windows-update` (update fully green; the job's exit 1 is the cleanup block being unable to kill the relaunched app from NetworkService — fixed in the script, Phase 6B reuses this install-wait logic). Owner SmartScreen/SAC record open (SmartScreen off on the runner PC) |
 | 1C: AppImage builds (3), glibc ≤ 2.35 | PASS | every run since `8442e78` |
