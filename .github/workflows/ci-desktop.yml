@@ -52,17 +52,26 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # `shell: bash` resolves to C:\WINDOWS\system32\bash.EXE (WSL, no distro) on this
+      # runner (desktop-preflight.yml hit the same trap) — rustup/cargo need no shell
+      # scripting here, so just run them directly from PowerShell.
       - name: Install Rust ${{ env.RUST_VERSION }}
-        shell: bash
+        shell: powershell
         env:
           RUSTUP_TOOLCHAIN: ${{ env.RUST_VERSION }}
         run: |
-          rustup toolchain install "${RUSTUP_TOOLCHAIN}" --profile minimal
-          rustup default "${RUSTUP_TOOLCHAIN}"
+          $ErrorActionPreference = 'Stop'
+          rustup toolchain install $env:RUSTUP_TOOLCHAIN --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw "rustup toolchain install failed with exit code $LASTEXITCODE" }
+          rustup default $env:RUSTUP_TOOLCHAIN
+          if ($LASTEXITCODE -ne 0) { throw "rustup default failed with exit code $LASTEXITCODE" }
 
       - name: cargo test
-        shell: bash
-        run: cargo test --manifest-path launcher/Cargo.toml
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --manifest-path launcher/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw "cargo test failed with exit code $LASTEXITCODE" }
 
   launcher-macos:
     name: launcher-macos
