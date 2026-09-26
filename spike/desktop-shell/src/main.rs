@@ -236,7 +236,17 @@ fn main() {
 }
 
 fn build_app(_test_port: Option<u16>) -> tauri::Result<tauri::App> {
-    tauri::Builder::default()
+    // All plugins go on the Builder: they are initialized in build(), before run().
+    // Plugins added inside .setup() only exist once run() starts the event loop, which
+    // the --ci-update path never calls (it drives the updater right after build()).
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init());
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_plugin_sparkle_updater::init());
+    builder
         .setup(|app| {
             // Edit menu first: WKWebView needs predefined edit items for clipboard shortcuts.
             let edit = SubmenuBuilder::new(app, "Edit")
@@ -306,18 +316,6 @@ fn build_app(_test_port: Option<u16>) -> tauri::Result<tauri::App> {
             });
 
             builder.build()?;
-
-            // spike updater plugins
-            #[cfg(not(target_os = "macos"))]
-            {
-                app.handle().plugin(
-                    tauri_plugin_updater::Builder::new().build(),
-                )?;
-            }
-            #[cfg(target_os = "macos")]
-            {
-                app.handle().plugin(tauri_plugin_sparkle_updater::init())?;
-            }
             Ok(())
         })
         .on_menu_event(|app, event| {
