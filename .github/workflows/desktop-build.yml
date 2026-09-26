@@ -1,10 +1,36 @@
-# STUB (execution plan Phase 0, task 4 / contract §5 workflow bootstrap rule).
-# GitHub only dispatches a workflow_dispatch workflow whose file exists on the
-# default branch, so this stub lands on main first. Replaced by the real
-# build/sign/smoke workflow in Phase 4.
+# Desktop build + native smoke (execution plan Phase 4 — replaces the Phase 0 stub).
+# Contract §8 (no-secret jobs only): builds all three desktop targets from one wheel,
+# stages the payload, bundles unsigned artifacts, and smoke-tests the *installed/bundled*
+# app on native runners. Nothing is signed or published here; Phase 5 splits build-macos
+# into the signed chain, Phase 6B adds the updater-sigs job.
+#
+# Fork safety: this workflow has no pull_request trigger — it only runs via
+# workflow_dispatch / workflow_call, which require write access to the repo.
 name: Desktop Build
 
 on:
+  workflow_call:
+    inputs:
+      version:
+        description: "App version for the bundle and manifest (e.g. 2.1.3)"
+        required: true
+        type: string
+      sign:
+        description: "Sign/notarize the macOS artifact (Phase 5+)"
+        default: false
+        type: boolean
+      feed_base:
+        description: "Update feed base URL override for test builds (Phase 6B)"
+        default: ""
+        type: string
+      ci_hooks:
+        description: "Build Windows/Linux with the ci-hooks feature (Phase 6B)"
+        default: false
+        type: boolean
+      wheel_artifact:
+        description: "Existing wheel artifact name to download instead of building"
+        default: ""
+        type: string
   workflow_dispatch:
     inputs:
       version:
@@ -31,13 +57,446 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: desktop-build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  UV_VERSION: "0.12.9"
+  PYTHON_VERSION: "3.13"
+  NODE_VERSION: "24"
+  RUST_VERSION: "1.98"
+  TAURI_CLI_VERSION: "2.11.5"
+
 jobs:
-  stub:
-    name: stub
+  build-wheel:
+    name: build-wheel
+    # Skipped (success) when an existing wheel artifact is supplied.
+    if: inputs.wheel_artifact == ''
     runs-on: arc-general
-    timeout-minutes: 5
+    timeout-minutes: 30
     steps:
-      - name: Stub — replaced in Phase 4
+      # Same steps and pins as release-launcher.yml build-wheel (execution plan Phase 4).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install uv (pinned)
+        run: python -m pip install uv==${{ env.UV_VERSION }}
+      - name: uv lock --check
+        run: uv lock --check
+      - name: Build wheel + sdist
+        run: uv build
+      - name: Inspect release artifacts (fail-closed)
+        run: uv run --frozen python scripts/inspect_release_artifacts.py --dist-dir dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-wheel-and-sdist
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
+
+  build-macos:
+    name: build-macos
+    needs: build-wheel
+    runs-on: self-hosted-macos
+    timeout-minutes: 90
+    env:
+      TAURI_CONFIG: '{"version":"${{ inputs.version }}","bundle":{"createUpdaterArtifacts":false}}'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Preflight desktop toolchain (macos)
+        run: bash scripts/desktop_preflight.sh macos
+
+      - name: Install Rust ${{ env.RUST_VERSION }} with target aarch64-apple-darwin
+        env:
+          RUSTUP_TOOLCHAIN: ${{ env.RUST_VERSION }}
         run: |
-          echo "stub: implemented in a later phase"
-          exit 1
+          rustup toolchain install "${RUSTUP_TOOLCHAIN}" --profile minimal
+          rustup target add --toolchain "${RUSTUP_TOOLCHAIN}" aarch64-apple-darwin
+          rustup default "${RUSTUP_TOOLCHAIN}"
+
+      - name: Fetch + verify pinned uv binary (aarch64-apple-darwin)
+        run: bash scripts/fetch_uv_binary.sh ${{ env.UV_VERSION }} aarch64-apple-darwin uv-bin
+
+      - name: Install tauri-cli ${{ env.TAURI_CLI_VERSION }} (if missing)
+        run: |
+          if ! cargo tauri --version 2>/dev/null | grep -q "tauri-cli ${TAURI_CLI_VERSION}"; then
+            cargo install tauri-cli --locked --version "${TAURI_CLI_VERSION}"
+          fi
+
+      # wheel_artifact empty  → this run built it (desktop-wheel-and-sdist).
+      # wheel_artifact set    → download that artifact name instead (Phase 7 reuses this).
+      - name: Download wheel (built in this run)
+        if: inputs.wheel_artifact == ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-wheel-and-sdist
+          path: dist
+      - name: Download wheel (supplied artifact)
+        if: inputs.wheel_artifact != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ inputs.wheel_artifact }}
+          path: dist
+
+      - name: Stage desktop payload
+        run: |
+          WHEEL=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          python3 scripts/stage_desktop_payload.py \
+            --target aarch64-apple-darwin --version "${{ inputs.version }}" \
+            --wheel "$WHEEL" --uv-binary uv-bin/uv --uv-version ${{ env.UV_VERSION }} \
+            --out-root desktop
+
+      # One version input; updater .sig files come from Phase 6B's updater-sigs job,
+      # never from the build (contract §8). --no-sign: unsigned at this phase.
+      - name: cargo tauri build (app bundle)
+        run: |
+          cargo tauri build \
+            --no-sign --bundles app --target aarch64-apple-darwin \
+            --config "$TAURI_CONFIG"
+
+      - name: Build DMG
+        run: |
+          APP=$(find desktop/target -maxdepth 6 -type d -name "Persona Forge.app" -print -quit)
+          bash scripts/build_macos_dmg.sh "$APP" PersonaForge-macos-aarch64.dmg
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-macos-aarch64
+          path: PersonaForge-macos-aarch64.dmg
+          retention-days: 7
+          if-no-files-found: error
+
+  build-windows:
+    name: build-windows
+    needs: build-wheel
+    runs-on: self-hosted-windows
+    timeout-minutes: 90
+    env:
+      TAURI_CONFIG: '{"version":"${{ inputs.version }}","bundle":{"createUpdaterArtifacts":false}}'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust ${{ env.RUST_VERSION }} with target x86_64-pc-windows-msvc
+        shell: powershell
+        env:
+          RUSTUP_TOOLCHAIN: ${{ env.RUST_VERSION }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          rustup toolchain install $env:RUSTUP_TOOLCHAIN --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw "rustup toolchain install failed: $LASTEXITCODE" }
+          rustup target add --toolchain $env:RUSTUP_TOOLCHAIN x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "rustup target add failed: $LASTEXITCODE" }
+          rustup default $env:RUSTUP_TOOLCHAIN
+          if ($LASTEXITCODE -ne 0) { throw "rustup default failed: $LASTEXITCODE" }
+
+      # fetch_uv_binary.sh runs in Git Bash on Linux/macOS; `shell: bash` on this runner
+      # resolves to WSL (no distro), so mirror its exact fetch+verify logic in PowerShell
+      # here: download the pinned asset and its published .sha256, verify, extract uv.exe.
+      - name: Fetch + verify pinned uv binary (x86_64-pc-windows-msvc)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $asset = 'uv-x86_64-pc-windows-msvc.zip'
+          $base = 'https://github.com/astral-sh/uv/releases/download/${{ env.UV_VERSION }}'
+          $work = Join-Path $env:RUNNER_TEMP "uv-fetch-$([guid]::NewGuid())"
+          New-Item -ItemType Directory -Path $work -Force | Out-Null
+          Invoke-WebRequest -Uri "$base/$asset" -OutFile (Join-Path $work $asset)
+          Invoke-WebRequest -Uri "$base/$asset.sha256" -OutFile (Join-Path $work "$asset.sha256")
+          $expected = ((Get-Content (Join-Path $work "$asset.sha256") -First 1) -split '\s+')[0].Trim()
+          $actual = (Get-FileHash -Algorithm SHA256 (Join-Path $work $asset)).Hash.ToLower()
+          if ($actual -ne $expected) { throw "uv checksum mismatch: $actual != $expected" }
+          Expand-Archive -LiteralPath (Join-Path $work $asset) -DestinationPath "$work\extracted" -Force
+          New-Item -ItemType Directory -Path uv-bin -Force | Out-Null
+          Copy-Item (Join-Path $work "extracted\uv.exe") uv-bin\uv.exe
+
+      - name: Install tauri-cli ${{ env.TAURI_CLI_VERSION }} (if missing)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $have = $false
+          try {
+            $v = & cargo tauri --version 2>$null
+            if ($v -match [regex]::Escape("tauri-cli ${{ env.TAURI_CLI_VERSION }}")) { $have = $true }
+          } catch {}
+          if (-not $have) {
+            & cargo install tauri-cli --locked --version ${{ env.TAURI_CLI_VERSION }}
+            if ($LASTEXITCODE -ne 0) { throw "cargo install tauri-cli failed: $LASTEXITCODE" }
+          }
+
+      - name: Download wheel (built in this run)
+        if: inputs.wheel_artifact == ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-wheel-and-sdist
+          path: dist
+      - name: Download wheel (supplied artifact)
+        if: inputs.wheel_artifact != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ inputs.wheel_artifact }}
+          path: dist
+
+      - name: Stage desktop payload
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $wheel = Get-ChildItem dist -Filter '*.whl' | Select-Object -First 1
+          python scripts/stage_desktop_payload.py --target x86_64-pc-windows-msvc --version "${{ inputs.version }}" --wheel $wheel.FullName --uv-binary uv-bin\uv.exe --uv-version ${{ env.UV_VERSION }} --out-root desktop
+          if ($LASTEXITCODE -ne 0) { throw "stage_desktop_payload.py failed: $LASTEXITCODE" }
+
+      - name: cargo tauri build (NSIS bundle)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & cargo tauri build --bundles nsis --target x86_64-pc-windows-msvc --config $env:TAURI_CONFIG
+          if ($LASTEXITCODE -ne 0) { throw "cargo tauri build failed: $LASTEXITCODE" }
+
+      - name: Collect setup exe
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem "desktop\target\x86_64-pc-windows-msvc\release\bundle\nsis" -Filter '*-setup.exe' | Select-Object -First 1
+          if (-not $exe) { throw "no NSIS setup exe produced" }
+          Copy-Item $exe.FullName PersonaForge-windows-x86_64-setup.exe
+          "setup exe: {0:N1} MB" -f ((Get-Item PersonaForge-windows-x86_64-setup.exe).Length / 1MB) | Write-Host
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-windows-x86_64
+          path: PersonaForge-windows-x86_64-setup.exe
+          retention-days: 7
+          if-no-files-found: error
+
+  build-linux:
+    name: build-linux
+    needs: build-wheel
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 90
+    env:
+      TAURI_CONFIG: '{"version":"${{ inputs.version }}","bundle":{"createUpdaterArtifacts":false}}'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust ${{ env.RUST_VERSION }} with target x86_64-unknown-linux-gnu
+        env:
+          RUSTUP_TOOLCHAIN: ${{ env.RUST_VERSION }}
+        run: |
+          rustup toolchain install "${RUSTUP_TOOLCHAIN}" --profile minimal
+          rustup target add --toolchain "${RUSTUP_TOOLCHAIN}" x86_64-unknown-linux-gnu
+          rustup default "${RUSTUP_TOOLCHAIN}"
+
+      - name: Fetch + verify pinned uv binary (x86_64-unknown-linux-gnu)
+        run: bash scripts/fetch_uv_binary.sh ${{ env.UV_VERSION }} x86_64-unknown-linux-gnu uv-bin
+
+      - name: Install tauri-cli ${{ env.TAURI_CLI_VERSION }} (if missing)
+        run: |
+          if ! cargo tauri --version 2>/dev/null | grep -q "tauri-cli ${TAURI_CLI_VERSION}"; then
+            cargo install tauri-cli --locked --version "${TAURI_CLI_VERSION}"
+          fi
+
+      - name: Download wheel (built in this run)
+        if: inputs.wheel_artifact == ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-wheel-and-sdist
+          path: dist
+      - name: Download wheel (supplied artifact)
+        if: inputs.wheel_artifact != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ inputs.wheel_artifact }}
+          path: dist
+
+      - name: Stage desktop payload
+        run: |
+          WHEEL=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          python3 scripts/stage_desktop_payload.py \
+            --target x86_64-unknown-linux-gnu --version "${{ inputs.version }}" \
+            --wheel "$WHEEL" --uv-binary uv-bin/uv --uv-version ${{ env.UV_VERSION }} \
+            --out-root desktop
+
+      - name: cargo tauri build (AppImage bundle)
+        run: |
+          cargo tauri build \
+            --bundles appimage --target x86_64-unknown-linux-gnu \
+            --config "$TAURI_CONFIG"
+
+      - name: Collect AppImage + glibc check (fail if > 2.35)
+        run: |
+          set -euo pipefail
+          APPIMAGE=$(find desktop/target -maxdepth 6 -type f -name '*.AppImage' -print -quit)
+          cp "$APPIMAGE" PersonaForge-linux-x86_64.AppImage
+          chmod +x PersonaForge-linux-x86_64.AppImage
+          echo "AppImage: $(du -h PersonaForge-linux-x86_64.AppImage | cut -f1)"
+          APPIMAGE_EXTRACT_AND_RUN=1 ./PersonaForge-linux-x86_64.AppImage --appimage-extract >/dev/null
+          MAX_GLIBC=$(
+            {
+              objdump -T squashfs-root/persona-forge-desktop 2>/dev/null || true
+              find squashfs-root/usr/lib -name '*.so*' -exec objdump -T {} \; 2>/dev/null || true
+            } | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1
+          )
+          rm -rf squashfs-root
+          echo "max required glibc: ${MAX_GLIBC:-none}"
+          if [ -z "$MAX_GLIBC" ]; then
+            echo "FAIL: no GLIBC symbol versions found in the bundle" >&2
+            exit 1
+          fi
+          if [ "$(printf '%s\nGLIBC_2.35\n' "$MAX_GLIBC" | sort -V | head -1)" != "GLIBC_2.35" ]; then
+            echo "FAIL: bundle requires $MAX_GLIBC, target ceiling is GLIBC_2.35" >&2
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-linux-x86_64
+          path: PersonaForge-linux-x86_64.AppImage
+          retention-days: 7
+          if-no-files-found: error
+
+  smoke-macos:
+    name: smoke-macos
+    needs: build-macos
+    runs-on: self-hosted-macos
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-macos-aarch64
+          path: artifact
+
+      - name: Smoke-test the bundled app
+        env:
+          PERSONA_FORGE_HOME: ${{ runner.temp }}/pf-smoke-state
+        run: |
+          set -euo pipefail
+          rm -rf "$PERSONA_FORGE_HOME"
+          DMG="artifact/PersonaForge-macos-aarch64.dmg"
+          MNT="$RUNNER_TEMP/pf-dmg-mnt"
+          APP_DIR="$RUNNER_TEMP/pf-smoke-app"
+          rm -rf "$MNT" "$APP_DIR" && mkdir -p "$MNT" "$APP_DIR"
+          hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG"
+          cp -R "$MNT/Persona Forge.app" "$APP_DIR/"
+          hdiutil detach "$MNT"
+          bash scripts/smoke_desktop.sh macos \
+            "$APP_DIR/Persona Forge.app/Contents/MacOS/persona-forge-desktop" \
+            "$RUNNER_TEMP/smoke.json"
+
+  smoke-windows:
+    name: smoke-windows
+    needs: build-windows
+    runs-on: self-hosted-windows
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-windows-x86_64
+          path: artifact
+
+      - name: Install, smoke-test, uninstall
+        shell: powershell
+        env:
+          PERSONA_FORGE_HOME: ${{ runner.temp }}\pf-smoke-state
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:PERSONA_FORGE_HOME = Join-Path $env:RUNNER_TEMP "pf-smoke-state-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          if (Test-Path $env:PERSONA_FORGE_HOME) { Remove-Item $env:PERSONA_FORGE_HOME -Recurse -Force }
+
+          $setup = Resolve-Path 'artifact\PersonaForge-windows-x86_64-setup.exe'
+          $p = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "NSIS install exited with $($p.ExitCode)" }
+
+          $entry = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+            Where-Object { $_.GetValue('DisplayName') -eq 'Persona Forge' } |
+            Select-Object -First 1
+          if (-not $entry) { throw "no HKCU uninstall entry with DisplayName 'Persona Forge'" }
+          $installLocation = $entry.GetValue('InstallLocation')
+          if (-not $installLocation) { throw "uninstall entry has no InstallLocation" }
+          $exe = Join-Path $installLocation 'persona-forge-desktop.exe'
+          if (-not (Test-Path $exe)) { throw "installed exe is missing: $exe" }
+
+          try {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke_desktop.ps1 -Exe $exe -SmokeJson (Join-Path $env:RUNNER_TEMP 'smoke.json')
+            if ($LASTEXITCODE -ne 0) { throw "smoke_desktop.ps1 failed: $LASTEXITCODE" }
+          } finally {
+            $uninstaller = Join-Path $installLocation 'uninstall.exe'
+            if (Test-Path $uninstaller) {
+              Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait
+            }
+          }
+
+  smoke-gui-linux:
+    name: smoke-gui-linux
+    needs: build-linux
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-linux-x86_64
+          path: artifact
+
+      # One job on purpose: pods are ephemeral, so the env provisioned by the first
+      # --smoke-test run cannot be shared with a second job.
+      - name: Headless smoke + WebDriver GUI check
+        env:
+          PERSONA_FORGE_HOME: ${{ runner.temp }}/pf-smoke-state
+        run: |
+          set -euo pipefail
+          rm -rf "$PERSONA_FORGE_HOME"
+          APPIMAGE="$PWD/artifact/PersonaForge-linux-x86_64.AppImage"
+          chmod +x "$APPIMAGE"
+          # Provisions the payload env (uv sync into PERSONA_FORGE_HOME); also runs --bogus.
+          bash scripts/smoke_desktop.sh linux "$APPIMAGE" "$RUNNER_TEMP/smoke.json"
+
+          # WebDriver: tauri-driver under its own dbus session + xvfb, then selenium.
+          # The single-quoted script is passed verbatim to the inner bash (SC2016 is intended).
+          # shellcheck disable=SC2016
+          dbus-run-session -- xvfb-run -a bash -c '
+            set -euo pipefail
+            tauri-driver &
+            DRIVER_PID=$!
+            trap "kill $DRIVER_PID 2>/dev/null || true" EXIT
+            for _ in $(seq 1 30); do
+              curl --silent --output /dev/null http://127.0.0.1:4444/status && break
+              sleep 1
+            done
+            uv run --with selenium==4.35.0 --with requests \
+              python scripts/desktop_gui_check.py \
+                --app "$APPIMAGE" --state "$PERSONA_FORGE_HOME"
+          '
+
+  smoke-linux-newest:
+    name: smoke-linux-newest
+    needs: build-linux
+    runs-on: arc-llama-monitor
+    timeout-minutes: 30
+    env:
+      # Ubuntu 26.04 image does not set it; pods have no FUSE, so the AppImage must
+      # extract-and-run instead of mounting.
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-linux-x86_64
+          path: artifact
+
+      - name: Smoke-test on the newest-supported glibc
+        env:
+          PERSONA_FORGE_HOME: ${{ runner.temp }}/pf-smoke-state
+        run: |
+          set -euo pipefail
+          rm -rf "$PERSONA_FORGE_HOME"
+          chmod +x artifact/PersonaForge-linux-x86_64.AppImage
+          ldd --version | head -1
+          bash scripts/smoke_desktop.sh linux \
+            "$PWD/artifact/PersonaForge-linux-x86_64.AppImage" "$RUNNER_TEMP/smoke.json"
