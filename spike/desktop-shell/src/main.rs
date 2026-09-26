@@ -140,7 +140,7 @@ fn run_ci_update(app: tauri::AppHandle, out_path: PathBuf) -> Result<(), String>
             .map_err(|e| e.to_string())?;
         json["phase"] = serde_json::Value::String("installing".into());
         update.install(bytes.as_slice()).map_err(|e| e.to_string())?;
-        Ok(())
+        Ok::<(), String>(())
     });
 
     if let Err(e) = result {
