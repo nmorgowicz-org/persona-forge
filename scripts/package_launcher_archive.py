@@ -100,6 +100,34 @@ def export_requirements(target_platform: str, out_path: Path) -> None:
         )
 
 
+def build_manifest(
+    *,
+    version: str,
+    target: str,
+    wheel_name: str,
+    wheel_sha256: str,
+    uv_name: str,
+    uv_sha256: str,
+    uv_version: str,
+    requirements_name: str,
+    requirements_sha256: str,
+) -> dict:
+    """Schema-v1 manifest.json body shared by the CLI archive and the desktop payload
+    (docs/plans/20260925-native_app_shell_architecture.md §7: same schema, so `ensure_env` is
+    unchanged)."""
+    return {
+        "schema_version": 1,
+        "app": "persona-forge",
+        "version": version,
+        "target": target,
+        "python_constraint": ">=3.13,<3.14",
+        "wheel": {"file": wheel_name, "sha256": wheel_sha256},
+        "uv": {"file": uv_name, "sha256": uv_sha256, "version": uv_version},
+        "requirements_file": requirements_name,
+        "requirements_sha256": requirements_sha256,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", required=True, choices=sorted(TARGETS))
@@ -140,21 +168,17 @@ def main(argv: list[str] | None = None) -> int:
     shutil.copy2(args.wheel, work_dir / args.wheel.name)
     export_requirements(python_platform, work_dir / requirements_name)
 
-    manifest = {
-        "schema_version": 1,
-        "app": "persona-forge",
-        "version": args.version,
-        "target": args.target,
-        "python_constraint": ">=3.13,<3.14",
-        "wheel": {"file": args.wheel.name, "sha256": sha256_file(work_dir / args.wheel.name)},
-        "uv": {
-            "file": uv_name,
-            "sha256": sha256_file(work_dir / uv_name),
-            "version": args.uv_version,
-        },
-        "requirements_file": requirements_name,
-        "requirements_sha256": sha256_file(work_dir / requirements_name),
-    }
+    manifest = build_manifest(
+        version=args.version,
+        target=args.target,
+        wheel_name=args.wheel.name,
+        wheel_sha256=sha256_file(work_dir / args.wheel.name),
+        uv_name=uv_name,
+        uv_sha256=sha256_file(work_dir / uv_name),
+        uv_version=args.uv_version,
+        requirements_name=requirements_name,
+        requirements_sha256=sha256_file(work_dir / requirements_name),
+    )
     (work_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     (work_dir / "README.txt").write_text(README_TEMPLATE.format(target=args.target), encoding="utf-8")
 
