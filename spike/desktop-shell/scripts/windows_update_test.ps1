@@ -69,8 +69,10 @@ try {
     Write-Host 'PASS: updated to 0.1.1 (registry DisplayVersion)'
 }
 finally {
-    # the passive installer relaunches the app after the update, in the interactive
-    # session; NetworkService cannot kill it (access denied), so silence and fall back
+    # Cleanup must never fail the job: the relaunched app runs in the interactive
+    # session and NetworkService cannot kill it (access denied, PS 5.1 turns the
+    # taskkill stderr into a terminating error under Stop).
+    $ErrorActionPreference = 'Continue'
     Get-Process -Name $Name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     taskkill /IM "$Name.exe" /F 2>$null | Out-Null
     Uninstall-Spike

@@ -2221,7 +2221,7 @@ commit subjects once, at Phase 1 close. Runs are `desktop-spike.yml` run IDs (st
 | 1A: Sparkle EdDSA signature of the DMG | PASS | `spike-sparkle-sig` green since `d393907` |
 | 1A: owner offline install + launch from the DMG | open | owner |
 | 1B: NSIS 0.1.0 / 0.1.1 build on `self-hosted-windows` | PASS | run 36230861333 onward |
-| 1B: automated Windows update 0.1.0 → 0.1.1: silent install, `--ci-update` exits reporting `phase: "installing"` (§6.12), registry `DisplayVersion` reaches 0.1.1 within 20 s | PASS | run 36237430299 (rerun) `spike-windows-update`; owner SmartScreen/SAC record still open (SmartScreen off on the runner PC) |
+| 1B: automated Windows update 0.1.0 → 0.1.1: silent install, `--ci-update` exits reporting `phase: "installing"` (§6.12), registry `DisplayVersion` reaches 0.1.1, and the updated app **relaunches** in the interactive session | PASS | run 36242159413 `spike-windows-update` (update fully green; the job's exit 1 is the cleanup block being unable to kill the relaunched app from NetworkService — fixed in the script, Phase 6B reuses this install-wait logic). Owner SmartScreen/SAC record open (SmartScreen off on the runner PC) |
 | 1C: AppImage builds (3), glibc ≤ 2.35 | PASS | every run since `8442e78` |
 | 1C: updater `.sig` for N+1 AppImage + setup exe | PASS | since `90f973d`; key id `CA027814994FBE6D` matches `tauri-updater.key.pub` |
 | 1C: publish good + badsig feeds | PASS | run 36234077653 `spike-linux-publish` |
@@ -2251,6 +2251,7 @@ commit subjects once, at Phase 1 close. Runs are `desktop-spike.yml` run IDs (st
 | An interrupted rustup-init leaves a `cargo.exe` shim with no toolchain | always `rustup toolchain install` + `default`; call tools by path; fail on nonzero exit (`676553b`) | Phase 4 |
 | The owner's Windows app firewall blocks rustup/cargo (`os error 10013`) | owner allow-listed `_work/_tool/desktop-rust` | Phase 4 runner notes |
 | The same firewall blocked the freshly installed spike app (runner service profile: `C:\WINDOWS\ServiceProfiles\NetworkService\AppData\Local\desktop-spike\desktop-spike.exe`) | owner allow-listed that exact path (a path rule survives the test's uninstall; the folder only exists during a run) | Phase 4 smoke: the installed app downloads updates itself, so its exe must be allowed on `self-hosted-windows` |
+| The Windows updater relaunches the updated app in the **interactive user's** session, which the runner service (NetworkService) cannot kill — cleanup must never fail the job over it | cleanup silenced + `taskkill` fallback (`f285782`); Phase 6B's install-wait logic should also stop the relaunched app before uninstalling | Phase 6B |
 | AppImage bundle filename is `desktop-spike_<version>_amd64.AppImage` | `8442e78` | Phase 4 |
 | `CARGO_PKG_VERSION` stays at `Cargo.toml`'s value; `cargo tauri build --config '{"version":..}'` changes only the Tauri config version, so any version printed or compared must come from `package_info()` | print `context.package_info().version` (`f575ba6`) | Phase 3 (`--smoke-test` version), 6A/6B |
 
