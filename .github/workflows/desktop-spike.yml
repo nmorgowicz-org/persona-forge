@@ -264,7 +264,7 @@ jobs:
             echo "-- $f"
             codesign -dv --verbose=4 "$f" 2>&1 | grep -E "TeamIdentifier=|Authority=" || true
             FOUND=1
-          done < <(find "desktop-spike.app" -type f \( -name "Autoupdate" -o -name "*.xpc" \))
+          done < <(find "appzip/desktop-spike.app" -type f \( -name "Autoupdate" -o -name "*.xpc" \))
           [ "$FOUND" = "1" ] || { echo "no nested Sparkle helpers found to inspect"; exit 1; }
 
   spike-sparkle-sig:
@@ -313,27 +313,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Bootstrap Rust toolchain + tauri-cli (job-local, cached in runner _tool)
-        shell: bash
+        shell: powershell
         run: |
-          set -euo pipefail
-          ROOT="$RUNNER_TOOL_CACHE/desktop-rust"
-          export RUSTUP_HOME="$ROOT/rustup"
-          export CARGO_HOME="$ROOT/cargo"
-          export PATH="$CARGO_HOME/bin:$PATH"
-          if [ ! -x "$CARGO_HOME/bin/cargo.exe" ]; then
-            curl -o /tmp/rustup-init.exe -sSL https://win.rustup.rs/x86_64
-            /tmp/rustup-init.exe -y --default-toolchain 1.98-x86_64-pc-windows-msvc \
-              --profile minimal --no-modify-path
-          fi
+          $ErrorActionPreference = "Stop"
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          $root = Join-Path $env:RUNNER_TOOL_CACHE "desktop-rust"
+          $env:RUSTUP_HOME = Join-Path $root "rustup"
+          $env:CARGO_HOME = Join-Path $root "cargo"
+          $env:PATH = "$env:CARGO_HOME\bin;$env:PATH"
+          if (-not (Test-Path "$env:CARGO_HOME\bin\cargo.exe")) {
+            New-Item -ItemType Directory -Force -Path $root | Out-Null
+            Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile "$env:TEMP\rustup-init.exe"
+            & "$env:TEMP\rustup-init.exe" -y --default-toolchain 1.98-x86_64-pc-windows-msvc --profile minimal --no-modify-path
+          }
           cargo --version
-          if [ ! -x "$CARGO_HOME/bin/cargo-tauri.exe" ]; then
+          if (-not (Test-Path "$env:CARGO_HOME\bin\cargo-tauri.exe")) {
             cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked
-          fi
+          }
           cargo tauri --version
-          # persist for later steps of this job
-          echo "RUSTUP_HOME=$RUSTUP_HOME" >> "$GITHUB_ENV"
-          echo "CARGO_HOME=$CARGO_HOME" >> "$GITHUB_ENV"
-          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+          "RUSTUP_HOME=$env:RUSTUP_HOME" | Add-Content $env:GITHUB_ENV
+          "CARGO_HOME=$env:CARGO_HOME" | Add-Content $env:GITHUB_ENV
+          Add-Content $env:GITHUB_PATH "$env:CARGO_HOME\bin"
 
       - name: Generate dummy resource
         shell: powershell
@@ -345,19 +345,20 @@ jobs:
           [System.IO.File]::WriteAllBytes("$PWD/spike/desktop-shell/resources/dummy.bin", $buf)
 
       - name: Build NSIS installer
-        shell: bash
+        shell: powershell
         run: |
-          cd spike/desktop-shell
-          cargo tauri build --bundles nsis --target x86_64-pc-windows-msvc \
-            --config '{"version":"${{ matrix.version }}","bundle":{"createUpdaterArtifacts":false}}'
+          $ErrorActionPreference = "Stop"
+          Set-Location spike/desktop-shell
+          cargo tauri build --bundles nsis --target x86_64-pc-windows-msvc --config '{\"version\":\"${{ matrix.version }}\",\"bundle\":{\"createUpdaterArtifacts\":false}}'
 
       - name: Rename installer
-        shell: bash
+        shell: powershell
         run: |
-          cd spike/desktop-shell/target/x86_64-pc-windows-msvc/release/bundle/nsis
-          mv desktop-spike_0.1.0_x64-setup.exe desktop-spike-setup.exe 2>/dev/null || \
-            mv desktop-spike_0.1.1_x64-setup.exe desktop-spike-setup.exe
-          mv desktop-spike-setup.exe "$GITHUB_WORKSPACE/desktop-spike-${{ matrix.version }}-setup.exe"
+          $ErrorActionPreference = "Stop"
+          $dir = "spike/desktop-shell/target/x86_64-pc-windows-msvc/release/bundle/nsis"
+          $setup = Get-ChildItem $dir -Filter "desktop-spike_*_x64-setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw "no NSIS setup exe found in $dir" }
+          Move-Item $setup.FullName "$env:GITHUB_WORKSPACE\desktop-spike-${{ matrix.version }}-setup.exe"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

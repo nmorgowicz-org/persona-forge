@@ -2,11 +2,10 @@
 """Convert a raw Ed25519 seed (32 bytes) into a PKCS#8 PEM file (contract §9.2).
 
 Used by the spike workflow's Sparkle signing step. Key material never touches
-argv — both paths come from argv, contents from files/stdin.
+argv -- both paths come from argv, contents from files/stdin.
 
 usage: seed_to_pem.py <seed-file> <out-pem>
 """
-import base64
 import sys
 
 
@@ -14,11 +13,12 @@ def main() -> None:
     if len(sys.argv) != 3:
         sys.exit(f"usage: {sys.argv[0]} <seed-file> <out-pem>")
     try:
-        seed = base64.b64decode(open(sys.argv[1]).read().strip())
-    except (OSError, ValueError) as exc:
+        with open(sys.argv[1], "rb") as f:
+            seed = f.read()
+    except OSError as exc:
         sys.exit(f"cannot read seed: {exc}")
     if len(seed) != 32:
-        sys.exit(f"seed must decode to exactly 32 bytes, got {len(seed)}")
+        sys.exit(f"seed must be exactly 32 raw bytes, got {len(seed)}")
     hexder = "302e020100300506032b657004220420" + seed.hex()
     lines = [hexder[i : i + 64] for i in range(0, len(hexder), 64)]
     try:
