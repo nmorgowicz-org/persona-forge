@@ -51,6 +51,15 @@ jobs:
           cargo tauri build --no-sign --bundles app --target aarch64-apple-darwin \
             --config '{"version":"${{ inputs.version }}"}'
 
+      - name: Strip linker signature (rcodesign 0.29 cannot re-sign CodeDirectory v20400)
+        run: |
+          cd spike/desktop-shell/target/aarch64-apple-darwin/release/bundle/macos
+          # expected: the bundler leaves an ad-hoc linker signature; absence is fine too
+          codesign --remove-signature "desktop-spike.app/Contents/MacOS/desktop-spike" 2>/dev/null \
+            || echo "binary had no signature to remove (expected either way)"
+          codesign --remove-signature "desktop-spike.app" 2>/dev/null \
+            || echo "bundle had no signature to remove (expected either way)"
+
       - name: Zip .app (ditto keeps symlinks)
         run: |
           cd spike/desktop-shell/target/aarch64-apple-darwin/release/bundle/macos
