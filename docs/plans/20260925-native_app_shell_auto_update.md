@@ -2230,7 +2230,7 @@ commit subjects once, at Phase 1 close. Runs are `desktop-spike.yml` run IDs (st
 | 1C: GUI: splash → test origin, external link kept out, WAV + MP3 play, localStorage survives restart | PASS | run 36233400916 `spike-linux-gui` (7 checks) |
 | 1C: GUI downloads: `blob:` + same-origin saved as `tone.wav` / `tone (1).wav` WAVs; ask mode keeps the app responsive with the Save dialog open | PASS | runs 36235228235, 36236004149 `spike-linux-gui` |
 | 1C: newest distro (Ubuntu 26.04) `--version` | PASS | run 36233400916 |
-| 1D: owner webview matrix (Mac, Windows) | open | owner |
+| 1D: owner webview matrix (Mac, Windows) | **PASS with one open finding** | owner tests 2026-09-26, final build `3db90a8` (run 36244193928): downloads ✅ both shapes, both save modes, both OSes; `window.open` → system browser ✅ Windows; up-to-date feedback: Mac native Sparkle panel ✅, Windows dialog ✅ (owner: "native ugly toast" — Phase 6A designs the real update UX); menus ✅ both OSes (after the app-menu fix). **Open:** `<a target="_blank">` on Windows is silently dropped — `window.open` fires `on_new_window` but the anchor does not (owner + `3db90a8` build); macOS anchor not retested. Owner then confirmed: **the anchor is dead on macOS too** |
 
 ### Findings that change later phases
 
@@ -2251,6 +2251,7 @@ commit subjects once, at Phase 1 close. Runs are `desktop-spike.yml` run IDs (st
 | An interrupted rustup-init leaves a `cargo.exe` shim with no toolchain | always `rustup toolchain install` + `default`; call tools by path; fail on nonzero exit (`676553b`) | Phase 4 |
 | The owner's Windows app firewall blocks rustup/cargo (`os error 10013`) | owner allow-listed `_work/_tool/desktop-rust` | Phase 4 runner notes |
 | The same firewall blocked the freshly installed spike app (runner service profile: `C:\WINDOWS\ServiceProfiles\NetworkService\AppData\Local\desktop-spike\desktop-spike.exe`) | owner allow-listed that exact path (a path rule survives the test's uninstall; the folder only exists during a run) | Phase 4 smoke: the installed app downloads updates itself, so its exe must be allowed on `self-hosted-windows` |
+| `<a target="_blank">` is silently dropped on **both macOS and Windows** (no `on_navigation`, no `on_new_window`), while `window.open` fires `on_new_window` and opens externally (owner-confirmed both OSes on build `3db90a8`). The SPA has external links (docs, update banner for browser users), so Phase 3 must resolve it: dig into the wry 0.57 new-window handlers for anchor-initiated windows, or fall back to a frontend rule (needs owner sign-off, D10 friction) | open — Phase 3 task | Phase 3 |
 | The Windows updater relaunches the updated app in the **interactive user's** session, which the runner service (NetworkService) cannot kill — cleanup must never fail the job over it | cleanup silenced + `taskkill` fallback (`f285782`); Phase 6B's install-wait logic should also stop the relaunched app before uninstalling | Phase 6B |
 | AppImage bundle filename is `desktop-spike_<version>_amd64.AppImage` | `8442e78` | Phase 4 |
 | `CARGO_PKG_VERSION` stays at `Cargo.toml`'s value; `cargo tauri build --config '{"version":..}'` changes only the Tauri config version, so any version printed or compared must come from `package_info()` | print `context.package_info().version` (`f575ba6`) | Phase 3 (`--smoke-test` version), 6A/6B |
