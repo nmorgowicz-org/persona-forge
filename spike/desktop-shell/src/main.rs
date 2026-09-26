@@ -264,6 +264,15 @@ async fn check_and_install(app: &tauri::AppHandle) {
             }
             None => {
                 eprintln!("[update] no update available");
+                // silence is indistinguishable from a broken check for the user
+                use tauri_plugin_dialog::DialogExt;
+                app.dialog()
+                    .message(format!(
+                        "You're up to date (desktop-spike {}).",
+                        app.package_info().version
+                    ))
+                    .title("Check for Updates")
+                    .show(|_| {});
                 Ok::<(), String>(())
             }
         }

@@ -74,6 +74,9 @@ finally {
     # taskkill stderr into a terminating error under Stop).
     $ErrorActionPreference = 'Continue'
     Get-Process -Name $Name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    # taskkill failing leaves $LASTEXITCODE=1 and the runner's PowerShell wrapper
+    # propagates it as the job exit code, even when the test passed
     taskkill /IM "$Name.exe" /F 2>$null | Out-Null
     Uninstall-Spike
 }
+exit 0
