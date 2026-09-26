@@ -466,3 +466,159 @@ jobs:
           name: spike-updater-sigs
           path: artifacts/**/*.sig
           if-no-files-found: error
+
+  # ── 1C task 3: publish both test feeds (one latest.json, Windows + Linux) ────
+  spike-linux-publish:
+    name: spike-linux-publish
+    needs: spike-updater-sigs
+    runs-on: arc-general
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download N+1 AppImage
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: spike-linux-appimage-0.1.1-good
+          path: artifacts
+
+      - name: Download N+1 setup exe
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: spike-windows-setup-0.1.1
+          path: artifacts
+
+      - name: Download updater signatures
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: spike-updater-sigs
+          path: artifacts
+
+      - name: Publish good and badsig feeds
+        run: |
+          set -euo pipefail
+          command -v gh >/dev/null || { echo "::error::gh CLI is not on this runner image"; exit 1; }
+          pick() { find artifacts -type f -name "$1" | head -1; }
+          APPIMAGE=$(pick 'desktop-spike-0.1.1-good.AppImage')
+          SETUP=$(pick 'desktop-spike-0.1.1-setup.exe')
+          APPIMAGE_SIG=$(pick 'desktop-spike-0.1.1-good.AppImage.sig')
+          SETUP_SIG=$(pick 'desktop-spike-0.1.1-setup.exe.sig')
+          for f in "$APPIMAGE" "$SETUP" "$APPIMAGE_SIG" "$SETUP_SIG"; do
+            [ -n "$f" ] && [ -s "$f" ] || { echo "::error::missing or empty input: '$f'"; exit 1; }
+          done
+          A=desktop-spike_0.1.1_amd64.AppImage
+          S=desktop-spike_0.1.1_x64-setup.exe
+          mkdir -p good badsig
+          cp "$APPIMAGE" "good/$A"; cp "$APPIMAGE_SIG" "good/$A.sig"
+          cp "$SETUP" "good/$S";    cp "$SETUP_SIG" "good/$S.sig"
+          BASE="https://github.com/$GH_REPO/releases/download"
+          python3 spike/desktop-shell/scripts/make_latest_json.py --version 0.1.1 --out good/latest.json \
+            --platform linux-x86_64-appimage "$BASE/desktop-spike/$A" "good/$A.sig" \
+            --platform windows-x86_64-nsis "$BASE/desktop-spike/$S" "good/$S.sig"
+          gh release upload desktop-spike good/* --clobber
+
+          # badsig: N+1 AppImage with one byte flipped, served with the ORIGINAL signature
+          cp "good/$A" "badsig/$A"
+          python3 -c "import sys; p = sys.argv[1]; b = bytearray(open(p, 'rb').read()); b[len(b) // 2] ^= 0xFF; open(p, 'wb').write(b)" "badsig/$A"
+          if cmp -s "good/$A" "badsig/$A"; then echo "::error::byte flip had no effect"; exit 1; fi
+          python3 spike/desktop-shell/scripts/make_latest_json.py --version 0.1.1 --out badsig/latest.json \
+            --platform linux-x86_64-appimage "$BASE/desktop-spike-badsig/$A" "good/$A.sig"
+          gh release upload desktop-spike-badsig "badsig/$A" badsig/latest.json --clobber
+
+  # ── 1C task 4: automated update (good) and signature rejection (badsig) ─────
+  spike-linux-update:
+    name: spike-linux-update (${{ matrix.mode }})
+    needs: spike-linux-publish
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [good, badsig]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: spike-linux-appimage-0.1.0-${{ matrix.mode }}
+          path: app
+
+      - name: Run --ci-update and assert (${{ matrix.mode }})
+        run: |
+          set -euo pipefail
+          APP="$PWD/app/desktop-spike-0.1.0-${{ matrix.mode }}.AppImage"
+          chmod +x "$APP"
+          "$APP" --version
+          # the updater needs an app context (and so a display); outcome is judged from out.json
+          set +e
+          dbus-run-session -- xvfb-run -a "$APP" --ci-update "$RUNNER_TEMP/out.json"
+          echo "ci-update exit=$?"
+          set -e
+          python3 spike/desktop-shell/scripts/assert_ci_update.py "$RUNNER_TEMP/out.json" "${{ matrix.mode }}" "$APP"
+
+  # ── 1C task 5: WebDriver GUI checks against the test page ───────────────────
+  spike-linux-gui:
+    name: spike-linux-gui
+    needs: spike-linux-build
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: spike-linux-appimage-0.1.0-good
+          path: app
+
+      - name: Serve the test page with synthesized tones
+        run: |
+          set -euo pipefail
+          SITE="$RUNNER_TEMP/site"
+          mkdir -p "$SITE" && cp spike/desktop-shell/testpage/index.html "$SITE/"
+          ffmpeg -loglevel error -f lavfi -i "sine=frequency=440:duration=2" "$SITE/tone.wav"
+          ffmpeg -loglevel error -f lavfi -i "sine=frequency=440:duration=2" -codec:a libmp3lame "$SITE/tone.mp3"
+          nohup python3 -m http.server 8318 --bind 127.0.0.1 --directory "$SITE" > "$RUNNER_TEMP/http.log" 2>&1 &
+          for _ in $(seq 1 40); do curl -fsS -o /dev/null http://127.0.0.1:8318/tone.mp3 && break; sleep 0.5; done
+          curl -fsS -o /dev/null http://127.0.0.1:8318/
+
+      - name: Drive the AppImage through tauri-driver
+        run: |
+          set -euo pipefail
+          APP="$PWD/app/desktop-spike-0.1.0-good.AppImage"
+          chmod +x "$APP"
+          dbus-run-session -- xvfb-run -a \
+            spike/desktop-shell/scripts/run_gui_check.sh "$APP" "$RUNNER_TEMP/app-stderr.log"
+
+      - name: App and driver log
+        if: always()
+        run: cat "$RUNNER_TEMP/app-stderr.log" || true
+
+  # ── 1C task 6: newest distro (Ubuntu 26.04, no FUSE in pods) ────────────────
+  spike-linux-newest:
+    name: spike-linux-newest (Ubuntu 26.04)
+    needs: spike-linux-build
+    runs-on: arc-llama-monitor
+    timeout-minutes: 15
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: spike-linux-appimage-0.1.0-good
+          path: app
+
+      - name: Run N good --version
+        run: |
+          set -euo pipefail
+          grep PRETTY_NAME /etc/os-release
+          ldd --version | sed -n 1p
+          APP="$PWD/app/desktop-spike-0.1.0-good.AppImage"
+          chmod +x "$APP"
+          V=$("$APP" --version)
+          echo "$V"
+          [ "$V" = "desktop-spike 0.1.0" ]

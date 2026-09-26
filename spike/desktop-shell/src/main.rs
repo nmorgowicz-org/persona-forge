@@ -29,6 +29,13 @@ enum Decision {
     Deny,
 }
 
+/// `http://127.0.0.1:<TEST_ORIGIN_PORT>` — the only non-splash origin allowed in-app.
+fn is_test_origin(url: &tauri::Url) -> bool {
+    url.scheme() == "http"
+        && url.host_str() == Some("127.0.0.1")
+        && url.port() == Some(TEST_ORIGIN_PORT)
+}
+
 fn classify(url: &tauri::Url) -> Decision {
     match url.scheme() {
         "mailto" => Decision::OpenExternal,
@@ -41,21 +48,22 @@ fn classify(url: &tauri::Url) -> Decision {
         }
         // splash origins: tauri://localhost (macOS/Linux), http://tauri.localhost (Windows)
         "tauri" => Decision::Allow,
-        "http" | "https" | "blob" => {
+        "http" | "https" => {
             let host = url.host_str().unwrap_or("");
-            if host.split('#').next() == Some("tauri.localhost")
-                && url.scheme() == "http" {
-                    return Decision::Allow;
-                }
-            if host == "127.0.0.1" && url.port() == Some(TEST_ORIGIN_PORT) {
+            if url.scheme() == "http" && host == "tauri.localhost" {
                 Decision::Allow
-            } else if url.scheme() == "http" || url.scheme() == "https" {
-                Decision::OpenExternal
+            } else if is_test_origin(url) {
+                Decision::Allow
             } else {
-                // blob: to any other origin
-                Decision::Deny
+                Decision::OpenExternal
             }
         }
+        // blob: URLs carry their origin inside the path ("blob:http://127.0.0.1:8318/<uuid>"),
+        // so url.host_str() is None; judge the inner origin (contract §6.5).
+        "blob" => match tauri::Url::parse(url.path()) {
+            Ok(inner) if is_test_origin(&inner) => Decision::Allow,
+            _ => Decision::Deny,
+        },
         _ => Decision::Deny,
     }
 }
@@ -129,15 +137,24 @@ fn run_ci_update(app: tauri::AppHandle, out_path: PathBuf) -> Result<(), String>
                 return Err("no update available".into());
             }
             Err(e) => {
-                json["phase"] = serde_json::Value::String("verify".into());
+                json["phase"] = serde_json::Value::String("check".into());
                 return Err(e.to_string());
             }
         };
-        // download returns the verified bytes (progress closures only)
-        let bytes = update
-            .download(&mut |_len, _total| {}, &mut || {})
-            .await
-            .map_err(|e| e.to_string())?;
+        // download() fetches the bytes AND verifies the minisign signature
+        // (plugin updater.rs verify_signature); contract §6.12 reports a
+        // signature failure as phase "verify", anything else as "download"
+        json["phase"] = serde_json::Value::String("download".into());
+        let bytes = match update.download(&mut |_len, _total| {}, &mut || {}).await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                use tauri_plugin_updater::Error as E;
+                if matches!(e, E::Minisign(_) | E::Base64(_) | E::SignatureUtf8(_)) {
+                    json["phase"] = serde_json::Value::String("verify".into());
+                }
+                return Err(e.to_string());
+            }
+        };
         json["phase"] = serde_json::Value::String("installing".into());
         update.install(bytes.as_slice()).map_err(|e| e.to_string())?;
         Ok::<(), String>(())
@@ -146,6 +163,7 @@ fn run_ci_update(app: tauri::AppHandle, out_path: PathBuf) -> Result<(), String>
     if let Err(e) = result {
         json["error"] = serde_json::Value::String(e);
     } else {
+        json["phase"] = serde_json::Value::String("installed".into());
         json["ok"] = serde_json::Value::Bool(true);
     }
 
