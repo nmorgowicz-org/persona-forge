@@ -117,6 +117,9 @@ fn run_ci_update(app: tauri::AppHandle, out_path: PathBuf) -> Result<(), String>
         "from_version": app.package_info().version.to_string(),
         "to_version": serde_json::Value::Null,
         "error": serde_json::Value::Null,
+        // diagnostics: on Linux the updater replaces $APPIMAGE if set, else current_exe()
+        "appimage_env": std::env::var("APPIMAGE").ok(),
+        "current_exe": std::env::current_exe().ok().map(|p| p.display().to_string()),
     });
 
     let result: Result<(), String> = tauri::async_runtime::block_on(async {
