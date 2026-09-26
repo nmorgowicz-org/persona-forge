@@ -33,9 +33,19 @@ function Assert-NoServerLeftBehind {
 
 try {
     Write-Host "--- smoke run: --smoke-test $SmokeJson"
-    $p = Start-Process -FilePath $Exe -ArgumentList '--smoke-test', $SmokeJson -Wait -PassThru
+    # Redirect: Start-Process discards stdout/stderr otherwise, and the bootstrap's uv
+    # errors (e.g. firewall-blocked pypi fetches) only appear there.
+    $outTxt = "$SmokeJson.stdout.txt"
+    $errTxt = "$SmokeJson.stderr.txt"
+    $p = Start-Process -FilePath $Exe -ArgumentList '--smoke-test', $SmokeJson -Wait -PassThru `
+        -RedirectStandardOutput $outTxt -RedirectStandardError $errTxt
     if ($p.ExitCode -ne 0) {
-        Write-Host "FAIL: --smoke-test exited with $($p.ExitCode); server/bootstrap logs:"
+        Write-Host "FAIL: --smoke-test exited with $($p.ExitCode)"
+        Write-Host '--- app stderr:'
+        Get-Content $errTxt -ErrorAction SilentlyContinue | Write-Host
+        Write-Host '--- smoke JSON:'
+        Get-Content $SmokeJson -ErrorAction SilentlyContinue | Write-Host
+        Write-Host '--- server/bootstrap logs:'
         Get-ChildItem (Join-Path $env:PERSONA_FORGE_HOME 'desktop\logs') -Filter '*.log' -ErrorAction SilentlyContinue |
             ForEach-Object {
                 Write-Host "===== $($_.Name) ====="

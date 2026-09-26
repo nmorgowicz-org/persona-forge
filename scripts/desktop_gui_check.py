@@ -215,7 +215,9 @@ def main() -> None:
     # Bare options: ChromeOptions would add browserName:"chrome" + goog:chromeOptions to
     # alwaysMatch, which tauri-driver's capability matcher rejects ("Failed to match
     # capabilities" — Phase 4 run 6).
-    options = webdriver.ChromiumOptions.__bases__[0]()  # selenium BaseOptions
+    from selenium.webdriver.common.options import BaseOptions
+
+    options = BaseOptions()
     options.set_capability("tauri:options", {"application": str(app)})
     driver = webdriver.Remote(command_executor=args.driver_url, options=options)
     try:
