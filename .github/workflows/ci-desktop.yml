@@ -32,9 +32,12 @@ jobs:
       # externalBin resource), so a compile/test lane needs them present. --fake writes
       # placeholders without ever running `uv pip compile` (no network, no real wheel).
       - name: Stage fake desktop payload
-        run: python scripts/stage_desktop_payload.py --target x86_64-unknown-linux-gnu \
-          --version 0.0.0 --wheel /nonexistent.whl --uv-binary /nonexistent-uv --uv-version 0.12.9 \
-          --out-root desktop --fake
+        # No `\` line continuations: GitHub Actions folds the block into one line, turning a
+        # backslash-newline into a literal `\ ` that mangles the args (astral-sh/uv argparse).
+        run: |
+          python scripts/stage_desktop_payload.py \
+            --target x86_64-unknown-linux-gnu --version 0.0.0 --wheel /nonexistent.whl \
+            --uv-binary /nonexistent-uv --uv-version 0.12.9 --out-root desktop --fake
 
       - name: Install Rust ${{ env.RUST_VERSION }}
         env:
@@ -61,9 +64,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Stage fake desktop payload
-        run: python scripts/stage_desktop_payload.py --target aarch64-apple-darwin \
-          --version 0.0.0 --wheel /nonexistent.whl --uv-binary /nonexistent-uv --uv-version 0.12.9 \
-          --out-root desktop --fake
+        run: |
+          python scripts/stage_desktop_payload.py \
+            --target aarch64-apple-darwin --version 0.0.0 --wheel /nonexistent.whl \
+            --uv-binary /nonexistent-uv --uv-version 0.12.9 --out-root desktop --fake
 
       - name: Install Rust ${{ env.RUST_VERSION }}
         env:

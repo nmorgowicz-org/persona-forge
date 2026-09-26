@@ -269,7 +269,9 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
-        let Some(mut child) = child else { panic!("could not spawn the copied sleep binary") };
+        let Some(mut child) = child else {
+            panic!("could not spawn the copied sleep binary")
+        };
 
         assert!(SysinfoInUse.is_in_use(&root.path().join("old")));
 
