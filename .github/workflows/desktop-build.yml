@@ -461,7 +461,9 @@ jobs:
           bash scripts/smoke_desktop.sh linux "$APPIMAGE" "$RUNNER_TEMP/smoke.json"
 
           # WebDriver: tauri-driver under its own dbus session + xvfb, then selenium.
-          # The single-quoted script is passed verbatim to the inner bash (SC2016 is intended).
+          # The single-quoted script is passed verbatim to the inner bash (SC2016 is intended),
+          # so APPIMAGE must be exported, not just set as a shell variable.
+          export APPIMAGE
           # shellcheck disable=SC2016
           dbus-run-session -- xvfb-run -a bash -c '
             set -euo pipefail
