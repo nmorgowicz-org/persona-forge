@@ -17,7 +17,8 @@ pub struct WheelEntry {
 pub struct UvEntry {
     pub file: String,
     pub sha256: String,
-    #[allow(dead_code)] // part of the archive contract (build-time provenance); not read at runtime
+    #[allow(dead_code)]
+    // part of the archive contract (build-time provenance); not read at runtime
     pub version: String,
 }
 
@@ -45,7 +46,11 @@ pub enum ManifestError {
     UnsupportedSchema(u32),
     WrongApp(String),
     MissingMember(String),
-    HashMismatch { member: String, expected: String, actual: String },
+    HashMismatch {
+        member: String,
+        expected: String,
+        actual: String,
+    },
 }
 
 impl fmt::Display for ManifestError {
@@ -56,9 +61,15 @@ impl fmt::Display for ManifestError {
             ManifestError::UnsupportedSchema(v) => {
                 write!(f, "manifest schema_version {v} is not supported (expected {SUPPORTED_SCHEMA_VERSION})")
             }
-            ManifestError::WrongApp(app) => write!(f, "manifest is for app '{app}', not 'persona-forge'"),
+            ManifestError::WrongApp(app) => {
+                write!(f, "manifest is for app '{app}', not 'persona-forge'")
+            }
             ManifestError::MissingMember(m) => write!(f, "bundle is missing required member: {m}"),
-            ManifestError::HashMismatch { member, expected, actual } => write!(
+            ManifestError::HashMismatch {
+                member,
+                expected,
+                actual,
+            } => write!(
                 f,
                 "sha256 mismatch for {member}: manifest says {expected}, computed {actual}"
             ),
@@ -82,7 +93,8 @@ fn hex_encode(bytes: &[u8]) -> String {
 /// Load `manifest.json` from `bundle_dir` and parse it. Does not touch any other file.
 pub fn load(bundle_dir: &Path) -> Result<Manifest, ManifestError> {
     let path = bundle_dir.join("manifest.json");
-    let text = fs::read_to_string(&path).map_err(|e| ManifestError::Io(path.display().to_string(), e))?;
+    let text =
+        fs::read_to_string(&path).map_err(|e| ManifestError::Io(path.display().to_string(), e))?;
     let manifest: Manifest = serde_json::from_str(&text).map_err(ManifestError::Parse)?;
     if manifest.schema_version != SUPPORTED_SCHEMA_VERSION {
         return Err(ManifestError::UnsupportedSchema(manifest.schema_version));
@@ -93,21 +105,41 @@ pub fn load(bundle_dir: &Path) -> Result<Manifest, ManifestError> {
     Ok(manifest)
 }
 
-/// Verify every member the manifest references exists in `bundle_dir` and matches its declared
-/// SHA-256. Fail-closed: the first mismatch or missing file aborts before anything is mutated.
-pub fn verify_bundle(manifest: &Manifest, bundle_dir: &Path) -> Result<(), ManifestError> {
+/// Verify the wheel and requirements file the manifest references exist in `bundle_dir` and
+/// match their declared SHA-256. Fail-closed: the first mismatch or missing file aborts before
+/// anything is mutated. Excludes `uv` (bundled once, verified only by `verify_bundle`; the
+/// supervisor/retention paths that consume a manifest already-verified-for-provisioning never
+/// need the `uv` binary itself).
+pub fn verify_payload(manifest: &Manifest, bundle_dir: &Path) -> Result<(), ManifestError> {
     verify_member(bundle_dir, &manifest.wheel.file, &manifest.wheel.sha256)?;
-    verify_member(bundle_dir, &manifest.uv.file, &manifest.uv.sha256)?;
-    verify_member(bundle_dir, &manifest.requirements_file, &manifest.requirements_sha256)?;
+    verify_member(
+        bundle_dir,
+        &manifest.requirements_file,
+        &manifest.requirements_sha256,
+    )?;
     Ok(())
 }
 
-fn verify_member(bundle_dir: &Path, member: &str, expected_sha256: &str) -> Result<(), ManifestError> {
+/// Verify every member the manifest references (wheel, requirements, and `uv`) exists in
+/// `bundle_dir` and matches its declared SHA-256. Fail-closed: the first mismatch or missing
+/// file aborts before anything is mutated.
+pub fn verify_bundle(manifest: &Manifest, bundle_dir: &Path) -> Result<(), ManifestError> {
+    verify_payload(manifest, bundle_dir)?;
+    verify_member(bundle_dir, &manifest.uv.file, &manifest.uv.sha256)?;
+    Ok(())
+}
+
+fn verify_member(
+    bundle_dir: &Path,
+    member: &str,
+    expected_sha256: &str,
+) -> Result<(), ManifestError> {
     let path: PathBuf = bundle_dir.join(member);
     if !path.is_file() {
         return Err(ManifestError::MissingMember(member.to_string()));
     }
-    let actual = sha256_file(&path).map_err(|e| ManifestError::Io(path.display().to_string(), e))?;
+    let actual =
+        sha256_file(&path).map_err(|e| ManifestError::Io(path.display().to_string(), e))?;
     if !actual.eq_ignore_ascii_case(expected_sha256) {
         return Err(ManifestError::HashMismatch {
             member: member.to_string(),
@@ -149,13 +181,23 @@ mod tests {
     #[test]
     fn loads_and_verifies_a_clean_bundle() {
         let dir = tempfile::tempdir().unwrap();
-        write_file(dir.path(), "persona_forge-1.3.0-py3-none-any.whl", b"wheel-bytes");
+        write_file(
+            dir.path(),
+            "persona_forge-1.3.0-py3-none-any.whl",
+            b"wheel-bytes",
+        );
         write_file(dir.path(), "uv", b"uv-binary-bytes");
-        write_file(dir.path(), "requirements-x86_64-unknown-linux-gnu.txt", b"foo==1.0\n");
+        write_file(
+            dir.path(),
+            "requirements-x86_64-unknown-linux-gnu.txt",
+            b"foo==1.0\n",
+        );
 
-        let wheel_sha = sha256_file(&dir.path().join("persona_forge-1.3.0-py3-none-any.whl")).unwrap();
+        let wheel_sha =
+            sha256_file(&dir.path().join("persona_forge-1.3.0-py3-none-any.whl")).unwrap();
         let uv_sha = sha256_file(&dir.path().join("uv")).unwrap();
-        let req_sha = sha256_file(&dir.path().join("requirements-x86_64-unknown-linux-gnu.txt")).unwrap();
+        let req_sha =
+            sha256_file(&dir.path().join("requirements-x86_64-unknown-linux-gnu.txt")).unwrap();
         write_file(
             dir.path(),
             "manifest.json",
@@ -199,26 +241,119 @@ mod tests {
     #[test]
     fn detects_missing_member() {
         let dir = tempfile::tempdir().unwrap();
-        write_file(dir.path(), "manifest.json", sample_manifest_json("x", "y", "z").as_bytes());
+        write_file(
+            dir.path(),
+            "manifest.json",
+            sample_manifest_json("x", "y", "z").as_bytes(),
+        );
         let manifest = load(dir.path()).unwrap();
         let err = verify_bundle(&manifest, dir.path()).unwrap_err();
-        assert!(matches!(err, ManifestError::MissingMember(m) if m == "persona_forge-1.3.0-py3-none-any.whl"));
+        assert!(
+            matches!(err, ManifestError::MissingMember(m) if m == "persona_forge-1.3.0-py3-none-any.whl")
+        );
     }
 
     #[test]
     fn detects_hash_mismatch() {
         let dir = tempfile::tempdir().unwrap();
-        write_file(dir.path(), "persona_forge-1.3.0-py3-none-any.whl", b"wheel-bytes");
+        write_file(
+            dir.path(),
+            "persona_forge-1.3.0-py3-none-any.whl",
+            b"wheel-bytes",
+        );
         write_file(dir.path(), "uv", b"uv-binary-bytes");
-        write_file(dir.path(), "requirements-x86_64-unknown-linux-gnu.txt", b"foo==1.0\n");
+        write_file(
+            dir.path(),
+            "requirements-x86_64-unknown-linux-gnu.txt",
+            b"foo==1.0\n",
+        );
         write_file(
             dir.path(),
             "manifest.json",
-            sample_manifest_json("0000000000000000000000000000000000000000000000000000000000000000", "y", "z")
-                .as_bytes(),
+            sample_manifest_json(
+                "0000000000000000000000000000000000000000000000000000000000000000",
+                "y",
+                "z",
+            )
+            .as_bytes(),
         );
         let manifest = load(dir.path()).unwrap();
         let err = verify_bundle(&manifest, dir.path()).unwrap_err();
-        assert!(matches!(err, ManifestError::HashMismatch { member, .. } if member == "persona_forge-1.3.0-py3-none-any.whl"));
+        assert!(
+            matches!(err, ManifestError::HashMismatch { member, .. } if member == "persona_forge-1.3.0-py3-none-any.whl")
+        );
+    }
+
+    #[test]
+    fn verify_payload_passes_when_uv_is_missing_or_wrong() {
+        let dir = tempfile::tempdir().unwrap();
+        write_file(
+            dir.path(),
+            "persona_forge-1.3.0-py3-none-any.whl",
+            b"wheel-bytes",
+        );
+        write_file(
+            dir.path(),
+            "requirements-x86_64-unknown-linux-gnu.txt",
+            b"foo==1.0\n",
+        );
+        // uv deliberately absent; its sha is nonsense too.
+        let wheel_sha =
+            sha256_file(&dir.path().join("persona_forge-1.3.0-py3-none-any.whl")).unwrap();
+        let req_sha =
+            sha256_file(&dir.path().join("requirements-x86_64-unknown-linux-gnu.txt")).unwrap();
+        write_file(
+            dir.path(),
+            "manifest.json",
+            sample_manifest_json(&wheel_sha, "not-even-a-real-hash", &req_sha).as_bytes(),
+        );
+
+        let manifest = load(dir.path()).unwrap();
+        verify_payload(&manifest, dir.path()).expect("verify_payload must not check uv at all");
+        // verify_bundle, which does check uv, still fails because uv is missing.
+        let err = verify_bundle(&manifest, dir.path()).unwrap_err();
+        assert!(matches!(err, ManifestError::MissingMember(m) if m == "uv"));
+    }
+
+    #[test]
+    fn verify_payload_detects_wheel_and_requirements_mismatches() {
+        let dir = tempfile::tempdir().unwrap();
+        write_file(
+            dir.path(),
+            "persona_forge-1.3.0-py3-none-any.whl",
+            b"wheel-bytes",
+        );
+        write_file(
+            dir.path(),
+            "requirements-x86_64-unknown-linux-gnu.txt",
+            b"foo==1.0\n",
+        );
+        let bad_sha = "0".repeat(64);
+
+        let req_sha =
+            sha256_file(&dir.path().join("requirements-x86_64-unknown-linux-gnu.txt")).unwrap();
+        write_file(
+            dir.path(),
+            "manifest.json",
+            sample_manifest_json(&bad_sha, "irrelevant", &req_sha).as_bytes(),
+        );
+        let manifest = load(dir.path()).unwrap();
+        let err = verify_payload(&manifest, dir.path()).unwrap_err();
+        assert!(
+            matches!(err, ManifestError::HashMismatch { member, .. } if member == "persona_forge-1.3.0-py3-none-any.whl")
+        );
+
+        let wheel_sha =
+            sha256_file(&dir.path().join("persona_forge-1.3.0-py3-none-any.whl")).unwrap();
+        write_file(
+            dir.path(),
+            "manifest.json",
+            sample_manifest_json(&wheel_sha, "irrelevant", &bad_sha).as_bytes(),
+        );
+        let manifest = load(dir.path()).unwrap();
+        let err = verify_payload(&manifest, dir.path()).unwrap_err();
+        assert!(
+            matches!(err, ManifestError::HashMismatch { member, .. } if member == "requirements-x86_64-unknown-linux-gnu.txt")
+        );
     }
 }

@@ -9,9 +9,7 @@
 //! environment variables or manifest secrets - there are none in the manifest schema, and none
 //! of the args this launcher forwards are inspected or echoed beyond argv itself.
 
-mod bootstrap;
-mod manifest;
-mod paths;
+use persona_forge_launcher::{bootstrap, manifest, paths};
 
 use std::env;
 use std::path::PathBuf;
@@ -38,7 +36,8 @@ fn run() -> Result<ExitCode, String> {
     let bundle = bundle_dir();
 
     let manifest = manifest::load(&bundle).map_err(|e| format!("manifest error: {e}"))?;
-    manifest::verify_bundle(&manifest, &bundle).map_err(|e| format!("bundle verification failed: {e}"))?;
+    manifest::verify_bundle(&manifest, &bundle)
+        .map_err(|e| format!("bundle verification failed: {e}"))?;
 
     let environ: paths::Environ = env::vars().collect();
     let home = env::var("HOME")
@@ -52,8 +51,15 @@ fn run() -> Result<ExitCode, String> {
     let uv_path = bundle.join(&manifest.uv.file);
 
     let runner = bootstrap::SystemRunner;
-    let env_dir = bootstrap::ensure_env(&manifest, &bundle, &uv_path, &versions_dir, &current_marker, &runner)
-        .map_err(|e| format!("environment bootstrap failed: {e}"))?;
+    let env_dir = bootstrap::ensure_env(
+        &manifest,
+        &bundle,
+        &uv_path,
+        &versions_dir,
+        &current_marker,
+        &runner,
+    )
+    .map_err(|e| format!("environment bootstrap failed: {e}"))?;
 
     let python = bootstrap::venv_python(&env_dir);
     let args: Vec<String> = env::args().skip(1).collect();

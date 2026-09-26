@@ -23,6 +23,10 @@ on:
         description: "Release tag to attach launcher archives to (e.g. persona-forge-v1.3.0)"
         required: true
         type: string
+      dry_run:
+        description: "Run the full pipeline but never publish a GitHub Release"
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -342,7 +346,7 @@ jobs:
         run: uv run --frozen python scripts/validate_release_contract.py --dir release --version ${{ steps.version.outputs.version }}
 
       - name: Update published release with artifacts
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' && !inputs.dry_run
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ github.ref_name }}
@@ -352,7 +356,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
       - name: Create manual release with generated notes
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && !inputs.dry_run
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ github.event.inputs.tag_name }}

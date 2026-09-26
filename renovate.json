@@ -12,7 +12,9 @@
     {
       "customType": "regex",
       "managerFilePatterns": [
-        "//^\\.github\\/workflows\\/release-launcher\\.yml$//"
+        "//^\\.github\\/workflows\\/release-launcher\\.yml$//",
+        "//^\\.github\\/workflows\\/ci-desktop\\.yml$//",
+        "//^\\.github\\/workflows\\/desktop-build\\.yml$//"
       ],
       "matchStrings": ["RUST_VERSION:\\s*[\\\"'](?<currentValue>\\d+\\.\\d+)[\\\"']"],
       "depNameTemplate": "rust-lang/rust",

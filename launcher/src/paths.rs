@@ -8,21 +8,62 @@ use std::path::{Path, PathBuf};
 pub type Environ = HashMap<String, String>;
 
 fn clean(environ: &Environ, key: &str) -> Option<String> {
-    environ.get(key).map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+    environ
+        .get(key)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 fn expand(value: &str, home: &Path) -> PathBuf {
     if value == "~" {
         return home.to_path_buf();
     }
-    if let Some(rest) = value.strip_prefix("~/").or_else(|| value.strip_prefix("~\\")) {
+    if let Some(rest) = value
+        .strip_prefix("~/")
+        .or_else(|| value.strip_prefix("~\\"))
+    {
         return home.join(rest);
     }
     PathBuf::from(value)
 }
 
 /// Resolve the application-state root: `PERSONA_FORGE_HOME` else the platform default.
+///
+/// # Panics
+///
+/// Panics if the resolved root is a bare filesystem root (e.g. `/` or `C:\`), mirroring
+/// `src/persona_forge/paths.py::app_data_root`'s `ValueError` (lockstep, D9). Both sides treat
+/// this as an unrecoverable configuration error, not a value the caller should route around.
 pub fn app_data_root(environ: &Environ, platform: &str, home: &Path) -> PathBuf {
+    let root = resolve_app_data_root(environ, platform, home);
+    assert!(
+        !is_bare_root(&root),
+        "PERSONA_FORGE_HOME must not resolve to a filesystem root: {}",
+        root.display()
+    );
+    root
+}
+
+/// True if `path` has no `Normal` component at all -- just a root and/or a Windows drive
+/// prefix (`/`, `C:\`, `C:/`, `\\server\share\`, ...). Comparing rendered strings against a
+/// hand-built anchor is fragile here: on Windows, `PathBuf::from("/")` and a
+/// component-reconstructed anchor can render with different separators (`/` vs `\`) even when
+/// they're the same path, so a plain `==` on `OsStr` silently never fires. Walking
+/// `Path::components()` sidesteps that entirely.
+fn is_bare_root(path: &Path) -> bool {
+    let mut components = path.components().peekable();
+    if components.peek().is_none() {
+        return false; // an empty path is not a root
+    }
+    components.all(|c| {
+        matches!(
+            c,
+            std::path::Component::Prefix(_) | std::path::Component::RootDir
+        )
+    })
+}
+
+fn resolve_app_data_root(environ: &Environ, platform: &str, home: &Path) -> PathBuf {
     if let Some(override_value) = clean(environ, "PERSONA_FORGE_HOME") {
         return expand(&override_value, home);
     }
@@ -61,14 +102,20 @@ mod tests {
     use super::*;
 
     fn env(pairs: &[(&str, &str)]) -> Environ {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
     }
 
     #[test]
     fn honors_persona_forge_home_override() {
         let home = PathBuf::from("/home/nick");
         let e = env(&[("PERSONA_FORGE_HOME", "/custom/root")]);
-        assert_eq!(app_data_root(&e, "linux", &home), PathBuf::from("/custom/root"));
+        assert_eq!(
+            app_data_root(&e, "linux", &home),
+            PathBuf::from("/custom/root")
+        );
     }
 
     #[test]
@@ -82,7 +129,10 @@ mod tests {
     fn linux_default_uses_xdg_data_home() {
         let home = PathBuf::from("/home/nick");
         let e = env(&[("XDG_DATA_HOME", "/xdg")]);
-        assert_eq!(app_data_root(&e, "linux", &home), PathBuf::from("/xdg/persona-forge"));
+        assert_eq!(
+            app_data_root(&e, "linux", &home),
+            PathBuf::from("/xdg/persona-forge")
+        );
     }
 
     #[test]
@@ -103,6 +153,26 @@ mod tests {
             app_data_root(&e, "darwin", &home),
             home.join(".config").join("persona-forge")
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "must not resolve to a filesystem root")]
+    fn rejects_an_override_that_resolves_to_a_filesystem_root() {
+        let home = PathBuf::from("/home/nick");
+        let e = env(&[("PERSONA_FORGE_HOME", "/")]);
+        app_data_root(&e, "linux", &home);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[should_panic(expected = "must not resolve to a filesystem root")]
+    fn rejects_an_override_that_resolves_to_a_windows_drive_root() {
+        // `C:\` only parses as a drive-prefix + root on a Windows host; on Unix it's just one
+        // opaque `Normal` component, so this case is meaningless (and would falsely never
+        // panic) off Windows.
+        let home = PathBuf::from("/home/nick");
+        let e = env(&[("PERSONA_FORGE_HOME", "C:\\")]);
+        app_data_root(&e, "linux", &home);
     }
 
     #[test]
@@ -131,7 +201,10 @@ mod tests {
         let e = env(&[]);
         let root = app_data_root(&e, "linux", &home);
         assert_eq!(launcher_root(&e, "linux", &home), root.join("launcher"));
-        assert_eq!(versions_dir(&e, "linux", &home), root.join("launcher").join("versions"));
+        assert_eq!(
+            versions_dir(&e, "linux", &home),
+            root.join("launcher").join("versions")
+        );
         assert_eq!(
             current_marker(&e, "linux", &home),
             root.join("launcher").join("current.txt")

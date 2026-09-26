@@ -325,6 +325,8 @@ class TestServerCommand:
     def test_posix_argv_exact(self):
         argv = cli._server_command("127.0.0.1", 8318, platform="linux")
         assert argv == [
+            sys.executable,
+            "-m",
             "gunicorn",
             "persona_forge.app:app",
             "-w",
@@ -416,6 +418,28 @@ class TestSpawnedProcessAcceptance:
             assert body["backend"] == "pocket_tts"
             assert body.get("swap_in_progress") is False
             assert body.get("reconfig_in_progress") is False
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=10)
+
+    def test_reaches_ready_with_reduced_path(self, tmp_path):
+        """Bug protocol (Phase 2 Task 0): cmd_serve used os.execvp, which does a PATH lookup
+        for 'gunicorn'/'waitress-serve'. Reduce PATH to the OS default (no .venv/bin, as a
+        native launcher's environment would be) and confirm /health is still reachable. Before
+        the fix this fails with FileNotFoundError for gunicorn; it is the regression test."""
+        from tests.helpers.readiness import poll_health
+
+        port = _free_port()
+        reduced_path = "C:\\Windows\\System32;C:\\Windows" if sys.platform.startswith("win") else os.defpath
+        proc = self._spawn(tmp_path, port, extra_env={"PATH": reduced_path})
+        try:
+            body = poll_health(f"http://127.0.0.1:{port}", timeout=20)
+            assert body["status"] == "ok"
+            assert body["service_started"] is True
         finally:
             proc.terminate()
             try:
