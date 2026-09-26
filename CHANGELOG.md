@@ -1,5 +1,50 @@
 # Changelog
 
+## [2.2.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v2.1.4...persona-forge-v2.2.0) (2026-09-26)
+
+
+### Features
+
+* **api:** report desktop shell in /health and hide web update banner in the desktop app ([76e1f39](https://github.com/nmorgowicz-org/persona-forge/commit/76e1f395346a5ec2d151266c0a70702a99d5e580))
+* **desktop:** add Tauri desktop shell with managed local server ([76e1f39](https://github.com/nmorgowicz-org/persona-forge/commit/76e1f395346a5ec2d151266c0a70702a99d5e580))
+* **frontend:** native macOS window styling inside the desktop app ([76e1f39](https://github.com/nmorgowicz-org/persona-forge/commit/76e1f395346a5ec2d151266c0a70702a99d5e580))
+* **launcher:** extract core library with server supervisor and env retention ([cb6dd54](https://github.com/nmorgowicz-org/persona-forge/commit/cb6dd54ba768bb2b08a3ce7382cb26c097d3d908))
+* **ui:** save UI preferences on the server so they follow the install ([89929a6](https://github.com/nmorgowicz-org/persona-forge/commit/89929a6e1ae6a9bd02db25dd4feb37715511fd16))
+
+
+### Bug Fixes
+
+* **cli:** run gunicorn and waitress without relying on PATH so native serve works ([cb6dd54](https://github.com/nmorgowicz-org/persona-forge/commit/cb6dd54ba768bb2b08a3ce7382cb26c097d3d908))
+* **deps:** update rust crate sysinfo to v0.39.6 ([#340](https://github.com/nmorgowicz-org/persona-forge/issues/340)) ([4cb7fde](https://github.com/nmorgowicz-org/persona-forge/commit/4cb7fded5fa1830abdfd1176e7869715dfaa4c0d))
+
+
+### Documentation
+
+* **desktop:** correct D19 feed generation runner ([3248015](https://github.com/nmorgowicz-org/persona-forge/commit/32480151a306532b1e52b2ed7a01e2b0db8604b0))
+* **desktop:** macOS window polish (D20) and non-blocking downloads (D21) ([202ce77](https://github.com/nmorgowicz-org/persona-forge/commit/202ce77c236d463e65e889a559e8e907545e3b38))
+* **desktop:** record Phase 1 results and close the spike ([3248015](https://github.com/nmorgowicz-org/persona-forge/commit/32480151a306532b1e52b2ed7a01e2b0db8604b0))
+* **desktop:** release assets after desktop (D22) and automatic GPU acceleration (D23) ([513c774](https://github.com/nmorgowicz-org/persona-forge/commit/513c774ba53e352b1cd76699e4ae08d0bda21ab2))
+* **plan:** record desktop Phase 0 results ([7d2b3ea](https://github.com/nmorgowicz-org/persona-forge/commit/7d2b3ea018136730ca2a42964b10f5bc15d20a3f))
+* **plan:** record Phase 0R runner session results ([95d111f](https://github.com/nmorgowicz-org/persona-forge/commit/95d111f3d573f3f4291f987d4973352a9706ac10))
+
+
+### Continuous Integration
+
+* **desktop:** add desktop toolchain preflight and workflow stubs ([4420d40](https://github.com/nmorgowicz-org/persona-forge/commit/4420d403aa326d4baeea61e54066e77e18b11499))
+* **desktop:** add Rust test lane for launcher on Linux, macOS and Windows ([cb6dd54](https://github.com/nmorgowicz-org/persona-forge/commit/cb6dd54ba768bb2b08a3ce7382cb26c097d3d908))
+* **desktop:** build and test the desktop crate on Linux, macOS and Windows ([76e1f39](https://github.com/nmorgowicz-org/persona-forge/commit/76e1f395346a5ec2d151266c0a70702a99d5e580))
+* **desktop:** invoke Windows preflight through PowerShell ([7d2b3ea](https://github.com/nmorgowicz-org/persona-forge/commit/7d2b3ea018136730ca2a42964b10f5bc15d20a3f))
+* **desktop:** pin Windows preflight to Git Bash ([7d2b3ea](https://github.com/nmorgowicz-org/persona-forge/commit/7d2b3ea018136730ca2a42964b10f5bc15d20a3f))
+
+
+### Miscellaneous Chores
+
+* **ci:** declare self-hosted runner labels for actionlint ([4420d40](https://github.com/nmorgowicz-org/persona-forge/commit/4420d403aa326d4baeea61e54066e77e18b11499))
+* **ci:** duplicate actionlint config at repo root ([95d111f](https://github.com/nmorgowicz-org/persona-forge/commit/95d111f3d573f3f4291f987d4973352a9706ac10))
+* **deps:** update dependency motion to v13.4.1 ([#333](https://github.com/nmorgowicz-org/persona-forge/issues/333)) ([7b315d7](https://github.com/nmorgowicz-org/persona-forge/commit/7b315d72d85c069b6bcd7f8a40a670e8dc3e6f40))
+* **deps:** update dependency motion to v13.4.2 ([#339](https://github.com/nmorgowicz-org/persona-forge/issues/339)) ([3b3c742](https://github.com/nmorgowicz-org/persona-forge/commit/3b3c742c79b7f2f593d8cb1a489520a7b3212ed9))
+* **deps:** update python:3.13-slim docker digest to 7c61056 ([#332](https://github.com/nmorgowicz-org/persona-forge/issues/332)) ([073d91b](https://github.com/nmorgowicz-org/persona-forge/commit/073d91b7fe3d8901297c58557837c95176f1409b))
+
 ## [2.1.4](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v2.1.3...persona-forge-v2.1.4) (2026-09-25)
 
 
