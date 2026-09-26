@@ -329,7 +329,34 @@ fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
             let check = tauri::menu::MenuItemBuilder::with_id("check_updates", "Check for Updates")
                 .build(app)?;
             let help = SubmenuBuilder::new(app, "Help").item(&check).build()?;
-            let menu = MenuBuilder::new(app).items(&[&edit, &help]).build()?;
+
+            // Spike-sized contract §6.4 menu: on macOS the first submenu is the app menu and
+            // gets the native About/Hide/Quit; elsewhere a File menu with an About dialog and
+            // Quit (1D finding: Windows had no way to quit and no About).
+            #[cfg(target_os = "macos")]
+            let menu = {
+                let app_menu = SubmenuBuilder::new(app, "desktop-spike")
+                    .item(&tauri::menu::PredefinedMenuItem::about(app, None, None)?)
+                    .separator()
+                    .item(&tauri::menu::PredefinedMenuItem::hide(app, None)?)
+                    .item(&tauri::menu::PredefinedMenuItem::hide_others(app, None)?)
+                    .separator()
+                    .item(&tauri::menu::PredefinedMenuItem::quit(app, None)?)
+                    .build()?;
+                MenuBuilder::new(app).items(&[&app_menu, &edit, &help]).build()?
+            };
+            #[cfg(not(target_os = "macos"))]
+            let menu = {
+                let about = tauri::menu::MenuItemBuilder::with_id("about", "About desktop-spike")
+                    .build(app)?;
+                let quit = tauri::menu::PredefinedMenuItem::quit(app, None)?;
+                let file = SubmenuBuilder::new(app, "File")
+                    .item(&about)
+                    .separator()
+                    .item(&quit)
+                    .build()?;
+                MenuBuilder::new(app).items(&[&file, &edit, &help]).build()?
+            };
             // macOS ignores per-window menus: the app menu is what the menu bar shows, so
             // set it app-wide (1D finding: the default menu appeared, with an empty Help)
             app.set_menu(menu.clone())?;
@@ -437,7 +464,17 @@ fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
             Ok(())
         })
         .on_menu_event(|app, event| {
-            if event.id().0 == "check_updates" {
+            if event.id().0 == "about" {
+                // Windows/Linux: no native About panel, so a dialog with the build version
+                use tauri_plugin_dialog::DialogExt;
+                app.dialog()
+                    .message(format!(
+                        "desktop-spike {}",
+                        app.package_info().version
+                    ))
+                    .title("About desktop-spike")
+                    .show(|_| {});
+            } else if event.id().0 == "check_updates" {
                 #[cfg(not(target_os = "macos"))]
                 {
                     let app = app.clone();
