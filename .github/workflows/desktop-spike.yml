@@ -325,12 +325,21 @@ jobs:
             New-Item -ItemType Directory -Force -Path $root | Out-Null
             Invoke-WebRequest -Uri "https://win.rustup.rs/x86_64" -OutFile "$env:TEMP\rustup-init.exe"
             & "$env:TEMP\rustup-init.exe" -y --default-toolchain 1.98-x86_64-pc-windows-msvc --profile minimal --no-modify-path
+            if ($LASTEXITCODE -ne 0) { throw "rustup-init failed ($LASTEXITCODE)" }
           }
-          cargo --version
+          # Always ensure the toolchain: a previous interrupted run (e.g. network
+          # blocked mid-download) can leave the cargo.exe shim without a toolchain.
+          $tc = "1.98-x86_64-pc-windows-msvc"
+          & "$env:CARGO_HOME\bin\rustup.exe" toolchain install $tc --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw "rustup toolchain install $tc failed ($LASTEXITCODE)" }
+          & "$env:CARGO_HOME\bin\rustup.exe" default $tc
+          if ($LASTEXITCODE -ne 0) { throw "rustup default $tc failed" }
+          & "$env:CARGO_HOME\bin\cargo.exe" --version
           if (-not (Test-Path "$env:CARGO_HOME\bin\cargo-tauri.exe")) {
-            cargo install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked
+            & "$env:CARGO_HOME\bin\cargo.exe" install tauri-cli --version ${{ env.TAURI_CLI_VERSION }} --locked
+            if ($LASTEXITCODE -ne 0) { throw "cargo install tauri-cli failed ($LASTEXITCODE)" }
           }
-          cargo tauri --version
+          & "$env:CARGO_HOME\bin\cargo.exe" tauri --version
           "RUSTUP_HOME=$env:RUSTUP_HOME" | Add-Content $env:GITHUB_ENV
           "CARGO_HOME=$env:CARGO_HOME" | Add-Content $env:GITHUB_ENV
           Add-Content $env:GITHUB_PATH "$env:CARGO_HOME\bin"
