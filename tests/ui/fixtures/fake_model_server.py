@@ -485,6 +485,17 @@ def _install_test_controls(app_module, rt):
         rt._base_load_in_progress = False
         return jsonify({"ok": True})
 
+    @app_module.app.route("/_test/reset-ui-preferences", methods=["POST"])
+    def _test_reset_ui_preferences():
+        # The Playwright webServer runs ONE shared fake server for the whole suite, so
+        # ui_preferences.json (server-persisted now, not per-browser-context localStorage)
+        # otherwise leaks across spec files. Specs that assert a pristine/default preference
+        # state call this first.
+        from persona_forge import paths, ui_preferences_store
+
+        (paths.runtime_data_dir() / ui_preferences_store._FILENAME).unlink(missing_ok=True)
+        return jsonify({"ok": True})
+
 
 def _install_fake_voice_design(app_module):
     def _fake_run_voice_design_request(description, sample_text, language, seed=None):
@@ -507,6 +518,11 @@ def main() -> None:
     # Ensure library dirs before importing app (uses segment_library which defaults to /segments).
     os.environ.setdefault("VOICE_LIBRARY_DIR", tempfile.mkdtemp(prefix="persona-forge-e2e-voices-"))
     os.environ.setdefault("SEGMENT_LIBRARY_DIR", tempfile.mkdtemp(prefix="persona-forge-e2e-segments-"))
+    # Isolate UI preferences (ui_preferences_store.py) too: without this, the server falls
+    # back to the platform-default app-state dir, so every spec in the run (and every run on
+    # a dev machine) shares one ui_preferences.json and preferences leak across tests — e.g.
+    # one spec's saved "segments" tab silently becomes another spec's default.
+    os.environ.setdefault("PERSONA_FORGE_HOME", tempfile.mkdtemp(prefix="persona-forge-e2e-home-"))
     _seed_fake_segment_library()
 
     rt = _install_fake_runtime()

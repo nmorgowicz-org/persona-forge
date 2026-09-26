@@ -359,6 +359,37 @@ Important notes:
 - Runs on the model executor with a 300-second timeout.
 - No auth gate; same rationale as POST `/runtime/config`.
 
+### GET /ui/preferences
+
+- Purpose: read the saved UI preferences (contract D17 / §6.11). Works before the model loads
+  (never 503).
+- Response (JSON): `{"values": {...}}` — `{}` when nothing has been saved yet.
+- Persisted to `ui_preferences.json` in the same directory as `runtime.json`.
+
+### POST /ui/preferences
+
+- Purpose: merge UI preference values (theme, experience level, voice-library layout/toggle,
+  dismissed update version). Unknown keys and invalid values are rejected, so a stale client
+  cannot corrupt the store.
+- Request (JSON): `{"values": {<key>: <value>, ...}}`.
+
+Allowed keys:
+
+| Key | Value |
+| --- | --- |
+| `theme` | string, ≤ 32 chars |
+| `experienceLevel` | string, ≤ 32 chars |
+| `voiceLibrary.tab` | `"voices"` or `"segments"` |
+| `voiceLibrary.layout` | string, ≤ 32 chars |
+| `voiceLibrary.analysisExpanded` | boolean |
+| `updates.dismissedVersion` | string, ≤ 64 chars |
+
+- 200: full merged `{"values": {...}}`.
+- 400: invalid JSON, `values` missing or not an object, unknown key, or invalid value
+  (`{"error": "<message>"}`).
+- 413: body larger than 16 KB.
+- No auth gate; same rationale as POST `/runtime/config`.
+
 ### POST /health/validate-ref-text
 
 - Purpose: Validate the configured default reference (`REF_AUDIO`/`REF_AUDIO_PATH` + `REF_TEXT`)

@@ -4,6 +4,9 @@ async function ensureVoice(page) {
   await page.goto('/')
   if (!(await page.getByTestId('nav-voice-library').isVisible())) await page.getByRole('button', { name: 'Toggle Sidebar' }).click()
   await page.getByTestId('nav-voice-library').click()
+  // The library's active tab persists across sessions on the server now; a prior spec may
+  // have left it on "segments", which does not render voice-card.
+  await page.getByTestId('voice-library-tab-voices').click()
   // "Is the library empty?" is only answerable once a load has completed -- the store starts
   // empty, so a card count taken before then says nothing.
   await expect(page.locator('[data-testid="voice-library"][data-loaded="true"]')).toBeVisible()
@@ -19,6 +22,7 @@ async function ensureVoice(page) {
   if (await save.isVisible()) await save.click()
   if (!(await page.getByTestId('nav-voice-library').isVisible())) await page.getByRole('button', { name: 'Toggle Sidebar' }).click()
   await page.getByTestId('nav-voice-library').click()
+  await page.getByTestId('voice-library-tab-voices').click()
   await expect(page.locator('[data-testid="voice-card"]')).toHaveCount(1)
 }
 

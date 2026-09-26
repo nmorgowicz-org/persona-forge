@@ -276,7 +276,11 @@ test.describe('Stitch Studio quick-insert transaction', () => {
 })
 
 test.describe('Voice Library discoverability and segment browser scale', () => {
-  test('Voice Library switches between Reference voices and Segments without scrolling', async ({ page }) => {
+  test('Voice Library switches between Reference voices and Segments without scrolling', async ({ page, request }) => {
+    // A previous spec's real tab click can leave the server-persisted default on
+    // "segments" (tests/ui/fixtures/fake_model_server.py runs ONE shared server for the
+    // whole suite); this test's first assertion is specifically about the pristine default.
+    await request.post('/_test/reset-ui-preferences')
     await page.goto('/')
     await page.getByTestId('nav-voice-library').click()
 

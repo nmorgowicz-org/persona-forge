@@ -37,6 +37,9 @@ test.describe('Voice Edit workspace', () => {
     await expect(variants).toHaveCount(countBefore + 1, { timeout: 20000 })
 
     await page.getByTestId('nav-voice-library').click()
+    // The library's active tab persists across sessions on the server now; a prior spec may
+    // have left it on "segments", which does not render voice-card.
+    await page.getByTestId('voice-library-tab-voices').click()
     await expect(page.getByTestId('voice-card').first()).toContainText('Prosody Variants')
     // Repeated saves (earlier suite state, retries) can leave several variants sharing the
     // "Neutral 1.0x" label, so this asserts the label is present, not that it is unique.
@@ -110,12 +113,14 @@ test.describe('Voice Edit workspace', () => {
   test('Voice Library retains its existing prosody controls', async ({ page }) => {
     await page.goto('/')
     await page.getByTestId('nav-voice-library').click()
+    await page.getByTestId('voice-library-tab-voices').click()
     await expect(page.getByTestId('voice-card').first().getByRole('button', { name: /Adjust prosody/i })).toBeVisible()
   })
 
   test('Voice Library uses the shared compact prosody panel', async ({ page }) => {
     await page.goto('/')
     await page.getByTestId('nav-voice-library').click()
+    await page.getByTestId('voice-library-tab-voices').click()
     await page.getByTestId('voice-card').first().getByRole('button', { name: /Adjust prosody/i }).click()
     await expect(page.getByTestId('prosody-editor-panel')).toHaveAttribute('data-layout', 'compact')
   })

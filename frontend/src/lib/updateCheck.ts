@@ -1,9 +1,9 @@
 // Checks GitHub Releases for a newer persona-forge version than what /health reports.
 // Public repo, no auth — cached in localStorage to stay well under GitHub's rate limit.
+import { getPref, setPref } from './uiPreferences'
 
 const REPO = 'nmorgowicz-org/persona-forge'
 const CACHE_KEY = 'pf-update-check-cache'
-const DISMISSED_KEY = 'pf-update-dismissed-version'
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
 
 interface CachedCheck {
@@ -82,17 +82,9 @@ export async function checkForUpdate(
 }
 
 export function getDismissedVersion(): string | null {
-  try {
-    return localStorage.getItem(DISMISSED_KEY)
-  } catch {
-    return null
-  }
+  return getPref<string | null>('updates.dismissedVersion', null)
 }
 
 export function setDismissedVersion(version: string) {
-  try {
-    localStorage.setItem(DISMISSED_KEY, version)
-  } catch {
-    // non-critical
-  }
+  setPref('updates.dismissedVersion', version)
 }

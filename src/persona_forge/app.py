@@ -17,6 +17,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# D17 / §6.11: POST /ui/preferences bodies above this are rejected with 413.
+_UI_PREFERENCES_MAX_BODY = 16 * 1024
+
 
 import soundfile as sf
 from flask import Flask, Response, jsonify, request, send_from_directory, send_file
@@ -30,6 +33,7 @@ from persona_forge import (
     project_library,
     prosody_repair,
     segment_library,
+    ui_preferences_store,
     voice_design,
     voice_library,
 )
@@ -2252,6 +2256,30 @@ def runtime_config_reset():
     except Exception as exc:
         return jsonify({"error": f"Runtime config reset error: {exc}"}), 500
     return jsonify(state)
+
+
+@app.get("/ui/preferences")
+def ui_preferences_get():
+    # D17: no model dependency — preferences must be readable before the model loads.
+    return jsonify({"values": ui_preferences_store.load()})
+
+
+@app.post("/ui/preferences")
+def ui_preferences_post():
+    # Same no-auth-gate rationale as /runtime/config (trusted-network posture, SECURITY.md).
+    if request.content_length and request.content_length > _UI_PREFERENCES_MAX_BODY:
+        return jsonify({"error": "UI preferences body too large"}), 413
+    data = _json_body()
+    values = data.get("values") if isinstance(data, dict) else None
+    if not isinstance(values, dict):
+        return jsonify({"error": "Body must be a JSON object with a 'values' object"}), 400
+    try:
+        merged = ui_preferences_store.merge_and_save(values)
+    except ui_preferences_store.PreferencesInvalid as exc:
+        # safe_message is built from the key and a validator reason only (CodeQL:
+        # py/information-exposure-through-exception)
+        return jsonify({"error": exc.safe_message}), 400
+    return jsonify({"values": merged})
 
 
 @app.post("/generate")

@@ -4,6 +4,9 @@ test.describe('voice library', () => {
   test('view voices, inline-edit reference text, delete a voice, confirm empty state when none', async ({ page }) => {
     await page.goto('/')
     await page.getByTestId('nav-voice-library').click()
+    // The library's active tab persists across sessions on the server now; a prior spec may
+    // have left it on "segments", which does not render voice-card.
+    await page.getByTestId('voice-library-tab-voices').click()
 
     // Check if voices exist; if not, create one. The load must have finished first: the store
     // starts empty, so a card count before then cannot distinguish "none" from "not yet".
@@ -25,6 +28,7 @@ test.describe('voice library', () => {
       if (await saveBtn.isVisible()) await saveBtn.click()
 
       await page.getByTestId('nav-voice-library').click()
+      await page.getByTestId('voice-library-tab-voices').click()
       await expect(page.locator('[data-testid="voice-card"]')).toHaveCount(1, { timeout: 20000 })
     }
 
