@@ -203,7 +203,7 @@ fn main() {
         Args::CiUpdate(out_path) => {
             // updater plugins need an app context; build one with no windows
             let app = build_app(None).expect("failed to build spike app");
-            run_ci_update(app.handle().clone(), out_path);
+            let _ = run_ci_update(app.handle().clone(), out_path); // exits the process internally
         }
         Args::Gui => {}
     }
