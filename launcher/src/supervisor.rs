@@ -12,6 +12,35 @@ use process_wrap::std::*;
 
 use crate::health;
 
+/// Removes AppImage environment poisoning before spawning `uv` (bootstrap) or the server
+/// (supervisor). Inside an AppImage, AppRun prepends the extraction/mount dir to `PATH` and
+/// the bundled python wrapper exports `PYTHONHOME`/`PYTHONPATH` pointing into it. The bundled
+/// python has no stdlib (linuxdeploy deploys `libpython`, not the stdlib), so if `uv venv`
+/// discovers it — or the venv python inherits `PYTHONHOME` — provisioning or serving dies with
+/// `ModuleNotFoundError: No module named 'encodings'` (Phase 4 smoke finding).
+pub fn sanitize_command_env(command: &mut std::process::Command) {
+    command.env_remove("PYTHONHOME");
+    command.env_remove("PYTHONPATH");
+    // Drop PATH entries inside the AppImage tree: `$APPDIR/...` for mounts, and the
+    // ephemeral `/tmp/appimage_extracted_*` dirs used by APPIMAGE_EXTRACT_AND_RUN.
+    let appdir = std::env::var_os("APPDIR").map(std::path::PathBuf::from);
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let filtered: Vec<_> = std::env::split_paths(&path)
+        .filter(|entry| {
+            let as_str = entry.to_string_lossy();
+            if as_str.contains("appimage_extracted") {
+                return false;
+            }
+            match &appdir {
+                Some(dir) => !entry.starts_with(dir),
+                None => true,
+            }
+        })
+        .collect();
+    let joined = std::env::join_paths(filtered.iter().map(|p| p.as_path())).unwrap_or(path);
+    command.env("PATH", joined);
+}
+
 pub struct ServerSpec {
     pub python: PathBuf,
     /// "127.0.0.1" or "0.0.0.0" (D18).
@@ -62,6 +91,7 @@ impl ServerHandle {
 
         let mut command = CommandWrap::with_new(program, |command| {
             command.args(args);
+            crate::supervisor::sanitize_command_env(command);
             for (k, v) in env {
                 command.env(k, v);
             }
@@ -226,6 +256,39 @@ fn command_line_matches(pid: u32, needle: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitizer_strips_appimage_paths_and_python_home() {
+        let mut command = std::process::Command::new("true");
+        // Poison the *parent* env the way AppRun does, then sanitize like spawn does.
+        std::env::set_var("PYTHONHOME", "/tmp/appimage_extracted_x/usr/");
+        std::env::set_var(
+            "PATH",
+            format!(
+                "/tmp/appimage_extracted_x/usr/bin:/usr/local/bin:{}",
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        );
+        sanitize_command_env(&mut command);
+        std::env::remove_var("PYTHONHOME");
+
+        let env = command.get_envs().collect::<Vec<_>>();
+        assert!(env.contains(&(std::ffi::OsStr::new("PYTHONHOME"), None)));
+        let path = env
+            .iter()
+            .find(|(k, _)| *k == std::ffi::OsStr::new("PATH"))
+            .and_then(|(_, v)| v.to_owned())
+            .expect("PATH overridden");
+        let path = path.to_string_lossy();
+        assert!(
+            !path.contains("appimage_extracted"),
+            "PATH still poisoned: {path}"
+        );
+        assert!(
+            path.contains("/usr/local/bin"),
+            "PATH lost system entries: {path}"
+        );
+    }
 
     #[test]
     fn pidfile_round_trips() {
