@@ -130,7 +130,9 @@ jobs:
             --api-key-file ~/.appstoreconnect/key.json \
             --wait --staple "desktop-spike.app"
           rm -f key.pem cert.pem
-          zip -q -r signed-app.zip "desktop-spike.app"
+          # -y: store symlinks as links; following them breaks Sparkle.framework's
+          # Versions/Current layout and its signature
+          zip -q -r -y signed-app.zip "desktop-spike.app"
 
       - name: Remove key material
         if: always()
@@ -258,14 +260,21 @@ jobs:
           xcrun stapler validate "desktop-spike-${{ inputs.version }}.dmg"
           spctl --assess --type open --context context:primary-signature --verbose=4 \
             "desktop-spike-${{ inputs.version }}.dmg"
-          # nested code (Sparkle helpers/XPCs) must carry our Team ID
-          FOUND=0
+          # nested code (Sparkle helpers/XPCs) must carry the app's own Team ID
+          APP="$GITHUB_WORKSPACE/appzip/desktop-spike.app"
+          team_of() { codesign -dv --verbose=4 "$1" 2>&1 | sed -n 's/^TeamIdentifier=//p'; }
+          APP_TEAM=$(team_of "$APP")
+          [ -n "$APP_TEAM" ] && [ "$APP_TEAM" != "not set" ] || { echo "app has no TeamIdentifier"; exit 1; }
+          echo "app TeamIdentifier=$APP_TEAM"
+          COUNT=0
           while IFS= read -r f; do
-            echo "-- $f"
-            codesign -dv --verbose=4 "$f" 2>&1 | grep -E "TeamIdentifier=|Authority=" || true
-            FOUND=1
-          done < <(find "appzip/desktop-spike.app" -type f \( -name "Autoupdate" -o -name "*.xpc" \))
-          [ "$FOUND" = "1" ] || { echo "no nested Sparkle helpers found to inspect"; exit 1; }
+            T=$(team_of "$f")
+            echo "-- ${f#"$APP"/}: TeamIdentifier=$T"
+            [ "$T" = "$APP_TEAM" ] || { echo "Team ID mismatch on $f"; exit 1; }
+            COUNT=$((COUNT + 1))
+          done < <(find "$APP/Contents/Frameworks" \( -type f -name Autoupdate \) -o \( -type d \( -name "*.xpc" -o -name "Updater.app" \) \))
+          [ "$COUNT" -gt 0 ] || { echo "no nested Sparkle helpers found to inspect"; exit 1; }
+          echo "$COUNT nested Sparkle helpers carry Team ID $APP_TEAM"
 
   spike-sparkle-sig:
     name: spike-sparkle-sig (${{ inputs.version }})

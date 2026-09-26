@@ -6,6 +6,7 @@ argv -- both paths come from argv, contents from files/stdin.
 
 usage: seed_to_pem.py <seed-file> <out-pem>
 """
+import base64
 import sys
 
 
@@ -19,8 +20,11 @@ def main() -> None:
         sys.exit(f"cannot read seed: {exc}")
     if len(seed) != 32:
         sys.exit(f"seed must be exactly 32 raw bytes, got {len(seed)}")
-    hexder = "302e020100300506032b657004220420" + seed.hex()
-    lines = [hexder[i : i + 64] for i in range(0, len(hexder), 64)]
+    # PKCS#8 DER prefix for an Ed25519 private key, then the 32-byte seed;
+    # the PEM body is base64 of the DER (not hex).
+    der = bytes.fromhex("302e020100300506032b657004220420") + seed
+    b64 = base64.b64encode(der).decode("ascii")
+    lines = [b64[i : i + 64] for i in range(0, len(b64), 64)]
     try:
         with open(sys.argv[2], "w") as f:
             f.write("-----BEGIN PRIVATE KEY-----\n")
