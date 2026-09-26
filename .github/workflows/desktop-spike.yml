@@ -471,7 +471,8 @@ jobs:
   spike-linux-publish:
     name: spike-linux-publish
     needs: spike-updater-sigs
-    runs-on: arc-general
+    # our desktop image carries a pinned gh; the stock arc-general image has none
+    runs-on: arc-persona-forge-desktop
     timeout-minutes: 20
     permissions:
       contents: write
