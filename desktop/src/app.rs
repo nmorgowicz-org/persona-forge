@@ -745,7 +745,14 @@ fn run_bootstrap<R: Runtime + 'static>(app: AppHandle<R>) {
 
     let network_access = s.network_access;
     let chosen_port = match decision {
-        port::PortDecision::Use(p) => p,
+        port::PortDecision::Use(p) => {
+            // Persist even when unchanged: the GUI check (and anything else reading
+            // desktop/settings.json) must see the port without waiting for a port move.
+            let mut s2 = s;
+            s2.port = Some(p);
+            let _ = settings::save(&desktop_dir, &s2);
+            p
+        }
         port::PortDecision::Moved { to, .. } => {
             let mut s2 = s;
             s2.port = Some(to);
