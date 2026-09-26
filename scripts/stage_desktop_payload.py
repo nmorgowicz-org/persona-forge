@@ -24,6 +24,11 @@ import shutil
 import sys
 from pathlib import Path
 
+# When run as `python scripts/stage_desktop_payload.py`, sys.path[0] is scripts/, not the repo
+# root, so `from scripts import ...` fails on a fresh checkout (tests work because pytest puts
+# the repo root on sys.path). Put the repo root (this script's parent's parent) there.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from scripts import package_launcher_archive as pla
 
 # Desktop build target -> uv --python-platform value. Reuses the values already verified in
