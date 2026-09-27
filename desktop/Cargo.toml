@@ -12,29 +12,29 @@ name = "persona-forge-desktop"
 path = "src/main.rs"
 
 [build-dependencies]
-tauri-build = { version = "=2.6.3", features = [] }
+tauri-build = { version = "=2.7.0", features = [] }
 
 [dependencies]
 persona-forge-launcher = { path = "../launcher" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "=2.11.6", features = ["tray-icon", "macos-private-api", "image-png"] }
+tauri = { version = "=2.12.0", features = ["tray-icon", "macos-private-api", "image-png"] }
 # Pinned exactly: tauri 2.11.6 itself declares these as its minimum versions, but Cargo's
 # semver-compatible resolution can float them to newer patches with API drift that breaks the
 # build (observed: tauri-runtime 2.12.0 / tauri-macros 2.7.0 against tauri 2.11.6). Declaring
 # them directly, even though nothing here calls them directly, pins the whole graph.
-tauri-runtime = "=2.11.3"
-tauri-runtime-wry = "=2.11.4"
-tauri-macros = "=2.6.3"
-tauri-utils = "=2.9.3"
-tauri-plugin-single-instance = "=2.4.5"
-tauri-plugin-window-state = "=2.4.1"
-tauri-plugin-dialog = "=2.7.3"
-tauri-plugin-opener = "=2.5.5"
-tauri-plugin-notification = "=2.4.0"
-tauri-plugin-log = "=2.9.2"
-tauri-plugin-clipboard-manager = "=2.3.3"
-if-addrs = "=0.13.4"
+tauri-runtime = "=2.12.0"
+tauri-runtime-wry = "=2.12.0"
+tauri-macros = "=2.7.0"
+tauri-utils = "=2.10.0"
+tauri-plugin-single-instance = "=2.5.0"
+tauri-plugin-window-state = "=2.5.0"
+tauri-plugin-dialog = "=2.8.0"
+tauri-plugin-opener = "=2.6.0"
+tauri-plugin-notification = "=2.5.0"
+tauri-plugin-log = "=2.10.0"
+tauri-plugin-clipboard-manager = "=2.4.0"
+if-addrs = "=0.15.0"
 log = "0.4"
 parking_lot = "0.12"
 
