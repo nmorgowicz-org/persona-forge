@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AudioPlayer } from '@/components/AudioPlayer'
 import { base64ToBlob } from '@/lib/utils'
 
@@ -19,44 +19,45 @@ export function ClipPlayer({
   initialSpeed?: number
   onSpeedChange?: (speed: number) => void
 }) {
-  const [blob, setBlob] = useState<Blob | null>(null)
-  const [src, setSrc] = useState<string | null>(null)
+  const base64Blob = useMemo(
+    () => (audioBase64 && !audioUrl ? base64ToBlob(audioBase64) : null),
+    [audioBase64, audioUrl],
+  )
+  const base64Src = audioBase64 && !audioUrl
+    ? `data:audio/wav;base64,${audioBase64}`
+    : null
+  const [fetched, setFetched] = useState<{
+    audioUrl: string
+    src: string
+    blob: Blob | null
+  } | null>(null)
 
   useEffect(() => {
-    if (audioBase64 && !audioUrl) {
-      const b = base64ToBlob(audioBase64)
-      setBlob(b)
-      setSrc(`data:audio/wav;base64,${audioBase64}`)
-      return
-    }
-    if (audioUrl) {
-      let cancelled = false
-      fetch(audioUrl)
-        .then((r) => {
-          if (!r.ok || cancelled) return
-          return r.blob()
-        })
-        .then((b) => {
-          if (b && !cancelled) {
-            setBlob(b)
-            setSrc(URL.createObjectURL(b))
-          }
-        })
-        .catch(() => {
-          if (!cancelled) setSrc(audioUrl)
-        })
-      return () => {
-        cancelled = true
-      }
-    }
-  }, [audioBase64, audioUrl])
-
-  useEffect(() => {
-    const url = src
+    if (!audioUrl) return
+    let cancelled = false
+    let objectUrl: string | null = null
+    fetch(audioUrl)
+      .then((response) => {
+        if (!response.ok) throw new Error('Failed to fetch audio')
+        return response.blob()
+      })
+      .then((blob) => {
+        if (cancelled) return
+        objectUrl = URL.createObjectURL(blob)
+        setFetched({ audioUrl, src: objectUrl, blob })
+      })
+      .catch(() => {
+        if (!cancelled) setFetched({ audioUrl, src: audioUrl, blob: null })
+      })
     return () => {
-      if (url && url.startsWith('blob:')) URL.revokeObjectURL(url)
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [src])
+  }, [audioUrl])
+
+  const hasFetchedAudio = fetched !== null && fetched.audioUrl === audioUrl
+  const src = base64Src ?? (hasFetchedAudio ? fetched.src : null)
+  const blob = base64Blob ?? (hasFetchedAudio ? fetched.blob : null)
 
   if (!src) return null
 

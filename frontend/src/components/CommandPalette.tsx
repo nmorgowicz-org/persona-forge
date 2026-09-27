@@ -1,7 +1,7 @@
 // The two surfaces that read the shared shortcut registry (M4): the Cmd/Ctrl+K command palette
 // and the `?` keymap. Both are driven entirely by hooks/useGlobalShortcuts, so a page's keys
 // appear here the moment the page mounts -- there is no second list to keep in sync.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import {
@@ -31,10 +31,13 @@ function flatten(scopes: ReturnType<typeof useShortcutScopes>): PaletteEntry[] {
 
 export function CommandPalette() {
   const { palette } = useShortcutOverlays()
+  return palette ? <CommandPaletteContent /> : null
+}
+
+function CommandPaletteContent() {
   const scopes = useShortcutScopes()
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
-  const inputRef = useRef<HTMLInputElement | null>(null)
 
   const entries = useMemo(() => flatten(scopes), [scopes])
   const results = useMemo(() => {
@@ -42,15 +45,6 @@ export function CommandPalette() {
     if (!needle) return entries
     return entries.filter(({ command }) => `${command.label} ${command.hint ?? ''}`.toLowerCase().includes(needle))
   }, [entries, query])
-
-  // A fresh query starts at the top of the new result list.
-  useEffect(() => setActiveIndex(0), [query])
-  useEffect(() => {
-    if (palette) {
-      setQuery('')
-      setActiveIndex(0)
-    }
-  }, [palette])
 
   const runEntry = useCallback((entry: PaletteEntry | undefined) => {
     if (!entry) return
@@ -72,17 +66,19 @@ export function CommandPalette() {
   }
 
   return (
-    <Dialog open={palette} onOpenChange={setCommandPaletteOpen}>
+    <Dialog open onOpenChange={setCommandPaletteOpen}>
       <DialogContent data-testid="command-palette" className="max-w-lg gap-0 overflow-hidden p-0">
         <DialogTitle className="sr-only">Command palette</DialogTitle>
         <DialogDescription className="sr-only">Search for a command and run it</DialogDescription>
         <div className="flex items-center gap-2 border-b border-border/70 px-3">
           <Search className="size-3.5 shrink-0 text-muted-foreground" />
           <input
-            ref={inputRef}
             data-testid="command-palette-input"
             value={query}
-            onChange={(event) => setQuery(event.currentTarget.value)}
+            onChange={(event) => {
+              setActiveIndex(0)
+              setQuery(event.currentTarget.value)
+            }}
             onKeyDown={onKeyDown}
             placeholder="Search commands…"
             aria-label="Search commands"

@@ -6,7 +6,7 @@
 // via the shared bounded cache) is fetched only when a row is actually auditioned, and only one
 // row plays at a time. Rows use content-visibility (see index.css .segment-browser-row) so a
 // 250-row library scrolls smoothly without a virtualization dependency.
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { Copy, Loader2, Pause, Play, Plus } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
@@ -239,6 +239,7 @@ export function SegmentBrowserModal({
   // can detect it has been superseded and bail out instead of clobbering newer playback state
   // or resuming audio after the dialog has closed.
   const playbackTokenRef = useRef(0)
+  const loadingPlaybackTokenRef = useRef<number | null>(null)
   // This modal is one audio source in the transport coordinator (T1): an audition here
   // silences whatever else is sounding, including the arrangement playing underneath it.
   const source = useAudioSource('segment-audition', 'Segment audition')
@@ -253,31 +254,37 @@ export function SegmentBrowserModal({
   // The Audio object is created once and outlives individual renders; its 'ended' listener
   // reads the latest stop path through this ref.
   const stopAuditionRef = useRef(stopAudition)
-  stopAuditionRef.current = stopAudition
+  useLayoutEffect(() => {
+    stopAuditionRef.current = stopAudition
+  }, [stopAudition])
 
   const hasVoices = (voices?.length ?? 0) > 0 && !!onInsertVoices
 
-  useEffect(() => {
-    if (!open) {
+  const closeAudition = useCallback(() => {
+    // Invalidate async fetch/decode/play work before pausing or releasing its resources.
+    playbackTokenRef.current += 1
+    loadingPlaybackTokenRef.current = null
+    stopAudition()
+    setLoadingAudioId(null)
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current)
+      audioUrlRef.current = null
+    }
+  }, [stopAudition])
+
+  useLayoutEffect(() => {
+    return () => {
       playbackTokenRef.current += 1
-      stopAudition()
-      // Close leaves no audition state behind: a late in-flight resolve must not re-show a
-      // spinner on reopen, and the object URL must not survive close/reopen cycles.
-      setLoadingAudioId(null)
+      loadingPlaybackTokenRef.current = null
+      audioRef.current?.pause()
+      source.release()
       if (audioUrlRef.current) {
         URL.revokeObjectURL(audioUrlRef.current)
         audioUrlRef.current = null
       }
     }
-  }, [open, setPlayingId])
-
-  useEffect(() => {
-    return () => {
-      audioRef.current?.pause()
-      source.release()
-      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current)
-    }
   }, [source])
+
 
   // Optional controller: expose open() to the parent without changing how the dialog is
   // otherwise driven (the trigger button keeps working as before).
@@ -355,8 +362,9 @@ export function SegmentBrowserModal({
       if (chosen.length > 0) onInsertVoices?.(chosen, insertAfterClipId)
     }
     resetPickerState()
+    closeAudition()
     setOpen(false)
-  }, [activeTab, segments, voices, onInsertSegments, onInsertVoices, insertAfterClipId, resetPickerState])
+  }, [activeTab, segments, voices, onInsertSegments, onInsertVoices, insertAfterClipId, resetPickerState, closeAudition])
 
   const handleInsertSelected = useCallback(() => {
     commitInsert(Array.from(selectedIds))
@@ -375,10 +383,12 @@ export function SegmentBrowserModal({
     }
     const token = ++playbackTokenRef.current
     audioRef.current?.pause()
+    loadingPlaybackTokenRef.current = token
     setLoadingAudioId(row.id)
-    // A superseded in-flight audition (a newer click or a close) must not clobber newer state;
-    // at most it clears its own row's spinner if one is still showing.
+    // A stale request must not clear the spinner owned by a newer audition of the same row.
     const dropStaleLoading = () => {
+      if (loadingPlaybackTokenRef.current !== token) return
+      loadingPlaybackTokenRef.current = null
       setLoadingAudioId((cur) => (cur === row.id ? null : cur))
     }
     try {
@@ -417,14 +427,17 @@ export function SegmentBrowserModal({
       source.claim(stopAudition)
       await audioRef.current.play()
       if (token !== playbackTokenRef.current) {
-        stopAudition()
+        if (audioRef.current?.src === url) audioRef.current.pause()
         return
       }
       setPlayingId(row.id)
     } finally {
-      if (token === playbackTokenRef.current) setLoadingAudioId(null)
+      if (token === playbackTokenRef.current) {
+        loadingPlaybackTokenRef.current = null
+        setLoadingAudioId(null)
+      }
     }
-  }, [peaksByKey, setPlayingId])
+  }, [peaksByKey, setPlayingId, stopAudition, source])
 
   const handleKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'Enter') return
@@ -450,7 +463,13 @@ export function SegmentBrowserModal({
         </button>
       )}
 
-      <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetPickerState() }}>
+      <Dialog open={open} onOpenChange={(v) => {
+        setOpen(v)
+        if (!v) {
+          resetPickerState()
+          closeAudition()
+        }
+      }}>
         {/* DialogContent is programmatically focusable (not in the Tab order) so the dialog
             surface itself can be the Enter target: clicking the padding focuses it, and Enter
             commits the current selection. Radix initial-focus still lands on the first real

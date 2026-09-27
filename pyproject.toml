@@ -96,6 +96,7 @@ dev = [
   "soundfile==0.14.0",
   "librosa",
   "pyloudnorm",
+  "hatchling>=1.32.4",
 ]
 openvino = [
   "openvino==2026.4.0",

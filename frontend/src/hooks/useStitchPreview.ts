@@ -4,7 +4,7 @@
 // is scoped to whichever editor mounts it (StitchEditorBody), so unmounting an editor
 // (navigating away, closing quick insert) always revokes its preview URL and aborts any
 // in-flight render.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { hashStitchPlan, type StitchPlanState } from '@/lib/stitchPlan'
 import { renderStitchPreview } from '@/lib/stitchPreview'
 
@@ -32,10 +32,13 @@ export function useStitchPreview(plan: StitchPlanState): StitchPreviewState {
   // Always current -- renderNow must render whatever plan is live *right now*, not the plan
   // captured in whichever closure scheduled it (the debounce timer may be seconds stale).
   const planRef = useRef(plan)
-  planRef.current = plan
+  useLayoutEffect(() => {
+    planRef.current = plan
+  }, [plan])
 
-  const urlRef = useRef<string | null>(null)
   const seqRef = useRef(0)
+  const urlRef = useRef<string | null>(null)
+  const allocatedUrlsRef = useRef(new Set<string>())
   const debounceRef = useRef<number | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const lastHashRef = useRef('')
@@ -48,9 +51,13 @@ export function useStitchPreview(plan: StitchPlanState): StitchPreviewState {
   }, [])
 
   const swapUrl = useCallback((nextBlob: Blob | null) => {
-    if (urlRef.current) URL.revokeObjectURL(urlRef.current)
+    if (urlRef.current) {
+      URL.revokeObjectURL(urlRef.current)
+      allocatedUrlsRef.current.delete(urlRef.current)
+    }
     const nextUrl = nextBlob ? URL.createObjectURL(nextBlob) : null
     urlRef.current = nextUrl
+    if (nextUrl) allocatedUrlsRef.current.add(nextUrl)
     setUrl(nextUrl)
     setBlob(nextBlob)
   }, [])
@@ -131,17 +138,17 @@ export function useStitchPreview(plan: StitchPlanState): StitchPreviewState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hash])
 
-  // Unmount: revoke the object URL, abort any in-flight server render, and bump the
-  // sequence counter so even a non-cancellable local WebAudio render that resolves
-  // afterwards fails the supersede check and never allocates a new object URL.
-  useEffect(() => {
-    return () => {
-      clearTimer()
-      abortRef.current?.abort()
-      seqRef.current++
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current)
-    }
+  // Unmount: revoke every URL created before React could commit its latest URL state, abort
+  // any in-flight render, and invalidate any late result.
+  const dispose = useCallback(() => {
+    clearTimer()
+    abortRef.current?.abort()
+    seqRef.current++
+    for (const objectUrl of allocatedUrlsRef.current) URL.revokeObjectURL(objectUrl)
+    allocatedUrlsRef.current.clear()
+    urlRef.current = null
   }, [clearTimer])
+  useEffect(() => () => dispose(), [dispose])
 
   return { url, blob, isRendering, isStale, error, renderNow, scheduleRender, cancel, clear }
 }

@@ -123,13 +123,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Frontend check + build (mandatory)
-        working-directory: frontend
-        run: |
-          npm ci
-          npm run check
-          npm run build
-
       # On this self-hosted Windows box, System32 precedes Git\bin on PATH, so plain `shell:
       # bash` resolves to the WSL launcher stub at System32\bash.exe (WSL isn't installed here,
       # and it's staying that way) instead of Git Bash. GITHUB_PATH only affects this job's own

@@ -34,8 +34,10 @@ export function SpectrogramCanvas({
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const imageRef = useRef<HTMLCanvasElement | null>(null)
   const spectrogramRef = useRef<Spectrogram | null>(null)
-  const [spectrogram, setSpectrogram] = useState<Spectrogram | null>(null)
-  const [failed, setFailed] = useState(false)
+  const [analysis, setAnalysis] = useState<{ blob: Blob; cacheKey: string; spectrogram: Spectrogram | null; failed: boolean } | null>(null)
+  const currentAnalysis = analysis?.blob === blob && analysis.cacheKey === cacheKey ? analysis : null
+  const spectrogram = currentAnalysis?.spectrogram ?? null
+  const failed = currentAnalysis?.failed ?? false
   const clock = useMediaClock(mediaRef ?? { current: null }, playing)
   const playheadRef = useRef<number | null>(null)
   const readoutRef = useRef<HTMLSpanElement | null>(null)
@@ -44,8 +46,6 @@ export function SpectrogramCanvas({
   // never blocks a frame either.
   useEffect(() => {
     let dead = false
-    setSpectrogram(null)
-    setFailed(false)
     spectrogramRef.current = null
     if (!blob || !cacheKey) return
     const run = async () => {
@@ -57,10 +57,10 @@ export function SpectrogramCanvas({
         void ctx.close()
         if (!dead) {
           spectrogramRef.current = result
-          setSpectrogram(result)
+          setAnalysis({ blob, cacheKey, spectrogram: result, failed: false })
         }
       } catch {
-        if (!dead) setFailed(true)
+        if (!dead) setAnalysis({ blob, cacheKey, spectrogram: null, failed: true })
       }
     }
     void run()

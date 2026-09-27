@@ -3,33 +3,12 @@ import { Info, Loader2, StopCircle, Timer } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { useSidebar } from '@/components/ui/sidebar-context'
 import { cn } from '@/lib/utils'
+import { getHelpText, subscribeHelpText } from '@/lib/helpText'
+import { getActivityCountdown, tickActivityCountdown, type ActivityCountdownState } from '@/lib/activityCountdown'
 
-// The info view (CP0 decision D6). Any control can carry a `data-help` string; hovering or
-// focusing it puts that string in this strip, the way a plugin's help line works. It is also
-// where genuine product knowledge lives now, instead of paragraphs in the panel that the user
-// reads before they have made any choice.
-let helpText: string | null = null
-const helpListeners = new Set<() => void>()
-
-export function setHelpText(next: string | null): void {
-  if (helpText === next) return
-  helpText = next
-  for (const listener of helpListeners) listener()
-}
-
-function subscribeHelp(listener: () => void): () => void {
-  helpListeners.add(listener)
-  return () => {
-    helpListeners.delete(listener)
-  }
-}
 
 function useHelpText(): string | null {
-  return React.useSyncExternalStore(
-    subscribeHelp,
-    () => helpText,
-    () => null,
-  )
+  return React.useSyncExternalStore(subscribeHelpText, getHelpText, () => null)
 }
 
 function formatEta(s: number) {
@@ -53,33 +32,27 @@ export function ActivityStatusBar() {
   const status = useAppStore((s) => s.activityStatus)
   const { open: sidebarOpen } = useSidebar()
   const [hovered, setHovered] = React.useState(false)
-  const [countdown, setCountdown] = React.useState<number | null>(
-    status?.etaSeconds != null ? Math.round(status.etaSeconds) : null
-  )
+  const [countdownState, setCountdownState] = React.useState<ActivityCountdownState>(() => ({
+    activityId: status?.activityId ?? null,
+    etaSeconds: status?.etaSeconds ?? null,
+    value: status?.etaSeconds != null ? Math.round(status.etaSeconds) : null,
+  }))
 
   const active = !!status
+  const countdown = getActivityCountdown(countdownState, status)
 
   React.useEffect(() => {
-    if (!active || status?.etaSeconds == null) {
-      setCountdown(null)
-      return
+    if (!active || status?.etaSeconds == null || countdown == null || countdown <= 0) return
+    const tickStatus = {
+      active,
+      activityId: status.activityId,
+      etaSeconds: status.etaSeconds,
     }
-    setCountdown(Math.round(status.etaSeconds))
-  }, [active, status?.etaSeconds])
-
-  React.useEffect(() => {
-    if (!active || countdown == null || countdown <= 0) return
     const id = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev == null || prev <= 1) {
-          clearInterval(id)
-          return 0
-        }
-        return prev - 1
-      })
+      setCountdownState((previous) => tickActivityCountdown(previous, tickStatus))
     }, 1000)
     return () => clearInterval(id)
-  }, [active, countdown])
+  }, [active, countdown, status?.activityId, status?.etaSeconds])
 
   const help = useHelpText()
 

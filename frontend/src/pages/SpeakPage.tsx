@@ -37,22 +37,8 @@ import {
 } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { AdvancedDrawer } from '@/components/audio/AdvancedDrawer'
+import { useReducedMotionSafe } from '@/lib/motion'
 
-
-
-
-// Helper for reduced motion
-const useReducedMotion = () => {
-  const [reduced, setReduced] = useState(false)
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
-    if (media.matches) setReduced(true)
-    const listener = (e: MediaQueryListEvent) => setReduced(e.matches)
-    media.addEventListener('change', listener)
-    return () => media.removeEventListener('change', listener)
-  }, [])
-  return reduced
-}
 
 function StructuredError({ error }: { error: string }) {
   const info = classifyGenerateError(error, null)
@@ -128,7 +114,7 @@ interface SpeakResultMeta {
 }
 
 export function SpeakPage() {
-  const reducedMotion = useReducedMotion()
+  const reducedMotion = useReducedMotionSafe()
   const {
     text,
     setText,

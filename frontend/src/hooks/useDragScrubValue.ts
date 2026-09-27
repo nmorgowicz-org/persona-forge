@@ -15,7 +15,7 @@
 // through latestRef: re-renders mid-gesture (e.g. the rAF-throttled dragValue state) must
 // never churn listener identities, or the cleanup effect would strip the in-flight
 // gesture's listeners from the window.
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 
 /** GapControl's original typed-value grammar, moved here verbatim: "200", "0.2s", "200ms". */
 export function parseGapText(raw: string): number | null {
@@ -146,7 +146,9 @@ export function useDragScrubValue({
 
   // Fresh values for the identity-stable callbacks and the long-lived native listeners.
   const latestRef = useRef({ value, min, max, step, editing, disabled, onChange, snap, round, dragScale, fineScale, dragThreshold, defaultValue, format })
-  latestRef.current = { value, min, max, step, editing, disabled, onChange, snap, round, dragScale, fineScale, dragThreshold, defaultValue, format }
+  useLayoutEffect(() => {
+    latestRef.current = { value, min, max, step, editing, disabled, onChange, snap, round, dragScale, fineScale, dragThreshold, defaultValue, format }
+  }, [value, min, max, step, editing, disabled, onChange, snap, round, dragScale, fineScale, dragThreshold, defaultValue, format])
 
   const commitValue = useCallback((next: number) => {
     const l = latestRef.current
@@ -196,12 +198,14 @@ export function useDragScrubValue({
     rafRef.current = requestAnimationFrame(() => setDragValue(l.round(next)))
   }, [])
 
+  const endDragRef = useRef<(event: PointerEvent) => void>(() => {})
+  const handleEndDrag = useCallback((event: PointerEvent) => endDragRef.current(event), [])
   const endDrag = useCallback((event: PointerEvent) => {
     const state = dragStateRef.current
     if (!state || state.pointerId !== event.pointerId) return
     window.removeEventListener('pointermove', handlePointerMove)
-    window.removeEventListener('pointerup', endDrag)
-    window.removeEventListener('pointercancel', endDrag)
+    window.removeEventListener('pointerup', handleEndDrag)
+    window.removeEventListener('pointercancel', handleEndDrag)
     dragStateRef.current = null
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current)
@@ -221,7 +225,10 @@ export function useDragScrubValue({
       beginEdit()
     }
     setDragValue(null)
-  }, [handlePointerMove, commitValue, beginEdit])
+  }, [handlePointerMove, handleEndDrag, commitValue, beginEdit])
+  useLayoutEffect(() => {
+    endDragRef.current = endDrag
+  }, [endDrag])
 
   const beginScrub = useCallback(
     (event: PointerEvent, captureElement: HTMLElement, options?: { openEditorOnRelease?: boolean }) => {
@@ -246,13 +253,13 @@ export function useDragScrubValue({
       }
       captureElement.setPointerCapture(event.pointerId)
       window.addEventListener('pointermove', handlePointerMove)
-      window.addEventListener('pointerup', endDrag)
-      window.addEventListener('pointercancel', endDrag)
+      window.addEventListener('pointerup', handleEndDrag)
+      window.addEventListener('pointercancel', handleEndDrag)
     },
     // `axis` belongs here: the drag state records it at gesture start, and a stale closure
     // would capture the initial axis for the life of the control (a vertical drag then reads
     // as zero travel and silently commits the starting value).
-    [handlePointerMove, endDrag, axis],
+    [handlePointerMove, handleEndDrag, axis],
   )
 
   // The gesture listeners live on window and are normally removed by the end handlers, so
@@ -262,15 +269,15 @@ export function useDragScrubValue({
   useEffect(() => {
     return () => {
       window.removeEventListener('pointermove', handlePointerMove)
-      window.removeEventListener('pointerup', endDrag)
-      window.removeEventListener('pointercancel', endDrag)
+      window.removeEventListener('pointerup', handleEndDrag)
+      window.removeEventListener('pointercancel', handleEndDrag)
       dragStateRef.current = null
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current)
         rafRef.current = null
       }
     }
-  }, [handlePointerMove, endDrag])
+  }, [handlePointerMove, handleEndDrag])
 
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent) => {

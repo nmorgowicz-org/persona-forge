@@ -75,6 +75,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { useProsodyEditor } from '@/components/prosody/useProsodyEditor'
 import { ProsodyControls } from '@/components/prosody/ProsodyControls'
 import { ProsodyVariantsList } from '@/components/prosody/ProsodyVariantsList'
+import { useReducedMotionSafe } from '@/lib/motion'
 
 // Radix Select forbids an empty-string item value, so "Ungrouped" needs a placeholder token
 // that gets translated back to a null project_id at the call site.
@@ -123,18 +124,6 @@ type VoiceWithReferenceMeta = VoiceMeta & {
   duplicated_from?: string | null
 }
 
-// Helper for reduced motion
-const useReducedMotion = () => {
-  const [reduced, setReduced] = useState(false)
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
-    if (media.matches) setReduced(true)
-    const listener = (e: MediaQueryListEvent) => setReduced(e.matches)
-    media.addEventListener('change', listener)
-    return () => media.removeEventListener('change', listener)
-  }, [])
-  return reduced
-}
 
 function isMountedRef(voice: VoiceMeta): boolean {
   return (voice as VoiceMeta & { source?: string }).source === MOUNTED_REF_SOURCE
@@ -809,7 +798,7 @@ function VoiceCard({
   onSetProject: (voiceId: string, projectId: string) => void
 }) {
 
-  const reducedMotion = useReducedMotion()
+  const reducedMotion = useReducedMotionSafe()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(voice.sample_text)
   const [saving, setSaving] = useState(false)
@@ -1185,7 +1174,7 @@ function VoiceCard({
 }
 
 export function VoiceLibraryPage() {
-  const reducedMotion = useReducedMotion()
+  const reducedMotion = useReducedMotionSafe()
   const voices = useAppStore((s) => s.voices)
   const segments = useAppStore((s) => s.ovLibrary)
   const storeSetVoices = useAppStore((s) => s.setVoices)

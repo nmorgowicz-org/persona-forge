@@ -34,9 +34,9 @@ class FrontendBuildHook(BuildHookInterface):
         if self.target_name != "wheel" or version != "standard":
             return
         npm = "npm.cmd" if os.name == "nt" else "npm"
+        # Lint is a separate CI gate; the wheel hook only needs to build packaged assets.
         for step in (
             [npm, "ci"],
-            [npm, "run", "check"],
             [npm, "run", "build"],
         ):
             subprocess.run(step, cwd=_FRONTEND_DIR, check=True)

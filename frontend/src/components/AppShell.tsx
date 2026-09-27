@@ -35,7 +35,7 @@ import {
 import { useSidebar } from '@/components/ui/sidebar-context'
 import { ActivityStatusBar } from '@/components/ui/ActivityStatusBar'
 import { CommandPalette, ShortcutKeymap } from '@/components/CommandPalette'
-import { setHelpText } from '@/components/ui/ActivityStatusBar'
+import { setHelpText } from '@/lib/helpText'
 import { TransportReadout } from '@/components/audio/TransportReadout'
 import {
   isPrimaryModifier,

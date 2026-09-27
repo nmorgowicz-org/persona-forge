@@ -1,4 +1,4 @@
-import { useMemo, useRef, useCallback, useId, useState } from 'react'
+import { useEffect, useMemo, useRef, useCallback, useId, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Disclose } from './Disclose'
 import { createVoiceDesign, saveVoiceDesign } from '../lib/api'
@@ -94,7 +94,7 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
   const setIsSaving = useAppStore((s) => s.setVdIsSaving)
 
   // -- One-time init from EditingVoice --
-  const initRef = useMemo(() => ({ done: false }), [])
+  const initRef = useRef(false)
   const [deliveryVariantKind, setDeliveryVariantKind] =
     useState<DeliveryVariantKind>('natural')
 
@@ -103,19 +103,25 @@ export function VoiceDesignPanel({ onVoiceCreated, initial }: VoiceDesignPanelPr
   // textures/personas arrays, which used to crash this check with a bare `.length` read.
   const hasChipSelections = computeHasChipSelections(initial?.selections)
 
-  if (initial && !initRef.done) {
-    initRef.done = true
-    setSelections(
-      (hasChipSelections && initial.selections) || EMPTY_SELECTIONS,
-    )
-    setManualDescription(
-      initial && !hasChipSelections ? initial.description : null,
-    )
-    setSampleText(initial?.sampleText ?? '')
-    setSampleTextTouched(Boolean(initial?.sampleText))
-    setLanguage(initial?.language ?? 'English')
-    setSeedInput(initial?.seed != null ? String(initial.seed) : '')
-  }
+  useEffect(() => {
+    if (!initial || initRef.current) return
+    initRef.current = true
+    setSelections((hasChipSelections && initial.selections) || EMPTY_SELECTIONS)
+    setManualDescription(!hasChipSelections ? initial.description : null)
+    setSampleText(initial.sampleText ?? '')
+    setSampleTextTouched(Boolean(initial.sampleText))
+    setLanguage(initial.language ?? 'English')
+    setSeedInput(initial.seed != null ? String(initial.seed) : '')
+  }, [
+    hasChipSelections,
+    initial,
+    setLanguage,
+    setManualDescription,
+    setSampleText,
+    setSampleTextTouched,
+    setSeedInput,
+    setSelections,
+  ])
 
   // -- Derived --
   const composed = useMemo(() => composeDescription(selections), [selections])

@@ -15,6 +15,7 @@ jobs:
   paths-filter:
     runs-on: arc-general
     outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
       code: ${{ steps.filter.outputs.code }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -28,6 +29,25 @@ jobs:
               - "tests/ui/**"
               - "src/persona_forge/**"
               - requirements-dev.txt
+            frontend:
+              - .github/workflows/ci-ui.yml
+              - "frontend/**"
+  frontend-lint:
+    name: frontend-lint
+    needs: paths-filter
+    if: needs.paths-filter.outputs.frontend == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: arc-general
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Oxlint (warnings are errors)
+        working-directory: frontend
+        run: npm run lint
 
   e2e:
     name: e2e
@@ -105,11 +125,6 @@ jobs:
         if: needs.paths-filter.outputs.code == 'true'
         working-directory: frontend
         run: npm ci
-
-      - name: Lint frontend
-        if: needs.paths-filter.outputs.code == 'true'
-        working-directory: frontend
-        run: npm run lint
 
       - name: Build frontend
         if: needs.paths-filter.outputs.code == 'true'

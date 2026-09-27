@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { SavedVoicePicker } from '@/components/voice/SavedVoicePicker'
 import { ProsodyEditorPanel } from '@/components/prosody/ProsodyEditorPanel'
@@ -11,16 +11,23 @@ export function VoiceEditPage() {
   const deepLinkVoiceId = useAppStore((state) => state.deepLinkProsodyVoiceId)
   const consumeDeepLink = useAppStore((state) => state.setDeepLinkProsodyVoiceId)
   const [voices, setLocalVoices] = useState<VoiceMeta[]>(() => useAppStore.getState().voices)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selection, setSelection] = useState(() => ({
+    deepLinkId: deepLinkVoiceId,
+    selectedId: deepLinkVoiceId,
+  }))
+  if (deepLinkVoiceId && selection.deepLinkId !== deepLinkVoiceId) {
+    setSelection({ deepLinkId: deepLinkVoiceId, selectedId: deepLinkVoiceId })
+  }
+  const selectedId = selection.selectedId
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  const refresh = async (): Promise<void> => {
+  const refresh = useCallback(async (): Promise<void> => {
     const next = await listVoices()
     setLocalVoices(next)
     setVoices(next)
-  }
+  }, [setVoices])
 
   useEffect(() => {
     const load = async () => {
@@ -34,21 +41,20 @@ export function VoiceEditPage() {
       }
     }
     void load()
-  }, [])
+  }, [refresh])
 
-  // Deep link and auto-select share one effect so the deep-linked voice always wins:
-  // two effects in the same commit raced on setSelectedId, and the auto-select
-  // (voices[0]) clobbered the deep link before it was consumed.
+  // Keep the one-shot deep-link in the store only until its target voice is available.
   useEffect(() => {
     if (deepLinkVoiceId && voices.some((voice) => voice.voice_id === deepLinkVoiceId)) {
-      setSelectedId(deepLinkVoiceId)
       consumeDeepLink(null)
-    } else if (!selectedId && !deepLinkVoiceId && voices.length) {
-      setSelectedId(voices[0].voice_id)
     }
-  }, [consumeDeepLink, deepLinkVoiceId, selectedId, voices])
+  }, [consumeDeepLink, deepLinkVoiceId, voices])
 
-  const selectedVoice = voices.find((voice) => voice.voice_id === selectedId) ?? null
+  const effectiveSelectedId =
+    selectedId && voices.some((voice) => voice.voice_id === selectedId)
+      ? selectedId
+      : voices[0]?.voice_id ?? null
+  const selectedVoice = voices.find((voice) => voice.voice_id === effectiveSelectedId) ?? null
 
   return (
     <div data-testid="voice-edit-page" className="flex min-w-0 flex-col gap-6">
@@ -61,7 +67,13 @@ export function VoiceEditPage() {
           {loadError}
         </p>
       )}
-      <SavedVoicePicker voices={voices} selectedId={selectedId} onChange={setSelectedId} search={search} onSearchChange={setSearch} />
+      <SavedVoicePicker
+        voices={voices}
+        selectedId={effectiveSelectedId}
+        onChange={(nextId) => setSelection((current) => ({ ...current, selectedId: nextId }))}
+        search={search}
+        onSearchChange={setSearch}
+      />
       {selectedVoice ? (
         <ProsodyEditorPanel voice={selectedVoice} layout="page" onChanged={refresh} />
       ) : loading ? (
