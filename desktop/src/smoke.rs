@@ -161,7 +161,16 @@ pub fn run(
 
     let t = Instant::now();
     let _ = handle.stop(Duration::from_secs(10));
-    let port_freed = matches!(probe(port), health::PortState::Free);
+    // Windows: TerminateJobObject is immediate but the listening socket teardown can lag a
+    // moment behind; a single probe right after stop raced it (Phase 4 run 17). Retry briefly.
+    let mut port_freed = false;
+    for _ in 0..20 {
+        if matches!(probe(port), health::PortState::Free) {
+            port_freed = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
     let stop_result: Result<(), String> = if port_freed {
         Ok(())
     } else {

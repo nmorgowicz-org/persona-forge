@@ -21,7 +21,13 @@ pub struct SystemRunner;
 
 impl Runner for SystemRunner {
     fn run(&self, program: &Path, args: &[&str]) -> io::Result<i32> {
-        let status = std::process::Command::new(program).args(args).status()?;
+        // Same sanitation as the server spawn: without it `uv venv` discovers the AppImage's
+        // bundled stdlib-less python via the AppRun-prepended PATH and builds a venv whose
+        // base prefix dies with the ephemeral extraction dir.
+        let mut command = std::process::Command::new(program);
+        command.args(args);
+        crate::supervisor::sanitize_command_env(&mut command);
+        let status = command.status()?;
         Ok(status.code().unwrap_or(-1))
     }
 }

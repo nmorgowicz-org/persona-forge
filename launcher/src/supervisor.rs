@@ -12,6 +12,48 @@ use process_wrap::std::*;
 
 use crate::health;
 
+/// Removes AppImage environment poisoning before spawning `uv` (bootstrap) or the server
+/// (supervisor). Inside an AppImage, AppRun prepends the extraction/mount dir to `PATH` and
+/// the bundled python wrapper exports `PYTHONHOME`/`PYTHONPATH` pointing into it. The bundled
+/// python has no stdlib (linuxdeploy deploys `libpython`, not the stdlib), so if `uv venv`
+/// discovers it — or the venv python inherits `PYTHONHOME` — provisioning or serving dies with
+/// `ModuleNotFoundError: No module named 'encodings'` (Phase 4 smoke finding).
+pub fn sanitize_command_env(command: &mut std::process::Command) {
+    command.env_remove("PYTHONHOME");
+    command.env_remove("PYTHONPATH");
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    command.env(
+        "PATH",
+        filter_path(
+            &path,
+            std::env::var_os("APPDIR")
+                .as_deref()
+                .map(std::path::Path::new),
+        ),
+    );
+}
+
+/// Drops PATH entries inside the AppImage tree: `$APPDIR/...` for mounts, and the ephemeral
+/// `/tmp/appimage_extracted_*` dirs used by APPIMAGE_EXTRACT_AND_RUN.
+fn filter_path(path: &std::ffi::OsStr, appdir: Option<&std::path::Path>) -> std::ffi::OsString {
+    // Drop PATH entries inside the AppImage tree: `$APPDIR/...` for mounts, and the
+    // ephemeral `/tmp/appimage_extracted_*` dirs used by APPIMAGE_EXTRACT_AND_RUN.
+    let filtered: Vec<_> = std::env::split_paths(path)
+        .filter(|entry| {
+            let as_str = entry.to_string_lossy();
+            if as_str.contains("appimage_extracted") {
+                return false;
+            }
+            match appdir {
+                Some(dir) => !entry.starts_with(dir),
+                None => true,
+            }
+        })
+        .collect();
+    std::env::join_paths(filtered.iter().map(|p| p.as_path()))
+        .unwrap_or_else(|_| path.to_os_string())
+}
+
 pub struct ServerSpec {
     pub python: PathBuf,
     /// "127.0.0.1" or "0.0.0.0" (D18).
@@ -62,12 +104,32 @@ impl ServerHandle {
 
         let mut command = CommandWrap::with_new(program, |command| {
             command.args(args);
+            crate::supervisor::sanitize_command_env(command);
             for (k, v) in env {
                 command.env(k, v);
             }
             command.stdin(Stdio::null());
             command.stdout(log_file);
             command.stderr(log_file_err);
+            #[cfg(unix)]
+            {
+                // The parent blocks SIGTERM/SIGINT/SIGHUP process-wide (see main.rs) so its
+                // sigwait thread owns them; the server child must receive SIGTERM normally
+                // or graceful stop would always degrade to SIGKILL after the grace period.
+                use std::os::unix::process::CommandExt;
+                unsafe {
+                    command.pre_exec(|| {
+                        // SAFETY: sigset_t is zeroable/POD; pthread_sigmask is async-signal-safe.
+                        let mut set: libc::sigset_t = std::mem::zeroed();
+                        libc::sigemptyset(&mut set);
+                        for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+                            libc::sigaddset(&mut set, sig);
+                        }
+                        libc::pthread_sigmask(libc::SIG_UNBLOCK, &set, std::ptr::null_mut());
+                        Ok(())
+                    });
+                }
+            }
             #[cfg(windows)]
             {
                 use std::os::windows::process::CommandExt;
@@ -226,6 +288,47 @@ fn command_line_matches(pid: u32, needle: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitizer_strips_appimage_paths_and_python_home() {
+        // Pure-function check: no process-env mutation (tests run in parallel threads).
+        // Entry names deliberately avoid the host PATH separator so join_paths works on
+        // both Windows (;) and Unix (:).
+        let poisoned = "/tmp/appimage_extracted_x/usr/bin";
+        let system_entry = "system-entries-dir";
+        let real = std::env::join_paths([
+            std::path::Path::new(system_entry),
+            std::path::Path::new(poisoned),
+        ])
+        .unwrap();
+        let filtered = super::filter_path(
+            &real,
+            Some(std::path::Path::new("/tmp/appimage_extracted_x")),
+        );
+        let entries = std::env::split_paths(&filtered).collect::<Vec<_>>();
+        assert_eq!(entries, vec![std::path::PathBuf::from(system_entry)]);
+
+        // An APPDIR-scoped entry is dropped by prefix even without the marker substring.
+        let with_mount = std::env::join_paths([
+            std::path::Path::new("/tmp/appimage_extracted_x/usr/bin"),
+            std::path::Path::new(system_entry),
+            std::path::Path::new("/tmp/appimage_mount_x/lib"),
+        ])
+        .unwrap();
+        let filtered = super::filter_path(
+            &with_mount,
+            Some(std::path::Path::new("/tmp/appimage_mount_x")),
+        );
+        assert_eq!(
+            std::env::split_paths(&filtered).collect::<Vec<_>>(),
+            vec![std::path::PathBuf::from(system_entry)]
+        );
+
+        // No APPDIR: only the marker-based filter applies.
+        let filtered = super::filter_path(&with_mount, None);
+        let entries = std::env::split_paths(&filtered).collect::<Vec<_>>();
+        assert_eq!(entries.len(), 2);
+    }
 
     #[test]
     fn pidfile_round_trips() {

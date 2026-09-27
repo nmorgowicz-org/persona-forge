@@ -205,6 +205,12 @@ fn copy_text<R: Runtime>(app: AppHandle<R>, text: String) -> Result<(), String> 
 // ---------------------------------------------------------------------------------------------
 
 pub fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
+    // The app log must land in <state>/desktop/logs/desktop.log (contract §6.2, "Show Logs"),
+    // not the OS log dir — the plugin's default targets never write a file at all.
+    let log_dir = paths::app_data_root(&environ(), current_platform(), &home_dir())
+        .join("desktop")
+        .join("logs");
+    let _ = std::fs::create_dir_all(&log_dir);
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
@@ -221,7 +227,27 @@ pub fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
+                        path: log_dir,
+                        file_name: Some("desktop.log".into()),
+                    }),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                ])
+                .build(),
+        );
+
+    // macOS 26+'s NSVisualEffectView-based window effects stopped compositing reliably
+    // (tauri-apps/window-vibrancy#229); Liquid Glass is Apple's replacement API there, and the
+    // plugin falls back to NSVisualEffectView on older macOS.
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_plugin_liquid_glass::init());
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder;
+
+    builder
         .invoke_handler(tauri::generate_handler![
             get_bootstrap_state,
             retry_bootstrap,
@@ -232,9 +258,7 @@ pub fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
             apply_settings,
             list_addresses,
             copy_text,
-        ]);
-
-    builder
+        ])
         .setup(|app| {
             let home = home_dir();
             let platform = current_platform();
@@ -291,16 +315,13 @@ pub fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
 
             #[cfg(target_os = "macos")]
             {
+                // transparent + hidden title so the SPA draws the drag region; the vibrancy
+                // material itself is applied below via tauri-plugin-liquid-glass (the built-in
+                // .effects() stopped compositing on macOS 26 — window-vibrancy#229).
                 window_builder = window_builder
                     .title_bar_style(tauri::TitleBarStyle::Transparent)
                     .hidden_title(true)
-                    .transparent(true)
-                    .effects(tauri::utils::config::WindowEffectsConfig {
-                        effects: vec![tauri_utils::WindowEffect::Sidebar],
-                        state: Some(tauri_utils::WindowEffectState::FollowsWindowActiveState),
-                        radius: None,
-                        color: None,
-                    });
+                    .transparent(true);
             }
 
             let nav_handle = app.handle().clone();
@@ -330,7 +351,19 @@ pub fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
                 handle_download_event(&download_app_handle, &webview, event)
             });
 
-            window_builder.build()?;
+            // The window registers itself with the app; the handle is re-fetched above.
+            let _ = window_builder.build()?;
+
+            #[cfg(target_os = "macos")]
+            {
+                use tauri_plugin_liquid_glass::LiquidGlassExt;
+                if let Some(window) = app.get_webview_window("main") {
+                    // Fails soft: a missing effect must never block the app from starting.
+                    if let Err(e) = app.liquid_glass().set_effect(&window, Default::default()) {
+                        log::warn!("liquid glass effect unavailable: {e}");
+                    }
+                }
+            }
 
             spawn_bootstrap_thread(app.handle().clone());
 
@@ -728,7 +761,14 @@ fn run_bootstrap<R: Runtime + 'static>(app: AppHandle<R>) {
 
     let network_access = s.network_access;
     let chosen_port = match decision {
-        port::PortDecision::Use(p) => p,
+        port::PortDecision::Use(p) => {
+            // Persist even when unchanged: the GUI check (and anything else reading
+            // desktop/settings.json) must see the port without waiting for a port move.
+            let mut s2 = s;
+            s2.port = Some(p);
+            let _ = settings::save(&desktop_dir, &s2);
+            p
+        }
         port::PortDecision::Moved { to, .. } => {
             let mut s2 = s;
             s2.port = Some(to);

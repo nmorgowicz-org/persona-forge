@@ -41,6 +41,11 @@ parking_lot = "0.12"
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.189"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# macOS 26+ Liquid Glass (NSGlassEffectView) with NSVisualEffectView fallback on older macOS;
+# replaces the broken built-in window effects (see app.rs).
+tauri-plugin-liquid-glass = "=0.1.6"
+
 [dev-dependencies]
 tempfile = "=3.27.0"
 

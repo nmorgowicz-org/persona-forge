@@ -99,7 +99,9 @@ def main(argv: list[str] | None = None) -> int:
 
         shutil.copy2(args.wheel, wheel_dest)
         shutil.copy2(args.uv_binary, uv_dest)
-        pla.export_requirements(DESKTOP_TARGETS[args.target], requirements_dest)
+        pla.export_requirements(
+            DESKTOP_TARGETS[args.target], requirements_dest, uv_path=str(args.uv_binary)
+        )
 
         manifest = pla.build_manifest(
             version=args.version,
