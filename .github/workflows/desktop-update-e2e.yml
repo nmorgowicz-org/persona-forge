@@ -181,6 +181,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $env:UV_HTTP_TIMEOUT = '120'
           $env:UV_HTTP_RETRIES = '5'
+          $env:UV_NATIVE_TLS = 'true'
           $env:PERSONA_FORGE_HOME = Join-Path $env:RUNNER_TEMP "pf-update-e2e-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           if (Test-Path $env:PERSONA_FORGE_HOME) { Remove-Item $env:PERSONA_FORGE_HOME -Recurse -Force }
           $setup = Resolve-Path 'n\PersonaForge-windows-x86_64-setup.exe'
