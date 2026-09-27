@@ -1441,15 +1441,19 @@ ephemeral Linux runner, D19) and verified on the Mac. Add the App Translocation 
 3. When `inputs.sign` is true, split Phase 4's `build-macos` into the contract §8 chain:
    `build-macos` (unsigned `.app`, zipped with `ditto -c -k --keepParent`) → `sign-macos-app` on
    `arc-persona-forge-desktop` → `dmg-macos` on `self-hosted-macos` → `sign-macos-dmg` on
-   `arc-persona-forge-desktop` → `verify-macos` on `self-hosted-macos`. When `sign` is false, the
-   Phase 4 behavior stays. The signing jobs run only for `workflow_dispatch` and `workflow_call`
-   (never `pull_request`).
+   `arc-persona-forge-desktop` → `verify-macos` on `self-hosted-macos`. Before zipping, remove
+   any existing linker signature from the main binary and app bundle on the signed path (Phase 1A
+   proved rcodesign 0.29.0 cannot re-sign CodeDirectory v20400). When `sign` is false, Phase 4
+   behavior stays. The signing jobs run only for `workflow_dispatch` and `workflow_call` (never
+   `pull_request`).
 4. `verify-macos` (no secrets; all must pass): `xcrun stapler validate` on the `.app` (unzipped
    with `ditto -x -k`) and the DMG; `codesign --verify --deep --strict --verbose=2` and `spctl
    --assess --type execute --verbose=4` on the `.app`; `spctl --assess --type open --context
    context:primary-signature --verbose=4` on the DMG; `codesign -dv --verbose=4` on the main
-   binary, `uv`, `Sparkle.framework` and each nested bundle, asserting every `TeamIdentifier`
-   equals the Team ID output from `sign-macos-app`. rcodesign #169: a stapling step that exits 0
+   binary, `uv`, and every nested bundle shipped in Phase 5, asserting each `TeamIdentifier`
+   equals the Team ID output from `sign-macos-app`. The desktop crate does not contain
+   `Sparkle.framework` until Phase 6A adds the Sparkle updater plugin; its explicit Team-ID
+   assertion moves to Phase 6A. rcodesign #169: a stapling step that exits 0
    is not proof; only `stapler validate` counts.
 5. `src/translocation.rs` (macOS only), per §6.9:
    - Detection: the bundle path starts with `/private/var/folders/` and contains
@@ -1516,7 +1520,8 @@ feeds exist until Phase 6B.
   "passive". `bundle.createUpdaterArtifacts` stays **false**: `.sig` files come from the
   `updater-sigs` job (contract §8), so builds never need the private key.
 - `desktop/tauri.macos.conf.json`: `bundle.createUpdaterArtifacts` false. Sparkle framework
-  embedding per the plugin docs.
+  embedding per the plugin docs. Extend `verify-macos` to assert the embedded
+  `Sparkle.framework` Team ID matches the signed app's Team ID.
 - `desktop/Info.plist`: `SUPublicEDKey` (OA-4 public), `SUFeedURL` `<FEED_BASE>/appcast.xml`,
   `SUEnableAutomaticChecks` true, `SUScheduledCheckInterval` 86400,
   `SUAutomaticallyUpdate` false, `LSMinimumSystemVersion` 14.0.
