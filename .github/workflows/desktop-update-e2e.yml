@@ -191,6 +191,15 @@ jobs:
           if (-not $entry) { throw "Persona Forge uninstall entry is missing" }
           $install = $entry.GetValue('InstallLocation').Trim('"')
           $exe = Join-Path $install 'persona-forge-desktop.exe'
+          # Diagnose the runner's own PyPI/uv context before invoking the packaged launcher.
+          $uv = Join-Path $install 'uv.exe'
+          $requirements = Join-Path $install 'payload\requirements-x86_64-pc-windows-msvc.txt'
+          $probe = Join-Path $env:PERSONA_FORGE_HOME 'probe-venv'
+          Invoke-WebRequest 'https://pypi.org/simple/fastapi/' -UseBasicParsing | Out-Null
+          & $uv venv $probe --python 3.13.15
+          if ($LASTEXITCODE -ne 0) { throw 'bundled uv could not create the probe venv' }
+          & $uv pip sync --dry-run --python (Join-Path $probe 'Scripts\python.exe') $requirements
+          if ($LASTEXITCODE -ne 0) { throw 'bundled uv could not resolve the packaged requirements in CI' }
           try {
             & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke_desktop.ps1 -Exe $exe -SmokeJson (Join-Path $env:RUNNER_TEMP 'n-smoke.json')
             $p = Start-Process -FilePath $exe -ArgumentList '--ci-update', (Join-Path $env:RUNNER_TEMP 'update.json') -Wait -PassThru
