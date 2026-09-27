@@ -152,18 +152,177 @@ jobs:
             --wheel "$WHEEL" --uv-binary uv-bin/uv --uv-version ${{ env.UV_VERSION }} \
             --out-root desktop
 
-      # One version input; updater .sig files come from Phase 6B's updater-sigs job,
-      # never from the build (contract §8). --no-sign: unsigned at this phase.
+      # One version input; updater .sig files come from Phase 6B's updater-sigs job.
       - name: cargo tauri build (app bundle)
         run: |
           cargo tauri build \
             --no-sign --bundles app --target aarch64-apple-darwin \
             --config "$TAURI_CONFIG"
+      # Phase 1A proved rcodesign 0.29.0 cannot re-sign Apple's newer CodeDirectory v20400.
+      - name: Remove linker signatures before rcodesign
+        if: ${{ inputs.sign }}
+        run: |
+          set -euo pipefail
+          APP=$(find desktop/target -maxdepth 6 -type d -name "Persona Forge.app" -print -quit)
+          for target in "$APP/Contents/MacOS/persona-forge-desktop" "$APP"; do
+            if codesign -dv --verbose=4 "$target" > "$RUNNER_TEMP/codesign-display.log" 2>&1; then
+              codesign --remove-signature "$target"
+              echo "Removed pre-existing signature: $target"
+            else
+              cat "$RUNNER_TEMP/codesign-display.log"
+              echo "No pre-existing signature: $target"
+            fi
+          done
 
-      - name: Build DMG
+
+      - name: Zip unsigned app for the signing runner
+        if: ${{ inputs.sign }}
+        run: |
+          APP=$(find desktop/target -maxdepth 6 -type d -name "Persona Forge.app" -print -quit)
+          ditto -c -k --norsrc --noextattr --keepParent \
+            "$APP" PersonaForge-macos-aarch64.app.zip
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ inputs.sign }}
+        with:
+          name: desktop-macos-app-unsigned
+          path: PersonaForge-macos-aarch64.app.zip
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Build unsigned DMG
+        if: ${{ !inputs.sign }}
         run: |
           APP=$(find desktop/target -maxdepth 6 -type d -name "Persona Forge.app" -print -quit)
           bash scripts/build_macos_dmg.sh "$APP" PersonaForge-macos-aarch64.dmg
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !inputs.sign }}
+        with:
+          name: desktop-macos-aarch64
+          path: PersonaForge-macos-aarch64.dmg
+          retention-days: 7
+          if-no-files-found: error
+
+  sign-macos-app:
+    name: sign-macos-app
+    if: ${{ inputs.sign }}
+    needs: build-macos
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 45
+    outputs:
+      team_id: ${{ steps.sign.outputs.team_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-macos-app-unsigned
+          path: artifact
+
+      - name: Install rcodesign 0.29.0
+        run: |
+          set -euo pipefail
+          RCODESIGN_VERSION="0.29.0"
+          RCODESIGN_ASSET="apple-codesign-${RCODESIGN_VERSION}-x86_64-unknown-linux-musl"
+          curl --fail --location --silent --show-error -o rcodesign.tar.gz \
+            "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F${RCODESIGN_VERSION}/${RCODESIGN_ASSET}.tar.gz"
+          tar -xzf rcodesign.tar.gz "${RCODESIGN_ASSET}/rcodesign"
+          mv "${RCODESIGN_ASSET}/rcodesign" ./rcodesign
+          chmod +x ./rcodesign
+          echo "$PWD" >> "$GITHUB_PATH"
+
+      - name: Sign, notarize, and staple the app
+        id: sign
+        env:
+          MACOS_KEY_PEM: ${{ secrets.MACOS_KEY_PEM }}
+          MACOS_CERT_PEM: ${{ secrets.MACOS_CERT_PEM }}
+          APPLE_ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
+          APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+          APPLE_PRIVATE_KEY: ${{ secrets.APPLE_PRIVATE_KEY }}
+        run: |
+          bash scripts/sign_macos.sh app \
+            artifact/PersonaForge-macos-aarch64.app.zip \
+            PersonaForge-macos-aarch64-app-signed.zip
+
+      - name: Remove signing material
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/pf-sign"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-macos-app-signed
+          path: PersonaForge-macos-aarch64-app-signed.zip
+          retention-days: 7
+          if-no-files-found: error
+
+  dmg-macos:
+    name: dmg-macos
+    if: ${{ inputs.sign }}
+    needs: sign-macos-app
+    runs-on: self-hosted-macos
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-macos-app-signed
+          path: artifact
+
+      - name: Build DMG from the signed app
+        run: |
+          set -euo pipefail
+          mkdir -p signed-app
+          ditto -x -k artifact/PersonaForge-macos-aarch64-app-signed.zip signed-app
+          APP=$(find signed-app -maxdepth 2 -type d -name "Persona Forge.app" -print -quit)
+          bash scripts/build_macos_dmg.sh "$APP" PersonaForge-macos-aarch64.dmg
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-macos-dmg-unsigned
+          path: PersonaForge-macos-aarch64.dmg
+          retention-days: 7
+          if-no-files-found: error
+
+  sign-macos-dmg:
+    name: sign-macos-dmg
+    if: ${{ inputs.sign }}
+    needs: dmg-macos
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-macos-dmg-unsigned
+          path: artifact
+
+      - name: Install rcodesign 0.29.0
+        run: |
+          set -euo pipefail
+          RCODESIGN_VERSION="0.29.0"
+          RCODESIGN_ASSET="apple-codesign-${RCODESIGN_VERSION}-x86_64-unknown-linux-musl"
+          curl --fail --location --silent --show-error -o rcodesign.tar.gz \
+            "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F${RCODESIGN_VERSION}/${RCODESIGN_ASSET}.tar.gz"
+          tar -xzf rcodesign.tar.gz "${RCODESIGN_ASSET}/rcodesign"
+          mv "${RCODESIGN_ASSET}/rcodesign" ./rcodesign
+          chmod +x ./rcodesign
+          echo "$PWD" >> "$GITHUB_PATH"
+
+      - name: Sign, notarize, and staple the DMG
+        env:
+          MACOS_KEY_PEM: ${{ secrets.MACOS_KEY_PEM }}
+          MACOS_CERT_PEM: ${{ secrets.MACOS_CERT_PEM }}
+          APPLE_ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
+          APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
+          APPLE_PRIVATE_KEY: ${{ secrets.APPLE_PRIVATE_KEY }}
+        run: |
+          bash scripts/sign_macos.sh dmg \
+            artifact/PersonaForge-macos-aarch64.dmg \
+            PersonaForge-macos-aarch64.dmg
+
+      - name: Remove signing material
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/pf-sign"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -171,6 +330,67 @@ jobs:
           path: PersonaForge-macos-aarch64.dmg
           retention-days: 7
           if-no-files-found: error
+
+  verify-macos:
+    name: verify-macos
+    if: ${{ inputs.sign }}
+    needs: [sign-macos-app, sign-macos-dmg]
+    runs-on: self-hosted-macos
+    timeout-minutes: 30
+    env:
+      EXPECTED_TEAM_ID: ${{ needs.sign-macos-app.outputs.team_id }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-macos-app-signed
+          path: app-archive
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-macos-aarch64
+          path: dmg
+
+      - name: Verify stapling, signatures, and Team IDs
+        run: |
+          set -euo pipefail
+          [[ -n "$EXPECTED_TEAM_ID" ]] || { echo "FAIL: signing job did not report Team ID" >&2; exit 1; }
+          mkdir -p signed-app
+          ditto -x -k app-archive/PersonaForge-macos-aarch64-app-signed.zip signed-app
+          APP=$(find signed-app -maxdepth 2 -type d -name "Persona Forge.app" -print -quit)
+          [[ -d "$APP" ]] || { echo "FAIL: signed app bundle missing" >&2; exit 1; }
+          DMG="dmg/PersonaForge-macos-aarch64.dmg"
+
+          xcrun stapler validate "$APP"
+          xcrun stapler validate "$DMG"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          spctl --assess --type execute --verbose=4 "$APP"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG"
+
+          team_of() {
+            codesign -dv --verbose=4 "$1" 2>&1 |
+              sed -n 's/^TeamIdentifier=//p'
+          }
+          verify_team() {
+            local path="$1" team
+            team=$(team_of "$path")
+            echo "-- ${path#"$APP"/}: TeamIdentifier=$team"
+            [[ "$team" == "$EXPECTED_TEAM_ID" ]] || {
+              echo "FAIL: Team ID mismatch for $path: '$team' != '$EXPECTED_TEAM_ID'" >&2
+              exit 1
+            }
+          }
+          verify_team "$APP"
+          verify_team "$APP/Contents/MacOS/persona-forge-desktop"
+          verify_team "$APP/Contents/MacOS/uv"
+
+          # Phase 6A introduces Sparkle.framework. Until then, verify every nested bundle present.
+          COUNT=0
+          while IFS= read -r -d '' nested; do
+            verify_team "$nested"
+            COUNT=$((COUNT + 1))
+          done < <(find "$APP/Contents" -type d \( \
+            -name '*.app' -o -name '*.framework' -o -name '*.xpc' -o -name '*.bundle' \
+          \) -print0)
+          echo "$COUNT nested bundles verified for Team ID $EXPECTED_TEAM_ID"
 
   build-windows:
     name: build-windows
@@ -364,7 +584,8 @@ jobs:
 
   smoke-macos:
     name: smoke-macos
-    needs: build-macos
+    needs: [build-macos, verify-macos]
+    if: ${{ always() && ((inputs.sign != true && needs.build-macos.result == 'success') || (inputs.sign == true && needs.verify-macos.result == 'success')) }}
     runs-on: self-hosted-macos
     timeout-minutes: 30
     steps:

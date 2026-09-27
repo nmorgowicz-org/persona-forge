@@ -309,10 +309,15 @@ These are appended here so the release gate is one place — the Phase 4/5/6/7 s
 update manual checks will slot into this section as those phases land. Expected additions:
 
 - [ ] Phase 4: unsigned artifacts build on all three OSes; native smoke passes (headless, per job)
-- [ ] Phase 5: `.app` + DMG notarized/stapled; `codesign --verify --deep --strict` and `spctl`
-      clean; offline install launches (no Gatekeeper failure)
+- [ ] Phase 5: signed `.app` + DMG notarized/stapled; CI signature and Gatekeeper checks pass
+- [ ] Phase 5 OWNER: download the signed DMG through a browser, disconnect Wi-Fi, mount it, and
+      drag the app to Applications. Launch it offline; confirm there is no Gatekeeper rejection.
+      Eject and mount again, then launch directly from the mounted image. Confirm the move prompt;
+      accept and verify the relaunched process runs from `/Applications/Persona Forge.app`.
+      Repeat and decline; confirm the app continues and **Check for Updates** is disabled in the
+      app menu. If an existing app is present, verify replacement requires separate confirmation.
 - [ ] Phase 6A/6B: in-app "Check for Updates…" offers/installs/relaunches; good + badsig feeds;
-      Windows silent install; Sparkle appcast path
+       Windows silent install; Sparkle appcast path
 - [ ] Phase 7: release artifacts match the contract (`validate_release_contract.py`), checksums
       coverage, feed generation, rollback procedure tested
 
@@ -349,6 +354,7 @@ Copy this block into the PR (or a gist) and fill it in near release. `pass` / `F
 | T8.4 | system accent on native controls; brand theme unchanged | | |
 | T9.1 | broken payload → error screen; Retry/Show Logs/Quit | | |
 | T10.1 | Safari: no data-desktop, opaque, banner shown | | |
+| Phase 5 translocation | mounted-DMG prompt; accept relaunches from Applications; decline disables updates | | |
 | Phase 4 | unsigned artifacts + smoke (slot) | | |
 | Phase 5 | notarized `.app`/DMG, offline install | | |
 | Phase 6A/6B | update offer/install/relaunch; feeds; sigs | | |
