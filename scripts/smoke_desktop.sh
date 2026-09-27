@@ -10,14 +10,20 @@
 # server behind (final `pgrep` must find no `persona_forge.app:app`).
 set -euo pipefail
 
-PLATFORM="${1:?Usage: smoke_desktop.sh <macos|linux> <binary-path> <smoke-json-out>}"
-BINARY="${2:?Usage: smoke_desktop.sh <macos|linux> <binary-path> <smoke-json-out>}"
-SMOKE_JSON="${3:?Usage: smoke_desktop.sh <macos|linux> <binary-path> <smoke-json-out>}"
+PLATFORM="${1:?Usage: smoke_desktop.sh <macos|linux> <binary-path> <smoke-json-out> [--assert-ci-update-rejected]}"
+BINARY="${2:?Usage: smoke_desktop.sh <macos|linux> <binary-path> <smoke-json-out> [--assert-ci-update-rejected]}"
+SMOKE_JSON="${3:?Usage: smoke_desktop.sh <macos|linux> <binary-path> <smoke-json-out> [--assert-ci-update-rejected]}"
+ASSERT_CI_UPDATE_REJECTED="${4:-}"
 
 case "$PLATFORM" in
   macos|linux) ;;
   *) echo "FAIL: unknown platform '$PLATFORM' (expected macos or linux)" >&2; exit 1 ;;
 esac
+
+if [[ -n "$ASSERT_CI_UPDATE_REJECTED" && "$ASSERT_CI_UPDATE_REJECTED" != "--assert-ci-update-rejected" ]]; then
+  echo "FAIL: unknown fourth argument '$ASSERT_CI_UPDATE_REJECTED'" >&2
+  exit 1
+fi
 
 if [ ! -x "$BINARY" ]; then
   echo "FAIL: binary is missing or not executable: $BINARY" >&2
@@ -77,6 +83,18 @@ set -e
 if [ "$STATUS" -ne 2 ]; then
   echo "FAIL: --bogus exited with $STATUS, expected 2" >&2
   exit 1
+fi
+
+if [[ "$ASSERT_CI_UPDATE_REJECTED" == "--assert-ci-update-rejected" ]]; then
+  echo "--- smoke run: --ci-update (must exit 2 in a release artifact)"
+  set +e
+  "$BINARY" --ci-update "${SMOKE_JSON}.ci-update.json"
+  STATUS=$?
+  set -e
+  if [ "$STATUS" -ne 2 ]; then
+    echo "FAIL: --ci-update exited with $STATUS, expected 2" >&2
+    exit 1
+  fi
 fi
 
 echo "PASS: smoke ($PLATFORM)"
