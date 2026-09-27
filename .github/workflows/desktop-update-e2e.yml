@@ -133,6 +133,7 @@ jobs:
           python3 - "$MODE" "$STATUS" "$RUNNER_TEMP/update.json" <<'PY'
           import json, sys
           mode, status, report_path = sys.argv[1:]
+          status = int(status)
           report = json.load(open(report_path, encoding="utf-8"))
           if mode == "good":
               assert status == 0 and report["ok"] is True, (status, report)
