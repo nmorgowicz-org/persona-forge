@@ -59,6 +59,10 @@ pub fn run<R: Runtime>(app: AppHandle<R>, out_path: PathBuf) -> ExitCode {
         .build();
 
     let result = tauri::async_runtime::block_on(async {
+        let updater = match updater {
+            Ok(updater) => updater,
+            Err(error) => return Err(("build", error.to_string())),
+        };
         let update = match updater.check().await {
             Ok(Some(update)) => update,
             Ok(None) => return Err(("check", "no update available".to_string())),

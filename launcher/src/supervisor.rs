@@ -522,7 +522,7 @@ mod tests {
         let log_path = dir.path().join("server.log");
         let script = "start /b ping -n 60 127.0.0.1 >NUL & ping -n 60 127.0.0.1 >NUL";
 
-        let handle =
+        let mut handle =
             ServerHandle::spawn_command(Path::new("cmd"), &["/c", script], &[], &log_path).unwrap();
         let pid = handle.pid();
 
