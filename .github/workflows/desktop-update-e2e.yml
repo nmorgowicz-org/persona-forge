@@ -181,7 +181,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $env:UV_HTTP_TIMEOUT = '120'
           $env:UV_HTTP_RETRIES = '5'
-          $env:UV_NATIVE_TLS = 'true'
           $env:PERSONA_FORGE_HOME = Join-Path $env:RUNNER_TEMP "pf-update-e2e-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           if (Test-Path $env:PERSONA_FORGE_HOME) { Remove-Item $env:PERSONA_FORGE_HOME -Recurse -Force }
           $setup = Resolve-Path 'n\PersonaForge-windows-x86_64-setup.exe'
@@ -192,15 +191,6 @@ jobs:
           if (-not $entry) { throw "Persona Forge uninstall entry is missing" }
           $install = $entry.GetValue('InstallLocation').Trim('"')
           $exe = Join-Path $install 'persona-forge-desktop.exe'
-          # Diagnose the runner's own PyPI/uv context before invoking the packaged launcher.
-          $uv = Join-Path $install 'uv.exe'
-          $requirements = Join-Path $install 'payload\requirements-x86_64-pc-windows-msvc.txt'
-          $probe = Join-Path $env:PERSONA_FORGE_HOME 'probe-venv'
-          Invoke-WebRequest 'https://pypi.org/simple/fastapi/' -UseBasicParsing | Out-Null
-          & $uv venv $probe --python 3.13.15
-          if ($LASTEXITCODE -ne 0) { throw 'bundled uv could not create the probe venv' }
-          & $uv pip sync --dry-run --python (Join-Path $probe 'Scripts\python.exe') $requirements
-          if ($LASTEXITCODE -ne 0) { throw 'bundled uv could not resolve the packaged requirements in CI' }
           try {
             & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke_desktop.ps1 -Exe $exe -SmokeJson (Join-Path $env:RUNNER_TEMP 'n-smoke.json')
             $p = Start-Process -FilePath $exe -ArgumentList '--ci-update', (Join-Path $env:RUNNER_TEMP 'update.json') -Wait -PassThru
