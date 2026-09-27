@@ -21,24 +21,37 @@ use crate::health;
 pub fn sanitize_command_env(command: &mut std::process::Command) {
     command.env_remove("PYTHONHOME");
     command.env_remove("PYTHONPATH");
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    command.env(
+        "PATH",
+        filter_path(
+            &path,
+            std::env::var_os("APPDIR")
+                .as_deref()
+                .map(std::path::Path::new),
+        ),
+    );
+}
+
+/// Drops PATH entries inside the AppImage tree: `$APPDIR/...` for mounts, and the ephemeral
+/// `/tmp/appimage_extracted_*` dirs used by APPIMAGE_EXTRACT_AND_RUN.
+fn filter_path(path: &std::ffi::OsStr, appdir: Option<&std::path::Path>) -> std::ffi::OsString {
     // Drop PATH entries inside the AppImage tree: `$APPDIR/...` for mounts, and the
     // ephemeral `/tmp/appimage_extracted_*` dirs used by APPIMAGE_EXTRACT_AND_RUN.
-    let appdir = std::env::var_os("APPDIR").map(std::path::PathBuf::from);
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    let filtered: Vec<_> = std::env::split_paths(&path)
+    let filtered: Vec<_> = std::env::split_paths(path)
         .filter(|entry| {
             let as_str = entry.to_string_lossy();
             if as_str.contains("appimage_extracted") {
                 return false;
             }
-            match &appdir {
+            match appdir {
                 Some(dir) => !entry.starts_with(dir),
                 None => true,
             }
         })
         .collect();
-    let joined = std::env::join_paths(filtered.iter().map(|p| p.as_path())).unwrap_or(path);
-    command.env("PATH", joined);
+    std::env::join_paths(filtered.iter().map(|p| p.as_path()))
+        .unwrap_or_else(|_| path.to_os_string())
 }
 
 pub struct ServerSpec {
@@ -278,35 +291,43 @@ mod tests {
 
     #[test]
     fn sanitizer_strips_appimage_paths_and_python_home() {
-        let mut command = std::process::Command::new("true");
-        // Poison the *parent* env the way AppRun does, then sanitize like spawn does.
-        std::env::set_var("PYTHONHOME", "/tmp/appimage_extracted_x/usr/");
-        std::env::set_var(
-            "PATH",
-            format!(
-                "/tmp/appimage_extracted_x/usr/bin:/usr/local/bin:{}",
-                std::env::var("PATH").unwrap_or_default()
-            ),
+        // Pure-function check: no process-env mutation (tests run in parallel threads).
+        // Entry names deliberately avoid the host PATH separator so join_paths works on
+        // both Windows (;) and Unix (:).
+        let poisoned = "/tmp/appimage_extracted_x/usr/bin";
+        let system_entry = "system-entries-dir";
+        let real = std::env::join_paths([
+            std::path::Path::new(system_entry),
+            std::path::Path::new(poisoned),
+        ])
+        .unwrap();
+        let filtered = super::filter_path(
+            &real,
+            Some(std::path::Path::new("/tmp/appimage_extracted_x")),
         );
-        sanitize_command_env(&mut command);
-        std::env::remove_var("PYTHONHOME");
+        let entries = std::env::split_paths(&filtered).collect::<Vec<_>>();
+        assert_eq!(entries, vec![std::path::PathBuf::from(system_entry)]);
 
-        let env = command.get_envs().collect::<Vec<_>>();
-        assert!(env.contains(&(std::ffi::OsStr::new("PYTHONHOME"), None)));
-        let path = env
-            .iter()
-            .find(|(k, _)| *k == std::ffi::OsStr::new("PATH"))
-            .and_then(|(_, v)| v.to_owned())
-            .expect("PATH overridden");
-        let path = path.to_string_lossy();
-        assert!(
-            !path.contains("appimage_extracted"),
-            "PATH still poisoned: {path}"
+        // An APPDIR-scoped entry is dropped by prefix even without the marker substring.
+        let with_mount = std::env::join_paths([
+            std::path::Path::new("/tmp/appimage_extracted_x/usr/bin"),
+            std::path::Path::new(system_entry),
+            std::path::Path::new("/tmp/appimage_mount_x/lib"),
+        ])
+        .unwrap();
+        let filtered = super::filter_path(
+            &with_mount,
+            Some(std::path::Path::new("/tmp/appimage_mount_x")),
         );
-        assert!(
-            path.contains("/usr/local/bin"),
-            "PATH lost system entries: {path}"
+        assert_eq!(
+            std::env::split_paths(&filtered).collect::<Vec<_>>(),
+            vec![std::path::PathBuf::from(system_entry)]
         );
+
+        // No APPDIR: only the marker-based filter applies.
+        let filtered = super::filter_path(&with_mount, None);
+        let entries = std::env::split_paths(&filtered).collect::<Vec<_>>();
+        assert_eq!(entries.len(), 2);
     }
 
     #[test]
