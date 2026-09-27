@@ -658,13 +658,14 @@ jobs:
           name: desktop-linux-x86_64
           path: linux
       - name: Sign Windows and Linux updater artifacts
+        working-directory: desktop
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          cargo tauri signer sign -f windows/PersonaForge-windows-x86_64-setup.exe
-          cargo tauri signer sign -f linux/PersonaForge-linux-x86_64.AppImage
+          cargo tauri signer sign -f ../windows/PersonaForge-windows-x86_64-setup.exe
+          cargo tauri signer sign -f ../linux/PersonaForge-linux-x86_64.AppImage
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-updater-signatures

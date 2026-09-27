@@ -1,5 +1,4 @@
-# STUB (execution plan Phase 0, task 4 / contract §5 workflow bootstrap rule).
-# Replaced by the real update end-to-end workflow in Phase 6B.
+# Signed desktop update qualification gate (execution plan Phase 6B).
 name: Desktop Update E2E
 
 on:
@@ -25,12 +24,176 @@ permissions:
   contents: read
 
 jobs:
-  stub:
-    name: stub
+  publish-feeds:
+    name: publish-feeds
     runs-on: arc-general
-    timeout-minutes: 5
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
     steps:
-      - name: Stub — replaced in Phase 6B
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download signed N+1 artifacts
         run: |
-          echo "stub: implemented in a later phase"
-          exit 1
+          set -euo pipefail
+          gh run download "${{ inputs.n1_run_id }}" --repo "${{ github.repository }}" --dir download
+          mkdir -p release
+          cp download/desktop-macos-aarch64/PersonaForge-macos-aarch64.dmg release/
+          cp download/desktop-windows-x86_64/PersonaForge-windows-x86_64-setup.exe release/
+          cp download/desktop-linux-x86_64/PersonaForge-linux-x86_64.AppImage release/
+          cp download/desktop-updater-signatures/windows/PersonaForge-windows-x86_64-setup.exe.sig release/
+          cp download/desktop-updater-signatures/linux/PersonaForge-linux-x86_64.AppImage.sig release/
+      - name: Build and publish the requested feed
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          if [[ "$MODE" == "good" ]]; then
+            TAG=desktop-updater-test
+          else
+            TAG=desktop-updater-badsig
+            python3 - <<'PY'
+          from pathlib import Path
+          for name in (
+              "PersonaForge-macos-aarch64.dmg",
+              "PersonaForge-windows-x86_64-setup.exe",
+              "PersonaForge-linux-x86_64.AppImage",
+          ):
+              path = Path("release") / name
+              data = bytearray(path.read_bytes())
+              if not data:
+                  raise SystemExit(f"empty artifact: {path}")
+              data[0] ^= 1
+              path.write_bytes(data)
+          PY
+          fi
+          python3 scripts/generate_update_feeds.py \
+            --release-dir release --version 90.0.2 --tag "$TAG" \
+            --repo "${{ github.repository }}" \
+            --notes-url "https://github.com/${{ github.repository }}/releases/tag/$TAG"
+          if [[ "$MODE" == "badsig" ]]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          import re
+          path = Path("release/appcast.xml")
+          xml = path.read_text(encoding="utf-8")
+          match = re.search(r'sparkle:edSignature="([^"]+)"', xml)
+          if match is None:
+              raise SystemExit("appcast has no sparkle:edSignature")
+          signature = match.group(1)
+          replacement = ("A" if signature[0] != "A" else "B") + signature[1:]
+          path.write_text(xml[:match.start(1)] + replacement + xml[match.end(1):], encoding="utf-8")
+          PY
+          fi
+          gh release upload "$TAG" release/* --clobber --repo "${{ github.repository }}"
+
+  e2e-linux:
+    name: e2e-linux
+    needs: publish-feeds
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install N, update, and assert the requested result
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          rm -rf "$PERSONA_FORGE_HOME"
+          gh run download "${{ inputs.n_run_id }}" --repo "${{ github.repository }}" \
+            --name desktop-linux-x86_64 --dir n
+          APPIMAGE="$RUNNER_TEMP/PersonaForge-linux-x86_64.AppImage"
+          cp n/PersonaForge-linux-x86_64.AppImage "$APPIMAGE"
+          chmod +x "$APPIMAGE"
+          bash scripts/smoke_desktop.sh linux "$APPIMAGE" "$RUNNER_TEMP/n-smoke.json"
+          set +e
+          "$APPIMAGE" --ci-update "$RUNNER_TEMP/update.json"
+          STATUS=$?
+          set -e
+          python3 - "$MODE" "$STATUS" "$RUNNER_TEMP/update.json" <<'PY'
+          import json, sys
+          mode, status, report_path = sys.argv[1:]
+          report = json.load(open(report_path, encoding="utf-8"))
+          if mode == "good":
+              assert status == 0 and report["ok"] is True, (status, report)
+              assert report["phase"] == "installed" and report["to_version"] == "90.0.2", report
+          else:
+              assert status != 0 and report["ok"] is False, (status, report)
+              assert report["phase"] == "verify", report
+          PY
+          if [[ "$MODE" == "good" ]]; then
+            bash scripts/smoke_desktop.sh linux "$APPIMAGE" "$RUNNER_TEMP/n1-smoke.json"
+            python3 - "$RUNNER_TEMP/n1-smoke.json" "$PERSONA_FORGE_HOME/launcher/versions" <<'PY'
+          import json, sys
+          assert json.load(open(sys.argv[1], encoding="utf-8"))["version"] == "90.0.2"
+          assert sorted(p.name for p in __import__("pathlib").Path(sys.argv[2]).iterdir()) == ["90.0.1", "90.0.2"]
+          PY
+          else
+            bash scripts/smoke_desktop.sh linux "$APPIMAGE" "$RUNNER_TEMP/n-after-badsig.json"
+            python3 - "$RUNNER_TEMP/n-after-badsig.json" <<'PY'
+          import json, sys
+          assert json.load(open(sys.argv[1], encoding="utf-8"))["version"] == "90.0.1"
+          PY
+          fi
+
+  e2e-windows:
+    name: e2e-windows
+    needs: publish-feeds
+    runs-on: self-hosted-windows
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install N, update, and assert the requested result
+        shell: powershell
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:PERSONA_FORGE_HOME = Join-Path $env:RUNNER_TEMP "pf-update-e2e-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          if (Test-Path $env:PERSONA_FORGE_HOME) { Remove-Item $env:PERSONA_FORGE_HOME -Recurse -Force }
+          gh run download "${{ inputs.n_run_id }}" --repo "${{ github.repository }}" --name desktop-windows-x86_64 --dir n
+          $setup = Resolve-Path 'n\PersonaForge-windows-x86_64-setup.exe'
+          $p = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "N install failed: $($p.ExitCode)" }
+          $entry = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+            Where-Object { $_.GetValue('DisplayName') -eq 'Persona Forge' } | Select-Object -First 1
+          if (-not $entry) { throw "Persona Forge uninstall entry is missing" }
+          $install = $entry.GetValue('InstallLocation').Trim('"')
+          $exe = Join-Path $install 'persona-forge-desktop.exe'
+          try {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke_desktop.ps1 -Exe $exe -SmokeJson (Join-Path $env:RUNNER_TEMP 'n-smoke.json')
+            $p = Start-Process -FilePath $exe -ArgumentList '--ci-update', (Join-Path $env:RUNNER_TEMP 'update.json') -Wait -PassThru
+            $report = Get-Content (Join-Path $env:RUNNER_TEMP 'update.json') -Raw | ConvertFrom-Json
+            if ($env:MODE -eq 'good') {
+              if ($p.ExitCode -ne 0 -or -not $report.ok -or $report.phase -ne 'installing') { throw "unexpected good-update report: $($report | ConvertTo-Json -Compress)" }
+              $deadline = (Get-Date).AddSeconds(120)
+              do {
+                Start-Sleep -Milliseconds 500
+                $entry = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+                  Where-Object { $_.GetValue('DisplayName') -eq 'Persona Forge' } | Select-Object -First 1
+              } while ((-not $entry -or $entry.GetValue('DisplayVersion') -ne '90.0.2') -and (Get-Date) -lt $deadline)
+              if (-not $entry -or $entry.GetValue('DisplayVersion') -ne '90.0.2') { throw 'update did not reach DisplayVersion 90.0.2 within 120 seconds' }
+              Get-Process persona-forge-desktop -ErrorAction SilentlyContinue | Stop-Process -Force
+              $install = $entry.GetValue('InstallLocation').Trim('"')
+              $exe = Join-Path $install 'persona-forge-desktop.exe'
+              & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke_desktop.ps1 -Exe $exe -SmokeJson (Join-Path $env:RUNNER_TEMP 'n1-smoke.json')
+              $smoke = Get-Content (Join-Path $env:RUNNER_TEMP 'n1-smoke.json') -Raw | ConvertFrom-Json
+              if ($smoke.version -ne '90.0.2') { throw "expected 90.0.2 smoke, got $($smoke.version)" }
+            } else {
+              if ($p.ExitCode -eq 0 -or $report.ok -or $report.phase -ne 'verify') { throw "unexpected bad-signature report: $($report | ConvertTo-Json -Compress)" }
+              if ($entry.GetValue('DisplayVersion') -ne '90.0.1') { throw "bad signature changed installed version: $($entry.GetValue('DisplayVersion'))" }
+            }
+          } finally {
+            $entry = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+              Where-Object { $_.GetValue('DisplayName') -eq 'Persona Forge' } | Select-Object -First 1
+            if ($entry) {
+              $uninstaller = Join-Path $entry.GetValue('InstallLocation').Trim('"') 'uninstall.exe'
+              if (Test-Path $uninstaller) { Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait }
+            }
+          }
