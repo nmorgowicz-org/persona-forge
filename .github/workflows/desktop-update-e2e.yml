@@ -31,14 +31,19 @@ jobs:
     permissions:
       contents: write
     env:
-      GH_TOKEN: ${{ github.token }}
       SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Download signed N+1 artifacts
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.n1_run_id }}
+          pattern: desktop-*
+          path: download
+      - name: Prepare signed N+1 artifacts
         run: |
           set -euo pipefail
-          gh run download "${{ inputs.n1_run_id }}" --repo "${{ github.repository }}" --dir download
           mkdir -p release
           cp download/desktop-macos-aarch64/PersonaForge-macos-aarch64.dmg release/
           cp download/desktop-windows-x86_64/PersonaForge-windows-x86_64-setup.exe release/
@@ -87,7 +92,12 @@ jobs:
           path.write_text(xml[:match.start(1)] + replacement + xml[match.end(1):], encoding="utf-8")
           PY
           fi
-          gh release upload "$TAG" release/* --clobber --repo "${{ github.repository }}"
+      - name: Publish the requested feed assets
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        with:
+          tag_name: ${{ inputs.mode == 'good' && 'desktop-updater-test' || 'desktop-updater-badsig' }}
+          files: release/*
+          fail_on_unmatched_files: true
 
   e2e-linux:
     name: e2e-linux
@@ -98,14 +108,19 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.n_run_id }}
+          name: desktop-linux-x86_64
+          path: n
       - name: Install N, update, and assert the requested result
         env:
           MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
           rm -rf "$PERSONA_FORGE_HOME"
-          gh run download "${{ inputs.n_run_id }}" --repo "${{ github.repository }}" \
-            --name desktop-linux-x86_64 --dir n
           APPIMAGE="$RUNNER_TEMP/PersonaForge-linux-x86_64.AppImage"
           cp n/PersonaForge-linux-x86_64.AppImage "$APPIMAGE"
           chmod +x "$APPIMAGE"
@@ -149,6 +164,13 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.n_run_id }}
+          name: desktop-windows-x86_64
+          path: n
       - name: Install N, update, and assert the requested result
         shell: powershell
         env:
@@ -157,7 +179,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $env:PERSONA_FORGE_HOME = Join-Path $env:RUNNER_TEMP "pf-update-e2e-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           if (Test-Path $env:PERSONA_FORGE_HOME) { Remove-Item $env:PERSONA_FORGE_HOME -Recurse -Force }
-          gh run download "${{ inputs.n_run_id }}" --repo "${{ github.repository }}" --name desktop-windows-x86_64 --dir n
           $setup = Resolve-Path 'n\PersonaForge-windows-x86_64-setup.exe'
           $p = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "N install failed: $($p.ExitCode)" }
