@@ -55,14 +55,29 @@ jobs:
       - name: cargo test (desktop)
         run: cargo test --manifest-path desktop/Cargo.toml
 
+      - name: cargo test (ci-hooks updater driver)
+        run: cargo test --manifest-path desktop/Cargo.toml --features ci-hooks
+
   desktop-macos:
     name: desktop-macos
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: self-hosted-macos
     timeout-minutes: 30
+    env:
+      SPARKLE_FRAMEWORK_PATH: desktop
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+      - name: Fetch and verify pinned Sparkle.framework
+        run: |
+          set -euo pipefail
+          VERSION="2.9.6"
+          SHA256="52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192"
+          curl --fail --location --silent --show-error \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${VERSION}/Sparkle-${VERSION}.tar.xz" \
+            -o "$RUNNER_TEMP/Sparkle.tar.xz"
+          echo "${SHA256}  $RUNNER_TEMP/Sparkle.tar.xz" | shasum -a 256 -c -
+          tar -xf "$RUNNER_TEMP/Sparkle.tar.xz" -C "$RUNNER_TEMP"
+          ditto "$RUNNER_TEMP/Sparkle.framework" desktop/Sparkle.framework
       - name: Stage fake desktop payload
         run: |
           python scripts/stage_desktop_payload.py \
@@ -81,6 +96,9 @@ jobs:
 
       - name: cargo test (desktop)
         run: cargo test --manifest-path desktop/Cargo.toml
+
+      - name: cargo test (ci-hooks report contract)
+        run: cargo test --manifest-path desktop/Cargo.toml --features ci-hooks
 
   desktop-windows:
     name: desktop-windows
@@ -121,6 +139,13 @@ jobs:
           $ErrorActionPreference = 'Stop'
           cargo test --manifest-path desktop/Cargo.toml
           if ($LASTEXITCODE -ne 0) { throw "cargo test failed with exit code $LASTEXITCODE" }
+
+      - name: cargo test (ci-hooks updater driver)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --manifest-path desktop/Cargo.toml --features ci-hooks
+          if ($LASTEXITCODE -ne 0) { throw "cargo test with ci-hooks failed with exit code $LASTEXITCODE" }
 
   launcher-linux:
     name: launcher-linux

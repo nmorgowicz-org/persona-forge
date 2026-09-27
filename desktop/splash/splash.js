@@ -84,25 +84,27 @@ document.getElementById('retry-button').addEventListener('click', () => {
 })
 
 document.getElementById('show-logs-button').addEventListener('click', () => {
-  invoke('show_logs').catch(() => {})
+  invoke('show_logs').catch((reason) => showError(String(reason), logLines.slice(-30)))
 })
 
 document.getElementById('quit-button').addEventListener('click', () => {
-  invoke('quit_app').catch(() => {})
+  invoke('quit_app').catch((reason) => showError(String(reason), logLines.slice(-30)))
 })
 
 async function main() {
-  window.__TAURI__.event.listen('bootstrap://progress', (event) => {
-    const payload = event.payload || {}
-    if (payload.line) appendLogLine(payload.line)
-    if (payload.step) setActiveStep(payload.step)
-  })
-
   try {
+    if (!window.__TAURI__?.core?.invoke || !window.__TAURI__?.event?.listen) {
+      throw new Error('Desktop app commands are unavailable. Restart Persona Forge and try again.')
+    }
+    await window.__TAURI__.event.listen('bootstrap://progress', (event) => {
+      const payload = event.payload || {}
+      if (payload.line) appendLogLine(payload.line)
+      if (payload.step) setActiveStep(payload.step)
+    })
     const state = await invoke('get_bootstrap_state')
     await applyState(state)
-  } catch (err) {
-    showError(String(err), [])
+  } catch (reason) {
+    showError(String(reason), [])
   }
 }
 

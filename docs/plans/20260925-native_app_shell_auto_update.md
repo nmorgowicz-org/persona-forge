@@ -1494,9 +1494,11 @@ PR title: `ci(desktop): sign, notarize and staple the macOS app and DMG`, plus
 
 The shell can check for, download, verify, consent to, and install updates through Sparkle
 (macOS) and `tauri-plugin-updater` (Windows/Linux), including the test-only `--ci-update`
-driver (contract §6.12). No feed generation and no e2e in this phase: a check against the
-production feed must safely end in "no update" (contract §9.1's 404 path), because no desktop
-feeds exist until Phase 6B.
+driver (contract §6.12). No feed generation and no e2e in this phase. A missing feed is not the
+same as a successful no-update check: Tauri returns `ReleaseNotFound` for an HTTP 404 (`204 No
+Content` is its explicit no-update response), and Sparkle presents an appcast retrieval error.
+Until Phase 6B publishes valid feeds, record those 404 outcomes as expected errors and do not
+suppress them or claim that they confirm the feed is healthy.
 
 ### Read first
 
@@ -1553,10 +1555,11 @@ cargo test --manifest-path desktop/Cargo.toml
 python scripts/validate_repo.py && git diff --check
 ```
 
-Plus, on the Mac (implementer): a local unsigned release build
-(`cargo tauri build --no-sign --bundles app --target aarch64-apple-darwin`), launch it, run
-"Check for Updates…" against the production feed URL, and record that Sparkle reports "no
-update" (the feeds do not exist yet) and the app stays responsive.
+Plus, on the Mac (implementer): build and launch an unsigned release app. Check for Updates
+against the production feed URL and confirm the app stays responsive. With no appcast published
+until Phase 6B, Sparkle presents an update-retrieval error for the production 404; record this as
+an expected missing-feed error, not a successful "no update" result. Verify the no-update UI
+against a valid empty appcast once Phase 6B provides one.
 
 PR title: `feat(desktop): add Sparkle and Tauri updater plumbing with a test-only update driver`
 

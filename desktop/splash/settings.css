@@ -1,0 +1,172 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b0b0f;
+  --panel: #16161d;
+  --border: #2a2a35;
+  --text: #e7e7ee;
+  --muted: #9797a8;
+  --accent: #7c6cf0;
+  --danger: #ef5b6a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  padding: 24px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, 'Geist Variable', system-ui, sans-serif;
+}
+
+#settings-app {
+  width: min(100%, 620px);
+  margin: 0 auto;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.mark {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 11px;
+  background: linear-gradient(135deg, var(--accent), #4d3fb0);
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 20px;
+  font-weight: 650;
+}
+
+header p,
+small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+form {
+  display: grid;
+  gap: 16px;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+  font-size: 14px;
+  font-weight: 550;
+}
+
+select,
+input[type='number'] {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+}
+
+.field.disabled {
+  opacity: 0.5;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+  font-size: 14px;
+}
+
+.toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.addresses {
+  padding-top: 4px;
+}
+
+h2 {
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+ul {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 10px;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+button {
+  min-height: 36px;
+  padding: 7px 12px;
+  color: white;
+  background: var(--accent);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.secondary {
+  color: var(--text);
+  background: var(--panel);
+  border-color: var(--border);
+}
+
+button:hover {
+  filter: brightness(1.1);
+}
+
+footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+#status {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+#error {
+  margin-top: 16px;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+[hidden] {
+  display: none !important;
+}

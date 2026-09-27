@@ -2,7 +2,7 @@
 # Contract §8 (no-secret jobs only): builds all three desktop targets from one wheel,
 # stages the payload, bundles unsigned artifacts, and smoke-tests the *installed/bundled*
 # app on native runners. Nothing is signed or published here; Phase 5 splits build-macos
-# into the signed chain, Phase 6B adds the updater-sigs job.
+# into the signed chain, Phase 6A adds updater client plumbing, Phase 6B adds updater signatures.
 #
 # Fork safety: this workflow has no pull_request trigger — it only runs via
 # workflow_dispatch / workflow_call, which require write access to the repo.
@@ -20,11 +20,11 @@ on:
         default: false
         type: boolean
       feed_base:
-        description: "Update feed base URL override for test builds (Phase 6B)"
+        description: "Update feed base URL override for test builds (Phase 6A)"
         default: ""
         type: string
       ci_hooks:
-        description: "Build Windows/Linux with the ci-hooks feature (Phase 6B)"
+        description: "Build Windows/Linux with the ci-hooks feature (Phase 6A)"
         default: false
         type: boolean
       wheel_artifact:
@@ -42,11 +42,11 @@ on:
         default: false
         type: boolean
       feed_base:
-        description: "Update feed base URL override for test builds (Phase 6B)"
+        description: "Update feed base URL override for test builds (Phase 6A)"
         default: ""
         type: string
       ci_hooks:
-        description: "Build Windows/Linux with the ci-hooks feature (Phase 6B)"
+        description: "Build Windows/Linux with the ci-hooks feature (Phase 6A)"
         default: false
         type: boolean
       wheel_artifact:
@@ -106,6 +106,8 @@ jobs:
     timeout-minutes: 90
     env:
       TAURI_CONFIG: '{"version":"${{ inputs.version }}","bundle":{"createUpdaterArtifacts":false}}'
+      SPARKLE_FRAMEWORK_PATH: .
+      FEED_BASE: ${{ inputs.feed_base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -152,11 +154,32 @@ jobs:
             --wheel "$WHEEL" --uv-binary uv-bin/uv --uv-version ${{ env.UV_VERSION }} \
             --out-root desktop
 
-      # One version input; updater .sig files come from Phase 6B's updater-sigs job.
+      - name: Fetch and verify pinned Sparkle.framework
+        run: |
+          set -euo pipefail
+          VERSION="2.9.6"
+          SHA256="52bf9e88cdd972fc0c81501377a880e90d47031bd8ca5462488f843e2609e192"
+          curl --fail --location --silent --show-error \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${VERSION}/Sparkle-${VERSION}.tar.xz" \
+            -o "$RUNNER_TEMP/Sparkle.tar.xz"
+          echo "${SHA256}  $RUNNER_TEMP/Sparkle.tar.xz" | shasum -a 256 -c -
+          tar -xf "$RUNNER_TEMP/Sparkle.tar.xz" -C "$RUNNER_TEMP"
+          ditto "$RUNNER_TEMP/Sparkle.framework" desktop/Sparkle.framework
+
+      - name: Set macOS updater feed
+        run: |
+          args=(--plist desktop/Info.plist --tauri-config "$RUNNER_TEMP/tauri-feed.json")
+          if [[ -n "$FEED_BASE" ]]; then args+=(--base "$FEED_BASE"); fi
+          python3 scripts/set_feed_base.py "${args[@]}"
+
+      # Updater signatures are produced by Phase 6B's updater-sigs job; no private key is used here.
       - name: cargo tauri build (app bundle)
+        working-directory: desktop
         run: |
           cargo tauri build \
             --no-sign --bundles app --target aarch64-apple-darwin \
+            --config tauri.macos.conf.json \
+            --config "$RUNNER_TEMP/tauri-feed.json" \
             --config "$TAURI_CONFIG"
       # Phase 1A proved rcodesign 0.29.0 cannot re-sign Apple's newer CodeDirectory v20400.
       - name: Remove linker signatures before rcodesign
@@ -382,7 +405,7 @@ jobs:
           verify_team "$APP/Contents/MacOS/persona-forge-desktop"
           verify_team "$APP/Contents/MacOS/uv"
 
-          # Phase 6A introduces Sparkle.framework. Until then, verify every nested bundle present.
+          # Sparkle.framework must be among the Team-ID-checked nested bundles.
           COUNT=0
           while IFS= read -r -d '' nested; do
             verify_team "$nested"
@@ -399,6 +422,8 @@ jobs:
     timeout-minutes: 90
     env:
       TAURI_CONFIG: '{"version":"${{ inputs.version }}","bundle":{"createUpdaterArtifacts":false}}'
+      FEED_BASE: ${{ inputs.feed_base }}
+      CI_HOOKS: ${{ inputs.ci_hooks }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -470,14 +495,25 @@ jobs:
           python scripts/stage_desktop_payload.py --target x86_64-pc-windows-msvc --version "${{ inputs.version }}" --wheel $wheel.FullName --uv-binary uv-bin\uv.exe --uv-version ${{ env.UV_VERSION }} --out-root desktop
           if ($LASTEXITCODE -ne 0) { throw "stage_desktop_payload.py failed: $LASTEXITCODE" }
 
+      - name: Configure Windows updater feed
+        shell: powershell
+        run: |
+          $args = @('--tauri-config', 'desktop\tauri-feed.json')
+          if ($env:FEED_BASE) { $args += @('--base', $env:FEED_BASE) }
+          python scripts/set_feed_base.py @args
+          if ($LASTEXITCODE -ne 0) { throw "set_feed_base.py failed: $LASTEXITCODE" }
+
       - name: cargo tauri build (NSIS bundle)
+        working-directory: desktop
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           # PowerShell 5.1 mangles embedded double quotes when passing native args (even
           # quoted expansions), so hand tauri a config FILE instead of a JSON string.
-          Set-Content -Path desktop\tauri.build.json -Value $env:TAURI_CONFIG -Encoding utf8
-          & cargo tauri build --bundles nsis --target x86_64-pc-windows-msvc --config desktop\tauri.build.json
+          Set-Content -Path tauri.build.json -Value $env:TAURI_CONFIG -Encoding utf8
+          $tauriArgs = @('build', '--bundles', 'nsis', '--target', 'x86_64-pc-windows-msvc', '--config', 'tauri.build.json', '--config', 'tauri-feed.json')
+          if ($env:CI_HOOKS -eq 'true') { $tauriArgs += @('--features', 'ci-hooks') }
+          & cargo tauri @tauriArgs
           if ($LASTEXITCODE -ne 0) { throw "cargo tauri build failed: $LASTEXITCODE" }
 
       - name: Collect setup exe
@@ -503,6 +539,8 @@ jobs:
     timeout-minutes: 90
     env:
       TAURI_CONFIG: '{"version":"${{ inputs.version }}","bundle":{"createUpdaterArtifacts":false}}'
+      FEED_BASE: ${{ inputs.feed_base }}
+      CI_HOOKS: ${{ inputs.ci_hooks }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -544,10 +582,20 @@ jobs:
             --wheel "$WHEEL" --uv-binary uv-bin/uv --uv-version ${{ env.UV_VERSION }} \
             --out-root desktop
 
-      - name: cargo tauri build (AppImage bundle)
+      - name: Configure Linux updater feed
         run: |
-          cargo tauri build \
+          args=(--tauri-config "$RUNNER_TEMP/tauri-feed.json")
+          if [[ -n "$FEED_BASE" ]]; then args+=(--base "$FEED_BASE"); fi
+          python3 scripts/set_feed_base.py "${args[@]}"
+
+      - name: cargo tauri build (AppImage bundle)
+        working-directory: desktop
+        run: |
+          feature_args=()
+          if [[ "$CI_HOOKS" == "true" ]]; then feature_args=(--features ci-hooks); fi
+          cargo tauri build "${feature_args[@]}" \
             --bundles appimage --target x86_64-unknown-linux-gnu \
+            --config "$RUNNER_TEMP/tauri-feed.json" \
             --config "$TAURI_CONFIG"
 
       - name: Collect AppImage + glibc check (fail if > 2.35)

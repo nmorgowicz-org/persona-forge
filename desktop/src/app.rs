@@ -13,6 +13,8 @@ use parking_lot::Mutex;
 use persona_forge_launcher::{bootstrap, health, manifest, paths, supervisor};
 use serde::Serialize;
 use tauri::menu::MenuEvent;
+#[cfg(all(target_os = "macos", not(test)))]
+use tauri::Listener;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder};
 
 use crate::bundle_paths::bundle_paths;
@@ -86,6 +88,19 @@ fn retry_bootstrap<R: Runtime>(app: AppHandle<R>) {
     spawn_bootstrap_thread(app);
 }
 
+#[cfg(not(target_os = "macos"))]
+/// Restarts bootstrap on the old bundle if installing an update fails after the server was stopped.
+pub(crate) fn resume_after_failed_update<R: Runtime + 'static>(app: AppHandle<R>) {
+    {
+        let state = app.state::<ManagedState>();
+        *state.bootstrap.lock() = BootstrapState::default();
+    }
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.navigate("tauri://localhost/index.html".parse().unwrap());
+    }
+    spawn_bootstrap_thread(app);
+}
+
 #[tauri::command]
 fn show_logs<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     let state = app.state::<ManagedState>();
@@ -147,6 +162,7 @@ fn apply_settings<R: Runtime>(
     let mut s = settings::load(&state.desktop_dir);
     let old_mode = s.port_mode.clone();
     let old_network = s.network_access;
+    let tray_present = app.tray_by_id(tray::ID_TRAY_ICON).is_some();
     let old_port = s.port;
 
     s.port_mode = if port_mode == "fixed" {
@@ -159,9 +175,22 @@ fn apply_settings<R: Runtime>(
     s.tray_enabled = tray_enabled;
     s.ask_where_to_save = ask_where_to_save;
     settings::save(&state.desktop_dir, &s).map_err(|e| e.to_string())?;
+    let tray_update_error = if s.tray_enabled != tray_present {
+        tray::apply_preference(
+            &app,
+            s.tray_enabled,
+            state.translocation_disabled.load(Ordering::SeqCst),
+        )
+        .err()
+    } else {
+        None
+    };
 
-    let needs_restart =
-        s.port_mode != old_mode || s.port != old_port || s.network_access != old_network;
+    let bootstrap_failed = state.bootstrap.lock().error.is_some();
+    let needs_restart = s.port_mode != old_mode
+        || s.port != old_port
+        || s.network_access != old_network
+        || bootstrap_failed;
     if needs_restart {
         {
             let mut b = state.bootstrap.lock();
@@ -174,6 +203,11 @@ fn apply_settings<R: Runtime>(
             let _ = main.navigate("tauri://localhost/index.html".parse().unwrap());
         }
         spawn_restart_thread(app.clone());
+    }
+    if let Some(error) = tray_update_error {
+        return Err(format!(
+            "Settings were saved, but the tray preference could not be applied: {error}"
+        ));
     }
     Ok(())
 }
@@ -239,6 +273,13 @@ pub fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
                 .build(),
         );
 
+    #[cfg(all(target_os = "macos", not(test)))]
+    let builder = builder.plugin(tauri_plugin_sparkle_updater::init());
+    #[cfg(all(target_os = "macos", test))]
+    let builder = builder;
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
     // macOS 26+'s NSVisualEffectView-based window effects stopped compositing reliably
     // (tauri-apps/window-vibrancy#229); Liquid Glass is Apple's replacement API there, and the
     // plugin falls back to NSVisualEffectView on older macOS.
@@ -288,6 +329,23 @@ pub fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
                 .translocation_disabled
                 .store(translocation_disabled, Ordering::SeqCst);
 
+            #[cfg(all(target_os = "macos", not(test)))]
+            {
+                use tauri_plugin_sparkle_updater::SparkleUpdaterExt;
+                if let Some(updater) = app.handle().sparkle_updater() {
+                    // The shell runs checks after the server reaches Running, avoiding a
+                    // duplicate pre-bootstrap automatic check from Sparkle's AppKit timer.
+                    let _ = updater.set_automatically_checks_for_updates(false);
+                    if translocation_disabled {
+                        let _ = updater.set_may_check_for_updates_config(false);
+                    }
+                }
+                let sparkle_app = app.handle().clone();
+                app.listen("sparkle://will-install-update-on-quit", move |_| {
+                    crate::updates::stop_server_for_sparkle(&sparkle_app);
+                });
+            }
+
             let menu = menu::build_menu(app.handle(), translocation_disabled)?;
             app.set_menu(menu)?;
             app.on_menu_event(handle_menu_event);
@@ -299,9 +357,12 @@ pub fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
                 } else {
                     include_bytes!("../icons/tray/tray-color@2x.png")
                 };
-                if let Err(e) =
-                    tray::build_tray(app.handle(), icon_bytes, cfg!(target_os = "macos"))
-                {
+                if let Err(e) = tray::build_tray(
+                    app.handle(),
+                    icon_bytes,
+                    cfg!(target_os = "macos"),
+                    translocation_disabled,
+                ) {
                     log::warn!("tray creation failed; disabling tray for this session: {e}");
                 }
             }
@@ -315,13 +376,12 @@ pub fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
 
             #[cfg(target_os = "macos")]
             {
-                // transparent + hidden title so the SPA draws the drag region; the vibrancy
-                // material itself is applied below via tauri-plugin-liquid-glass (the built-in
-                // .effects() stopped compositing on macOS 26 — window-vibrancy#229).
+                // Use the standard native macOS title bar; keep the app title visible and the
+                // window background opaque instead of drawing a transparent custom title strip.
                 window_builder = window_builder
-                    .title_bar_style(tauri::TitleBarStyle::Transparent)
-                    .hidden_title(true)
-                    .transparent(true);
+                    .title_bar_style(tauri::TitleBarStyle::Visible)
+                    .hidden_title(false)
+                    .transparent(false);
             }
 
             let nav_handle = app.handle().clone();
@@ -364,8 +424,8 @@ pub fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
                     }
                 }
             }
-
             spawn_bootstrap_thread(app.handle().clone());
+            crate::updates::schedule_periodic_checks(app.handle().clone());
 
             Ok(())
         })
@@ -383,8 +443,7 @@ pub fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
                 }
                 #[cfg(not(target_os = "macos"))]
                 {
-                    let s = settings::load(&app.state::<ManagedState>().desktop_dir);
-                    if s.tray_enabled {
+                    if app.tray_by_id(tray::ID_TRAY_ICON).is_some() {
                         api.prevent_close();
                         let _ = window.hide();
                         notify_once_tray_hidden(app);
@@ -414,9 +473,7 @@ fn notify_once_tray_hidden<R: Runtime>(app: &AppHandle<R>) {
 fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event: MenuEvent) {
     let id = event.id().0.as_str();
     match id {
-        menu::ID_CHECK_UPDATES | tray::ID_CHECK_UPDATES => {
-            // Disabled until Phase 6A wires the real updater UX.
-        }
+        menu::ID_CHECK_UPDATES | tray::ID_CHECK_UPDATES => crate::updates::check_for_updates(app),
         menu::ID_SETTINGS => {
             let _ = open_settings_window(app);
         }
@@ -494,7 +551,7 @@ fn open_settings_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     }
     WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("Persona Forge Settings")
-        .inner_size(520.0, 440.0)
+        .inner_size(560.0, 600.0)
         .resizable(false)
         .initialization_script(desktop_marker_script(current_platform()))
         .build()?;
@@ -506,9 +563,23 @@ fn do_quit<R: Runtime>(app: &AppHandle<R>) {
     if state.quitting.swap(true, Ordering::SeqCst) {
         return; // already quitting
     }
-    if let Some(handle) = state.server.lock().take() {
-        let _ = handle.stop(STOP_GRACE);
-        let _ = std::fs::remove_file(state.desktop_dir.join("server.pid"));
+    {
+        let mut server = state.server.lock();
+        if let Some(handle) = server.as_mut() {
+            match handle.stop(STOP_GRACE) {
+                Ok(()) => {
+                    server.take();
+                    if let Err(error) = std::fs::remove_file(state.desktop_dir.join("server.pid")) {
+                        if error.kind() != std::io::ErrorKind::NotFound {
+                            log::warn!("server stopped but could not remove server.pid: {error}");
+                        }
+                    }
+                }
+                Err(error) => {
+                    log::error!("could not stop embedded server before quitting: {error}");
+                }
+            }
+        }
     }
     app.exit(0);
 }
@@ -682,12 +753,26 @@ fn spawn_bootstrap_thread<R: Runtime + 'static>(app: AppHandle<R>) {
 
 fn spawn_restart_thread<R: Runtime + 'static>(app: AppHandle<R>) {
     std::thread::spawn(move || {
-        {
+        let stop_error = {
             let state = app.state::<ManagedState>();
-            let taken = state.server.lock().take();
-            if let Some(handle) = taken {
-                let _ = handle.stop(STOP_GRACE);
+            let mut server = state.server.lock();
+            if let Some(handle) = server.as_mut() {
+                match handle.stop(STOP_GRACE) {
+                    Ok(()) => {
+                        server.take();
+                        None
+                    }
+                    Err(error) => Some(error.to_string()),
+                }
+            } else {
+                None
             }
+        };
+        if let Some(error) = stop_error {
+            return set_error(
+                &app,
+                format!("could not stop embedded server before restart: {error}"),
+            );
         }
         run_bootstrap(app);
     });

@@ -7,6 +7,7 @@
     "frontendDist": "splash"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [],
     "macOSPrivateApi": true,
     "security": {
@@ -15,6 +16,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": false,
     "targets": ["app", "dmg", "nsis", "appimage"],
     "resources": {
       "payload/": "payload/"
@@ -42,6 +44,17 @@
     "linux": {
       "appimage": {
         "bundleMediaFramework": true
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENBMDI3ODE0OTk0RkJFNkQKUldSdHZrK1pGSGdDeW9YaXN0UkFoODUvTGwyeE9NZ2ZiWENqMUZzT1dzQW9hbmp5QlFFSVE1TEQK",
+      "endpoints": [
+        "https://github.com/nmorgowicz-org/persona-forge/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }
