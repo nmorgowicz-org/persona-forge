@@ -127,7 +127,7 @@ jobs:
           chmod +x "$APPIMAGE"
           bash scripts/smoke_desktop.sh linux "$APPIMAGE" "$RUNNER_TEMP/n-smoke.json"
           set +e
-          "$APPIMAGE" --ci-update "$RUNNER_TEMP/update.json"
+          xvfb-run -a "$APPIMAGE" --ci-update "$RUNNER_TEMP/update.json"
           STATUS=$?
           set -e
           python3 - "$MODE" "$STATUS" "$RUNNER_TEMP/update.json" <<'PY'
@@ -178,6 +178,8 @@ jobs:
           MODE: ${{ inputs.mode }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $env:UV_HTTP_TIMEOUT = '120'
+          $env:UV_HTTP_RETRIES = '5'
           $env:PERSONA_FORGE_HOME = Join-Path $env:RUNNER_TEMP "pf-update-e2e-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           if (Test-Path $env:PERSONA_FORGE_HOME) { Remove-Item $env:PERSONA_FORGE_HOME -Recurse -Force }
           $setup = Resolve-Path 'n\PersonaForge-windows-x86_64-setup.exe'
