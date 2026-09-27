@@ -217,7 +217,7 @@ cython_debug/
 #   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
 #   and can be added to the global gitignore or merged into this file. However, if you prefer, 
 #   you could uncomment the following to ignore the entire vscode folder
-# .vscode/
+.vscode/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
@@ -289,3 +289,10 @@ CLAUDE.local.md
 # scripts/stage_desktop_payload.py, never committed (docs/plans/20260925-native_app_shell_architecture.md §5).
 /desktop/payload/
 /desktop/binaries/
+
+# Sparkle.framework is fetched pinned/verified at build time by desktop-build.yml
+# (docs/plans/20260925-native_app_shell_auto_update.md Phase 6A); never committed.
+/desktop/Sparkle.framework/
+
+# Local Pyright interpreter override (hardcodes ${workspaceFolder}/.venv paths per-machine).
+pyrightconfig.json

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src ipc: http://ipc.localhost" />
+  <title>Persona Forge Settings</title>
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <main id="settings-app" aria-busy="true">
+    <header>
+      <div class="mark" aria-hidden="true"></div>
+      <div>
+        <h1>Settings</h1>
+        <p>Configure the Persona Forge desktop app.</p>
+      </div>
+    </header>
+
+    <form id="settings-form" hidden>
+      <label class="field">
+        <span>Server port mode</span>
+        <select id="port-mode" name="port-mode">
+          <option value="auto">Choose a port automatically</option>
+          <option value="fixed">Use a specific port</option>
+        </select>
+      </label>
+
+      <label class="field" id="port-field">
+        <span>Port</span>
+        <input id="port" name="port" type="number" min="1024" max="65535" step="1" />
+        <small>Choose a port between 1024 and 65535.</small>
+      </label>
+
+      <label class="toggle">
+        <input id="network-access" type="checkbox" />
+        <span>Allow access from other devices on my network</span>
+      </label>
+      <label class="toggle">
+        <input id="tray-enabled" type="checkbox" />
+        <span>Show Persona Forge in the system tray</span>
+      </label>
+      <label class="toggle">
+        <input id="ask-where-to-save" type="checkbox" />
+        <span>Ask where to save downloaded files</span>
+      </label>
+
+      <section class="addresses" aria-live="polite">
+        <h2>Server addresses</h2>
+        <ul id="address-list"><li>Loading…</li></ul>
+        <button id="copy-address" class="secondary" type="button">Copy local address</button>
+      </section>
+
+      <footer>
+        <p id="status" role="status"></p>
+        <button id="save" type="submit">Save Settings</button>
+      </footer>
+    </form>
+
+    <p id="error" role="alert" hidden></p>
+    <button id="retry-load" class="secondary" type="button" hidden>Retry loading settings</button>
+  </main>
+  <script src="settings.js"></script>
+</body>
+</html>

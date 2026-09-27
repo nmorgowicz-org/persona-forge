@@ -5,6 +5,8 @@
 mod app;
 mod args;
 mod bundle_paths;
+#[cfg(feature = "ci-hooks")]
+mod ci_hooks;
 mod downloads;
 mod logs;
 mod marker;
@@ -16,6 +18,7 @@ mod settings;
 mod smoke;
 mod translocation;
 mod tray;
+mod updates;
 
 use std::io::Write;
 use std::process::ExitCode;
@@ -44,7 +47,7 @@ fn main() -> ExitCode {
             ExitCode::from(code as u8)
         }
         Ok(args::Args::SmokeTest(out_path)) => run_smoke_test(&context, &out_path),
-        #[cfg(feature = "ci-hooks")]
+        #[cfg(all(feature = "ci-hooks", not(target_os = "macos")))]
         Ok(args::Args::CiUpdate(out_path)) => run_ci_update(context, out_path),
         Ok(args::Args::Gui) => run_gui(context),
     }
@@ -94,10 +97,18 @@ fn run_gui(context: tauri::Context) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-#[cfg(feature = "ci-hooks")]
+#[cfg(all(feature = "ci-hooks", not(target_os = "macos")))]
 fn run_ci_update(context: tauri::Context, out_path: std::path::PathBuf) -> ExitCode {
-    // Phase 6A/6B port the client side from the desktop-spike-final tag; not wired yet.
-    let _ = (context, out_path);
-    eprintln!("persona-forge-desktop: --ci-update is not implemented until Phase 6A/6B");
-    ExitCode::FAILURE
+    let app = match tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .build(context)
+    {
+        Ok(app) => app,
+        Err(error) => {
+            eprintln!("persona-forge-desktop: failed to initialize updater: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    ci_hooks::run(app.handle().clone(), out_path)
 }

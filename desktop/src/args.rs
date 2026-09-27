@@ -8,7 +8,7 @@ use std::path::PathBuf;
 pub enum Args {
     Gui,
     SmokeTest(PathBuf),
-    #[cfg(feature = "ci-hooks")]
+    #[cfg(all(feature = "ci-hooks", not(target_os = "macos")))]
     CiUpdate(PathBuf),
 }
 
@@ -28,7 +28,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, (String, i
                 .ok_or_else(|| (arg.clone(), EXIT_UNKNOWN_ARGUMENT))?;
             return Ok(Args::SmokeTest(PathBuf::from(out)));
         }
-        #[cfg(feature = "ci-hooks")]
+        #[cfg(all(feature = "ci-hooks", not(target_os = "macos")))]
         if arg == "--ci-update" {
             let out = iter
                 .next()
@@ -68,14 +68,14 @@ mod tests {
         assert_eq!(err.1, EXIT_UNKNOWN_ARGUMENT);
     }
 
-    #[cfg(not(feature = "ci-hooks"))]
+    #[cfg(any(not(feature = "ci-hooks"), target_os = "macos"))]
     #[test]
-    fn ci_update_without_the_feature_exits_2() {
+    fn ci_update_without_supported_feature_exits_2() {
         let err = parse(v(&["--ci-update", "x.json"])).unwrap_err();
         assert_eq!(err.1, EXIT_UNKNOWN_ARGUMENT);
     }
 
-    #[cfg(feature = "ci-hooks")]
+    #[cfg(all(feature = "ci-hooks", not(target_os = "macos")))]
     #[test]
     fn ci_update_with_the_feature_parses() {
         assert_eq!(
