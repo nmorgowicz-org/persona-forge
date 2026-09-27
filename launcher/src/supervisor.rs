@@ -161,24 +161,44 @@ impl ServerHandle {
         self.child.try_wait()
     }
 
-    /// Unix: `SIGTERM` the group, wait up to `grace`, then `SIGKILL` the group.
+    /// Unix: sends SIGTERM to the process group, then escalates to SIGKILL after `grace`.
     /// Windows: `TerminateJobObject` immediately (no graceful signal exists; `grace` is ignored).
-    pub fn stop(mut self, grace: Duration) -> io::Result<()> {
+    /// Returns without consuming the handle so callers can retry after an error.
+    pub fn stop(&mut self, grace: Duration) -> io::Result<()> {
         #[cfg(unix)]
         {
-            self.child.signal(libc::SIGTERM)?;
+            signal_group(&*self.child, libc::SIGTERM).map_err(|error| {
+                io::Error::new(
+                    error.kind(),
+                    format!("sending SIGTERM to process group: {error}"),
+                )
+            })?;
             let deadline = Instant::now() + grace;
-            loop {
-                if self.child.try_wait()?.is_some() {
-                    return Ok(());
-                }
-                if Instant::now() >= deadline {
-                    break;
-                }
+            while process_group_exists(self.pid).map_err(|error| {
+                io::Error::new(
+                    error.kind(),
+                    format!("checking process group after SIGTERM: {error}"),
+                )
+            })? && Instant::now() < deadline
+            {
                 std::thread::sleep(Duration::from_millis(50));
             }
-            self.child.start_kill()?;
-            self.child.wait()?;
+            if process_group_exists(self.pid).map_err(|error| {
+                io::Error::new(
+                    error.kind(),
+                    format!("checking process group before SIGKILL: {error}"),
+                )
+            })? {
+                signal_group(&*self.child, libc::SIGKILL).map_err(|error| {
+                    io::Error::new(
+                        error.kind(),
+                        format!("sending SIGKILL to process group: {error}"),
+                    )
+                })?;
+            }
+            self.child.wait().map_err(|error| {
+                io::Error::new(error.kind(), format!("waiting for process group: {error}"))
+            })?;
             Ok(())
         }
         #[cfg(windows)]
@@ -188,6 +208,34 @@ impl ServerHandle {
             self.child.wait()?;
             Ok(())
         }
+    }
+}
+
+#[cfg(unix)]
+fn signal_group(child: &dyn ChildWrapper, signal: i32) -> io::Result<()> {
+    match child.signal(signal) {
+        Ok(()) => Ok(()),
+        // ESRCH: group is already empty. EPERM: on macOS/BSD, killpg on a process group we
+        // own returns EPERM (not ESRCH) once every member has already exited -- there is no
+        // live process left for the kernel to check permissions against, so it reports EPERM
+        // instead. Since we always own the groups we spawn, treat both as "already gone".
+        Err(error) if matches!(error.raw_os_error(), Some(libc::ESRCH) | Some(libc::EPERM)) => {
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(unix)]
+fn process_group_exists(pgid: u32) -> io::Result<bool> {
+    if unsafe { libc::killpg(pgid as i32, 0) } == 0 {
+        return Ok(true);
+    }
+    match io::Error::last_os_error().raw_os_error() {
+        // See `signal_group`: EPERM here means the group we own is already empty, not that
+        // some other-owned process is blocking us.
+        Some(libc::ESRCH) | Some(libc::EPERM) => Ok(false),
+        _ => Err(io::Error::last_os_error()),
     }
 }
 
@@ -374,7 +422,7 @@ mod tests {
         let gc_pid_file = dir.path().join("gc");
         let script = format!("sleep 60 & echo $! > {}; wait", gc_pid_file.display());
 
-        let handle =
+        let mut handle =
             ServerHandle::spawn_command(Path::new("sh"), &["-c", &script], &[], &log_path).unwrap();
         let child_pid = handle.pid();
 
@@ -400,6 +448,36 @@ mod tests {
             unsafe { libc::kill(grandchild_pid, 0) },
             0,
             "grandchild must be gone"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_kills_process_group_descendants_after_leader_exits() {
+        let dir = tempfile::tempdir().unwrap();
+        let log_path = dir.path().join("server.log");
+        let marker = dir.path().join("survived");
+        let script = format!(
+            "(sleep 0.5; echo survived > {}; sleep 60) &",
+            marker.display()
+        );
+        let mut handle =
+            ServerHandle::spawn_command(Path::new("sh"), &["-c", &script], &[], &log_path).unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while handle.try_wait().unwrap().is_none() {
+            assert!(
+                Instant::now() < deadline,
+                "process-group leader never exited"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        handle.stop(Duration::from_millis(100)).unwrap();
+        std::thread::sleep(Duration::from_millis(700));
+        assert!(
+            !marker.exists(),
+            "descendant continued after the process-group leader exited"
         );
     }
 
