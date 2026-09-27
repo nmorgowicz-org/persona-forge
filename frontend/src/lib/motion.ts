@@ -4,7 +4,7 @@
 //
 // Mirrored as CSS custom properties in `index.css` (`--motion-*`, `--ease-*`) for transitions
 // that never touch React. Keep the two in step; the names are the contract.
-import { useEffect, useState } from 'react'
+import { useSyncExternalStore } from 'react'
 
 /** Durations in seconds, for `motion/react`. */
 export const DURATION = {
@@ -56,18 +56,24 @@ export const MOTION_CSS_VARS = {
 } as const
 
 /** `useReducedMotion` that is safe before hydration and under SSR: starts `false` (motion
- * allowed) and corrects on the first effect, so nothing renders differently on the server than
- * on the first client paint. Every animation still needs a static end-state under this flag --
- * reduced motion removes the travel, never the information. */
+ * allowed) and reads the user's preference from the browser media query. Every animation still
+ * needs a static end-state under this flag -- reduced motion removes the travel, never the
+ * information. */
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
+
+function subscribeReducedMotion(onChange: () => void): () => void {
+  if (typeof window === 'undefined' || !window.matchMedia) return () => {}
+  const query = window.matchMedia(REDUCED_MOTION_QUERY)
+  query.addEventListener('change', onChange)
+  return () => query.removeEventListener('change', onChange)
+}
+
+function getReducedMotionSnapshot(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia
+    ? window.matchMedia(REDUCED_MOTION_QUERY).matches
+    : false
+}
+
 export function useReducedMotionSafe(): boolean {
-  const [reduced, setReduced] = useState(false)
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return
-    const query = window.matchMedia('(prefers-reduced-motion: reduce)')
-    setReduced(query.matches)
-    const onChange = (event: MediaQueryListEvent) => setReduced(event.matches)
-    query.addEventListener('change', onChange)
-    return () => query.removeEventListener('change', onChange)
-  }, [])
-  return reduced
+  return useSyncExternalStore(subscribeReducedMotion, getReducedMotionSnapshot, () => false)
 }

@@ -1,10 +1,10 @@
-import { useRef, useState, type RefObject } from 'react'
+import { useCallback, useRef, useState, type RefObject } from 'react'
 import { cn } from '@/lib/utils'
-import { createTimeTicks } from '@/lib/timeAxis'
+import { createTimeTicks, formatHoverTime } from '@/lib/timeAxis'
 import type { AudioEnvelope } from '@/lib/waveform'
 import { WaveformCanvas } from '@/components/waveform/WaveformCanvas'
 import { useElementWidth } from '@/hooks/useElementWidth'
-import { HOVER_TIME_GUIDE_LABEL_CLASS, HOVER_TIME_GUIDE_LINE_CLASS, useHoverTimeGuide } from '@/hooks/useHoverTimeGuide'
+import { HOVER_TIME_GUIDE_LABEL_CLASS, HOVER_TIME_GUIDE_LINE_CLASS } from '@/hooks/useHoverTimeGuide'
 
 // A highlighted region of the waveform, expressed as 0..1 fractions of the clip.
 export interface WaveformRegion {
@@ -55,7 +55,22 @@ export function Waveform({
   const hasTimeAxis = duration != null && duration > 0 && isFinite(duration)
   const [containerRef, widthPx] = useElementWidth<HTMLDivElement>()
   const pixelsPerSecond = hasTimeAxis && widthPx > 0 ? widthPx / (duration as number) : 0
-  const guide = useHoverTimeGuide()
+  const guideRef = useRef<HTMLDivElement | null>(null)
+  const labelRef = useRef<HTMLSpanElement | null>(null)
+  const setGuideRef = useCallback((node: HTMLDivElement | null) => { guideRef.current = node }, [])
+  const setLabelRef = useCallback((node: HTMLSpanElement | null) => { labelRef.current = node }, [])
+  const guide = {
+    show: (left: string, seconds: number, fraction: number) => {
+      const element = guideRef.current
+      const label = labelRef.current
+      if (!element || !label) return
+      element.style.display = ''
+      element.style.left = left
+      label.textContent = formatHoverTime(seconds)
+      label.style.transform = fraction <= 0.06 ? 'translateX(0)' : fraction >= 0.94 ? 'translateX(-100%)' : 'translateX(-50%)'
+    },
+    hide: () => { if (guideRef.current) guideRef.current.style.display = 'none' },
+  }
 
   const fracAt = (clientX: number, el: Element) => {
     const rect = el.getBoundingClientRect()
@@ -156,8 +171,8 @@ export function Waveform({
 
       {/* hover time readout: the exact time under the pointer, same grammar as the ruler */}
       {pixelsPerSecond > 0 && (
-        <div ref={guide.guideRef} data-testid={testId ? `${testId}-time` : undefined} className={HOVER_TIME_GUIDE_LINE_CLASS} style={{ left: 0, display: 'none' }}>
-          <span ref={guide.labelRef} className={HOVER_TIME_GUIDE_LABEL_CLASS}>
+        <div ref={setGuideRef} data-testid={testId ? `${testId}-time` : undefined} className={HOVER_TIME_GUIDE_LINE_CLASS} style={{ left: 0, display: 'none' }}>
+          <span ref={setLabelRef} className={HOVER_TIME_GUIDE_LABEL_CLASS}>
             0.0s
           </span>
         </div>

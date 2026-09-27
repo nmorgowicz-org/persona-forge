@@ -5,7 +5,7 @@
 // React state (that would re-render the whole tree on every animation frame); instead,
 // subscribe to `subscribeTime`, which only runs while playing and calls back via
 // requestAnimationFrame so a consumer can push the position straight onto a DOM node's style.
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useAudioSource } from '@/hooks/useAudioTransport'
 
 export interface StitchTransport {
@@ -14,7 +14,7 @@ export interface StitchTransport {
    * arrangement has clips), so listeners must (re-)attach at the moment it actually mounts
    * rather than once on this hook's own first render, which can run before that element
    * exists at all. */
-  audioRef: React.Ref<HTMLAudioElement>
+  audioRef: (el: HTMLAudioElement | null) => void
   isPlaying: boolean
   durationSec: number
   /** clipId of the clip whose bounded range is currently playing, or null when playback is
@@ -61,11 +61,13 @@ export function useStitchTransport(src: string | null): StitchTransport {
   const [activeRangeId, setActiveRangeId] = useState<string | null>(null)
   const [loopRange, setLoopRangeState] = useState<{ startSec: number; endSec: number } | null>(null)
   const durationSecRef = useRef(0)
-  durationSecRef.current = durationSec
   const activeRangeIdRef = useRef<string | null>(null)
-  activeRangeIdRef.current = activeRangeId
   const loopRef = useRef(loopRange)
-  loopRef.current = loopRange
+  useLayoutEffect(() => {
+    durationSecRef.current = durationSec
+    activeRangeIdRef.current = activeRangeId
+    loopRef.current = loopRange
+  }, [durationSec, activeRangeId, loopRange])
   const rangeEndRef = useRef<number | null>(null)
   // Playback survives a preview swap. A re-render replaces the element's src (the plan really
   // did change -- a gap suggestion landing, an analysis-driven edit), which empties the
@@ -75,18 +77,8 @@ export function useStitchTransport(src: string | null): StitchTransport {
   const lastFractionRef = useRef(0)
   const isPlayingRef = useRef(false)
   const resumeRef = useRef<{ fraction: number; play: boolean; rangeId: string | null; rangeEndFraction: number | null } | null>(null)
-  // The arrangement is one audio source among several (T1): whoever starts sounding takes
-  // playback from the previous owner.
-  const source = useAudioSource('stitch-arrangement', 'Stitch arrangement')
-  const subscribersRef = useRef<Set<(sec: number) => void>>(new Set())
-  const rafRef = useRef<number | null>(null)
-
-  // A new rendered preview replaces the element's `src` (React updates the same <audio>
-  // node's attribute rather than remounting it); playback/range state from the previous
-  // preview no longer applies to the new audio.
-  useEffect(() => {
-    // Read the outgoing playback state from refs: by the time this effect runs the element has
-    // already been emptied by the src change, so its own currentTime is no longer usable.
+  const loadedSrcRef = useRef<string | null>(null)
+  const captureResume = useCallback(() => {
     const wasPlaying = isPlayingRef.current
     const fraction = lastFractionRef.current
     const rangeId = activeRangeIdRef.current
@@ -96,16 +88,34 @@ export function useStitchTransport(src: string | null): StitchTransport {
     resumeRef.current = fraction > 0 || wasPlaying || rangeId
       ? { fraction, play: wasPlaying, rangeId, rangeEndFraction }
       : null
-    setIsPlaying(false)
-    setActiveRangeId(null)
-    rangeEndRef.current = null
-    setDurationSec(0)
-  }, [src])
+  }, [])
+  // The arrangement is one audio source among several (T1): whoever starts sounding takes
+  // playback from the previous owner.
+  const source = useAudioSource('stitch-arrangement', 'Stitch arrangement')
+  const subscribersRef = useRef<Set<(sec: number) => void>>(new Set())
+  const rafRef = useRef<number | null>(null)
 
+  // A new rendered preview replaces the element's `src` (React updates the same <audio>
+  // node's attribute rather than remounting it); playback/range state from the previous
+  // preview no longer applies to the new audio.
+  useLayoutEffect(() => {
+    // Keep the outgoing snapshot across rapid source swaps until the latest source loads;
+    // emptied/pause events clear the live refs before a replacement can emit metadata.
+    if (!resumeRef.current) captureResume()
+    rangeEndRef.current = null
+  }, [src, captureResume])
   useEffect(() => {
     const audio = elRef.current
     if (!audio) return
+    const onEmptied = () => {
+      setIsPlaying(false)
+      isPlayingRef.current = false
+      setActiveRangeId(null)
+      rangeEndRef.current = null
+      setDurationSec(0)
+    }
     const onLoadedMetadata = () => {
+      loadedSrcRef.current = audio.getAttribute('src')
       const duration = isFinite(audio.duration) ? audio.duration : 0
       setDurationSec(duration)
       const resume = resumeRef.current
@@ -130,6 +140,9 @@ export function useStitchTransport(src: string | null): StitchTransport {
       source.claim(() => audio.pause())
     }
     const onPause = () => {
+      const changingSource = loadedSrcRef.current !== null
+        && audio.getAttribute('src') !== loadedSrcRef.current
+      if (changingSource && !resumeRef.current) captureResume()
       setIsPlaying(false)
       isPlayingRef.current = false
       source.report(audio.currentTime, durationSecRef.current)
@@ -151,6 +164,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
         rangeEndRef.current = null
       }
     }
+    audio.addEventListener('emptied', onEmptied)
     audio.addEventListener('loadedmetadata', onLoadedMetadata)
     audio.addEventListener('play', onPlay)
     audio.addEventListener('pause', onPause)
@@ -161,13 +175,14 @@ export function useStitchTransport(src: string | null): StitchTransport {
       // studio), and an in-memory blob URL keeps playing without its DOM node. The captured
       // element is still a live object once detached, so pause() works and can't throw.
       audio.pause()
+      audio.removeEventListener('emptied', onEmptied)
       audio.removeEventListener('loadedmetadata', onLoadedMetadata)
       audio.removeEventListener('play', onPlay)
       audio.removeEventListener('pause', onPause)
       audio.removeEventListener('ended', onEnded)
       audio.removeEventListener('timeupdate', onTimeUpdate)
     }
-  }, [attachTick])
+  }, [attachTick, captureResume, source])
 
   // RAF loop: only scheduled while playing, torn down on pause/unmount. Notifies subscribers
   // directly -- never sets React state, so a scrubbing/playing arrangement never re-renders
@@ -203,7 +218,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
       rafRef.current = null
     }
-  }, [isPlaying, durationSec])
+  }, [isPlaying, durationSec, source])
 
   const subscribeTime = useCallback((cb: (sec: number) => void) => {
     subscribersRef.current.add(cb)
@@ -234,7 +249,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
     // play() rejects on interrupt (src swap mid-click) or autoplay-policy denial;
     // playback state is event-driven, so the rejection carries no state to recover.
     audio.play().catch(() => {})
-  }, [])
+  }, [seekToLoopStartIfOutside])
 
   const pause = useCallback(() => { elRef.current?.pause() }, [])
 
@@ -249,7 +264,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
     } else {
       audio.pause()
     }
-  }, [])
+  }, [seekToLoopStartIfOutside])
 
   const seek = useCallback((sec: number) => {
     const audio = elRef.current
@@ -260,7 +275,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
     // One-shot notify so a paused playhead moves immediately instead of waiting for the RAF
     // loop, which only runs while playing.
     for (const cb of subscribersRef.current) cb(audio.currentTime)
-  }, [])
+  }, [source])
 
   const playRange = useCallback((id: string, startSec: number, endSec: number) => {
     const audio = elRef.current

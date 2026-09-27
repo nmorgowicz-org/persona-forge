@@ -8,7 +8,7 @@
 //
 // Auditioning is a third audio owner, so it goes through the playback-focus registry (N6):
 // claiming playback pauses whatever owned it before, including the arrangement transport.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Pause, Play } from 'lucide-react'
 import { create } from 'zustand'
 import { useAppStore } from '@/store'
@@ -38,7 +38,7 @@ interface StitchABStore {
   activate(slot: Slot): void
 }
 
-export const useStitchABStore = create<StitchABStore>((set, get) => ({
+const useStitchABStore = create<StitchABStore>((set, get) => ({
   a: null,
   b: null,
   active: null,
@@ -99,8 +99,10 @@ export function StitchABBar() {
   const audioARef = useRef<HTMLAudioElement | null>(null)
   const audioBRef = useRef<HTMLAudioElement | null>(null)
   const [playingSlot, setPlayingSlot] = useState<Slot | null>(null)
+  const auditionTokenRef = useRef(0)
 
   const stopAudition = useCallback(() => {
+    auditionTokenRef.current++
     audioARef.current?.pause()
     audioBRef.current?.pause()
     setPlayingSlot(null)
@@ -108,7 +110,9 @@ export function StitchABBar() {
   }, [source])
   // The registry keeps this callback: it must reach the current render's state.
   const stopRef = useRef(stopAudition)
-  stopRef.current = stopAudition
+  useLayoutEffect(() => {
+    stopRef.current = stopAudition
+  }, [stopAudition])
 
   const audition = (slot: Slot) => {
     const element = slot === 'a' ? audioARef.current : audioBRef.current
@@ -118,9 +122,12 @@ export function StitchABBar() {
       return
     }
     stopAudition()
+    const token = ++auditionTokenRef.current
     source.claim(() => stopRef.current())
     element.currentTime = 0
-    void element.play().catch(() => {})
+    void element.play().catch(() => {
+      if (token === auditionTokenRef.current) stopAudition()
+    })
   }
 
   useEffect(() => () => stopRef.current(), [])

@@ -57,8 +57,6 @@ export const LevelMeter = memo(function LevelMeter({
   const lastFrameRef = useRef(0)
   const reduced = useReducedMotionSafe()
   const clock = useMediaClock(mediaRef ?? { current: null }, playing)
-  const reducedRef = useRef(reduced)
-  reducedRef.current = reduced
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -122,7 +120,7 @@ export const LevelMeter = memo(function LevelMeter({
 
       // Instant attack, eased fall. Under reduced motion the fall is immediate: the level is
       // still true, only the ballistic travel is gone.
-      const fall = reducedRef.current ? Number.POSITIVE_INFINITY : FALL_DB_PER_SECOND * elapsed
+      const fall = reduced ? Number.POSITIVE_INFINITY : FALL_DB_PER_SECOND * elapsed
       displayRef.current = db > displayRef.current ? db : Math.max(db, displayRef.current - fall)
 
       const held = heldRef.current
@@ -138,7 +136,7 @@ export const LevelMeter = memo(function LevelMeter({
       return clock.subscribe((seconds) => step(seconds))
     }
     step(null)
-  }, [clock, envelope, mediaRef, playing, progress])
+  }, [clock, envelope, mediaRef, playing, progress, reduced])
 
   return (
     <div className={cn('flex min-w-28 flex-col gap-1', className)}>

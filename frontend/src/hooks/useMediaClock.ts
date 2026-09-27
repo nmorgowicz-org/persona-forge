@@ -9,7 +9,7 @@
 // Subscribers write to canvas or to DOM nodes. If a value must also be readable by React
 // (a label that says "1.2s"), it belongs in the coarse state the component already has, not
 // in this stream.
-import { useEffect, useRef, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, type RefObject } from 'react'
 
 export interface MediaClock {
   /** Called with the element's current time on every animation frame while the clock runs.
@@ -29,18 +29,15 @@ export function useMediaClock(
 ): MediaClock {
   const subscribersRef = useRef(new Set<(seconds: number) => void>())
 
-  const clockRef = useRef<MediaClock | null>(null)
-  if (clockRef.current === null) {
-    clockRef.current = {
-      subscribe: (callback) => {
-        subscribersRef.current.add(callback)
-        return () => {
-          subscribersRef.current.delete(callback)
-        }
-      },
-      read: () => mediaRef.current?.currentTime ?? 0,
-    }
-  }
+  const clock = useMemo<MediaClock>(() => ({
+    subscribe: (callback) => {
+      subscribersRef.current.add(callback)
+      return () => {
+        subscribersRef.current.delete(callback)
+      }
+    },
+    read: () => mediaRef.current?.currentTime ?? 0,
+  }), [mediaRef])
 
   useEffect(() => {
     if (!active) return
@@ -57,5 +54,5 @@ export function useMediaClock(
     return () => cancelAnimationFrame(frame)
   }, [active, mediaRef])
 
-  return clockRef.current
+  return clock
 }

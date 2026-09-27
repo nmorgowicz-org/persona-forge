@@ -5,10 +5,11 @@
 // Level comes from the envelope in absolute units and, in a multi-clip view, from a scale
 // shared with every other lane on screen -- that is what makes a quiet segment look quiet next
 // to its neighbour.
-import { memo, type PointerEvent as ReactPointerEvent } from 'react'
+import { memo, useCallback, useRef, type PointerEvent as ReactPointerEvent } from 'react'
 import type { AudioEnvelope } from '@/lib/waveform'
+import { formatHoverTime } from '@/lib/timeAxis'
 import { WaveformCanvas } from '@/components/waveform/WaveformCanvas'
-import { HOVER_TIME_GUIDE_LABEL_CLASS, HOVER_TIME_GUIDE_LINE_CLASS, useHoverTimeGuide } from '@/hooks/useHoverTimeGuide'
+import { HOVER_TIME_GUIDE_LABEL_CLASS, HOVER_TIME_GUIDE_LINE_CLASS } from '@/hooks/useHoverTimeGuide'
 
 interface WaveformLaneProps {
   envelope: AudioEnvelope | null
@@ -43,8 +44,26 @@ export const WaveformLane = memo(function WaveformLane({
   showPeakReadout = false,
   failed = false,
 }: WaveformLaneProps) {
-  const guide = useHoverTimeGuide()
+  const guideRef = useRef<HTMLDivElement | null>(null)
+  const labelRef = useRef<HTMLSpanElement | null>(null)
+  const setGuideRef = useCallback((node: HTMLDivElement | null) => { guideRef.current = node }, [])
+  const setLabelRef = useCallback((node: HTMLSpanElement | null) => { labelRef.current = node }, [])
+  const guide = {
+    show: (left: string, seconds: number, fraction: number) => {
+      const element = guideRef.current
+      const label = labelRef.current
+      if (!element || !label) return
+      element.style.display = ''
+      element.style.left = left
+      label.textContent = formatHoverTime(seconds)
+      label.style.transform = fraction <= 0.06 ? 'translateX(0)' : fraction >= 0.94 ? 'translateX(-100%)' : 'translateX(-50%)'
+    },
+    hide: () => { if (guideRef.current) guideRef.current.style.display = 'none' },
+  }
   const hasScale = durMs != null && durMs > 0
+  // Until a multi-lane shared peak arrives, render against absolute full scale rather than
+  // auto-fitting each clip independently. A lone lane intentionally keeps its labeled auto-fit.
+  const laneScaleAbs = scaleAbs ?? (showPeakReadout ? null : 1)
 
   // The lane's box is measured at hover time rather than observed: a per-lane ResizeObserver
   // would add a state update and a re-render to every clip for a readout that only exists
@@ -83,19 +102,22 @@ export const WaveformLane = memo(function WaveformLane({
       onPointerMove={hasScale ? onPointerMove : undefined}
       onPointerLeave={hasScale ? guide.hide : undefined}
     >
+      {/* Clip lanes have no playback playhead; the canvas default at 0 would draw a full-height
+          line that obscures the true-scale waveform silhouette. */}
       <WaveformCanvas
         envelope={envelope}
         startMs={keepStartMs}
         endMs={keepEndMs}
-        scaleAbs={scaleAbs}
+        scaleAbs={laneScaleAbs}
+        progress={-1}
         showPeakReadout={showPeakReadout}
         failed={failed}
         canvasTestId="stitch-waveform-canvas"
         onOverlay={drawPauseBands}
       />
       {hasScale && (
-        <div ref={guide.guideRef} data-testid={timeGuideTestId} className={HOVER_TIME_GUIDE_LINE_CLASS} style={{ left: 0, display: 'none' }}>
-          <span ref={guide.labelRef} className={HOVER_TIME_GUIDE_LABEL_CLASS}>
+        <div ref={setGuideRef} data-testid={timeGuideTestId} className={HOVER_TIME_GUIDE_LINE_CLASS} style={{ left: 0, display: 'none' }}>
+          <span ref={setLabelRef} className={HOVER_TIME_GUIDE_LABEL_CLASS}>
             0.0s
           </span>
         </div>

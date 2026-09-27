@@ -34,8 +34,10 @@ export interface ActivityStatus {
   detail: string | null
   progress: number
   etaSeconds: number | null
+  /** Identifier for the underlying task, so a new task can reset UI like its ETA countdown. */
+  activityId?: string | null
   // When set, the status bar renders a Stop button that invokes this — lets a long-running
-  // job be cancelled from anywhere on the page, not just from controls above the fold.
+  // job be cancelled from anywhere, not just from controls above the fold.
   onCancel?: (() => void) | null
 }
 
@@ -131,7 +133,7 @@ interface StoreState {
    speakAudioBlob: Blob | null
    editingVoice: EditingVoice | null
    designEngine: DesignEngine
-   activityStatus: ActivityStatus | null
+  activityStatus: ActivityStatus | null
   runtimeTtsBackend: string | null
   pocketTtsVoiceCloningAvailable: boolean | null
   swapInProgress: boolean

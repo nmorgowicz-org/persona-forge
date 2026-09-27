@@ -156,8 +156,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
   const stitchedUrl = useAppStore((s) => s.ovStitchedUrl)
   const stitchedBlob = useAppStore((s) => s.ovStitchedBlob)
   const savedVoiceId = useAppStore((s) => s.ovSavedVoiceId)
-  // Intentionally subscribed to keep Zustand batched; value used via store hooks in this component.
-  useAppStore((s) => s.ovCurrentJobId)
+  const currentJobId = useAppStore((s) => s.ovCurrentJobId)
   const jobTotalSegments = useAppStore((s) => s.ovJobTotalSegments)
   const jobStatus = useAppStore((s) => s.ovJobStatus)
   const jobSegmentsCompleted = useAppStore(
@@ -2634,6 +2633,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
       detail,
       progress: progressFraction,
       etaSeconds: jobEtaSeconds,
+      activityId: currentJobId,
       onCancel: () => {
         const jobId = useAppStore.getState().ovCurrentJobId
         if (jobId) cancelOmniVoiceAudition(jobId).catch(() => {})
@@ -2647,6 +2647,7 @@ export function OmniVoicePanel({ onVoiceCreated }: OmniVoicePanelProps) {
     jobCandidatesTotal,
     jobEtaSeconds,
     jobMessage,
+    currentJobId,
     progressFraction,
     setActivityStatus,
   ])

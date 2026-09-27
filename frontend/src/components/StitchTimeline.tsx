@@ -4,7 +4,7 @@ import { AnimatePresence, motion, MotionConfig, Reorder } from 'motion/react'
 import { ChevronUp, ChevronDown, Loader2, Play, Gauge, RotateCcw, Minus, Plus, Maximize2, Redo2, Undo2 } from 'lucide-react'
 import { useAppStore, type StitchPlanClip, type StitchPlanDsp } from '@/store'
 import { EmptyState } from '@/components/ui/empty-state'
-import { MOTION } from '@/lib/motion'
+import { MOTION, useReducedMotionSafe } from '@/lib/motion'
 import {
   getStitchPacingTargets,
   type StitchPlanPayload,
@@ -42,18 +42,6 @@ import { GapControl } from './stitch/GapControl'
 import { StitchClipCard } from './stitch/StitchClipCard'
 import { ReferenceReadiness } from './stitch/ReferenceReadiness'
 
-// Helper for reduced motion
-const useReducedMotion = () => {
-  const [reduced, setReduced] = useState(false)
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
-    if (media.matches) setReduced(true)
-    const listener = (e: MediaQueryListEvent) => setReduced(e.matches)
-    media.addEventListener('change', listener)
-    return () => media.removeEventListener('change', listener)
-  }, [])
-  return reduced
-}
 
 
 /* ---------- helpers ---------- */
@@ -284,7 +272,7 @@ export const StitchTimeline = memo(function StitchTimeline({
   const previewScale = transport.durationSec > 0 && effectiveTotalMs > 0
     ? (transport.durationSec * 1000) / effectiveTotalMs
     : 1
-  const reducedMotion = useReducedMotion()
+  const reducedMotion = useReducedMotionSafe()
 
   const autoPace = useCallback(() => {
     setPaddingMs(clips.slice(0, -1).map((clip) => {
@@ -713,7 +701,7 @@ export function StitchDspControls({
   dsp: StitchPlanDsp
   onSetDsp: (patch: Partial<StitchPlanDsp>) => void
 }) {
-  const reducedMotion = useReducedMotion()
+  const reducedMotion = useReducedMotionSafe()
 
   return (
     <div className="mt-2 flex flex-col gap-2">
@@ -819,6 +807,11 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
 
   const preview = useStitchPreview(plan)
   const transport = useStitchTransport(preview.url)
+  const { audioRef: attachAudioRef } = transport
+  const attachTransportAudio = useCallback(
+    (element: HTMLAudioElement | null) => attachAudioRef(element),
+    [attachAudioRef],
+  )
   const planHash = useMemo(() => hashStitchPlan(plan), [plan])
 
   const handleSave = useCallback(async () => {
@@ -973,7 +966,7 @@ function StitchEditorBody(props: StitchEditorBodyProps) {
           {preview.url ? (
             <>
               <TransportBar transport={transport} />
-              <audio ref={transport.audioRef} src={preview.url} preload="auto" data-testid="stitch-transport-audio" />
+              <audio ref={attachTransportAudio} src={preview.url} preload="auto" data-testid="stitch-transport-audio" />
             </>
           ) : (
             <div className="flex h-10 items-center px-3 text-xs text-muted-foreground">

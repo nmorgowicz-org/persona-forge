@@ -21,13 +21,18 @@ import { TimeRuler } from './TimeRuler'
 
 type Decoded = { envelope: AudioEnvelope; durationMs: number; sampleCount: number }
 
+function audioRevision(base64: string): string {
+  let hash = 2166136261
+  for (let index = 0; index < base64.length; index += 1) {
+    hash = Math.imul(hash ^ base64.charCodeAt(index), 16777619)
+  }
+  return `${base64.length}-${(hash >>> 0).toString(16)}`
+}
+
 function useDecodedPeaks(base64: string | null, perSec = 48): Decoded | null {
-  const [decoded, setDecoded] = useState<Decoded | null>(null)
+  const [result, setResult] = useState<{ base64: string; decoded: Decoded } | null>(null)
   useEffect(() => {
-    if (!base64) {
-      setDecoded(null)
-      return
-    }
+    if (!base64) return
     let cancelled = false
     const ctx = new AudioContext()
     void base64ToBlob(base64)
@@ -39,17 +44,14 @@ function useDecodedPeaks(base64: string | null, perSec = 48): Decoded | null {
         const durationMs = (buffer.length / buffer.sampleRate) * 1000
         // A true-scale envelope from the samples already in hand: the lane needs absolute
         // level, and re-decoding to get it would be work for nothing (B-P2).
-        setDecoded({ envelope: envelopeFromChannels([channel], buffer.sampleRate), durationMs, sampleCount: buffer.length })
-      })
-      .catch(() => {
-        if (!cancelled) setDecoded(null)
+        setResult({ base64, decoded: { envelope: envelopeFromChannels([channel], buffer.sampleRate), durationMs, sampleCount: buffer.length } })
       })
       .finally(() => void ctx.close())
     return () => {
       cancelled = true
     }
   }, [base64, perSec])
-  return decoded
+  return result?.base64 === base64 ? result.decoded : null
 }
 
 function wordClass(boundary: AlignmentBoundary): string {
@@ -94,7 +96,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
   // preview deck above so the choice stays visible all the way down to this lane.
   stylePreset?: string
 }) {
-  const [originalBase64, setOriginalBase64] = useState<string | null>(null)
+  const [originalResult, setOriginalResult] = useState<{ voiceId: string; base64: string | null } | null>(null)
   const [hoverPct, setHoverPct] = useState<number | null>(null)
   const [playing, setPlaying] = useState<'original' | 'adjusted' | null>(null)
   // Both lanes are already mutually exclusive here, so the compare is one source in the
@@ -106,10 +108,9 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
 
   useEffect(() => {
     let cancelled = false
-    setOriginalBase64(null)
     void getVoice(voiceId)
       .then((full) => {
-        if (!cancelled) setOriginalBase64(full.audio_base64 ?? null)
+        if (!cancelled) setOriginalResult({ voiceId, base64: full.audio_base64 ?? null })
       })
       .catch(() => {})
     return () => {
@@ -117,6 +118,19 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
     }
   }, [voiceId])
 
+  const originalBase64 = originalResult?.voiceId === voiceId ? originalResult.base64 : null
+  const originalSpectrogram = useMemo(
+    () => originalBase64
+      ? { blob: base64ToBlob(originalBase64), revision: audioRevision(originalBase64) }
+      : null,
+    [originalBase64],
+  )
+  const adjustedSpectrogram = useMemo(
+    () => adjustedBase64
+      ? { blob: base64ToBlob(adjustedBase64), revision: audioRevision(adjustedBase64) }
+      : null,
+    [adjustedBase64],
+  )
   const original = useDecodedPeaks(originalBase64)
   const adjusted = useDecodedPeaks(adjustedBase64)
   const origAudio = useLaneAudio(originalBase64)
@@ -169,7 +183,9 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
   // keep them in refs to dodge stale closures.
   const regionRef = useRef<{ start: number; end: number } | null>(null)
   const loopRef = useRef(loop)
-  loopRef.current = loop
+  useEffect(() => {
+    loopRef.current = loop
+  }, [loop])
   const dragRef = useRef<{ lane: 'original' | 'adjusted'; startMs: number; endMs: number; moved: boolean } | null>(null)
   // A live drag on a manufactured pause's trailing edge — resizes the inserted gap. Kept in a
   // ref for the math, mirrored into state so the band grows under the cursor before re-preview.
@@ -215,7 +231,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
       el.removeEventListener('ended', onEnd)
     }
-  }, [playing, laneAudio])
+  }, [playing, laneAudio, source])
 
   const startPlay = (lane: 'original' | 'adjusted', fromMs: number, region: { start: number; end: number } | null) => {
     const el = laneAudio(lane)
@@ -322,43 +338,30 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
   // The bindings keep their original scope -- the surface takes focus on pointer-down, and the
   // registry's `when` gate means they only fire while focus is inside it -- but they are now
   // documented in the `?` keymap along with everything else.
-  const compareActionsRef = useRef({
-    togglePlay: () => {},
-    toggleLoop: () => {},
-    seekBy: (_deltaMs: number) => {},
-  })
-  compareActionsRef.current = {
-    togglePlay: () => togglePlay(playing ?? lastLaneRef.current),
-    toggleLoop: () => setLoop((value) => !value),
-    seekBy: (deltaMs: number) => seekTo(Math.max(0, Math.min(maxDurMs, positionMs + deltaMs))),
-  }
-  const compareCommands = useMemo<ShortcutCommand[]>(
-    () => [
-      {
-        id: 'compare.playPause',
-        label: 'Play/pause the A/B lanes',
-        keys: 'Space',
-        match: (event) => event.key === ' ' || event.key === 'Spacebar',
-        run: () => compareActionsRef.current.togglePlay(),
-      },
-      {
-        id: 'compare.loop',
-        label: 'Toggle the A/B loop',
-        keys: 'L',
-        match: (event) => event.key === 'l' || event.key === 'L',
-        run: () => compareActionsRef.current.toggleLoop(),
-      },
-      {
-        id: 'compare.step',
-        label: 'Step the playhead by 100ms (Shift = 20ms)',
-        keys: '←/→',
-        palette: false,
-        match: (event) => event.key === 'ArrowLeft' || event.key === 'ArrowRight',
-        run: (event) => compareActionsRef.current.seekBy((event?.shiftKey ? 20 : 100) * (event?.key === 'ArrowRight' ? 1 : -1)),
-      },
-    ],
-    [],
-  )
+  const compareCommands: ShortcutCommand[] = [
+    {
+      id: 'compare.playPause',
+      label: 'Play/pause the A/B lanes',
+      keys: 'Space',
+      match: (event) => event.key === ' ' || event.key === 'Spacebar',
+      run: () => togglePlay(playing ?? lastLaneRef.current),
+    },
+    {
+      id: 'compare.loop',
+      label: 'Toggle the A/B loop',
+      keys: 'L',
+      match: (event) => event.key === 'l' || event.key === 'L',
+      run: () => setLoop((value) => !value),
+    },
+    {
+      id: 'compare.step',
+      label: 'Step the playhead by 100ms (Shift = 20ms)',
+      keys: '←/→',
+      palette: false,
+      match: (event) => event.key === 'ArrowLeft' || event.key === 'ArrowRight',
+      run: (event) => seekTo(Math.max(0, Math.min(maxDurMs, positionMs + (event?.shiftKey ? 20 : 100) * (event?.key === 'ArrowRight' ? 1 : -1)))),
+    },
+  ]
   useShortcutScope(
     'compare',
     'Voice Edit A/B compare',
@@ -377,7 +380,7 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
     : null
 
   const selWidth = selection ? `${Math.max(0, ((selection.end - selection.start) / maxDurMs) * 100)}%` : '0%'
-  const TransportButton = ({ lane }: { lane: 'original' | 'adjusted' }) => (
+  const transportButton = (lane: 'original' | 'adjusted') => (
     <button
       type="button"
       onClick={() => togglePlay(lane)}
@@ -422,8 +425,8 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
             </button>
           ))}
         </div>
-        <TransportButton lane="original" />
-        {hasAdjusted && <TransportButton lane="adjusted" />}
+        {transportButton('original')}
+        {hasAdjusted && transportButton('adjusted')}
         <button
           type="button"
           onClick={() => setLoop((v) => !v)}
@@ -455,8 +458,8 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
           <div className="absolute inset-y-0 left-0 opacity-80" style={{ width: pct(original?.durationMs ?? 0) }}>
             {view === 'spectrum' ? (
               <SpectrogramCanvas
-                blob={originalBase64 ? base64ToBlob(originalBase64) : null}
-                cacheKey={originalBase64 ? `spectrogram:voice-edit:${voiceId}:original:${originalBase64.length}` : null}
+                blob={originalSpectrogram?.blob ?? null}
+                cacheKey={originalSpectrogram ? `spectrogram:voice-edit:${voiceId}:original:${originalSpectrogram.revision}` : null}
                 mediaRef={origAudio}
                 playing={playing === 'original'}
                 testId="original-spectrogram"
@@ -509,8 +512,8 @@ export function AlignmentCompare({ voiceId, adjustedBase64 = null, adjustedSampl
           <div className="absolute inset-y-0 left-0" style={{ width: pct(adjusted.durationMs) }}>
             {view === 'spectrum' ? (
               <SpectrogramCanvas
-                blob={adjustedBase64 ? base64ToBlob(adjustedBase64) : null}
-                cacheKey={adjustedBase64 ? `spectrogram:voice-edit:${voiceId}:adjusted:${adjustedBase64.length}` : null}
+                blob={adjustedSpectrogram?.blob ?? null}
+                cacheKey={adjustedSpectrogram ? `spectrogram:voice-edit:${voiceId}:adjusted:${adjustedSpectrogram.revision}` : null}
                 mediaRef={adjAudio}
                 playing={playing === 'adjusted'}
                 testId="adjusted-spectrogram"

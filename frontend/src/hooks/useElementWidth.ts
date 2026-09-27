@@ -15,7 +15,7 @@ export function useElementWidth<T extends HTMLElement>(): [(node: T | null) => v
 
   useEffect(() => {
     if (!node) return
-    setWidth(node.getBoundingClientRect().width)
+    // ResizeObserver delivers the initial size as well as later changes.
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0]
       if (entry) setWidth(entry.contentRect.width)

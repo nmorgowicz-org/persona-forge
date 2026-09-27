@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
 import { Download, Pause, Play, Repeat, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Waveform } from '@/components/Waveform'
@@ -42,7 +42,12 @@ interface AudioDeckProps {
   onSpeedChange?: (speed: number) => void
 }
 
-export function AudioDeck({
+export function AudioDeck(props: AudioDeckProps) {
+  const sourceKey = `${props.src}:${props.blob?.size ?? ''}:${props.blob?.type ?? ''}`
+  return <AudioDeckContent key={sourceKey} {...props} />
+}
+
+function AudioDeckContent({
   src,
   blob,
   className,
@@ -80,16 +85,6 @@ export function AudioDeck({
   // card's job. The commands read live closures through a ref so their identity never churns
   // (a re-registration per render would notify every registry subscriber).
   const deckActionsRef = useRef({ togglePlay: () => {}, restart: () => {}, toggleLoop: () => {}, download: () => {} })
-  deckActionsRef.current = {
-    togglePlay,
-    restart: () => {
-      const audio = audioRef.current
-      if (audio) audio.currentTime = 0
-      setProgress(0)
-    },
-    toggleLoop: () => setIsLooping((looping) => !looping),
-    download,
-  }
   const deckCommands = useMemo<ShortcutCommand[]>(
     () => [
       { id: 'deck.playPause', label: 'Play or pause this clip', run: () => deckActionsRef.current.togglePlay() },
@@ -113,12 +108,6 @@ export function AudioDeck({
   const clipped = !clipCleared && stats != null && stats.peakDbfs >= CLIP_DBFS
 
   useEffect(() => {
-    setEnvelope(null)
-    setStats(null)
-    setClipCleared(false)
-    setDecodeFailed(false)
-    setProgress(0)
-    setIsPlaying(false)
     if (!blob) return
     let cancelled = false
     // One decode feeds both analyses: the waveform envelope (P2) and the loudness stats (P4),
@@ -158,7 +147,7 @@ export function AudioDeck({
     }
   }, [isLooping, playbackRate])
 
-  function togglePlay() {
+  const togglePlay = useCallback(() => {
     const audio = audioRef.current
     if (!audio) return
     if (audio.paused) {
@@ -166,7 +155,7 @@ export function AudioDeck({
     } else {
       audio.pause()
     }
-  }
+  }, [])
 
   function handleSeek(pct: number) {
     const audio = audioRef.current
@@ -193,12 +182,24 @@ export function AudioDeck({
     audio.play().catch(() => {})
   }
 
-  function download() {
+  const download = useCallback(() => {
     const a = document.createElement('a')
     a.href = src
     a.download = downloadName ?? `generated-audio-${Date.now()}.mp3`
     a.click()
-  }
+  }, [downloadName, src])
+  useEffect(() => {
+    deckActionsRef.current = {
+      togglePlay,
+      restart: () => {
+        const audio = audioRef.current
+        if (audio) audio.currentTime = 0
+        setProgress(0)
+      },
+      toggleLoop: () => setIsLooping((looping) => !looping),
+      download,
+    }
+  }, [download, togglePlay])
 
   return (
     <section

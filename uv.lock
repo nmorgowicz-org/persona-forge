@@ -622,6 +622,22 @@ wheels = [
 ]
 
 [[package]]
+name = "hatchling"
+version = "1.32.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packaging" },
+    { name = "pathspec" },
+    { name = "pluggy" },
+    { name = "tomlkit" },
+    { name = "trove-classifiers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f6/97/b5312f01a8c6daf729a9d272dd442e0c546dbcc630495788786c4b567ed0/hatchling-1.32.4.tar.gz", hash = "sha256:c4468f73144c054d2aab4ef0f0378c43b9878bf07f8ffd6b79690e970d375f07", size = 58065, upload-time = "2026-09-20T22:48:45.398Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5f/80/91f51f439c05d4ec4623c22928ce16a938d6d793bf709477830823497859/hatchling-1.32.4-py3-none-any.whl", hash = "sha256:08ecf7548fb48205e7f213d70c71e67b8271b7242093dc3f1da578b42c734a2c", size = 78748, upload-time = "2026-09-20T22:48:44.19Z" },
+]
+
+[[package]]
 name = "hf-gradio"
 version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1651,6 +1667,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pathspec"
+version = "1.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5a/82/42f767fc1c1143d6fd36efb827202a2d997a375e160a71eb2888a925aac1/pathspec-1.1.1.tar.gz", hash = "sha256:17db5ecd524104a120e173814c90367a96a98d07c45b2e10c2f3919fff91bf5a", size = 135180, upload-time = "2026-04-27T01:46:08.907Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f1/d9/7fb5aa316bc299258e68c73ba3bddbc499654a07f151cba08f6153988714/pathspec-1.1.1-py3-none-any.whl", hash = "sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189", size = 57328, upload-time = "2026-04-27T01:46:07.06Z" },
+]
+
+[[package]]
 name = "persona-forge"
 version = "2.1.4"
 source = { editable = "." }
@@ -1709,6 +1734,7 @@ xpu = [
 [package.dev-dependencies]
 dev = [
     { name = "flask" },
+    { name = "hatchling" },
     { name = "httpx" },
     { name = "librosa" },
     { name = "numpy" },
@@ -1764,6 +1790,7 @@ provides-extras = ["qwen-tts", "cuda12", "cuda13", "xpu", "rocm"]
 [package.metadata.requires-dev]
 dev = [
     { name = "flask", specifier = "==3.1.3" },
+    { name = "hatchling", specifier = ">=1.32.4" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "librosa" },
     { name = "numpy", specifier = "==2.4.6" },
@@ -2782,6 +2809,15 @@ dependencies = [
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/triton_xpu-3.7.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8ccc1592ddda23ab2e9d143da2b4b69eb40821172c5bd4bc4e262323dc7f5172", upload-time = "2026-07-08T14:02:45Z" },
     { url = "https://download-r2.pytorch.org/whl/triton_xpu-3.7.2-cp313-cp313-win_amd64.whl", hash = "sha256:8cc89c78bba0e79f5454188f333ae08419852bc63141444b55fb7475f06e2967", upload-time = "2026-07-08T14:03:10Z" },
+]
+
+[[package]]
+name = "trove-classifiers"
+version = "2026.9.21.13"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bf/93/af436dfaa845cab5d96f0adbc1e4f3730532d37fa249e4eb796fb1d7fc82/trove_classifiers-2026.9.21.13.tar.gz", hash = "sha256:0a9ebc8d4e2f3e8a22848c5258033035bec17a3012ac3fea16dbaa764489eb71", size = 17085, upload-time = "2026-09-21T13:29:07.301Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/30/81/0da8afb52a71d0a4f2bd3152357b1a441e393b286374802b9d3addab4ab5/trove_classifiers-2026.9.21.13-py3-none-any.whl", hash = "sha256:8b1ff4f9c191b1040b71c37f1e445ab99732911e3cd91de52838453a854d7a17", size = 14232, upload-time = "2026-09-21T13:29:06.123Z" },
 ]
 
 [[package]]

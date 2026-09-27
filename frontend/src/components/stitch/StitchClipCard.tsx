@@ -7,7 +7,7 @@
 // on every pointermove -- only the final value does. Using pointer events (not mouse events)
 // means touch and pen produce the same gesture, and setPointerCapture keeps receiving
 // move/up even if the cursor leaves the handle mid-drag.
-import { memo, useCallback, useEffect, useLayoutEffect, useState, useRef, type PointerEvent as ReactPointerEvent } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef, type PointerEvent as ReactPointerEvent } from 'react'
 import { ChevronUp, Crosshair, GripVertical, Pencil, RotateCcw, X, Play, Pause, Scissors, Trash2, Volume2, VolumeX } from 'lucide-react'
 import { type StitchPlanClip } from '@/store'
 import { cn } from '@/lib/utils'
@@ -224,7 +224,7 @@ export const StitchClipCard = memo(function StitchClipCard({
   const [editingText, setEditingText] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [draftText, setDraftText] = useState(clip.text ?? '')
-  const [selection, setSelection] = useState<{ startMs: number; endMs: number } | null>(null)
+  const [selectionState, setSelection] = useState<{ startMs: number; endMs: number } | null>(null)
   const [gainDb, setGainDb] = useState(-3)
   const [regionFadeInMs, setRegionFadeInMs] = useState(15)
   const [regionFadeOutMs, setRegionFadeOutMs] = useState(35)
@@ -312,19 +312,16 @@ export const StitchClipCard = memo(function StitchClipCard({
     return () => { dead = true }
   }, [clip.clipId, clip.sourceAudioBase64])
 
-  const effectiveDuration = clipEffectiveDurationMs(clip)
+  const effectiveDuration = useMemo(() => clipEffectiveDurationMs(clip), [clip])
+  const selection = selectionState
+    ? {
+        startMs: clampMs(Math.min(selectionState.startMs, selectionState.endMs), 0, effectiveDuration),
+        endMs: clampMs(Math.max(selectionState.startMs, selectionState.endMs), 0, effectiveDuration),
+      }
+    : null
 
-  // A committed trim can shrink the effective window below an existing selection; clamp the
-  // stored selection back into [0, effectiveDuration] so the region panel and its edits
-  // never target audio outside the kept window.
-  useEffect(() => {
-    setSelection((prev) => {
-      if (!prev) return prev
-      const start = clampMs(Math.min(prev.startMs, prev.endMs), 0, effectiveDuration)
-      const end = clampMs(Math.max(prev.startMs, prev.endMs), 0, effectiveDuration)
-      return start === prev.startMs && end === prev.endMs ? prev : { startMs: start, endMs: end }
-    })
-  }, [effectiveDuration])
+  // A committed trim can shrink the effective window below an existing selection. Derive a
+  // clamped view so the region panel and edits never target audio outside the kept window.
 
   const clampTrimStart = useCallback((v: number) => {
     const nv = Math.max(0, Math.min(v, (durMs ?? 0) - 20))
@@ -390,12 +387,14 @@ export const StitchClipCard = memo(function StitchClipCard({
     rafRef.current = requestAnimationFrame(() => setDragPreview({ kind: state.kind, value: next }))
   }, [clampForKind])
 
+  const endDragRef = useRef<(event: PointerEvent) => void>(() => {})
+  const handleEndDrag = useCallback((event: PointerEvent) => endDragRef.current(event), [])
   const endDrag = useCallback((e: PointerEvent) => {
     const state = dragStateRef.current
     if (!state || state.pointerId !== e.pointerId) return
     window.removeEventListener('pointermove', handlePointerMove)
-    window.removeEventListener('pointerup', endDrag)
-    window.removeEventListener('pointercancel', endDrag)
+    window.removeEventListener('pointerup', handleEndDrag)
+    window.removeEventListener('pointercancel', handleEndDrag)
     dragStateRef.current = null
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current)
@@ -411,7 +410,10 @@ export const StitchClipCard = memo(function StitchClipCard({
     const finalValue = clampForKind(state.kind, state.startValue + signed)
     onUpdate(clip.clipId, { [patchKeyForKind(state.kind)]: finalValue } as Partial<StitchPlanClip>)
     setDragPreview(null)
-  }, [handlePointerMove, onUpdate, clip.clipId, clampForKind])
+  }, [handlePointerMove, handleEndDrag, onUpdate, clip.clipId, clampForKind])
+  useLayoutEffect(() => {
+    endDragRef.current = endDrag
+  }, [endDrag])
 
   const startDrag = (kind: HandleKind) => (e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
@@ -428,8 +430,8 @@ export const StitchClipCard = memo(function StitchClipCard({
     }
     e.currentTarget.setPointerCapture(e.pointerId)
     window.addEventListener('pointermove', handlePointerMove)
-    window.addEventListener('pointerup', endDrag)
-    window.addEventListener('pointercancel', endDrag)
+    window.addEventListener('pointerup', handleEndDrag)
+    window.addEventListener('pointercancel', handleEndDrag)
   }
 
   const handleSelectionPointerMove = useCallback((e: PointerEvent) => {
@@ -438,12 +440,17 @@ export const StitchClipCard = memo(function StitchClipCard({
     setSelection((prev) => clampSelection(prev?.startMs ?? pointToMs(e.clientX), pointToMs(e.clientX)))
   }, [clampSelection, pointToMs])
 
+  const endSelectionDragRef = useRef<(event: PointerEvent) => void>(() => {})
+  const handleEndSelectionDrag = useCallback((event: PointerEvent) => endSelectionDragRef.current(event), [])
   const endSelectionDrag = useCallback((e: PointerEvent) => {
     if (selectionDragRef.current?.pointerId !== e.pointerId) return
     selectionDragRef.current = null
     window.removeEventListener('pointermove', handleSelectionPointerMove)
-    window.removeEventListener('pointerup', endSelectionDrag)
-  }, [handleSelectionPointerMove])
+    window.removeEventListener('pointerup', handleEndSelectionDrag)
+  }, [handleSelectionPointerMove, handleEndSelectionDrag])
+  useLayoutEffect(() => {
+    endSelectionDragRef.current = endSelectionDrag
+  }, [endSelectionDrag])
 
   // The gesture listeners live on window and are normally removed by the end handlers, so
   // unmounting mid-drag (e.g. the clip gets removed) would leak them and leave a pending
@@ -453,10 +460,10 @@ export const StitchClipCard = memo(function StitchClipCard({
   useEffect(() => {
     return () => {
       window.removeEventListener('pointermove', handlePointerMove)
-      window.removeEventListener('pointerup', endDrag)
-      window.removeEventListener('pointercancel', endDrag)
+      window.removeEventListener('pointerup', handleEndDrag)
+      window.removeEventListener('pointercancel', handleEndDrag)
       window.removeEventListener('pointermove', handleSelectionPointerMove)
-      window.removeEventListener('pointerup', endSelectionDrag)
+      window.removeEventListener('pointerup', handleEndSelectionDrag)
       dragStateRef.current = null
       selectionDragRef.current = null
       movedGestureRef.current = null
@@ -465,7 +472,7 @@ export const StitchClipCard = memo(function StitchClipCard({
         rafRef.current = null
       }
     }
-  }, [handlePointerMove, endDrag, handleSelectionPointerMove, endSelectionDrag])
+  }, [handlePointerMove, handleEndDrag, handleSelectionPointerMove, handleEndSelectionDrag])
 
   const startSelection = (e: ReactPointerEvent<HTMLDivElement>) => {
     // Only the primary button starts a gesture; the secondary one belongs to the context menu.
@@ -478,7 +485,7 @@ export const StitchClipCard = memo(function StitchClipCard({
     setSelection(clampSelection(startMs, startMs + 10))
     e.currentTarget.setPointerCapture(e.pointerId)
     window.addEventListener('pointermove', handleSelectionPointerMove)
-    window.addEventListener('pointerup', endSelectionDrag)
+    window.addEventListener('pointerup', handleEndSelectionDrag)
   }
 
   const addRegionEdit = (edit: RegionEdit) => onAddRegionEdit(clip.clipId, edit)

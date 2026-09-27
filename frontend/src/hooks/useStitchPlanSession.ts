@@ -3,7 +3,7 @@
 // draft (quick-insert modal) that never touches the store until explicitly committed. See
 // docs/archive/stitch-studio/20260920-stitch_studio_ux_execution_plan.md "Session contract" -- later packets
 // depend on these exact names/signatures.
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useAppStore, type StitchPlanClip, type StitchPlanDsp } from '@/store'
 import {
   cloneStitchPlanState,
@@ -98,9 +98,7 @@ export function useStoreStitchPlanSession(): StitchPlanSession {
  * component instance calls this hook) and never writes to zustand. The caller commits by
  * reading `.plan` and passing it to `replaceOvStitchPlan` explicitly. */
 export function useDraftStitchPlanSession(initial: StitchPlanState): StitchPlanSession {
-  const initialRef = useRef<StitchPlanState | null>(null)
-  if (initialRef.current === null) initialRef.current = cloneStitchPlanState(initial)
-  const [plan, setPlan] = useState<StitchPlanState>(initialRef.current)
+  const [plan, setPlan] = useState<StitchPlanState>(() => cloneStitchPlanState(initial))
 
   const setClips = useCallback((updater: StitchPlanClip[] | ((clips: StitchPlanClip[]) => StitchPlanClip[])) => {
     setPlan((prev) => ({ ...prev, clips: typeof updater === 'function' ? updater(prev.clips) : updater }))

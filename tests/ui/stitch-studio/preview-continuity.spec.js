@@ -115,4 +115,62 @@ test.describe('preview continuity', () => {
     // shorter render cannot fail it.
     expect(Math.abs(after.t / after.d - fraction)).toBeLessThan(0.05)
   })
+  test('a second preview swap preserves pending playback intent until the latest source loads', async ({ page }) => {
+    await page.addInitScript(() => {
+      const pending = []
+      window.__pendingTransportMetadata = pending
+      window.__holdTransportMetadata = false
+      const add = HTMLMediaElement.prototype.addEventListener
+      HTMLMediaElement.prototype.addEventListener = function (type, listener, options) {
+        if (type === 'loadedmetadata' && this.dataset.testid === 'stitch-transport-audio') {
+          const wrapped = function (event) {
+            if (window.__holdTransportMetadata) {
+              pending.push({ src: this.getAttribute('src'), listener, event })
+            } else {
+              listener.call(this, event)
+            }
+          }
+          return add.call(this, type, wrapped, options)
+        }
+        return add.call(this, type, listener, options)
+      }
+      window.__releaseLatestTransportMetadata = () => {
+        const audio = document.querySelector('[data-testid="stitch-transport-audio"]')
+        const latest = pending.filter((entry) => entry.src === audio?.getAttribute('src')).at(-1)
+        if (!audio || !latest) return false
+        latest.listener.call(audio, latest.event)
+        return true
+      }
+    })
+    await insertSegments(page, 2)
+    const transport = await waitForSettledPreview(page)
+    const { src: originalSrc } = await startPlaying(page, transport)
+    await page.evaluate(() => { window.__holdTransportMetadata = true })
+
+    const gap = page.getByTestId('stitch-gap-control').first()
+    const changeGap = async (value) => {
+      await gap.getByRole('button', { name: /Gap between clip/ }).click()
+      const input = gap.getByRole('textbox')
+      await input.fill(String(value))
+      await input.press('Enter')
+    }
+
+    await changeGap(700)
+    await expect.poll(() => transport.evaluate((el) => el.src), { timeout: 15000 }).not.toBe(originalSrc)
+    const firstReplacementSrc = await transport.evaluate((el) => el.src)
+
+    // Hold the first replacement's metadata callback while another plan change replaces it.
+    await changeGap(900)
+    await expect
+      .poll(() => transport.evaluate((el) => el.src), { timeout: 15000 })
+      .not.toBe(firstReplacementSrc)
+    await expect
+      .poll(() => transport.evaluate((el) => Number.isFinite(el.duration) && el.duration > 1))
+      .toBe(true)
+    await expect.poll(() => page.evaluate(() => window.__pendingTransportMetadata.length)).toBeGreaterThan(0)
+
+    expect(await page.evaluate(() => window.__releaseLatestTransportMetadata())).toBe(true)
+    await expect.poll(() => transport.evaluate((el) => el.paused)).toBe(false)
+  })
+
 })

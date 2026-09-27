@@ -13,7 +13,11 @@ import { encodeRegionWav, renderRegionEdits, type RegionAudio } from './regionAu
 type Selection = { startMs: number; endMs: number }
 type DecodedAudio = RegionAudio
 
-export function RegionEditor({ audioBase64, edits = [], pauseIntervals = [], boundaryPlan = [], sampleCount, readOnly = false, showPlayer = true, onChange, onApply, onClose, busy = false }: {
+const EMPTY_EDITS: StitchPlanRegionEdit[] = []
+const EMPTY_PAUSE_INTERVALS: [number, number][] = []
+const EMPTY_BOUNDARY_PLAN: ProsodyPausePlanEntry[] = []
+
+export function RegionEditor({ audioBase64, edits = EMPTY_EDITS, pauseIntervals = EMPTY_PAUSE_INTERVALS, boundaryPlan = EMPTY_BOUNDARY_PLAN, sampleCount, readOnly = false, showPlayer = true, onChange, onApply, onClose, busy = false }: {
   audioBase64: string
   edits?: StitchPlanRegionEdit[]
   pauseIntervals?: [number, number][]
@@ -27,23 +31,37 @@ export function RegionEditor({ audioBase64, edits = [], pauseIntervals = [], bou
   busy?: boolean
 }) {
   const laneRef = useRef<HTMLDivElement>(null)
-  const [durationMs, setDurationMs] = useState(0)
-  const [envelope, setEnvelope] = useState<AudioEnvelope | null>(null)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [silenceMs, setSilenceMs] = useState(250)
-  const [audioUrl, setAudioUrl] = useState('')
-  const [decoded, setDecoded] = useState<DecodedAudio | null>(null)
+  const [sourceAudio, setSourceAudio] = useState<{ audioBase64: string; url: string; decoded: DecodedAudio | null } | null>(null)
+  const [renderedAudio, setRenderedAudio] = useState<{ decoded: DecodedAudio; edits: StitchPlanRegionEdit[]; url: string; durationMs: number; envelope: AudioEnvelope } | null>(null)
   const [hoverMs, setHoverMs] = useState<number | null>(null)
+
+  const currentSource = sourceAudio?.audioBase64 === audioBase64 ? sourceAudio : null
+  const decoded = currentSource?.decoded ?? null
+  const currentRender = renderedAudio?.decoded === decoded && renderedAudio.edits === edits ? renderedAudio : null
+  const audioUrl = currentRender?.url ?? currentSource?.url ?? ''
+  const durationMs = currentRender?.durationMs ?? 0
+  const envelope = currentRender?.envelope ?? null
 
   useEffect(() => {
     const blob = base64ToBlob(audioBase64)
     const url = URL.createObjectURL(blob)
-    setAudioUrl(url)
     let cancelled = false
     const ctx = new AudioContext()
-    void blob.arrayBuffer().then((data) => ctx.decodeAudioData(data)).then((buffer) => {
+    void blob.arrayBuffer().then(async (data) => {
       if (cancelled) return
-      setDecoded({ channels: Array.from({ length: buffer.numberOfChannels }, (_, index) => new Float32Array(buffer.getChannelData(index))), sampleRate: buffer.sampleRate })
+      setSourceAudio({ audioBase64, url, decoded: null })
+      const buffer = await ctx.decodeAudioData(data)
+      if (cancelled) return
+      setSourceAudio({
+        audioBase64,
+        url,
+        decoded: {
+          channels: Array.from({ length: buffer.numberOfChannels }, (_, index) => new Float32Array(buffer.getChannelData(index))),
+          sampleRate: buffer.sampleRate,
+        },
+      })
     }).finally(() => void ctx.close())
     return () => { cancelled = true; URL.revokeObjectURL(url) }
   }, [audioBase64])
@@ -51,14 +69,20 @@ export function RegionEditor({ audioBase64, edits = [], pauseIntervals = [], bou
   useEffect(() => {
     if (!decoded) return
     const channels = renderRegionEdits(decoded, edits)
-    const blob = encodeRegionWav(channels, decoded.sampleRate)
-    const url = URL.createObjectURL(blob)
-    setAudioUrl((previous) => { if (previous) URL.revokeObjectURL(previous); return url })
-    setDurationMs(Math.round((channels[0].length / decoded.sampleRate) * 1000))
-    // The lane draws the *edited* render, so its envelope comes from the same channels --
-    // building it here avoids decoding the WAV we just encoded.
-    setEnvelope(envelopeFromChannels(channels, decoded.sampleRate))
-    return () => URL.revokeObjectURL(url)
+    const wav = encodeRegionWav(channels, decoded.sampleRate)
+    const duration = Math.round((channels[0].length / decoded.sampleRate) * 1000)
+    const renderedEnvelope = envelopeFromChannels(channels, decoded.sampleRate)
+    let cancelled = false
+    let url = ''
+    void wav.arrayBuffer().then((bytes) => {
+      if (cancelled) return
+      url = URL.createObjectURL(new Blob([bytes], { type: wav.type }))
+      setRenderedAudio({ decoded, edits, url, durationMs: duration, envelope: renderedEnvelope })
+    })
+    return () => {
+      cancelled = true
+      if (url) URL.revokeObjectURL(url)
+    }
   }, [decoded, edits])
 
   const selected = selection ?? { startMs: 0, endMs: Math.min(300, durationMs) }
