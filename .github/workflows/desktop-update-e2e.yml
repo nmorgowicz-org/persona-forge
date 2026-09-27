@@ -120,6 +120,7 @@ jobs:
           MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
+          export PERSONA_FORGE_HOME="$RUNNER_TEMP/pf-update-e2e-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           rm -rf "$PERSONA_FORGE_HOME"
           APPIMAGE="$RUNNER_TEMP/PersonaForge-linux-x86_64.AppImage"
           cp n/PersonaForge-linux-x86_64.AppImage "$APPIMAGE"
