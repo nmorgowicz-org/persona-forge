@@ -58,8 +58,9 @@ body {
 .brand .mark {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, var(--accent), #4d3fb0);
+  flex: none;
+  display: block;
+  object-fit: contain;
 }
 
 .brand h1 {

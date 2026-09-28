@@ -42,8 +42,8 @@ header {
   width: 44px;
   height: 44px;
   flex: none;
-  border-radius: 11px;
-  background: linear-gradient(135deg, var(--accent), #4d3fb0);
+  display: block;
+  object-fit: contain;
 }
 
 h1,
