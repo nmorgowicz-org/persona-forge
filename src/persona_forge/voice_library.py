@@ -140,19 +140,15 @@ def set_active_variant(voice_id: str, variant_filename: str | None = None) -> bo
     return True
 
 
-def _load_master_wav(voice_id: str) -> tuple[np.ndarray, int, bytes] | None:
-    """Resolve and read a voice's master reference (original.wav, legacy reference.wav).
+def _load_source_wav(voice_id: str) -> tuple[np.ndarray, int, bytes] | None:
+    """Resolve and read the audio currently served for a voice.
 
-    Returns ``(wav, sr, wav_bytes)`` or ``None`` if the voice or its master is missing.
-    Centralizes the master-resolution the prosody engines share.
+    Prosody preview and alignment must use the same current/original source returned by
+    ``get_voice`` so the adjusted lane remains a transformation of the selected clip.
     """
-    voice_dir = _voice_dir(voice_id)
-    master_path = voice_dir / "original.wav"
-    if not master_path.is_file():
-        master_path = voice_dir / "reference.wav"
-    if not master_path.is_file():
+    wav_bytes = get_voice_wav_bytes(voice_id)
+    if wav_bytes is None:
         return None
-    wav_bytes = master_path.read_bytes()
     wav, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32")
     return np.asarray(wav, dtype=np.float32).ravel(), int(sr), wav_bytes
 
@@ -203,7 +199,7 @@ def get_vad_directed_wav(
     transcript = (meta.get("sample_text") or "").strip()
     if not transcript:
         return None
-    loaded = _load_master_wav(voice_id)
+    loaded = _load_source_wav(voice_id)
     if loaded is None:
         return None
     wav, sr, _ = loaded
@@ -260,9 +256,10 @@ def get_alignment_directed_wav(
 ) -> tuple[np.ndarray, int] | tuple[np.ndarray, int, list[dict[str, Any]]] | None:
     """Alignment-directed surgical pause insertion for blended speech (plan §5.3/§5.5).
 
-    Aligns the master reference to its transcript (reusing the ``meta["alignment"]`` cache
-    when its identity still matches) and inserts each punctuation-owned pause at the aligned
-    word boundary via the anti-click ``apply_boundary_pause_plan``. Returns ``(wav, sr)`` on
+    Aligns the audio currently served for this voice to its transcript (reusing the
+    ``meta["alignment"]`` cache when its identity still matches) and inserts each
+    punctuation-owned pause at the aligned word boundary via the anti-click
+    ``apply_boundary_pause_plan``. Returns ``(wav, sr)`` on
     success, or ``None`` to signal the caller to fall back to the energy path — no transcript,
     ``auto`` mode where triage says the clip is not blended, alignment yielding no confident
     owned boundaries, or any alignment error. This keeps the chain "never worse than status
@@ -276,7 +273,7 @@ def get_alignment_directed_wav(
     transcript = (meta.get("sample_text") or "").strip()
     if not transcript:
         return None
-    loaded = _load_master_wav(voice_id)
+    loaded = _load_source_wav(voice_id)
     if loaded is None:
         return None
     wav, sr, wav_bytes = loaded
@@ -356,9 +353,9 @@ def get_prosody_adjusted_wav(
     if meta is None:
         return None
 
-    loaded = _load_master_wav(voice_id)
+    loaded = _load_source_wav(voice_id)
     if loaded is None:
-        print(f"[DEBUG] master audio for {voice_id} is not a file")
+        print(f"[DEBUG] source audio for {voice_id} is not a file")
         return None
     wav, sr, _ = loaded
 
@@ -432,8 +429,8 @@ def create_prosody_variant(
     mode: str = "natural", target_overrides: dict[str, float] | None = None,
     source: str = "preset",
 ) -> tuple[str, str] | None:
-    """Create a prosody-adjusted variant of the master reference and register it in
-    variants.json under a unique slug (lineage-preserving vd_<parent_hex>.<slug> sub-ID).
+    """Create a prosody-adjusted variant from the audio currently served for this voice and
+    register it in variants.json under a unique slug (lineage-preserving vd_<parent_hex>.<slug> sub-ID).
     Returns (variant_filename, slug), or None on error.
     """
     result = get_prosody_adjusted_wav(

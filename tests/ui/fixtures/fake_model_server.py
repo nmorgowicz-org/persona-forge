@@ -269,7 +269,7 @@ def _patch_save_voice(app_module, rt):
         d = _fake_dir_parent / voice_id
         d.mkdir(parents=True, exist_ok=True)
         # Materialize the voice's reference audio on disk. The real forced-alignment
-        # and prosody paths resolve their master through _voice_dir()/_load_master_wav(),
+        # and prosody paths resolve their source through _voice_dir()/_load_source_wav(),
         # so a directory with metadata but no audio would blank the word boundaries
         # and the adjusted lane instead of exercising those paths for real.
         master = d / "original.wav"

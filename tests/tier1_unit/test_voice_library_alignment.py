@@ -258,3 +258,23 @@ class TestVadDirectedWav:
     def test_no_interior_punctuation_returns_none(self):
         vid = _save("Just one sentence with no interior break")
         assert voice_library.get_vad_directed_wav(vid, "Storyteller", 1.0, 0.0, mode="precise") is None
+
+@pytest.mark.parametrize("mode", ["natural", "precise"])
+def test_prosody_preview_uses_the_voice_currently_serves(mode):
+    voice_id = _save("")
+    voice_dir = voice_library._voice_dir(voice_id)
+    variant_path = voice_dir / "prosody_active.wav"
+    t = np.linspace(0.0, 2.0, 48000, endpoint=False, dtype=np.float32)
+    active = (0.05 * np.sin(2 * np.pi * 330.0 * t)).astype(np.float32)
+    sf.write(variant_path, active, 24000, format="WAV", subtype="PCM_16")
+    assert voice_library.set_active_variant(voice_id, variant_path.name)
+
+    expected, sr = sf.read(variant_path, dtype="float32")
+    result = voice_library.get_prosody_adjusted_wav(
+        voice_id, "Neutral", 1.0, 0.0, mode
+    )
+
+    assert result is not None
+    actual, actual_sr = result[0], result[1]
+    assert actual_sr == sr
+    np.testing.assert_array_equal(actual, expected)
