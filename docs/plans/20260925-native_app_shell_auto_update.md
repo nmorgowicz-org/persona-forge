@@ -1815,8 +1815,10 @@ On the Mac (macOS 26) and the Windows 11 PC. Linux is covered by the automated j
  - [x] First run completes. The SPA works: Speak generates and plays audio; download → Save dialog.
  - [x] Contract §1 items 2, 4, 5, 7, 8 behave as specified (use the Phase 3 checklist).
  - [ ] The next real release (N+1) is offered and installs through the in-app updater.
-   **Note:** v3.0.1 update dialog was found but rendered the full GitHub Releases page. Fixed
-   by adding inline HTML description to appcast.xml in Phase 8 follow-up.
+   **Status (2026-09-28):** v3.0.1 N+1 update prompt appeared and offered v3.0.1 to the v2.1.4
+   app; the update dialog rendered the full GitHub Releases page instead of the update content.
+   Fixed in `scripts/generate_update_feeds.py` by embedding a short inline HTML `<description>`
+   alongside the existing `sparkle:releaseNotesLink`. Re-test with the next release.
  - [x] Existing CLI-archive users: after installing the desktop app, their voices and projects
    appear (shared app-data root).
  - [x] Settings: fixed port and "Allow other devices on my network" work, and a tool on another
