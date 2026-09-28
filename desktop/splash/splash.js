@@ -14,6 +14,14 @@
 })()
 
 const STEP_ORDER = ['verify', 'venv', 'sync', 'install', 'start', 'wait']
+const STEP_LABELS = {
+  verify: 'Verifying app files…',
+  venv: 'Preparing your Python environment…',
+  sync: 'Installing required dependencies…',
+  install: 'Installing Persona Forge…',
+  start: 'Starting the local server…',
+  wait: 'Waiting for the server to become ready…',
+}
 const MAX_LOG_LINES = 200
 
 const stepsEl = document.getElementById('steps')
@@ -22,6 +30,8 @@ const errorPanelEl = document.getElementById('error-panel')
 const errorMessageEl = document.getElementById('error-message')
 const errorLogEl = document.getElementById('error-log')
 const appEl = document.getElementById('app')
+const statusMessageEl = document.getElementById('status-message')
+const progressEl = document.querySelector('.progress-track')
 
 const logLines = []
 
@@ -38,7 +48,13 @@ function setActiveStep(step) {
     else if (i === idx) li.dataset.status = 'active'
     else li.removeAttribute('data-status')
   })
+  if (STEP_LABELS[step]) {
+    statusMessageEl.textContent = STEP_LABELS[step]
+    progressEl.setAttribute('aria-valuetext', STEP_LABELS[step])
+  }
 }
+
+setActiveStep('verify')
 
 function appendLogLine(line) {
   if (!line) return
