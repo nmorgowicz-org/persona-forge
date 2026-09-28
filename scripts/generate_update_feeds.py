@@ -190,7 +190,7 @@ def build_appcast_xml(
         "    <title>Persona Forge</title>\n"
         "    <item>\n"
          f'      <sparkle:releaseNotesLink>{escape(notes_url)}</sparkle:releaseNotesLink>\n'
-        f"      <description><![CDATA[<p>A new version of Persona Forge is available.</p>"
+         f'      <description><![CDATA[<p>A new version of Persona Forge is available.</p>'
         f'<p><a href="{escape(notes_url)}">View release notes</a></p>]]></description>\n'
         f"      <enclosure "
         f'url="{escape(dmg_url)}" '
