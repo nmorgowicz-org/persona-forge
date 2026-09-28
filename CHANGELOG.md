@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.0.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.0.0...persona-forge-v3.0.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* **audio:** report actual duration and apply preset pause factors ([675ad47](https://github.com/nmorgowicz-org/persona-forge/commit/675ad47c7ee424cab08b5806411b868350d569d4))
+* **ci:** grant release upload permission to app token ([b5c98e9](https://github.com/nmorgowicz-org/persona-forge/commit/b5c98e9c786a13100aa5edf77ca947897d885bd6))
+* **ci:** run desktop signing after shared wheel build ([7b67ce6](https://github.com/nmorgowicz-org/persona-forge/commit/7b67ce60ad954c5c77d64456d7c5eb02f61764dc))
+* **ci:** use absolute Sparkle framework search path ([7b67ce6](https://github.com/nmorgowicz-org/persona-forge/commit/7b67ce60ad954c5c77d64456d7c5eb02f61764dc))
+* **desktop:** unblock release builds and sanitize reset errors ([7b67ce6](https://github.com/nmorgowicz-org/persona-forge/commit/7b67ce60ad954c5c77d64456d7c5eb02f61764dc))
+
+
+### Continuous Integration
+
+* **desktop:** clean stale Windows smoke port ([7b67ce6](https://github.com/nmorgowicz-org/persona-forge/commit/7b67ce60ad954c5c77d64456d7c5eb02f61764dc))
+
+
+### Miscellaneous Chores
+
+* **deps:** update dependency motion to v13.4.4 ([#355](https://github.com/nmorgowicz-org/persona-forge/issues/355)) ([1b03e0e](https://github.com/nmorgowicz-org/persona-forge/commit/1b03e0ea0bba902f76242ac87ccaa11844a94aa4))
+
 ## [3.0.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v2.1.4...persona-forge-v3.0.0) (2026-09-28)
 
 
