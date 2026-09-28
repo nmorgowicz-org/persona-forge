@@ -757,17 +757,29 @@ jobs:
           if (-not (Test-Path $exe)) { throw "installed exe is missing: $exe" }
 
           try {
+            # Port 8318 is reserved for the desktop smoke backend. Clear stale
+            # listeners from earlier jobs before starting this run.
+            Get-NetTCPConnection -LocalPort 8318 -State Listen -ErrorAction SilentlyContinue |
+              Select-Object -ExpandProperty OwningProcess -Unique |
+              Where-Object { $_ -gt 0 } |
+              ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+            Start-Sleep -Seconds 1
             $smokeArgs = @('-Exe', $exe, '-SmokeJson', (Join-Path $env:RUNNER_TEMP 'smoke.json'))
             if ($env:CI_HOOKS -ne 'true') { $smokeArgs += '-AssertCiUpdateRejected' }
             & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke_desktop.ps1 @smokeArgs
             if ($LASTEXITCODE -ne 0) { throw "smoke_desktop.ps1 failed: $LASTEXITCODE" }
           } finally {
+            # Port 8318 is reserved for the desktop smoke backend. Clear leaked
+            # listeners even when smoke fails, then uninstall the app.
+            Get-NetTCPConnection -LocalPort 8318 -State Listen -ErrorAction SilentlyContinue |
+              Select-Object -ExpandProperty OwningProcess -Unique |
+              Where-Object { $_ -gt 0 } |
+              ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
             $uninstaller = Join-Path $installLocation 'uninstall.exe'
             if (Test-Path $uninstaller) {
               Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait
             }
           }
-
   smoke-gui-linux:
     name: smoke-gui-linux
     if: ${{ !cancelled() && needs.build-linux.result == 'success' }}
