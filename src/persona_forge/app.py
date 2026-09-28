@@ -2258,8 +2258,9 @@ def runtime_config_reset():
         return jsonify({"error": "Another runtime reconfiguration or swap is already in progress"}), 503
     try:
         state = model.executor.submit(model.reset_runtime_config).result(timeout=300)
-    except Exception as exc:
-        return jsonify({"error": f"Runtime config reset error: {exc}"}), 500
+    except Exception:
+        logger.exception("Runtime config reset failed")
+        return jsonify({"error": "Runtime config reset failed"}), 500
     return jsonify(state)
 
 
