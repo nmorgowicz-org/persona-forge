@@ -1,5 +1,9 @@
 """Test /runtime/config GET and POST."""
 
+import logging
+from concurrent.futures import Future
+
+
 import pytest
 
 
@@ -74,3 +78,20 @@ class TestRuntimeConfigPost:
             json={"NOT_A_KEY": 1},
         )
         assert resp.status_code == 400
+
+    def test_reset_internal_failure_is_logged_but_not_returned(
+        self, client, rt, app_module, monkeypatch, caplog
+    ):
+        future = Future()
+        internal_error = "private backend path /srv/persona-forge/runtime.json"
+        future.set_exception(RuntimeError(internal_error))
+        monkeypatch.setattr(rt, "reset_runtime_config", lambda: None, raising=False)
+        monkeypatch.setattr(rt.executor, "submit", lambda *args, **kwargs: future)
+
+        with caplog.at_level(logging.ERROR, logger="persona_forge.app"):
+            resp = client.post("/runtime/config/reset")
+
+        assert resp.status_code == 500
+        assert resp.get_json() == {"error": "Runtime config reset failed"}
+        assert internal_error not in resp.get_data(as_text=True)
+        assert internal_error in caplog.text

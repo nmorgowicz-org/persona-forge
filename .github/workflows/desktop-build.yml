@@ -102,6 +102,9 @@ jobs:
   build-macos:
     name: build-macos
     needs: build-wheel
+    # A supplied wheel intentionally skips build-wheel; allow this platform build to use it.
+    if: ${{ !cancelled() && (success() || needs.build-wheel.result == 'skipped') }}
+
     runs-on: self-hosted-macos
     timeout-minutes: 90
     env:
@@ -418,6 +421,9 @@ jobs:
   build-windows:
     name: build-windows
     needs: build-wheel
+    # A supplied wheel intentionally skips build-wheel; allow this platform build to use it.
+    if: ${{ !cancelled() && (success() || needs.build-wheel.result == 'skipped') }}
+
     runs-on: self-hosted-windows
     timeout-minutes: 90
     env:
@@ -535,6 +541,9 @@ jobs:
   build-linux:
     name: build-linux
     needs: build-wheel
+    # A supplied wheel intentionally skips build-wheel; allow this platform build to use it.
+    if: ${{ !cancelled() && (success() || needs.build-wheel.result == 'skipped') }}
+
     runs-on: arc-persona-forge-desktop
     timeout-minutes: 90
     env:
