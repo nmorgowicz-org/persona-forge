@@ -1811,15 +1811,19 @@ PR title: `feat(release): publish signed desktop apps and update feeds with each
 On the Mac (macOS 26) and the Windows 11 PC. Linux is covered by the automated jobs in Phases
 4 and 6 (contract D8); record their run URLs for this release instead.
 
-- [ ] Install from the release page. Record any OS warning text verbatim.
-- [ ] First run completes. The SPA works: Speak generates and plays audio; download → Save dialog.
-- [ ] Contract §1 items 2, 4, 5, 7, 8 behave as specified (use the Phase 3 checklist).
-- [ ] The next real release (N+1) is offered and installs through the in-app updater.
-- [ ] Existing CLI-archive users: after installing the desktop app, their voices and projects
-      appear (shared app-data root).
-- [ ] Settings: fixed port and "Allow other devices on my network" work, and a tool on another
-      machine can call `http://<ip>:<port>/v1/audio/speech`.
-- [ ] Uninstall (drag to Trash / the Windows uninstaller) leaves user data in place.
+ - [x] Install from the release page. Record any OS warning text verbatim.
+ - [x] First run completes. The SPA works: Speak generates and plays audio; download → Save dialog.
+ - [x] Contract §1 items 2, 4, 5, 7, 8 behave as specified (use the Phase 3 checklist).
+ - [ ] The next real release (N+1) is offered and installs through the in-app updater.
+   **Status (2026-09-28):** v3.0.1 N+1 update prompt appeared and offered v3.0.1 to the v2.1.4
+   app; the update dialog rendered the full GitHub Releases page instead of the update content.
+   Fixed in `scripts/generate_update_feeds.py` by embedding a short inline HTML `<description>`
+   alongside the existing `sparkle:releaseNotesLink`. Re-test with the next release.
+ - [x] Existing CLI-archive users: after installing the desktop app, their voices and projects
+   appear (shared app-data root).
+ - [x] Settings: fixed port and "Allow other devices on my network" work, and a tool on another
+   machine can call `http://<ip>:<port>/v1/audio/speech`.
+ - [x] Uninstall (drag to Trash / the Windows uninstaller) leaves user data in place.
 
 ### Handoff (in the final PR, per `AGENTS.md` "Agent handoff requirements", adapted)
 
