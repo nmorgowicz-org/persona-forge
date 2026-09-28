@@ -109,7 +109,7 @@ jobs:
     timeout-minutes: 90
     env:
       TAURI_CONFIG: '{"version":"${{ inputs.version }}","bundle":{"createUpdaterArtifacts":false}}'
-      SPARKLE_FRAMEWORK_PATH: .
+      SPARKLE_FRAMEWORK_PATH: ${{ github.workspace }}/desktop
       FEED_BASE: ${{ inputs.feed_base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
