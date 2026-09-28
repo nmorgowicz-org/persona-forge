@@ -64,7 +64,7 @@ jobs:
     runs-on: self-hosted-macos
     timeout-minutes: 30
     env:
-      SPARKLE_FRAMEWORK_PATH: desktop
+      SPARKLE_FRAMEWORK_PATH: ${{ github.workspace }}/desktop
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Fetch and verify pinned Sparkle.framework
