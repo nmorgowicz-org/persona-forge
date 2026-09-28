@@ -232,7 +232,7 @@ jobs:
 
   sign-macos-app:
     name: sign-macos-app
-    if: ${{ inputs.sign }}
+    if: ${{ !cancelled() && inputs.sign && needs.build-macos.result == 'success' }}
     needs: build-macos
     runs-on: arc-persona-forge-desktop
     timeout-minutes: 45
@@ -283,7 +283,7 @@ jobs:
 
   dmg-macos:
     name: dmg-macos
-    if: ${{ inputs.sign }}
+    if: ${{ !cancelled() && inputs.sign && needs.sign-macos-app.result == 'success' }}
     needs: sign-macos-app
     runs-on: self-hosted-macos
     timeout-minutes: 30
@@ -311,7 +311,7 @@ jobs:
 
   sign-macos-dmg:
     name: sign-macos-dmg
-    if: ${{ inputs.sign }}
+    if: ${{ !cancelled() && inputs.sign && needs.dmg-macos.result == 'success' }}
     needs: dmg-macos
     runs-on: arc-persona-forge-desktop
     timeout-minutes: 45
@@ -359,7 +359,7 @@ jobs:
 
   verify-macos:
     name: verify-macos
-    if: ${{ inputs.sign }}
+    if: ${{ !cancelled() && inputs.sign && needs.sign-macos-app.result == 'success' && needs.sign-macos-dmg.result == 'success' }}
     needs: [sign-macos-app, sign-macos-dmg]
     runs-on: self-hosted-macos
     timeout-minutes: 30
@@ -641,7 +641,7 @@ jobs:
 
   updater-sigs:
     name: updater-sigs
-    if: ${{ inputs.sign }}
+    if: ${{ !cancelled() && inputs.sign && needs.build-windows.result == 'success' && needs.build-linux.result == 'success' }}
     needs: [build-windows, build-linux]
     runs-on: arc-persona-forge-desktop
     timeout-minutes: 30
@@ -720,10 +720,12 @@ jobs:
 
   smoke-windows:
     name: smoke-windows
+    if: ${{ !cancelled() && needs.build-windows.result == 'success' }}
     needs: build-windows
     runs-on: self-hosted-windows
     timeout-minutes: 30
     steps:
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -768,10 +770,12 @@ jobs:
 
   smoke-gui-linux:
     name: smoke-gui-linux
+    if: ${{ !cancelled() && needs.build-linux.result == 'success' }}
     needs: build-linux
     runs-on: arc-persona-forge-desktop
     timeout-minutes: 45
     steps:
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -816,10 +820,12 @@ jobs:
 
   smoke-linux-newest:
     name: smoke-linux-newest
+    if: ${{ !cancelled() && needs.build-linux.result == 'success' }}
     needs: build-linux
     runs-on: arc-llama-monitor
     timeout-minutes: 30
     env:
+
       # Ubuntu 26.04 image does not set it; pods have no FUSE, so the AppImage must
       # extract-and-run instead of mounting.
       APPIMAGE_EXTRACT_AND_RUN: "1"
