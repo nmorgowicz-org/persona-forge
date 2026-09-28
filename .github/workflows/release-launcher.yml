@@ -1,17 +1,7 @@
-# Phase 7 — Verified cross-platform native bootstrap archives
-# (docs/plans/20260829-no_more_docker_architecture.md §9; execution plan Phase 7).
-#
-# Builds the wheel/sdist once, cross-compiles persona-forge-launcher for the three supported
-# targets, bundles each into a launcher archive with a pinned+verified uv binary (never
-# `curl | sh` - see scripts/fetch_uv_binary.sh), runs every archive on a target-native runner,
-# then validates and publishes the full release set (Gate 7: exact archive membership,
-# checksums.json coverage, manifest cross-checks).
-#
-# Runner-label ruling: use the established `arc-llama-monitor` runner, matching
-# local-llm-foundry's cross-platform release workflow. Its image provides the
-# cross-build toolchains required by this matrix. The smoke matrix below uses
-# `arc-general` for Linux x86-64 and the repository's native
-# `self-hosted-windows`/`self-hosted-macos` labels.
+# Release workflow: build and validate the wheel, Linux CLI archive, and signed desktop apps.
+# The macOS and Windows CLI archives stop with the first release containing desktop assets (D22).
+# Desktop code signing, updater signing, and feed generation use ephemeral ARC runners only (D19).
+# Every release asset and both signed update feeds are checksum-covered and fail-closed validated.
 name: Release Launcher
 
 on:
@@ -20,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release tag to attach launcher archives to (e.g. persona-forge-v1.3.0)"
+        description: "Release tag to attach artifacts to (e.g. persona-forge-v1.3.0)"
         required: true
         type: string
       dry_run:
@@ -78,6 +68,81 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+  version:
+    name: version
+    runs-on: arc-general
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read project version
+        id: version
+        run: |
+          VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  desktop:
+    name: desktop
+    needs: [build-wheel, version]
+    uses: ./.github/workflows/desktop-build.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      sign: true
+      wheel_artifact: wheel-and-sdist
+    secrets: inherit
+
+  publish-feeds:
+    name: publish-feeds
+    needs: [version, desktop]
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 15
+    env:
+      SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-macos-aarch64
+          path: release
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-windows-x86_64
+          path: release
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-linux-x86_64
+          path: release
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-updater-signatures
+          path: signatures
+      - name: Generate signed update feeds
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find signatures -type f -name '*.sig' -exec mv {} release/ \;
+          if [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            TAG="${{ github.event.inputs.tag_name }}"
+          fi
+          python3 scripts/generate_update_feeds.py \
+            --release-dir release \
+            --version "$RELEASE_VERSION" \
+            --tag "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-update-feeds
+          path: |
+            release/appcast.xml
+            release/latest.json
+          retention-days: 7
+          if-no-files-found: error
+
   build-launcher:
     name: build-launcher-${{ matrix.target }}
     needs: build-wheel
@@ -90,12 +155,6 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             asset_stem: linux-x86_64
             uv_target: x86_64-unknown-linux-gnu
-          - target: x86_64-pc-windows-gnu
-            asset_stem: windows-x86_64
-            uv_target: x86_64-pc-windows-msvc # uv publishes no windows-gnu build; msvc binary runs fine standalone
-          - target: aarch64-apple-darwin
-            asset_stem: macos-aarch64
-            uv_target: aarch64-apple-darwin
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -119,70 +178,6 @@ jobs:
       - name: Fetch + verify pinned uv binary (${{ matrix.uv_target }})
         run: bash scripts/fetch_uv_binary.sh ${{ env.UV_VERSION }} ${{ matrix.uv_target }} uv-bin
 
-      - name: Install rcodesign (macOS signing)
-        if: matrix.target == 'aarch64-apple-darwin'
-        run: |
-          set -euo pipefail
-          RCODESIGN_VERSION="0.29.0"
-          RCODESIGN_ASSET="apple-codesign-${RCODESIGN_VERSION}-x86_64-unknown-linux-musl"
-          curl --fail --location --silent --show-error -o rcodesign.tar.gz \
-            "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F${RCODESIGN_VERSION}/${RCODESIGN_ASSET}.tar.gz"
-          tar -xzf rcodesign.tar.gz "${RCODESIGN_ASSET}/rcodesign"
-          mv "${RCODESIGN_ASSET}/rcodesign" ./rcodesign
-          chmod +x rcodesign
-
-      - name: Prepare App Store Connect API key
-        if: matrix.target == 'aarch64-apple-darwin'
-        env:
-          APPLE_ISSUER_ID: ${{ secrets.APPLE_ISSUER_ID }}
-          APPLE_KEY_ID: ${{ secrets.APPLE_KEY_ID }}
-          APPLE_PRIVATE_KEY: ${{ secrets.APPLE_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.appstoreconnect
-          echo "$APPLE_PRIVATE_KEY" > /tmp/AuthKey.pem
-          ./rcodesign encode-app-store-connect-api-key \
-            -o ~/.appstoreconnect/key.json \
-            "$APPLE_ISSUER_ID" "$APPLE_KEY_ID" /tmp/AuthKey.pem
-
-      - name: Sign launcher binary (macOS)
-        if: matrix.target == 'aarch64-apple-darwin'
-        env:
-          MACOS_KEY_PEM: ${{ secrets.MACOS_KEY_PEM }}
-          MACOS_CERT_PEM: ${{ secrets.MACOS_CERT_PEM }}
-        run: |
-          set -euo pipefail
-          echo "$MACOS_KEY_PEM" > key.pem
-          echo "$MACOS_CERT_PEM" > cert.pem
-          LAUNCHER="launcher/target/aarch64-apple-darwin/release/persona-forge-launcher"
-          ./rcodesign sign \
-            --pem-file key.pem --pem-file cert.pem \
-            --for-notarization \
-            "$LAUNCHER"
-
-      - name: Notarize launcher binary (macOS)
-        if: matrix.target == 'aarch64-apple-darwin'
-        run: |
-          set -euo pipefail
-          # notary-submit does not accept a bare Mach-O binary; it must be
-          # zipped first. Stapling a plain executable is not supported by
-          # Apple (only .app/.pkg/.dmg), so we notarize but do not staple.
-          # Gatekeeper falls back to an online check on first launch, which
-          # still clears the quarantine warning.
-          LAUNCHER="launcher/target/aarch64-apple-darwin/release/persona-forge-launcher"
-          zip notarize.zip "$LAUNCHER"
-          ./rcodesign notary-submit \
-            --api-key-file ~/.appstoreconnect/key.json \
-            --wait \
-            notarize.zip
-
-      - name: Verify launcher signature (macOS)
-        if: matrix.target == 'aarch64-apple-darwin'
-        run: |
-          set -euo pipefail
-          LAUNCHER="launcher/target/aarch64-apple-darwin/release/persona-forge-launcher"
-          ./rcodesign verify "$LAUNCHER"
-
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: wheel-and-sdist
@@ -199,10 +194,8 @@ jobs:
         run: |
           set -euo pipefail
           UV_BIN="uv-bin/uv"
-          [ "${{ matrix.target }}" = "x86_64-pc-windows-gnu" ] && UV_BIN="uv-bin/uv.exe"
           WHEEL=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
           LAUNCHER_BIN="launcher/target/${{ matrix.target }}/release/persona-forge-launcher"
-          [ "${{ matrix.target }}" = "x86_64-pc-windows-gnu" ] && LAUNCHER_BIN="${LAUNCHER_BIN}.exe"
           VERSION=$(uv run --frozen python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           uv run --frozen python scripts/package_launcher_archive.py \
             --target ${{ matrix.target }} \
@@ -221,71 +214,30 @@ jobs:
           if-no-files-found: error
 
   smoke-launcher:
-    name: smoke-launcher-${{ matrix.target }}
+    name: smoke-launcher-linux
     needs: build-launcher
-    runs-on: ${{ matrix.runs-on }}
+    runs-on: arc-general
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            asset_stem: linux-x86_64
-            archive_suffix: .tar.gz
-            runs-on: arc-general
-          - target: x86_64-pc-windows-gnu
-            asset_stem: windows-x86_64
-            archive_suffix: .zip
-            runs-on: self-hosted-windows
-          - target: aarch64-apple-darwin
-            asset_stem: macos-aarch64
-            archive_suffix: .tar.gz
-            runs-on: self-hosted-macos
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: launcher-${{ matrix.asset_stem }}
+          name: launcher-linux-x86_64
           path: release-assets
 
-      - name: Smoke-test packaged launcher doctor --json (Unix)
-        if: matrix.target != 'x86_64-pc-windows-gnu'
+      - name: Smoke-test packaged Linux launcher doctor --json
         shell: bash
         run: |
           set -euo pipefail
-          ARCHIVE="release-assets/persona-forge-bootstrap-${{ matrix.asset_stem }}${{ matrix.archive_suffix }}"
+          ARCHIVE="release-assets/persona-forge-bootstrap-linux-x86_64.tar.gz"
           SMOKE_DIR=$(mktemp -d)
           trap 'rm -rf "$SMOKE_DIR"' EXIT
-          case "$ARCHIVE" in
-            *.zip) unzip -q "$ARCHIVE" -d "$SMOKE_DIR" ;;
-            *.tar.gz) tar -xzf "$ARCHIVE" -C "$SMOKE_DIR" ;;
-            *) echo "unsupported launcher archive: $ARCHIVE" >&2; exit 1 ;;
-          esac
+          tar -xzf "$ARCHIVE" -C "$SMOKE_DIR"
           LAUNCHER_BIN="$SMOKE_DIR/persona-forge-launcher"
           PERSONA_FORGE_HOME="$SMOKE_DIR/state" "$LAUNCHER_BIN" doctor --json
 
-      - name: Smoke-test packaged launcher doctor --json (Windows)
-        if: matrix.target == 'x86_64-pc-windows-gnu'
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $archive = Join-Path 'release-assets' 'persona-forge-bootstrap-windows-x86_64.zip'
-          $smokeDir = Join-Path $env:RUNNER_TEMP "persona-forge-smoke-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          New-Item -ItemType Directory -Path $smokeDir -Force | Out-Null
-          try {
-            Expand-Archive -LiteralPath $archive -DestinationPath $smokeDir -Force
-            $launcherBin = Join-Path $smokeDir 'persona-forge-launcher.exe'
-            $env:PERSONA_FORGE_HOME = Join-Path $smokeDir 'state'
-            & $launcherBin doctor --json
-            if ($LASTEXITCODE -ne 0) {
-              throw "launcher doctor exited with code $LASTEXITCODE"
-            }
-          } finally {
-            Remove-Item -LiteralPath $smokeDir -Recurse -Force -ErrorAction SilentlyContinue
-          }
-
   release:
     name: release
-    needs: [build-wheel, build-launcher, smoke-launcher]
+    needs: [build-wheel, version, build-launcher, smoke-launcher, desktop, publish-feeds]
     runs-on: arc-general
     timeout-minutes: 20
     permissions:
@@ -319,12 +271,48 @@ jobs:
           path: release
           merge-multiple: true
 
-      - name: Determine release version
-        id: version
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-macos-aarch64
+          path: release
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-windows-x86_64
+          path: release
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-linux-x86_64
+          path: release
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-updater-signatures
+          path: signatures
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-update-feeds
+          path: release
+
+      - name: Flatten updater signatures
         run: |
           set -euo pipefail
-          TAG="${{ github.event_name == 'release' && github.ref_name || github.event.inputs.tag_name }}"
+          find signatures -type f -name '*.sig' -exec mv {} release/ \;
+
+      - name: Determine and verify release version
+        id: version
+        env:
+          EXPECTED_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
+            TAG="$GITHUB_REF_NAME"
+          else
+            TAG="${{ github.event.inputs.tag_name }}"
+          fi
           VERSION="${TAG#persona-forge-v}"
+          if [[ "$VERSION" != "$EXPECTED_VERSION" ]]; then
+            echo "release tag version $VERSION does not match project version $EXPECTED_VERSION" >&2
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Generate SHA-256 checksums

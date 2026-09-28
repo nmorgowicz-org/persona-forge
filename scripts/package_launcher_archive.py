@@ -59,6 +59,8 @@ The first launcher command downloads Python and installs the application environ
 under your user data directory. The first server start downloads model assets. Later
 runs reuse the environment and cached data. To update, download the newer release
 archive and run its launcher; existing voices, settings, and model caches are retained.
+For desktop use, download the desktop asset for your platform from GitHub Releases (the
+Linux AppImage is a preview; the Windows installer is unsigned).
 """
 
 

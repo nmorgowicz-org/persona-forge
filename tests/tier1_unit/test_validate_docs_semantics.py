@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from scripts import validate_docs_semantics as docs_semantics
 
 from scripts.validate_docs_semantics import (
     BANNED_PATTERNS,
@@ -42,6 +43,41 @@ class TestAgainstRealRepo:
         check_release_workflow_contract(failures)
         assert failures == []
 
+
+    def test_release_workflow_contract_rejects_non_ephemeral_feed_runner(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ):
+        import yaml
+
+        root = tmp_path
+        (root / ".github" / "workflows").mkdir(parents=True)
+        (root / "launcher").mkdir()
+        (root / "scripts").mkdir()
+        (root / "scripts" / "package_launcher_archive.py").touch()
+        workflow = {
+            "on": {"workflow_dispatch": {"inputs": {"tag_name": {}}}},
+            "jobs": {
+                "build-launcher": {
+                    "strategy": {
+                        "matrix": {"include": [{"target": "x86_64-unknown-linux-gnu"}]}
+                    }
+                },
+                "desktop": {
+                    "uses": "./.github/workflows/desktop-build.yml",
+                    "with": {"sign": True, "wheel_artifact": "wheel-and-sdist"},
+                },
+                "publish-feeds": {"runs-on": "arc-general"},
+                "release": {"needs": ["desktop", "publish-feeds"]},
+            },
+        }
+        workflow_path = root / ".github" / "workflows" / "release-launcher.yml"
+        workflow_path.write_text(yaml.safe_dump(workflow), encoding="utf-8")
+        monkeypatch.setattr(docs_semantics, "REPO_ROOT", root)
+
+        failures: list[str] = []
+        docs_semantics.check_release_workflow_contract(failures)
+
+        assert any("feed generation must run on ephemeral arc-persona-forge-desktop" in f for f in failures)
     def test_env_name_parity_check_passes(self):
         failures: list[str] = []
         check_env_name_parity(failures)

@@ -12,7 +12,8 @@ live spectrogram, all drawn from one media clock:
 | Doc | What it covers |
 |---|---|
 | [HOW_TO_RUN.md](HOW_TO_RUN.md) | Docker Compose setup, first boot, the export step for Qwen/OpenVINO |
-| [RUN_LOCAL.md](RUN_LOCAL.md) | Recommended no-Docker launcher, plus source checkout and release-wheel installation |
+| [RUN_LOCAL.md](RUN_LOCAL.md) | Linux headless CLI archive, macOS/Windows release wheel, and source development |
+| [architecture/DESKTOP_APP.md](architecture/DESKTOP_APP.md) | Desktop app install, operation, updates, and troubleshooting |
 | [MIGRATION.md](MIGRATION.md) | Moving a deployment's data between Docker and native |
 | [ENV_REFERENCE.md](ENV_REFERENCE.md) | Every environment variable, with defaults |
 | [api/HTTP_API_REFERENCE.md](api/HTTP_API_REFERENCE.md) | Every HTTP endpoint, request and response shapes |

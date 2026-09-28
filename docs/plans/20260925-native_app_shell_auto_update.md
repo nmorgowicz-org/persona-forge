@@ -1725,10 +1725,11 @@ the active docs.
      (the desktop staging reads its macOS/Windows `--python-platform` values). Read
      `ci-packaging.yml`: drop jobs that only smoke the macOS/Windows **archives**, and keep any
      check of the per-platform requirements export that `stage_desktop_payload.py` reuses.
-   - the `release` job step order becomes: download artifacts → determine release version →
-     `generate_update_feeds.py` (with `SPARKLE_ED_PRIVATE_KEY`; the `release` job already runs on
-     the ephemeral `arc-general`, D19) → generate SHA-256 checksums (so the feeds are covered) →
-     validate release contract → publish.
+   - generate the update feeds on the ephemeral `arc-persona-forge-desktop` runner
+     (contract D19; the `arc-general` image lacks `gh`), passing `SPARKLE_ED_PRIVATE_KEY`
+     only to that job. Have the release job download the resulting feeds as workflow artifacts,
+     then generate SHA-256 checksums (so the feeds are covered) → validate release contract →
+     publish.
 2. `validate_release_contract.py`: add the desktop assets to `expected_assets()`:
    - `PersonaForge-macos-aarch64.dmg`, `PersonaForge-windows-x86_64-setup.exe` +
      `.sig`, `PersonaForge-linux-x86_64.AppImage` + `.sig`,

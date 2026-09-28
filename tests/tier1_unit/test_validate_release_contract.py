@@ -1,8 +1,7 @@
 """Test scripts/validate_release_contract.py: the Phase 7 fail-closed release-set validator.
 
-Covers Gate 7's required self-test categories: a clean positive release, a missing top-level
-asset, an extra top-level asset, a checksums.json hash mismatch, and a bootstrap archive that is
-missing one of its own required members.
+Tests cover a clean release, missing and legacy assets, checksum/manifest integrity, and signed
+desktop update feed metadata.
 """
 
 from __future__ import annotations
@@ -22,8 +21,6 @@ VERSION = "1.3.0"
 
 BOOTSTRAP_MEMBERS = {
     "persona-forge-bootstrap-linux-x86_64.tar.gz": ("persona-forge-launcher", "uv"),
-    "persona-forge-bootstrap-windows-x86_64.zip": ("persona-forge-launcher.exe", "uv.exe"),
-    "persona-forge-bootstrap-macos-aarch64.tar.gz": ("persona-forge-launcher", "uv"),
 }
 
 
@@ -76,20 +73,48 @@ def _make_clean_release(release_dir: Path) -> dict[str, bytes]:
     release_dir.mkdir(parents=True, exist_ok=True)
     wheel_name = f"persona_forge-{VERSION}-py3-none-any.whl"
     sdist_name = f"persona_forge-{VERSION}.tar.gz"
-
     contents: dict[str, bytes] = {
         wheel_name: b"wheel-bytes",
         sdist_name: b"sdist-bytes",
+        "PersonaForge-macos-aarch64.dmg": b"dmg-image",
+        "PersonaForge-windows-x86_64-setup.exe": b"windows-installer",
+        "PersonaForge-linux-x86_64.AppImage": b"linux-appimage",
+        "PersonaForge-windows-x86_64-setup.exe.sig": b"windows-signature",
+        "PersonaForge-linux-x86_64.AppImage.sig": b"linux-signature",
     }
-    for asset in BOOTSTRAP_MEMBERS:
-        (release_dir / asset).write_bytes(b"")  # placeholder, overwritten below
-    for f in [wheel_name, sdist_name]:
-        (release_dir / f).write_bytes(contents[f])
-
-    for asset in BOOTSTRAP_MEMBERS:
-        _write_bootstrap_archive(release_dir / asset, wheel_name, contents[wheel_name])
-        contents[asset] = (release_dir / asset).read_bytes()
-
+    for name, data in contents.items():
+        (release_dir / name).write_bytes(data)
+    archive = "persona-forge-bootstrap-linux-x86_64.tar.gz"
+    _write_bootstrap_archive(release_dir / archive, wheel_name, contents[wheel_name])
+    contents[archive] = (release_dir / archive).read_bytes()
+    dmg = release_dir / "PersonaForge-macos-aarch64.dmg"
+    (release_dir / "appcast.xml").write_text(
+        '<?xml version="1.0"?><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
+        '<channel><item><enclosure url="https://example/release/PersonaForge-macos-aarch64.dmg" '
+        f'length="{dmg.stat().st_size}" sparkle:version="{VERSION}" '
+        f'sparkle:shortVersionString="{VERSION}" sparkle:edSignature="dmg-signature"/></item></channel></rss>',
+        encoding="utf-8",
+    )
+    contents["appcast.xml"] = (release_dir / "appcast.xml").read_bytes()
+    (release_dir / "latest.json").write_text(
+        json.dumps({
+            "pub_date": "2026-09-27T00:00:00Z",
+            "notes": "https://example/release/notes",
+            "version": VERSION,
+            "platforms": {
+                "windows-x86_64-nsis": {
+                    "url": "https://example/release/PersonaForge-windows-x86_64-setup.exe",
+                    "signature": "windows-signature",
+                },
+                "linux-x86_64-appimage": {
+                    "url": "https://example/release/PersonaForge-linux-x86_64.AppImage",
+                    "signature": "linux-signature",
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+    contents["latest.json"] = (release_dir / "latest.json").read_bytes()
     checksums = {"checksums": {name: _sha256_bytes(data) for name, data in contents.items()}}
     (release_dir / "checksums.json").write_text(json.dumps(checksums, indent=2), encoding="utf-8")
     contents["checksums.json"] = (release_dir / "checksums.json").read_bytes()
@@ -108,14 +133,10 @@ def test_clean_release_passes(tmp_path: Path, capsys: pytest.CaptureFixture[str]
     assert out["failures"] == []
 
 
-def test_missing_top_level_asset_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_missing_desktop_asset_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     release_dir = tmp_path / "release"
     _make_clean_release(release_dir)
-    (release_dir / "persona-forge-bootstrap-windows-x86_64.zip").unlink()
-    checksums = json.loads((release_dir / "checksums.json").read_text())
-    checksums["checksums"].pop("persona-forge-bootstrap-windows-x86_64.zip")
-    (release_dir / "checksums.json").write_text(json.dumps(checksums), encoding="utf-8")
-
+    (release_dir / "PersonaForge-macos-aarch64.dmg").unlink()
     code = main(["--dir", str(release_dir), "--version", VERSION])
 
     assert code == 1
@@ -133,6 +154,46 @@ def test_extra_top_level_asset_fails(tmp_path: Path, capsys: pytest.CaptureFixtu
     assert code == 1
     out = json.loads(capsys.readouterr().out)
     assert any("unexpected extra release asset" in f for f in out["failures"])
+
+
+@pytest.mark.parametrize(
+    "legacy_archive",
+    [
+        "persona-forge-bootstrap-macos-aarch64.tar.gz",
+        "persona-forge-bootstrap-windows-x86_64.zip",
+    ],
+)
+def test_legacy_desktop_bootstrap_archives_are_rejected(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], legacy_archive: str
+) -> None:
+    release_dir = tmp_path / "release"
+    _make_clean_release(release_dir)
+    (release_dir / legacy_archive).write_bytes(b"legacy")
+    assert main(["--dir", str(release_dir), "--version", VERSION]) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert any("unexpected extra release asset" in f for f in out["failures"])
+
+
+def test_latest_json_version_mismatch_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    release_dir = tmp_path / "release"
+    _make_clean_release(release_dir)
+    latest = json.loads((release_dir / "latest.json").read_text())
+    latest["version"] = "9.9.9"
+    (release_dir / "latest.json").write_text(json.dumps(latest))
+    assert main(["--dir", str(release_dir), "--version", VERSION]) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert any("latest.json version" in f for f in out["failures"])
+
+
+def test_latest_json_signature_mismatch_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    release_dir = tmp_path / "release"
+    _make_clean_release(release_dir)
+    latest = json.loads((release_dir / "latest.json").read_text())
+    latest["platforms"]["linux-x86_64-appimage"]["signature"] = "wrong-signature"
+    (release_dir / "latest.json").write_text(json.dumps(latest))
+    assert main(["--dir", str(release_dir), "--version", VERSION]) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert any("signature does not match" in f for f in out["failures"])
 
 
 def test_checksum_mismatch_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

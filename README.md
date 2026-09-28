@@ -121,9 +121,41 @@ spectrogram, all drawn from one media clock while the take plays:
 
 ---
 
-## Getting started
+## Install the desktop app
 
-**Prerequisites:** Docker and Docker Compose. Images are published to
+**The recommended install is the desktop app.** Download the installer for your platform from
+[GitHub Releases](https://github.com/nmorgowicz-org/persona-forge/releases):
+
+| Platform | Download | Status |
+|---|---|---|
+| macOS Apple Silicon | `PersonaForge-macos-aarch64.dmg` | Signed and notarized |
+| Windows x86-64 | `PersonaForge-windows-x86_64-setup.exe` | Unsigned preview; read the Windows warning below |
+| Linux x86-64 | `PersonaForge-linux-x86_64.AppImage` | **Preview**; GNOME users may need the AppIndicator extension for the tray icon |
+
+The desktop app guides first-time setup and includes its own server. See the [desktop app guide](docs/architecture/DESKTOP_APP.md)
+for requirements, Settings, update behavior, and troubleshooting.
+
+> **Windows: the installer is not code-signed.** Windows SmartScreen will show "Windows
+> protected your PC". Click **More info → Run anyway**. This allows only this installer; you
+> do not need to turn SmartScreen off. The same prompt can appear after an update.
+>
+> If **Smart App Control** is on, Windows blocks unsigned apps with no "Run anyway" option.
+> To install, turn it off in Windows Security → App & browser control → Smart App Control
+> settings → Off. On some Windows versions it cannot be turned back on without resetting
+> Windows, so decide before you switch it off.
+
+### Headless installs
+
+Use the container on any supported host when you want a headless service, including GPU
+deployments. On Linux x86-64, the CLI launcher archive is also available for headless native
+installs. The macOS and Windows CLI archives are not distributed; for headless use on those
+platforms, install the release wheel with `uv tool install persona-forge` and start it with
+`uvx persona-forge serve`. See [RUN_LOCAL.md](docs/RUN_LOCAL.md) for the wheel and Linux archive
+instructions, or [HOW_TO_RUN.md](docs/HOW_TO_RUN.md) for the container path.
+
+## Run in a container (headless)
+
+The published container is the recommended headless path. Images are published to
 [GHCR](https://github.com/nmorgowicz-org/persona-forge/pkgs/container/persona-forge) on every
 release — this pulls a prebuilt image rather than building from source.
 
@@ -159,68 +191,12 @@ below for pinned version/digest tags.
 > **Want the Qwen engine with OpenVINO acceleration?** Run the export step first and set
 > `TTS_BACKEND=openvino`. See [HOW_TO_RUN.md](docs/HOW_TO_RUN.md).
 
-> **Don't want Docker?** The recommended native path is the platform launcher archive from a
-> [GitHub Release](https://github.com/nmorgowicz-org/persona-forge/releases). It includes the
-> Persona Forge wheel, a pinned `uv`, and hash-locked dependency requirements, so users do not
-> need to preinstall Python, `uv`, or Node.js. The first run downloads Python and the runtime
-> dependencies; the first server start downloads model assets into the user's application-data
-> directory. Persona Forge can also be installed from a source checkout with `uv`; the release
-> wheel is a GitHub Release asset (we do not currently publish it to PyPI). See
-> [RUN_LOCAL.md](docs/RUN_LOCAL.md); to move an
-> existing Docker deployment's data over, see [MIGRATION.md](docs/MIGRATION.md).
-
-> On macOS, verify the release checksum first. The launcher is code-signed and notarized by
-> Apple; Gatekeeper verifies this online on first launch (requires internet connectivity once),
-> no manual quarantine removal needed. See [native setup](docs/RUN_LOCAL.md) for the safety note.
-
-### Run natively (no Docker)
-
-The recommended native install is the launcher archive on the
-[latest release](https://github.com/nmorgowicz-org/persona-forge/releases). Choose the archive for
-your platform:
-
-| Platform | Archive |
-|---|---|
-| Linux x86-64 | `persona-forge-bootstrap-linux-x86_64.tar.gz` |
-| Apple Silicon macOS | `persona-forge-bootstrap-macos-aarch64.tar.gz` |
-| Windows x86-64 | `persona-forge-bootstrap-windows-x86_64.zip` |
-
-Download `checksums.json` and your archive from the same release, verify the archive's SHA-256
-against that file, then extract it. On Linux/macOS:
-
-```bash
-tar -xzf persona-forge-bootstrap-<platform>.tar.gz
-chmod +x persona-forge-launcher
-./persona-forge-launcher doctor --json
-./persona-forge-launcher setup
-./persona-forge-launcher serve
-```
-
-On Apple Silicon macOS, the launcher is code-signed and notarized by Apple. Gatekeeper
-verifies this online on first launch (requires internet connectivity once) - no manual
-quarantine removal needed.
-
-On Windows PowerShell:
-
-```powershell
-Expand-Archive .\persona-forge-bootstrap-windows-x86_64.zip -DestinationPath .\persona-forge
-Set-Location .\persona-forge
-.\persona-forge-launcher.exe doctor --json
-.\persona-forge-launcher.exe setup
-.\persona-forge-launcher.exe serve
-```
-
-Open <http://127.0.0.1:8318>. The archive includes the app wheel, pinned `uv`, and locked
-requirements, so Python, `uv`, and Node.js do not need to be installed first. The first launcher
-command downloads Python and runtime dependencies; the first server start downloads model assets.
-For exact checksum commands, upgrades, source checkout, and release-wheel installation, see
-[the full native guide](docs/RUN_LOCAL.md).
-
 ---
 
 ## HTTP API
 
-Everything is served on port 8318. There is **no authentication by default**.
+Docker and the CLI default to port 8318; the desktop app selects and remembers a port in the
+8318–8348 range. There is **no authentication by default**.
 
 | Method | Path | Description |
 |---|---|---|
@@ -265,7 +241,7 @@ docker pull ghcr.io/nmorgowicz-org/persona-forge:v2.1.4  # x-release-please-vers
 ```
 
 Tags: `latest`, `v<major>.<minor>.<patch>`, `<git-sha>`. Use any of these as
-`PERSONA_FORGE_IMAGE` (see [Getting started](#getting-started)) instead of `latest` for a
+`PERSONA_FORGE_IMAGE` (see [Run in a container](#run-in-a-container-headless)) instead of `latest` for a
 reproducible deploy.
 
 **Container vs. native — why both exist.** The runtime depends on pinned torch/torchaudio
@@ -273,11 +249,11 @@ wheels, source-level patches applied to installed third-party packages (qwen_tts
 a per-accelerator-family install step, and a Node/npm frontend build (`frontend/`) that has to
 run and get bundled in ahead of time. The container packages all of that into one pinned,
 reproducible artifact — backend and frontend — so none of it is visible to the operator, and it
-stays the most-tested, canonical deployment path. Persona Forge also installs and runs natively
-(source checkout via `uv`, an installable wheel/sdist, or a self-contained launcher archive) —
-the same pins and patches are applied by the native `setup`/`serve` commands instead of a
-container build. See [RUN_LOCAL.md](docs/RUN_LOCAL.md) for the native paths and their current
-hardware-validation status, and [MIGRATION.md](docs/MIGRATION.md) for moving between the two.
+stays the most-tested headless deployment path. For local interactive use, the desktop app is
+recommended; headless native installs use the Linux CLI archive or the release wheel on macOS
+and Windows. Source checkout via `uv` remains available for development. See
+[RUN_LOCAL.md](docs/RUN_LOCAL.md) for native paths and hardware-validation status, and
+[MIGRATION.md](docs/MIGRATION.md) for moving between container and native installs.
 
 ---
 
@@ -285,11 +261,10 @@ hardware-validation status, and [MIGRATION.md](docs/MIGRATION.md) for moving bet
 
 **[📖 Full documentation index](docs/README.md)**
 
-Quick links: [Docker setup](docs/HOW_TO_RUN.md) · [Native setup](docs/RUN_LOCAL.md) ·
-[Migration](docs/MIGRATION.md) · [Environment](docs/ENV_REFERENCE.md) ·
-[HTTP API](docs/api/HTTP_API_REFERENCE.md) ·
-[Architecture](docs/architecture/SYSTEM_OVERVIEW.md) ·
-[Contributing](docs/dev/LOCAL_SETUP.md)
+Quick links: [Desktop app](docs/architecture/DESKTOP_APP.md) · [Container setup](docs/HOW_TO_RUN.md) ·
+[Headless native setup](docs/RUN_LOCAL.md) · [Migration](docs/MIGRATION.md) ·
+[Environment](docs/ENV_REFERENCE.md) · [HTTP API](docs/api/HTTP_API_REFERENCE.md) ·
+[Architecture](docs/architecture/SYSTEM_OVERVIEW.md) · [Contributing](docs/dev/LOCAL_SETUP.md)
 
 ---
 

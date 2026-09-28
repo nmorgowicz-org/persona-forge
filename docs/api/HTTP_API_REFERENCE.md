@@ -7,6 +7,12 @@ Single-source reference for all HTTP endpoints exposed by Persona Forge.
 - All endpoints are relative to the service root (default: `http://host:8318`).
 - The service is single-worker (Gunicorn `-w 1`); model access is serialized via a single-thread executor.
 
+## Connecting other tools
+
+In Persona Forge Desktop, open **Settings** and copy the OpenAI-compatible base URL shown for
+the server. It has the form `http://<host>:<port>/v1`; use the loopback address for tools on the
+same machine or a listed LAN address when network access is enabled.
+
 ---
 
 ## Core TTS
