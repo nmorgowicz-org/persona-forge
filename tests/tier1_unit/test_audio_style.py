@@ -55,3 +55,21 @@ def test_apply_style_preset_normalizes_toward_lufs(preset: str, target_lufs: flo
     assert any(step.startswith("normalize_lufs") for step in metadata["applied_steps"])
     measured = pyln.Meter(sr).integrated_loudness(polished)
     assert measured == pytest.approx(target_lufs, abs=1.5)
+
+
+@pytest.mark.parametrize("preset,factor", [("Calm", 1.10), ("Energetic", 0.90), ("Storyteller", 1.10)])
+def test_preset_pause_factor_is_applied(preset: str, factor: float) -> None:
+    import librosa
+    from persona_forge.audio_style import _shape_pauses
+
+    sr = 24000
+    tone = np.ones(sr, dtype=np.float32) * 0.1
+    wav = np.concatenate([tone, np.zeros(sr, dtype=np.float32), tone])
+    polished, applied_factor = _shape_pauses(wav, sr, prompt="hello world", style_preset=preset, factor=factor)
+    original_regions = librosa.effects.split(wav, top_db=30)
+    polished_regions = librosa.effects.split(polished, top_db=30)
+    original_gap = original_regions[1][0] - original_regions[0][1]
+    polished_gap = polished_regions[1][0] - polished_regions[0][1]
+
+    assert polished_gap == pytest.approx(original_gap * factor, abs=1024)
+    assert applied_factor == pytest.approx(factor)

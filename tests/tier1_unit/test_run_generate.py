@@ -110,6 +110,22 @@ class _FakeAudioTensor:
         return self._wav
 
 
+def test_completed_job_reports_waveform_duration_not_text_estimate(model_module):
+    m = model_module
+    job = m._create_job("a" * 96, seed=1601800701)
+    try:
+        job.frames_generated = job.expected_total_frames
+        assert m.get_job_progress(job.job_id)["audio_seconds"] == 10.25
+        job.wav = np.zeros(24000 * 6, dtype=np.float32)
+        job.sr = 24000
+        job.status = "completed"
+        progress = m.get_job_progress(job.job_id)
+        assert progress["audio_seconds"] == 6.0
+        assert progress["audio_seconds_generated"] == 6.0
+    finally:
+        m._cleanup_job(job.job_id)
+
+
 class TestRunGenerateSuccessPath:
     def _configure_model(self, monkeypatch, m):
         monkeypatch.setattr(m, "model", _FakeGeneratingModel())
