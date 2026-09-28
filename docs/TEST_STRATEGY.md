@@ -166,6 +166,29 @@ Run:
 - Update docs/RUN_LOCAL.md, docs/MIGRATION.md, and docs/ENV_REFERENCE.md if paths.py's resolver
   defaults or override var names changed — those docs hand-document the same mapping.
 
+### 1.9 Desktop app
+
+Affected:
+- `desktop/` (Tauri shell), desktop payload/build scripts, or desktop workflows.
+
+Run / gates:
+- **`ci-desktop.yml`** runs launcher and desktop Rust checks on Linux, macOS, and Windows.
+  Linux includes formatting, Clippy, unit tests, and the `ci-hooks` updater-driver tests; the
+  native macOS and Windows lanes compile and run the desktop and updater-driver tests.
+- **`desktop-build.yml` smoke** builds the bundled desktop app and exercises the packaged
+  artifact on native runners. Its smoke checks verify payload provisioning, server startup,
+  health readiness, and clean shutdown; Linux also has automated GUI coverage under Xvfb.
+- **Signed update E2E:** `desktop-update-e2e.yml` checks successful and invalid-signature update
+  flows on Linux and Windows. These are automated updater-driver gates, not real-GUI update
+  verification.
+- **Owner acceptance:** install and launch actual release artifacts on macOS and Windows, check
+  first-run setup, Settings and port changes, downloads, tray behavior, and network-access
+  firewall behavior. Real-GUI update verification is deferred until the first actual desktop
+  release is available; do not claim it was performed before then.
+
+Treat Linux desktop as a preview: its release gates are automated and there is no maintainer
+Linux-desktop owner-acceptance lane.
+
 ## 2. Standard commands (run these first, always)
 
 For any PR, at minimum:

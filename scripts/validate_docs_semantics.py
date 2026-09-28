@@ -26,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 ACTIVE_DOCS = [
     "README.md",
     "docs/README.md",
+    "docs/architecture/DESKTOP_APP.md",
     "docs/HOW_TO_RUN.md",
     "docs/RUN_LOCAL.md",
     "docs/MIGRATION.md",
@@ -160,15 +161,27 @@ def check_release_workflow_contract(failures: list[str]) -> None:
     matrix_targets = {
         entry["target"] for entry in build_launcher.get("strategy", {}).get("matrix", {}).get("include", [])
     }
-    expected_targets = {
-        "x86_64-unknown-linux-gnu",
-        "x86_64-pc-windows-gnu",
-        "aarch64-apple-darwin",
-    }
+    expected_targets = {"x86_64-unknown-linux-gnu"}
     if matrix_targets != expected_targets:
         failures.append(
             f"release-launcher.yml build matrix targets {sorted(matrix_targets)} != expected {sorted(expected_targets)}"
         )
+
+    desktop = jobs.get("desktop", {})
+    if desktop.get("uses") != "./.github/workflows/desktop-build.yml":
+        failures.append("release-launcher.yml must call the reusable desktop-build.yml workflow")
+    desktop_inputs = desktop.get("with", {})
+    if not desktop_inputs.get("sign"):
+        failures.append("release-launcher.yml desktop workflow call must set sign: true")
+    if desktop_inputs.get("wheel_artifact") != "wheel-and-sdist":
+        failures.append("release-launcher.yml desktop workflow call must reuse the wheel-and-sdist artifact")
+
+    feed_job = jobs.get("publish-feeds", {})
+    if feed_job.get("runs-on") != "arc-persona-forge-desktop":
+        failures.append("release-launcher.yml feed generation must run on ephemeral arc-persona-forge-desktop (D19)")
+    release_needs = set(jobs.get("release", {}).get("needs", []))
+    if not {"desktop", "publish-feeds"}.issubset(release_needs):
+        failures.append("release-launcher.yml release job must depend on desktop and publish-feeds")
 
     launcher_src = REPO_ROOT / "launcher"
     if not launcher_src.is_dir():

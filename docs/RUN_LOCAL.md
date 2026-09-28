@@ -1,48 +1,34 @@
-# Running Persona Forge natively (no Docker)
+# Running Persona Forge locally
 
-This document is for running Persona Forge directly on your machine — a source checkout, an
-installed wheel, or a downloaded launcher archive — with no container involved. It's an
-alternative deployment path to [HOW_TO_RUN.md](HOW_TO_RUN.md), not a replacement; Docker remains
-the reproducible, most-tested deployment path (see "Docker vs. native" below). For migrating an
-existing Docker deployment's data over, see [MIGRATION.md](MIGRATION.md).
+The **desktop app is the recommended install** for a local interactive experience. Download the
+macOS DMG or Windows NSIS installer, or the Linux x86-64 AppImage preview, from
+[GitHub Releases](https://github.com/nmorgowicz-org/persona-forge/releases). The Windows
+installer is unsigned and may trigger SmartScreen or Smart App Control; Linux is a preview and
+GNOME may require the AppIndicator extension for the tray icon. See the
+[desktop app guide](architecture/DESKTOP_APP.md) for installation details, Settings, updates,
+and troubleshooting.
 
-> **Hardware validation status:** the native setup below is exercised by CI on Linux (fake-model
-> test lanes) and has real end-to-end validation on Apple Silicon / Intel iGPU per
+This guide covers headless native installs and development. For a headless service on any
+supported OS, the container remains the recommended path; see [HOW_TO_RUN.md](HOW_TO_RUN.md).
+For migrating an existing Docker deployment's data, see [MIGRATION.md](MIGRATION.md).
+The native CLI requires Python `>=3.13,<3.14` (the desktop app bundles its own runtime).
+
+
+> **Hardware validation status:** native CLI setup is exercised by CI on Linux (fake-model test
+> lanes) and has real end-to-end validation on Apple Silicon / Intel iGPU per
 > [architecture/ACCELERATOR_FAMILIES.md](architecture/ACCELERATOR_FAMILIES.md)'s validation-status
 > table. Broader OS/hardware combinations (Windows+NVIDIA, additional Linux+GPU configurations)
 > are staged for verification but not yet confirmed on real hardware — treat native support on an
 > unlisted combination as best-effort until this note is updated.
 
-## Recommended path: the release launcher
+## Headless native installation
 
-For most users who do not want Docker, download the platform launcher archive from the
-[Persona Forge releases](https://github.com/nmorgowicz-org/persona-forge/releases). Each archive
-contains the native launcher, Python 3.13-compatible application wheel, target-specific
-hash-locked requirements, a pinned `uv` binary, and a manifest. It does not contain the large ML
-dependency wheels or model weights.
+### Linux x86-64 CLI launcher archive
 
-The launcher is the native install and startup helper. It creates a per-user, versioned Python
-environment on first use, installs the bundled wheel and requirements, and reuses that environment
-on later runs. No preinstalled Python, `uv`, Node.js, administrator access, or repository checkout
-is required. Internet access is required on the first run to download Python and Python packages,
-and on the first server start to download model assets. Even `doctor` performs the initial
-environment bootstrap; after bootstrap, `doctor` itself is read-only.
-
-### Supported release archives
-
-| Operating system | Release asset | Notes |
-|---|---|---|
-| Linux x86-64 | `persona-forge-bootstrap-linux-x86_64.tar.gz` | Intel/AMD 64-bit Linux |
-| macOS Apple Silicon | `persona-forge-bootstrap-macos-aarch64.tar.gz` | M-series Macs |
-| Windows x86-64 | `persona-forge-bootstrap-windows-x86_64.zip` | 64-bit Intel/AMD Windows |
-
-There are currently no launcher archives for Linux ARM64, Intel Macs, or Windows ARM64. The
-launcher uses the default native dependency set; explicit CUDA, ROCm, Intel XPU, or Qwen3-TTS
-extras require the source-checkout path described below.
-
-### Download, verify, and run on Linux
-
-Replace `1.4.7` below with the release version you want to install.
+The Linux CLI archive is for headless native installs. It includes the native launcher, app wheel,
+target-specific hash-locked requirements, a pinned `uv` binary, and a manifest. It does not
+contain the large ML dependency wheels or model weights. Internet access is required on first use
+to download Python and Python packages, and on the first server start to download model assets.
 
 ```bash
 VERSION=1.4.7
@@ -61,70 +47,26 @@ chmod +x persona-forge-launcher
 ./persona-forge-launcher serve
 ```
 
-Open <http://127.0.0.1:8318> after the server starts. Stop it with `Ctrl-C`.
+Open <http://127.0.0.1:8318> after the server starts. Stop it with `Ctrl-C`. Replace `1.4.7`
+with the release version you want.
 
-### Download, verify, and run on Apple Silicon macOS
+### Headless native install on macOS or Windows
 
-Use the same flow with the macOS archive. The launcher is code-signed and notarized by
-Apple, so Gatekeeper verifies it online on first launch (requires internet connectivity
-once) instead of quarantining it — no `xattr` step needed.
+The macOS and Windows CLI launcher archives are no longer distributed. Use the release wheel
+with `uv` instead:
 
 ```bash
-VERSION=1.4.7
-ARCHIVE=persona-forge-bootstrap-macos-aarch64.tar.gz
-BASE_URL="https://github.com/nmorgowicz-org/persona-forge/releases/download/persona-forge-v${VERSION}"
-mkdir -p "persona-forge-${VERSION}" && cd "persona-forge-${VERSION}"
-curl -fL -o checksums.json "${BASE_URL}/checksums.json"
-curl -fL -o "${ARCHIVE}" "${BASE_URL}/${ARCHIVE}"
-EXPECTED=$(awk -F'"' -v name="${ARCHIVE}" '{for (i = 1; i <= NF; i++) if ($i == name) {print $(i + 2); exit}}' checksums.json)
-ACTUAL=$(shasum -a 256 "${ARCHIVE}" | awk '{print $1}')
-[ -n "${EXPECTED}" ] && [ "${ACTUAL}" = "${EXPECTED}" ] || { echo "checksum verification failed" >&2; exit 1; }
-tar -xzf "${ARCHIVE}"
-chmod +x persona-forge-launcher
-./persona-forge-launcher doctor --json
-./persona-forge-launcher setup
-./persona-forge-launcher serve
+uv tool install persona-forge
+uvx persona-forge serve
 ```
 
-Open <http://127.0.0.1:8318> after the server starts. Stop it with `Ctrl-C`.
+Install a Python 3.13-compatible `uv` first if needed. The server defaults to port 8318; stop it
+with `Ctrl-C`.
 
-### Download, verify, and run on Windows
+## Desktop app
 
-Run this in Windows PowerShell. Replace `1.4.7` with the release version you want.
-
-```powershell
-$version = '1.4.7'
-$archive = 'persona-forge-bootstrap-windows-x86_64.zip'
-$baseUrl = "https://github.com/nmorgowicz-org/persona-forge/releases/download/persona-forge-v$version"
-$installDir = Join-Path (Get-Location) "persona-forge-$version"
-New-Item -ItemType Directory -Path $installDir -Force | Out-Null
-Set-Location $installDir
-Invoke-WebRequest -Uri "$baseUrl/checksums.json" -OutFile .\checksums.json
-Invoke-WebRequest -Uri "$baseUrl/$archive" -OutFile ".\$archive"
-$checksums = Get-Content .\checksums.json -Raw | ConvertFrom-Json
-$expected = $checksums.checksums.PSObject.Properties[$archive].Value
-$actual = (Get-FileHash ".\$archive" -Algorithm SHA256).Hash.ToLowerInvariant()
-if ([string]::IsNullOrEmpty($expected) -or $actual -ne $expected) { throw 'checksum verification failed' }
-Expand-Archive -LiteralPath ".\$archive" -DestinationPath . -Force
-.\persona-forge-launcher.exe doctor --json
-.\persona-forge-launcher.exe setup
-.\persona-forge-launcher.exe serve
-```
-
-Open <http://127.0.0.1:8318> after the server starts. Stop it with `Ctrl-C`.
-
-### Updating a launcher installation
-
-Download and verify the newer release archive in a new directory, then run its launcher. The
-launcher keeps application data and installed environments under the user data root, so voices,
-cached models, and settings are reused. It provisions the new application version alongside the
-old one and switches the `current` marker only after a successful install. The `uv` version is
-updated by downloading the newer release archive; users do not need to update `uv` separately.
-Keep the previous archive if you want a simple rollback.
-
-The launcher is intentionally a single executable rather than a separate shell or batch wrapper:
-it performs the same verified setup flow on every supported OS and avoids shell-policy,
-quoting, and executable-bit differences.
+The desktop app is the recommended local install and manages its server in a native window. See
+[DESKTOP_APP.md](architecture/DESKTOP_APP.md) for the full desktop contract and troubleshooting.
 
 ## Other native installation paths
 
@@ -146,37 +88,21 @@ uv run persona-forge serve
 For an API-only source install, use `uv run persona-forge setup --no-ui`. This is the same
 environment covered in depth in [dev/LOCAL_SETUP.md](dev/LOCAL_SETUP.md).
 
-### Release wheel — for users who already manage Python
+### Release wheel — headless macOS or Windows
 
-The project currently attaches the wheel to GitHub Releases; it is not published to PyPI. Use a
-Python 3.13 interpreter (`>=3.13,<3.14`) and install the wheel from the release page. The wheel
-already contains the built web UI, so no Node.js installation or frontend build is needed.
-
-On macOS/Linux:
+For headless use without Docker on macOS or Windows, install the release wheel with `uv`. The
+wheel includes the built web UI; no Node.js or frontend build is needed. Install a
+Python 3.13-compatible `uv` first:
 
 ```bash
-VERSION=1.4.7
-python3.13 -m venv .venv
-. .venv/bin/activate
-python -m pip install "https://github.com/nmorgowicz-org/persona-forge/releases/download/persona-forge-v${VERSION}/persona_forge-${VERSION}-py3-none-any.whl"
-persona-forge doctor
-persona-forge setup --no-ui
-persona-forge serve
+uv tool install persona-forge
+uvx persona-forge serve
 ```
 
-On Windows PowerShell:
+The server listens on port 8318 by default. Stop it with `Ctrl-C`. The Linux CLI archive remains
+available for headless Linux installs; the desktop app is the recommended local install on each
+platform.
 
-```powershell
-$version = '1.4.7'
-py -3.13 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install "https://github.com/nmorgowicz-org/persona-forge/releases/download/persona-forge-v$version/persona_forge-$version-py3-none-any.whl"
-.\.venv\Scripts\persona-forge.exe doctor
-.\.venv\Scripts\persona-forge.exe setup --no-ui
-.\.venv\Scripts\persona-forge.exe serve
-```
-
-The wheel's dependencies are resolved from package indexes during installation. For a fully
-managed install with the target requirements and bundled `uv`, use the launcher path above.
 
 ## The CLI surface
 
@@ -231,13 +157,12 @@ Both are supported; pick based on what you need:
 | | Docker | Native |
 |---|---|---|
 | Reproducibility | Highest — pinned image, isolated from host Python/OS | Depends on host Python/OS/toolchain state |
-| Setup friction | Needs Docker/Compose installed | Needs `uv` (or nothing, with the launcher archive) |
+| Setup friction | Needs Docker/Compose installed | Desktop app needs no separate Python setup; headless Linux archive bundles launcher tooling; source development needs `uv` |
 | Isolation from host | Full (container namespace, own filesystem) | None — runs as a normal host process |
-| Accelerator install | First-boot into a persisted volume, one image for all families | Extras resolved at `uv sync` time, one venv per family |
-| Best for | Servers, shared hosts, anything needing a reproducible artifact | Local development, single-user desktop/laptop installs, hosts where Docker itself isn't available or wanted |
+| Accelerator install | First-boot into a persisted volume, one image for all families | Extras resolved at `uv sync` time for source installs; desktop v1 uses the platform's bundled default |
+| Best for | Headless servers, shared hosts, anything needing a reproducible artifact | Local interactive use (desktop app), Linux headless installs, or development |
 
-**Don't run both against the same port at once.** Both default to port 8318; if a Docker
-container and a native `serve` are started on the same host without one of them overriding
-`--port`/`PERSONA_FORGE_PORT`, the second one to start will either fail to bind or silently shadow
-the first, depending on your platform's socket behavior. Pick one, or give the second an explicit
-`--port`.
+**Avoid starting the desktop app and a CLI/container server on the same port.** Docker and the
+CLI default to 8318; the desktop app automatically selects and remembers a port from 8318–8348.
+If the selected port is already serving Persona Forge, the desktop app refuses to attach or start
+a second server. Change the port in desktop Settings or stop the other server first.

@@ -1,18 +1,11 @@
 """Fail-closed validator for a Persona Forge release set (Phase 7).
 
-For tag `persona-forge-vX.Y.Z` the release directory must contain exactly:
+For a release version, the directory must contain the Python wheel/sdist, Linux bootstrap archive,
+signed macOS/Windows/Linux desktop artifacts, appcast.xml, latest.json, and checksums.json.
 
-    persona_forge-X.Y.Z-py3-none-any.whl
-    persona_forge-X.Y.Z.tar.gz
-    persona-forge-bootstrap-linux-x86_64.tar.gz
-    persona-forge-bootstrap-windows-x86_64.zip
-    persona-forge-bootstrap-macos-aarch64.tar.gz
-    checksums.json
-
-Checks: exact top-level asset membership (no missing, no extra), checksums.json covers every
-asset with a matching SHA-256 and no stray keys, each bootstrap archive has exactly its expected
-member set, and each archive's manifest.json agrees with --version and with the top-level wheel's
-hash. Exit 0 = every assertion passed; 1 = at least one failed (fail-closed).
+Checks enforce exact top-level membership, SHA-256 coverage with no stray checksum keys, bootstrap
+archive members and manifest integrity, feed versions, asset URLs, signatures, and DMG length.
+Exit 0 means every assertion passed; 1 means at least one failed (fail-closed).
 """
 
 from __future__ import annotations
@@ -23,28 +16,23 @@ import json
 import sys
 import tarfile
 import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
-BOOTSTRAP_ASSETS = (
-    "persona-forge-bootstrap-linux-x86_64.tar.gz",
-    "persona-forge-bootstrap-windows-x86_64.zip",
-    "persona-forge-bootstrap-macos-aarch64.tar.gz",
+BOOTSTRAP_ASSETS = ("persona-forge-bootstrap-linux-x86_64.tar.gz",)
+
+DESKTOP_ASSETS = (
+    "PersonaForge-macos-aarch64.dmg",
+    "PersonaForge-windows-x86_64-setup.exe",
+    "PersonaForge-windows-x86_64-setup.exe.sig",
+    "PersonaForge-linux-x86_64.AppImage",
+    "PersonaForge-linux-x86_64.AppImage.sig",
+    "appcast.xml",
+    "latest.json",
 )
 
 BOOTSTRAP_MEMBERS = {
     "persona-forge-bootstrap-linux-x86_64.tar.gz": {
-        "persona-forge-launcher",
-        "uv",
-        "manifest.json",
-        "README.txt",
-    },
-    "persona-forge-bootstrap-windows-x86_64.zip": {
-        "persona-forge-launcher.exe",
-        "uv.exe",
-        "manifest.json",
-        "README.txt",
-    },
-    "persona-forge-bootstrap-macos-aarch64.tar.gz": {
         "persona-forge-launcher",
         "uv",
         "manifest.json",
@@ -66,6 +54,7 @@ def expected_assets(version: str) -> set[str]:
         f"persona_forge-{version}-py3-none-any.whl",
         f"persona_forge-{version}.tar.gz",
         *BOOTSTRAP_ASSETS,
+        *DESKTOP_ASSETS,
         "checksums.json",
     }
 
@@ -139,6 +128,82 @@ def check_archive(path: Path, version: str, top_level_wheel_sha256: str, failure
         )
 
 
+def check_update_feeds(release_dir: Path, version: str, failures: list[str]) -> None:
+    latest_path = release_dir / "latest.json"
+    try:
+        latest = json.loads(latest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        failures.append(f"latest.json is invalid: {e}")
+        latest = {}
+    if not isinstance(latest, dict):
+        failures.append("latest.json must be a JSON object")
+        latest = {}
+    pub_date = latest.get("pub_date")
+    if not isinstance(pub_date, str) or not pub_date:
+        failures.append("latest.json pub_date must be a non-empty string")
+    notes = latest.get("notes")
+    if not isinstance(notes, str) or not notes:
+        failures.append("latest.json notes must be a non-empty string")
+    if isinstance(notes, str) and not notes.startswith("https://"):
+        failures.append("latest.json notes must be an HTTPS URL")
+    if latest.get("version") != version:
+        failures.append(f"latest.json version is {latest.get('version')!r}, expected {version!r}")
+    platforms = latest.get("platforms")
+    if not isinstance(platforms, dict):
+        failures.append("latest.json platforms must be an object")
+        platforms = {}
+    for key, asset in (
+        ("windows-x86_64-nsis", "PersonaForge-windows-x86_64-setup.exe"),
+        ("linux-x86_64-appimage", "PersonaForge-linux-x86_64.AppImage"),
+    ):
+        entry = platforms.get(key)
+        if not isinstance(entry, dict):
+            failures.append(f"latest.json platforms.{key} must be an object")
+            continue
+        url = entry.get("url")
+        if not isinstance(url, str) or not url.endswith(asset) or not (release_dir / asset).is_file():
+            failures.append(f"latest.json platforms.{key}.url must end with existing asset {asset}")
+        signature = entry.get("signature")
+        sig_path = release_dir / f"{asset}.sig"
+        try:
+            expected_signature = sig_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            expected_signature = None
+        if not isinstance(signature, str) or not expected_signature or signature != expected_signature:
+            failures.append(f"latest.json platforms.{key}.signature does not match {sig_path.name}")
+
+    appcast_path = release_dir / "appcast.xml"
+    try:
+        root = ET.parse(appcast_path).getroot()
+        enclosure = root.find(".//enclosure")
+        if enclosure is None:
+            raise ValueError("missing enclosure")
+        if enclosure.get("{http://www.andymatuschak.org/xml-namespaces/sparkle}version") != version:
+            failures.append("appcast.xml sparkle:version does not match requested version")
+        short_version = enclosure.get(
+            "{http://www.andymatuschak.org/xml-namespaces/sparkle}shortVersionString"
+        )
+        if short_version != version:
+            failures.append("appcast.xml sparkle:shortVersionString does not match requested version")
+        ed_signature = enclosure.get(
+            "{http://www.andymatuschak.org/xml-namespaces/sparkle}edSignature"
+        )
+        if not ed_signature:
+            failures.append("appcast.xml enclosure is missing sparkle:edSignature")
+        dmg_name = "PersonaForge-macos-aarch64.dmg"
+        if not enclosure.get("url", "").endswith(dmg_name) or not (release_dir / dmg_name).is_file():
+            failures.append(f"appcast.xml enclosure URL must end with existing asset {dmg_name}")
+        try:
+            length = int(enclosure.get("length", ""))
+        except ValueError:
+            length = -1
+        dmg_path = release_dir / dmg_name
+        if not dmg_path.is_file() or length != dmg_path.stat().st_size:
+            failures.append("appcast.xml enclosure length does not match DMG size")
+    except (OSError, ET.ParseError, ValueError) as e:
+        failures.append(f"appcast.xml is invalid: {e}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dir", required=True, type=Path, help="Directory containing the release assets")
@@ -190,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
         archive_path = args.dir / asset
         if archive_path.is_file():
             check_archive(archive_path, args.version, top_level_wheel_sha256, failures)
+    check_update_feeds(args.dir, args.version, failures)
 
     receipt = {"status": "pass" if not failures else "fail", "version": args.version, "failures": failures}
     print(json.dumps(receipt, indent=2))

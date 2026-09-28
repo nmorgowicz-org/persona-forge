@@ -33,6 +33,7 @@ To ensure code integrity and prevent accidental deletions:
   - Environment variables → `docs/ENV_REFERENCE.md` (accelerator-family vars are in
     `docs/architecture/ACCELERATOR_FAMILIES.md`, not yet in ENV_REFERENCE)
   - Test tiers → `docs/TEST_STRATEGY.md`
+  - Desktop shell, packaging, user-visible behavior, and troubleshooting → `docs/architecture/DESKTOP_APP.md`
 
 If a change conflicts with any of these, stop and propose alternatives explicitly.
 
@@ -43,6 +44,7 @@ src/persona_forge/     Flask app, model runtime, config, Pocket-TTS/OpenVINO/PyT
 src/export/            OpenVINO export/quantization, parity tests, benchmark tooling
 frontend/              React 19 + Vite 8 + Tailwind 4 SPA (built in frontend-build stage, served at /)
 launcher/              Rust native bootstrap launcher and cross-platform archive entry point
+desktop/               Tauri desktop app shell; install/operation contract and troubleshooting: `docs/architecture/DESKTOP_APP.md`
 scripts/               entrypoint.sh (container entrypoint), export.py, dev-deploy.sh, validate_repo.py, download_model.py
 tests/                 tier1_unit/  tier2_backend/  tier3_api_integration/  ui/ (Playwright E2E + capture harness)
 requirements/          requirements-{runtime,openvino,export,pocket-tts}.txt

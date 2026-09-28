@@ -6,6 +6,20 @@ Docker? See [RUN_LOCAL.md](RUN_LOCAL.md) instead; the env vars below apply equal
 except where noted (see [ENV_REFERENCE.md](ENV_REFERENCE.md) and [MIGRATION.md](MIGRATION.md)
 for the container-path-vs-native-path mapping).
 
+## Desktop app
+
+For an interactive local install, the **desktop app is the recommended path**. Download the macOS
+DMG, Windows NSIS installer, or Linux x86-64 AppImage preview from
+[GitHub Releases](https://github.com/nmorgowicz-org/persona-forge/releases). The Windows
+installer is unsigned and can trigger SmartScreen or Smart App Control; the Linux AppImage is a
+preview, and the GNOME tray icon requires the AppIndicator extension. See the
+[desktop app guide](architecture/DESKTOP_APP.md) for installation, first-run behavior, Settings,
+updates, and troubleshooting.
+
+This guide covers the **headless container path**. For headless native use, the Linux CLI archive
+is available on Linux; macOS and Windows users should use the release wheel with
+`uv tool install persona-forge` and `uvx persona-forge serve`. See [RUN_LOCAL.md](RUN_LOCAL.md).
+
 ## Quick start (pocket-tts, no export required)
 
 **What "ready" looks like.** Once `/health` reports `"model_loaded": true`, Speak generates
