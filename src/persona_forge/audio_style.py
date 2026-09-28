@@ -230,11 +230,12 @@ def get_pause_targets(
     return targets
 
 
-def _shape_pauses(wav: np.ndarray, sr: int, prompt: str = "", style_preset: str = "Neutral", pace_multiplier: float = 1.0, pause_offset_ms: float = 0.0, **kwargs) -> Tuple[np.ndarray, float]:
+def _shape_pauses(wav: np.ndarray, sr: int, prompt: str = "", style_preset: str = "Neutral", pace_multiplier: float = 1.0, pause_offset_ms: float = 0.0, factor: float = 1.0) -> Tuple[np.ndarray, float]:
     """
     Modify internal pauses based on punctuation in the prompt and a style map.
     """
-    if np.abs(pace_multiplier - 1.0) < 1e-4 and not prompt and np.abs(pause_offset_ms) < 1e-4:
+    effective_pace = pace_multiplier * factor
+    if np.abs(effective_pace - 1.0) < 1e-4 and not prompt and np.abs(pause_offset_ms) < 1e-4:
         return wav, 1.0
 
     try:
@@ -246,7 +247,7 @@ def _shape_pauses(wav: np.ndarray, sr: int, prompt: str = "", style_preset: str 
         # 2. Get punctuation-aware targets using temporal proportional mapping
         audio_duration = wav.size / sr
         gap_starts = [non_silent[i][1] / sr for i in range(len(non_silent) - 1)]
-        targets = get_pause_targets(prompt, style_preset, pace_multiplier, gap_starts, audio_duration, pause_offset_ms)
+        targets = get_pause_targets(prompt, style_preset, effective_pace, gap_starts, audio_duration, pause_offset_ms)
 
         new_wav_parts = []
         last_end = 0
@@ -265,7 +266,7 @@ def _shape_pauses(wav: np.ndarray, sr: int, prompt: str = "", style_preset: str 
                         # speaker's own delivery character. Never snap a breath to a fixed
                         # constant — that mechanizes the pacing. (gap_len is in samples, so
                         # scale it directly; no seconds conversion needed.)
-                        new_gap_len = max(1, int(gap_len * pace_multiplier))
+                        new_gap_len = max(1, int(gap_len * effective_pace))
                     else:
                         # Punctuation-driven structural pause: resize to the absolute target.
                         new_gap_len = max(1, int(target_sec * sr))
@@ -280,7 +281,7 @@ def _shape_pauses(wav: np.ndarray, sr: int, prompt: str = "", style_preset: str 
         if last_end < wav.size:
             new_wav_parts.append(wav[last_end:])
 
-        return np.concatenate(new_wav_parts).astype(np.float32), float(pace_multiplier)
+        return np.concatenate(new_wav_parts).astype(np.float32), float(effective_pace)
     except Exception as e:
         logger.warning(f"Pause shaping failed: {e}")
         return wav, 1.0

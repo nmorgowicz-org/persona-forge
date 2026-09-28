@@ -1510,6 +1510,13 @@ def get_job_progress(job_id: str) -> dict[str, Any] | None:
         eta_seconds = remaining_frames / speed
         progress_pct = min(100.0, (frames / max(expected_total_frames, 1)) * 100.0)
 
+    actual_audio_seconds = (
+        len(job.wav) / job.sr
+        if job.status == "completed" and job.wav is not None and job.sr > 0
+        else None
+    )
+    reported_audio_seconds = actual_audio_seconds if actual_audio_seconds is not None else frames / 12
+    reported_rtf = round(elapsed / max(1, reported_audio_seconds), 2) if reported_audio_seconds > 0 else None
     return {
         "job_id": job.job_id,
         "status": job.status,
@@ -1517,10 +1524,10 @@ def get_job_progress(job_id: str) -> dict[str, Any] | None:
         "expected_total_frames": expected_total_frames,
         "progress_pct": round(progress_pct, 1),
         "elapsed_seconds": round(elapsed, 1),
-        "audio_seconds_generated": round(frames / 12, 2),
-        "audio_seconds": round(frames / 12, 2),
+        "audio_seconds_generated": round(reported_audio_seconds, 2),
+        "audio_seconds": round(reported_audio_seconds, 2),
         "live_rtf_estimate": round(elapsed / max(1, frames / 12), 2) if frames > 0 else None,
-        "rtf": round(elapsed / max(1, frames / 12), 2) if frames > 0 else None,
+        "rtf": reported_rtf,
         "eta_seconds": round(eta_seconds, 1) if eta_seconds is not None else None,
         "message": job.message,
         "voice_family_id": job.voice_family_id,
