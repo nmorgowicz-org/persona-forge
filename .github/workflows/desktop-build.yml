@@ -630,6 +630,53 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+  updater-sigs:
+    name: updater-sigs
+    if: ${{ inputs.sign }}
+    needs: [build-windows, build-linux]
+    runs-on: arc-persona-forge-desktop
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust ${{ env.RUST_VERSION }}
+        env:
+          RUSTUP_TOOLCHAIN: ${{ env.RUST_VERSION }}
+        run: |
+          rustup toolchain install "${RUSTUP_TOOLCHAIN}" --profile minimal
+          rustup default "${RUSTUP_TOOLCHAIN}"
+      - name: Install tauri-cli ${{ env.TAURI_CLI_VERSION }} (if missing)
+        run: |
+          if ! cargo tauri --version 2>/dev/null | grep -q "tauri-cli ${TAURI_CLI_VERSION}"; then
+            cargo install tauri-cli --locked --version "${TAURI_CLI_VERSION}"
+          fi
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-windows-x86_64
+          path: windows
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: desktop-linux-x86_64
+          path: linux
+      - name: Sign Windows and Linux updater artifacts
+        working-directory: desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          cargo tauri signer sign --app-version "${{ inputs.version }}" \
+            ../windows/PersonaForge-windows-x86_64-setup.exe
+          cargo tauri signer sign --app-version "${{ inputs.version }}" \
+            ../linux/PersonaForge-linux-x86_64.AppImage
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-updater-signatures
+          path: |
+            windows/PersonaForge-windows-x86_64-setup.exe.sig
+            linux/PersonaForge-linux-x86_64.AppImage.sig
+          retention-days: 7
+          if-no-files-found: error
+
   smoke-macos:
     name: smoke-macos
     needs: [build-macos, verify-macos]
@@ -656,9 +703,11 @@ jobs:
           hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG"
           cp -R "$MNT/Persona Forge.app" "$APP_DIR/"
           hdiutil detach "$MNT"
-          bash scripts/smoke_desktop.sh macos \
-            "$APP_DIR/Persona Forge.app/Contents/MacOS/persona-forge-desktop" \
-            "$RUNNER_TEMP/smoke.json"
+          smoke_args=(
+            macos "$APP_DIR/Persona Forge.app/Contents/MacOS/persona-forge-desktop"
+            "$RUNNER_TEMP/smoke.json" --assert-ci-update-rejected
+          )
+          bash scripts/smoke_desktop.sh "${smoke_args[@]}"
 
   smoke-windows:
     name: smoke-windows
@@ -676,6 +725,7 @@ jobs:
         shell: powershell
         env:
           PERSONA_FORGE_HOME: ${{ runner.temp }}\pf-smoke-state
+          CI_HOOKS: ${{ inputs.ci_hooks }}
         run: |
           $ErrorActionPreference = 'Stop'
           $env:PERSONA_FORGE_HOME = Join-Path $env:RUNNER_TEMP "pf-smoke-state-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
@@ -696,7 +746,9 @@ jobs:
           if (-not (Test-Path $exe)) { throw "installed exe is missing: $exe" }
 
           try {
-            & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke_desktop.ps1 -Exe $exe -SmokeJson (Join-Path $env:RUNNER_TEMP 'smoke.json')
+            $smokeArgs = @('-Exe', $exe, '-SmokeJson', (Join-Path $env:RUNNER_TEMP 'smoke.json'))
+            if ($env:CI_HOOKS -ne 'true') { $smokeArgs += '-AssertCiUpdateRejected' }
+            & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke_desktop.ps1 @smokeArgs
             if ($LASTEXITCODE -ne 0) { throw "smoke_desktop.ps1 failed: $LASTEXITCODE" }
           } finally {
             $uninstaller = Join-Path $installLocation 'uninstall.exe'
@@ -723,12 +775,14 @@ jobs:
         env:
           PERSONA_FORGE_HOME: ${{ runner.temp }}/pf-smoke-state
         run: |
-          set -euo pipefail
-          rm -rf "$PERSONA_FORGE_HOME"
           APPIMAGE="$PWD/artifact/PersonaForge-linux-x86_64.AppImage"
           chmod +x "$APPIMAGE"
           # Provisions the payload env (uv sync into PERSONA_FORGE_HOME); also runs --bogus.
-          bash scripts/smoke_desktop.sh linux "$APPIMAGE" "$RUNNER_TEMP/smoke.json"
+          smoke_args=(linux "$APPIMAGE" "$RUNNER_TEMP/smoke.json")
+          if [[ "${{ inputs.ci_hooks }}" != "true" ]]; then
+            smoke_args+=(--assert-ci-update-rejected)
+          fi
+          bash scripts/smoke_desktop.sh "${smoke_args[@]}"
 
           # WebDriver: tauri-driver under its own dbus session + xvfb, then selenium.
           # The single-quoted script is passed verbatim to the inner bash (SC2016 is intended),
@@ -771,9 +825,10 @@ jobs:
         env:
           PERSONA_FORGE_HOME: ${{ runner.temp }}/pf-smoke-state
         run: |
-          set -euo pipefail
-          rm -rf "$PERSONA_FORGE_HOME"
           chmod +x artifact/PersonaForge-linux-x86_64.AppImage
           ldd --version | head -1
-          bash scripts/smoke_desktop.sh linux \
-            "$PWD/artifact/PersonaForge-linux-x86_64.AppImage" "$RUNNER_TEMP/smoke.json"
+          smoke_args=(linux "$PWD/artifact/PersonaForge-linux-x86_64.AppImage" "$RUNNER_TEMP/smoke.json")
+          if [[ "${{ inputs.ci_hooks }}" != "true" ]]; then
+            smoke_args+=(--assert-ci-update-rejected)
+          fi
+          bash scripts/smoke_desktop.sh "${smoke_args[@]}"

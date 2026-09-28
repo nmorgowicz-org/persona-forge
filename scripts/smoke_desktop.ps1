@@ -11,7 +11,8 @@
 # no persona_forge.app:app).
 param(
     [Parameter(Mandatory = $true)][string]$Exe,
-    [Parameter(Mandatory = $true)][string]$SmokeJson
+    [Parameter(Mandatory = $true)][string]$SmokeJson,
+    [switch]$AssertCiUpdateRejected
 )
 
 $ErrorActionPreference = 'Stop'
@@ -78,6 +79,14 @@ try {
     $p = Start-Process -FilePath $Exe -ArgumentList '--bogus' -Wait -PassThru
     if ($p.ExitCode -ne 2) {
         throw "FAIL: --bogus exited with $($p.ExitCode), expected 2"
+    }
+
+    if ($AssertCiUpdateRejected) {
+        Write-Host "--- smoke run: --ci-update (must exit 2 in a release artifact)"
+        $p = Start-Process -FilePath $Exe -ArgumentList '--ci-update', "$SmokeJson.ci-update.json" -Wait -PassThru
+        if ($p.ExitCode -ne 2) {
+            throw "FAIL: --ci-update exited with $($p.ExitCode), expected 2"
+        }
     }
 
     Write-Host "PASS: smoke (windows)"

@@ -773,7 +773,7 @@ function VoiceCard({
   // changing which one is active on the source voice.
   onDuplicate: (variantFilename?: string) => Promise<VoiceMeta | null>
   onSaveSampleText: (text: string) => Promise<void>
-  onTranscribe: () => Promise<void>
+  onTranscribe: () => Promise<boolean>
   onNormalize: (voiceId: string) => Promise<void>
   onTrimSilence: (voiceId: string) => Promise<void>
   onFixAll: () => void
@@ -1108,7 +1108,14 @@ function VoiceCard({
                 editor={editor}
                 layout="compact"
                 busy={busy}
-                triage={triage ? { mode: triage.mode, reasons: triage.reasons, gapsDetected: triage.gaps_detected, boundariesExpected: triage.boundaries_expected } : null}
+                onTranscribe={async () => {
+                  setTranscribing(true)
+                  try {
+                    return await onTranscribe()
+                  } finally {
+                    setTranscribing(false)
+                  }
+                }}
               />
              </div>
            </PopoverContent>
@@ -1419,13 +1426,15 @@ export function VoiceLibraryPage() {
     }
   }
 
-  async function transcribe(voiceId: string) {
+  async function transcribe(voiceId: string): Promise<boolean> {
     setError(null)
     try {
-      await transcribeVoiceReference(voiceId)
+      const updated = await transcribeVoiceReference(voiceId)
       await refresh()
+      return Boolean(updated.sample_text?.trim())
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+      return false
     }
   }
 

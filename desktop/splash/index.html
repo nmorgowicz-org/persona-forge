@@ -9,7 +9,7 @@
 <body>
 <main id="app" data-state="booting">
   <div class="brand">
-    <div class="mark" aria-hidden="true"></div>
+    <img class="mark" src="favicon.svg" alt="" />
     <h1>Persona Forge</h1>
   </div>
 
@@ -21,6 +21,12 @@
     <li data-step="start">Starting server</li>
     <li data-step="wait">Waiting for server</li>
   </ol>
+
+  <div class="progress-track" role="progressbar" aria-label="Startup progress" aria-valuetext="Starting Persona Forge">
+    <div class="progress-indicator"></div>
+  </div>
+
+  <p id="status-message" class="status-message" role="status" aria-live="polite">Starting Persona Forge…</p>
 
   <pre id="log-tail" class="log-tail" aria-label="Recent log output"></pre>
 
