@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, useState } from 'react'
 import { AlertTriangle, AudioWaveform, Loader2, Play, Star, Undo2, Wand2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -22,16 +22,15 @@ interface ProsodyControlsProps {
   editor: ProsodyEditor
   layout: 'compact' | 'page'
   triage?: ProsodyTriageHint | null
-  // Page-level busy for this voice (normalize/trim/transcribe/region-edit in
-  // flight) — gates the action buttons alongside the editor's own busy state.
   busy?: boolean
+  onTranscribe?: () => Promise<boolean>
 }
 
 const MODE_TITLES: Record<ProsodyMode, (hasTranscript: boolean) => string> = {
   precise: (hasTranscript) =>
     hasTranscript
       ? 'Force forced-alignment-directed surgical pauses'
-      : 'Add reference text to enable forced alignment',
+      : 'Use Precise mode with the energy-based fallback (no reference text)',
   natural: () => 'Fast energy path — never re-aligns',
   auto: () => 'Let triage decide: align blended clips, keep clean clips fast',
 }
@@ -40,13 +39,32 @@ const MODE_TITLES: Record<ProsodyMode, (hasTranscript: boolean) => string> = {
 // actions. Shared verbatim between Voice Library's compact popover and the Voice Edit
 // page; the surrounding variants list and alignment comparison are composed by the caller
 // so each surface can place them where its layout needs.
-export function ProsodyControls({ editor, layout, triage, busy }: ProsodyControlsProps) {
+export function ProsodyControls({ editor, layout, triage, busy, onTranscribe }: ProsodyControlsProps) {
+  const [transcribing, setTranscribing] = useState(false)
+  const [transcribeError, setTranscribeError] = useState<string | null>(null)
   // The Style Preset label names the dropdown by id, so the name a screen reader reads is the
   // text that is visible above it (B-P8).
   const styleLabelId = useId()
   const sentenceBoundaries = (editor.alignBoundaries ?? []).filter((b) => b.kind === 'sentence_split')
   const clauseBoundaries = (editor.alignBoundaries ?? []).filter((b) => b.kind !== 'sentence_split' && b.owns_clause)
   const shapedBoundaryCount = sentenceBoundaries.length + clauseBoundaries.length
+
+  async function selectMode(mode: ProsodyMode) {
+    if (mode !== 'precise' || editor.hasTranscript || !onTranscribe) {
+      editor.setMode(mode)
+      return
+    }
+    setTranscribing(true)
+    setTranscribeError(null)
+    try {
+      if (await onTranscribe()) editor.setMode('precise')
+      else setTranscribeError('Whisper could not produce a transcript. Please try again or enter reference text.')
+    } catch (err) {
+      setTranscribeError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setTranscribing(false)
+    }
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -61,22 +79,22 @@ export function ProsodyControls({ editor, layout, triage, busy }: ProsodyControl
         </div>
         <div className="grid grid-cols-3 gap-1">
           {(['auto', 'natural', 'precise'] as const).map((m) => {
-            const disabled = m === 'precise' && !editor.hasTranscript
             return (
               <Button
                 key={m}
                 size="sm"
                 variant={editor.mode === m ? 'default' : 'outline'}
-                disabled={disabled || editor.previewBusy}
+                disabled={busy || transcribing || editor.previewBusy}
                 className="h-7 px-1 text-[10px] capitalize"
                 title={MODE_TITLES[m](editor.hasTranscript)}
-                onClick={() => editor.setMode(m)}
+                onClick={() => void selectMode(m)}
               >
-                {m}
+                {transcribing && m === 'precise' ? 'Transcribing…' : m}
               </Button>
             )
           })}
         </div>
+        {transcribeError && <p role="alert" className="text-[10px] text-destructive">{transcribeError}</p>}
         {/* Latency masking + boundary badge: only meaningful when the resolved mode
             actually aligns. */}
         {editor.resolvedPrecise && (
@@ -114,7 +132,7 @@ export function ProsodyControls({ editor, layout, triage, busy }: ProsodyControl
         )}
         <p className="text-[10px] text-muted-foreground italic leading-tight">
           {!editor.hasTranscript
-            ? 'No transcript on this clip — Precise (forced alignment) needs reference text.'
+            ? 'No reference text — Precise is available; forced alignment is skipped and the existing energy-based fallback is used.'
             : triage?.mode === 'precise'
               ? `${triage.gapsDetected ?? '?'} gaps detected, ${triage.boundariesExpected ?? '?'} sentence boundaries expected → blended speech; Auto escalates to alignment.`
               : triage?.mode === 'natural'
