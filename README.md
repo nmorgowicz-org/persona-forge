@@ -6,7 +6,7 @@
 
 Clone a voice from a single reference WAV. Design accents from scratch. Assemble clips in a
 timeline editor. Serve it all over an OpenAI-compatible API. One process, no training required —
-run it in the container or natively.
+run it as the desktop app, in a container, or natively.
 
 [![Release](https://img.shields.io/github/v/release/nmorgowicz-org/persona-forge)](https://github.com/nmorgowicz-org/persona-forge/releases)
 [![Container](https://img.shields.io/badge/ghcr.io-persona--forge-blue?logo=docker)](https://github.com/nmorgowicz-org/persona-forge/pkgs/container/persona-forge)
@@ -132,8 +132,11 @@ spectrogram, all drawn from one media clock while the take plays:
 | Windows x86-64 | `PersonaForge-windows-x86_64-setup.exe` | Unsigned preview; read the Windows warning below |
 | Linux x86-64 | `PersonaForge-linux-x86_64.AppImage` | **Preview**; GNOME users may need the AppIndicator extension for the tray icon |
 
-The desktop app guides first-time setup and includes its own server. See the [desktop app guide](docs/architecture/DESKTOP_APP.md)
-for requirements, Settings, update behavior, and troubleshooting.
+The desktop app guides first-time setup and includes its own server. It detects your GPU
+automatically and provisions the matching PyTorch accelerator when available — NVIDIA CUDA 12/13,
+Intel Arc iGPU (XPU), and AMD ROCm on Linux — falling back to CPU inference with a notice if
+anything fails. See the [desktop app guide](docs/architecture/DESKTOP_APP.md) for requirements,
+Settings, update behavior, GPU acceleration, and troubleshooting.
 
 > **Windows: the installer is not code-signed.** Windows SmartScreen will show "Windows
 > protected your PC". Click **More info → Run anyway**. This allows only this installer; you
@@ -244,16 +247,17 @@ Tags: `latest`, `v<major>.<minor>.<patch>`, `<git-sha>`. Use any of these as
 `PERSONA_FORGE_IMAGE` (see [Run in a container](#run-in-a-container-headless)) instead of `latest` for a
 reproducible deploy.
 
-**Container vs. native — why both exist.** The runtime depends on pinned torch/torchaudio
-wheels, source-level patches applied to installed third-party packages (qwen_tts, transformers),
-a per-accelerator-family install step, and a Node/npm frontend build (`frontend/`) that has to
-run and get bundled in ahead of time. The container packages all of that into one pinned,
-reproducible artifact — backend and frontend — so none of it is visible to the operator, and it
-stays the most-tested headless deployment path. For local interactive use, the desktop app is
-recommended; headless native installs use the Linux CLI archive or the release wheel on macOS
-and Windows. Source checkout via `uv` remains available for development. See
-[RUN_LOCAL.md](docs/RUN_LOCAL.md) for native paths and hardware-validation status, and
-[MIGRATION.md](docs/MIGRATION.md) for moving between container and native installs.
+**Container vs. native — why both exist.** The desktop app is the recommended install: it
+bundles its own Python runtime, provisions the matching PyTorch accelerator automatically, and
+updates itself through Sparkle (macOS) or the Tauri updater (Windows/Linux). The container
+packages the runtime, source-level patches, and the frontend build into one pinned, reproducible
+artifact — backend and frontend — so none of that complexity is visible to the operator, and it
+remains the most-tested headless deployment path. For local interactive use, the desktop app is
+recommended; for headless services, the container is the recommended path. Headless native installs
+use the Linux CLI archive or the release wheel on macOS and Windows; source checkout via `uv`
+remains available for development. See [RUN_LOCAL.md](docs/RUN_LOCAL.md) for native paths and
+hardware-validation status, and [MIGRATION.md](docs/MIGRATION.md) for moving between container and
+native installs.
 
 ---
 

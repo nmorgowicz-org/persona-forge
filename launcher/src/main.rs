@@ -9,7 +9,7 @@
 //! environment variables or manifest secrets - there are none in the manifest schema, and none
 //! of the args this launcher forwards are inspected or echoed beyond argv itself.
 
-use persona_forge_launcher::{bootstrap, manifest, paths};
+use persona_forge_launcher::{bootstrap, gpu, manifest, paths};
 
 use std::env;
 use std::path::PathBuf;
@@ -51,15 +51,48 @@ fn run() -> Result<ExitCode, String> {
     let uv_path = bundle.join(&manifest.uv.file);
 
     let runner = bootstrap::SystemRunner;
-    let env_dir = bootstrap::ensure_env(
+    let detected = gpu::detect_platform();
+    let extra = match detected {
+        gpu::Accel::Cpu => None,
+        gpu::Accel::Cuda12 => Some("cuda12"),
+        gpu::Accel::Cuda13 => Some("cuda13"),
+        gpu::Accel::IntelXpu => Some("xpu"),
+        gpu::Accel::Rocm => Some("rocm"),
+    };
+    let gpu_result = bootstrap::ensure_env(
         &manifest,
         &bundle,
         &uv_path,
         &versions_dir,
         &current_marker,
         &runner,
-    )
-    .map_err(|e| format!("environment bootstrap failed: {e}"))?;
+        extra,
+    );
+    let (env_dir, active) = match gpu_result {
+        Ok(dir) => (dir, detected),
+        Err(error) if extra.is_some() => {
+            eprintln!("GPU acceleration is unavailable ({error}); using CPU");
+            let dir = bootstrap::ensure_env(
+                &manifest,
+                &bundle,
+                &uv_path,
+                &versions_dir,
+                &current_marker,
+                &runner,
+                None,
+            )
+            .map_err(|e| format!("CPU environment bootstrap failed: {e}"))?;
+            (dir, gpu::Accel::Cpu)
+        }
+        Err(error) => return Err(format!("environment bootstrap failed: {error}")),
+    };
+    let family = match active {
+        gpu::Accel::Cpu => "cpu",
+        gpu::Accel::Cuda12 | gpu::Accel::Cuda13 => "cuda",
+        gpu::Accel::IntelXpu => "intel-xpu",
+        gpu::Accel::Rocm => "rocm",
+    };
+    env::set_var("GPU_FAMILY", family);
 
     let python = bootstrap::venv_python(&env_dir);
     let args: Vec<String> = env::args().skip(1).collect();

@@ -72,7 +72,7 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def export_requirements(target_platform: str, out_path: Path, uv_path: str = "uv") -> None:
+def export_requirements(target_platform: str, out_path: Path, uv_path: str = "uv", extra: str | None = None) -> None:
     # `uv export` resolves only for the host platform's existing uv.lock; getting a hash-locked
     # requirements file for a *different* target needs the pip-compatible resolver instead, which
     # accepts a full target triple via --python-platform (docs/plans/20260829-no_more_docker_architecture.md §9).
@@ -91,6 +91,10 @@ def export_requirements(target_platform: str, out_path: Path, uv_path: str = "uv
         "-o",
         str(out_path),
     ]
+    if extra:
+        # Phase 9: per-family requirements for GPU acceleration (cuda12, cuda13, xpu, rocm).
+        # The extra narrows the base torch/torchaudio range to the accelerator-specific pin.
+        cmd.extend(["--extra", extra])
     env = os.environ.copy()
     if target_platform == "aarch64-apple-darwin":
         # uv's --python-platform default macOS deployment target (13.0) is older than the
@@ -100,8 +104,24 @@ def export_requirements(target_platform: str, out_path: Path, uv_path: str = "uv
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if result.returncode != 0:
         raise SystemExit(
-            f"uv pip compile failed for --python-platform {target_platform}:\n{result.stdout}\n{result.stderr}"
+            f"uv pip compile failed for --python-platform {target_platform} (extra={extra or 'none'}):\n{result.stdout}\n{result.stderr}"
         )
+
+# Phase 9: per-family requirements available on each uv platform triple.
+# Windows/Linux share cuda12/cuda13/xpu; Linux adds rocm; macOS has none (MPS is in the
+# default torch wheel). Keys are the uv --python-platform values (see TARGETS /
+# DESKTOP_TARGETS); both packaging scripts call this with the uv triple, never the
+# rust build target.
+_ACCELERATOR_EXTRAS = {
+    "x86_64-unknown-linux-gnu": ("cuda12", "cuda13", "xpu", "rocm"),
+    "x86_64-pc-windows-msvc": ("cuda12", "cuda13", "xpu"),
+    "aarch64-apple-darwin": (),
+}
+
+
+def accelerator_extras_for_target(target: str) -> tuple[str, ...]:
+    """Return the uv extras with per-family requirements for the given uv platform triple."""
+    return _ACCELERATOR_EXTRAS.get(target, ())
 
 
 def build_manifest(
@@ -115,11 +135,17 @@ def build_manifest(
     uv_version: str,
     requirements_name: str,
     requirements_sha256: str,
+    accelerator_requirements: dict[str, str] | None = None,
 ) -> dict:
     """Schema-v1 manifest.json body shared by the CLI archive and the desktop payload
     (docs/plans/20260925-native_app_shell_architecture.md §7: same schema, so `ensure_env` is
-    unchanged)."""
-    return {
+    unchanged).
+
+    ``accelerator_requirements`` maps extra names (``cuda12``, ``cuda13``, ``xpu``, ``rocm``)
+    to their sha256. Phase 9: per-family GPU requirements are optional; absent means the payload
+    contains no accelerated installs (macOS).
+    """
+    manifest = {
         "schema_version": 1,
         "app": "persona-forge",
         "version": version,
@@ -130,6 +156,9 @@ def build_manifest(
         "requirements_file": requirements_name,
         "requirements_sha256": requirements_sha256,
     }
+    if accelerator_requirements:
+        manifest["accelerator_requirements"] = accelerator_requirements
+    return manifest
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -172,6 +201,13 @@ def main(argv: list[str] | None = None) -> int:
     shutil.copy2(args.wheel, work_dir / args.wheel.name)
     export_requirements(python_platform, work_dir / requirements_name)
 
+    # Phase 9: export per-family requirements for GPU acceleration.
+    accelerator_requirements = {}
+    for extra in accelerator_extras_for_target(python_platform):
+        accel_req_name = f"requirements-{args.target}-{extra}.txt"
+        export_requirements(python_platform, work_dir / accel_req_name, extra=extra)
+        accelerator_requirements[extra] = sha256_file(work_dir / accel_req_name)
+
     manifest = build_manifest(
         version=args.version,
         target=args.target,
@@ -182,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         uv_version=args.uv_version,
         requirements_name=requirements_name,
         requirements_sha256=sha256_file(work_dir / requirements_name),
+        accelerator_requirements=accelerator_requirements or None,
     )
     (work_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     (work_dir / "README.txt").write_text(README_TEMPLATE.format(target=args.target), encoding="utf-8")

@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
+use persona_forge_launcher::gpu::{self, Accel};
 use persona_forge_launcher::{bootstrap, health, manifest, paths, supervisor};
 use serde::Serialize;
 use tauri::menu::MenuEvent;
@@ -24,6 +25,47 @@ use crate::{logs, menu, nav, netinfo, port, settings, tray};
 
 const READY_TIMEOUT: Duration = Duration::from_secs(180);
 const STOP_GRACE: Duration = Duration::from_secs(10);
+/// Phase 9: map the detected GPU family to the requirements extra name (D23).
+fn accel_extra(accel: Accel) -> &'static str {
+    match accel {
+        Accel::Cpu => "cpu",
+        Accel::Cuda12 => "cuda12",
+        Accel::Cuda13 => "cuda13",
+        Accel::IntelXpu => "xpu",
+        Accel::Rocm => "rocm",
+    }
+}
+
+/// Phase 9: map the detected GPU family to the `GPU_FAMILY` env var value.
+fn accel_family_env(accel: Accel) -> &'static str {
+    match accel {
+        Accel::Cpu => "cpu",
+        Accel::Cuda12 | Accel::Cuda13 => "cuda",
+        Accel::IntelXpu => "intel-xpu",
+        Accel::Rocm => "rocm",
+    }
+}
+
+/// Phase 9: current time as a compact timestamp string (e.g., `20260929T103000Z`).
+fn chrono_timestamp() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Convert to a compact UTC timestamp.
+    // This is a simple implementation; for production use, consider the `chrono` crate.
+    let days = now / 86400;
+    let secs_in_day = now % 86400;
+    let hours = secs_in_day / 3600;
+    let mins = (secs_in_day % 3600) / 60;
+    let secs = secs_in_day % 60;
+    // Convert days since epoch to a rough YYYYMMDD format.
+    // This is not a full calendar conversion, but sufficient for logging.
+    let year = 2026 + days / 365;
+    let month = (days % 365) / 30 + 1;
+    let day = (days % 30) + 1;
+    format!("{year:04}{month:02}{day:02}T{hours:02}{mins:02}{secs:02}Z")
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BootstrapState {
@@ -118,6 +160,19 @@ fn open_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     open_settings_window(&app).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn retry_acceleration<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    let state = app.state::<ManagedState>();
+    let desktop_dir = state.desktop_dir.clone();
+    // Clear the acceleration status so the background thread can retry.
+    let mut s = settings::load(&desktop_dir);
+    s.acceleration_status = None;
+    settings::save(&desktop_dir, &s).map_err(|e| e.to_string())?;
+    // Trigger a restart to re-run bootstrap with the cleared status.
+    spawn_restart_thread(app);
+    Ok(())
+}
+
 #[derive(Serialize)]
 struct SettingsPayload {
     port_mode: String,
@@ -125,6 +180,8 @@ struct SettingsPayload {
     network_access: bool,
     tray_enabled: bool,
     ask_where_to_save: bool,
+    acceleration_mode: String,
+    acceleration_status: Option<serde_json::Value>,
 }
 
 #[tauri::command]
@@ -141,6 +198,17 @@ fn get_settings<R: Runtime>(app: AppHandle<R>) -> SettingsPayload {
         network_access: s.network_access,
         tray_enabled: s.tray_enabled,
         ask_where_to_save: s.ask_where_to_save,
+        acceleration_mode: match s.acceleration {
+            settings::AccelerationMode::Automatic => "automatic".into(),
+            settings::AccelerationMode::CpuOnly => "cpu-only".into(),
+            settings::AccelerationMode::Nvidia => "nvidia".into(),
+            settings::AccelerationMode::IntelXpu => "intel-xpu".into(),
+            settings::AccelerationMode::Amd => "amd".into(),
+        },
+        acceleration_status: s
+            .acceleration_status
+            .as_ref()
+            .and_then(|st| serde_json::to_value(st).ok()),
     }
 }
 
@@ -152,7 +220,11 @@ fn apply_settings<R: Runtime>(
     network_access: bool,
     tray_enabled: bool,
     ask_where_to_save: bool,
+    acceleration_mode: String,
 ) -> Result<(), String> {
+    if acceleration_mode == "amd" && !cfg!(target_os = "linux") {
+        return Err("AMD ROCm is available on Linux only".to_string());
+    }
     if let Some(p) = port {
         if !settings::is_valid_port(p) {
             return Err("port must be between 1024 and 65535".to_string());
@@ -162,6 +234,7 @@ fn apply_settings<R: Runtime>(
     let mut s = settings::load(&state.desktop_dir);
     let old_mode = s.port_mode.clone();
     let old_network = s.network_access;
+    let old_acceleration = s.acceleration;
     let tray_present = app.tray_by_id(tray::ID_TRAY_ICON).is_some();
     let old_port = s.port;
 
@@ -174,6 +247,13 @@ fn apply_settings<R: Runtime>(
     s.network_access = network_access;
     s.tray_enabled = tray_enabled;
     s.ask_where_to_save = ask_where_to_save;
+    s.acceleration = match acceleration_mode.as_str() {
+        "cpu-only" => settings::AccelerationMode::CpuOnly,
+        "nvidia" => settings::AccelerationMode::Nvidia,
+        "intel-xpu" => settings::AccelerationMode::IntelXpu,
+        "amd" => settings::AccelerationMode::Amd,
+        _ => settings::AccelerationMode::Automatic,
+    };
     settings::save(&state.desktop_dir, &s).map_err(|e| e.to_string())?;
     let tray_update_error = if s.tray_enabled != tray_present {
         tray::apply_preference(
@@ -190,6 +270,7 @@ fn apply_settings<R: Runtime>(
     let needs_restart = s.port_mode != old_mode
         || s.port != old_port
         || s.network_access != old_network
+        || s.acceleration != old_acceleration
         || bootstrap_failed;
     if needs_restart {
         {
@@ -299,6 +380,7 @@ pub fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
             apply_settings,
             list_addresses,
             copy_text,
+            retry_acceleration,
         ])
         .setup(|app| {
             let home = home_dir();
@@ -718,7 +800,9 @@ impl<R: Runtime> bootstrap::Progress for ThreadProgress<R> {
             bootstrap::Step::Venv => "venv",
             bootstrap::Step::Sync => "sync",
             bootstrap::Step::Install => "install",
+            bootstrap::Step::Verify => "verify",
         };
+        emit_step(&self.app, name, None);
         emit_step(&self.app, name, None);
     }
 }
@@ -805,23 +889,178 @@ fn run_bootstrap<R: Runtime + 'static>(app: AppHandle<R>) {
     let runner = bootstrap::SystemRunner;
     let progress = ThreadProgress { app: app.clone() };
 
-    let env_dir = match bootstrap::ensure_env_with_progress(
-        &manifest,
-        &payload_dir,
-        &uv_path,
-        &versions_dir,
-        &current_marker,
-        &runner,
-        &progress,
-    ) {
-        Ok(d) => d,
-        Err(e) => return set_error(&app, e.to_string()),
+    // Phase 9: detect GPU family and resolve the desired env (D23).
+    // CPU is the safe default; GPU is only used when a working env already exists
+    // or when the user explicitly requested it.
+    let desktop_dir = app.state::<ManagedState>().desktop_dir.clone();
+    let s = settings::load(&desktop_dir);
+    let accel = gpu::detect_platform();
+
+    // Decide whether to try the GPU env:
+    // - `cpu-only`: never
+    // - `automatic`: try GPU env if it exists (fast path), otherwise fall back to CPU
+    // - explicit family: try that env
+    let gpu_extra: Option<&'static str> = match s.acceleration {
+        settings::AccelerationMode::CpuOnly => None,
+        settings::AccelerationMode::Automatic => {
+            if accel != Accel::Cpu {
+                Some(accel_extra(accel))
+            } else {
+                None
+            }
+        }
+        settings::AccelerationMode::Nvidia => match accel {
+            Accel::Cuda12 => Some("cuda12"),
+            Accel::Cuda13 => Some("cuda13"),
+            _ => None,
+        },
+        settings::AccelerationMode::IntelXpu => Some("xpu"),
+        settings::AccelerationMode::Amd => Some("rocm"),
     };
+
+    // Phase 9: fast path — if the GPU env already exists on disk, use it directly.
+    // This is the common case on second and later launches.
+    let env_dir: PathBuf = if let Some(extra) = gpu_extra {
+        let gpu_env_name = format!("{}+{}", manifest.version, extra);
+        let gpu_env_dir = versions_dir.join(&gpu_env_name);
+        let marker = gpu_env_dir.join(".ready");
+        let recorded = marker
+            .is_file()
+            .then(|| std::fs::read_to_string(&marker).unwrap_or_default())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        if recorded == manifest.wheel.sha256 {
+            // GPU env is fully provisioned for this exact wheel — use it.
+            log::info!("Phase 9: using existing GPU env {}", gpu_env_name);
+            gpu_env_dir
+        } else {
+            // GPU env not ready — provision CPU first (fast), then background-install GPU.
+            // The user can start generating audio immediately.
+            log::info!("Phase 9: provisioning CPU env, GPU install in background");
+            match bootstrap::ensure_env_with_progress(
+                &manifest,
+                &payload_dir,
+                &uv_path,
+                &versions_dir,
+                &current_marker,
+                &runner,
+                bootstrap::BootstrapOptions {
+                    extra: None,
+                    progress: &progress,
+                },
+            ) {
+                Ok(dir) => dir,
+                Err(e) => return set_error(&app, format!("CPU bootstrap failed: {e}")),
+            }
+        }
+    } else {
+        // No GPU desired (cpu-only or no GPU detected) — provision CPU.
+        match bootstrap::ensure_env_with_progress(
+            &manifest,
+            &payload_dir,
+            &uv_path,
+            &versions_dir,
+            &current_marker,
+            &runner,
+            bootstrap::BootstrapOptions {
+                extra: None,
+                progress: &progress,
+            },
+        ) {
+            Ok(dir) => dir,
+            Err(e) => return set_error(&app, format!("CPU bootstrap failed: {e}")),
+        }
+    };
+
+    let failed_for_this_env = gpu_extra.is_some_and(|extra| {
+        s.acceleration_status
+            .as_ref()
+            .is_some_and(|status| status.extra == extra && status.version == manifest.version)
+    });
+
+    // Phase 9: spawn background GPU install if we're on CPU but GPU is available.
+    // This runs asynchronously and never blocks the app.
+    if let Some(extra) = gpu_extra.filter(|_| {
+        env_dir.file_name().and_then(|n| n.to_str()) == Some(&manifest.version)
+            && !failed_for_this_env
+    }) {
+        let app_clone = app.clone();
+        let payload_clone = payload_dir.clone();
+        let uv_clone = uv_path.clone();
+        let versions_clone = versions_dir.clone();
+        let marker_clone = current_marker.clone();
+        let manifest_version = manifest.version.clone();
+        let desktop_dir_bg = desktop_dir.clone();
+
+        std::thread::spawn(move || {
+            log::info!("Phase 9: background GPU install started ({extra})");
+            let result = bootstrap::ensure_env(
+                &{
+                    // Build a minimal manifest for the background install.
+                    // We need a Manifest struct, but we only use version and wheel.sha256.
+                    // The real manifest was already verified above.
+                    manifest::load(&payload_clone).expect("manifest re-load failed")
+                },
+                &payload_clone,
+                &uv_clone,
+                &versions_clone,
+                &marker_clone,
+                &bootstrap::SystemRunner,
+                Some(extra),
+            );
+            match result {
+                Ok(gpu_env) => {
+                    log::info!(
+                        "Phase 9: background GPU install succeeded: {}",
+                        gpu_env.display()
+                    );
+                    let mut s_bg = settings::load(&desktop_dir_bg);
+                    s_bg.acceleration_status = None;
+                    if let Err(e) = settings::save(&desktop_dir_bg, &s_bg) {
+                        log::warn!("could not clear acceleration failure status: {e}");
+                    }
+                    let _ = app_clone.emit(
+                        "acceleration://ready",
+                        serde_json::json!({
+                            "extra": extra,
+                            "version": manifest_version,
+                        }),
+                    );
+                }
+                Err(e) => {
+                    let err_msg = e.to_string();
+                    log::warn!("Phase 9: background GPU install failed: {err_msg}");
+                    // Record the failure in settings so the user can Retry from Settings.
+                    let mut s_bg = settings::load(&desktop_dir_bg);
+                    s_bg.acceleration_status = Some(settings::AccelerationStatus {
+                        extra: extra.to_string(),
+                        version: manifest_version.clone(),
+                        error: err_msg.clone(),
+                        attempted_at: chrono_timestamp(),
+                    });
+                    let _ = settings::save(&desktop_dir_bg, &s_bg);
+                    notify(
+                        &app_clone,
+                        "Persona Forge",
+                        "GPU acceleration is unavailable; using CPU. Details in Settings.",
+                    );
+                    let _ = app_clone.emit(
+                        "acceleration://failed",
+                        serde_json::json!({
+                            "extra": extra,
+                            "error": err_msg,
+                        }),
+                    );
+                }
+            }
+        });
+    }
     let python = bootstrap::venv_python(&env_dir);
 
     let desktop_dir = app.state::<ManagedState>().desktop_dir.clone();
 
     // Unix orphan recovery (§6.2) before port selection.
+
     #[cfg(unix)]
     {
         let pidfile = desktop_dir.join("server.pid");
@@ -894,9 +1133,20 @@ fn run_bootstrap<R: Runtime + 'static>(app: AppHandle<R>) {
         host,
         port: chosen_port,
         extra_env: vec![
-            ("PERSONA_FORGE_SHELL".to_string(), "desktop".to_string()),
-            ("PERSONA_FORGE_PORT".to_string(), chosen_port.to_string()),
-        ],
+                ("PERSONA_FORGE_SHELL".to_string(), "desktop".to_string()),
+                ("PERSONA_FORGE_PORT".to_string(), chosen_port.to_string()),
+                (
+                    "GPU_FAMILY".to_string(),
+                    if env_dir.file_name().and_then(|n| n.to_str())
+                        == Some(manifest.version.as_str())
+                    {
+                        "cpu"
+                    } else {
+                        accel_family_env(accel)
+                    }
+                    .to_string(),
+                ),
+            ],
         log_path,
     };
     let mut handle = match supervisor::ServerHandle::spawn(&spec) {

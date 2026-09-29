@@ -105,6 +105,37 @@ input[type='number'] {
   accent-color: var(--accent);
 }
 
+.acceleration {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.acceleration .hint {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.acceleration-status {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.acceleration-status.success {
+  color: var(--success);
+}
+
+.acceleration-status.error {
+  color: var(--error);
+}
+
+#retry-acceleration {
+  margin-top: 8px;
+}
+
 .addresses {
   padding-top: 4px;
 }

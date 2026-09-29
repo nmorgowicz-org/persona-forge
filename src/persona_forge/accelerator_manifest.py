@@ -115,8 +115,44 @@ ACCELERATOR_PINS: dict[str, AcceleratorPin] = {
 # yet a distinct CUDA generation persona-forge targets.
 
 
-def pin_for_family(gpu_family: str) -> AcceleratorPin | None:
-    """Return the first pin whose ``gpu_family`` matches, or ``None`` for ``cpu``/unknown."""
+
+def select_cuda_pin(
+    compute_capability: tuple[int, int] | None,
+    driver_cuda_major: int | None,
+) -> AcceleratorPin:
+    """Select the CUDA torch build for a given GPU capability and driver CUDA major.
+
+    D23 rule (validated on RTX 5090, 2026-09-28):
+    - compute capability >= (7, 5) **and** driver CUDA major >= 13 → ``cuda13``
+    - anything else, including unknowns → ``cuda12``
+
+    The installed CUDA toolkit does not matter; the wheels carry their own runtime.
+    ``driver_cuda_major`` is the ``CUDA Version: X.Y`` line from ``nvidia-smi``.
+    """
+    if (
+        compute_capability is not None
+        and compute_capability >= (7, 5)
+        and driver_cuda_major is not None
+        and driver_cuda_major >= 13
+    ):
+        return ACCELERATOR_PINS["cuda13"]
+    return ACCELERATOR_PINS["cuda12"]
+
+
+def pin_for_family(
+    gpu_family: str,
+    *,
+    compute_capability: tuple[int, int] | None = None,
+    driver_cuda_major: int | None = None,
+) -> AcceleratorPin | None:
+    """Return the matching pin for a GPU family, or ``None`` for ``cpu``/unknown.
+
+    For ``cuda``, the correct sub-pin (``cuda12`` vs ``cuda13``) is selected via
+    :func:`select_cuda_pin` when ``compute_capability`` and ``driver_cuda_major``
+    are provided; otherwise falls back to ``cuda12`` (conservative default).
+    """
+    if gpu_family == "cuda":
+        return select_cuda_pin(compute_capability, driver_cuda_major)
     for pin in ACCELERATOR_PINS.values():
         if pin.gpu_family == gpu_family:
             return pin

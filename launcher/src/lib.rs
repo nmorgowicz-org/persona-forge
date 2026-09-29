@@ -5,6 +5,7 @@
 //! instead of duplicating any of this logic.
 
 pub mod bootstrap;
+pub mod gpu;
 pub mod health;
 pub mod manifest;
 pub mod paths;

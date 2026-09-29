@@ -74,6 +74,7 @@ pub enum Step {
     Venv,
     Sync,
     Install,
+    Verify,
 }
 
 pub trait Progress {
@@ -84,6 +85,11 @@ pub struct NoProgress;
 
 impl Progress for NoProgress {
     fn step(&self, _: Step) {}
+}
+
+pub struct BootstrapOptions<'a> {
+    pub extra: Option<&'a str>,
+    pub progress: &'a dyn Progress,
 }
 
 /// Ensure a fully-provisioned venv exists for `manifest.version` under `versions_dir`, building
@@ -97,6 +103,7 @@ pub fn ensure_env(
     versions_dir: &Path,
     current_marker: &Path,
     runner: &dyn Runner,
+    extra: Option<&str>,
 ) -> Result<PathBuf, BootstrapError> {
     ensure_env_with_progress(
         manifest,
@@ -105,7 +112,10 @@ pub fn ensure_env(
         versions_dir,
         current_marker,
         runner,
-        &NoProgress,
+        BootstrapOptions {
+            extra,
+            progress: &NoProgress,
+        },
     )
 }
 
@@ -119,11 +129,12 @@ pub fn ensure_env_with_progress(
     versions_dir: &Path,
     current_marker: &Path,
     runner: &dyn Runner,
-    progress: &dyn Progress,
+    options: BootstrapOptions<'_>,
 ) -> Result<PathBuf, BootstrapError> {
     // `env_dir` IS the venv root once provisioned (the staged venv is renamed directly onto
     // it below) - there is no extra "venv" nesting level.
-    let env_dir = versions_dir.join(&manifest.version);
+    let env_name = env_name_for_version(&manifest.version, options.extra);
+    let env_dir = versions_dir.join(&env_name);
     let marker = ready_marker(&env_dir);
 
     if marker.is_file() {
@@ -133,7 +144,7 @@ pub fn ensure_env_with_progress(
         }
     }
 
-    let staging_dir = versions_dir.join(format!("{}.staging", manifest.version));
+    let staging_dir = versions_dir.join(format!("{}.staging", env_name));
     if staging_dir.exists() {
         fs::remove_dir_all(&staging_dir).map_err(|e| {
             io_err(
@@ -155,7 +166,8 @@ pub fn ensure_env_with_progress(
         uv_path,
         &staging_dir,
         runner,
-        progress,
+        &requirements_name_for_extra(&manifest.requirements_file, options.extra),
+        options,
     ) {
         let _ = fs::remove_dir_all(&staging_dir); // best-effort cleanup; the error already explains why
         return Err(e);
@@ -177,23 +189,25 @@ pub fn ensure_env_with_progress(
     }
     fs::rename(staging_dir.join("venv"), &env_dir)
         .map_err(|e| io_err(&format!("promoting staged env to {}", env_dir.display()), e))?;
-    let _ = fs::remove_dir_all(versions_dir.join(format!("{}.staging", manifest.version)));
+    let _ = fs::remove_dir_all(versions_dir.join(format!("{}.staging", env_name)));
 
     fs::write(ready_marker(&env_dir), &manifest.wheel.sha256)
         .map_err(|e| io_err("writing ready marker", e))?;
 
     // Read the OLD current.txt content before overwriting it: that's the "previous" version
     // retention keeps around, so a rollback path never loses the last-known-good env.
+    // Phase 9: compare versions ignoring the `+<extra>` suffix (e.g., `3.0.1` vs `3.0.1+cuda13`).
+    let base_version = env_name.split('+').next().unwrap_or(&env_name);
     let previous = fs::read_to_string(current_marker)
         .ok()
         .map(|s| s.trim().to_string())
-        .filter(|v| !v.is_empty() && v != &manifest.version);
+        .filter(|v| !v.is_empty() && v != base_version);
 
     write_atomically(current_marker, &manifest.version)?;
 
     if let Err(e) = crate::retention::prune_versions(
         versions_dir,
-        &manifest.version,
+        &env_name,
         previous.as_deref(),
         &crate::retention::SysinfoInUse,
     ) {
@@ -209,12 +223,13 @@ fn provision(
     uv_path: &Path,
     staging_dir: &Path,
     runner: &dyn Runner,
-    progress: &dyn Progress,
+    requirements_name: &str,
+    options: BootstrapOptions<'_>,
 ) -> Result<(), BootstrapError> {
     let venv_dir = staging_dir.join("venv");
     let venv_dir_str = venv_dir.to_string_lossy().into_owned();
 
-    progress.step(Step::Venv);
+    options.progress.step(Step::Venv);
     let code = runner
         .run(uv_path, &["venv", &venv_dir_str, "--python", "3.13"])
         .map_err(|e| io_err("spawning uv venv", e))?;
@@ -227,10 +242,10 @@ fn provision(
 
     let python = venv_python(&venv_dir);
     let python_str = python.to_string_lossy().into_owned();
-    let requirements_path = bundle_dir.join(&manifest.requirements_file);
+    let requirements_path = bundle_dir.join(requirements_name);
     let requirements_str = requirements_path.to_string_lossy().into_owned();
 
-    progress.step(Step::Sync);
+    options.progress.step(Step::Sync);
     let code = runner
         .run(
             uv_path,
@@ -246,7 +261,7 @@ fn provision(
 
     let wheel_path = bundle_dir.join(&manifest.wheel.file);
     let wheel_str = wheel_path.to_string_lossy().into_owned();
-    progress.step(Step::Install);
+    options.progress.step(Step::Install);
     let code = runner
         .run(
             uv_path,
@@ -267,6 +282,24 @@ fn provision(
         });
     }
 
+    // Phase 9: Run GPU probe verification after install to confirm the device works.
+    // This catches cases where the install succeeded but the GPU can't actually run the model.
+    if let Some(extra) = options.extra {
+        options.progress.step(Step::Verify);
+        let probe_code = runner
+            .run(
+                &python,
+                &["-m", "persona_forge.gpu_probe", "--extra", extra],
+            )
+            .map_err(|e| io_err("spawning gpu_probe", e))?;
+        if probe_code != 0 {
+            return Err(BootstrapError::CommandFailed {
+                step: "gpu_probe verification".to_string(),
+                code: probe_code,
+            });
+        }
+    }
+
     Ok(())
 }
 
@@ -281,7 +314,24 @@ fn write_atomically(path: &Path, contents: &str) -> Result<(), BootstrapError> {
     })?;
     Ok(())
 }
+/// Phase 9: env directory name is `<version>` for CPU or `<version>+<extra>` for GPU.
+fn env_name_for_version(version: &str, extra: Option<&str>) -> String {
+    match extra {
+        Some(e) => format!("{}+{}", version, e),
+        None => version.to_string(),
+    }
+}
 
+/// Phase 9: requirements file name is `<base>` for CPU or `<base>-<extra>.txt` for GPU.
+fn requirements_name_for_extra(base_name: &str, extra: Option<&str>) -> String {
+    match extra {
+        Some(e) => {
+            let stem = base_name.strip_suffix(".txt").unwrap_or(base_name);
+            format!("{}-{}.txt", stem, e)
+        }
+        None => base_name.to_string(),
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,6 +356,7 @@ mod tests {
             },
             requirements_file: "reqs.txt".to_string(),
             requirements_sha256: "reqsha".to_string(),
+            accelerator_requirements: None,
         }
     }
 
@@ -379,6 +430,7 @@ mod tests {
             &versions_dir,
             &current_marker,
             &runner,
+            None,
         )
         .unwrap();
 
@@ -409,6 +461,7 @@ mod tests {
             &versions_dir,
             &current_marker,
             &first_runner,
+            None,
         )
         .unwrap();
 
@@ -420,6 +473,7 @@ mod tests {
             &versions_dir,
             &current_marker,
             &second_runner,
+            None,
         )
         .unwrap();
 
@@ -447,6 +501,7 @@ mod tests {
             &versions_dir,
             &current_marker,
             &good_runner,
+            None,
         )
         .unwrap();
         assert!(venv_python(&old_env).exists());
@@ -460,6 +515,7 @@ mod tests {
             &versions_dir,
             &current_marker,
             &bad_runner,
+            None,
         );
         assert!(err.is_err());
 
@@ -518,7 +574,10 @@ mod tests {
             &versions_dir,
             &current_marker,
             &runner,
-            &progress,
+            BootstrapOptions {
+                extra: None,
+                progress: &progress,
+            },
         )
         .unwrap();
 
@@ -526,6 +585,11 @@ mod tests {
             progress.steps.into_inner(),
             vec![Step::Venv, Step::Sync, Step::Install]
         );
+        assert!(runner
+            .calls
+            .borrow()
+            .iter()
+            .all(|args| !args.iter().any(|arg| arg == "persona_forge.gpu_probe")));
     }
 
     #[test]
@@ -545,6 +609,7 @@ mod tests {
             &versions_dir,
             &current_marker,
             &FakeRunner::new(None),
+            None,
         )
         .unwrap();
 
@@ -556,7 +621,10 @@ mod tests {
             &versions_dir,
             &current_marker,
             &FakeRunner::new(None),
-            &progress,
+            BootstrapOptions {
+                extra: None,
+                progress: &progress,
+            },
         )
         .unwrap();
 
@@ -585,6 +653,7 @@ mod tests {
             &versions_dir,
             &current_marker,
             &FakeRunner::new(None),
+            None,
         )
         .unwrap();
         let gen2 = manifest("1.2.0", "sha2");
@@ -595,6 +664,7 @@ mod tests {
             &versions_dir,
             &current_marker,
             &FakeRunner::new(None),
+            None,
         )
         .unwrap();
         // A failed provision must not prune anything: 1.1.0 must still be sitting there,
@@ -607,7 +677,8 @@ mod tests {
             &uv_path,
             &versions_dir,
             &current_marker,
-            &bad_runner
+            &bad_runner,
+            None,
         )
         .is_err());
         assert!(
@@ -625,6 +696,7 @@ mod tests {
             &versions_dir,
             &current_marker,
             &FakeRunner::new(None),
+            None,
         )
         .unwrap();
 
@@ -658,6 +730,7 @@ mod tests {
             &versions_dir,
             &current_marker,
             &FakeRunner::new(None),
+            None,
         )
         .unwrap();
         // Force a re-provision of the exact same version by corrupting the ready marker's
@@ -671,6 +744,7 @@ mod tests {
             &versions_dir,
             &current_marker,
             &FakeRunner::new(None),
+            None,
         )
         .unwrap();
 

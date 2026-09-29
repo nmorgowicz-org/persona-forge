@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from persona_forge.accelerator_manifest import ACCELERATOR_PINS, pin_for_family
+from persona_forge.accelerator_manifest import (
+    ACCELERATOR_PINS,
+    pin_for_family,
+    select_cuda_pin,
+)
 
 
 class TestAcceleratorPins:
@@ -50,3 +54,60 @@ class TestPinForFamily:
 
     def test_unknown_family_has_no_pin(self):
         assert pin_for_family("bogus") is None
+
+class TestSelectCudaPin:
+    """D23 rule: CC >= (7,5) AND driver CUDA major >= 13 -> cuda13; else cuda12."""
+
+    def test_rtx_5090_blackwell_selects_cuda13(self):
+        pin = select_cuda_pin(compute_capability=(12, 0), driver_cuda_major=13)
+        assert pin.extra == "cuda13"
+        assert pin.index_url == "https://download.pytorch.org/whl/cu130"
+
+    def test_ampere_cuda13_driver_selects_cuda13(self):
+        pin = select_cuda_pin(compute_capability=(8, 6), driver_cuda_major=13)
+        assert pin.extra == "cuda13"
+
+    def test_turing_cuda13_driver_selects_cuda13(self):
+        pin = select_cuda_pin(compute_capability=(7, 5), driver_cuda_major=13)
+        assert pin.extra == "cuda13"
+
+    def test_pascal_cuda13_driver_selects_cuda12(self):
+        # GTX 1080: CC 6.1 < (7,5) -> cuda12 even with CUDA 13 driver.
+        pin = select_cuda_pin(compute_capability=(6, 1), driver_cuda_major=13)
+        assert pin.extra == "cuda12"
+
+    def test_blackwell_cuda12_driver_selects_cuda12(self):
+        # RTX 5090 but driver only supports CUDA 12.6.
+        pin = select_cuda_pin(compute_capability=(12, 0), driver_cuda_major=12)
+        assert pin.extra == "cuda12"
+
+    def test_unknown_capability_selects_cuda12(self):
+        pin = select_cuda_pin(compute_capability=None, driver_cuda_major=13)
+        assert pin.extra == "cuda12"
+
+    def test_unknown_cuda_major_selects_cuda12(self):
+        pin = select_cuda_pin(compute_capability=(12, 0), driver_cuda_major=None)
+        assert pin.extra == "cuda12"
+
+    def test_both_unknown_selects_cuda12(self):
+        pin = select_cuda_pin(compute_capability=None, driver_cuda_major=None)
+        assert pin.extra == "cuda12"
+
+
+class TestPinForFamilyCudaSelection:
+    """pin_for_family('cuda') delegates to select_cuda_pin."""
+
+    def test_cuda_with_blackwell_selects_cuda13(self):
+        pin = pin_for_family("cuda", compute_capability=(12, 0), driver_cuda_major=13)
+        assert pin is not None
+        assert pin.extra == "cuda13"
+
+    def test_cuda_without_info_selects_cuda12(self):
+        pin = pin_for_family("cuda")
+        assert pin is not None
+        assert pin.extra == "cuda12"
+
+    def test_cuda_with_old_gpu_selects_cuda12(self):
+        pin = pin_for_family("cuda", compute_capability=(6, 1), driver_cuda_major=13)
+        assert pin is not None
+        assert pin.extra == "cuda12"

@@ -390,10 +390,15 @@ Apply after raw TTS generation and after the app's existing silence trim:
    - Avoid pumping; TTS output is often already level.
 
 4. Time-stretch (pitch-preserving; `librosa.effects.time_stretch`, already
-   installed) — **ships in Phase 4 v1** (decided 2026-07-09).
+   installed) — original Phase 4 v1 decision (2026-07-09):
    - Keep subtle. Calm uses -3% to -8%; Energetic uses +3% to +8%.
    - Do not exceed +/-10% without explicit listening approval (hard guardrail).
    - Preserve pitch — never use naive resampling (which shifts pitch/timbre).
+   - **Revised 2026-09-29:** Calm and Energetic omit whole-clip time-stretch.
+     Locked-seed listening found an echo-like artifact in both presets; Neutral
+     and Storyteller did not exhibit it. Retain their pause shaping and other
+     finishing steps. This supersedes the original preset-specific stretch
+     bullets above.
 
 5. Pause shaping
    - Detect silences by energy threshold.
@@ -1421,8 +1426,8 @@ Tasks:
 - Implement `audio_style.py` as a thin layer over `audio_post.py`, using
   `librosa`/`scipy`/`pyloudnorm` for LUFS, EQ, and pitch-preserving time-stretch.
 - Implement Neutral/Clean/Broadcast polish first (loudness + EQ + dynamics).
-- Add Calm/Energetic (incl. pause-shaping and pitch-preserving time-stretch,
-  ±3–8%, guardrail ±10%) and Storyteller after a first listening pass.
+- Add Calm/Energetic (pause shaping; the original time-stretch requirement was
+  superseded on 2026-09-29 as noted above) and Storyteller after a first listening pass.
 - Add applied-step metadata to completed jobs.
 
 Validation:
@@ -1434,7 +1439,8 @@ Validation:
   - 60 second audio
 - Confirm LUFS/true-peak targets are actually hit (measure output with
   `pyloudnorm`) and that true-peak stays under the ceiling.
-- Confirm time-stretch preserves pitch (no timbre shift) within ±8%.
+- If optional time-stretch is used outside Calm/Energetic, confirm it preserves
+  pitch (no timbre shift) within ±8%.
 - Listen A/B for at least:
   - Qwen Base reference
   - Pocket TTS reference

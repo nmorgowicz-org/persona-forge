@@ -408,7 +408,6 @@ STYLE_PIPELINES: dict[str, dict[str, Any]] = {
         "peak": PEAK_CEILING_DB,
         "compress": None,
         "steps": _steps(
-            ("time_stretch", _apply_time_stretch, {"factor": 1.05}),
             ("shape_pauses", _shape_pauses, {"factor": 1.10}),
             ("warm_eq", _apply_warm_eq, {}),
             ("normalize_lufs", _normalize_lufs, {"target_lufs": -23.0}),
@@ -420,7 +419,6 @@ STYLE_PIPELINES: dict[str, dict[str, Any]] = {
         "peak": PEAK_CEILING_DB,
         "compress": {"threshold_db": -20.0, "ratio": 2.0},
         "steps": _steps(
-            ("time_stretch", _apply_time_stretch, {"factor": 0.95}),
             ("shape_pauses", _shape_pauses, {"factor": 0.90}),
             ("compress", compress, {"threshold_db": -20.0, "ratio": 2.0}),
             ("normalize_lufs", _normalize_lufs, {"target_lufs": TARGET_LUFS}),

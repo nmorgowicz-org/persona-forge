@@ -1227,7 +1227,7 @@ Record each item with a screenshot or log line in the PR:
       (`pgrep -fl persona_forge.app:app` shows one server process group).
 - [ ] Cmd+C/V/Z/A work in the Speak page textarea.
 - [ ] Speak → download audio → the file appears in `~/Downloads` (a second download of the same
-      name gets ` (1)`), with no dialog → the "Saved" notification reveals it in Finder.
+      name gets `(1)`), with no dialog → the "Saved" notification reveals it in Finder.
 - [ ] Settings → Ask where to save each file → on → download → the Save dialog opens and the app
       stays responsive while it is open (scroll, click the sidebar) → Save puts the file there;
       a second download → Cancel → nothing left in `desktop/downloads-tmp/`.
@@ -1811,19 +1811,19 @@ PR title: `feat(release): publish signed desktop apps and update feeds with each
 On the Mac (macOS 26) and the Windows 11 PC. Linux is covered by the automated jobs in Phases
 4 and 6 (contract D8); record their run URLs for this release instead.
 
- - [x] Install from the release page. Record any OS warning text verbatim.
- - [x] First run completes. The SPA works: Speak generates and plays audio; download → Save dialog.
- - [x] Contract §1 items 2, 4, 5, 7, 8 behave as specified (use the Phase 3 checklist).
- - [ ] The next real release (N+1) is offered and installs through the in-app updater.
-   **Status (2026-09-28):** v3.0.1 N+1 update prompt appeared and offered v3.0.1 to the v2.1.4
-   app; the update dialog rendered the full GitHub Releases page instead of the update content.
-   Fixed in `scripts/generate_update_feeds.py` by embedding a short inline HTML `<description>`
-   alongside the existing `sparkle:releaseNotesLink`. Re-test with the next release.
- - [x] Existing CLI-archive users: after installing the desktop app, their voices and projects
+- [x] Install from the release page. Record any OS warning text verbatim.
+- [x] First run completes. The SPA works: Speak generates and plays audio; download → Save dialog.
+- [x] Contract §1 items 2, 4, 5, 7, 8 behave as specified (use the Phase 3 checklist).
+- [ ] The next real release (N+1) is offered and installs through the in-app updater.
+   **Status (2026-09-28):** v3.0.1 update offered to v2.1.4 app; the dialog rendered the
+   full GitHub Releases page. Fixed by embedding an inline HTML `<description>` alongside
+   the `sparkle:releaseNotesLink` in `scripts/generate_update_feeds.py`. The next release
+   must be verified to display the concise inline notes.
+- [x] Existing CLI-archive users: after installing the desktop app, their voices and projects
    appear (shared app-data root).
- - [x] Settings: fixed port and "Allow other devices on my network" work, and a tool on another
+- [x] Settings: fixed port and "Allow other devices on my network" work, and a tool on another
    machine can call `http://<ip>:<port>/v1/audio/speech`.
- - [x] Uninstall (drag to Trash / the Windows uninstaller) leaves user data in place.
+- [x] Uninstall (drag to Trash / the Windows uninstaller) leaves user data in place.
 
 ### Handoff (in the final PR, per `AGENTS.md` "Agent handoff requirements", adapted)
 
@@ -2287,3 +2287,102 @@ passes: the updater replaces the AppImage correctly even in extract-and-run mode
 - Capacity (arc-runner at 24 GB, 21.2Gi allocatable): three concurrent desktop builds use ~2.7Gi
   peak each; CPU (96% of 13 cores) is the limit. `maxRunners` raised by one on every set (#35,
   #39).
+
+## Phase 9 results
+
+Recorded 2026-09-28. Probe runs via `scripts/gpu_validate.sh` on the owner's RTX 5090
+(`nick@192.168.2.16`, Windows 11, Python 3.13.15, uv 0.12.9, NVIDIA driver 617.14).
+
+### cuda13 — PASSED
+
+```json
+{
+  "torch_version": "2.14.0+cu130",
+  "torch_cuda_version": "13.0",
+  "cuda_available": true,
+  "device_name": "NVIDIA GeForce RTX 5090",
+  "device_capability": [12, 0],
+  "arch_list": ["sm_75", "sm_80", "sm_86", "sm_90", "sm_100", "sm_120"],
+  "matmul_pass": true
+}
+```
+
+- `sm_120` present in arch list → CUDA 13 supports Blackwell (CC 12.0).
+- Matmul matches CPU (`rtol=1e-3, atol=1e-3`).
+- **Stop condition not triggered.** D23's rule holds.
+
+### cuda12 — CUDA available but no sm_120 kernels
+
+```json
+{
+  "torch_version": "2.14.0+cu126",
+  "torch_cuda_version": "12.6",
+  "cuda_available": true,
+  "device_name": "NVIDIA GeForce RTX 5090",
+  "device_capability": [12, 0],
+  "arch_list": ["sm_50", "sm_60", "sm_61", "sm_70", "sm_75", "sm_80", "sm_86", "sm_90"],
+  "matmul_pass": true
+}
+```
+
+- `sm_120` **absent** from arch list → no Blackwell kernels in the cu126 build.
+- PyTorch emitted a `UserWarning`:
+  *"NVIDIA GeForce RTX 5090 with CUDA capability sm_120 is not compatible with the
+   current PyTorch installation. The current PyTorch install supports CUDA capabilities
+   sm_50 sm_60 sm_61 sm_70 sm_75 sm_80 sm_86 sm_90."*
+- Matmul returned a result (not a crash), but the kernel was not CUDA-12-compiled for
+  this device class.
+
+### Conclusion
+
+**D23 confirmed:** compute capability ≥ (7,5) **and** driver CUDA major ≥ 13 → `cuda13`;
+anything else → `cuda12`. The RTX 5090 (CC 12.0) requires `cuda13`.
+
+### Phase 9 review follow-up (2026-09-29)
+
+The review fixes on `desktop/p9-gpu-acceleration` address CPU bootstrap probing,
+platform detection (including Windows Intel adapters and Linux device nodes),
+per-family probe selection, active GPU environment retention, persisted acceleration
+mode, failure retry suppression, CLI accelerator selection, CPU fallback reporting,
+and Linux-only AMD selection. The audio-preset fix was committed separately as
+`4b6c2b3` (`fix(audio): remove artifact-prone stretching from Calm and Energetic`).
+
+Local checks: launcher and desktop `cargo check` passed; launcher cross-target
+`cargo check --target x86_64-pc-windows-gnu` passed; `python scripts/validate_repo.py`,
+`docker compose config --quiet`, and `git diff --check` passed. Gate 9 local tests
+passed on 2026-09-29: launcher `cargo test` (65 passed, 1 ignored), desktop
+`cargo test` (50 passed), and the Phase 9 tier-1 Python command (716 passed,
+1 warning). The installed-app GPU/CPU fallback scenario remains to be run.
+PR #362 merged the GPU validation workflow and its probe script to `main` on
+2026-09-29.
+
+### Post-rebase validation and CUDA wheel check (2026-09-29)
+
+The Phase 9 branch was rebased onto `main` after PR #362 merged and pushed with
+`--force-with-lease`. Post-rebase local checks passed: `python scripts/validate_repo.py`,
+`docker compose config --quiet`, `git diff --check origin/main...HEAD`, launcher
+`cargo test` (65 passed, 1 ignored), desktop `cargo test` (50 passed), and tier-1
+Python tests (exit 0). The audio fix is a separate commit.
+
+Live PyTorch wheel indexes for Windows Python 3.13 contain `torch 2.14.0` for
+`cu126` and `cu130`, but not `cu128`. The `cu128` index tops out at `torch 2.11.0`.
+Keep the D23 `cu130` selection for GPUs with compute capability at least 7.5 and
+a CUDA 13-capable driver. The `cu126` wheel exists but the recorded RTX 5090
+probe shows it lacks `sm_120`; it is not a usable Blackwell fallback. A 50-series
+card whose driver reports only CUDA 12 requires a driver update before CUDA 13
+can be selected. Replacing `cu126` with `cu128` would also require a coordinated
+older Torch stack, not an index-only change.
+
+Windows CUDA 13 workflow dispatch [run 36611800750](https://github.com/nmorgowicz-org/persona-forge/actions/runs/36611800750)
+failed on both attempts before reaching the GPU probe. `uv pip install` timed
+out connecting to `https://download.pytorch.org/whl/cu130/torchaudio/` after
+three retries on each attempt. The owner identified the local app firewall
+blocking `uv` and allowed it through.
+
+After that firewall change, Windows CUDA 13 workflow dispatch
+[run 36613488941](https://github.com/nmorgowicz-org/persona-forge/actions/runs/36613488941)
+passed on the RTX 5090 runner. Its probe reported `torch 2.14.0+cu130`, CUDA
+`13.0`, CUDA available, device capability `(12, 0)`, `sm_120` in the compiled
+architecture list, and GPU matmul matching CPU. The remote CUDA 13 workflow
+gate is complete. The owner's installed-app Automatic GPU, CPU-only, and
+blocked-network fallback scenarios remain open.
