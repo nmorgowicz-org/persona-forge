@@ -2376,7 +2376,13 @@ older Torch stack, not an index-only change.
 Windows CUDA 13 workflow dispatch [run 36611800750](https://github.com/nmorgowicz-org/persona-forge/actions/runs/36611800750)
 failed on both attempts before reaching the GPU probe. `uv pip install` timed
 out connecting to `https://download.pytorch.org/whl/cu130/torchaudio/` after
-three retries on each attempt. This is a remote package-index connectivity
-blocker, not a CUDA or model result. The actual Windows workflow gate and the
-owner's installed-app Automatic GPU, CPU-only, and blocked-network fallback
-scenarios remain open.
+three retries on each attempt. The owner identified the local app firewall
+blocking `uv` and allowed it through.
+
+After that firewall change, Windows CUDA 13 workflow dispatch
+[run 36613488941](https://github.com/nmorgowicz-org/persona-forge/actions/runs/36613488941)
+passed on the RTX 5090 runner. Its probe reported `torch 2.14.0+cu130`, CUDA
+`13.0`, CUDA available, device capability `(12, 0)`, `sm_120` in the compiled
+architecture list, and GPU matmul matching CPU. The remote CUDA 13 workflow
+gate is complete. The owner's installed-app Automatic GPU, CPU-only, and
+blocked-network fallback scenarios remain open.
