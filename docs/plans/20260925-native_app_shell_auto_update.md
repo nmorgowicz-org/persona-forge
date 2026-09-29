@@ -1227,7 +1227,7 @@ Record each item with a screenshot or log line in the PR:
       (`pgrep -fl persona_forge.app:app` shows one server process group).
 - [ ] Cmd+C/V/Z/A work in the Speak page textarea.
 - [ ] Speak → download audio → the file appears in `~/Downloads` (a second download of the same
-      name gets ` (1)`), with no dialog → the "Saved" notification reveals it in Finder.
+      name gets `(1)`), with no dialog → the "Saved" notification reveals it in Finder.
 - [ ] Settings → Ask where to save each file → on → download → the Save dialog opens and the app
       stays responsive while it is open (scroll, click the sidebar) → Save puts the file there;
       a second download → Cancel → nothing left in `desktop/downloads-tmp/`.
@@ -1811,19 +1811,19 @@ PR title: `feat(release): publish signed desktop apps and update feeds with each
 On the Mac (macOS 26) and the Windows 11 PC. Linux is covered by the automated jobs in Phases
 4 and 6 (contract D8); record their run URLs for this release instead.
 
- - [x] Install from the release page. Record any OS warning text verbatim.
- - [x] First run completes. The SPA works: Speak generates and plays audio; download → Save dialog.
- - [x] Contract §1 items 2, 4, 5, 7, 8 behave as specified (use the Phase 3 checklist).
- - [ ] The next real release (N+1) is offered and installs through the in-app updater.
+- [x] Install from the release page. Record any OS warning text verbatim.
+- [x] First run completes. The SPA works: Speak generates and plays audio; download → Save dialog.
+- [x] Contract §1 items 2, 4, 5, 7, 8 behave as specified (use the Phase 3 checklist).
+- [ ] The next real release (N+1) is offered and installs through the in-app updater.
    **Status (2026-09-28):** v3.0.1 update offered to v2.1.4 app; the dialog rendered the
    full GitHub Releases page. Fixed by embedding an inline HTML `<description>` alongside
    the `sparkle:releaseNotesLink` in `scripts/generate_update_feeds.py`. The next release
    must be verified to display the concise inline notes.
- - [x] Existing CLI-archive users: after installing the desktop app, their voices and projects
+- [x] Existing CLI-archive users: after installing the desktop app, their voices and projects
    appear (shared app-data root).
- - [x] Settings: fixed port and "Allow other devices on my network" work, and a tool on another
+- [x] Settings: fixed port and "Allow other devices on my network" work, and a tool on another
    machine can call `http://<ip>:<port>/v1/audio/speech`.
- - [x] Uninstall (drag to Trash / the Windows uninstaller) leaves user data in place.
+- [x] Uninstall (drag to Trash / the Windows uninstaller) leaves user data in place.
 
 ### Handoff (in the final PR, per `AGENTS.md` "Agent handoff requirements", adapted)
 
@@ -2287,6 +2287,7 @@ passes: the updater replaces the AppImage correctly even in extract-and-run mode
 - Capacity (arc-runner at 24 GB, 21.2Gi allocatable): three concurrent desktop builds use ~2.7Gi
   peak each; CPU (96% of 13 cores) is the limit. `maxRunners` raised by one on every set (#35,
   #39).
+
 ## Phase 9 results
 
 Recorded 2026-09-28. Probe runs via `scripts/gpu_validate.sh` on the owner's RTX 5090
@@ -2336,4 +2337,3 @@ Recorded 2026-09-28. Probe runs via `scripts/gpu_validate.sh` on the owner's RTX
 
 **D23 confirmed:** compute capability ≥ (7,5) **and** driver CUDA major ≥ 13 → `cuda13`;
 anything else → `cuda12`. The RTX 5090 (CC 12.0) requires `cuda13`.
-

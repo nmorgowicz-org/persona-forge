@@ -33,9 +33,9 @@ function updateAccelerationStatus(displayStatus) {
     retryAcceleration.hidden = true
     return
   }
-  
+
   const { extra, version, error: errorMsg, attempted_at, device_name } = displayStatus
-  
+
   if (errorMsg) {
     accelerationStatus.textContent = `Failed to provision ${extra} env: ${errorMsg} (attempted ${attempted_at})`
     accelerationStatus.className = 'acceleration-status error'
