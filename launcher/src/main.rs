@@ -58,6 +58,7 @@ fn run() -> Result<ExitCode, String> {
         &versions_dir,
         &current_marker,
         &runner,
+        None,
     )
     .map_err(|e| format!("environment bootstrap failed: {e}"))?;
 

@@ -31,6 +31,43 @@ impl PortMode {
     }
 }
 
+/// GPU acceleration mode (Phase 9, contract D23).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AccelerationMode {
+    /// Try the best available accelerator, fall back to CPU on failure.
+    Automatic,
+    /// Never install or use a GPU env.
+    CpuOnly,
+    /// Force the NVIDIA (CUDA) path.
+    Nvidia,
+    /// Force the Intel XPU path.
+    IntelXpu,
+    /// Force the AMD ROCm path (Linux only).
+    Amd,
+}
+
+impl Default for AccelerationMode {
+    fn default() -> Self {
+        AccelerationMode::Automatic
+    }
+}
+
+/// Last GPU provisioning attempt status (Phase 9).
+/// Recorded on every install/probe failure so the user can Retry from Settings
+/// without the app silently wasting minutes on a broken install at each launch.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AccelerationStatus {
+    /// The extra that was attempted (e.g., `cuda13`, `xpu`, `rocm`).
+    pub extra: String,
+    /// The app version the attempt targeted.
+    pub version: String,
+    /// Error text from the failed step (uv stderr tail or probe message).
+    pub error: String,
+    /// ISO-8601 UTC timestamp of the attempt.
+    pub attempted_at: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     pub port_mode: PortMode,
@@ -39,7 +76,10 @@ pub struct Settings {
     pub tray_enabled: bool,
     /// Default `false`; a file without this key reads as `false` (no schema bump, §6.7).
     pub ask_where_to_save: bool,
-    /// Unknown keys, preserved verbatim across a load/save round trip.
+    /// Phase 9: GPU acceleration mode (default `automatic`).
+    pub acceleration: AccelerationMode,
+    /// Phase 9: last failed GPU provisioning attempt (`None` = never failed / never tried).
+    pub acceleration_status: Option<AccelerationStatus>,
     pub extra: Map<String, Value>,
 }
 
@@ -51,6 +91,8 @@ impl Default for Settings {
             network_access: false,
             tray_enabled: true,
             ask_where_to_save: false,
+            acceleration: AccelerationMode::Automatic,
+            acceleration_status: None,
             extra: Map::new(),
         }
     }
@@ -101,6 +143,14 @@ pub fn load(desktop_dir: &Path) -> Settings {
         .remove("ask_where_to_save")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let acceleration = obj
+        .remove("acceleration")
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(AccelerationMode::Automatic);
+    let acceleration_status = obj
+        .remove("acceleration_status")
+        .and_then(|v| serde_json::from_value(v).ok());
     obj.remove("schema_version");
 
     Settings {
@@ -109,6 +159,8 @@ pub fn load(desktop_dir: &Path) -> Settings {
         network_access,
         tray_enabled,
         ask_where_to_save,
+        acceleration,
+        acceleration_status,
         extra: obj,
     }
 }
@@ -123,6 +175,18 @@ pub fn save(desktop_dir: &Path, settings: &Settings) -> io::Result<()> {
     fs::create_dir_all(desktop_dir)?;
     let mut obj = settings.extra.clone();
     obj.insert("schema_version".to_string(), Value::from(SCHEMA_VERSION));
+    obj.insert(
+        "acceleration".to_string(),
+        Value::from(serde_json::to_value(settings.acceleration).unwrap_or(Value::String("automatic".into()))),
+    );
+    obj.insert(
+        "acceleration_status".to_string(),
+        settings
+            .acceleration_status
+            .as_ref()
+            .map(|s| serde_json::to_value(s).unwrap_or(Value::Null))
+            .unwrap_or(Value::Null),
+    );
     obj.insert(
         "port_mode".to_string(),
         Value::from(settings.port_mode.as_str()),
@@ -232,6 +296,8 @@ mod tests {
             network_access: true,
             tray_enabled: false,
             ask_where_to_save: true,
+            acceleration: AccelerationMode::Automatic,
+            acceleration_status: None,
             extra: Map::new(),
         };
         save(dir.path(), &s).unwrap();

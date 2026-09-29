@@ -4,6 +4,7 @@
 //! archive's thin bootstrap) and the Tauri desktop shell (Phase 3) both depend on this crate
 //! instead of duplicating any of this logic.
 
+pub mod bootstrap;
 pub mod gpu;
 pub mod health;
 pub mod manifest;
