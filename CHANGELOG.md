@@ -1,5 +1,36 @@
 # Changelog
 
+## [3.1.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.0.1...persona-forge-v3.1.0) (2026-09-29)
+
+
+### Features
+
+* **desktop:** automatic GPU acceleration with CPU fallback ([89d5695](https://github.com/nmorgowicz-org/persona-forge/commit/89d5695cafdf514f220d6f49b777e8b241efca5d))
+
+
+### Bug Fixes
+
+* **audio:** remove artifact-prone stretching from Calm and Energetic ([89d5695](https://github.com/nmorgowicz-org/persona-forge/commit/89d5695cafdf514f220d6f49b777e8b241efca5d))
+* **release:** embed inline release notes in appcast.xml ([2d3f68f](https://github.com/nmorgowicz-org/persona-forge/commit/2d3f68fb69d1ffd8b49b994d2871f575af0b8ca8))
+* **runtime:** choose the CUDA 13 torch build for GPUs that support it ([89d5695](https://github.com/nmorgowicz-org/persona-forge/commit/89d5695cafdf514f220d6f49b777e8b241efca5d))
+
+
+### Documentation
+
+* **desktop:** record Phase 8 acceptance status and appcast fix details ([2d3f68f](https://github.com/nmorgowicz-org/persona-forge/commit/2d3f68fb69d1ffd8b49b994d2871f575af0b8ca8))
+
+
+### Continuous Integration
+
+* **gpu:** add dispatchable GPU validation workflow ([5a01ef9](https://github.com/nmorgowicz-org/persona-forge/commit/5a01ef9a384ab488d43e67d8e076393acc9213c7))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump ip-address from 10.5.0 to 10.7.2 in /frontend ([#361](https://github.com/nmorgowicz-org/persona-forge/issues/361)) ([a1b74d6](https://github.com/nmorgowicz-org/persona-forge/commit/a1b74d665a4a8412ae2773e57751bd4d7f8dc428))
+* **deps:** bump undici from 7.29.0 to 7.30.0 in /frontend ([#360](https://github.com/nmorgowicz-org/persona-forge/issues/360)) ([85956c6](https://github.com/nmorgowicz-org/persona-forge/commit/85956c61a46fcc205db4cd63de8da6465b408b94))
+* **deps:** update dependency @types/node to v24.19.0 ([#359](https://github.com/nmorgowicz-org/persona-forge/issues/359)) ([e39df2d](https://github.com/nmorgowicz-org/persona-forge/commit/e39df2d9416fc190c8705f415b77c3dbf84261d5))
+
 ## [3.0.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.0.0...persona-forge-v3.0.1) (2026-09-28)
 
 
