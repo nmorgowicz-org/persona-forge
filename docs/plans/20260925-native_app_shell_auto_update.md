@@ -1815,10 +1815,12 @@ On the Mac (macOS 26) and the Windows 11 PC. Linux is covered by the automated j
 - [x] First run completes. The SPA works: Speak generates and plays audio; download → Save dialog.
 - [x] Contract §1 items 2, 4, 5, 7, 8 behave as specified (use the Phase 3 checklist).
 - [ ] The next real release (N+1) is offered and installs through the in-app updater.
-   **Status (2026-09-28):** v3.0.1 update offered to v2.1.4 app; the dialog rendered the
-   full GitHub Releases page. Fixed by embedding an inline HTML `<description>` alongside
-   the `sparkle:releaseNotesLink` in `scripts/generate_update_feeds.py`. The next release
-   must be verified to display the concise inline notes.
+   **Status (2026-09-29):** A v3.0.1 app offered v3.1.1 and rendered the full GitHub release
+   page. Inspection of the live v3.1.1 feed showed that `sparkle:releaseNotesLink` still pointed
+   at that page and `<description>` contained only a generic message and link. This branch updates
+   the feed generator to embed the GitHub release body as Markdown and omit
+   `sparkle:releaseNotesLink`; verify the next real update displays only that version's notes and
+   installs successfully.
 - [x] Existing CLI-archive users: after installing the desktop app, their voices and projects
    appear (shared app-data root).
 - [x] Settings: fixed port and "Allow other devices on my network" work, and a tool on another

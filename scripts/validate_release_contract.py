@@ -15,8 +15,8 @@ import hashlib
 import json
 import sys
 import tarfile
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 
 BOOTSTRAP_ASSETS = ("persona-forge-bootstrap-linux-x86_64.tar.gz",)
@@ -207,6 +207,21 @@ def check_update_feeds(release_dir: Path, version: str, failures: list[str]) -> 
     appcast_path = release_dir / "appcast.xml"
     try:
         root = ET.parse(appcast_path).getroot()
+        item = root.find(".//item")
+        if item is None:
+            failures.append("appcast.xml is missing its update item")
+        else:
+            description = item.find("description")
+            if description is None or not (description.text or "").strip():
+                failures.append("appcast.xml must embed non-empty release notes in description")
+            elif description.get(
+                "{http://www.andymatuschak.org/xml-namespaces/sparkle}format"
+            ) != "markdown":
+                failures.append("appcast.xml description must declare sparkle:format=markdown")
+            if item.find(
+                "{http://www.andymatuschak.org/xml-namespaces/sparkle}releaseNotesLink"
+            ) is not None:
+                failures.append("appcast.xml must not link to external release notes")
         enclosure = root.find(".//enclosure")
         if enclosure is None:
             raise ValueError("missing enclosure")

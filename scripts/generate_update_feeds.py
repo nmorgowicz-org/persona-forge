@@ -181,17 +181,23 @@ def asset_url(repo: str, tag: str, asset_name: str) -> str:
 
 
 def build_appcast_xml(
-    *, version: str, dmg_url: str, dmg_length: int, ed_signature: str, notes_url: str
+    *,
+    version: str,
+    dmg_url: str,
+    dmg_length: int,
+    ed_signature: str,
+    release_notes: str,
 ) -> str:
+    if not release_notes.strip():
+        raise FeedGenerationError("release notes must not be empty")
+    notes_cdata = release_notes.replace("]]>", "]]]]><![CDATA[>")
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'
         '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">\n'
         "  <channel>\n"
         "    <title>Persona Forge</title>\n"
         "    <item>\n"
-         f'      <sparkle:releaseNotesLink>{escape(notes_url)}</sparkle:releaseNotesLink>\n'
-         f'      <description><![CDATA[<p>A new version of Persona Forge is available.</p>'
-        f'<p><a href="{escape(notes_url)}">View release notes</a></p>]]></description>\n'
+        f'      <description sparkle:format="markdown"><![CDATA[{notes_cdata}]]></description>\n'
         f"      <enclosure "
         f'url="{escape(dmg_url)}" '
         f'length="{dmg_length}" '
@@ -228,7 +234,14 @@ def build_latest_json(
 
 
 def generate(
-    *, release_dir: Path, version: str, tag: str, repo: str, notes_url: str, sparkle_seed_b64: str
+    *,
+    release_dir: Path,
+    version: str,
+    tag: str,
+    repo: str,
+    notes_url: str,
+    release_notes: str,
+    sparkle_seed_b64: str,
 ) -> None:
     check_openssl_rawin_support()
 
@@ -247,7 +260,7 @@ def generate(
         dmg_url=asset_url(repo, tag, DMG_ASSET),
         dmg_length=dmg_length,
         ed_signature=ed_signature,
-        notes_url=notes_url,
+        release_notes=release_notes,
     )
     latest_json = build_latest_json(
         version=version,
@@ -277,6 +290,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", required=True, help="OWNER/NAME")
     parser.add_argument("--notes-url", required=True, help="release notes URL for both feeds")
     parser.add_argument(
+        "--release-notes-file",
+        required=True,
+        type=Path,
+        help="UTF-8 Markdown release notes to embed in the macOS update feed",
+    )
+    parser.add_argument(
         "--sparkle-key-env",
         default="SPARKLE_ED_PRIVATE_KEY",
         help="name of the env var holding the base64 32-byte Ed25519 seed (default: %(default)s)",
@@ -292,15 +311,17 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"--release-dir does not exist or is not a directory: {release_dir}")
 
     try:
+        release_notes = args.release_notes_file.read_text(encoding="utf-8")
         generate(
             release_dir=release_dir,
             version=args.version,
             tag=args.tag,
             repo=args.repo,
             notes_url=args.notes_url,
+            release_notes=release_notes,
             sparkle_seed_b64=seed_b64,
         )
-    except FeedGenerationError as error:
+    except (FeedGenerationError, OSError, UnicodeError) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1
 
