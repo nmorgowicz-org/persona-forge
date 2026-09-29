@@ -17,8 +17,9 @@ page:
 
 On macOS, open the DMG and drag Persona Forge to Applications. On Windows, run the per-user
 installer; it does not require administrator privileges. On Linux, mark the downloaded AppImage
-executable and launch it. Windows and Linux desktop v1 use CPU inference; the macOS Apple Silicon
-build uses the default PyTorch wheel, which includes Metal/MPS support.
+executable and launch it. All platforms detect your GPU automatically and provision the matching
+PyTorch accelerator (CUDA 12/13 on NVIDIA, Intel XPU on Arc iGPUs, ROCm on AMD — Linux only),
+falling back to CPU inference with a notice when anything fails. See [GPU acceleration](#gpu-acceleration).
 
 The Linux desktop build is a preview because it is validated through automated CI rather than a
 maintainer's Linux desktop. The AppImage is the only Linux desktop package. Intel macOS, Windows
@@ -63,6 +64,10 @@ settings include:
   authentication; anyone on the reachable network can use it and access its voices. Enable this
   only on a network you trust.
 - **Keep running in the menu bar / system tray** and **Ask where to save each file**.
+- **Acceleration:** Automatic (default), CPU only, NVIDIA, Intel, or AMD. Automatic detects
+  the best available accelerator and provisions the matching PyTorch wheel; explicit choices
+  force a specific path and fall back to CPU when the hardware does not match. See
+  [GPU acceleration](#gpu-acceleration) for details.
 
 The app window uses the loopback URL `http://127.0.0.1:<port>/` even when network access is
 enabled. Settings shows the loopback address and, when applicable, each LAN address. It also
@@ -95,6 +100,33 @@ the desktop port, open **Settings**, select Automatic or Fixed, and Apply; chang
 restarts the managed server. To reset the saved port to automatic selection, close the app and
 delete only the `port` key from `<app data root>/desktop/settings.json`, then relaunch. If the
 file has no port value, the app selects an available port on startup.
+
+## GPU acceleration
+
+The desktop app detects your GPU family automatically on first launch (and after each update)
+and provisions the matching PyTorch accelerator wheel into a versioned environment:
+
+| Platform | Accelerator | Requirements |
+|---|---|---|
+| macOS Apple Silicon | MPS (Metal Performance Shaders) | macOS 14 or later; no extra steps — the default PyTorch wheel includes MPS |
+| Windows x86-64 | NVIDIA CUDA 13 or 12 | NVIDIA GPU with compute capability ≥ 7.5; CUDA 13 chosen when the driver supports it, otherwise CUDA 12 |
+| Linux x86-64 | NVIDIA CUDA 13 or 12, Intel XPU (Arc), AMD ROCm | Same CUDA rules as Windows; Intel XPU uses the Arc iGPU; ROCm requires AMD GPU |
+
+If the detected GPU family is not supported (for example, an AMD GPU on Windows), or if the
+accelerator installation or verification fails, the app falls back to CPU inference and shows a
+notice with details in Settings. The fallback is never silent.
+
+**Settings → Acceleration** lets you override the automatic choice:
+
+- **Automatic** (default): detects the best available accelerator.
+- **CPU only**: forces CPU inference regardless of hardware.
+- **NVIDIA**: forces the CUDA path (will fall back to CPU on non-NVIDIA hardware).
+- **Intel**: forces the Intel XPU path (will fall back to CPU on non-Intel hardware).
+- **AMD**: forces the ROCm path (Linux only; unavailable on macOS and Windows).
+
+The detected device name and any `acceleration_status` error are shown in Settings. A **Retry**
+button appears after a failed provision attempt. Applying a change re-provisions the environment
+and restarts the managed server.
 
 ## Updates
 

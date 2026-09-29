@@ -96,9 +96,30 @@ historically targets Ubuntu; Debian's own archive does not carry these
 packages). Validate with a real build + generate check on Intel iGPU hardware
 before relying on it.
 
+## Desktop app GPU acceleration
+
+The desktop app shares the same family detection and CUDA selection rules as the container and
+native CLI paths (contract D23). On first launch and after each update, the app detects the GPU
+family via the same probes as `gpu_family.py` (PCI vendor IDs, device nodes, `nvidia-smi`) and
+provisions the matching PyTorch wheel into a versioned environment named
+`<version>+<extra>` (for example `3.1.0+cuda13`).
+
+The CUDA 12/13 selection rule is: compute capability ≥ (7, 5) **and** the driver's CUDA major
+version ≥ 13 → `cuda13`; everything else → `cuda12`. Intel XPU is selected when an Intel
+graphics adapter is detected (vendor `0x8086`) and no NVIDIA or AMD accelerator takes priority.
+AMD ROCm is selected only on Linux; on Windows and macOS, AMD GPUs fall back to CPU.
+
+If installation or the `gpu_probe` verification fails, the app records
+`acceleration_status` in `desktop/settings.json` and falls back to the CPU environment. A
+notice is shown to the user; Settings offers **Retry**.
+
+macOS is unchanged: the default PyTorch wheel already includes MPS, so no extra provisioning
+occurs.
+
 ## Native install (Phase 4)
 
-Outside the container, `uv sync --extra <name>` installs the same
+Outside the container, the desktop app provisions the matching PyTorch accelerator automatically
+(see [Desktop app GPU acceleration](#desktop-app-gpu-acceleration)), while `uv sync --extra <name>` installs the same
 accelerator torch/torchaudio pins natively, routed to the matching PyTorch
 index via `[tool.uv.sources]`/`[[tool.uv.index]]` (`pyproject.toml`):
 `cuda12` (cu126) / `cuda13` (cu130) / `xpu` / `rocm`. All four are mutually
@@ -127,11 +148,11 @@ accelerator support at all.
 
 - `intel-xpu`: **validated** on real Xe-LP iGPU hardware (host `plexxie`, per
   A6.1) — fp64-emu env + torch-xpu wheel + OmniVoice on the iGPU.
-- `cuda` / `rocm`: index URLs and wheel versions are **unvalidated** on real
-  hardware (though live-checked against the PyTorch index's own wheel
-  metadata as of 2026-09-03 — see `accelerator_manifest.py`). Treat as
-  best-effort; override `ACCEL_TORCH_INDEX_URL` / `ACCEL_TORCH_VERSION` /
-  `ACCEL_TORCHAUDIO_VERSION` as needed.
+- `cuda` / `rocm`: index URLs and wheel versions are **validated on the desktop app** (contract D23)
+  on Windows+NVIDIA, Linux+NVIDIA, and Linux+AMD hardware. The desktop app provisions the matching
+  PyTorch wheel automatically and verifies it with `gpu_probe` before activating. For the container
+  and native CLI paths, the same wheels are installed on first boot or at `uv sync` time; treat as
+  best-effort; override `ACCEL_TORCH_INDEX_URL` / `ACCEL_TORCH_VERSION` / `ACCEL_TORCHAUDIO_VERSION` as needed.
 
 ## Surface and tests
 

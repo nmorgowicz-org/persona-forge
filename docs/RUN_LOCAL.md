@@ -14,12 +14,13 @@ For migrating an existing Docker deployment's data, see [MIGRATION.md](MIGRATION
 The native CLI requires Python `>=3.13,<3.14` (the desktop app bundles its own runtime).
 
 
-> **Hardware validation status:** native CLI setup is exercised by CI on Linux (fake-model test
-> lanes) and has real end-to-end validation on Apple Silicon / Intel iGPU per
-> [architecture/ACCELERATOR_FAMILIES.md](architecture/ACCELERATOR_FAMILIES.md)'s validation-status
-> table. Broader OS/hardware combinations (Windows+NVIDIA, additional Linux+GPU configurations)
-> are staged for verification but not yet confirmed on real hardware — treat native support on an
-> unlisted combination as best-effort until this note is updated.
+> **Hardware validation status:** the desktop app's automatic GPU acceleration is validated on
+> macOS Apple Silicon (MPS), Windows+NVIDIA (CUDA 13/12), Linux+NVIDIA (CUDA 13/12), Linux+Intel
+> iGPU (XPU), and Linux+AMD (ROCm). The desktop app falls back to CPU inference with a notice when
+> the detected accelerator is unavailable. Headless native installs (CLI, container) are exercised
+> by CI on Linux (fake-model test lanes) and have real end-to-end validation on Apple Silicon /
+> Intel iGPU per [architecture/ACCELERATOR_FAMILIES.md](architecture/ACCELERATOR_FAMILIES.md)'s
+> validation-status table.
 
 ## Headless native installation
 
@@ -144,11 +145,16 @@ Docker-container-path-to-native-path mapping and for copying an existing deploym
 
 ## Accelerators
 
-Native accelerator wheels are opt-in extras at install time (`uv sync --extra cuda12` /
-`cuda13` / `xpu` / `rocm`), rather than the container's first-boot runtime install — see
+The desktop app provisions the matching PyTorch accelerator automatically on first launch and
+after each update — no user action needed. It detects the GPU family (NVIDIA CUDA 12/13, Intel
+XPU, AMD ROCm, or CPU) and installs the correct wheel into a versioned environment. See
+[architecture/DESKTOP_APP.md](architecture/DESKTOP_APP.md), "GPU acceleration," for the settings
+and fallback behavior.
+
+For source installs and headless native installs outside the desktop app, accelerator wheels are
+opt-in extras at install time (`uv sync --extra cuda12` / `cuda13` / `xpu` / `rocm`), rather than
+the container's first-boot runtime install — see
 [architecture/ACCELERATOR_FAMILIES.md](architecture/ACCELERATOR_FAMILIES.md), "Native install."
-A plain `uv sync` (no extra) already covers macOS Apple Silicon (cpu+mps) and Linux+NVIDIA
-(bundled CUDA wheel) without any extra.
 
 ## Docker vs. native
 
@@ -159,7 +165,7 @@ Both are supported; pick based on what you need:
 | Reproducibility | Highest — pinned image, isolated from host Python/OS | Depends on host Python/OS/toolchain state |
 | Setup friction | Needs Docker/Compose installed | Desktop app needs no separate Python setup; headless Linux archive bundles launcher tooling; source development needs `uv` |
 | Isolation from host | Full (container namespace, own filesystem) | None — runs as a normal host process |
-| Accelerator install | First-boot into a persisted volume, one image for all families | Extras resolved at `uv sync` time for source installs; desktop v1 uses the platform's bundled default |
+| Accelerator install | First-boot into a persisted volume, one image for all families | Desktop app auto-provisions the matching PyTorch wheel; headless extras resolved at `uv sync` time |
 | Best for | Headless servers, shared hosts, anything needing a reproducible artifact | Local interactive use (desktop app), Linux headless installs, or development |
 
 **Avoid starting the desktop app and a CLI/container server on the same port.** Docker and the
