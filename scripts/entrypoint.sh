@@ -53,7 +53,28 @@ if [ "${_gpu_family}" != "cpu" ]; then
         # defaults this replaced went unnoticed for a full accelerator generation).
         _manifest_pin="$(python -c "
 from persona_forge.accelerator_manifest import pin_for_family
-p = pin_for_family('${_gpu_family}')
+import subprocess, re
+
+# D23: for cuda family, select cuda13 vs cuda12 based on GPU compute capability
+# and driver CUDA major (from nvidia-smi).
+cc = None
+cudamajor = None
+if '${_gpu_family}' == 'cuda':
+    try:
+        r = subprocess.run(['nvidia-smi', '--query-gpu=compute_cap', '--format=csv,noheader'],
+                          capture_output=True, text=True, timeout=10)
+        m = re.match(r'(\d+)\.(\d+)', r.stdout.strip())
+        if m:
+            cc = (int(m.group(1)), int(m.group(2)))
+        r2 = subprocess.run(['nvidia-smi'], capture_output=True, text=True, timeout=10)
+        m2 = re.search(r'CUDA Version:\s*(\d+)\.', r2.stdout)
+        if m2:
+            cudamajor = int(m2.group(1))
+    except Exception:
+        pass
+p = pin_for_family('${_gpu_family}',
+                    compute_capability=cc,
+                    driver_cuda_major=cudamajor)
 print(p.index_url if p else '')
 print(p.torch_version if p else '')
 print(p.torchaudio_version if p else '')
