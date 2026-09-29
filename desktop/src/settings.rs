@@ -32,10 +32,11 @@ impl PortMode {
 }
 
 /// GPU acceleration mode (Phase 9, contract D23).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AccelerationMode {
     /// Try the best available accelerator, fall back to CPU on failure.
+    #[default]
     Automatic,
     /// Never install or use a GPU env.
     CpuOnly,
@@ -45,12 +46,6 @@ pub enum AccelerationMode {
     IntelXpu,
     /// Force the AMD ROCm path (Linux only).
     Amd,
-}
-
-impl Default for AccelerationMode {
-    fn default() -> Self {
-        AccelerationMode::Automatic
-    }
 }
 
 /// Last GPU provisioning attempt status (Phase 9).
@@ -176,10 +171,7 @@ pub fn save(desktop_dir: &Path, settings: &Settings) -> io::Result<()> {
     obj.insert("schema_version".to_string(), Value::from(SCHEMA_VERSION));
     obj.insert(
         "acceleration".to_string(),
-        Value::from(
-            serde_json::to_value(settings.acceleration)
-                .unwrap_or(Value::String("automatic".into())),
-        ),
+        serde_json::to_value(settings.acceleration).unwrap_or(Value::String("automatic".into())),
     );
     obj.insert(
         "acceleration_status".to_string(),

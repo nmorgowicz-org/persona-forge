@@ -87,6 +87,11 @@ impl Progress for NoProgress {
     fn step(&self, _: Step) {}
 }
 
+pub struct BootstrapOptions<'a> {
+    pub extra: Option<&'a str>,
+    pub progress: &'a dyn Progress,
+}
+
 /// Ensure a fully-provisioned venv exists for `manifest.version` under `versions_dir`, building
 /// it if necessary, and return the venv directory. Never mutates `versions_dir/<version>` or
 /// `current_marker` unless every provisioning step succeeds. Delegates to
@@ -107,8 +112,10 @@ pub fn ensure_env(
         versions_dir,
         current_marker,
         runner,
-        extra,
-        &NoProgress,
+        BootstrapOptions {
+            extra,
+            progress: &NoProgress,
+        },
     )
 }
 
@@ -122,12 +129,11 @@ pub fn ensure_env_with_progress(
     versions_dir: &Path,
     current_marker: &Path,
     runner: &dyn Runner,
-    extra: Option<&str>,
-    progress: &dyn Progress,
+    options: BootstrapOptions<'_>,
 ) -> Result<PathBuf, BootstrapError> {
     // `env_dir` IS the venv root once provisioned (the staged venv is renamed directly onto
     // it below) - there is no extra "venv" nesting level.
-    let env_name = env_name_for_version(&manifest.version, extra);
+    let env_name = env_name_for_version(&manifest.version, options.extra);
     let env_dir = versions_dir.join(&env_name);
     let marker = ready_marker(&env_dir);
 
@@ -160,9 +166,8 @@ pub fn ensure_env_with_progress(
         uv_path,
         &staging_dir,
         runner,
-        &requirements_name_for_extra(&manifest.requirements_file, extra),
-        extra,
-        progress,
+        &requirements_name_for_extra(&manifest.requirements_file, options.extra),
+        options,
     ) {
         let _ = fs::remove_dir_all(&staging_dir); // best-effort cleanup; the error already explains why
         return Err(e);
@@ -219,13 +224,12 @@ fn provision(
     staging_dir: &Path,
     runner: &dyn Runner,
     requirements_name: &str,
-    extra: Option<&str>,
-    progress: &dyn Progress,
+    options: BootstrapOptions<'_>,
 ) -> Result<(), BootstrapError> {
     let venv_dir = staging_dir.join("venv");
     let venv_dir_str = venv_dir.to_string_lossy().into_owned();
 
-    progress.step(Step::Venv);
+    options.progress.step(Step::Venv);
     let code = runner
         .run(uv_path, &["venv", &venv_dir_str, "--python", "3.13"])
         .map_err(|e| io_err("spawning uv venv", e))?;
@@ -241,7 +245,7 @@ fn provision(
     let requirements_path = bundle_dir.join(requirements_name);
     let requirements_str = requirements_path.to_string_lossy().into_owned();
 
-    progress.step(Step::Sync);
+    options.progress.step(Step::Sync);
     let code = runner
         .run(
             uv_path,
@@ -257,7 +261,7 @@ fn provision(
 
     let wheel_path = bundle_dir.join(&manifest.wheel.file);
     let wheel_str = wheel_path.to_string_lossy().into_owned();
-    progress.step(Step::Install);
+    options.progress.step(Step::Install);
     let code = runner
         .run(
             uv_path,
@@ -280,8 +284,8 @@ fn provision(
 
     // Phase 9: Run GPU probe verification after install to confirm the device works.
     // This catches cases where the install succeeded but the GPU can't actually run the model.
-    if let Some(extra) = extra {
-        progress.step(Step::Verify);
+    if let Some(extra) = options.extra {
+        options.progress.step(Step::Verify);
         let probe_code = runner
             .run(
                 &python,
@@ -570,8 +574,10 @@ mod tests {
             &versions_dir,
             &current_marker,
             &runner,
-            None,
-            &progress,
+            BootstrapOptions {
+                extra: None,
+                progress: &progress,
+            },
         )
         .unwrap();
 
@@ -615,8 +621,10 @@ mod tests {
             &versions_dir,
             &current_marker,
             &FakeRunner::new(None),
-            None,
-            &progress,
+            BootstrapOptions {
+                extra: None,
+                progress: &progress,
+            },
         )
         .unwrap();
 

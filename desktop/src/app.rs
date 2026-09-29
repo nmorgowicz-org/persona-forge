@@ -234,7 +234,7 @@ fn apply_settings<R: Runtime>(
     let mut s = settings::load(&state.desktop_dir);
     let old_mode = s.port_mode.clone();
     let old_network = s.network_access;
-    let old_acceleration = s.acceleration.clone();
+    let old_acceleration = s.acceleration;
     let tray_present = app.tray_by_id(tray::ID_TRAY_ICON).is_some();
     let old_port = s.port;
 
@@ -944,8 +944,10 @@ fn run_bootstrap<R: Runtime + 'static>(app: AppHandle<R>) {
                 &versions_dir,
                 &current_marker,
                 &runner,
-                None,
-                &progress,
+                bootstrap::BootstrapOptions {
+                    extra: None,
+                    progress: &progress,
+                },
             ) {
                 Ok(dir) => dir,
                 Err(e) => return set_error(&app, format!("CPU bootstrap failed: {e}")),
@@ -960,8 +962,10 @@ fn run_bootstrap<R: Runtime + 'static>(app: AppHandle<R>) {
             &versions_dir,
             &current_marker,
             &runner,
-            None,
-            &progress,
+            bootstrap::BootstrapOptions {
+                extra: None,
+                progress: &progress,
+            },
         ) {
             Ok(dir) => dir,
             Err(e) => return set_error(&app, format!("CPU bootstrap failed: {e}")),
@@ -976,17 +980,16 @@ fn run_bootstrap<R: Runtime + 'static>(app: AppHandle<R>) {
 
     // Phase 9: spawn background GPU install if we're on CPU but GPU is available.
     // This runs asynchronously and never blocks the app.
-    if env_dir.file_name().and_then(|n| n.to_str()) == Some(&manifest.version)
-        && gpu_extra.is_some()
-        && !failed_for_this_env
-    {
+    if let Some(extra) = gpu_extra.filter(|_| {
+        env_dir.file_name().and_then(|n| n.to_str()) == Some(&manifest.version)
+            && !failed_for_this_env
+    }) {
         let app_clone = app.clone();
         let payload_clone = payload_dir.clone();
         let uv_clone = uv_path.clone();
         let versions_clone = versions_dir.clone();
         let marker_clone = current_marker.clone();
         let manifest_version = manifest.version.clone();
-        let extra = gpu_extra.unwrap();
         let desktop_dir_bg = desktop_dir.clone();
 
         std::thread::spawn(move || {

@@ -430,17 +430,13 @@ mod tests {
     }
 
     fn run_case(
-        nvidia_pci: bool,
-        cuda_node: bool,
-        nvidia_smi: bool,
-        amd_pci: bool,
-        rocm_node: bool,
-        intel_pci: bool,
-        intel_node: bool,
+        signals: [bool; 7],
         cc: Option<(u32, u32)>,
         driver_major: Option<u32>,
         os: Os,
     ) -> Accel {
+        let [nvidia_pci, cuda_node, nvidia_smi, amd_pci, rocm_node, intel_pci, intel_node] =
+            signals;
         let probe = FakeProbe {
             nvidia_pci,
             cuda_node,
@@ -459,13 +455,7 @@ mod tests {
     fn test_cuda13_selection() {
         // RTX 5090: CC (12, 0), driver CUDA 13
         let result = run_case(
-            true,
-            true,
-            true, // NVIDIA present
-            false,
-            false, // no AMD
-            false,
-            false, // no Intel
+            [true, true, true, false, false, false, false],
             Some((12, 0)),
             Some(13),
             Os::Linux,
@@ -477,13 +467,7 @@ mod tests {
     fn test_cuda12_selection() {
         // Older GPU: CC (6, 1) (Pascal), driver CUDA 13
         let result = run_case(
-            true,
-            true,
-            true,
-            false,
-            false,
-            false,
-            false,
+            [true, true, true, false, false, false, false],
             Some((6, 1)),
             Some(13),
             Os::Linux,
@@ -495,13 +479,7 @@ mod tests {
     fn test_cuda12_with_old_driver() {
         // RTX 5090 but driver only supports CUDA 12.6
         let result = run_case(
-            true,
-            true,
-            true,
-            false,
-            false,
-            false,
-            false,
+            [true, true, true, false, false, false, false],
             Some((12, 0)),
             Some(12),
             Os::Linux,
@@ -514,13 +492,7 @@ mod tests {
         // PCI present but no device node: not capable, falls back to CPU.
         // This matches Python's resolve_gpu_family: present without capability = cpu.
         let result = run_case(
-            true,
-            false,
-            true, // PCI present, no device node, nvidia-smi works
-            false,
-            false,
-            false,
-            false,
+            [true, false, true, false, false, false, false],
             None,
             Some(13),
             Os::Linux,
@@ -532,13 +504,7 @@ mod tests {
     fn test_rocm_selection() {
         // AMD GPU on Linux
         let result = run_case(
-            false,
-            false,
-            false, // no NVIDIA
-            true,
-            true, // AMD PCI + /dev/kfd
-            false,
-            false, // no Intel
+            [false, false, false, true, true, false, false],
             None,
             None,
             Os::Linux,
@@ -550,13 +516,7 @@ mod tests {
     fn test_intel_xpu_selection() {
         // Intel GPU
         let result = run_case(
-            false,
-            false,
-            false,
-            false,
-            false,
-            true,
-            true, // Intel PCI + /dev/dri/renderD*
+            [false, false, false, false, false, true, true],
             None,
             None,
             Os::Linux,
@@ -568,13 +528,7 @@ mod tests {
     fn test_macos_always_cpu() {
         // Even with NVIDIA PCI present, macOS is CPU
         let result = run_case(
-            true,
-            true,
-            true,
-            false,
-            false,
-            false,
-            false,
+            [true, true, true, false, false, false, false],
             Some((12, 0)),
             Some(13),
             Os::Macos,
@@ -586,13 +540,7 @@ mod tests {
     fn test_priority_cuda_over_others() {
         // NVIDIA should win over AMD and Intel
         let result = run_case(
-            true,
-            true,
-            true, // NVIDIA
-            true,
-            true, // AMD
-            true,
-            true, // Intel
+            [true, true, true, true, true, true, true],
             Some((12, 0)),
             Some(13),
             Os::Linux,
@@ -604,13 +552,7 @@ mod tests {
     fn test_nvidia_smi_alone_is_cuda() {
         // Windows case: nvidia-smi works but no sysfs probes
         let result = run_case(
-            false,
-            false,
-            true, // only nvidia-smi
-            false,
-            false,
-            false,
-            false,
+            [false, false, true, false, false, false, false],
             Some((12, 0)),
             Some(13),
             Os::Windows,
@@ -622,13 +564,7 @@ mod tests {
     fn test_pci_present_but_no_device_node() {
         // PCI present but no device node and no nvidia-smi: not capable
         let result = run_case(
-            true,
-            false,
-            false, // PCI only
-            false,
-            false,
-            false,
-            false,
+            [true, false, false, false, false, false, false],
             None,
             None,
             Os::Linux,
@@ -638,18 +574,7 @@ mod tests {
 
     #[test]
     fn test_no_hardware_is_cpu() {
-        let result = run_case(
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            None,
-            None,
-            Os::Linux,
-        );
+        let result = run_case([false; 7], None, None, Os::Linux);
         assert_eq!(result, Accel::Cpu);
     }
 
@@ -707,13 +632,9 @@ mod tests {
             };
 
             let result = run_case(
-                nvidia_pci,
-                cuda_node,
-                nvidia_smi,
-                amd_pci,
-                rocm_node,
-                intel_pci,
-                intel_node,
+                [
+                    nvidia_pci, cuda_node, nvidia_smi, amd_pci, rocm_node, intel_pci, intel_node,
+                ],
                 cc,
                 driver_major,
                 os,
