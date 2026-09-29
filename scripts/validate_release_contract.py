@@ -174,10 +174,10 @@ def check_update_feeds(release_dir: Path, version: str, failures: list[str]) -> 
     if not isinstance(pub_date, str) or not pub_date:
         failures.append("latest.json pub_date must be a non-empty string")
     notes = latest.get("notes")
-    if not isinstance(notes, str) or not notes:
-        failures.append("latest.json notes must be a non-empty string")
-    if isinstance(notes, str) and not notes.startswith("https://"):
-        failures.append("latest.json notes must be an HTTPS URL")
+    if not isinstance(notes, str) or not notes.strip():
+        failures.append("latest.json notes must contain non-empty release notes text")
+    elif notes.startswith(("http://", "https://")):
+        failures.append("latest.json notes must contain release notes text, not a URL")
     if latest.get("version") != version:
         failures.append(f"latest.json version is {latest.get('version')!r}, expected {version!r}")
     platforms = latest.get("platforms")

@@ -1670,6 +1670,14 @@ Runs, in order (the owner creates the two pre-releases first, OA-8):
    update with a signature error.
 7. The owner deletes both pre-releases afterwards.
 
+### Phase 6B follow-up — readable release notes in update prompts
+
+The update feeds now embed the release notes text in both client formats. Sparkle reads the
+Markdown description from `appcast.xml`; Tauri's Windows/Linux update dialog reads plain text from
+`latest.json.notes`. The generator strips common Markdown formatting for the Tauri dialog, and the
+release-contract validator rejects empty notes or a notes URL. Verify both dialogs against the next
+release on macOS and Windows; the already-published v3.1.1 feeds are unchanged.
+
 ### Gate 6B
 
 ```bash

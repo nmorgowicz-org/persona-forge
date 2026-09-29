@@ -30,7 +30,6 @@ from scripts.generate_update_feeds import (
 VERSION = "90.0.1"
 TAG = "desktop-updater-test"
 REPO = "nmorgowicz-org/persona-forge"
-NOTES_URL = "https://github.com/nmorgowicz-org/persona-forge/releases/tag/desktop-updater-test"
 RELEASE_NOTES = (
     "## Bug Fixes\n\n* **release:** validate the launcher requirements set.\n"
 )
@@ -85,7 +84,6 @@ def test_appcast_signature_verifies_with_openssl(tmp_path: Path) -> None:
         version=VERSION,
         tag=TAG,
         repo=REPO,
-        notes_url=NOTES_URL,
         release_notes=RELEASE_NOTES,
         sparkle_seed_b64=seed_b64,
     )
@@ -133,7 +131,6 @@ def test_appcast_contains_required_fields(tmp_path: Path) -> None:
         version=VERSION,
         tag=TAG,
         repo=REPO,
-        notes_url=NOTES_URL,
         release_notes=RELEASE_NOTES,
         sparkle_seed_b64=seed_b64,
     )
@@ -196,7 +193,6 @@ def test_latest_json_has_required_keys_and_matching_version(tmp_path: Path) -> N
         version=VERSION,
         tag=TAG,
         repo=REPO,
-        notes_url=NOTES_URL,
         release_notes=RELEASE_NOTES,
         sparkle_seed_b64=seed_b64,
     )
@@ -209,7 +205,7 @@ def test_latest_json_has_required_keys_and_matching_version(tmp_path: Path) -> N
 
     assert "pub_date" in latest
     assert "notes" in latest
-    assert latest["notes"] == NOTES_URL
+    assert latest["notes"] == "Bug Fixes\n\n• release: validate the launcher requirements set."
 
     platforms = latest["platforms"]
     assert set(platforms) == {"windows-x86_64-nsis", "linux-x86_64-appimage"}
@@ -240,7 +236,6 @@ def test_each_missing_asset_raises(tmp_path: Path, missing_name: str) -> None:
             version=VERSION,
             tag=TAG,
             repo=REPO,
-            notes_url=NOTES_URL,
             release_notes=RELEASE_NOTES,
             sparkle_seed_b64=seed_b64,
         )
@@ -258,7 +253,6 @@ def test_empty_signature_file_raises(tmp_path: Path) -> None:
             version=VERSION,
             tag=TAG,
             repo=REPO,
-            notes_url=NOTES_URL,
             release_notes=RELEASE_NOTES,
             sparkle_seed_b64=seed_b64,
         )
@@ -276,7 +270,6 @@ def test_empty_dmg_raises(tmp_path: Path) -> None:
             version=VERSION,
             tag=TAG,
             repo=REPO,
-            notes_url=NOTES_URL,
             release_notes=RELEASE_NOTES,
             sparkle_seed_b64=seed_b64,
         )
@@ -293,7 +286,6 @@ def test_seed_that_does_not_decode_to_32_bytes_raises(tmp_path: Path) -> None:
             version=VERSION,
             tag=TAG,
             repo=REPO,
-            notes_url=NOTES_URL,
             release_notes=RELEASE_NOTES,
             sparkle_seed_b64=short_seed,
         )
@@ -309,7 +301,6 @@ def test_no_key_material_appears_in_generated_files(tmp_path: Path) -> None:
         version=VERSION,
         tag=TAG,
         repo=REPO,
-        notes_url=NOTES_URL,
         release_notes=RELEASE_NOTES,
         sparkle_seed_b64=seed_b64,
     )
@@ -351,8 +342,6 @@ def test_no_key_material_appears_in_stdout_or_stderr(
                 TAG,
                 "--repo",
                 REPO,
-                "--notes-url",
-                NOTES_URL,
                 "--release-notes-file",
                 str(release_dir.parent / "release-notes.md"),
             ]
@@ -386,8 +375,6 @@ def test_main_reports_missing_env_var(tmp_path: Path) -> None:
                     TAG,
                     "--repo",
                     REPO,
-                    "--notes-url",
-                    NOTES_URL,
                     "--release-notes-file",
                     str(release_dir.parent / "release-notes.md"),
                 ]

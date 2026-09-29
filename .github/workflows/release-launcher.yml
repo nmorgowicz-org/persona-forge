@@ -135,7 +135,6 @@ jobs:
             --version "$RELEASE_VERSION" \
             --tag "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" \
             --release-notes-file "$RUNNER_TEMP/release-notes.md"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

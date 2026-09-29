@@ -10,7 +10,7 @@ directory:
 
 Usage:
     generate_update_feeds.py --release-dir DIR --version X.Y.Z --tag TAG --repo OWNER/NAME
-                              --notes-url URL --sparkle-key-env SPARKLE_ED_PRIVATE_KEY
+                              --release-notes-file FILE --sparkle-key-env SPARKLE_ED_PRIVATE_KEY
 
 Fails closed: a missing asset, an empty/unreadable signature, or a version that does not match
 the caller's `--version` are all hard errors, never silently skipped.
@@ -27,6 +27,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -215,7 +216,7 @@ def build_appcast_xml(
 def build_latest_json(
     *,
     version: str,
-    notes_url: str,
+    notes: str,
     windows_url: str,
     windows_signature: str,
     linux_url: str,
@@ -225,12 +226,23 @@ def build_latest_json(
     return {
         "version": version,
         "pub_date": pub_date,
-        "notes": notes_url,
+        "notes": notes,
         "platforms": {
             "windows-x86_64-nsis": {"url": windows_url, "signature": windows_signature},
             "linux-x86_64-appimage": {"url": linux_url, "signature": linux_signature},
         },
     }
+
+
+def release_notes_as_plain_text(markdown: str) -> str:
+    lines: list[str] = []
+    for line in markdown.splitlines():
+        line = re.sub(r"^\s*#{1,6}\s+", "", line)
+        line = re.sub(r"^\s*[-*+]\s+", "• ", line)
+        line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)
+        line = line.replace("**", "").replace("__", "").replace("`", "")
+        lines.append(line)
+    return "\n".join(lines).strip()
 
 
 def generate(
@@ -239,7 +251,6 @@ def generate(
     version: str,
     tag: str,
     repo: str,
-    notes_url: str,
     release_notes: str,
     sparkle_seed_b64: str,
 ) -> None:
@@ -264,7 +275,7 @@ def generate(
     )
     latest_json = build_latest_json(
         version=version,
-        notes_url=notes_url,
+        notes=release_notes_as_plain_text(release_notes),
         windows_url=asset_url(repo, tag, WINDOWS_ASSET),
         windows_signature=windows_signature,
         linux_url=asset_url(repo, tag, LINUX_ASSET),
@@ -288,12 +299,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", required=True, help="e.g. 1.3.0 or 90.0.1 (no leading 'v')")
     parser.add_argument("--tag", required=True, help="the GitHub release tag the assets live under")
     parser.add_argument("--repo", required=True, help="OWNER/NAME")
-    parser.add_argument("--notes-url", required=True, help="release notes URL for both feeds")
     parser.add_argument(
         "--release-notes-file",
         required=True,
         type=Path,
-        help="UTF-8 Markdown release notes to embed in the macOS update feed",
+        help="UTF-8 Markdown release notes to embed in appcast and latest.json",
     )
     parser.add_argument(
         "--sparkle-key-env",
@@ -317,7 +327,6 @@ def main(argv: list[str] | None = None) -> int:
             version=args.version,
             tag=args.tag,
             repo=args.repo,
-            notes_url=args.notes_url,
             release_notes=release_notes,
             sparkle_seed_b64=seed_b64,
         )
