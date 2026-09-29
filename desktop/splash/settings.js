@@ -191,7 +191,7 @@ if (window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen)
       extra: payload.extra,
       version: payload.version,
       error: null,
-      attempted_at: new Date().toISOString().replace('T', 'T').slice(0, 19)
+      attempted_at: new Date().toISOString().slice(0, 19)
     })
   }).catch(() => {
     // Event listener not available (e.g., in browser dev mode)
@@ -203,7 +203,7 @@ if (window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen)
       extra: payload.extra,
       version: '',
       error: payload.error,
-      attempted_at: new Date().toISOString().replace('T', 'T').slice(0, 19)
+      attempted_at: new Date().toISOString().slice(0, 19)
     })
   }).catch(() => {
     // Event listener not available (e.g., in browser dev mode)
