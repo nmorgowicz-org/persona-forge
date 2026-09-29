@@ -2337,3 +2337,21 @@ Recorded 2026-09-28. Probe runs via `scripts/gpu_validate.sh` on the owner's RTX
 
 **D23 confirmed:** compute capability ≥ (7,5) **and** driver CUDA major ≥ 13 → `cuda13`;
 anything else → `cuda12`. The RTX 5090 (CC 12.0) requires `cuda13`.
+
+### Phase 9 review follow-up (2026-09-29)
+
+The review fixes on `desktop/p9-gpu-acceleration` address CPU bootstrap probing,
+platform detection (including Windows Intel adapters and Linux device nodes),
+per-family probe selection, active GPU environment retention, persisted acceleration
+mode, failure retry suppression, CLI accelerator selection, CPU fallback reporting,
+and Linux-only AMD selection. The three separate audio-preset working-tree edits
+remain outside this follow-up.
+
+Local checks: launcher and desktop `cargo check` passed; launcher cross-target
+`cargo check --target x86_64-pc-windows-gnu` passed; `python scripts/validate_repo.py`,
+`docker compose config --quiet`, and `git diff --check` passed. Gate 9 local tests
+passed on 2026-09-29: launcher `cargo test` (65 passed, 1 ignored), desktop
+`cargo test` (50 passed), and the Phase 9 tier-1 Python command (716 passed,
+1 warning). The installed-app GPU/CPU fallback scenario remains to be run.
+PR #362 merged the GPU validation workflow and its probe script to `main` on
+2026-09-29. The Windows CUDA 13 dispatch is the next remote gate.

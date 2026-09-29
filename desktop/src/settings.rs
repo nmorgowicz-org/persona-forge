@@ -145,8 +145,7 @@ pub fn load(desktop_dir: &Path) -> Settings {
         .unwrap_or(false);
     let acceleration = obj
         .remove("acceleration")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .and_then(|s| serde_json::from_str(&s).ok())
+        .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or(AccelerationMode::Automatic);
     let acceleration_status = obj
         .remove("acceleration_status")
@@ -177,7 +176,10 @@ pub fn save(desktop_dir: &Path, settings: &Settings) -> io::Result<()> {
     obj.insert("schema_version".to_string(), Value::from(SCHEMA_VERSION));
     obj.insert(
         "acceleration".to_string(),
-        Value::from(serde_json::to_value(settings.acceleration).unwrap_or(Value::String("automatic".into()))),
+        Value::from(
+            serde_json::to_value(settings.acceleration)
+                .unwrap_or(Value::String("automatic".into())),
+        ),
     );
     obj.insert(
         "acceleration_status".to_string(),

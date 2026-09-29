@@ -68,6 +68,30 @@ pub fn prune_versions(
     let current_version = Version::parse(strip_staging(strip_extra(keep_current))).ok();
     // Phase 9: the CPU fallback env for the current version (strip +<extra> if present).
     let current_cpu_fallback = strip_extra(keep_current);
+    let active_extra = keep_current.split_once('+').map(|(_, extra)| extra);
+    let previous_same_extra = active_extra.and_then(|extra| {
+        fs::read_dir(versions_dir)
+            .ok()?
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let (version, candidate_extra) = name.split_once('+')?;
+                if candidate_extra != extra || !entry.file_type().ok()?.is_dir() {
+                    return None;
+                }
+                let parsed = Version::parse(version).ok()?;
+                if current_version
+                    .as_ref()
+                    .is_some_and(|current| parsed < *current)
+                {
+                    Some((parsed, name))
+                } else {
+                    None
+                }
+            })
+            .max_by(|left, right| left.0.cmp(&right.0))
+            .map(|(_, name)| name)
+    });
     let mut deleted = Vec::new();
 
     for entry in entries {
@@ -77,7 +101,14 @@ pub fn prune_versions(
         let name_str = name.to_string_lossy();
         let path = entry.path();
 
-        if name_str == keep_current || Some(name_str.as_ref()) == keep_previous || name_str == current_cpu_fallback {
+        if name_str == keep_current
+            || Some(name_str.as_ref()) == keep_previous
+            || keep_previous
+                .filter(|previous| !previous.contains('+'))
+                .is_some_and(|previous| strip_extra(&name_str) == previous)
+            || name_str == current_cpu_fallback
+            || previous_same_extra.as_deref() == Some(name_str.as_ref())
+        {
             continue;
         }
         if file_type.is_symlink() {
@@ -373,5 +404,20 @@ mod tests {
         assert!(versions_dir.join("2.0.0").exists());
         assert!(!versions_dir.join("2.0.0+xpu").exists());
         assert!(!versions_dir.join("1.0.0+xpu").exists());
+    }
+
+    #[test]
+    fn cpu_promotion_preserves_previous_gpu_env_for_rollback() {
+        let root = tempfile::tempdir().unwrap();
+        let versions_dir = root.path().join("versions");
+        fs::create_dir_all(&versions_dir).unwrap();
+        for name in ["2.0.0", "1.0.0", "1.0.0+cuda13", "0.9.0+cuda13"] {
+            fs::create_dir_all(versions_dir.join(name)).unwrap();
+        }
+
+        prune_versions(&versions_dir, "2.0.0", Some("1.0.0"), &NeverInUse).unwrap();
+
+        assert!(versions_dir.join("1.0.0+cuda13").exists());
+        assert!(!versions_dir.join("0.9.0+cuda13").exists());
     }
 }

@@ -11,6 +11,7 @@
 //! Python tests (`test_gpu_family.py`) and Rust tests (`gpu.rs`), so the detection
 //! logic stays in lockstep across languages.
 
+#[cfg(target_os = "linux")]
 use std::path::Path;
 use std::process::Command;
 
@@ -32,14 +33,11 @@ pub enum Accel {
 
 /// Operating system abstraction for probe selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
 pub enum Os {
     Linux,
     Windows,
-    #[default]
     Macos,
 }
-
 
 /// Injectable GPU probes — unit-testable without hardware.
 ///
@@ -131,7 +129,12 @@ impl GpuProbe for PlatformProbe {
         pci_vendor_present("/sys/bus/pci/devices", "0x8086")
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "windows")]
+    fn intel_pci_present(&self) -> bool {
+        windows_intel_adapter_present()
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     fn intel_pci_present(&self) -> bool {
         false
     }
@@ -141,7 +144,12 @@ impl GpuProbe for PlatformProbe {
         glob_any("/dev/dri/renderD*")
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "windows")]
+    fn intel_device_node_present(&self) -> bool {
+        windows_intel_adapter_present()
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     fn intel_device_node_present(&self) -> bool {
         false
     }
@@ -208,10 +216,9 @@ pub fn select_cuda_extra(
     driver_cuda_major: Option<u32>,
 ) -> Accel {
     if let (Some(cc), Some(major)) = (compute_capability, driver_cuda_major) {
-        if (cc.0 > 7 || (cc.0 == 7 && cc.1 >= 5))
-            && major >= 13 {
-                return Accel::Cuda13;
-            }
+        if (cc.0 > 7 || (cc.0 == 7 && cc.1 >= 5)) && major >= 13 {
+            return Accel::Cuda13;
+        }
     }
     Accel::Cuda12
 }
@@ -219,6 +226,7 @@ pub fn select_cuda_extra(
 /// Check if a PCI vendor ID is present in `/sys/bus/pci/devices/*/vendor`.
 ///
 /// Returns `true` if any device file matches the given vendor ID string (e.g., `"0x10de"`).
+#[cfg(target_os = "linux")]
 fn pci_vendor_present(base: &str, vendor_id: &str) -> bool {
     let base_path = Path::new(base);
     let entries = match std::fs::read_dir(base_path) {
@@ -239,15 +247,53 @@ fn pci_vendor_present(base: &str, vendor_id: &str) -> bool {
 /// Return `true` if any path matches the given glob pattern.
 ///
 /// Simplified glob: only supports trailing `*` wildcard.
+#[cfg(target_os = "linux")]
 fn glob_any(pattern: &str) -> bool {
     let star_idx = match pattern.rfind('*') {
         Some(i) => i,
         None => return false,
     };
-    let prefix = &pattern[..star_idx];
-    match std::fs::read_dir(prefix) {
-        Ok(entries) => entries.flatten().next().is_some(),
+    let prefix = Path::new(&pattern[..star_idx]);
+    let Some(parent) = prefix.parent() else {
+        return false;
+    };
+    let Some(name_prefix) = prefix.file_name() else {
+        return false;
+    };
+    match std::fs::read_dir(parent) {
+        Ok(entries) => entries.flatten().any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(name_prefix.to_string_lossy().as_ref())
+        }),
         Err(_) => false,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_intel_adapter_present() -> bool {
+    use windows::Win32::Graphics::Gdi::{EnumDisplayDevicesW, DISPLAY_DEVICEW};
+
+    let mut index = 0;
+    loop {
+        let mut device = DISPLAY_DEVICEW {
+            cb: std::mem::size_of::<DISPLAY_DEVICEW>() as u32,
+            ..Default::default()
+        };
+        if !unsafe { EnumDisplayDevicesW(None, index, &mut device, 0) }.as_bool() {
+            return false;
+        }
+        let id_end = device
+            .DeviceID
+            .iter()
+            .position(|&ch| ch == 0)
+            .unwrap_or(device.DeviceID.len());
+        let id = String::from_utf16_lossy(&device.DeviceID[..id_end]);
+        if id.to_ascii_uppercase().contains("VEN_8086") {
+            return true;
+        }
+        index += 1;
     }
 }
 
@@ -294,13 +340,17 @@ fn nvidia_smi_compute_cap() -> Result<(u32, u32), String> {
 ///
 /// This is the driver's supported CUDA version (not the installed toolkit).
 fn nvidia_smi_cuda_version() -> Result<u32, String> {
-    let output = Command::new("nvidia-smi").output().map_err(|e| e.to_string())?;
+    let output = Command::new("nvidia-smi")
+        .output()
+        .map_err(|e| e.to_string())?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
     }
     let text = String::from_utf8_lossy(&output.stdout);
     // Find "CUDA Version: X.Y" or "CUDA Version : X.Y" (format varies by locale/version).
-    let idx = text.find("CUDA Version").ok_or("CUDA Version line not found")?;
+    let idx = text
+        .find("CUDA Version")
+        .ok_or("CUDA Version line not found")?;
     let after = &text[idx + "CUDA Version".len()..];
     // Skip whitespace and colons
     let after = after.trim_start_matches(|c: char| c.is_whitespace() || c == ':');
@@ -320,7 +370,13 @@ fn nvidia_smi_cuda_version() -> Result<u32, String> {
 /// Convenience function using the platform-native probes.
 pub fn detect_platform() -> Accel {
     let probe = PlatformProbe;
-    let os = Os::default();
+    let os = if cfg!(target_os = "linux") {
+        Os::Linux
+    } else if cfg!(target_os = "windows") {
+        Os::Windows
+    } else {
+        Os::Macos
+    };
     detect(&probe, os)
 }
 
@@ -403,9 +459,13 @@ mod tests {
     fn test_cuda13_selection() {
         // RTX 5090: CC (12, 0), driver CUDA 13
         let result = run_case(
-            true, true, true, // NVIDIA present
-            false, false,     // no AMD
-            false, false,     // no Intel
+            true,
+            true,
+            true, // NVIDIA present
+            false,
+            false, // no AMD
+            false,
+            false, // no Intel
             Some((12, 0)),
             Some(13),
             Os::Linux,
@@ -417,9 +477,13 @@ mod tests {
     fn test_cuda12_selection() {
         // Older GPU: CC (6, 1) (Pascal), driver CUDA 13
         let result = run_case(
-            true, true, true,
-            false, false,
-            false, false,
+            true,
+            true,
+            true,
+            false,
+            false,
+            false,
+            false,
             Some((6, 1)),
             Some(13),
             Os::Linux,
@@ -431,9 +495,13 @@ mod tests {
     fn test_cuda12_with_old_driver() {
         // RTX 5090 but driver only supports CUDA 12.6
         let result = run_case(
-            true, true, true,
-            false, false,
-            false, false,
+            true,
+            true,
+            true,
+            false,
+            false,
+            false,
+            false,
             Some((12, 0)),
             Some(12),
             Os::Linux,
@@ -446,9 +514,13 @@ mod tests {
         // PCI present but no device node: not capable, falls back to CPU.
         // This matches Python's resolve_gpu_family: present without capability = cpu.
         let result = run_case(
-            true, false, true, // PCI present, no device node, nvidia-smi works
-            false, false,
-            false, false,
+            true,
+            false,
+            true, // PCI present, no device node, nvidia-smi works
+            false,
+            false,
+            false,
+            false,
             None,
             Some(13),
             Os::Linux,
@@ -460,10 +532,15 @@ mod tests {
     fn test_rocm_selection() {
         // AMD GPU on Linux
         let result = run_case(
-            false, false, false, // no NVIDIA
-            true, true,          // AMD PCI + /dev/kfd
-            false, false,        // no Intel
-            None, None,
+            false,
+            false,
+            false, // no NVIDIA
+            true,
+            true, // AMD PCI + /dev/kfd
+            false,
+            false, // no Intel
+            None,
+            None,
             Os::Linux,
         );
         assert_eq!(result, Accel::Rocm);
@@ -473,10 +550,15 @@ mod tests {
     fn test_intel_xpu_selection() {
         // Intel GPU
         let result = run_case(
-            false, false, false,
-            false, false,
-            true, true, // Intel PCI + /dev/dri/renderD*
-            None, None,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            true, // Intel PCI + /dev/dri/renderD*
+            None,
+            None,
             Os::Linux,
         );
         assert_eq!(result, Accel::IntelXpu);
@@ -486,9 +568,13 @@ mod tests {
     fn test_macos_always_cpu() {
         // Even with NVIDIA PCI present, macOS is CPU
         let result = run_case(
-            true, true, true,
-            false, false,
-            false, false,
+            true,
+            true,
+            true,
+            false,
+            false,
+            false,
+            false,
             Some((12, 0)),
             Some(13),
             Os::Macos,
@@ -500,9 +586,13 @@ mod tests {
     fn test_priority_cuda_over_others() {
         // NVIDIA should win over AMD and Intel
         let result = run_case(
-            true, true, true, // NVIDIA
-            true, true,       // AMD
-            true, true,       // Intel
+            true,
+            true,
+            true, // NVIDIA
+            true,
+            true, // AMD
+            true,
+            true, // Intel
             Some((12, 0)),
             Some(13),
             Os::Linux,
@@ -514,9 +604,13 @@ mod tests {
     fn test_nvidia_smi_alone_is_cuda() {
         // Windows case: nvidia-smi works but no sysfs probes
         let result = run_case(
-            false, false, true, // only nvidia-smi
-            false, false,
-            false, false,
+            false,
+            false,
+            true, // only nvidia-smi
+            false,
+            false,
+            false,
+            false,
             Some((12, 0)),
             Some(13),
             Os::Windows,
@@ -528,10 +622,15 @@ mod tests {
     fn test_pci_present_but_no_device_node() {
         // PCI present but no device node and no nvidia-smi: not capable
         let result = run_case(
-            true, false, false, // PCI only
-            false, false,
-            false, false,
-            None, None,
+            true,
+            false,
+            false, // PCI only
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
             Os::Linux,
         );
         assert_eq!(result, Accel::Cpu);
@@ -540,10 +639,15 @@ mod tests {
     #[test]
     fn test_no_hardware_is_cpu() {
         let result = run_case(
-            false, false, false,
-            false, false,
-            false, false,
-            None, None,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            None,
+            None,
             Os::Linux,
         );
         assert_eq!(result, Accel::Cpu);
@@ -571,8 +675,8 @@ mod tests {
         let fixture_path = "../tests/fixtures/gpu_family_cases.json";
         let content = fs::read_to_string(fixture_path)
             .expect("shared fixture tests/fixtures/gpu_family_cases.json should exist");
-        let cases: Vec<serde_json::Value> = serde_json::from_str(&content)
-            .expect("fixture should be valid JSON");
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&content).expect("fixture should be valid JSON");
 
         for case in &cases {
             let name = case["name"].as_str().expect("case name");
@@ -585,15 +689,8 @@ mod tests {
             let intel_node = case["intel_node"].as_bool().unwrap();
             let cc: Option<(u32, u32)> = case["compute_capability"]
                 .as_array()
-                .map(|a| {
-                    (
-                        a[0].as_u64().unwrap() as u32,
-                        a[1].as_u64().unwrap() as u32,
-                    )
-                });
-            let driver_major: Option<u32> = case["driver_cuda_major"]
-                .as_u64()
-                .map(|n| n as u32);
+                .map(|a| (a[0].as_u64().unwrap() as u32, a[1].as_u64().unwrap() as u32));
+            let driver_major: Option<u32> = case["driver_cuda_major"].as_u64().map(|n| n as u32);
             let os = match case["os"].as_str().unwrap() {
                 "linux" => Os::Linux,
                 "windows" => Os::Windows,
@@ -622,11 +719,7 @@ mod tests {
                 os,
             );
 
-            assert_eq!(
-                result, expected,
-                "case '{}' failed",
-                name
-            );
+            assert_eq!(result, expected, "case '{}' failed", name);
         }
     }
 }

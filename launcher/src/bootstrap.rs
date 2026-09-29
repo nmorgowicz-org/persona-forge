@@ -161,6 +161,7 @@ pub fn ensure_env_with_progress(
         &staging_dir,
         runner,
         &requirements_name_for_extra(&manifest.requirements_file, extra),
+        extra,
         progress,
     ) {
         let _ = fs::remove_dir_all(&staging_dir); // best-effort cleanup; the error already explains why
@@ -201,7 +202,7 @@ pub fn ensure_env_with_progress(
 
     if let Err(e) = crate::retention::prune_versions(
         versions_dir,
-        &manifest.version,
+        &env_name,
         previous.as_deref(),
         &crate::retention::SysinfoInUse,
     ) {
@@ -218,6 +219,7 @@ fn provision(
     staging_dir: &Path,
     runner: &dyn Runner,
     requirements_name: &str,
+    extra: Option<&str>,
     progress: &dyn Progress,
 ) -> Result<(), BootstrapError> {
     let venv_dir = staging_dir.join("venv");
@@ -278,20 +280,21 @@ fn provision(
 
     // Phase 9: Run GPU probe verification after install to confirm the device works.
     // This catches cases where the install succeeded but the GPU can't actually run the model.
-    progress.step(Step::Verify);
-    let probe_code = runner
-        .run(
-            &python,
-            &["-m", "persona_forge.gpu_probe"],
-        )
-        .map_err(|e| io_err("spawning gpu_probe", e))?;
-    if probe_code != 0 {
-        return Err(BootstrapError::CommandFailed {
-            step: "gpu_probe verification".to_string(),
-            code: probe_code,
-        });
+    if let Some(extra) = extra {
+        progress.step(Step::Verify);
+        let probe_code = runner
+            .run(
+                &python,
+                &["-m", "persona_forge.gpu_probe", "--extra", extra],
+            )
+            .map_err(|e| io_err("spawning gpu_probe", e))?;
+        if probe_code != 0 {
+            return Err(BootstrapError::CommandFailed {
+                step: "gpu_probe verification".to_string(),
+                code: probe_code,
+            });
+        }
     }
-
 
     Ok(())
 }
@@ -574,8 +577,13 @@ mod tests {
 
         assert_eq!(
             progress.steps.into_inner(),
-            vec![Step::Venv, Step::Sync, Step::Install, Step::Verify]
+            vec![Step::Venv, Step::Sync, Step::Install]
         );
+        assert!(runner
+            .calls
+            .borrow()
+            .iter()
+            .all(|args| !args.iter().any(|arg| arg == "persona_forge.gpu_probe")));
     }
 
     #[test]

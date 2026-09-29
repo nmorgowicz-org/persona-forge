@@ -11,6 +11,9 @@ const portField = document.getElementById('port-field')
 const addressList = document.getElementById('address-list')
 const copyButton = document.getElementById('copy-address')
 const accelerationMode = document.getElementById('acceleration-mode')
+const amdOption = document.getElementById('amd-option')
+amdOption.hidden = !navigator.platform.toLowerCase().includes('linux')
+amdOption.disabled = amdOption.hidden
 const accelerationStatus = document.getElementById('acceleration-status')
 let addresses = []
 

@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use persona_forge_launcher::{bootstrap, health, manifest, paths, supervisor};
 use persona_forge_launcher::gpu::{self, Accel};
+use persona_forge_launcher::{bootstrap, health, manifest, paths, supervisor};
 use serde::Serialize;
 use tauri::menu::MenuEvent;
 #[cfg(all(target_os = "macos", not(test)))]
@@ -205,9 +205,10 @@ fn get_settings<R: Runtime>(app: AppHandle<R>) -> SettingsPayload {
             settings::AccelerationMode::IntelXpu => "intel-xpu".into(),
             settings::AccelerationMode::Amd => "amd".into(),
         },
-        acceleration_status: s.acceleration_status.as_ref().and_then(|st| {
-            serde_json::to_value(st).ok()
-        }),
+        acceleration_status: s
+            .acceleration_status
+            .as_ref()
+            .and_then(|st| serde_json::to_value(st).ok()),
     }
 }
 
@@ -221,6 +222,9 @@ fn apply_settings<R: Runtime>(
     ask_where_to_save: bool,
     acceleration_mode: String,
 ) -> Result<(), String> {
+    if acceleration_mode == "amd" && !cfg!(target_os = "linux") {
+        return Err("AMD ROCm is available on Linux only".to_string());
+    }
     if let Some(p) = port {
         if !settings::is_valid_port(p) {
             return Err("port must be between 1024 and 65535".to_string());
@@ -933,7 +937,7 @@ fn run_bootstrap<R: Runtime + 'static>(app: AppHandle<R>) {
             // GPU env not ready — provision CPU first (fast), then background-install GPU.
             // The user can start generating audio immediately.
             log::info!("Phase 9: provisioning CPU env, GPU install in background");
-            bootstrap::ensure_env_with_progress(
+            match bootstrap::ensure_env_with_progress(
                 &manifest,
                 &payload_dir,
                 &uv_path,
@@ -942,12 +946,14 @@ fn run_bootstrap<R: Runtime + 'static>(app: AppHandle<R>) {
                 &runner,
                 None,
                 &progress,
-            )
-            .unwrap_or_else(|e| panic!("CPU bootstrap failed: {e}"))
+            ) {
+                Ok(dir) => dir,
+                Err(e) => return set_error(&app, format!("CPU bootstrap failed: {e}")),
+            }
         }
     } else {
         // No GPU desired (cpu-only or no GPU detected) — provision CPU.
-        bootstrap::ensure_env_with_progress(
+        match bootstrap::ensure_env_with_progress(
             &manifest,
             &payload_dir,
             &uv_path,
@@ -956,14 +962,23 @@ fn run_bootstrap<R: Runtime + 'static>(app: AppHandle<R>) {
             &runner,
             None,
             &progress,
-        )
-        .unwrap_or_else(|e| panic!("CPU bootstrap failed: {e}"))
+        ) {
+            Ok(dir) => dir,
+            Err(e) => return set_error(&app, format!("CPU bootstrap failed: {e}")),
+        }
     };
+
+    let failed_for_this_env = gpu_extra.is_some_and(|extra| {
+        s.acceleration_status
+            .as_ref()
+            .is_some_and(|status| status.extra == extra && status.version == manifest.version)
+    });
 
     // Phase 9: spawn background GPU install if we're on CPU but GPU is available.
     // This runs asynchronously and never blocks the app.
     if env_dir.file_name().and_then(|n| n.to_str()) == Some(&manifest.version)
         && gpu_extra.is_some()
+        && !failed_for_this_env
     {
         let app_clone = app.clone();
         let payload_clone = payload_dir.clone();
@@ -996,6 +1011,11 @@ fn run_bootstrap<R: Runtime + 'static>(app: AppHandle<R>) {
                         "Phase 9: background GPU install succeeded: {}",
                         gpu_env.display()
                     );
+                    let mut s_bg = settings::load(&desktop_dir_bg);
+                    s_bg.acceleration_status = None;
+                    if let Err(e) = settings::save(&desktop_dir_bg, &s_bg) {
+                        log::warn!("could not clear acceleration failure status: {e}");
+                    }
                     let _ = app_clone.emit(
                         "acceleration://ready",
                         serde_json::json!({
@@ -1016,6 +1036,11 @@ fn run_bootstrap<R: Runtime + 'static>(app: AppHandle<R>) {
                         attempted_at: chrono_timestamp(),
                     });
                     let _ = settings::save(&desktop_dir_bg, &s_bg);
+                    notify(
+                        &app_clone,
+                        "Persona Forge",
+                        "GPU acceleration is unavailable; using CPU. Details in Settings.",
+                    );
                     let _ = app_clone.emit(
                         "acceleration://failed",
                         serde_json::json!({
@@ -1105,10 +1130,20 @@ fn run_bootstrap<R: Runtime + 'static>(app: AppHandle<R>) {
         host,
         port: chosen_port,
         extra_env: vec![
-            ("PERSONA_FORGE_SHELL".to_string(), "desktop".to_string()),
-            ("PERSONA_FORGE_PORT".to_string(), chosen_port.to_string()),
-            ("GPU_FAMILY".to_string(), accel_family_env(accel).to_string()),
-        ],
+                ("PERSONA_FORGE_SHELL".to_string(), "desktop".to_string()),
+                ("PERSONA_FORGE_PORT".to_string(), chosen_port.to_string()),
+                (
+                    "GPU_FAMILY".to_string(),
+                    if env_dir.file_name().and_then(|n| n.to_str())
+                        == Some(manifest.version.as_str())
+                    {
+                        "cpu"
+                    } else {
+                        accel_family_env(accel)
+                    }
+                    .to_string(),
+                ),
+            ],
         log_path,
     };
     let mut handle = match supervisor::ServerHandle::spawn(&spec) {
