@@ -1,6 +1,6 @@
 """Persona Forge — voice cloning and design studio."""
 
-__version__ = "3.0.1"  # x-release-please-version
+__version__ = "3.1.0"  # x-release-please-version
 
 import logging
 import warnings
