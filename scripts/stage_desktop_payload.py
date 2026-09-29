@@ -103,6 +103,17 @@ def main(argv: list[str] | None = None) -> int:
             DESKTOP_TARGETS[args.target], requirements_dest, uv_path=str(args.uv_binary)
         )
 
+        # Phase 9: export per-family requirements for GPU acceleration.
+        accelerator_requirements = {}
+        for extra in pla.accelerator_extras_for_target(DESKTOP_TARGETS[args.target]):
+            accel_req_name = f"requirements-{args.target}-{extra}.txt"
+            accel_req_dest = payload_dir / accel_req_name
+            pla.export_requirements(
+                DESKTOP_TARGETS[args.target], accel_req_dest,
+                uv_path=str(args.uv_binary), extra=extra,
+            )
+            accelerator_requirements[extra] = pla.sha256_file(accel_req_dest)
+
         manifest = pla.build_manifest(
             version=args.version,
             target=args.target,
@@ -113,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
             uv_version=args.uv_version,
             requirements_name=requirements_name,
             requirements_sha256=pla.sha256_file(requirements_dest),
+            accelerator_requirements=accelerator_requirements or None,
         )
 
     (payload_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

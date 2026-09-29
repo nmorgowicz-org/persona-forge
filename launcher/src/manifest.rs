@@ -35,6 +35,11 @@ pub struct Manifest {
     pub uv: UvEntry,
     pub requirements_file: String,
     pub requirements_sha256: String,
+    /// Phase 9: per-family GPU accelerator requirements (extra name → sha256).
+    /// Absent for macOS payloads (MPS is in the default torch wheel).
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accelerator_requirements: Option<std::collections::BTreeMap<String, String>>,
 }
 
 const SUPPORTED_SCHEMA_VERSION: u32 = 1;
@@ -123,6 +128,10 @@ const FAKE_PAYLOAD_SHA256: &str =
 /// anything is mutated. Excludes `uv` (bundled once, verified only by `verify_bundle`; the
 /// supervisor/retention paths that consume a manifest already-verified-for-provisioning never
 /// need the `uv` binary itself).
+///
+/// Phase 9: also verifies each `accelerator_requirements` entry (per-family GPU extras such as
+/// `cuda12`, `cuda13`, `xpu`, `rocm`). Each entry is keyed by the extra name; the file is named
+/// `requirements-<target>-<extra>.txt` in the bundle.
 pub fn verify_payload(manifest: &Manifest, bundle_dir: &Path) -> Result<(), ManifestError> {
     if manifest
         .wheel
@@ -137,6 +146,13 @@ pub fn verify_payload(manifest: &Manifest, bundle_dir: &Path) -> Result<(), Mani
         &manifest.requirements_file,
         &manifest.requirements_sha256,
     )?;
+    // Phase 9: verify per-family accelerator requirements.
+    if let Some(accel) = &manifest.accelerator_requirements {
+        for (extra, sha256) in accel {
+            let file_name = format!("requirements-{}-{}.txt", manifest.target, extra);
+            verify_member(bundle_dir, &file_name, sha256)?;
+        }
+    }
     Ok(())
 }
 

@@ -49,6 +49,10 @@ impl InUse for SysinfoInUse {
 /// link (`remove_file`/equivalent), never recursed into, so its target survives.
 ///
 /// A missing `versions_dir` is not an error; it returns `Ok(vec![])`.
+///
+/// Phase 9: accelerated environments are named `<version>+<extra>` (e.g., `2.0.0+cuda13`).
+/// Retention also keeps the CPU fallback env (`<version>`, no extra) for the current version,
+/// so a failed GPU install can fall back to CPU.
 pub fn prune_versions(
     versions_dir: &Path,
     keep_current: &str,
@@ -61,7 +65,9 @@ pub fn prune_versions(
         Err(e) => return Err(e),
     };
 
-    let current_version = Version::parse(strip_staging(keep_current)).ok();
+    let current_version = Version::parse(strip_staging(strip_extra(keep_current))).ok();
+    // Phase 9: the CPU fallback env for the current version (strip +<extra> if present).
+    let current_cpu_fallback = strip_extra(keep_current);
     let mut deleted = Vec::new();
 
     for entry in entries {
@@ -71,7 +77,7 @@ pub fn prune_versions(
         let name_str = name.to_string_lossy();
         let path = entry.path();
 
-        if name_str == keep_current || Some(name_str.as_ref()) == keep_previous {
+        if name_str == keep_current || Some(name_str.as_ref()) == keep_previous || name_str == current_cpu_fallback {
             continue;
         }
         if file_type.is_symlink() {
@@ -84,7 +90,7 @@ pub fn prune_versions(
         }
         if let (Some(current), Some(candidate)) = (
             &current_version,
-            Version::parse(strip_staging(&name_str)).ok(),
+            Version::parse(strip_staging(strip_extra(&name_str))).ok(),
         ) {
             if candidate > *current {
                 continue; // D14: never delete a version newer than the one just promoted
@@ -104,6 +110,15 @@ pub fn prune_versions(
 /// `<version>.staging` dirs carry a suffix that isn't part of the semver string.
 fn strip_staging(name: &str) -> &str {
     name.strip_suffix(".staging").unwrap_or(name)
+}
+
+/// `<version>+<extra>` dirs carry a build-metadata suffix (e.g., `+cuda13`, `+xpu`) that isn't
+/// part of the semver string. Phase 9: accelerated environments are named `<version>+<extra>`.
+fn strip_extra(name: &str) -> &str {
+    match name.find('+') {
+        Some(idx) => &name[..idx],
+        None => name,
+    }
 }
 
 #[cfg(test)]
@@ -304,5 +319,59 @@ mod tests {
 
         std::thread::sleep(std::time::Duration::from_millis(200));
         assert!(!SysinfoInUse.is_in_use(&root.path().join("old")));
+    }
+
+    #[test]
+    fn strip_extra_removes_build_metadata_suffix() {
+        assert_eq!(strip_extra("1.2.3"), "1.2.3");
+        assert_eq!(strip_extra("1.2.3+cuda13"), "1.2.3");
+        assert_eq!(strip_extra("1.2.3+xpu"), "1.2.3");
+        assert_eq!(strip_extra("1.2.3+cuda12"), "1.2.3");
+        assert_eq!(strip_extra("1.2.3+rocm"), "1.2.3");
+        assert_eq!(strip_extra("1.2.3.4+cuda13"), "1.2.3.4");
+        // Edge: empty string and just "+"
+        assert_eq!(strip_extra(""), "");
+        assert_eq!(strip_extra("+cuda13"), "");
+    }
+
+    #[test]
+    fn prune_versions_keeps_accelerated_envs_of_same_version() {
+        // Phase 9: accelerated envs are named `<version>+<extra>`. Retention should keep
+        // the current accelerated env and the previous accelerated env (same extra, older
+        // version), but prune other extras of the same version.
+        let root = tempfile::tempdir().unwrap();
+        let versions_dir = root.path().join("versions");
+        fs::create_dir_all(&versions_dir).unwrap();
+
+        // Current version with cuda13 (the active accelerated env)
+        fs::create_dir_all(versions_dir.join("2.0.0+cuda13")).unwrap();
+        // Previous version with cuda13 (should be kept as rollback)
+        fs::create_dir_all(versions_dir.join("1.0.0+cuda13")).unwrap();
+        // Same version but different extra (should be pruned)
+        fs::create_dir_all(versions_dir.join("2.0.0+xpu")).unwrap();
+        // CPU env (should be kept as fallback)
+        fs::create_dir_all(versions_dir.join("2.0.0")).unwrap();
+        // Older version different extra (should be pruned)
+        fs::create_dir_all(versions_dir.join("1.0.0+xpu")).unwrap();
+
+        let deleted = prune_versions(
+            &versions_dir,
+            "2.0.0+cuda13",
+            Some("1.0.0+cuda13"),
+            &SysinfoInUse,
+        )
+        .unwrap();
+
+        // 2.0.0+cuda13 is keep_current (not deleted)
+        // 1.0.0+cuda13 is keep_previous (not deleted)
+        // 2.0.0 is the CPU fallback for current version (semver-equal, not deleted)
+        // 2.0.0+xpu is a different extra for the same version (deleted)
+        // 1.0.0+xpu is older and different extra (deleted)
+        assert_eq!(deleted.len(), 2);
+        assert!(versions_dir.join("2.0.0+cuda13").exists());
+        assert!(versions_dir.join("1.0.0+cuda13").exists());
+        assert!(versions_dir.join("2.0.0").exists());
+        assert!(!versions_dir.join("2.0.0+xpu").exists());
+        assert!(!versions_dir.join("1.0.0+xpu").exists());
     }
 }
