@@ -74,6 +74,7 @@ pub enum Step {
     Venv,
     Sync,
     Install,
+    Verify,
 }
 
 pub trait Progress {
@@ -274,6 +275,23 @@ fn provision(
             code,
         });
     }
+
+    // Phase 9: Run GPU probe verification after install to confirm the device works.
+    // This catches cases where the install succeeded but the GPU can't actually run the model.
+    progress.step(Step::Verify);
+    let probe_code = runner
+        .run(
+            &python,
+            &["-m", "persona_forge.gpu_probe"],
+        )
+        .map_err(|e| io_err("spawning gpu_probe", e))?;
+    if probe_code != 0 {
+        return Err(BootstrapError::CommandFailed {
+            step: "gpu_probe verification".to_string(),
+            code: probe_code,
+        });
+    }
+
 
     Ok(())
 }
@@ -556,7 +574,7 @@ mod tests {
 
         assert_eq!(
             progress.steps.into_inner(),
-            vec![Step::Venv, Step::Sync, Step::Install]
+            vec![Step::Venv, Step::Sync, Step::Install, Step::Verify]
         );
     }
 

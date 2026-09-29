@@ -160,6 +160,19 @@ fn open_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     open_settings_window(&app).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn retry_acceleration<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    let state = app.state::<ManagedState>();
+    let desktop_dir = state.desktop_dir.clone();
+    // Clear the acceleration status so the background thread can retry.
+    let mut s = settings::load(&desktop_dir);
+    s.acceleration_status = None;
+    settings::save(&desktop_dir, &s).map_err(|e| e.to_string())?;
+    // Trigger a restart to re-run bootstrap with the cleared status.
+    spawn_restart_thread(app);
+    Ok(())
+}
+
 #[derive(Serialize)]
 struct SettingsPayload {
     port_mode: String,
@@ -167,6 +180,8 @@ struct SettingsPayload {
     network_access: bool,
     tray_enabled: bool,
     ask_where_to_save: bool,
+    acceleration_mode: String,
+    acceleration_status: Option<serde_json::Value>,
 }
 
 #[tauri::command]
@@ -183,6 +198,16 @@ fn get_settings<R: Runtime>(app: AppHandle<R>) -> SettingsPayload {
         network_access: s.network_access,
         tray_enabled: s.tray_enabled,
         ask_where_to_save: s.ask_where_to_save,
+        acceleration_mode: match s.acceleration {
+            settings::AccelerationMode::Automatic => "automatic".into(),
+            settings::AccelerationMode::CpuOnly => "cpu-only".into(),
+            settings::AccelerationMode::Nvidia => "nvidia".into(),
+            settings::AccelerationMode::IntelXpu => "intel-xpu".into(),
+            settings::AccelerationMode::Amd => "amd".into(),
+        },
+        acceleration_status: s.acceleration_status.as_ref().and_then(|st| {
+            serde_json::to_value(st).ok()
+        }),
     }
 }
 
@@ -194,6 +219,7 @@ fn apply_settings<R: Runtime>(
     network_access: bool,
     tray_enabled: bool,
     ask_where_to_save: bool,
+    acceleration_mode: String,
 ) -> Result<(), String> {
     if let Some(p) = port {
         if !settings::is_valid_port(p) {
@@ -204,6 +230,7 @@ fn apply_settings<R: Runtime>(
     let mut s = settings::load(&state.desktop_dir);
     let old_mode = s.port_mode.clone();
     let old_network = s.network_access;
+    let old_acceleration = s.acceleration.clone();
     let tray_present = app.tray_by_id(tray::ID_TRAY_ICON).is_some();
     let old_port = s.port;
 
@@ -216,6 +243,13 @@ fn apply_settings<R: Runtime>(
     s.network_access = network_access;
     s.tray_enabled = tray_enabled;
     s.ask_where_to_save = ask_where_to_save;
+    s.acceleration = match acceleration_mode.as_str() {
+        "cpu-only" => settings::AccelerationMode::CpuOnly,
+        "nvidia" => settings::AccelerationMode::Nvidia,
+        "intel-xpu" => settings::AccelerationMode::IntelXpu,
+        "amd" => settings::AccelerationMode::Amd,
+        _ => settings::AccelerationMode::Automatic,
+    };
     settings::save(&state.desktop_dir, &s).map_err(|e| e.to_string())?;
     let tray_update_error = if s.tray_enabled != tray_present {
         tray::apply_preference(
@@ -232,6 +266,7 @@ fn apply_settings<R: Runtime>(
     let needs_restart = s.port_mode != old_mode
         || s.port != old_port
         || s.network_access != old_network
+        || s.acceleration != old_acceleration
         || bootstrap_failed;
     if needs_restart {
         {
@@ -341,6 +376,7 @@ pub fn build_app(context: tauri::Context) -> tauri::Result<tauri::App> {
             apply_settings,
             list_addresses,
             copy_text,
+            retry_acceleration,
         ])
         .setup(|app| {
             let home = home_dir();
@@ -760,7 +796,9 @@ impl<R: Runtime> bootstrap::Progress for ThreadProgress<R> {
             bootstrap::Step::Venv => "venv",
             bootstrap::Step::Sync => "sync",
             bootstrap::Step::Install => "install",
+            bootstrap::Step::Verify => "verify",
         };
+        emit_step(&self.app, name, None);
         emit_step(&self.app, name, None);
     }
 }
@@ -1069,6 +1107,7 @@ fn run_bootstrap<R: Runtime + 'static>(app: AppHandle<R>) {
         extra_env: vec![
             ("PERSONA_FORGE_SHELL".to_string(), "desktop".to_string()),
             ("PERSONA_FORGE_PORT".to_string(), chosen_port.to_string()),
+            ("GPU_FAMILY".to_string(), accel_family_env(accel).to_string()),
         ],
         log_path,
     };

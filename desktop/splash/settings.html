@@ -45,6 +45,25 @@
         <span>Ask where to save downloaded files</span>
       </label>
 
+      <section class="acceleration">
+        <h2>GPU Acceleration</h2>
+        <p class="hint">Select how Persona Forge should use your GPU.</p>
+
+        <label class="field">
+          <span>Acceleration mode</span>
+          <select id="acceleration-mode" name="acceleration-mode">
+            <option value="automatic">Automatic (recommended)</option>
+            <option value="cpu-only">CPU only</option>
+            <option value="nvidia">NVIDIA (CUDA)</option>
+            <option value="intel-xpu">Intel XPU (Arc/Alchemist)</option>
+            <option value="amd" id="amd-option">AMD ROCm</option>
+          </select>
+        </label>
+
+        <div id="acceleration-status" class="acceleration-status" role="status"></div>
+        <button id="retry-acceleration" class="secondary" type="button" hidden>Retry GPU setup</button>
+      </section>
+
       <section class="addresses" aria-live="polite">
         <h2>Server addresses</h2>
         <ul id="address-list"><li>Loading…</li></ul>
