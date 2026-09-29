@@ -105,7 +105,8 @@ def _make_clean_release(release_dir: Path) -> dict[str, bytes]:
     dmg = release_dir / "PersonaForge-macos-aarch64.dmg"
     (release_dir / "appcast.xml").write_text(
         '<?xml version="1.0"?><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
-        '<channel><item><enclosure url="https://example/release/PersonaForge-macos-aarch64.dmg" '
+        '<channel><item><description sparkle:format="markdown"><![CDATA[Release notes]]></description>'
+        '<enclosure url="https://example/release/PersonaForge-macos-aarch64.dmg" '
         f'length="{dmg.stat().st_size}" sparkle:version="{VERSION}" '
         f'sparkle:shortVersionString="{VERSION}" sparkle:edSignature="dmg-signature"/></item></channel></rss>',
         encoding="utf-8",
@@ -114,7 +115,7 @@ def _make_clean_release(release_dir: Path) -> dict[str, bytes]:
     (release_dir / "latest.json").write_text(
         json.dumps({
             "pub_date": "2026-09-27T00:00:00Z",
-            "notes": "https://example/release/notes",
+            "notes": "Release notes",
             "version": VERSION,
             "platforms": {
                 "windows-x86_64-nsis": {
@@ -146,6 +147,23 @@ def test_clean_release_passes(tmp_path: Path, capsys: pytest.CaptureFixture[str]
     out = json.loads(capsys.readouterr().out)
     assert out["status"] == "pass"
     assert out["failures"] == []
+
+
+def test_tauri_notes_reject_a_release_page_url(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    release_dir = tmp_path / "release"
+    _make_clean_release(release_dir)
+    latest_path = release_dir / "latest.json"
+    latest = json.loads(latest_path.read_text(encoding="utf-8"))
+    latest["notes"] = "https://example/release/notes"
+    latest_path.write_text(json.dumps(latest), encoding="utf-8")
+
+    code = main(["--dir", str(release_dir), "--version", VERSION])
+
+    assert code == 1
+    out = json.loads(capsys.readouterr().out)
+    assert "latest.json notes must contain release notes text, not a URL" in out["failures"]
 
 
 def test_missing_desktop_asset_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

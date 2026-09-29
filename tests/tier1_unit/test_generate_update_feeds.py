@@ -12,6 +12,7 @@ import json
 import os
 import secrets
 import subprocess
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ from scripts.generate_update_feeds import (
     LINUX_ASSET,
     WINDOWS_ASSET,
     FeedGenerationError,
+    build_appcast_xml,
     generate,
     main,
 )
@@ -28,7 +30,9 @@ from scripts.generate_update_feeds import (
 VERSION = "90.0.1"
 TAG = "desktop-updater-test"
 REPO = "nmorgowicz-org/persona-forge"
-NOTES_URL = "https://github.com/nmorgowicz-org/persona-forge/releases/tag/desktop-updater-test"
+RELEASE_NOTES = (
+    "## Bug Fixes\n\n* **release:** validate the launcher requirements set.\n"
+)
 
 
 def _openssl_bin() -> str:
@@ -56,6 +60,9 @@ def _derive_public_key_pem(seed_b64: str, tmp_path: Path) -> Path:
 
 def _populate_release_dir(release_dir: Path) -> None:
     release_dir.mkdir(parents=True, exist_ok=True)
+    (release_dir.parent / "release-notes.md").write_text(
+        RELEASE_NOTES, encoding="utf-8"
+    )
     (release_dir / DMG_ASSET).write_bytes(secrets.token_bytes(4096))
     (release_dir / WINDOWS_ASSET).write_bytes(secrets.token_bytes(2048))
     (release_dir / f"{WINDOWS_ASSET}.sig").write_text(
@@ -77,7 +84,7 @@ def test_appcast_signature_verifies_with_openssl(tmp_path: Path) -> None:
         version=VERSION,
         tag=TAG,
         repo=REPO,
-        notes_url=NOTES_URL,
+        release_notes=RELEASE_NOTES,
         sparkle_seed_b64=seed_b64,
     )
 
@@ -124,7 +131,7 @@ def test_appcast_contains_required_fields(tmp_path: Path) -> None:
         version=VERSION,
         tag=TAG,
         repo=REPO,
-        notes_url=NOTES_URL,
+        release_notes=RELEASE_NOTES,
         sparkle_seed_b64=seed_b64,
     )
 
@@ -136,6 +143,44 @@ def test_appcast_contains_required_fields(tmp_path: Path) -> None:
     assert 'sparkle:minimumSystemVersion="14.0"' in appcast
     dmg_length = (release_dir / DMG_ASSET).stat().st_size
     assert f'length="{dmg_length}"' in appcast
+    assert "sparkle:releaseNotesLink" not in appcast
+    item = ET.fromstring(appcast).find("./channel/item")
+    assert item is not None
+    description = item.find("description")
+    assert description is not None
+    assert (
+        description.get("{http://www.andymatuschak.org/xml-namespaces/sparkle}format")
+        == "markdown"
+    )
+    assert description.text == RELEASE_NOTES
+
+
+def test_appcast_preserves_cdata_terminators_in_release_notes() -> None:
+    release_notes = "Notes may contain the CDATA terminator: ]]> safely."
+    appcast = build_appcast_xml(
+        version=VERSION,
+        dmg_url="https://example.com/update.dmg",
+        dmg_length=1,
+        ed_signature="signature",
+        release_notes=release_notes,
+    )
+
+    item = ET.fromstring(appcast).find("./channel/item")
+    assert item is not None
+    description = item.find("description")
+    assert description is not None
+    assert description.text == release_notes
+
+
+def test_appcast_rejects_empty_release_notes() -> None:
+    with pytest.raises(FeedGenerationError, match="release notes must not be empty"):
+        build_appcast_xml(
+            version=VERSION,
+            dmg_url="https://example.com/update.dmg",
+            dmg_length=1,
+            ed_signature="signature",
+            release_notes=" \n",
+        )
 
 
 def test_latest_json_has_required_keys_and_matching_version(tmp_path: Path) -> None:
@@ -148,7 +193,7 @@ def test_latest_json_has_required_keys_and_matching_version(tmp_path: Path) -> N
         version=VERSION,
         tag=TAG,
         repo=REPO,
-        notes_url=NOTES_URL,
+        release_notes=RELEASE_NOTES,
         sparkle_seed_b64=seed_b64,
     )
 
@@ -160,7 +205,7 @@ def test_latest_json_has_required_keys_and_matching_version(tmp_path: Path) -> N
 
     assert "pub_date" in latest
     assert "notes" in latest
-    assert latest["notes"] == NOTES_URL
+    assert latest["notes"] == "Bug Fixes\n\n• release: validate the launcher requirements set."
 
     platforms = latest["platforms"]
     assert set(platforms) == {"windows-x86_64-nsis", "linux-x86_64-appimage"}
@@ -191,7 +236,7 @@ def test_each_missing_asset_raises(tmp_path: Path, missing_name: str) -> None:
             version=VERSION,
             tag=TAG,
             repo=REPO,
-            notes_url=NOTES_URL,
+            release_notes=RELEASE_NOTES,
             sparkle_seed_b64=seed_b64,
         )
 
@@ -208,7 +253,7 @@ def test_empty_signature_file_raises(tmp_path: Path) -> None:
             version=VERSION,
             tag=TAG,
             repo=REPO,
-            notes_url=NOTES_URL,
+            release_notes=RELEASE_NOTES,
             sparkle_seed_b64=seed_b64,
         )
 
@@ -225,7 +270,7 @@ def test_empty_dmg_raises(tmp_path: Path) -> None:
             version=VERSION,
             tag=TAG,
             repo=REPO,
-            notes_url=NOTES_URL,
+            release_notes=RELEASE_NOTES,
             sparkle_seed_b64=seed_b64,
         )
 
@@ -241,7 +286,7 @@ def test_seed_that_does_not_decode_to_32_bytes_raises(tmp_path: Path) -> None:
             version=VERSION,
             tag=TAG,
             repo=REPO,
-            notes_url=NOTES_URL,
+            release_notes=RELEASE_NOTES,
             sparkle_seed_b64=short_seed,
         )
 
@@ -256,7 +301,7 @@ def test_no_key_material_appears_in_generated_files(tmp_path: Path) -> None:
         version=VERSION,
         tag=TAG,
         repo=REPO,
-        notes_url=NOTES_URL,
+        release_notes=RELEASE_NOTES,
         sparkle_seed_b64=seed_b64,
     )
 
@@ -297,8 +342,8 @@ def test_no_key_material_appears_in_stdout_or_stderr(
                 TAG,
                 "--repo",
                 REPO,
-                "--notes-url",
-                NOTES_URL,
+                "--release-notes-file",
+                str(release_dir.parent / "release-notes.md"),
             ]
         )
     finally:
@@ -330,8 +375,8 @@ def test_main_reports_missing_env_var(tmp_path: Path) -> None:
                     TAG,
                     "--repo",
                     REPO,
-                    "--notes-url",
-                    NOTES_URL,
+                    "--release-notes-file",
+                    str(release_dir.parent / "release-notes.md"),
                 ]
             )
         assert excinfo.value.code == 2

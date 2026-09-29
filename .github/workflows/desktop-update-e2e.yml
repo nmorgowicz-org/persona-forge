@@ -74,10 +74,11 @@ jobs:
               path.write_bytes(data)
           PY
           fi
+          printf '%s\n' 'Desktop updater qualification test release notes.' > "$RUNNER_TEMP/release-notes.md"
           python3 scripts/generate_update_feeds.py \
             --release-dir release --version 90.0.2 --tag "$TAG" \
             --repo "${{ github.repository }}" \
-            --notes-url "https://github.com/${{ github.repository }}/releases/tag/$TAG"
+            --release-notes-file "$RUNNER_TEMP/release-notes.md"
           if [[ "$MODE" == "badsig" ]]; then
             python3 - <<'PY'
           from pathlib import Path

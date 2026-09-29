@@ -15,8 +15,8 @@ import hashlib
 import json
 import sys
 import tarfile
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 
 BOOTSTRAP_ASSETS = ("persona-forge-bootstrap-linux-x86_64.tar.gz",)
@@ -174,10 +174,10 @@ def check_update_feeds(release_dir: Path, version: str, failures: list[str]) -> 
     if not isinstance(pub_date, str) or not pub_date:
         failures.append("latest.json pub_date must be a non-empty string")
     notes = latest.get("notes")
-    if not isinstance(notes, str) or not notes:
-        failures.append("latest.json notes must be a non-empty string")
-    if isinstance(notes, str) and not notes.startswith("https://"):
-        failures.append("latest.json notes must be an HTTPS URL")
+    if not isinstance(notes, str) or not notes.strip():
+        failures.append("latest.json notes must contain non-empty release notes text")
+    elif notes.startswith(("http://", "https://")):
+        failures.append("latest.json notes must contain release notes text, not a URL")
     if latest.get("version") != version:
         failures.append(f"latest.json version is {latest.get('version')!r}, expected {version!r}")
     platforms = latest.get("platforms")
@@ -207,6 +207,21 @@ def check_update_feeds(release_dir: Path, version: str, failures: list[str]) -> 
     appcast_path = release_dir / "appcast.xml"
     try:
         root = ET.parse(appcast_path).getroot()
+        item = root.find(".//item")
+        if item is None:
+            failures.append("appcast.xml is missing its update item")
+        else:
+            description = item.find("description")
+            if description is None or not (description.text or "").strip():
+                failures.append("appcast.xml must embed non-empty release notes in description")
+            elif description.get(
+                "{http://www.andymatuschak.org/xml-namespaces/sparkle}format"
+            ) != "markdown":
+                failures.append("appcast.xml description must declare sparkle:format=markdown")
+            if item.find(
+                "{http://www.andymatuschak.org/xml-namespaces/sparkle}releaseNotesLink"
+            ) is not None:
+                failures.append("appcast.xml must not link to external release notes")
         enclosure = root.find(".//enclosure")
         if enclosure is None:
             raise ValueError("missing enclosure")
