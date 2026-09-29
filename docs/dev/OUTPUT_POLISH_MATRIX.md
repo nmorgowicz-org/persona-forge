@@ -28,8 +28,8 @@ advertised LUFS/peak values must match delivered behavior.
 | Neutral | -20.0 | -1.0 dBFS | normalize -> limit |
 | Clean | -20.0 | -1.0 dBFS | compress(-24, 2.5) -> normalize -> limit |
 | Broadcast | -20.0 | -1.0 dBFS | compress(-20, 3.0) -> normalize -> presence boost -> limit |
-| Calm | -23.0 | -1.0 dBFS | time-stretch 1.05 -> shape pauses 1.10 -> warm EQ -> normalize -> limit |
-| Energetic | -20.0 | -1.0 dBFS | time-stretch 0.95 -> shape pauses 0.90 -> compress(-20, 2.0) -> normalize -> limit |
+| Calm | -23.0 | -1.0 dBFS | shape pauses 1.10 -> warm EQ -> normalize -> limit |
+| Energetic | -20.0 | -1.0 dBFS | shape pauses 0.90 -> compress(-20, 2.0) -> normalize -> limit |
 | Storyteller | -23.0 | -1.0 dBFS | warm EQ -> compress(-24, 2.0) -> shape pauses 1.10 -> normalize -> limit |
 
 The `default` house chain applies when a generation request omits
