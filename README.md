@@ -240,7 +240,7 @@ docker pull ghcr.io/nmorgowicz-org/persona-forge:latest
 Pin a version — or a digest — for anything you depend on:
 
 ```bash
-docker pull ghcr.io/nmorgowicz-org/persona-forge:v3.1.0  # x-release-please-version
+docker pull ghcr.io/nmorgowicz-org/persona-forge:v3.1.1  # x-release-please-version
 ```
 
 Tags: `latest`, `v<major>.<minor>.<patch>`, `<git-sha>`. Use any of these as

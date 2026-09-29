@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.0...persona-forge-v3.1.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **release:** validate Phase 9 launcher requirements set ([8e5ccd1](https://github.com/nmorgowicz-org/persona-forge/commit/8e5ccd1dc5aa60fea57999f901027d19a267dafb))
+
 ## [3.1.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.0.1...persona-forge-v3.1.0) (2026-09-29)
 
 
