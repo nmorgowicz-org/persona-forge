@@ -40,6 +40,13 @@ BOOTSTRAP_MEMBERS = {
     },
 }
 
+BOOTSTRAP_REQUIREMENTS = {
+    "persona-forge-bootstrap-linux-x86_64.tar.gz": (
+        "x86_64-unknown-linux-gnu",
+        frozenset({"cuda12", "cuda13", "xpu", "rocm"}),
+    ),
+}
+
 
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -99,8 +106,6 @@ def check_archive(path: Path, version: str, top_level_wheel_sha256: str, failure
         failures.append(f"{path.name}: missing member(s) {sorted(missing)}")
     if len(wheel_members) != 1:
         failures.append(f"{path.name}: expected exactly one .whl member, found {sorted(wheel_members)}")
-    if len(req_members) != 1:
-        failures.append(f"{path.name}: expected exactly one requirements-*.txt member, found {sorted(req_members)}")
     extra = actual_names - expected_total
     if extra:
         failures.append(f"{path.name}: unexpected extra member(s) {sorted(extra)}")
@@ -120,6 +125,33 @@ def check_archive(path: Path, version: str, top_level_wheel_sha256: str, failure
         failures.append(f"{path.name}: manifest.app is {manifest.get('app')!r}, expected 'persona-forge'")
     if manifest.get("version") != version:
         failures.append(f"{path.name}: manifest.version is {manifest.get('version')!r}, expected {version!r}")
+    target, required_extras = BOOTSTRAP_REQUIREMENTS[path.name]
+    if manifest.get("target") != target:
+        failures.append(f"{path.name}: manifest.target is {manifest.get('target')!r}, expected {target!r}")
+    base_name = f"requirements-{target}.txt"
+    if manifest.get("requirements_file") != base_name:
+        failures.append(f"{path.name}: manifest.requirements_file must be {base_name!r}")
+    accelerator_hashes = manifest.get("accelerator_requirements")
+    if not isinstance(accelerator_hashes, dict) or set(accelerator_hashes) != required_extras:
+        failures.append(
+            f"{path.name}: manifest.accelerator_requirements must name {sorted(required_extras)}"
+        )
+        accelerator_hashes = {}
+    expected_requirements = {base_name: manifest.get("requirements_sha256")}
+    expected_requirements.update(
+        {f"requirements-{target}-{name}.txt": digest for name, digest in accelerator_hashes.items()}
+    )
+    if req_members != set(expected_requirements):
+        failures.append(
+            f"{path.name}: requirements members {sorted(req_members)} do not match "
+            f"manifest entries {sorted(expected_requirements)}"
+        )
+    for name, expected_sha in expected_requirements.items():
+        content = members.get(name)
+        if content is not None and (
+            not isinstance(expected_sha, str) or hashlib.sha256(content).hexdigest() != expected_sha
+        ):
+            failures.append(f"{path.name}: {name} sha256 does not match manifest")
     manifest_wheel_sha = (manifest.get("wheel") or {}).get("sha256")
     if manifest_wheel_sha != top_level_wheel_sha256:
         failures.append(
