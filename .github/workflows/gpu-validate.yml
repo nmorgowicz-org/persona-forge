@@ -1,0 +1,60 @@
+# GPU validation probe (execution plan Phase 9, Task 0).
+#
+# Dispatch-only; no secrets. Creates a Python 3.13 venv with pinned uv, installs
+# torch/torchaudio from the specified extra's PyTorch index, and runs a probe that
+# prints JSON: torch.__version__, torch.version.cuda, torch.cuda.is_available(),
+# torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0),
+# torch.cuda.get_arch_list(), and a 1024x1024 float32 matmul on device vs CPU
+# (torch.allclose, rtol=1e-3).
+#
+# The owner may need to allow uv.exe / python.exe through the Windows app firewall
+# once (Phase 1 lesson).
+name: GPU Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      extra:
+        description: "PyTorch index extra (cuda12 | cuda13 | xpu)"
+        required: true
+        type: choice
+        options:
+          - cuda12
+          - cuda13
+          - xpu
+      runner:
+        description: "Runner label"
+        required: false
+        type: choice
+        default: self-hosted-windows
+        options:
+          - self-hosted-windows
+          - self-hosted-macos
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.12.9"
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  gpu-probe:
+    name: gpu-probe-${{ inputs.extra }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run GPU probe (Windows)
+        if: inputs.runner == 'self-hosted-windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & 'C:\Program Files\Git\bin\bash.exe' --noprofile --norc -eo pipefail 'scripts/gpu_validate.sh' '${{ inputs.extra }}' '${{ env.PYTHON_VERSION }}' '${{ env.UV_VERSION }}'
+          if ($LASTEXITCODE -ne 0) { throw "gpu_validate.sh failed with exit code $LASTEXITCODE" }
+
+      - name: Run GPU probe (macOS)
+        if: inputs.runner == 'self-hosted-macos'
+        run: |
+          bash scripts/gpu_validate.sh "${{ inputs.extra }}" "${{ env.PYTHON_VERSION }}" "${{ env.UV_VERSION }}"
