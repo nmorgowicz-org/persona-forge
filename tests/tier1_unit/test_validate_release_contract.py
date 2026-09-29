@@ -29,12 +29,20 @@ def _sha256_bytes(data: bytes) -> str:
 
 
 def _write_bootstrap_archive(
-    path: Path, wheel_name: str, wheel_bytes: bytes, drop_members: frozenset[str] = frozenset()
+    path: Path,
+    wheel_name: str,
+    wheel_bytes: bytes,
+    drop_members: frozenset[str] = frozenset(),
+    corrupt_accelerator: str | None = None,
 ) -> None:
     launcher_name, uv_name = BOOTSTRAP_MEMBERS[path.name]
-    target = path.name.replace("persona-forge-bootstrap-", "").rsplit(".", 1)[0]
-    if target.endswith(".tar"):
-        target = target[: -len(".tar")]
+    target = "x86_64-unknown-linux-gnu"
+    requirements_name = f"requirements-{target}.txt"
+    requirements_bytes = b"persona-forge==1.3.0\n"
+    accelerator_bytes = {
+        extra: f"persona-forge[{extra}]==1.3.0\n".encode()
+        for extra in ("cuda12", "cuda13", "xpu", "rocm")
+    }
     manifest = {
         "schema_version": 1,
         "app": "persona-forge",
@@ -43,17 +51,24 @@ def _write_bootstrap_archive(
         "python_constraint": ">=3.13,<3.14",
         "wheel": {"file": wheel_name, "sha256": _sha256_bytes(wheel_bytes)},
         "uv": {"file": uv_name, "sha256": "uvsha", "version": "0.12.9"},
-        "requirements_file": f"requirements-{target}.txt",
-        "requirements_sha256": "reqsha",
+        "requirements_file": requirements_name,
+        "requirements_sha256": _sha256_bytes(requirements_bytes),
+        "accelerator_requirements": {
+            extra: _sha256_bytes(data) for extra, data in accelerator_bytes.items()
+        },
     }
     members = {
         launcher_name: b"stub-launcher",
         uv_name: b"stub-uv",
         wheel_name: wheel_bytes,
-        f"requirements-{target}.txt": b"persona-forge==1.3.0\n",
+        requirements_name: requirements_bytes,
         "manifest.json": json.dumps(manifest, indent=2).encode(),
         "README.txt": b"readme",
     }
+    for extra, data in accelerator_bytes.items():
+        members[f"requirements-{target}-{extra}.txt"] = data
+    if corrupt_accelerator:
+        members[f"requirements-{target}-{corrupt_accelerator}.txt"] = b"corrupted\n"
     for name in drop_members:
         members.pop(name, None)
 
@@ -237,6 +252,39 @@ def test_archive_missing_internal_member_fails(tmp_path: Path, capsys: pytest.Ca
         "persona-forge-bootstrap-linux-x86_64.tar.gz: missing member" in f and "README.txt" in f
         for f in out["failures"]
     )
+
+
+def test_archive_missing_accelerator_requirements_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    release_dir = tmp_path / "release"
+    contents = _make_clean_release(release_dir)
+    archive = release_dir / "persona-forge-bootstrap-linux-x86_64.tar.gz"
+    wheel_name = f"persona_forge-{VERSION}-py3-none-any.whl"
+    _write_bootstrap_archive(
+        archive,
+        wheel_name,
+        contents[wheel_name],
+        drop_members=frozenset({"requirements-x86_64-unknown-linux-gnu-cuda13.txt"}),
+    )
+
+    assert main(["--dir", str(release_dir), "--version", VERSION]) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert any("requirements members" in failure and "cuda13" in failure for failure in out["failures"])
+
+
+def test_archive_accelerator_requirements_hash_mismatch_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    release_dir = tmp_path / "release"
+    contents = _make_clean_release(release_dir)
+    archive = release_dir / "persona-forge-bootstrap-linux-x86_64.tar.gz"
+    wheel_name = f"persona_forge-{VERSION}-py3-none-any.whl"
+    _write_bootstrap_archive(archive, wheel_name, contents[wheel_name], corrupt_accelerator="cuda13")
+
+    assert main(["--dir", str(release_dir), "--version", VERSION]) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert any("cuda13.txt sha256 does not match manifest" in failure for failure in out["failures"])
 
 
 def test_missing_release_dir_fails(tmp_path: Path) -> None:
