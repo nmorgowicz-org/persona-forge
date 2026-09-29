@@ -2287,3 +2287,53 @@ passes: the updater replaces the AppImage correctly even in extract-and-run mode
 - Capacity (arc-runner at 24 GB, 21.2Gi allocatable): three concurrent desktop builds use ~2.7Gi
   peak each; CPU (96% of 13 cores) is the limit. `maxRunners` raised by one on every set (#35,
   #39).
+## Phase 9 results
+
+Recorded 2026-09-28. Probe runs via `scripts/gpu_validate.sh` on the owner's RTX 5090
+(`nick@192.168.2.16`, Windows 11, Python 3.13.15, uv 0.12.9, NVIDIA driver 617.14).
+
+### cuda13 — PASSED
+
+```json
+{
+  "torch_version": "2.14.0+cu130",
+  "torch_cuda_version": "13.0",
+  "cuda_available": true,
+  "device_name": "NVIDIA GeForce RTX 5090",
+  "device_capability": [12, 0],
+  "arch_list": ["sm_75", "sm_80", "sm_86", "sm_90", "sm_100", "sm_120"],
+  "matmul_pass": true
+}
+```
+
+- `sm_120` present in arch list → CUDA 13 supports Blackwell (CC 12.0).
+- Matmul matches CPU (`rtol=1e-3, atol=1e-3`).
+- **Stop condition not triggered.** D23's rule holds.
+
+### cuda12 — CUDA available but no sm_120 kernels
+
+```json
+{
+  "torch_version": "2.14.0+cu126",
+  "torch_cuda_version": "12.6",
+  "cuda_available": true,
+  "device_name": "NVIDIA GeForce RTX 5090",
+  "device_capability": [12, 0],
+  "arch_list": ["sm_50", "sm_60", "sm_61", "sm_70", "sm_75", "sm_80", "sm_86", "sm_90"],
+  "matmul_pass": true
+}
+```
+
+- `sm_120` **absent** from arch list → no Blackwell kernels in the cu126 build.
+- PyTorch emitted a `UserWarning`:
+  *"NVIDIA GeForce RTX 5090 with CUDA capability sm_120 is not compatible with the
+   current PyTorch installation. The current PyTorch install supports CUDA capabilities
+   sm_50 sm_60 sm_61 sm_70 sm_75 sm_80 sm_86 sm_90."*
+- Matmul returned a result (not a crash), but the kernel was not CUDA-12-compiled for
+  this device class.
+
+### Conclusion
+
+**D23 confirmed:** compute capability ≥ (7,5) **and** driver CUDA major ≥ 13 → `cuda13`;
+anything else → `cuda12`. The RTX 5090 (CC 12.0) requires `cuda13`.
+
