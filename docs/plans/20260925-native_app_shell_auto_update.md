@@ -2344,8 +2344,8 @@ The review fixes on `desktop/p9-gpu-acceleration` address CPU bootstrap probing,
 platform detection (including Windows Intel adapters and Linux device nodes),
 per-family probe selection, active GPU environment retention, persisted acceleration
 mode, failure retry suppression, CLI accelerator selection, CPU fallback reporting,
-and Linux-only AMD selection. The three separate audio-preset working-tree edits
-remain outside this follow-up.
+and Linux-only AMD selection. The audio-preset fix was committed separately as
+`4b6c2b3` (`fix(audio): remove artifact-prone stretching from Calm and Energetic`).
 
 Local checks: launcher and desktop `cargo check` passed; launcher cross-target
 `cargo check --target x86_64-pc-windows-gnu` passed; `python scripts/validate_repo.py`,
@@ -2354,4 +2354,29 @@ passed on 2026-09-29: launcher `cargo test` (65 passed, 1 ignored), desktop
 `cargo test` (50 passed), and the Phase 9 tier-1 Python command (716 passed,
 1 warning). The installed-app GPU/CPU fallback scenario remains to be run.
 PR #362 merged the GPU validation workflow and its probe script to `main` on
-2026-09-29. The Windows CUDA 13 dispatch is the next remote gate.
+2026-09-29.
+
+### Post-rebase validation and CUDA wheel check (2026-09-29)
+
+The Phase 9 branch was rebased onto `main` after PR #362 merged and pushed with
+`--force-with-lease`. Post-rebase local checks passed: `python scripts/validate_repo.py`,
+`docker compose config --quiet`, `git diff --check origin/main...HEAD`, launcher
+`cargo test` (65 passed, 1 ignored), desktop `cargo test` (50 passed), and tier-1
+Python tests (exit 0). The audio fix is a separate commit.
+
+Live PyTorch wheel indexes for Windows Python 3.13 contain `torch 2.14.0` for
+`cu126` and `cu130`, but not `cu128`. The `cu128` index tops out at `torch 2.11.0`.
+Keep the D23 `cu130` selection for GPUs with compute capability at least 7.5 and
+a CUDA 13-capable driver. The `cu126` wheel exists but the recorded RTX 5090
+probe shows it lacks `sm_120`; it is not a usable Blackwell fallback. A 50-series
+card whose driver reports only CUDA 12 requires a driver update before CUDA 13
+can be selected. Replacing `cu126` with `cu128` would also require a coordinated
+older Torch stack, not an index-only change.
+
+Windows CUDA 13 workflow dispatch [run 36611800750](https://github.com/nmorgowicz-org/persona-forge/actions/runs/36611800750)
+failed on both attempts before reaching the GPU probe. `uv pip install` timed
+out connecting to `https://download.pytorch.org/whl/cu130/torchaudio/` after
+three retries on each attempt. This is a remote package-index connectivity
+blocker, not a CUDA or model result. The actual Windows workflow gate and the
+owner's installed-app Automatic GPU, CPU-only, and blocked-network fallback
+scenarios remain open.
