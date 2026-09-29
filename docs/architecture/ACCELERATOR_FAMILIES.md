@@ -148,11 +148,13 @@ accelerator support at all.
 
 - `intel-xpu`: **validated** on real Xe-LP iGPU hardware (host `plexxie`, per
   A6.1) — fp64-emu env + torch-xpu wheel + OmniVoice on the iGPU.
-- `cuda` / `rocm`: index URLs and wheel versions are **validated on the desktop app** (contract D23)
-  on Windows+NVIDIA, Linux+NVIDIA, and Linux+AMD hardware. The desktop app provisions the matching
-  PyTorch wheel automatically and verifies it with `gpu_probe` before activating. For the container
-  and native CLI paths, the same wheels are installed on first boot or at `uv sync` time; treat as
-  best-effort; override `ACCEL_TORCH_INDEX_URL` / `ACCEL_TORCH_VERSION` / `ACCEL_TORCHAUDIO_VERSION` as needed.
+- `cuda` / `rocm`: **validated on the owner's RTX 5090** (NVIDIA GeForce RTX 5090,
+  compute capability 12.0, driver 617.14, CUDA 13 driver) via `scripts/gpu_validate.sh`
+  on 2026-09-28. The D23 selection rule (`select_cuda_pin()`) picks `cuda13` for this
+  GPU; `cuda12` lacks `sm_120` kernels and fails on Blackwell. For other NVIDIA GPUs
+  (compute capability < 7.5) or older drivers, `cuda12` is the correct default.
+  See `docs/plans/20260925-native_app_shell_auto_update.md` §Phase 9 results for
+  full probe outputs.
 
 ## Surface and tests
 
