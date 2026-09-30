@@ -1,6 +1,6 @@
 //! Library crate for `persona-forge-launcher`: bundle verification, env bootstrap/retention,
 //! and desktop-shell server supervision/health probing
-//! (`docs/plans/20260925-native_app_shell_auto_update.md` Phase 2, D9). `main.rs` (the CLI
+//! (`docs/archive/desktop-app/20260925-native_app_shell_auto_update.md` Phase 2, D9). `main.rs` (the CLI
 //! archive's thin bootstrap) and the Tauri desktop shell (Phase 3) both depend on this crate
 //! instead of duplicating any of this logic.
 

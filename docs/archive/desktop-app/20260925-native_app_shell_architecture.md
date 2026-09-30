@@ -1,9 +1,17 @@
+# Archived 2026-09-30
+
+This contract is retained as the historical design record for the desktop app. The next-release
+in-app update verification and installed GPU fallback scenarios were still pending at archive time;
+record their results here after the next release. Current operating guidance is in
+[`docs/architecture/DESKTOP_APP.md`](../../architecture/DESKTOP_APP.md).
+
 # Persona Forge Desktop — Architecture Contract
 
-**Status:** draft for owner review, 2026-09-25. Binding design for
-`20260925-native_app_shell_auto_update.md` (the execution plan) once the owner approves it.
-When the two docs conflict, **this doc wins**. The execution plan may not relax a decision here.
-To change a decision, amend this doc in a separate commit and get owner sign-off.
+**Status:** Archived 2026-09-30. Historical design contract; see the archive notice above for
+validation follow-ups. Binding design for
+`20260925-native_app_shell_auto_update.md` (the execution plan). This contract governed
+implementation; its decisions are retained as historical design context. Current operating
+guidance is in `docs/architecture/DESKTOP_APP.md`.
 
 **Amendment 2026-09-26 (owner-approved):** D20 (macOS window polish) and D21 (downloads never
 block; Downloads folder by default, optional "Ask where to save"). They change §6.4, §6.5, §6.7,

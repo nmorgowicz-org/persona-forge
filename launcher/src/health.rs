@@ -1,4 +1,4 @@
-//! Port/health probing (contract §6.3, `docs/plans/20260925-native_app_shell_auto_update.md`
+//! Port/health probing (contract §6.3, `docs/archive/desktop-app/20260925-native_app_shell_auto_update.md`
 //! Phase 2). std-only HTTP/1.1 GET over `TcpStream`; no HTTP client dependency, since the only
 //! thing ever probed is `GET /health` against a local Persona Forge server.
 
