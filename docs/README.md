@@ -60,8 +60,8 @@ Compact references written for AI coding agents working in this repo.
 
 - [`archive/`](archive/) — dated design, implementation, and analysis plans, grouped by topic,
   kept as a record once resolved or superseded
-- [`archive/desktop-app/`](archive/desktop-app/) — archived desktop architecture and execution
-  plans; update acceptance and installed GPU fallback results after the next release
+- [`archive/desktop-app/`](archive/desktop-app/) — archived desktop architecture, execution, and
+  Phase 6B update-gates design; update acceptance and installed GPU fallback results after the next release
 - [`dev/benchmarks/`](dev/benchmarks/) — benchmark logs from the OpenVINO era
 - [`archive/openvino/OPENVINO_IMPLEMENTATION.md`](archive/openvino/OPENVINO_IMPLEMENTATION.md)
   and [`dev/benchmarks/OPENVINO_RESULTS.md`](dev/benchmarks/OPENVINO_RESULTS.md) —
