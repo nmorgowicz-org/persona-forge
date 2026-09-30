@@ -336,7 +336,7 @@ fn nvidia_smi_compute_cap() -> Result<(u32, u32), String> {
     Ok((major, minor))
 }
 
-/// Parse the `CUDA Version: X.Y` line from `nvidia-smi` output and return the major version.
+/// Parse the driver's `CUDA Version` or `CUDA UMD Version` header from `nvidia-smi`.
 ///
 /// This is the driver's supported CUDA version (not the installed toolkit).
 fn nvidia_smi_cuda_version() -> Result<u32, String> {
@@ -347,18 +347,36 @@ fn nvidia_smi_cuda_version() -> Result<u32, String> {
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
     }
     let text = String::from_utf8_lossy(&output.stdout);
-    // Find "CUDA Version: X.Y" or "CUDA Version : X.Y" (format varies by locale/version).
-    let idx = text
-        .find("CUDA Version")
+    parse_driver_cuda_major(&text)
+}
+
+/// Read the driver CUDA major without allocating a copy of the version number.
+fn parse_driver_cuda_major(text: &str) -> Result<u32, String> {
+    let after = text
+        .match_indices("CUDA")
+        .find_map(|(idx, _)| {
+            let after = &text[idx + "CUDA".len()..];
+            if !after.starts_with(char::is_whitespace) {
+                return None;
+            }
+            let after = after.trim_start();
+            let after = if let Some(after) = after.strip_prefix("UMD") {
+                if !after.starts_with(char::is_whitespace) {
+                    return None;
+                }
+                after.trim_start()
+            } else {
+                after
+            };
+            after.strip_prefix("Version")
+        })
         .ok_or("CUDA Version line not found")?;
-    let after = &text[idx + "CUDA Version".len()..];
-    // Skip whitespace and colons
+    // Keep accepting whitespace around the colon used by older driver headers.
     let after = after.trim_start_matches(|c: char| c.is_whitespace() || c == ':');
-    // Extract the number before the dot or space
-    let num: String = after
-        .chars()
-        .take_while(|c| c.is_ascii_digit() || *c == '.')
-        .collect();
+    let end = after
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(after.len());
+    let num = &after[..end];
     let major: u32 = num
         .split('.')
         .next()
@@ -449,6 +467,52 @@ mod tests {
             driver_major,
         };
         detect(&probe, os)
+    }
+
+    #[test]
+    fn test_driver_cuda_legacy_headers() {
+        for (header, expected) in [
+            (
+                "| NVIDIA-SMI 570.86.16 Driver Version: 570.86.16 CUDA Version: 12.8 |",
+                12,
+            ),
+            ("CUDA Version : 13.0", 13),
+            ("CUDA \t Version \t: \t12.6", 12),
+            ("CUDA \t UMD \t Version : 13.4", 13),
+        ] {
+            assert_eq!(parse_driver_cuda_major(header), Ok(expected));
+        }
+    }
+
+    #[test]
+    fn test_driver_cuda_current_windows_header_selects_cuda13() {
+        let header = "NVIDIA-SMI 617.14 KMD Version: 617.14 CUDA UMD Version: 13.4";
+        let driver_major = parse_driver_cuda_major(header).unwrap();
+        assert_eq!(driver_major, 13);
+        assert_eq!(
+            select_cuda_extra(Some((12, 0)), Some(driver_major)),
+            Accel::Cuda13
+        );
+    }
+
+    #[test]
+    fn test_driver_cuda_missing_or_malformed_version_stays_conservative() {
+        for header in [
+            "",
+            "NVIDIA-SMI 617.14 KMD Version: 617.14",
+            "CUDA UMD: 13.4",
+            "CUDA Version: N/A",
+            "CUDA UMD Version:",
+            "CUDA Version: .4",
+            "CUDA UMD Version: 4294967296.4",
+        ] {
+            let driver_major = parse_driver_cuda_major(header);
+            assert!(driver_major.is_err(), "unexpected version in {header:?}");
+            assert_eq!(
+                select_cuda_extra(Some((12, 0)), driver_major.ok()),
+                Accel::Cuda12
+            );
+        }
     }
 
     #[test]

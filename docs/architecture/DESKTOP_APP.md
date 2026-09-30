@@ -112,6 +112,11 @@ and provisions the matching PyTorch accelerator wheel into a versioned environme
 | Windows x86-64 | NVIDIA CUDA 13 or 12 | NVIDIA GPU with compute capability ≥ 7.5; CUDA 13 chosen when the driver supports it, otherwise CUDA 12 |
 | Linux x86-64 | NVIDIA CUDA 13 or 12, Intel XPU (Arc), AMD ROCm | Same CUDA rules as Windows; Intel XPU uses the Arc iGPU; ROCm requires AMD GPU |
 
+NVIDIA driver detection accepts both the older `CUDA Version` header and the newer
+`CUDA UMD Version` header from `nvidia-smi`. Bundled accelerator requirements include
+package-specific wheel sources, so provisioning does not depend on a repository checkout
+or a manually configured PyTorch index.
+
 If the detected GPU family is not supported (for example, an AMD GPU on Windows), or if the
 accelerator installation or verification fails, the app falls back to CPU inference and shows a
 notice with details in Settings. The fallback is never silent.
@@ -169,6 +174,16 @@ Use **Show Logs** in the app menu or tray to open the log directory. Review `des
 shell and port decisions, `bootstrap.log` for Python/environment provisioning, and `server.log`
 for server startup and runtime output. The splash also shows recent log lines and has **Retry**,
 **Show Logs**, and **Quit** actions when startup fails.
+
+### NVIDIA detected but generation still runs on CPU
+
+Hardware detection and accelerator installation are separate steps. Check **Settings →
+Acceleration** for an installation failure; detecting NVIDIA does not prove the running
+Python environment has CUDA-enabled Torch. Older builds can misread the `CUDA UMD Version`
+driver header or fail to find accelerator wheels because their bundled requirements omit
+the wheel sources. Install an updated build with these fixes, then use **Retry** if a failure
+remains. Once background provisioning succeeds, relaunch the app to use its GPU environment.
+
 
 ### Change or reset the port
 

@@ -72,6 +72,24 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _source_find_links(extra: str | None) -> list[str]:
+    """Expose only the selected packages' wheel pages, not entire accelerator indexes."""
+    if extra is None:
+        return []
+    src_dir = str(Path(__file__).resolve().parents[1] / "src")
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    from persona_forge.accelerator_manifest import ACCELERATOR_PINS
+
+    pin = ACCELERATOR_PINS.get(extra)
+    if pin is None:
+        return []
+    return [
+        f"{pin.index_url.rstrip('/')}/{package}/"
+        for package in ("torch", "torchaudio", *pin.extra_pins)
+    ]
+
+
 def export_requirements(target_platform: str, out_path: Path, uv_path: str = "uv", extra: str | None = None) -> None:
     # `uv export` resolves only for the host platform's existing uv.lock; getting a hash-locked
     # requirements file for a *different* target needs the pip-compatible resolver instead, which
@@ -106,6 +124,16 @@ def export_requirements(target_platform: str, out_path: Path, uv_path: str = "uv
         raise SystemExit(
             f"uv pip compile failed for --python-platform {target_platform} (extra={extra or 'none'}):\n{result.stdout}\n{result.stderr}"
         )
+    # requirements.txt cannot express tool.uv.sources' per-package index routing.
+    # Emitting every index globally instead lets the first accelerator index shadow
+    # both the selected backend and unrelated PyPI packages. A Simple API package
+    # page is also a valid --find-links page: expose only the selected source's wheels
+    # while keeping compile's exact versions and integrity hashes unchanged.
+    links = _source_find_links(extra)
+    if links:
+        requirements = out_path.read_text(encoding="utf-8")
+        preamble = "".join(f"--find-links {url}\n" for url in links)
+        out_path.write_text(preamble + "\n" + requirements, encoding="utf-8")
 
 # Phase 9: per-family requirements available on each uv platform triple.
 # Windows/Linux share cuda12/cuda13/xpu; Linux adds rocm; macOS has none (MPS is in the
