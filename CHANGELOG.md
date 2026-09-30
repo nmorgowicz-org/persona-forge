@@ -1,5 +1,27 @@
 # Changelog
 
+## [3.1.2](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.1...persona-forge-v3.1.2) (2026-09-30)
+
+
+### Bug Fixes
+
+* **deps:** update rust dependencies ([#367](https://github.com/nmorgowicz-org/persona-forge/issues/367)) ([38f0d20](https://github.com/nmorgowicz-org/persona-forge/commit/38f0d20e33ef101696d70df6843c63dcb49568b7))
+* **updater:** embed release notes in Sparkle feed ([652e463](https://github.com/nmorgowicz-org/persona-forge/commit/652e463dd6ceb127ca6b4a670c452a1db12e8451))
+* **updater:** show release notes in Tauri update prompt ([652e463](https://github.com/nmorgowicz-org/persona-forge/commit/652e463dd6ceb127ca6b4a670c452a1db12e8451))
+
+
+### Documentation
+
+* **desktop:** archive native app shell plans ([8657d42](https://github.com/nmorgowicz-org/persona-forge/commit/8657d421a652f3dd48f5bb86f536ec125e602d8e))
+* **desktop:** archive Phase 6B design spec ([8657d42](https://github.com/nmorgowicz-org/persona-forge/commit/8657d421a652f3dd48f5bb86f536ec125e602d8e))
+* **desktop:** record desktop test results ([8657d42](https://github.com/nmorgowicz-org/persona-forge/commit/8657d421a652f3dd48f5bb86f536ec125e602d8e))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump brace-expansion from 5.0.9 to 5.0.12 in /frontend ([#370](https://github.com/nmorgowicz-org/persona-forge/issues/370)) ([3f19b76](https://github.com/nmorgowicz-org/persona-forge/commit/3f19b76776f34e823588eb61bf8be84858798510))
+* **deps:** bump fast-uri from 3.1.7 to 3.1.8 in /frontend ([#369](https://github.com/nmorgowicz-org/persona-forge/issues/369)) ([fe6cc69](https://github.com/nmorgowicz-org/persona-forge/commit/fe6cc69380b80cc928c7184202f7991b9d6fe7ac))
+
 ## [3.1.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.0...persona-forge-v3.1.1) (2026-09-29)
 
 
