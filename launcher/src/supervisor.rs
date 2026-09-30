@@ -1,4 +1,4 @@
-//! Server process supervision (contract §6.2, `docs/plans/20260925-native_app_shell_auto_update.md`
+//! Server process supervision (contract §6.2, `docs/archive/desktop-app/20260925-native_app_shell_auto_update.md`
 //! Phase 2). Spawns `<python> -m persona_forge.cli serve` in its own process group (Unix) /
 //! kill-on-close Job Object (Windows), and gives the desktop shell a clean stop/health handshake
 //! instead of relying on the child ever seeing a console Ctrl+C.

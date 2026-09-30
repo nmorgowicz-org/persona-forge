@@ -153,7 +153,7 @@ accelerator support at all.
   on 2026-09-28. The D23 selection rule (`select_cuda_pin()`) picks `cuda13` for this
   GPU; `cuda12` lacks `sm_120` kernels and fails on Blackwell. For other NVIDIA GPUs
   (compute capability < 7.5) or older drivers, `cuda12` is the correct default.
-  See `docs/plans/20260925-native_app_shell_auto_update.md` §Phase 9 results for
+  See `docs/archive/desktop-app/20260925-native_app_shell_auto_update.md` §Phase 9 results for
   full probe outputs.
 
 ## Surface and tests

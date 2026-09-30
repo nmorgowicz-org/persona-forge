@@ -1,4 +1,4 @@
-//! Version directory retention (contract D14, `docs/plans/20260925-native_app_shell_auto_update.md`
+//! Version directory retention (contract D14, `docs/archive/desktop-app/20260925-native_app_shell_auto_update.md`
 //! Phase 2). After a successful `ensure_env` promote, delete every stale `versions/<name>` entry
 //! that is not the version just promoted, not the immediately previous version, not currently in
 //! use by a live process, and not a semver-greater version than the one just promoted (D14: a

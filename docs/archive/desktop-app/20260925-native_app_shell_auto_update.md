@@ -1,8 +1,16 @@
+# Archived 2026-09-30
+
+This execution plan is retained as the implementation and validation record. The next-release
+in-app update verification and installed GPU fallback scenarios were still pending at archive time;
+record their results here after the next release. Current operating guidance is in
+[`docs/architecture/DESKTOP_APP.md`](../../architecture/DESKTOP_APP.md).
+
 # Persona Forge Desktop — Execution Plan
 
-Status: **draft. The owner reviews it together with the architecture contract before Phase 0.**
+Status: **Archived 2026-09-30.** Historical execution record; see the archive notice above for
+validation follow-ups.
 
-**Architecture contract (binding):** `docs/plans/20260925-native_app_shell_architecture.md`.
+**Architecture contract (binding):** `docs/archive/desktop-app/20260925-native_app_shell_architecture.md`.
 Every decision ID (`D1`…`D23`) and section reference (`§6.2` etc.) below points into that doc.
 If this plan and the contract disagree, the contract wins. **Stop and report**; do not pick one
 yourself.
@@ -1865,9 +1873,10 @@ Follow-ups: Windows signing, API auth, macOS data-root migration, Linux aarch64,
 
 ### Archive
 
-Once Phase 9 is also done, move both plan docs to `docs/archive/desktop-app/` and mark them
-complete; until then they stay active, because Phase 9 runs after this acceptance.
-`docs/architecture/DESKTOP_APP.md` remains the active reference.
+Archived 2026-09-30 in `docs/archive/desktop-app/`. The next-release update acceptance and
+installed GPU/CPU/network-fallback scenarios remain owner follow-ups; add their results to this
+record when the new release is available. `docs/architecture/DESKTOP_APP.md` remains the active
+reference.
 
 ---
 

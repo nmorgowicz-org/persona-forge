@@ -1,6 +1,13 @@
+# Archived 2026-09-30
+
+This is the historical design record for Phase 6B's signed update feeds and automated update
+gates. The next real-release update display/install check remains open; its status and results
+belong in the companion archived execution plan.
+
 # Phase 6B: signed update feeds and update gates — design
 
-**Status:** approved in conversation on 2026-09-27; awaiting written-spec review.
+**Status:** Archived 2026-09-30. Phase 6B implementation and automated gates are complete; real
+release update acceptance remains open as recorded in the companion execution plan.
 
 ## Purpose and success criteria
 

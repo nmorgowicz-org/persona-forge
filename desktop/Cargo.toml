@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2021"
 rust-version = "1.87"
 license = "MIT"
-description = "Persona Forge desktop shell: a Tauri v2 app that manages a local Persona Forge server (docs/plans/20260925-native_app_shell_architecture.md)"
+description = "Persona Forge desktop shell: a Tauri v2 app that manages a local Persona Forge server (docs/archive/desktop-app/20260925-native_app_shell_architecture.md)"
 publish = false
 
 [[bin]]

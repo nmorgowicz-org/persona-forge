@@ -138,7 +138,7 @@ def build_manifest(
     accelerator_requirements: dict[str, str] | None = None,
 ) -> dict:
     """Schema-v1 manifest.json body shared by the CLI archive and the desktop payload
-    (docs/plans/20260925-native_app_shell_architecture.md §7: same schema, so `ensure_env` is
+    (docs/archive/desktop-app/20260925-native_app_shell_architecture.md §7: same schema, so `ensure_env` is
     unchanged).
 
     ``accelerator_requirements`` maps extra names (``cuda12``, ``cuda13``, ``xpu``, ``rocm``)
