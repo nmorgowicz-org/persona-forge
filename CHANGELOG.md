@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Bug Fixes
+
+* **desktop:** recognize NVIDIA's CUDA UMD version header so CUDA 13-capable drivers select the correct accelerator environment.
+* **packaging:** preserve package-specific accelerator wheel sources in standalone launcher and desktop requirements.
+
 ## [3.1.2](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.1...persona-forge-v3.1.2) (2026-09-30)
 
 
