@@ -1,8 +1,10 @@
 # Persona Forge — Desktop Manual Test Plan (release gate)
 
-**Status:** placeholder — build is not yet releasable; execute this plan **near release** (Phase 7),
-not during the current build-out. This file is the **living home for every manual desktop QA test**;
-Phases 4–7 append their packaging/signing/update checks here as they land.
+**Status:** The first desktop release shipped. This remains the **living home for manual desktop QA**.
+Recorded Phase 1 spike checks, first-release owner acceptance, and automated release gates are
+summarized below. Run remaining product UI checks against the current release build, the updater
+check after the next release, and the GPU fallback checks on a build containing the Phase 9
+changes. Do not treat an earlier spike pass as proof for an unrecorded final-release check.
 
 Owner runs this on the Mac (`darwin arm64`). Where a test says "other machine", use a Debian LXC
 (`docker-agent`/`hermes-*` neighbor) or a spare browser — one is enough.
@@ -305,60 +307,68 @@ python3 -c "import json;d=json.load(open('/tmp/desktop-gate/smoke.json'));assert
 
 ## Release-wiring checks (Phase 7 addition)
 
-These are appended here so the release gate is one place — the Phase 4/5/6/7 stamp/build/sign/
-update manual checks will slot into this section as those phases land. Expected additions:
+These rows record the release pipeline gates and the remaining owner checks. Workflow receipts and
+phase-level details are preserved in the [archived execution plan](archive/desktop-app/20260925-native_app_shell_auto_update.md).
 
-- [ ] Phase 4: unsigned artifacts build on all three OSes; native smoke passes (headless, per job)
-- [ ] Phase 5: signed `.app` + DMG notarized/stapled; CI signature and Gatekeeper checks pass
-- [ ] Phase 5 OWNER: download the signed DMG through a browser, disconnect Wi-Fi, mount it, and
-      drag the app to Applications. Launch it offline; confirm there is no Gatekeeper rejection.
-      Eject and mount again, then launch directly from the mounted image. Confirm the move prompt;
-      accept and verify the relaunched process runs from `/Applications/Persona Forge.app`.
-      Repeat and decline; confirm the app continues and **Check for Updates** is disabled in the
-      app menu. If an existing app is present, verify replacement requires separate confirmation.
-- [ ] Phase 6A/6B: in-app "Check for Updates…" offers/installs/relaunches; good + badsig feeds;
-       Windows silent install; Sparkle appcast path
-- [ ] Phase 7: release artifacts match the contract (`validate_release_contract.py`), checksums
-      coverage, feed generation, rollback procedure tested
+- [x] Phase 4: unsigned artifacts build on all three OSes; native smoke passes (run 36279576711)
+- [x] Phase 5: signed `.app` + DMG notarized/stapled; CI signature and Gatekeeper checks pass (run 36306147694)
+- [x] Phase 5 OWNER: signed DMG installed and launched with Wi-Fi off; no Gatekeeper rejection
+      (owner result in Phase 1 results).
+- [ ] Phase 5 OWNER: mounted-image move prompt accept/decline flow and update-disabled behavior
+      were not recorded.
+- [x] Phase 6A/6B automated gates: signed good updates and bad-signature rejection on Linux and
+      Windows (runs 36358376331 and 36359223085). Real macOS/Windows GUI update on a production
+      release remains open below.
+- [x] Phase 7: release dry-run validates desktop artifacts, feeds, checksums, and the full asset
+      contract (run 36415146814).
+- [ ] Next release: verify the in-app updater displays only that release's notes and installs on
+      macOS and Windows.
+- [x] Phase 9 hardware probe: CUDA 13 PyTorch probe passed on the RTX 5090 (run 36613488941).
+- [ ] Phase 9 owner: verify Automatic GPU provisioning, CPU-only mode, and blocked-network CPU
+      fallback in the installed app.
 
 ---
 
 ## Results table
 
-Copy this block into the PR (or a gist) and fill it in near release. `pass` / `FAIL(#<issue>)` /
-`n/e` (not exercised — note why).
+Statuses: `PASS`, `PARTIAL`, `OPEN`, or `n/e` (not exercised or not individually recorded; explain
+why). Evidence points to the phase receipts and run records in the archived execution plan.
 
 | # | Test | Result | Evidence (screenshot/log) |
 | --- | ------ | -------- | --------------------------- |
-| T0.0 | real-payload `--smoke-test` | | |
-| T1.1 | first-run splash → SPA | | |
-| T1.2 | second launch focuses; one server | | |
-| T2.1 | Cmd+C/V/Z/A in Speak + library textareas | | |
-| T3.1 | default save → `~/Downloads`, `(1)` dedup, Saved notif | | |
-| T3.2 | ask mode: responsive dialog; Save moves; Cancel clears tmp | | |
-| T3.3 | download failure → partial removed + "Download failed" | | |
-| T4.1 | external links → system browser | | |
-| T4.2 | no web update banner in-app; banner shows in browser | | |
-| T5.1 | close-to-tray/Dock; reopen; Cmd+Q quits in 10s | | |
-| T5.2 | SIGTERM orphan recovery; same port after relaunch | | |
-| T5.3 | window size/position persist | | |
-| T5.4 | tray toggle persists; off = no icon | | |
-| T6.1 | auto 8318 busy → 8319 persisted; 8319 busy → "port moved" | | |
-| T6.2 | fixed 9123 never moves; conflict dialog; external-PF prompt | | |
-| T6.3 | no free port → clear error | | |
-| T7.1 | LAN reachable; firewall prompt recorded | | |
-| T7.2 | Copy Server Address (off = 127.0.0.1, on = LAN) | | |
-| T8.1 | Dock/About/tray icons light + dark | | |
-| T8.2 | vibrancy light + dark; dims on deactivate; no flicker | | |
-| T8.3 | Reduce Transparency → opaque sidebar (record actual) | | |
-| T8.4 | system accent on native controls; brand theme unchanged | | |
-| T9.1 | broken payload → error screen; Retry/Show Logs/Quit | | |
-| T10.1 | Safari: no data-desktop, opaque, banner shown | | |
-| Phase 5 translocation | mounted-DMG prompt; accept relaunches from Applications; decline disables updates | | |
-| Phase 4 | unsigned artifacts + smoke (slot) | | |
-| Phase 5 | notarized `.app`/DMG, offline install | | |
-| Phase 6A/6B | update offer/install/relaunch; feeds; sigs | | |
-| Phase 7 | release contract + rollback | | |
+| T0.0 | real-payload `--smoke-test` | PASS | Phase 4 native smoke, run 36279576711. |
+| T1.1 | first-run splash → SPA | PASS | Phase 8 owner acceptance: first run reached the SPA; Speak generated and played audio. |
+| T1.2 | second launch focuses; one server | n/e | No individual result recorded in the phase receipts. |
+| T2.1 | Cmd+C/V/Z/A in Speak + library textareas | n/e | No individual result recorded in the phase receipts. |
+| T3.1 | default save → `~/Downloads`, `(1)` dedup, Saved notif | PARTIAL | Phase 1 GUI downloads and same-name files passed (runs 36235228235, 36236004149); notification evidence not recorded. |
+| T3.2 | ask mode: responsive dialog; Save moves; Cancel clears tmp | PARTIAL | Phase 1 owner/GUI checks covered ask mode and responsiveness (runs 36235228235, 36236004149); temp cleanup evidence not recorded. |
+| T3.3 | download failure → partial removed + "Download failed" | n/e | No individual result recorded. |
+| T4.1 | external links → system browser | PARTIAL | `window.open` passed on macOS/Windows; `<a target="_blank">` was dropped on both (build `3db90a8`, run 36244193928). |
+| T4.2 | no web update banner in-app; banner shows in browser | n/e | No paired desktop/browser result recorded. |
+| T5.1 | close-to-tray/Dock; reopen; Cmd+Q quits in 10s | n/e | No individual result recorded. |
+| T5.2 | SIGTERM orphan recovery; same port after relaunch | n/e | No owner-run result recorded. |
+| T5.3 | window size/position persist | n/e | No individual result recorded. |
+| T5.4 | tray toggle persists; off = no icon | n/e | No individual result recorded. |
+| T6.1 | auto 8318 busy → 8319 persisted; 8319 busy → "port moved" | n/e | No owner-run result recorded. |
+| T6.2 | fixed 9123 never moves; conflict dialog; external-PF prompt | PARTIAL | Phase 8 owner acceptance confirmed fixed-port Settings behavior; conflict dialogs were not individually recorded. |
+| T6.3 | no free port → clear error | n/e | No individual result recorded. |
+| T7.1 | LAN reachable; firewall prompt recorded | PARTIAL | Phase 8 owner acceptance confirmed another machine could call `/v1/audio/speech`; firewall prompt text was not recorded. |
+| T7.2 | Copy Server Address (off = 127.0.0.1, on = LAN) | n/e | No individual result recorded. |
+| T8.1 | Dock/About/tray icons light + dark | n/e | No light/dark screenshot receipt recorded. |
+| T8.2 | vibrancy light + dark; dims on deactivate; no flicker | n/e | No individual result recorded. |
+| T8.3 | Reduce Transparency → opaque sidebar (record actual) | n/e | No individual result recorded. |
+| T8.4 | system accent on native controls; brand theme unchanged | n/e | No individual result recorded. |
+| T9.1 | broken payload → error screen; Retry/Show Logs/Quit | n/e | No owner-run result recorded. |
+| T10.1 | Safari: no data-desktop, opaque, banner shown | n/e | No paired Safari result recorded. |
+| Phase 5 translocation | mounted-DMG prompt; accept relaunches from Applications; decline disables updates | PARTIAL | Offline DMG install/launch passed; move/decline path not recorded (Phase 1 results). |
+| Phase 4 | unsigned artifacts + smoke (slot) | PASS | Desktop package/smoke run 36279576711. |
+| Phase 5 | notarized `.app`/DMG, offline install | PASS | Signing/build run 36306147694; owner offline install in Phase 1 results. |
+| Phase 6A/6B | update offer/install/relaunch; feeds; sigs | PARTIAL | Linux/Windows good and bad-signature automation passed (runs 36358376331, 36359223085); production GUI acceptance remains open. |
+| Phase 8 owner acceptance | install, first run, contract items 2/4/5/7/8, shared data, Settings/LAN access, uninstall/data retention | PASS | Owner acceptance matrix in archived execution plan, recorded 2026-09-29. The in-app N+1 update is separately open. |
+| Phase 7 | release contract + rollback | PARTIAL | Full dry-run passed (run 36415146814); rollback was not recorded as tested. |
+| Phase 9 hardware probe | CUDA 13 selection and RTX 5090 PyTorch probe | PASS | Run 36613488941; installed-app fallback remains a separate open check. |
+| Phase 9 installed app | Automatic GPU, CPU-only, and blocked-network fallback | OPEN | Owner scenarios remain unrun per archived execution plan. |
+| Next-release updater | version-specific release notes display and successful install | OPEN | Verify macOS and Windows after the next release; v3.1.1 feeds were unchanged. |
 
 ---
 
