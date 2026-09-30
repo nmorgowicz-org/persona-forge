@@ -7,6 +7,19 @@
 * **desktop:** recognize NVIDIA's CUDA UMD version header so CUDA 13-capable drivers select the correct accelerator environment.
 * **packaging:** preserve package-specific accelerator wheel sources in standalone launcher and desktop requirements.
 
+## [3.1.3](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.2...persona-forge-v3.1.3) (2026-09-30)
+
+
+### Bug Fixes
+
+* **desktop:** recognize NVIDIA CUDA UMD version headers ([dff7f29](https://github.com/nmorgowicz-org/persona-forge/commit/dff7f292d17ba3bd1547b71ae18327478eaadb89))
+* **packaging:** preserve accelerator wheel sources in standalone requirements ([dff7f29](https://github.com/nmorgowicz-org/persona-forge/commit/dff7f292d17ba3bd1547b71ae18327478eaadb89))
+
+
+### Documentation
+
+* **desktop:** document CPU fallback after accelerator provisioning failures ([dff7f29](https://github.com/nmorgowicz-org/persona-forge/commit/dff7f292d17ba3bd1547b71ae18327478eaadb89))
+
 ## [3.1.2](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.1...persona-forge-v3.1.2) (2026-09-30)
 
 
