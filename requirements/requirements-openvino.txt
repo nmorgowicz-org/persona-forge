@@ -1,1 +1,1 @@
-openvino==2026.4.0
+openvino==2026.4.1
