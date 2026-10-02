@@ -39,7 +39,7 @@ log = "0.4"
 parking_lot = "0.12"
 
 [target.'cfg(unix)'.dependencies]
-libc = "=0.2.189"
+libc = "=0.2.190"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 tauri-plugin-updater = "=2.13.1"
