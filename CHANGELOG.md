@@ -7,6 +7,15 @@
 * **desktop:** recognize NVIDIA's CUDA UMD version header so CUDA 13-capable drivers select the correct accelerator environment.
 * **packaging:** preserve package-specific accelerator wheel sources in standalone launcher and desktop requirements.
 
+## [3.1.5](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.4...persona-forge-v3.1.5) (2026-10-02)
+
+
+### Miscellaneous Chores
+
+* **deps:** update dependency openvino to v2026.4.1 ([#378](https://github.com/nmorgowicz-org/persona-forge/issues/378)) ([223fa58](https://github.com/nmorgowicz-org/persona-forge/commit/223fa58da91fda6766608dbfad068536fe34e260))
+* **deps:** update frontend npm dependencies ([#379](https://github.com/nmorgowicz-org/persona-forge/issues/379)) ([424ac62](https://github.com/nmorgowicz-org/persona-forge/commit/424ac62052440b37306b93cee8a787e0ff364e32))
+* **deps:** update python:3.13-slim docker digest to bb29887 ([#380](https://github.com/nmorgowicz-org/persona-forge/issues/380)) ([b35178d](https://github.com/nmorgowicz-org/persona-forge/commit/b35178dd9479324977b4386f0291c8967ff1d317))
+
 ## [3.1.4](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.3...persona-forge-v3.1.4) (2026-10-01)
 
 
