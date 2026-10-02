@@ -99,10 +99,10 @@ dev = [
   "hatchling>=1.32.4",
 ]
 openvino = [
-  "openvino==2026.4.0",
+  "openvino==2026.4.1",
 ]
 export = [
-  "openvino==2026.4.0",
+  "openvino==2026.4.1",
   "nncf==3.4.0",
 ]
 
