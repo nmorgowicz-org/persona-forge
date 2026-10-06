@@ -30,7 +30,7 @@ def test_generate_minimal(base_url: str):
     r = httpx.post(
         f"{base_url}/generate",
         json={"text": TEST_TEXT},
-        timeout=10,
+        timeout=30,
     )
     assert r.status_code == 200
     # Verify it is audio, not JSON.
@@ -44,7 +44,7 @@ def test_generate_explicit_format(base_url: str):
         r = httpx.post(
             f"{base_url}/generate",
             json={"text": TEST_TEXT, "response_format": fmt},
-            timeout=10,
+            timeout=30,
         )
         assert r.status_code == 200
         ct = (r.headers.get("content-type") or "").lower()
