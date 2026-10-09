@@ -18,7 +18,7 @@ tauri-build = { version = "=2.7.1", features = [] }
 persona-forge-launcher = { path = "../launcher" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "=2.12.1", features = ["tray-icon", "macos-private-api", "image-png"] }
+tauri = { version = "=2.12.2", features = ["tray-icon", "macos-private-api", "image-png"] }
 # Pinned exactly: tauri 2.11.6 itself declares these as its minimum versions, but Cargo's
 # semver-compatible resolution can float them to newer patches with API drift that breaks the
 # build (observed: tauri-runtime 2.12.0 / tauri-macros 2.7.0 against tauri 2.11.6). Declaring
@@ -42,7 +42,7 @@ parking_lot = "0.12"
 libc = "=0.2.190"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-tauri-plugin-updater = "=2.13.1"
+tauri-plugin-updater = "=2.13.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # macOS 26+ Liquid Glass (NSGlassEffectView) with NSVisualEffectView fallback on older macOS;
