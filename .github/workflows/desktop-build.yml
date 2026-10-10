@@ -81,7 +81,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Install uv (pinned)
@@ -92,7 +92,7 @@ jobs:
         run: uv build
       - name: Inspect release artifacts (fail-closed)
         run: uv run --frozen python scripts/inspect_release_artifacts.py --dist-dir dist
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-wheel-and-sdist
           path: dist/
@@ -138,13 +138,13 @@ jobs:
       # wheel_artifact set    → download that artifact name instead (Phase 7 reuses this).
       - name: Download wheel (built in this run)
         if: inputs.wheel_artifact == ''
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: desktop-wheel-and-sdist
           path: dist
       - name: Download wheel (supplied artifact)
         if: inputs.wheel_artifact != ''
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: ${{ inputs.wheel_artifact }}
           path: dist
@@ -208,7 +208,7 @@ jobs:
           ditto -c -k --norsrc --noextattr --keepParent \
             "$APP" PersonaForge-macos-aarch64.app.zip
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ inputs.sign }}
         with:
           name: desktop-macos-app-unsigned
@@ -222,7 +222,7 @@ jobs:
           APP=$(find desktop/target -maxdepth 6 -type d -name "Persona Forge.app" -print -quit)
           bash scripts/build_macos_dmg.sh "$APP" PersonaForge-macos-aarch64.dmg
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !inputs.sign }}
         with:
           name: desktop-macos-aarch64
@@ -240,7 +240,7 @@ jobs:
       team_id: ${{ steps.sign.outputs.team_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: desktop-macos-app-unsigned
           path: artifact
@@ -274,7 +274,7 @@ jobs:
         if: always()
         run: rm -rf "$RUNNER_TEMP/pf-sign"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-macos-app-signed
           path: PersonaForge-macos-aarch64-app-signed.zip
@@ -289,7 +289,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: desktop-macos-app-signed
           path: artifact
@@ -302,7 +302,7 @@ jobs:
           APP=$(find signed-app -maxdepth 2 -type d -name "Persona Forge.app" -print -quit)
           bash scripts/build_macos_dmg.sh "$APP" PersonaForge-macos-aarch64.dmg
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-macos-dmg-unsigned
           path: PersonaForge-macos-aarch64.dmg
@@ -317,7 +317,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: desktop-macos-dmg-unsigned
           path: artifact
@@ -350,7 +350,7 @@ jobs:
         if: always()
         run: rm -rf "$RUNNER_TEMP/pf-sign"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-macos-aarch64
           path: PersonaForge-macos-aarch64.dmg
@@ -366,11 +366,11 @@ jobs:
     env:
       EXPECTED_TEAM_ID: ${{ needs.sign-macos-app.outputs.team_id }}
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: desktop-macos-app-signed
           path: app-archive
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: desktop-macos-aarch64
           path: dmg
@@ -482,13 +482,13 @@ jobs:
 
       - name: Download wheel (built in this run)
         if: inputs.wheel_artifact == ''
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: desktop-wheel-and-sdist
           path: dist
       - name: Download wheel (supplied artifact)
         if: inputs.wheel_artifact != ''
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: ${{ inputs.wheel_artifact }}
           path: dist
@@ -531,7 +531,7 @@ jobs:
           Copy-Item $exe.FullName PersonaForge-windows-x86_64-setup.exe
           "setup exe: {0:N1} MB" -f ((Get-Item PersonaForge-windows-x86_64-setup.exe).Length / 1MB) | Write-Host
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-windows-x86_64
           path: PersonaForge-windows-x86_64-setup.exe
@@ -572,13 +572,13 @@ jobs:
 
       - name: Download wheel (built in this run)
         if: inputs.wheel_artifact == ''
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: desktop-wheel-and-sdist
           path: dist
       - name: Download wheel (supplied artifact)
         if: inputs.wheel_artifact != ''
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: ${{ inputs.wheel_artifact }}
           path: dist
@@ -632,7 +632,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-linux-x86_64
           path: PersonaForge-linux-x86_64.AppImage
@@ -658,11 +658,11 @@ jobs:
           if ! cargo tauri --version 2>/dev/null | grep -q "tauri-cli ${TAURI_CLI_VERSION}"; then
             cargo install tauri-cli --locked --version "${TAURI_CLI_VERSION}"
           fi
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: desktop-windows-x86_64
           path: windows
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: desktop-linux-x86_64
           path: linux
@@ -677,7 +677,7 @@ jobs:
             ../windows/PersonaForge-windows-x86_64-setup.exe
           cargo tauri signer sign --app-version "${{ inputs.version }}" \
             ../linux/PersonaForge-linux-x86_64.AppImage
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-updater-signatures
           path: |
@@ -694,7 +694,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: desktop-macos-aarch64
           path: artifact
@@ -727,7 +727,7 @@ jobs:
     steps:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: desktop-windows-x86_64
           path: artifact
@@ -789,7 +789,7 @@ jobs:
     steps:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: desktop-linux-x86_64
           path: artifact
@@ -843,7 +843,7 @@ jobs:
       APPIMAGE_EXTRACT_AND_RUN: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: desktop-linux-x86_64
           path: artifact
