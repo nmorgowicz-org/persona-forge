@@ -7,6 +7,24 @@
 * **desktop:** recognize NVIDIA's CUDA UMD version header so CUDA 13-capable drivers select the correct accelerator environment.
 * **packaging:** preserve package-specific accelerator wheel sources in standalone launcher and desktop requirements.
 
+## [3.1.6](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.5...persona-forge-v3.1.6) (2026-10-11)
+
+
+### Bug Fixes
+
+* **deps:** update rust dependencies ([#396](https://github.com/nmorgowicz-org/persona-forge/issues/396)) ([2838474](https://github.com/nmorgowicz-org/persona-forge/commit/283847448891e644440932374738d74afc3de26d))
+* **deps:** update rust dependencies ([#400](https://github.com/nmorgowicz-org/persona-forge/issues/400)) ([7a06b58](https://github.com/nmorgowicz-org/persona-forge/commit/7a06b58d8b25e3c7187f47cff46b72a481d56164))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump @modelcontextprotocol/sdk from 1.30.0 to 1.32.1 in /frontend ([#398](https://github.com/nmorgowicz-org/persona-forge/issues/398)) ([02638ff](https://github.com/nmorgowicz-org/persona-forge/commit/02638ff9929bd823521a27b8e5712021358d9079))
+* **deps:** bump @modelcontextprotocol/sdk in /frontend ([02638ff](https://github.com/nmorgowicz-org/persona-forge/commit/02638ff9929bd823521a27b8e5712021358d9079))
+* **deps:** update dependency shadcn to v4.21.4 ([#399](https://github.com/nmorgowicz-org/persona-forge/issues/399)) ([d4766bc](https://github.com/nmorgowicz-org/persona-forge/commit/d4766bcdebed3c74aeb83d0a7cb32f6b3cc6a6d4))
+* **deps:** update docker base images ([#393](https://github.com/nmorgowicz-org/persona-forge/issues/393)) ([4251695](https://github.com/nmorgowicz-org/persona-forge/commit/4251695fb73667676df171952034e654839f407f))
+* **deps:** update frontend npm dependencies ([#395](https://github.com/nmorgowicz-org/persona-forge/issues/395)) ([3e58475](https://github.com/nmorgowicz-org/persona-forge/commit/3e584751c069cd0353e3d62df3302a2c52a54d5a))
+* **deps:** update github actions ([#394](https://github.com/nmorgowicz-org/persona-forge/issues/394)) ([1b0ff7b](https://github.com/nmorgowicz-org/persona-forge/commit/1b0ff7be67646b3a67eed18a7866fb4da3daa88c))
+
 ## [3.1.5](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.4...persona-forge-v3.1.5) (2026-10-06)
 
 
