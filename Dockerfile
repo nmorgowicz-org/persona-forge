@@ -14,7 +14,7 @@
 ARG PYTHON_IMAGE=python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f
 # Not digest-pinned like PYTHON_IMAGE below (build-stage only, never shipped in the final
 # image) — override via --build-arg if you need reproducibility guarantees for CI.
-ARG NODE_IMAGE=node:24-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
+ARG NODE_IMAGE=node:24-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5
 
 # Static export, served by Flask at / (see src/persona_forge/app.py). Independent stage so the
 # final image never needs a Node toolchain.
