@@ -10,7 +10,19 @@
  * Run `fn` while collecting long tasks. Returns the durations (ms) that exceeded `threshold`.
  * Entries observed during the run are returned in order.
  */
-export async function collectLongTasks(page, fn, { threshold = 50 } = {}) {
+export const LONG_TASK_BUDGET_MS = 50
+
+// The 50 ms budget is exact on a quiet developer machine. On the shared CI runner, CPU
+// contention from neighbouring jobs stretches ordinary rendering/layout tasks to 50-400 ms, and
+// the failure repeats across all retries because they land on the same noisy host. CI may set
+// LONGTASK_THRESHOLD_MS to a looser ceiling that still catches real main-thread blocking (an
+// STFT or reorder done synchronously on the main thread) without flagging scheduler noise.
+function defaultThreshold() {
+  const raw = Number(process.env.LONGTASK_THRESHOLD_MS)
+  return Number.isFinite(raw) && raw >= LONG_TASK_BUDGET_MS ? raw : LONG_TASK_BUDGET_MS
+}
+
+export async function collectLongTasks(page, fn, { threshold = defaultThreshold() } = {}) {
   await page.evaluate(() => {
     window.__longTasks = []
     if (window.__longTaskObserver) window.__longTaskObserver.disconnect()
