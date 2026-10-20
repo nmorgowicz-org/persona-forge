@@ -38,7 +38,7 @@ else:
 # Pinned artifact identities (verified 2026-08-22, plan section 4.3)
 # ---------------------------------------------------------------------------
 
-POCKET_TTS_PACKAGE_VERSION = "2.1.0"
+POCKET_TTS_PACKAGE_VERSION = "4.0.0"
 
 KYUTAI_CLONING_REPO = "kyutai/pocket-tts"
 KYUTAI_CLONING_REVISION = "39592ff23c9ef80098bb74895d104c26275fe2c9"

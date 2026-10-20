@@ -9,9 +9,10 @@ resolver-verified local files (see ``pocket_tts_runtime``).
 
 This module only rewrites the three downloadable paths (cloning weights,
 non-cloning fallback weights, tokenizer) to resolver-verified local files; the
-architecture of the template is byte-for-byte the pocket-tts 2.1.0
-``config/english.yaml`` (strict schema, ``extra=forbid``), so the generated file
-is loadable by the pinned package version.
+architecture of the template matches the pinned pocket-tts ``config/english.yaml``
+(strict schema, ``extra=forbid``), so the generated file is loadable by the pinned
+package version. Only the weight/tokenizer paths differ from upstream: the weights
+stay on our verified revisions rather than upstream's newer default.
 """
 
 from __future__ import annotations
@@ -43,6 +44,10 @@ _TEMPLATE = """\
 weights_path: "{weights_path}"
 weights_path_without_voice_cloning: "{noncloning_weights_path}"
 
+# Replace characters that are absent from the training data (pocket-tts >= 4.0.0).
+replace_characters:
+  '’': "'"
+  '‘': "'"
 
 flow_lm:
   insert_bos_before_voice: true
