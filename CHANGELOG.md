@@ -7,6 +7,42 @@
 * **desktop:** recognize NVIDIA's CUDA UMD version header so CUDA 13-capable drivers select the correct accelerator environment.
 * **packaging:** preserve package-specific accelerator wheel sources in standalone launcher and desktop requirements.
 
+## [3.1.6](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.5...persona-forge-v3.1.6) (2026-10-20)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate libc to v0.2.191 ([#407](https://github.com/nmorgowicz-org/persona-forge/issues/407)) ([d1d7a8a](https://github.com/nmorgowicz-org/persona-forge/commit/d1d7a8ab6767c9d0a83503c089300619a1e9c7ce))
+* **deps:** update rust dependencies ([#396](https://github.com/nmorgowicz-org/persona-forge/issues/396)) ([2838474](https://github.com/nmorgowicz-org/persona-forge/commit/283847448891e644440932374738d74afc3de26d))
+* **deps:** update rust dependencies ([#400](https://github.com/nmorgowicz-org/persona-forge/issues/400)) ([7a06b58](https://github.com/nmorgowicz-org/persona-forge/commit/7a06b58d8b25e3c7187f47cff46b72a481d56164))
+* **deps:** update rust dependencies ([#401](https://github.com/nmorgowicz-org/persona-forge/issues/401)) ([de9ae33](https://github.com/nmorgowicz-org/persona-forge/commit/de9ae33ae2a0f03160f5226e52a24a7dd559f5a7))
+* **deps:** update rust dependencies ([#405](https://github.com/nmorgowicz-org/persona-forge/issues/405)) ([111a58e](https://github.com/nmorgowicz-org/persona-forge/commit/111a58e45ba2b6367cfb0b5290d2b2ae5f06c549))
+
+
+### Tests
+
+* **ui:** tolerate CI scheduler noise in long-task budget ([eabe9fc](https://github.com/nmorgowicz-org/persona-forge/commit/eabe9fc18eb249b88683c61a2291764d6f9bd0a0))
+
+
+### Continuous Integration
+
+* **renovate:** keep validator pin current via regex manager ([c3e17d1](https://github.com/nmorgowicz-org/persona-forge/commit/c3e17d1c2879940a71c0a29235efd422b44ad4ee))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump @modelcontextprotocol/sdk from 1.30.0 to 1.32.1 in /frontend ([#398](https://github.com/nmorgowicz-org/persona-forge/issues/398)) ([02638ff](https://github.com/nmorgowicz-org/persona-forge/commit/02638ff9929bd823521a27b8e5712021358d9079))
+* **deps:** bump @modelcontextprotocol/sdk in /frontend ([02638ff](https://github.com/nmorgowicz-org/persona-forge/commit/02638ff9929bd823521a27b8e5712021358d9079))
+* **deps:** update actions/create-github-app-token digest to 64ab729 ([#403](https://github.com/nmorgowicz-org/persona-forge/issues/403)) ([67f377d](https://github.com/nmorgowicz-org/persona-forge/commit/67f377d6fbc2f48428a9a61f327f938f3f60bb3e))
+* **deps:** update dependency shadcn to v4.21.4 ([#399](https://github.com/nmorgowicz-org/persona-forge/issues/399)) ([d4766bc](https://github.com/nmorgowicz-org/persona-forge/commit/d4766bcdebed3c74aeb83d0a7cb32f6b3cc6a6d4))
+* **deps:** update docker base images ([#393](https://github.com/nmorgowicz-org/persona-forge/issues/393)) ([4251695](https://github.com/nmorgowicz-org/persona-forge/commit/4251695fb73667676df171952034e654839f407f))
+* **deps:** update frontend npm dependencies ([#395](https://github.com/nmorgowicz-org/persona-forge/issues/395)) ([3e58475](https://github.com/nmorgowicz-org/persona-forge/commit/3e584751c069cd0353e3d62df3302a2c52a54d5a))
+* **deps:** update frontend npm dependencies ([#402](https://github.com/nmorgowicz-org/persona-forge/issues/402)) ([f3f32d1](https://github.com/nmorgowicz-org/persona-forge/commit/f3f32d16435bf60400d65bb0f20b2ea622ad4f62))
+* **deps:** update frontend npm dependencies ([#408](https://github.com/nmorgowicz-org/persona-forge/issues/408)) ([0c2dbb9](https://github.com/nmorgowicz-org/persona-forge/commit/0c2dbb9666c7998bbbc906b113cdaa92e7644668))
+* **deps:** update github actions ([#394](https://github.com/nmorgowicz-org/persona-forge/issues/394)) ([1b0ff7b](https://github.com/nmorgowicz-org/persona-forge/commit/1b0ff7be67646b3a67eed18a7866fb4da3daa88c))
+* **deps:** update github/codeql-action digest to 6f2ac81 ([#406](https://github.com/nmorgowicz-org/persona-forge/issues/406)) ([5d1de96](https://github.com/nmorgowicz-org/persona-forge/commit/5d1de96dfd58eb9a3103d7aa28d7c624bf07dddb))
+* **deps:** update node.js to a5f4366 ([#404](https://github.com/nmorgowicz-org/persona-forge/issues/404)) ([34e2461](https://github.com/nmorgowicz-org/persona-forge/commit/34e2461ba00c4b6dc3238be3886ee283732bbccf))
+
 ## [3.1.5](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.4...persona-forge-v3.1.5) (2026-10-06)
 
 
