@@ -23,6 +23,16 @@
     },
     {
       "customType": "regex",
+      "description": "Keep the renovate-config-validator pin in ci.yml current with the latest Renovate release.",
+      "managerFilePatterns": [
+        "//^\\.github\\/workflows\\/ci\\.yml$//"
+      ],
+      "matchStrings": ["--package renovate@(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "renovate",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "customType": "regex",
       "managerFilePatterns": [
         "//^Dockerfile$//"
       ],
@@ -133,8 +143,7 @@
       "matchManagers": ["custom.regex", "pep621"],
       "matchFileNames": ["pyproject.toml", "uv.lock"],
       "matchPackageNames": ["torch", "torchaudio", "triton-xpu", "triton-rocm"],
-      "enabled": false,
-      "vulnerabilityAlerts": { "enabled": false }
+      "enabled": false
     },
     {
       "description": "Qwen package updates can change the custom generation contract",
