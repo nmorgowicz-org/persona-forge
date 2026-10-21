@@ -15,7 +15,11 @@ concurrency:
 
 jobs:
   validate:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # A release-please merge to main is byte-identical to the PR head that already passed this job
+    # (branch protection requires up-to-date branches), so don't repeat it on the push.
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore: release '))
     runs-on: arc-general
     timeout-minutes: 15
     env:
