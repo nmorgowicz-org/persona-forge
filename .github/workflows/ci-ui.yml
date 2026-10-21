@@ -16,7 +16,9 @@ jobs:
     runs-on: arc-general
     outputs:
       frontend: ${{ steps.filter.outputs.frontend }}
-      code: ${{ steps.filter.outputs.code }}
+      # Release PRs only bump version strings (incl. src/persona_forge/__init__.py), which would match the
+      # `code` filter. `e2e` is a required check, so it still runs and fast-passes instead of being skipped.
+      code: ${{ steps.filter.outputs.code == 'true' && !startsWith(github.head_ref, 'release-please--') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
@@ -62,7 +64,7 @@ jobs:
 
       - name: No relevant changes
         if: needs.paths-filter.outputs.code != 'true'
-        run: echo "No frontend/UI-relevant changes detected, skipping E2E run"
+        run: echo "No frontend/UI-relevant changes detected (or release-please version-bump PR), skipping E2E run"
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         if: needs.paths-filter.outputs.code == 'true'
