@@ -7,6 +7,39 @@
 * **desktop:** recognize NVIDIA's CUDA UMD version header so CUDA 13-capable drivers select the correct accelerator environment.
 * **packaging:** preserve package-specific accelerator wheel sources in standalone launcher and desktop requirements.
 
+## [3.2.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.6...persona-forge-v3.2.0) (2026-10-22)
+
+
+### Features
+
+* **pocket-tts:** upgrade to 4.0.0, add replace_characters ([256e2de](https://github.com/nmorgowicz-org/persona-forge/commit/256e2defca69c11d3bad4d4277941a2925021541))
+
+
+### Bug Fixes
+
+* **deps:** update dependency pocket-tts to v4.0.1 ([#422](https://github.com/nmorgowicz-org/persona-forge/issues/422)) ([8906c1c](https://github.com/nmorgowicz-org/persona-forge/commit/8906c1c6082a9c8020f071c75c617004319265c7))
+* **deps:** update rust dependencies ([#423](https://github.com/nmorgowicz-org/persona-forge/issues/423)) ([41e4687](https://github.com/nmorgowicz-org/persona-forge/commit/41e4687afca5f51765a1ce57371e4e39284fadb2))
+
+
+### Continuous Integration
+
+* skip redundant runs on release-please PRs and merges ([632b1c8](https://github.com/nmorgowicz-org/persona-forge/commit/632b1c800d2ebdbafb9397a4e01c8e3a9bee40f3))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump certifi from 2026.7.22 to 2026.10.19 ([#414](https://github.com/nmorgowicz-org/persona-forge/issues/414)) ([34b763e](https://github.com/nmorgowicz-org/persona-forge/commit/34b763ed0ab71014c41cc4da9aecc609af1a007f))
+* **deps:** bump gradio from 3.36.1 to 6.16.0 ([#416](https://github.com/nmorgowicz-org/persona-forge/issues/416)) ([ba0fe3c](https://github.com/nmorgowicz-org/persona-forge/commit/ba0fe3c93986eb572ea2a41b86a864b1e658cf73))
+* **deps:** bump hono from 4.13.7 to 4.13.13 in /frontend ([#419](https://github.com/nmorgowicz-org/persona-forge/issues/419)) ([9b880fb](https://github.com/nmorgowicz-org/persona-forge/commit/9b880fb561f5efda265ae0e22515aa7ec68c99ef))
+* **deps:** bump pillow from 12.3.0 to 13.0.0 ([#415](https://github.com/nmorgowicz-org/persona-forge/issues/415)) ([7b6c56b](https://github.com/nmorgowicz-org/persona-forge/commit/7b6c56be47e721274a0bea091d0b238e95d1d6de))
+* **deps:** bump pillow from 12.3.0 to 13.0.0 ([#424](https://github.com/nmorgowicz-org/persona-forge/issues/424)) ([0b09b44](https://github.com/nmorgowicz-org/persona-forge/commit/0b09b44fcad387f96c1b9f6414a9e5fb5187e1c8))
+* **deps:** update dependency shadcn to v4.22.1 ([#427](https://github.com/nmorgowicz-org/persona-forge/issues/427)) ([e68f95d](https://github.com/nmorgowicz-org/persona-forge/commit/e68f95d658525135f03f6cab36a3f18c3a1713f0))
+* **deps:** update docker base images ([#417](https://github.com/nmorgowicz-org/persona-forge/issues/417)) ([9b02a56](https://github.com/nmorgowicz-org/persona-forge/commit/9b02a560a788c8f0143dc61e00b2fb5670bb5c47))
+* **deps:** update docker base images ([#420](https://github.com/nmorgowicz-org/persona-forge/issues/420)) ([f38ca53](https://github.com/nmorgowicz-org/persona-forge/commit/f38ca53737051b7fd445e3e53a89c0c3756c41f0))
+* **deps:** update github actions ([#426](https://github.com/nmorgowicz-org/persona-forge/issues/426)) ([95bc5e9](https://github.com/nmorgowicz-org/persona-forge/commit/95bc5e90a1ba27227e39b620df87dac9d784fe93))
+* **deps:** update github/codeql-action digest to 9b32540 ([#421](https://github.com/nmorgowicz-org/persona-forge/issues/421)) ([82c2773](https://github.com/nmorgowicz-org/persona-forge/commit/82c277373ac7cf3062e70a4d3092775d33746cc8))
+* **deps:** update node.js to 55fb5f5 ([#425](https://github.com/nmorgowicz-org/persona-forge/issues/425)) ([546b5ca](https://github.com/nmorgowicz-org/persona-forge/commit/546b5ca1fd91bf4959385ad0b355e1941c24a889))
+
 ## [3.1.6](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.5...persona-forge-v3.1.6) (2026-10-20)
 
 
