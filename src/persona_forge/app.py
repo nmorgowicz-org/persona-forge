@@ -2097,6 +2097,7 @@ def omnivoice_segments_create():
 
     # Enrich metadata from audition job (if candidate still resolvable)
     job_id, params, candidate_payload, segment_index = _find_candidate_job(candidate_id)
+    params = params or []
 
     # _params tuple: (segments, instruct, language, candidates_per_segment, seed, num_step,
     #                 cleaned_durations, speed, guidance_scale, diverse_candidates,
@@ -2888,10 +2889,10 @@ def generate_stream():
         return jsonify({"error": "Model not loaded"}), 503
     # Fast-fail only when model is loaded — if it's idle-unloaded, the executor will reload
     # and _run_generate_with_streaming will raise RuntimeError if vocoder isn't available.
-    if model.model is not None:
-        vocoder = getattr(model.ov_runtime, "vocoder_runtime", None)
-        if vocoder is None or not vocoder.enabled:
-            return jsonify({"error": "Streaming requires the FP32 OpenVINO vocoder"}), 503
+    ov_runtime = getattr(model, "ov_runtime", None)
+    vocoder = getattr(ov_runtime, "vocoder_runtime", None)
+    if model.model is not None and (vocoder is None or not vocoder.enabled):
+        return jsonify({"error": "Streaming requires the FP32 OpenVINO vocoder"}), 503
     data = _json_body()
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
@@ -2952,7 +2953,7 @@ def generate_stream():
         content_type="application/octet-stream",
         headers={
             "X-Audio-Format": "f32le",
-            "X-Audio-Sample-Rate": str(vocoder.sample_rate),
+            "X-Audio-Sample-Rate": str(getattr(vocoder, "sample_rate", 24000)),
             "X-Audio-Channels": "1",
             "X-Stream-Error-Semantics": "connection-close",
         },
@@ -3061,4 +3062,4 @@ def batch_internal():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8318)
+    app.run(host=os.environ.get("PERSONA_FORGE_HOST", "0.0.0.0"), port=8318)
