@@ -221,6 +221,7 @@ class TestNormalizeReference:
         after = voice_library.get_voice_wav_bytes(saved["voice_id"])
 
         assert updated is not None
+        assert after is not None
         assert after != before
         wav, sr = sf.read(io.BytesIO(after), dtype="float32")
         assert np.max(np.abs(wav)) > 0.05
@@ -234,7 +235,9 @@ class TestNormalizeReference:
         )
         original = voice_library.get_voice_wav_bytes(saved["voice_id"])
         voice_library.normalize_reference(saved["voice_id"])
-        assert voice_library.get_voice(saved["voice_id"])["undo_available"] is True
+        normalized_meta = voice_library.get_voice(saved["voice_id"])
+        assert normalized_meta is not None
+        assert normalized_meta["undo_available"] is True
 
         restored = voice_library.undo_reference_edit(saved["voice_id"])
 
@@ -252,6 +255,8 @@ class TestTrimReferenceSilence:
         updated = voice_library.trim_reference_silence(saved["voice_id"])
         after = voice_library.get_voice_wav_bytes(saved["voice_id"])
 
+        assert before is not None
+        assert after is not None
         before_wav, _ = sf.read(io.BytesIO(before), dtype="float32")
         after_wav, _ = sf.read(io.BytesIO(after), dtype="float32")
 
@@ -274,7 +279,9 @@ class TestAdjustReferencePauses:
             sample_text="hello there friend",
             language="English",
         )
-        before, sr = sf.read(io.BytesIO(voice_library.get_voice_wav_bytes(saved["voice_id"])), dtype="float32")
+        before_bytes = voice_library.get_voice_wav_bytes(saved["voice_id"])
+        assert before_bytes is not None
+        before, sr = sf.read(io.BytesIO(before_bytes), dtype="float32")
         before_gap = next(
             gap for gap in voice_library.detect_pause_intervals(before, sr)
             if gap[0] > 0 and gap[1] < before.size / sr
@@ -283,7 +290,9 @@ class TestAdjustReferencePauses:
         updated = voice_library.adjust_reference_pauses(
             saved["voice_id"], style_preset="Neutral", pace_multiplier=pace_multiplier
         )
-        after, _ = sf.read(io.BytesIO(voice_library.get_voice_wav_bytes(saved["voice_id"])), dtype="float32")
+        after_bytes = voice_library.get_voice_wav_bytes(saved["voice_id"])
+        assert after_bytes is not None
+        after, _ = sf.read(io.BytesIO(after_bytes), dtype="float32")
 
         assert updated is not None
         after_gap = next(
@@ -454,14 +463,18 @@ class TestSetDefaultVariant:
         assert second is not None
 
         updated_second = voice_library.set_default_variant(second["voice_id"])
+        assert updated_second is not None
         assert updated_second["is_default"] is True
 
         refreshed_first = voice_library.get_voice(first["voice_id"])
+        assert refreshed_first is not None
         assert refreshed_first.get("is_default", False) is False
 
         updated_first = voice_library.set_default_variant(first["voice_id"])
+        assert updated_first is not None
         assert updated_first["is_default"] is True
         refreshed_second = voice_library.get_voice(second["voice_id"])
+        assert refreshed_second is not None
         assert refreshed_second.get("is_default", False) is False
 
     def test_voice_without_family_id_is_its_own_family(self):
@@ -469,6 +482,7 @@ class TestSetDefaultVariant:
             b"a", description="desc", sample_text="text", language="English"
         )
         updated = voice_library.set_default_variant(saved["voice_id"])
+        assert updated is not None
         assert updated["is_default"] is True
 
     def test_unknown_voice_returns_none(self):
@@ -594,7 +608,9 @@ class TestApiDefault:
         voice_library.set_api_default("pocket_tts", saved["voice_id"])
 
         assert voice_library.get_active_default_voice_id() == saved["voice_id"]
-        assert voice_library.get_api_default()["voice"] == saved["voice_id"]
+        mirrored = voice_library.get_api_default()
+        assert mirrored is not None
+        assert mirrored["voice"] == saved["voice_id"]
 
     def test_stale_saved_voice_is_treated_as_unset(self):
         voice_library.set_api_default("pocket_tts", "vd_0000000000ff")
@@ -615,7 +631,9 @@ class TestApiDefault:
         voice_library.set_api_default("pocket_tts", saved["voice_id"])
 
         assert voice_library.clear_api_default_for_voice("vd_0000000000fe") is False
-        assert voice_library.get_api_default()["voice"] == saved["voice_id"]
+        remaining = voice_library.get_api_default()
+        assert remaining is not None
+        assert remaining["voice"] == saved["voice_id"]
 
     @pytest.mark.parametrize(
         "voice",
