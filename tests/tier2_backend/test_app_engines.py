@@ -66,6 +66,58 @@ def test_voices_endpoint_lists_saved_and_presets(
     assert all(entry["servable"] for entry in entries)
 
 
+def test_registry_exposes_a_matching_adapter():
+    engine = speech_engines.ENGINES["pocket-tts"]
+
+    adapter = speech_engines.adapter_for(engine)
+
+    assert adapter.id == "pocket-tts"
+    assert isinstance(adapter, speech_engines.SpeechEngine)
+
+
+def test_pocket_adapter_delegates_synthesis(app_module, monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_generate(_text, _language, **kwargs):
+        captured.update(kwargs)
+        return object(), 24000, "job-1"
+
+    monkeypatch.setattr(app_module.model, "_run_generate", fake_generate)
+
+    wav, sample_rate, job_id = speech_engines.adapter_for(
+        speech_engines.ENGINES["pocket-tts"]
+    ).synthesize("hi", "English", voice_id="pocket:vera", seed_value=7)
+
+    assert sample_rate == 24000
+    assert job_id == "job-1"
+    assert captured["voice_id"] == "pocket:vera"
+    assert captured["seed_value"] == 7
+
+
+def test_pocket_adapter_streams_pcm(monkeypatch):
+    from types import SimpleNamespace
+
+    import persona_forge
+
+    def fake_stream(_text, _language, **kwargs):
+        yield b"\x00\x00"
+
+    monkeypatch.setattr(
+        persona_forge,
+        "model",
+        SimpleNamespace(_run_generate_pocket_tts_stream=fake_stream),
+        raising=False,
+    )
+
+    chunks = list(
+        speech_engines.adapter_for(speech_engines.ENGINES["pocket-tts"]).stream_pcm(
+            "hi", "English"
+        )
+    )
+
+    assert chunks == [b"\x00\x00"]
+
+
 def test_speech_unknown_model_still_serves_and_is_flagged(client):
     response = client.post(
         "/v1/audio/speech", json={"input": "hello", "model": "not-an-engine"}

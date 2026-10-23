@@ -107,9 +107,11 @@ def test_round_trip_all_keys(prefs_json):
     values = {
         "theme": "rose",
         "experienceLevel": "expert",
-        "voiceLibrary.tab": "voices",
+        "voiceLibrary.tab": "builtin",
         "voiceLibrary.layout": "grid-3",
         "voiceLibrary.analysisExpanded": True,
+        "voiceFavorites": ["pocket:vera", "vd_000000000001"],
+        "voiceCatalog.language": "all",
         "updates.dismissedVersion": "2.3.0",
     }
     assert set(values) == set(ui_preferences_store.ALLOWED_KEYS)

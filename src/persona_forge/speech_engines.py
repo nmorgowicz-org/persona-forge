@@ -10,8 +10,9 @@ their technical screening (Phase B) has picked the order, without changing this 
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,117 @@ def active_engine(backend: str | None) -> EngineInfo | None:
 def list_engines() -> list[EngineInfo]:
     """All registered engines, in registration order."""
     return list(ENGINES.values())
+
+
+@runtime_checkable
+class SpeechEngine(Protocol):
+    """Behaviour a serving engine must provide (plan §4.2).
+
+    C2 implements the synthesis surface; pack install/verify/prepare and unload join this
+    contract in C3 without changing how the API calls it.
+    """
+
+    id: str
+
+    def describe(self) -> dict[str, Any]:
+        """Return the engine descriptor shown by /v1/models and the UI."""
+        ...
+
+    def synthesize(
+        self,
+        text: str,
+        language: str,
+        *,
+        voice_id: str | None = None,
+        voice_variant_id: str | None = None,
+        style_preset: str | None = None,
+        postprocess: bool | dict[str, Any] | None = None,
+        prosody_repair: bool = False,
+        seed_value: int | None = None,
+        instruct: str | None = None,
+    ) -> tuple[Any, int, str | None]:
+        """Return ``(wav, sample_rate, job_id)`` for one complete request."""
+        ...
+
+    def stream_pcm(
+        self,
+        text: str,
+        language: str,
+        *,
+        voice_id: str | None = None,
+        seed_value: int | None = None,
+    ) -> Iterator[bytes]:
+        """Yield raw int16 LE mono PCM chunks."""
+        ...
+
+
+class PocketTtsEngine:
+    """Pocket adapter over the existing runtime.
+
+    C2 is deliberately a delegation layer: the model module stays the implementation, so the
+    endpoint's behaviour, timeouts, repair metadata and cancellation semantics are unchanged.
+    C3 moves the implementation behind a pack child process.
+    """
+
+    id = "pocket-tts"
+
+    def describe(self) -> dict[str, Any]:
+        return ENGINES[self.id].as_dict()
+
+    def synthesize(
+        self,
+        text: str,
+        language: str,
+        *,
+        voice_id: str | None = None,
+        voice_variant_id: str | None = None,
+        style_preset: str | None = None,
+        postprocess: bool | dict[str, Any] | None = None,
+        prosody_repair: bool = False,
+        seed_value: int | None = None,
+        instruct: str | None = None,
+    ) -> tuple[Any, int, str | None]:
+        from persona_forge import model
+
+        return model.executor.submit(
+            model._run_generate,
+            text,
+            language,
+            voice_id=voice_id,
+            voice_variant_id=voice_variant_id,
+            style_preset=style_preset,
+            postprocess=postprocess,
+            prosody_repair=prosody_repair,
+            seed_value=seed_value,
+            instruct=instruct,
+        ).result(timeout=480)
+
+    def stream_pcm(
+        self,
+        text: str,
+        language: str,
+        *,
+        voice_id: str | None = None,
+        seed_value: int | None = None,
+    ) -> Iterator[bytes]:
+        from persona_forge import model
+
+        yield from model._run_generate_pocket_tts_stream(
+            text, language, voice_id=voice_id, seed_value=seed_value
+        )
+
+
+ADAPTERS: dict[str, SpeechEngine] = {
+    "pocket-tts": PocketTtsEngine(),
+}
+
+
+def adapter_for(engine: EngineInfo) -> SpeechEngine:
+    """Return the serving adapter for ``engine``; raises LookupError when none is registered."""
+    adapter = ADAPTERS.get(engine.id)
+    if adapter is None:
+        raise LookupError(f"No adapter registered for engine {engine.id!r}")
+    return adapter
 
 
 def resolve_model(

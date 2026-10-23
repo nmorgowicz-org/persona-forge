@@ -2605,7 +2605,13 @@ def openai_audio_speech():
         data.get("model"), getattr(model, "TTS_BACKEND", None)
     )
     active_engine = speech_engines.active_engine(getattr(model, "TTS_BACKEND", None))
-    if engine is not None and active_engine is not None and engine.id != active_engine.id:
+    if active_engine is None:
+        return _openai_error(
+            "No speech engine is active; install one in Settings → Speech engines.",
+            503,
+            "api_error",
+        )
+    if engine is not None and engine.id != active_engine.id:
         return _openai_error(
             f"Model {engine.id!r} is not active; the active engine is {active_engine.id!r}.",
             409,
@@ -2662,8 +2668,8 @@ def openai_audio_speech():
 
     # Batch path: all other backends/formats, plus repair-enabled requests.
     try:
-        wav, sr, job_id = model.executor.submit(
-            model._run_generate,
+        adapter = speech_engines.adapter_for(active_engine)
+        wav, sr, job_id = adapter.synthesize(
             text,
             language,
             voice_id=voice_id,
@@ -2673,7 +2679,7 @@ def openai_audio_speech():
             prosody_repair=repair_requested,
             seed_value=resolved_seed,
             instruct=instruct,
-        ).result(timeout=480)
+        )
         audio, media_type = _encode(wav, sr, fmt)
     except Exception as exc:
         if isinstance(exc, RuntimeError) and "cache capacity exceeded" in str(exc):
@@ -2733,7 +2739,8 @@ def _openai_audio_speech_stream_pocket_tts(
 
     def produce() -> None:
         try:
-            for pcm_chunk in model._run_generate_pocket_tts_stream(
+            adapter = speech_engines.adapter_for(speech_engines.ENGINES["pocket-tts"])
+            for pcm_chunk in adapter.stream_pcm(
                 text,
                 language,
                 voice_id=voice_id,
