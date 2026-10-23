@@ -3,6 +3,7 @@ import { motion } from 'motion/react'
 import { Settings2, Cpu } from 'lucide-react'
 import { getRuntimeConfig, updateRuntimeConfig, type RuntimeConfigState } from '@/lib/api'
 import { AcceleratorCoachCard } from '@/components/AcceleratorCoachCard'
+import { SpeechEnginesCard } from '@/components/SpeechEnginesCard'
 import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -168,6 +169,8 @@ export function RuntimeConfigPage() {
           </div>
         </div>
       )}
+
+      <SpeechEnginesCard />
 
       {error && (
         <div className="rounded-control border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">

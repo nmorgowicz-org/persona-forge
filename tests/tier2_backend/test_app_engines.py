@@ -118,6 +118,36 @@ def test_pocket_adapter_streams_pcm(monkeypatch):
     assert chunks == [b"\x00\x00"]
 
 
+def test_engines_endpoint_lists_builtin(client, app_module, monkeypatch, tmp_path):
+    monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path))
+    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+
+    response = client.get("/engines")
+
+    assert response.status_code == 200
+    cards = {card["id"]: card for card in response.get_json()["engines"]}
+    assert cards["pocket-tts"]["kind"] == "builtin"
+    assert cards["pocket-tts"]["state"]["status"] == "built-in"
+    assert cards["pocket-tts"]["active"] is True
+
+
+def test_verify_builtin_engine(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path))
+
+    response = client.post("/engines/pocket-tts/verify")
+
+    assert response.status_code == 200
+    assert response.get_json()["engine"]["state"]["verified"] is True
+
+
+def test_verify_unknown_engine_is_404(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path))
+
+    response = client.post("/engines/nope/verify")
+
+    assert response.status_code == 404
+
+
 def test_speech_unknown_model_still_serves_and_is_flagged(client):
     response = client.post(
         "/v1/audio/speech", json={"input": "hello", "model": "not-an-engine"}

@@ -27,6 +27,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory, send_f
 from persona_forge import (
     audio_diagnostics,
     audio_style,
+    engine_packs,
     frontend,
     model,
     omnivoice_engine,
@@ -133,6 +134,11 @@ if _frontend_enabled:
 
 def _openai_error(message: str, status: int, err_type: str = "invalid_request_error"):
     return jsonify({"error": {"message": message, "type": err_type, "code": None}}), status
+
+
+def _is_capacity_error(exc: BaseException) -> bool:
+    """True when generation stopped because MAX_SPEECH_SECONDS was exceeded."""
+    return isinstance(exc, RuntimeError) and "cache capacity exceeded" in str(exc)
 
 
 # Encodings we can actually produce. Anything else is rejected with 400 rather than
@@ -2428,7 +2434,7 @@ def generate():
         ).result(timeout=480)
         audio, media_type = _encode(wav, sr, fmt)
     except Exception as exc:
-        if isinstance(exc, RuntimeError) and "cache capacity exceeded" in str(exc):
+        if _is_capacity_error(exc):
             print(
                 f"[OV-CAPACITY] capacity exceeded; text_len={len(text)}; "
                 f"likely no EOS or REF_TEXT mismatch.",
@@ -2501,7 +2507,7 @@ def generate_with_metrics():
         ).result(timeout=480)
         audio, media_type = _encode(wav, sr, "wav")
     except Exception as exc:
-        if isinstance(exc, RuntimeError) and "cache capacity exceeded" in str(exc):
+        if _is_capacity_error(exc):
             return jsonify({
                 "error": (
                     "Generation aborted: model exceeded its allowed audio length. "
@@ -2537,6 +2543,23 @@ def generate_with_metrics():
         if progress and progress.get("prosody_repair"):
             response_payload["prosody_repair"] = progress["prosody_repair"]
     return jsonify(response_payload)
+
+
+@app.get("/engines")
+def engines_list():
+    """List built-in engines and installed packs with their local state."""
+    return jsonify(
+        {"engines": engine_packs.engine_cards(getattr(model, "TTS_BACKEND", None))}
+    )
+
+
+@app.post("/engines/<engine_id>/verify")
+def engines_verify(engine_id: str):
+    """Re-hash one pack's artifacts (built-ins are always verified)."""
+    card = engine_packs.verify_engine(engine_id, getattr(model, "TTS_BACKEND", None))
+    if card is None:
+        return jsonify({"error": "engine not found"}), 404
+    return jsonify({"engine": card})
 
 
 @app.get("/v1/models")
@@ -2682,7 +2705,7 @@ def openai_audio_speech():
         )
         audio, media_type = _encode(wav, sr, fmt)
     except Exception as exc:
-        if isinstance(exc, RuntimeError) and "cache capacity exceeded" in str(exc):
+        if _is_capacity_error(exc):
             print(
                 f"[OV-CAPACITY] capacity exceeded; text_len={len(text)}; "
                 f"likely no EOS or REF_TEXT mismatch.",
@@ -3038,6 +3061,25 @@ def _parity_kwargs(data: dict[str, Any]) -> dict[str, Any]:
     return {key: data[key] for key in keys if data.get(key) is not None}
 
 
+def _streaming_diff_metrics(streamed: Any, raw: Any) -> tuple[Any, float | None, float | None]:
+    """Return ``(diff, max_abs, snr_db)`` for streaming parity diagnostics.
+
+    Diagnostics must never turn a successful render into a 500, so anything unexpected in the
+    comparison degrades to ``None`` and the headers report "unavailable".
+    """
+    import numpy as np
+
+    try:
+        diff = streamed.astype(np.float64) - raw.astype(np.float64)
+        signal = float(np.sum(raw.astype(np.float64) ** 2))
+        noise = float(np.sum(diff ** 2))
+        snr = float("inf") if noise == 0.0 else 10.0 * float(np.log10(signal / noise))
+        max_abs = float(np.max(np.abs(diff), initial=0.0))
+        return diff, max_abs, snr
+    except (TypeError, ValueError, FloatingPointError):
+        return None, None, None
+
+
 @app.post("/stream_internal")
 def stream_internal():
     """Dev-only endpoint returning the concatenated incremental decode as WAV."""
@@ -3073,9 +3115,7 @@ def stream_internal():
         streamed = np.concatenate(chunks) if chunks else wav
         if streamed.shape != raw.shape:
             raise RuntimeError(f"stream/batch length mismatch: {streamed.size} != {raw.size}")
-        diff = streamed.astype(np.float64) - raw.astype(np.float64)
-        signal, noise = float(np.sum(raw.astype(np.float64) ** 2)), float(np.sum(diff ** 2))
-        snr = float("inf") if noise == 0.0 else 10.0 * np.log10(signal / noise)
+        diff, max_abs, snr = _streaming_diff_metrics(streamed, raw)
         audio, media_type = _encode(streamed, sr, "wav")
         headers = {
             "X-Streaming-Frames": str(streamed.size // 1920),
@@ -3085,8 +3125,14 @@ def stream_internal():
             "X-Streaming-Reused-Decode": str(reuse).lower(),
             "X-Streaming-TTFB-Seconds": f"{chunk_times[0]:.6f}" if chunk_times else "none",
             "X-Streaming-Total-Seconds": f"{info['elapsed_seconds']:.6f}",
-            "X-Streaming-Max-Abs": f"{float(np.max(np.abs(diff), initial=0.0)):.9g}",
-            "X-Streaming-SNR-Db": "inf" if np.isinf(snr) else f"{snr:.6f}",
+            "X-Streaming-Max-Abs": (
+                "unavailable" if max_abs is None else f"{max_abs:.9g}"
+            ),
+            "X-Streaming-SNR-Db": (
+                "unavailable"
+                if snr is None
+                else ("inf" if np.isinf(snr) else f"{snr:.6f}")
+            ),
         }
         return audio, media_type, headers
 

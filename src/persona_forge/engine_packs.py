@@ -1,0 +1,372 @@
+"""Engine packs (Phase C3): manifests, discovery and local verification.
+
+A pack is a directory under ``ENGINE_PACKS_DIR`` (default ``<data>/engine-packs``) containing a
+``manifest.json`` plus its pinned artifacts. This module owns only what can be decided locally:
+is the manifest valid, are the artifacts present, do their hashes match, how much disk do they
+use. Downloading, virtualenv creation and process management stay out of this layer so the API can
+report an honest state before any install exists.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Mapping
+
+from persona_forge import paths, speech_engines
+
+MANIFEST_FILENAME = "manifest.json"
+VERIFIED_FILENAME = ".verified.json"
+_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+class PackManifestError(ValueError):
+    """A manifest is malformed. The message is safe to show to the user."""
+
+
+@dataclass(frozen=True)
+class PackArtifact:
+    path: str
+    sha256: str
+    size: int
+    source: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "path": self.path,
+            "sha256": self.sha256,
+            "size": self.size,
+            "source": self.source,
+        }
+
+
+@dataclass(frozen=True)
+class PackManifest:
+    id: str
+    engine_id: str
+    version: str
+    label: str
+    description: str
+    runtime: str
+    requirements: tuple[str, ...]
+    artifacts: tuple[PackArtifact, ...]
+    revision: str | None = None
+    notes: str | None = None
+    manifest_sha256: str = ""
+    raw: Mapping[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "engine_id": self.engine_id,
+            "version": self.version,
+            "label": self.label,
+            "description": self.description,
+            "runtime": self.runtime,
+            "requirements": list(self.requirements),
+            "artifacts": [artifact.as_dict() for artifact in self.artifacts],
+            "revision": self.revision,
+            "notes": self.notes,
+            "manifest_sha256": self.manifest_sha256,
+        }
+
+
+def packs_root() -> Path:
+    """Directory holding engine packs; overridable for tests and non-default installs."""
+    override = os.environ.get("ENGINE_PACKS_DIR")
+    if override:
+        return Path(override).expanduser()
+    return paths.runtime_data_dir() / "engine-packs"
+
+
+def _safe_relative_path(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise PackManifestError("artifact path must be a non-empty string")
+    path = Path(value)
+    if path.is_absolute() or ".." in path.parts:
+        raise PackManifestError(f"artifact path must stay inside the pack: {value!r}")
+    return value
+
+
+def parse_manifest(payload: Mapping[str, Any], manifest_sha256: str = "") -> PackManifest:
+    """Validate a raw manifest mapping and return its typed form."""
+    pack_id = payload.get("id")
+    if not isinstance(pack_id, str) or not _ID_RE.match(pack_id):
+        raise PackManifestError("id must be a lowercase slug (a-z, 0-9, '.', '_', '-')")
+    engine_id = payload.get("engine_id")
+    if not isinstance(engine_id, str) or not _ID_RE.match(engine_id):
+        raise PackManifestError("engine_id must be a lowercase slug")
+
+    version = payload.get("version")
+    if not isinstance(version, str) or not version.strip():
+        raise PackManifestError("version must be a non-empty string")
+
+    artifacts_raw = payload.get("artifacts")
+    if not isinstance(artifacts_raw, list) or not artifacts_raw:
+        raise PackManifestError("artifacts must be a non-empty list")
+    artifacts: list[PackArtifact] = []
+    for index, item in enumerate(artifacts_raw):
+        if not isinstance(item, Mapping):
+            raise PackManifestError(f"artifacts[{index}] must be an object")
+        path = _safe_relative_path(item.get("path"))
+        sha256 = item.get("sha256")
+        if not isinstance(sha256, str) or not _SHA256_RE.match(sha256):
+            raise PackManifestError(f"artifacts[{index}].sha256 must be 64 lowercase hex chars")
+        size = item.get("size")
+        if not isinstance(size, int) or size < 0:
+            raise PackManifestError(f"artifacts[{index}].size must be a non-negative integer")
+        source = item.get("source")
+        if source is not None and not isinstance(source, str):
+            raise PackManifestError(f"artifacts[{index}].source must be a string")
+        artifacts.append(PackArtifact(path=path, sha256=sha256, size=size, source=source))
+
+    requirements_raw = payload.get("requirements", [])
+    if not isinstance(requirements_raw, list) or any(
+        not isinstance(item, str) or not item.strip() for item in requirements_raw
+    ):
+        raise PackManifestError("requirements must be a list of non-empty strings")
+
+    return PackManifest(
+        id=pack_id,
+        engine_id=engine_id,
+        version=version,
+        label=str(payload.get("label") or pack_id),
+        description=str(payload.get("description") or ""),
+        runtime=str(payload.get("runtime") or "python"),
+        requirements=tuple(requirements_raw),
+        artifacts=tuple(artifacts),
+        revision=payload.get("revision") if isinstance(payload.get("revision"), str) else None,
+        notes=payload.get("notes") if isinstance(payload.get("notes"), str) else None,
+        manifest_sha256=manifest_sha256,
+        raw=payload,
+    )
+
+
+def load_manifest(pack_dir: Path) -> PackManifest:
+    manifest_path = pack_dir / MANIFEST_FILENAME
+    try:
+        raw_bytes = manifest_path.read_bytes()
+    except OSError:
+        raise PackManifestError(f"cannot read {MANIFEST_FILENAME}") from None
+    try:
+        payload = json.loads(raw_bytes)
+    except ValueError as exc:
+        raise PackManifestError(f"invalid JSON: {exc}") from exc
+    if not isinstance(payload, Mapping):
+        raise PackManifestError("manifest must be a JSON object")
+    return parse_manifest(payload, hashlib.sha256(raw_bytes).hexdigest())
+
+
+@dataclass
+class PackStatus:
+    pack: PackManifest
+    directory: Path
+    errors: list[str] = field(default_factory=list)
+    artifacts_present: int = 0
+    artifacts_total: int = 0
+    disk_bytes: int = 0
+    verified: bool = False
+
+    @property
+    def status(self) -> str:
+        if self.errors:
+            return "invalid"
+        if self.artifacts_present < self.artifacts_total:
+            return "not-installed"
+        return "verified" if self.verified else "installed"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "artifacts_present": self.artifacts_present,
+            "artifacts_total": self.artifacts_total,
+            "disk_bytes": self.disk_bytes,
+            "verified": self.verified,
+            "errors": list(self.errors),
+        }
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verification_stamp(pack_dir: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads((pack_dir / VERIFIED_FILENAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_verification_stamp(pack_dir: Path, manifest_sha256: str) -> None:
+    payload = {"manifest_sha256": manifest_sha256, "verified_at": time.time()}
+    try:
+        (pack_dir / VERIFIED_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
+    except OSError:
+        # A read-only pack is still usable; the next verify just re-hashes it.
+        pass
+
+
+def inspect_pack(pack_dir: Path, *, verify: bool = False) -> PackStatus:
+    """Compute a pack's local status, optionally hashing every artifact."""
+    try:
+        manifest = load_manifest(pack_dir)
+    except PackManifestError as exc:
+        placeholder = PackManifest(
+            id=pack_dir.name,
+            engine_id=pack_dir.name,
+            version="",
+            label=pack_dir.name,
+            description="",
+            runtime="python",
+            requirements=(),
+            artifacts=(),
+        )
+        return PackStatus(
+            pack=placeholder, directory=pack_dir, errors=[str(exc)], artifacts_total=0
+        )
+
+    status = PackStatus(
+        pack=manifest,
+        directory=pack_dir,
+        artifacts_total=len(manifest.artifacts),
+    )
+    stamp = _verification_stamp(pack_dir)
+    stamp_current = stamp.get("manifest_sha256") == manifest.manifest_sha256
+    all_present = True
+    hashes_ok = True
+    for artifact in manifest.artifacts:
+        artifact_path = pack_dir / artifact.path
+        if not artifact_path.is_file():
+            all_present = False
+            hashes_ok = False
+            continue
+        status.artifacts_present += 1
+        try:
+            status.disk_bytes += artifact_path.stat().st_size
+        except OSError:
+            pass
+        if verify:
+            try:
+                if _sha256_file(artifact_path) != artifact.sha256:
+                    hashes_ok = False
+                    status.errors.append(f"hash mismatch: {artifact.path}")
+            except OSError:
+                hashes_ok = False
+                status.errors.append(f"cannot read {artifact.path}")
+
+    status.verified = (
+        all_present
+        and not status.errors
+        and (hashes_ok if verify else stamp_current)
+    )
+    if verify and status.verified:
+        _write_verification_stamp(pack_dir, manifest.manifest_sha256)
+    return status
+
+
+def discover_packs(root: Path | None = None) -> list[PackStatus]:
+    root = root or packs_root()
+    if not root.is_dir():
+        return []
+    packs: list[PackStatus] = []
+    for entry in sorted(root.iterdir()):
+        if entry.is_dir() and (entry / MANIFEST_FILENAME).is_file():
+            packs.append(inspect_pack(entry))
+    return packs
+
+
+def _engine_card(engine: speech_engines.EngineInfo, backend: str | None) -> dict[str, Any]:
+    active = speech_engines.engine_for_backend(backend)
+    return {
+        "id": engine.id,
+        "label": engine.label,
+        "description": engine.description,
+        "kind": "builtin",
+        "version": None,
+        "runtime": engine.runtime,
+        "source": engine.source,
+        "license": engine.license,
+        "active": active is not None and engine.id == active.id,
+        "capabilities": engine.capabilities.as_dict(),
+        "state": {
+            "status": "built-in",
+            "artifacts_present": 0,
+            "artifacts_total": 0,
+            "disk_bytes": 0,
+            "verified": True,
+            "errors": [],
+        },
+        "requirements": [],
+        "pack": None,
+    }
+
+
+def engine_cards(backend: str | None, root: Path | None = None) -> list[dict[str, Any]]:
+    """Built-in engines plus installed packs, one card per engine."""
+    cards: dict[str, dict[str, Any]] = {
+        engine.id: _engine_card(engine, backend)
+        for engine in speech_engines.list_engines()
+    }
+    for pack_status in discover_packs(root):
+        card = cards.get(pack_status.pack.engine_id)
+        if card is None:
+            card = {
+                "id": pack_status.pack.engine_id,
+                "label": pack_status.pack.label,
+                "description": pack_status.pack.description,
+                "kind": "pack",
+                "version": pack_status.pack.version,
+                "runtime": pack_status.pack.runtime,
+                "source": None,
+                "license": None,
+                "active": False,
+                "capabilities": {},
+                "state": pack_status.as_dict(),
+                "requirements": list(pack_status.pack.requirements),
+                "pack": pack_status.pack.as_dict(),
+            }
+            cards[pack_status.pack.engine_id] = card
+        else:
+            card["kind"] = "builtin+pack"
+            card["version"] = pack_status.pack.version
+            card["state"] = pack_status.as_dict()
+            card["requirements"] = list(pack_status.pack.requirements)
+            card["pack"] = pack_status.pack.as_dict()
+    return list(cards.values())
+
+
+def verify_engine(engine_id: str, backend: str | None, root: Path | None = None) -> dict[str, Any] | None:
+    """Re-verify one engine card; built-ins are always verified."""
+    cards = engine_cards(backend, root)
+    card = next((item for item in cards if item["id"] == engine_id), None)
+    if card is None:
+        return None
+    if card["kind"] == "builtin":
+        return card
+    root = root or packs_root()
+    for entry in sorted(root.iterdir()) if root.is_dir() else []:
+        if not entry.is_dir():
+            continue
+        try:
+            manifest = load_manifest(entry)
+        except PackManifestError:
+            continue
+        if manifest.engine_id == engine_id:
+            refreshed = inspect_pack(entry, verify=True)
+            card = dict(card)
+            card["state"] = refreshed.as_dict()
+            card["version"] = refreshed.pack.version
+            card["pack"] = refreshed.pack.as_dict()
+            return card
+    return card

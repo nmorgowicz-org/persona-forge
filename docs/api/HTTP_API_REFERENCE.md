@@ -119,6 +119,24 @@ Important notes:
   (`library`|`preset`), `display_name`, `language`, `language_code`, `servable`.
 - Presets are included only when the Pocket backend is active.
 
+### GET /engines
+
+- Purpose: engine-manager view for the UI; combines built-in engines with packs under
+  `ENGINE_PACKS_DIR`.
+- Response 200: `{ "engines": [ ... ] }`, each card: `id`, `label`, `description`, `kind`
+  (`builtin`|`pack`|`builtin+pack`), `version`, `runtime`, `source`, `license`, `active`,
+  `capabilities`, `requirements`, `pack` (manifest + artifacts) and `state`:
+  `status` (`built-in`|`not-installed`|`installed`|`verified`|`invalid`),
+  `artifacts_present`, `artifacts_total`, `disk_bytes`, `verified`, `errors`.
+- Read-only and local: no network access, no model load.
+
+### POST /engines/{engine_id}/verify
+
+- Purpose: re-hash a pack's artifacts against the manifest pins and refresh its state.
+- Response 200: `{ "engine": { ...card... } }` with `state.status = "verified"` when every
+  artifact exists and matches, `invalid` with `state.errors` otherwise.
+- Built-in engines are always verified. Unknown ids return 404.
+
 ### POST /generate/with_metrics
 
 - Purpose: Same generation as `/generate` but returns a JSON envelope with base64 audio,

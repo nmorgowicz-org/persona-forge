@@ -197,6 +197,12 @@ Changes require a model reload (`/runtime/config` marks both vars as reload keys
 
 When cloning is available, the mounted REF_AUDIO is automatically registered as a voice named "Mounted reference (Default)" in the library so it can be selected explicitly as well as used as the default.
 
+## Engine packs
+
+| Var | Default | Description |
+|-----|---------|-------------|
+| `ENGINE_PACKS_DIR` | `<DATA_DIR>/engine-packs` | Directory scanned by `GET /engines`. Each subdirectory holds a `manifest.json` plus its pinned artifacts. Verification is local-only (existence, size, SHA-256); nothing is downloaded and no code runs during verification. |
+
 ## Debug / dev (do not use in production)
 
 | Var | Default | Description |

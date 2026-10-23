@@ -420,6 +420,71 @@ export async function setApiDefault(params: {
   return (body.default as ApiDefaultRecord | null) ?? null
 }
 
+export interface EngineCapabilities {
+  clone: boolean
+  presets: boolean
+  import_prepared_voice: boolean
+  streaming: 'frame' | 'sentence' | 'none' | string
+  languages: string[]
+  speed: boolean
+  expression_tags: boolean
+  seed: boolean
+  instructions: boolean
+}
+
+export interface EngineState {
+  status: 'built-in' | 'not-installed' | 'installed' | 'verified' | 'invalid'
+  artifacts_present: number
+  artifacts_total: number
+  disk_bytes: number
+  verified: boolean
+  errors: string[]
+}
+
+export interface EnginePackArtifact {
+  path: string
+  sha256: string
+  size: number
+  source: string | null
+}
+
+export interface EngineCard {
+  id: string
+  label: string
+  description: string
+  kind: 'builtin' | 'pack' | 'builtin+pack'
+  version: string | null
+  runtime: string
+  source: string | null
+  license: string | null
+  active: boolean
+  capabilities: Partial<EngineCapabilities>
+  state: EngineState
+  requirements: string[]
+  pack: {
+    id: string
+    version: string
+    artifacts: EnginePackArtifact[]
+    notes: string | null
+  } | null
+}
+
+export async function listEngines(): Promise<EngineCard[]> {
+  const res = await fetch('/engines')
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  return body.engines ?? []
+}
+
+export async function verifyEngine(engineId: string): Promise<EngineCard> {
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/verify`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  return body.engine
+}
+
 export async function getVoice(voiceId: string): Promise<VoiceMeta> {
   const res = await fetch(`/voices/${encodeURIComponent(voiceId)}`)
   if (!res.ok) throw new Error(await readError(res))
