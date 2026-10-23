@@ -33,6 +33,7 @@ from persona_forge import (
     project_library,
     prosody_repair,
     segment_library,
+    speech_engines,
     ui_preferences_store,
     voice_design,
     voice_library,
@@ -2538,6 +2539,57 @@ def generate_with_metrics():
     return jsonify(response_payload)
 
 
+@app.get("/v1/models")
+def openai_models():
+    """List registered speech engines in an OpenAI-compatible shape."""
+    active = speech_engines.engine_for_backend(getattr(model, "TTS_BACKEND", None))
+    data = []
+    for engine in speech_engines.list_engines():
+        entry = engine.as_dict()
+        entry["created"] = 0
+        entry["owned_by"] = "local"
+        entry["active"] = active is not None and engine.id == active.id
+        data.append(entry)
+    return jsonify({"object": "list", "data": data})
+
+
+@app.get("/v1/audio/voices")
+def openai_voices():
+    """List every voice the endpoint can serve, saved and built-in."""
+    active = speech_engines.active_engine(getattr(model, "TTS_BACKEND", None))
+    engine_id = active.id if active else None
+    data = []
+    for voice in voice_library.list_voices():
+        meta = voice_library.get_voice(voice["voice_id"]) or {}
+        data.append(
+            {
+                "voice_id": voice["voice_id"],
+                "object": "voice",
+                "engine": engine_id,
+                "kind": "library",
+                "display_name": meta.get("description") or voice["voice_id"],
+                "language": meta.get("language"),
+                "language_code": meta.get("language_code"),
+                "servable": True,
+            }
+        )
+    if getattr(model, "TTS_BACKEND", None) == "pocket_tts":
+        for vid, meta in POCKET_BUILTIN_VOICES.items():
+            data.append(
+                {
+                    "voice_id": f"pocket:{vid}",
+                    "object": "voice",
+                    "engine": engine_id,
+                    "kind": "preset",
+                    "display_name": meta["display_name"],
+                    "language": meta["language"],
+                    "language_code": meta["language_code"],
+                    "servable": True,
+                }
+            )
+    return jsonify({"object": "list", "data": data})
+
+
 @app.post("/v1/audio/speech")
 def openai_audio_speech():
     # Bridge the same startup race /omnivoice/audition already queues through, instead
@@ -2549,6 +2601,16 @@ def openai_audio_speech():
     data = _json_body()
     if not data:
         return _openai_error("Invalid JSON", 400)
+    engine, model_recognized = speech_engines.resolve_model(
+        data.get("model"), getattr(model, "TTS_BACKEND", None)
+    )
+    active_engine = speech_engines.active_engine(getattr(model, "TTS_BACKEND", None))
+    if engine is not None and active_engine is not None and engine.id != active_engine.id:
+        return _openai_error(
+            f"Model {engine.id!r} is not active; the active engine is {active_engine.id!r}.",
+            409,
+            "invalid_request_error",
+        )
     text = (data.get("input") or data.get("text") or "").strip()
     if not text:
         return _openai_error("'input' is required", 400)
@@ -2595,7 +2657,7 @@ def openai_audio_speech():
         and not repair_requested
     ):
         return _openai_audio_speech_stream_pocket_tts(
-            text, language, voice_id, resolved_seed, instruct, data
+            text, language, voice_id, resolved_seed, instruct, data, model_recognized
         )
 
     # Batch path: all other backends/formats, plus repair-enabled requests.
@@ -2629,6 +2691,7 @@ def openai_audio_speech():
             )
         return _openai_error(f"Inference error: {exc}", 500, "api_error")
     response = Response(audio, content_type=media_type)
+    response.headers["X-Model-Recognized"] = "true" if model_recognized else "false"
     response.headers["X-Seed"] = str(resolved_seed)
     if job_id:
         response.headers["X-Job-Id"] = job_id
@@ -2660,6 +2723,7 @@ def _openai_audio_speech_stream_pocket_tts(
     resolved_seed: int | None,
     instruct: str | None,
     data: dict,
+    model_recognized: bool,
 ):
     """Stream Pocket-TTS audio as raw PCM for Hermes TTS streaming integration."""
     if instruct:
@@ -2700,6 +2764,7 @@ def _openai_audio_speech_stream_pocket_tts(
         content_type="audio/pcm",
         headers={
             "X-Seed": str(resolved_seed) if resolved_seed is not None else "",
+            "X-Model-Recognized": "true" if model_recognized else "false",
             "X-Audio-Sample-Rate": "24000",
             "X-Audio-Channels": "1",
             "X-Audio-Bits": "16",

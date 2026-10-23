@@ -72,12 +72,19 @@ Request body (JSON):
 - `seed` (integer, optional) — RNG seed.
 - `prosody_repair` (boolean, optional, default false) — same bounded complete-file repair
   contract as `/generate`.
+- `model` (string, optional) — engine selector. Known values: `pocket-tts` (and aliases
+  `pocket`, `pocket_tts`, `persona-forge`, `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts`, `default`,
+  or omitted → active engine). An unknown label is treated as a client-side name and served by
+  the active engine, so existing OpenAI clients keep working; the response reports
+  `X-Model-Recognized: false`. Naming a registered engine that is not active returns 409.
 
 Response:
 
 - 200:
   - Body: raw audio bytes (MP3, WAV, or PCM, based on `response_format`).
   - Header: `X-Seed`: resolved integer seed.
+  - Header: `X-Model-Recognized`: `true` when `model` matched an engine/alias, `false` when an
+    unknown label was accepted for compatibility.
   - Headers: the same `X-Prosody-Repair-*` outcome metadata as `/generate`.
 - 503:
   - If model not loaded or a runtime reconfiguration is in progress.
@@ -93,6 +100,24 @@ Error format:
 Important notes:
 
 - Same FIFO queueing behind swaps as `/generate`.
+
+### GET /v1/models
+
+- Purpose: OpenAI-compatible model discovery; lists registered speech engines.
+- Response 200: `{ "object": "list", "data": [ ... ] }`, each entry:
+  `id` (`pocket-tts`), `object` (`model`), `label`, `description`, `backend`, `runtime`,
+  `source`, `license`, `installed`, `active`, `owned_by` (`local`), and `capabilities`
+  (`clone`, `presets`, `import_prepared_voice`, `streaming`, `languages`, `speed`,
+  `expression_tags`, `seed`, `instructions`).
+- No model load is required; safe to poll before the engine is ready.
+
+### GET /v1/audio/voices
+
+- Purpose: list every voice the endpoint can serve for the active engine.
+- Response 200: `{ "object": "list", "data": [ ... ] }`, each entry:
+  `voice_id` (`vd_...` or `pocket:<name>`), `object` (`voice`), `engine`, `kind`
+  (`library`|`preset`), `display_name`, `language`, `language_code`, `servable`.
+- Presets are included only when the Pocket backend is active.
 
 ### POST /generate/with_metrics
 
