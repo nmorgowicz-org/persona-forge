@@ -464,7 +464,8 @@ def voices_list():
     active_id = None
     if getattr(model, "TTS_BACKEND", None) in ("pytorch", "openvino", "pocket_tts"):
         try:
-            active_id = voice_library.get_active_default_voice_id()
+            default = voice_library.get_api_default()
+            active_id = default["voice"] if default else None
         except Exception:
             active_id = None
     for voice in voices:
@@ -491,6 +492,114 @@ def voices_builtin():
             "requires_backend": "pocket_tts",
         })
     return jsonify({"voices": voices})
+
+
+def _api_default_view() -> dict[str, Any] | None:
+    """Return the effective API default enriched for the UI, or None."""
+    record = voice_library.get_api_default()
+    if record is None:
+        return None
+    voice = record["voice"]
+    backend = record.get("engine") or getattr(model, "TTS_BACKEND", None)
+    if voice.startswith("pocket:"):
+        preset = voice.split(":", 1)[1]
+        meta = POCKET_BUILTIN_VOICES.get(preset)
+        if meta is None:
+            return None
+        return {
+            **record,
+            "engine": backend,
+            "kind": "preset",
+            "display_name": meta["display_name"],
+            "language": meta["language"],
+            "language_code": meta["language_code"],
+            "servable": backend == "pocket_tts",
+        }
+    meta = voice_library.get_voice(voice) or {}
+    return {
+        **record,
+        "engine": backend,
+        "kind": "library",
+        "display_name": meta.get("description") or meta.get("display_name") or voice,
+        "language": meta.get("language"),
+        "language_code": meta.get("language_code"),
+        "servable": True,
+    }
+
+
+def _activate_library_voice_for_api(
+    voice_id: str,
+) -> tuple[dict[str, Any] | None, tuple[Any, int] | None]:
+    """Rebuild runtime state for a saved voice; return ``(meta, error_response)``."""
+    active_backend = getattr(model, "TTS_BACKEND", None)
+    if active_backend not in ("pytorch", "openvino", "pocket_tts"):
+        return None, (
+            jsonify({"error": f"Activate-for-API is unavailable for TTS_BACKEND={active_backend}"}),
+            409,
+        )
+    if not model._service_started:
+        return None, (jsonify({"error": "Model not loaded"}), 503)
+    meta = voice_library.get_voice(voice_id)
+    if meta is None:
+        return None, (jsonify({"error": "voice_id not found"}), 404)
+
+    if active_backend in ("pytorch", "openvino"):
+        if not (meta.get("sample_text") or "").strip():
+            return None, (
+                jsonify(
+                    {
+                        "error": (
+                            "This voice has no reference transcript. Generate a transcript with Whisper "
+                            "or edit the reference text before activating it."
+                        )
+                    }
+                ),
+                400,
+            )
+        rebuild = model.activate_default_voice_from_library
+    else:
+        from persona_forge import pocket_tts_runtime
+
+        rebuild = pocket_tts_runtime.set_default_voice_state_from_library
+
+    try:
+        # Run on the model executor so the voice-state forward pass never races generation.
+        model.executor.submit(rebuild, voice_id).result(timeout=120)
+    except Exception as exc:
+        return None, (jsonify({"error": f"Activate failed: {exc}"}), 500)
+    return meta, None
+
+
+@app.get("/api-default")
+def api_default_get():
+    """Return the effective no-voice API default (engine + voice + variant)."""
+    return jsonify({"default": _api_default_view()})
+
+
+@app.put("/api-default")
+def api_default_put():
+    """Set the no-voice API default; built-in presets and saved voices are both accepted."""
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    voice = (data.get("voice") or "").strip()
+    if not voice:
+        return jsonify({"error": "voice is required"}), 400
+    engine = (data.get("engine") or "").strip() or None
+    variant = (data.get("variant") or "").strip() or None
+    backend = getattr(model, "TTS_BACKEND", None)
+    if voice.startswith("pocket:"):
+        if voice.split(":", 1)[1] not in POCKET_BUILTIN_VOICES:
+            return jsonify({"error": f"unknown built-in voice: {voice}"}), 404
+        if backend != "pocket_tts":
+            return jsonify({"error": "Built-in presets require TTS_BACKEND=pocket_tts"}), 409
+        voice_library.set_api_default(engine or backend, voice, variant)
+        return jsonify({"default": _api_default_view()})
+    _meta, error = _activate_library_voice_for_api(voice)
+    if error is not None:
+        return error
+    voice_library.set_api_default(engine or backend, voice, variant)
+    return jsonify({"default": _api_default_view()})
 
 
 def _resolve_builtin_voice(data: dict, voice_id: str | None) -> tuple[str | None, str | None]:
@@ -620,6 +729,7 @@ def voices_delete(voice_id: str):
         return jsonify({"error": "voice_id not found"}), 404
     if voice_library.get_active_default_voice_id() == voice_id:
         voice_library.clear_active_default_voice_id()
+    voice_library.clear_api_default_for_voice(voice_id)
     model.invalidate_voice_clone_prompt(voice_id)
     try:
         from persona_forge import pocket_tts_runtime
@@ -795,40 +905,15 @@ def voices_delete_variant(voice_id: str, variant_filename: str):
 @app.post("/voices/<voice_id>/activate")
 def voices_activate(voice_id: str):
     """Make a saved voice the runtime API default and hot-swap its clone state."""
-    active_backend = getattr(model, "TTS_BACKEND", None)
-    if active_backend not in ("pytorch", "openvino", "pocket_tts"):
-        return (
-            jsonify({"error": f"Activate-for-API is unavailable for TTS_BACKEND={active_backend}"}),
-            409,
-        )
-    if not model._service_started:
-        return jsonify({"error": "Model not loaded"}), 503
-    meta = voice_library.get_voice(voice_id)
+    meta, error = _activate_library_voice_for_api(voice_id)
+    if error is not None:
+        return error
     if meta is None:
         return jsonify({"error": "voice_id not found"}), 404
-
-    if active_backend in ("pytorch", "openvino"):
-        if not (meta.get("sample_text") or "").strip():
-            return jsonify(
-                {
-                    "error": (
-                        "This voice has no reference transcript. Generate a transcript with Whisper "
-                        "or edit the reference text before activating it."
-                    )
-                }
-            ), 400
-        rebuild = model.activate_default_voice_from_library
-    else:
-        from persona_forge import pocket_tts_runtime
-
-        rebuild = pocket_tts_runtime.set_default_voice_state_from_library
-
-    try:
-        # Run on the model executor so the voice-state forward pass never races generation.
-        model.executor.submit(rebuild, voice_id).result(timeout=120)
-    except Exception as exc:
-        return jsonify({"error": f"Activate failed: {exc}"}), 500
-    return jsonify({**meta, "api_active": True})
+    voice_library.set_api_default(getattr(model, "TTS_BACKEND", None), voice_id)
+    payload = dict(meta)
+    payload["api_active"] = True
+    return jsonify(payload)
 
 
 @app.post("/voices/<voice_id>/warm")
@@ -2472,6 +2557,18 @@ def openai_audio_speech():
     language = (data.get("language") or "English").strip()
     # OpenAI SDK sends "voice", our internal convention uses "voice_id" — accept both.
     voice_id = (data.get("voice_id") or data.get("voice") or "").strip() or None
+    if voice_id is None and not (data.get("builtin_voice") or "").strip():
+        # No voice in the request: apply the persisted API default. Saved voices already
+        # resolve through the runtime; passing them explicitly keeps the effective default
+        # authoritative even after a restart. Presets must exist in the pinned catalog.
+        default = voice_library.get_api_default()
+        if default:
+            candidate = default["voice"]
+            if candidate.startswith("pocket:"):
+                if candidate.split(":", 1)[1] in POCKET_BUILTIN_VOICES:
+                    voice_id = candidate
+            else:
+                voice_id = candidate
     voice_id, builtin_error = _resolve_builtin_voice(data, voice_id)
     if builtin_error:
         return _openai_error(builtin_error, 400)

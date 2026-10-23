@@ -547,3 +547,80 @@ def test_ensure_mounted_ref_voice_reuses_existing_voice_with_matching_audio(tmp_
     ]
     assert not voice_library._voice_dir(voice_library.MOUNTED_REF_VOICE_ID).exists()
     assert voice_library.find_voice_id_for_audio(str(ref_audio)) == saved["voice_id"]
+
+
+class TestApiDefault:
+    """Structured API default (Phase A1): presets, saved voices, legacy migration."""
+
+    @pytest.fixture(autouse=True)
+    def tmp_api_default(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(voice_library, "VOICE_LIBRARY_DIR", tmp_path)
+        monkeypatch.setattr(voice_library, "ACTIVE_DEFAULT_FILE", tmp_path / ".active_default")
+        monkeypatch.setattr(voice_library, "API_DEFAULT_FILE", tmp_path / ".api_default.json")
+        yield tmp_path
+
+    def _saved_voice(self) -> dict:
+        return voice_library.save_voice(
+            b"RIFF....", description="calm narrator", sample_text="hello there", language="English"
+        )
+
+    def test_legacy_default_is_reported_as_legacy(self):
+        saved = self._saved_voice()
+        voice_library.set_active_default_voice_id(saved["voice_id"])
+
+        record = voice_library.get_api_default()
+
+        assert record is not None
+        assert record["voice"] == saved["voice_id"]
+        assert record["source"] == "legacy"
+        assert record["engine"] is None
+
+    def test_preset_default_persists_and_clears_legacy_mirror(self):
+        voice_library.set_active_default_voice_id("vd_000000000001")
+
+        record = voice_library.set_api_default("pocket_tts", "pocket:vera", variant="expressive")
+
+        assert record["voice"] == "pocket:vera"
+        assert record["variant"] == "expressive"
+        assert voice_library.get_active_default_voice_id() is None
+        persisted = voice_library.get_api_default()
+        assert persisted is not None
+        assert persisted["engine"] == "pocket_tts"
+        assert persisted["source"] == "record"
+
+    def test_saved_voice_default_mirrors_legacy_file(self):
+        saved = self._saved_voice()
+
+        voice_library.set_api_default("pocket_tts", saved["voice_id"])
+
+        assert voice_library.get_active_default_voice_id() == saved["voice_id"]
+        assert voice_library.get_api_default()["voice"] == saved["voice_id"]
+
+    def test_stale_saved_voice_is_treated_as_unset(self):
+        voice_library.set_api_default("pocket_tts", "vd_0000000000ff")
+
+        assert voice_library.get_api_default() is None
+
+    def test_clear_for_matching_voice_removes_both_files(self, tmp_api_default):
+        saved = self._saved_voice()
+        voice_library.set_api_default("pocket_tts", saved["voice_id"])
+
+        assert voice_library.clear_api_default_for_voice(saved["voice_id"]) is True
+        assert voice_library.get_api_default() is None
+        assert not (tmp_api_default / ".active_default").exists()
+        assert not (tmp_api_default / ".api_default.json").exists()
+
+    def test_clear_for_other_voice_leaves_default(self):
+        saved = self._saved_voice()
+        voice_library.set_api_default("pocket_tts", saved["voice_id"])
+
+        assert voice_library.clear_api_default_for_voice("vd_0000000000fe") is False
+        assert voice_library.get_api_default()["voice"] == saved["voice_id"]
+
+    @pytest.mark.parametrize(
+        "voice",
+        ["pocket:", "pocket:../evil", "pocket:bad name", "vd_nothex", "not-a-voice"],
+    )
+    def test_rejects_invalid_voice_forms(self, voice):
+        with pytest.raises(ValueError):
+            voice_library.set_api_default("pocket_tts", voice)

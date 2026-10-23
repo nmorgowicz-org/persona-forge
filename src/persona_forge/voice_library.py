@@ -84,6 +84,116 @@ def clear_active_default_voice_id() -> None:
         logger.warning("Could not clear active API default %s", ACTIVE_DEFAULT_FILE)
 
 
+# Structured no-voice API default (Phase A1 of docs/plans/20261023-kokoro_phonon_kittentts2.md):
+# {"engine": str | None, "voice": str, "variant": str | None, "updated_at": float}. `voice` is
+# either a saved library id (``vd_...``) or a built-in preset (``pocket:<name>``). The legacy
+# ``.active_default`` file stays authoritative for the runtime hot-swap path and is kept in sync
+# for saved voices, so older code and rollbacks keep working unchanged.
+API_DEFAULT_FILE = VOICE_LIBRARY_DIR / ".api_default.json"
+_PRESET_VOICE_RE = re.compile(r"^pocket:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+
+
+def _write_text_atomic(path: Path, payload: str) -> None:
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def get_api_default() -> dict[str, Any] | None:
+    """Return the effective no-voice API default, or None.
+
+    Prefers the structured record, falling back to the legacy single-value file. A saved voice
+    that no longer exists is treated as unset rather than served as a stale reference. Presets
+    are validated by the caller (which owns the built-in catalog).
+    """
+    record: dict[str, Any] | None = None
+    try:
+        parsed = json.loads(API_DEFAULT_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        parsed = None
+    if isinstance(parsed, dict):
+        voice = parsed.get("voice")
+        if isinstance(voice, str) and voice.strip():
+            record = {
+                "engine": (parsed.get("engine") or None),
+                "voice": voice.strip(),
+                "variant": (parsed.get("variant") or None),
+                "updated_at": parsed.get("updated_at"),
+                "source": "record",
+            }
+    if record is None:
+        legacy = get_active_default_voice_id()
+        if legacy:
+            record = {
+                "engine": None,
+                "voice": legacy,
+                "variant": None,
+                "updated_at": None,
+                "source": "legacy",
+            }
+    if record is None:
+        return None
+    voice = record["voice"]
+    if not voice.startswith("pocket:") and get_voice(voice) is None:
+        return None
+    return record
+
+
+def set_api_default(
+    engine: str | None, voice: str, variant: str | None = None
+) -> dict[str, Any]:
+    """Persist the structured API default and mirror saved voices to the legacy file."""
+    voice = (voice or "").strip()
+    if not voice:
+        raise ValueError("voice is required")
+    is_preset = voice.startswith("pocket:")
+    if is_preset:
+        if not _PRESET_VOICE_RE.match(voice):
+            raise ValueError(f"invalid preset voice: {voice!r}")
+    elif not _is_valid_voice_id(voice):
+        raise ValueError(f"invalid voice_id: {voice!r}")
+
+    record = {
+        "engine": (engine or "").strip() or None,
+        "voice": voice,
+        "variant": (variant or "").strip() or None,
+        "updated_at": time.time(),
+    }
+    _write_text_atomic(API_DEFAULT_FILE, json.dumps(record, sort_keys=True))
+    if is_preset:
+        # Presets have no library record; the runtime falls back to its mounted default, and
+        # request-time resolution passes the preset explicitly.
+        clear_active_default_voice_id()
+    else:
+        set_active_default_voice_id(voice)
+    return {**record, "source": "record"}
+
+
+def clear_api_default() -> None:
+    """Clear both the structured record and the legacy default."""
+    try:
+        API_DEFAULT_FILE.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Could not clear structured API default %s", API_DEFAULT_FILE)
+    clear_active_default_voice_id()
+
+
+def clear_api_default_for_voice(voice_id: str) -> bool:
+    """Clear the default when it points at ``voice_id``; return whether it was cleared."""
+    record = get_api_default()
+    if record is None or record.get("voice") != voice_id:
+        return False
+    clear_api_default()
+    return True
+
+
 def new_voice_id() -> str:
     return f"vd_{secrets.token_hex(6)}"
 

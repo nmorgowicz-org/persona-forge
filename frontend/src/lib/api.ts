@@ -386,6 +386,40 @@ export async function listBuiltInVoices(): Promise<BuiltInVoiceMeta[]> {
   return body.voices ?? body
 }
 
+export interface ApiDefaultRecord {
+  engine: string | null
+  voice: string
+  variant: string | null
+  kind: 'library' | 'preset'
+  display_name: string | null
+  language: string | null
+  language_code: string | null
+  servable: boolean
+  source?: 'record' | 'legacy'
+}
+
+export async function getApiDefault(): Promise<ApiDefaultRecord | null> {
+  const res = await fetch('/api-default')
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  return (body.default as ApiDefaultRecord | null) ?? null
+}
+
+export async function setApiDefault(params: {
+  voice: string
+  engine?: string | null
+  variant?: string | null
+}): Promise<ApiDefaultRecord | null> {
+  const res = await fetch('/api-default', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  return (body.default as ApiDefaultRecord | null) ?? null
+}
+
 export async function getVoice(voiceId: string): Promise<VoiceMeta> {
   const res = await fetch(`/voices/${encodeURIComponent(voiceId)}`)
   if (!res.ok) throw new Error(await readError(res))
