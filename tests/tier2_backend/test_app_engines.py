@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 from persona_forge import speech_engines, voice_library
 
 
@@ -144,6 +147,55 @@ def test_verify_unknown_engine_is_404(client, monkeypatch, tmp_path):
     monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path))
 
     response = client.post("/engines/nope/verify")
+
+    assert response.status_code == 404
+
+
+def test_install_and_remove_pack_over_api(client, monkeypatch, tmp_path):
+    data = b"blob"
+    source = tmp_path / "source.bin"
+    source.write_bytes(data)
+    packs = tmp_path / "packs" / "demo"
+    packs.mkdir(parents=True)
+    (packs / "manifest.json").write_text(
+        json.dumps(
+            {
+                "id": "demo",
+                "engine_id": "demo-engine",
+                "version": "1.0.0",
+                "label": "Demo",
+                "artifacts": [
+                    {
+                        "path": "model.bin",
+                        "sha256": hashlib.sha256(data).hexdigest(),
+                        "size": len(data),
+                        "source": source.as_uri(),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path / "packs"))
+    monkeypatch.setenv("ENGINE_PACKS_ALLOW_FILE_SOURCES", "1")
+
+    installed = client.post("/engines/demo-engine/install")
+
+    assert installed.status_code == 200
+    assert installed.get_json()["state"]["status"] == "verified"
+    cards = {card["id"]: card for card in client.get("/engines").get_json()["engines"]}
+    assert cards["demo-engine"]["state"]["status"] == "verified"
+
+    removed = client.post("/engines/demo-engine/remove")
+
+    assert removed.status_code == 200
+    assert removed.get_json() == {"removed": "demo-engine"}
+
+
+def test_remove_builtin_engine_is_rejected(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path))
+
+    response = client.post("/engines/pocket-tts/remove")
 
     assert response.status_code == 404
 

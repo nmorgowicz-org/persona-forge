@@ -485,6 +485,22 @@ export async function verifyEngine(engineId: string): Promise<EngineCard> {
   return body.engine
 }
 
+export async function installEngine(engineId: string): Promise<EngineCard> {
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/install`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  return body.engine
+}
+
+export async function removeEngine(engineId: string): Promise<void> {
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/remove`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error(await readError(res))
+}
+
 export async function getVoice(voiceId: string): Promise<VoiceMeta> {
   const res = await fetch(`/voices/${encodeURIComponent(voiceId)}`)
   if (!res.ok) throw new Error(await readError(res))

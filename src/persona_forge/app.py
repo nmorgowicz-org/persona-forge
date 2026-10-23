@@ -2562,6 +2562,35 @@ def engines_verify(engine_id: str):
     return jsonify({"engine": card})
 
 
+@app.post("/engines/<engine_id>/install")
+def engines_install(engine_id: str):
+    """Download, verify and publish a pack's artifacts."""
+    try:
+        status = engine_packs.install_pack(engine_id)
+    except engine_packs.PackInstallError as exc:
+        return jsonify({"error": str(exc)}), 409
+    cards = engine_packs.engine_cards(getattr(model, "TTS_BACKEND", None))
+    card = next((item for item in cards if item["id"] == engine_id), None)
+    return jsonify({"engine": card, "state": status.as_dict()})
+
+
+@app.post("/engines/<engine_id>/remove")
+def engines_remove(engine_id: str):
+    """Delete a pack. The active engine cannot be removed."""
+    active = speech_engines.engine_for_backend(getattr(model, "TTS_BACKEND", None))
+    if active is not None and active.id == engine_id:
+        return jsonify(
+            {"error": "Cannot remove the active engine; switch engines first."}
+        ), 409
+    try:
+        removed = engine_packs.remove_pack(engine_id)
+    except engine_packs.PackInstallError as exc:
+        return jsonify({"error": str(exc)}), 409
+    if not removed:
+        return jsonify({"error": "pack not found or not removable"}), 404
+    return jsonify({"removed": engine_id})
+
+
 @app.get("/v1/models")
 def openai_models():
     """List registered speech engines in an OpenAI-compatible shape."""

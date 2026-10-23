@@ -118,6 +118,84 @@ def test_discover_skips_directories_without_manifest(tmp_path):
     assert [pack.pack.id for pack in packs] == ["kokoro-pack"]
 
 
+def test_install_from_file_source(tmp_path):
+    data = b"model-bytes"
+    source = tmp_path / "source.bin"
+    source.write_bytes(data)
+    payload = _payload(
+        engine_id="installed-engine",
+        artifacts=[
+            {
+                "path": "model.onnx",
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "size": len(data),
+                "source": source.as_uri(),
+            }
+        ],
+    )
+    packs_root = tmp_path / "packs"
+    pack_dir = _write_pack(packs_root, payload, {})
+
+    status = engine_packs.install_pack("installed-engine", packs_root, allow_file=True)
+
+    assert status.status == "verified"
+    assert (pack_dir / "model.onnx").read_bytes() == data
+    assert not (pack_dir / "model.onnx.part").exists()
+
+
+def test_install_rejects_hash_mismatch(tmp_path):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"actual-bytes")
+    payload = _payload(
+        engine_id="bad-engine",
+        artifacts=[
+            {
+                "path": "model.onnx",
+                "sha256": hashlib.sha256(b"expected-bytes").hexdigest(),
+                "size": len(b"actual-bytes"),
+                "source": source.as_uri(),
+            }
+        ],
+    )
+    packs_root = tmp_path / "packs"
+    pack_dir = _write_pack(packs_root, payload, {})
+
+    with pytest.raises(engine_packs.PackInstallError):
+        engine_packs.install_pack("bad-engine", packs_root, allow_file=True)
+
+    assert not (pack_dir / "model.onnx").exists()
+    assert not (pack_dir / "model.onnx.part").exists()
+
+
+def test_install_rejects_file_sources_when_disabled(tmp_path):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"data")
+    payload = _payload(
+        engine_id="file-engine",
+        artifacts=[
+            {
+                "path": "model.onnx",
+                "sha256": hashlib.sha256(b"data").hexdigest(),
+                "size": 4,
+                "source": source.as_uri(),
+            }
+        ],
+    )
+    packs_root = tmp_path / "packs"
+    _write_pack(packs_root, payload, {})
+
+    with pytest.raises(engine_packs.PackInstallError):
+        engine_packs.install_pack("file-engine", packs_root, allow_file=False)
+
+
+def test_remove_pack_deletes_directory(tmp_path):
+    pack_dir = _write_pack(tmp_path, _payload(engine_id="removable"), {})
+
+    assert engine_packs.remove_pack("removable", tmp_path) is True
+    assert not pack_dir.exists()
+    assert engine_packs.remove_pack("removable", tmp_path) is False
+
+
 def test_engine_cards_include_the_builtin_engine(tmp_path):
     cards = {card["id"]: card for card in engine_packs.engine_cards("pocket_tts", tmp_path)}
 

@@ -1,7 +1,17 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, CircleSlash, HardDrive, Loader2, RefreshCw } from 'lucide-react'
 import {
+  CheckCircle2,
+  CircleSlash,
+  Download,
+  HardDrive,
+  Loader2,
+  RefreshCw,
+  Trash2,
+} from 'lucide-react'
+import {
+  installEngine,
   listEngines,
+  removeEngine,
   verifyEngine,
   type EngineCard,
   type EngineState,
@@ -35,7 +45,10 @@ export function SpeechEnginesCard() {
   const [engines, setEngines] = useState<EngineCard[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [verifying, setVerifying] = useState<string | null>(null)
+  const [pendingAction, setPendingAction] = useState<{
+    id: string
+    action: 'verify' | 'install' | 'remove'
+  } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -55,7 +68,7 @@ export function SpeechEnginesCard() {
   }, [])
 
   async function verify(engineId: string) {
-    setVerifying(engineId)
+    setPendingAction({ id: engineId, action: 'verify' })
     setError(null)
     try {
       const refreshed = await verifyEngine(engineId)
@@ -65,7 +78,35 @@ export function SpeechEnginesCard() {
     } catch (err) {
       setError(String((err as Error)?.message || err))
     } finally {
-      setVerifying(null)
+      setPendingAction(null)
+    }
+  }
+
+  async function install(engineId: string) {
+    setPendingAction({ id: engineId, action: 'install' })
+    setError(null)
+    try {
+      const refreshed = await installEngine(engineId)
+      setEngines((current) =>
+        current.map((engine) => (engine.id === refreshed.id ? refreshed : engine)),
+      )
+    } catch (err) {
+      setError(String((err as Error)?.message || err))
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
+  async function remove(engineId: string) {
+    setPendingAction({ id: engineId, action: 'remove' })
+    setError(null)
+    try {
+      await removeEngine(engineId)
+      setEngines((current) => current.filter((engine) => engine.id !== engineId))
+    } catch (err) {
+      setError(String((err as Error)?.message || err))
+    } finally {
+      setPendingAction(null)
     }
   }
 
@@ -148,20 +189,60 @@ export function SpeechEnginesCard() {
                 )}
                 {engine.state.disk_bytes > 0 && <span>{formatBytes(engine.state.disk_bytes)}</span>}
                 {engine.kind !== 'builtin' && (
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="outline"
-                    disabled={verifying === engine.id}
-                    onClick={() => void verify(engine.id)}
-                  >
-                    {verifying === engine.id ? (
-                      <Loader2 className="animate-spin" />
-                    ) : (
-                      <RefreshCw />
+                  <>
+                    {engine.state.status !== 'verified' && (
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant="outline"
+                        disabled={pendingAction !== null}
+                        onClick={() => void install(engine.id)}
+                      >
+                        {pendingAction?.id === engine.id &&
+                        pendingAction.action === 'install' ? (
+                          <Loader2 className="animate-spin" />
+                        ) : (
+                          <Download />
+                        )}
+                        {engine.state.status === 'not-installed' ? 'Install' : 'Repair'}
+                      </Button>
                     )}
-                    Verify hashes
-                  </Button>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      disabled={pendingAction !== null}
+                      onClick={() => void verify(engine.id)}
+                    >
+                      {pendingAction?.id === engine.id &&
+                      pendingAction.action === 'verify' ? (
+                        <Loader2 className="animate-spin" />
+                      ) : (
+                        <RefreshCw />
+                      )}
+                      Verify hashes
+                    </Button>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="ghost"
+                      disabled={engine.active || pendingAction !== null}
+                      title={
+                        engine.active
+                          ? 'Switch to another engine before removing this one'
+                          : undefined
+                      }
+                      onClick={() => void remove(engine.id)}
+                    >
+                      {pendingAction?.id === engine.id &&
+                      pendingAction.action === 'remove' ? (
+                        <Loader2 className="animate-spin" />
+                      ) : (
+                        <Trash2 />
+                      )}
+                      Remove
+                    </Button>
+                  </>
                 )}
               </div>
 

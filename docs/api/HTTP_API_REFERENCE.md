@@ -137,6 +137,22 @@ Important notes:
   artifact exists and matches, `invalid` with `state.errors` otherwise.
 - Built-in engines are always verified. Unknown ids return 404.
 
+### POST /engines/{engine_id}/install
+
+- Purpose: download a pack's artifacts from the URLs pinned in its manifest, resume partial
+  downloads, verify size and SHA-256, then publish the verification stamp.
+- Response 200: `{ "engine": { ...card... }, "state": { ... } }` with `state.status = "verified"`.
+- 409: no manifest, active install, not enough disk, unsupported source scheme, or verification
+  failure (`{ "error": "..." }`). Partial downloads are kept as `<artifact>.part` for retry;
+  unverified bytes are never published as the artifact.
+
+### POST /engines/{engine_id}/remove
+
+- Purpose: delete a pack directory (manifest and artifacts). Built-in engines have no pack.
+- 200: `{ "removed": "<engine_id>" }`.
+- 409: the engine is active — switch engines first.
+- 404: no removable pack for that id.
+
 ### POST /generate/with_metrics
 
 - Purpose: Same generation as `/generate` but returns a JSON envelope with base64 audio,

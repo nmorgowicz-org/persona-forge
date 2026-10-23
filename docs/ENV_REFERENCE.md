@@ -202,6 +202,7 @@ When cloning is available, the mounted REF_AUDIO is automatically registered as 
 | Var | Default | Description |
 |-----|---------|-------------|
 | `ENGINE_PACKS_DIR` | `<DATA_DIR>/engine-packs` | Directory scanned by `GET /engines`. Each subdirectory holds a `manifest.json` plus its pinned artifacts. Verification is local-only (existence, size, SHA-256); nothing is downloaded and no code runs during verification. |
+| `ENGINE_PACKS_ALLOW_FILE_SOURCES` | unset | Test/debug only: allow `file://` artifact sources in pack manifests. Leave unset in production so installs only use http(s). |
 
 ## Debug / dev (do not use in production)
 

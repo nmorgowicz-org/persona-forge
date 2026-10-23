@@ -13,10 +13,13 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from persona_forge import paths, speech_engines
 
@@ -28,6 +31,10 @@ _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 class PackManifestError(ValueError):
     """A manifest is malformed. The message is safe to show to the user."""
+
+
+class PackInstallError(RuntimeError):
+    """An install cannot proceed (bad source, disk space, hash mismatch)."""
 
 
 @dataclass(frozen=True)
@@ -273,6 +280,135 @@ def inspect_pack(pack_dir: Path, *, verify: bool = False) -> PackStatus:
     if verify and status.verified:
         _write_verification_stamp(pack_dir, manifest.manifest_sha256)
     return status
+
+
+def find_pack_dir(engine_id: str, root: Path | None = None) -> Path | None:
+    """Return the pack directory whose manifest claims ``engine_id``."""
+    root = root or packs_root()
+    if not root.is_dir():
+        return None
+    for entry in sorted(root.iterdir()):
+        if not entry.is_dir():
+            continue
+        try:
+            manifest = load_manifest(entry)
+        except PackManifestError:
+            continue
+        if manifest.engine_id == engine_id:
+            return entry
+    return None
+
+
+def _download_artifact(url: str, dest: Path, artifact: PackArtifact, *, allow_file: bool) -> None:
+    """Download with byte-range resume, then verify size and hash before publishing."""
+    parsed = urlparse(url)
+    scheme_ok = parsed.scheme in ("http", "https") or (parsed.scheme == "file" and allow_file)
+    if not scheme_ok:
+        raise PackInstallError(
+            f"{artifact.path}: unsupported source scheme {parsed.scheme!r}"
+        )
+
+    part = dest.with_name(dest.name + ".part")
+    offset = part.stat().st_size if part.is_file() else 0
+    headers = {"Range": f"bytes={offset}-"} if offset else {}
+    request = Request(url, headers=headers)
+    try:
+        with urlopen(request, timeout=60) as response:
+            status = getattr(response, "status", 200)
+            if offset and status != 206:
+                offset = 0
+                part.unlink(missing_ok=True)
+            written = offset
+            with part.open("ab" if offset else "wb") as handle:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    written += len(chunk)
+    except (OSError, ValueError) as exc:
+        raise PackInstallError(f"{artifact.path}: download failed: {exc}") from exc
+
+    if written != artifact.size:
+        part.unlink(missing_ok=True)
+        raise PackInstallError(
+            f"{artifact.path}: expected {artifact.size} bytes, received {written}"
+        )
+    if _sha256_file(part) != artifact.sha256:
+        part.unlink(missing_ok=True)
+        raise PackInstallError(f"{artifact.path}: hash mismatch after download")
+    os.replace(part, dest)
+
+
+def install_pack(
+    engine_id: str, root: Path | None = None, *, allow_file: bool | None = None
+) -> PackStatus:
+    """Fetch a pack's artifacts, verify them, and publish the verified stamp.
+
+    The manifest must already exist in the pack directory (packs ship metadata separately from
+    their bytes). Downloads resume from ``.part`` files; failures leave the partial file for a
+    later retry and never publish an unverified artifact.
+    """
+    root = root or packs_root()
+    pack_dir = find_pack_dir(engine_id, root)
+    if pack_dir is None:
+        raise PackInstallError(f"no pack manifest for engine {engine_id!r}")
+    manifest = load_manifest(pack_dir)
+    if allow_file is None:
+        allow_file = os.environ.get("ENGINE_PACKS_ALLOW_FILE_SOURCES") == "1"
+
+    missing_bytes = 0
+    for artifact in manifest.artifacts:
+        dest = pack_dir / artifact.path
+        if dest.is_file() and dest.stat().st_size == artifact.size:
+            continue
+        missing_bytes += artifact.size
+    free_bytes = shutil.disk_usage(root).free
+    if missing_bytes > free_bytes:
+        raise PackInstallError(
+            f"not enough free disk: need {missing_bytes} bytes, {free_bytes} available"
+        )
+
+    lock_path = pack_dir / ".install.lock"
+    try:
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError as exc:
+        raise PackInstallError("an install is already running for this pack") from exc
+    os.close(lock_fd)
+    try:
+        for artifact in manifest.artifacts:
+            dest = pack_dir / artifact.path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if dest.is_file():
+                try:
+                    if _sha256_file(dest) == artifact.sha256:
+                        continue
+                except OSError:
+                    pass
+                dest.unlink(missing_ok=True)
+            if not artifact.source:
+                raise PackInstallError(f"{artifact.path}: manifest has no source URL")
+            _download_artifact(artifact.source, dest, artifact, allow_file=allow_file)
+        status = inspect_pack(pack_dir, verify=True)
+        if not status.verified:
+            detail = "; ".join(status.errors) or "unknown verification failure"
+            raise PackInstallError(f"verification failed: {detail}")
+        return status
+    finally:
+        lock_path.unlink(missing_ok=True)
+
+
+def remove_pack(engine_id: str, root: Path | None = None) -> bool:
+    """Delete a pack directory. Built-in engines are not removable."""
+    root = root or packs_root()
+    pack_dir = find_pack_dir(engine_id, root)
+    if pack_dir is None:
+        return False
+    try:
+        shutil.rmtree(pack_dir)
+    except OSError as exc:
+        raise PackInstallError(f"could not remove pack: {exc}") from exc
+    return True
 
 
 def discover_packs(root: Path | None = None) -> list[PackStatus]:
