@@ -455,6 +455,10 @@ idle-unloaded. None of the candidate packages installed. Transient; recapture be
   sustained RTF ≤ 1) or **Batch quality** (slower, labelled). Batch engines are still valuable.
 - Record unsupported/untested combinations explicitly; claim only tested combinations.
 
+**Screening results (2026-10-23):** [20261023-phase-b-screening.md](20261023-phase-b-screening.md) —
+Phonon 31m, Kokoro 82M, Kitten nano and KokoClone on macOS M5 Max and docker-agent; Kokoro on the
+RTX 5090. Kitten TTS 2 is blocked on its Windows build.
+
 ## 7. Phases
 
 | Phase | Scope | Completion gate |

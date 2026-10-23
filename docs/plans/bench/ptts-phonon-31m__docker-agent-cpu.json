@@ -1,0 +1,94 @@
+{
+  "engine": "ptts (Phonon 31m)",
+  "package": "ptts 0.4.1",
+  "model": "hf://gradium/phonon-31m-en",
+  "target": "docker-agent, Intel i7-1360P, 6 vCPU, cgroup --cpus=4",
+  "load_average": "17.14 18.42 15.80",
+  "corpus_sha256": "cd24e22a18dd33160858b446d7d465b9df06ec357b9d410ea2ccbf681d8d76a8",
+  "load_s": 0.837,
+  "load_note": "first init in a cold HF cache; includes model download",
+  "peak_rss_after_load_mib": 155.9,
+  "peak_rss_final_mib": 424.5,
+  "sample_rate": 24000,
+  "languages": [
+    "en"
+  ],
+  "supports_local_voice_cloning": false,
+  "voices": 2,
+  "ttfb_long_s": 0.0563,
+  "stream_total_s": 6.091,
+  "stream_audio_s": 25.44,
+  "stream_rtf": 0.239,
+  "cases": [
+    {
+      "case": "short",
+      "voice": "default",
+      "audio_s": 2.56,
+      "rtf": 0.216,
+      "trials_s": [
+        0.7723,
+        0.5521,
+        0.4957
+      ],
+      "min_s": 0.4957,
+      "median_s": 0.5521,
+      "max_s": 0.7723
+    },
+    {
+      "case": "assistant",
+      "voice": "default",
+      "audio_s": 9.04,
+      "rtf": 0.225,
+      "trials_s": [
+        2.0377,
+        1.9993,
+        3.561
+      ],
+      "min_s": 1.9993,
+      "median_s": 2.0377,
+      "max_s": 3.561
+    },
+    {
+      "case": "structured",
+      "voice": "default",
+      "audio_s": 11.68,
+      "rtf": 0.243,
+      "trials_s": [
+        3.1949,
+        2.6451,
+        2.8435
+      ],
+      "min_s": 2.6451,
+      "median_s": 2.8435,
+      "max_s": 3.1949
+    },
+    {
+      "case": "long",
+      "voice": "default",
+      "audio_s": 25.44,
+      "rtf": 0.248,
+      "trials_s": [
+        6.3181,
+        5.7844,
+        7.3603
+      ],
+      "min_s": 5.7844,
+      "median_s": 6.3181,
+      "max_s": 7.3603
+    },
+    {
+      "case": "assistant",
+      "voice": "Easton",
+      "audio_s": 8.16,
+      "rtf": 0.246,
+      "trials_s": [
+        2.0096,
+        1.9041,
+        2.0503
+      ],
+      "min_s": 1.9041,
+      "median_s": 2.0096,
+      "max_s": 2.0503
+    }
+  ]
+}

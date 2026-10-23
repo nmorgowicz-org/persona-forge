@@ -1,0 +1,94 @@
+{
+  "engine": "ptts (Phonon 31m)",
+  "package": "ptts 0.4.1",
+  "model": "hf://gradium/phonon-31m-en",
+  "target": "macOS 27.0.1, Apple M5 Max (arm64), 64 GiB",
+  "load_average": "9.33 5.28 3.98",
+  "corpus_sha256": "cd24e22a18dd33160858b446d7d465b9df06ec357b9d410ea2ccbf681d8d76a8",
+  "load_s": 0.586,
+  "load_note": "first init in a cold HF cache; includes model download",
+  "peak_rss_after_load_mib": 162.3,
+  "peak_rss_final_mib": 378.1,
+  "sample_rate": 24000,
+  "languages": [
+    "en"
+  ],
+  "supports_local_voice_cloning": false,
+  "voices": 2,
+  "ttfb_long_s": 0.0096,
+  "stream_total_s": 0.4578,
+  "stream_audio_s": 25.36,
+  "stream_rtf": 0.018,
+  "cases": [
+    {
+      "case": "short",
+      "voice": "default",
+      "audio_s": 2.56,
+      "rtf": 0.024,
+      "trials_s": [
+        0.0604,
+        0.0626,
+        0.0579
+      ],
+      "min_s": 0.0579,
+      "median_s": 0.0604,
+      "max_s": 0.0626
+    },
+    {
+      "case": "assistant",
+      "voice": "default",
+      "audio_s": 9.04,
+      "rtf": 0.019,
+      "trials_s": [
+        0.176,
+        0.1754,
+        0.1708
+      ],
+      "min_s": 0.1708,
+      "median_s": 0.1754,
+      "max_s": 0.176
+    },
+    {
+      "case": "structured",
+      "voice": "default",
+      "audio_s": 11.68,
+      "rtf": 0.019,
+      "trials_s": [
+        0.2174,
+        0.2187,
+        0.2286
+      ],
+      "min_s": 0.2174,
+      "median_s": 0.2187,
+      "max_s": 0.2286
+    },
+    {
+      "case": "long",
+      "voice": "default",
+      "audio_s": 25.36,
+      "rtf": 0.018,
+      "trials_s": [
+        0.4998,
+        0.4601,
+        0.4505
+      ],
+      "min_s": 0.4505,
+      "median_s": 0.4601,
+      "max_s": 0.4998
+    },
+    {
+      "case": "assistant",
+      "voice": "Easton",
+      "audio_s": 8.16,
+      "rtf": 0.02,
+      "trials_s": [
+        0.1603,
+        0.1634,
+        0.1568
+      ],
+      "min_s": 0.1568,
+      "median_s": 0.1603,
+      "max_s": 0.1634
+    }
+  ]
+}
