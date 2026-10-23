@@ -994,7 +994,8 @@ def voices_preview_prosody(voice_id: str):
     if result is None:
         return jsonify({"error": "Preview failed"}), 500
 
-    wav, sr, plan = result
+    wav, sr = result[0], result[1]
+    plan = result[2] if len(result) > 2 else None
     
     # 1. Calculate metrics for the adjusted audio
     try:
@@ -1834,6 +1835,8 @@ def _validate_region_edits(edits_raw: Any) -> list[dict[str, Any]] | None:
         if not isinstance(raw, dict):
             return None
         edit_type = raw.get("type")
+        if not isinstance(edit_type, str):
+            return None
         fields = _REGION_EDIT_FIELDS.get(edit_type)
         if fields is None:
             return None
@@ -1841,9 +1844,13 @@ def _validate_region_edits(edits_raw: Any) -> list[dict[str, Any]] | None:
         edit: dict[str, Any] = {"type": edit_type}
         try:
             for key in required:
-                edit[key] = float(raw.get(key))
+                value = raw.get(key)
+                if value is None:
+                    return None
+                edit[key] = float(value)
             for key in optional:
-                edit[key] = float(raw.get(key) or 0.0)
+                value = raw.get(key)
+                edit[key] = float(value) if value is not None else 0.0
         except (TypeError, ValueError):
             return None
         edits.append(edit)
