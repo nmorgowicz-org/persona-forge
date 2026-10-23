@@ -1,6 +1,7 @@
 # Dev / Test Loop with docker-agent
 
 This doc exists so future sessions (Claude or human) can quickly understand:
+
 - What’s on this branch
 - How the app runs on docker-agent
 - How to rapidly test local changes
@@ -11,6 +12,7 @@ This doc exists so future sessions (Claude or human) can quickly understand:
 - Goal: implement Persona Forge / OmniVoice workflows with accent-specific voice design, streaming segments, and queueing while models load.
 
 Key capabilities:
+
 - Per-sentence OmniVoice segment generation (audition → cherry-pick → stitch → save).
 - Streaming segments into the rack as they complete.
 - Diverse candidates (guidance_scale), real progress/ETA.
@@ -27,6 +29,7 @@ Key capabilities:
 - Port: 8318 → 8318 (HTTP)
 
 Runtime mode:
+
 - Command:
   - scripts/entrypoint.sh gunicorn persona_forge.app:app \
     -w 1 -k gthread --threads 4 --timeout 300 \
@@ -39,6 +42,7 @@ Runtime mode:
   - (REF_TEXT set to a fixed reference; confirm if it must change for your use.)
 
 Key mounts:
+
 - Host: /var/data/autopirate/persona-forge/voices
   - Container: /voices
 - Host: /var/data/autopirate/persona-forge/segments
@@ -49,12 +53,13 @@ Key mounts:
   - Container: /root/.cache/huggingface/hub
 - Host: /var/data/autopirate/persona-forge/ov
   - Container: /ov
-- Host: /home/nick/projects/persona-forge/src
+- Host: /root/projects/persona-forge/src
   - Container: /app/src
 
 Important:
+
 - The running container uses /app/src from:
-  - /home/nick/projects/persona-forge/src on docker-agent.
+  - /root/projects/persona-forge/src on docker-agent.
 - That directory is git-tracked to the same repo as this project.
 
 ## 3. Dev-test loop (current default)
@@ -70,7 +75,7 @@ From the local repo (e.g. this CWD):
    - git commit -m "descriptive message"
    - git push origin voice-design-accent-and-queueing
 3) On docker-agent:
-   - cd /home/nick/projects/persona-forge
+   - cd /root/projects/persona-forge
    - git pull origin voice-design-accent-and-queueing
 4) Reload backend:
    - The container’s code mount already reflects the new src, but gunicorn has no auto-reload.
@@ -78,9 +83,10 @@ From the local repo (e.g. this CWD):
      - Fast reload: docker exec persona-forge kill -HUP 1
      - Or full restart (safer for bigger changes): docker restart persona-forge
 5) Test:
-   - Hit http://192.168.10.72:8318 to verify behavior.
+   - Hit <http://192.168.10.72:8318> to verify behavior.
 
 Notes:
+
 - If you change Python-only files: HUP or restart is sufficient.
 - If you change Dockerfile, requirements, or system-level deps: rebuild image and recreate container.
 
@@ -100,7 +106,7 @@ Example (run on docker-agent, or script it):
       -p 8318:8318 \
       -v /var/data/autopirate/persona-forge/voices:/voices \
       -v /var/data/autopirate/persona-forge/segments:/segments \
-      -v /home/nick/projects/persona-forge/src:/app/src \
+      -v /root/projects/persona-forge/src:/app/src \
       -v /var/data/autopirate/persona-forge/reference/voice_A.wav:/voice/reference.wav \
       -v /var/data/autopirate/persona-forge/model:/root/.cache/huggingface/hub \
       -v /var/data/autopirate/persona-forge/ov:/ov \
@@ -115,7 +121,8 @@ Example (run on docker-agent, or script it):
         --timeout-graceful-shutdown 300
 
 Effect:
-- Any change in /home/nick/projects/persona-forge/src triggers auto-reload inside ~1-2 seconds.
+
+- Any change in /root/projects/persona-forge/src triggers auto-reload inside ~1-2 seconds.
 - Combine with git pull on docker-agent after pushing from local.
 
 When done iterating, revert to normal gunicorn-based container command.
@@ -131,6 +138,6 @@ If you’re a new Claude session:
   - Implement in this repo.
   - Commit + push.
   - Instruct user to (or assist with):
-    - cd /home/nick/projects/persona-forge && git pull
+    - cd /root/projects/persona-forge && git pull
     - docker exec persona-forge kill -HUP 1 (or docker restart persona-forge).
 - Only propose heavier changes (image rebuilds, env changes) when necessary and confirm first.
