@@ -35,7 +35,7 @@ All reviewed families output 24 kHz; adapters must still report the actual rate.
 
 | Engine | Cloning | Built-in voices | Best targets (to be verified) | Streaming | Role in Persona Forge |
 | --- | --- | --- | --- | --- | --- |
-| **Pocket-TTS** (current) | Local, from reference audio; cached states | 31 curated app entries (24 English + 7 non-English) | CPU everywhere; existing accelerator families | PCM frame streaming (existing) | Default, universal, low-resource |
+| **Pocket-TTS** (current) | Local, from reference audio; cached states | 30 curated app entries (24 English + 6 non-English) | CPU everywhere; existing accelerator families | PCM frame streaming (existing) | Default, universal, low-resource |
 | **Kitten TTS 2** 1.7B | Local in-context, 5–30 s ref + transcript (Python); native C++ needs offline-prepared refs | 115 entries in pinned manifest, multiple languages (docs disagree on totals) | CUDA GPU (Python), Apple silicon (MLX, documented), x86 CPU (C++/GGML) | Sentence-chunk (Python and C++ binding) | High-quality cloning + large preset catalog |
 | **KokoClone** (Kokoro + Kanade + vocoder) | Local voice conversion of Kokoro output toward a reference | Inherits Kokoro presets as source | CUDA or CPU; no MPS in wrapper | None (complete audio) | Cloning alternative; batch quality tier |
 | **Kokoro 82M** (native or ONNX) | None (blending ≠ cloning) | ~54 voices, US/UK English + other languages | CPU (ONNX), CUDA, MPS (native, unverified) | Sentence/segment | Fast, light preset engine |
@@ -151,7 +151,7 @@ integration found in the tree or `git log --all` messages.
 | `pocket_artifact_resolver.py`, `pocket_english_config.py` | Pinned revisions with size/SHA-256 verification. Generalize into a per-engine artifact manifest. |
 | `accelerator_manifest.py`, `gpu_probe.py`, `gpu_family.py`, `device.py` | Hardware detection and accelerator wheel selection. Reuse for engine hardware-fit and recommendations. |
 | Desktop app (`desktop/`, [DESKTOP_APP](../architecture/DESKTOP_APP.md)) | Already provisions a **versioned Python environment** and accelerator-matched PyTorch wheel on first launch, with CPU fallback. Engine packs should reuse this provisioning machinery (§4.4). |
-| `app.py::POCKET_BUILTIN_VOICES`, `/voices/built-in` | 31 curated Pocket entries (24 English + 7 non-English). Becomes the Pocket slice of the unified catalog. |
+| `app.py::POCKET_BUILTIN_VOICES`, `/voices/built-in` | 30 curated Pocket entries (24 English + 6 non-English). Becomes the Pocket slice of the unified catalog. |
 | `app.py::openai_audio_speech`, `_resolve_builtin_voice` | Accepts `voice`, `voice_id`, `builtin_voice`, `pocket:<name>`. Does not route on `model`; PCM streaming is Pocket-specific. |
 | `voice_library.py`, `/voices/<id>/activate` | Strict `vd_...` IDs; default must be a saved voice. A preset cannot be API default today — fixed in Phase A. |
 | `omnivoice_engine.py`, `segment_library.py` | Creation is separate from rendering; keep design/segments/stitch/variants intact. |
