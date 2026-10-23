@@ -19,6 +19,8 @@ export type PrefKey =
   | 'voiceLibrary.tab'
   | 'voiceLibrary.layout'
   | 'voiceLibrary.analysisExpanded'
+  | 'voiceFavorites'
+  | 'voiceCatalog.language'
   | 'updates.dismissedVersion'
 
 type Codec = {
@@ -33,7 +35,7 @@ type Codec = {
 // would reject with a 400 and lose the rest of the batch.
 const THEMES = ['violet', 'teal', 'amber', 'rose']
 const EXPERIENCE_LEVELS = ['guided', 'expert']
-const VOICE_LIBRARY_TABS = ['voices', 'segments']
+const VOICE_LIBRARY_TABS = ['voices', 'builtin', 'segments']
 
 const isString = (value: unknown): value is string => typeof value === 'string'
 const oneOf =
@@ -66,6 +68,25 @@ const CODECS: Record<PrefKey, Codec> = {
     storageKey: 'voice-library-analysis-expanded',
     decode: (raw) => (raw === 'false' ? false : raw === 'true' ? true : undefined),
     encode: (value) => String(Boolean(value)),
+  },
+  voiceFavorites: {
+    storageKey: 'voice-favorites',
+    decode: (raw) => {
+      if (!isString(raw)) return undefined
+      try {
+        const parsed = JSON.parse(raw)
+        return Array.isArray(parsed) ? parsed.filter(isString) : undefined
+      } catch {
+        return undefined
+      }
+    },
+    encode: (value) =>
+      JSON.stringify(Array.isArray(value) ? value.filter(isString) : []),
+  },
+  'voiceCatalog.language': {
+    storageKey: 'voice-catalog-language',
+    decode: oneOf(['en', 'all']),
+    encode: (value) => String(value),
   },
   'updates.dismissedVersion': {
     storageKey: 'pf-update-dismissed-version',

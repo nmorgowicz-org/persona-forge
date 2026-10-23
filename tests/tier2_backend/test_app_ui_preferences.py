@@ -39,6 +39,36 @@ class TestUiPreferences:
         assert resp.get_json() == {"values": merged}
         assert json.loads(_isolated_store.read_text())["values"] == merged
 
+    def test_catalog_preferences_round_trip(self, client, _isolated_store):
+        values = {
+            "voiceLibrary.tab": "builtin",
+            "voiceFavorites": ["pocket:vera", "vd_000000000001"],
+            "voiceCatalog.language": "all",
+        }
+
+        resp = client.post("/ui/preferences", json={"values": values})
+
+        assert resp.status_code == 200
+        assert resp.get_json() == {"values": values}
+        assert client.get("/ui/preferences").get_json() == {"values": values}
+        assert json.loads(_isolated_store.read_text())["values"] == values
+
+    def test_favorites_reject_non_string_items(self, client):
+        resp = client.post(
+            "/ui/preferences", json={"values": {"voiceFavorites": ["ok", 3]}}
+        )
+
+        assert resp.status_code == 400
+        assert resp.get_json()["error"].startswith("voiceFavorites: ")
+
+    def test_voice_library_tab_rejects_unknown_value(self, client):
+        resp = client.post(
+            "/ui/preferences", json={"values": {"voiceLibrary.tab": "catalog"}}
+        )
+
+        assert resp.status_code == 400
+        assert resp.get_json()["error"].startswith("voiceLibrary.tab: ")
+
     def test_unknown_key_is_400_and_not_saved(self, client):
         client.post("/ui/preferences", json={"values": {"theme": "teal"}})
 

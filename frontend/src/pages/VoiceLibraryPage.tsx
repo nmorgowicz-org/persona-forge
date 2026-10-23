@@ -71,6 +71,7 @@ import { RegionEditor } from '@/components/waveform/RegionEditor'
 import { AlignmentCompare } from '@/components/waveform/AlignmentCompare'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { BuiltInVoicesTab } from '@/components/voices/BuiltInVoicesTab'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useProsodyEditor } from '@/components/prosody/useProsodyEditor'
 import { ProsodyControls } from '@/components/prosody/ProsodyControls'
@@ -1197,14 +1198,14 @@ export function VoiceLibraryPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [groupByProject, setGroupByProject] = useState(false)
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
-  const [activeTab, setActiveTab] = useState<'voices' | 'segments'>(() =>
-    getPref<'voices' | 'segments'>('voiceLibrary.tab', 'voices'),
+  const [activeTab, setActiveTab] = useState<'voices' | 'builtin' | 'segments'>(() =>
+    getPref<'voices' | 'builtin' | 'segments'>('voiceLibrary.tab', 'voices'),
   )
   // setPref only on genuine user/system-driven changes below (Tabs onValueChange, the
   // deep-link effect) -- not here. A useEffect keyed on activeTab also fires on the initial
   // mount, which would silently write the *default* value to the server the first time
   // anyone opens the library, before the user has chosen anything.
-  function selectTab(tab: 'voices' | 'segments') {
+  function selectTab(tab: 'voices' | 'builtin' | 'segments') {
     setActiveTab(tab)
     setPref('voiceLibrary.tab', tab)
   }
@@ -1839,21 +1840,28 @@ export function VoiceLibraryPage() {
             <Skeleton key={row} className="h-16 w-full rounded-panel" />
           ))}
         </div>
-      ) : voices.length === 0 && segments.length === 0 && !error ? (
-        <EmptyState
-          className="py-16"
-          title="No voices saved yet"
-          description="Design a voice or clone one from a reference clip. Saved voices and segments collect here, and the API serves them."
-          actionLabel="Design your first voice"
-          onAction={() => setPage('voice-design')}
-        />
       ) : (
-        <Tabs value={activeTab} onValueChange={(v) => selectTab(v === 'segments' ? 'segments' : 'voices')}>
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) =>
+            selectTab(v === 'segments' ? 'segments' : v === 'builtin' ? 'builtin' : 'voices')
+          }
+        >
           <TabsList>
-            <TabsTrigger value="voices" data-testid="voice-library-tab-voices">Reference voices</TabsTrigger>
+            <TabsTrigger value="voices" data-testid="voice-library-tab-voices">My voices</TabsTrigger>
+            <TabsTrigger value="builtin" data-testid="voice-library-tab-builtin">Built-in voices</TabsTrigger>
             <TabsTrigger value="segments" data-testid="voice-library-tab-segments">Segments</TabsTrigger>
           </TabsList>
           <TabsContent value="voices" className="flex flex-col gap-6">
+          {voices.length === 0 && !error && (
+            <EmptyState
+              className="py-16"
+              title="No voices saved yet"
+              description="Design a voice or clone one from a reference clip. Built-in voices are ready to use immediately."
+              actionLabel="Design your first voice"
+              onAction={() => setPage('voice-design')}
+            />
+          )}
           {voices.length > 0 && (
             <section className="flex flex-col gap-3">
                <div className="flex items-center justify-between">
@@ -1950,6 +1958,10 @@ export function VoiceLibraryPage() {
 
             </section>
           )}
+          </TabsContent>
+
+          <TabsContent value="builtin" className="flex flex-col gap-6">
+            <BuiltInVoicesTab />
           </TabsContent>
 
           <TabsContent value="segments" className="flex flex-col gap-6">

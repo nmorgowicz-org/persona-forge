@@ -1,0 +1,469 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Check,
+  Copy,
+  Loader2,
+  Play,
+  Search,
+  Square,
+  Star,
+  Volume2,
+} from 'lucide-react'
+import {
+  generateSpeech,
+  getApiDefault,
+  listBuiltInVoices,
+  setApiDefault,
+  type ApiDefaultRecord,
+  type BuiltInVoiceMeta,
+} from '@/lib/api'
+import { cn } from '@/lib/utils'
+import { useAppStore } from '@/store'
+import {
+  readFavoriteVoiceIds,
+  subscribeFavoriteVoices,
+  toggleFavoriteVoice,
+} from '@/lib/voiceFavorites'
+import { getPref, setPref } from '@/lib/uiPreferences'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+
+const CATEGORY_LABELS: Record<string, string> = {
+  conversation: 'Conversation',
+  reading: 'Reading',
+  multilingual: 'Multilingual',
+  other: 'Other',
+}
+
+function isEnglishVoice(voice: BuiltInVoiceMeta): boolean {
+  const code = (voice.language_code || '').toLowerCase()
+  return code.startsWith('en') || /english/i.test(voice.language || '')
+}
+
+export function BuiltInVoicesTab() {
+  const setPage = useAppStore((s) => s.setPage)
+  const setVoiceId = useAppStore((s) => s.setVoiceId)
+
+  const [voices, setVoices] = useState<BuiltInVoiceMeta[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  const [language, setLanguage] = useState<'en' | 'all'>(() =>
+    getPref<'en' | 'all'>('voiceCatalog.language', 'en'),
+  )
+  const [category, setCategory] = useState('all')
+  const [favorites, setFavorites] = useState<string[]>(() => readFavoriteVoiceIds())
+  const [previewing, setPreviewing] = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewName, setPreviewName] = useState<string | null>(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [detail, setDetail] = useState<BuiltInVoiceMeta | null>(null)
+  const [apiDefault, setApiDefaultState] = useState<ApiDefaultRecord | null>(null)
+  const [settingDefault, setSettingDefault] = useState<string | null>(null)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const previewToken = useRef(0)
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([listBuiltInVoices(), getApiDefault()])
+      .then(([catalog, effective]) => {
+        if (cancelled) return
+        setVoices(catalog)
+        setApiDefaultState(effective)
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(String((err as Error)?.message || err))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => subscribeFavoriteVoices(() => setFavorites(readFavoriteVoiceIds())), [])
+
+  useEffect(() => {
+    if (!previewUrl) return
+    return () => URL.revokeObjectURL(previewUrl)
+  }, [previewUrl])
+
+  const categories = useMemo(
+    () => Array.from(new Set(voices.map((voice) => voice.category).filter(Boolean))).sort(),
+    [voices],
+  )
+  const hiddenByLanguage = useMemo(
+    () => (language === 'en' ? voices.filter((voice) => !isEnglishVoice(voice)).length : 0),
+    [voices, language],
+  )
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return voices.filter((voice) => {
+      if (language === 'en' && !isEnglishVoice(voice)) return false
+      if (category !== 'all' && voice.category !== category) return false
+      if (!q) return true
+      return (
+        voice.display_name.toLowerCase().includes(q) ||
+        voice.voice_id.toLowerCase().includes(q) ||
+        (voice.language || '').toLowerCase().includes(q) ||
+        (voice.note || '').toLowerCase().includes(q)
+      )
+    })
+  }, [voices, language, category, query])
+
+  function changeLanguage(next: 'en' | 'all') {
+    setLanguage(next)
+    setPref('voiceCatalog.language', next)
+  }
+
+  function stopPreview() {
+    previewToken.current += 1
+    setPreviewing(null)
+    setPreviewName(null)
+    setPreviewUrl(null)
+  }
+
+  async function previewVoice(voice: BuiltInVoiceMeta) {
+    if (previewing === voice.voice_id) {
+      stopPreview()
+      return
+    }
+    stopPreview()
+    const token = ++previewToken.current
+    setPreviewError(null)
+    setPreviewName(voice.display_name)
+    setPreviewing(voice.voice_id)
+    try {
+      const result = await generateSpeech({
+        text: `Hi, I'm ${voice.display_name}. This is how I sound.`,
+        voiceId: voice.voice_id,
+        responseFormat: 'mp3',
+      })
+      if (token !== previewToken.current) return
+      setPreviewUrl(URL.createObjectURL(result.blob))
+    } catch (err) {
+      if (token === previewToken.current) {
+        setPreviewError(String((err as Error)?.message || err))
+      }
+    } finally {
+      if (token === previewToken.current) setPreviewing(null)
+    }
+  }
+
+  async function makeDefault(voice: BuiltInVoiceMeta) {
+    setSettingDefault(voice.voice_id)
+    setError(null)
+    try {
+      setApiDefaultState(
+        await setApiDefault({ voice: voice.voice_id, engine: voice.backend }),
+      )
+    } catch (err) {
+      setError(String((err as Error)?.message || err))
+    } finally {
+      setSettingDefault(null)
+    }
+  }
+
+  async function copyVoiceId(voiceId: string) {
+    await navigator.clipboard.writeText(voiceId)
+    setCopiedId(voiceId)
+    setTimeout(() => setCopiedId(null), 1200)
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-56 flex-1">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search built-in voices"
+            aria-label="Search built-in voices"
+            className="pl-8"
+          />
+        </div>
+        <Select
+          value={language}
+          onValueChange={(value) => changeLanguage(value === 'all' ? 'all' : 'en')}
+        >
+          <SelectTrigger className="w-40" aria-label="Language filter">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="en">English only</SelectItem>
+            <SelectItem value="all">All languages</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={category} onValueChange={setCategory}>
+          <SelectTrigger className="w-40" aria-label="Category filter">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All categories</SelectItem>
+            {categories.map((value) => (
+              <SelectItem key={value} value={value}>
+                {CATEGORY_LABELS[value] || value}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {filtered.length} voice{filtered.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      {hiddenByLanguage > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {hiddenByLanguage} non-English voice{hiddenByLanguage === 1 ? '' : 's'} hidden by the
+          language filter.{' '}
+          <button
+            type="button"
+            className="underline underline-offset-2 hover:text-foreground"
+            onClick={() => changeLanguage('all')}
+          >
+            Show all languages
+          </button>
+        </p>
+      )}
+
+      {previewUrl && (
+        <div className="flex flex-wrap items-center gap-3 rounded-panel border border-border bg-muted/30 p-3">
+          <Volume2 className="size-4 shrink-0 text-primary" />
+          <span className="text-xs font-medium">{previewName ?? 'Preview'}</span>
+          <audio key={previewUrl} src={previewUrl} controls autoPlay className="h-8 min-w-56 flex-1" />
+          <Button type="button" size="xs" variant="ghost" onClick={stopPreview}>
+            Close
+          </Button>
+        </div>
+      )}
+      {previewError && (
+        <p className="rounded-control border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {previewError}
+        </p>
+      )}
+      {error && (
+        <p className="rounded-control border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {error}
+        </p>
+      )}
+
+      {loading ? (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <Skeleton key={index} className="h-32 rounded-panel" />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <p className="rounded-panel border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+          No voices match these filters.
+        </p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {filtered.map((voice) => {
+            const isFavorite = favorites.includes(voice.voice_id)
+            const isPreviewing = previewing === voice.voice_id
+            const isApiDefault = apiDefault?.voice === voice.voice_id
+            return (
+              <div
+                key={voice.voice_id}
+                className={cn(
+                  'flex flex-col gap-2 rounded-panel border border-border bg-card p-4 text-card-foreground shadow-sm transition-colors',
+                  isApiDefault && 'border-primary/40',
+                )}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 flex-col">
+                    <span className="truncate text-sm font-medium">{voice.display_name}</span>
+                    <span className="truncate font-mono text-[10px] text-muted-foreground">
+                      {voice.voice_id}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label={
+                      isFavorite
+                        ? `Remove ${voice.display_name} from favorites`
+                        : `Add ${voice.display_name} to favorites`
+                    }
+                    aria-pressed={isFavorite}
+                    onClick={() => setFavorites(toggleFavoriteVoice(voice.voice_id))}
+                    className={cn(
+                      'rounded-control p-1 transition-colors hover:bg-muted',
+                      isFavorite ? 'text-warning' : 'text-muted-foreground',
+                    )}
+                  >
+                    <Star className={cn('size-4', isFavorite && 'fill-current')} />
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Badge variant="outline" className="text-[10px]">
+                    Pocket
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px]">
+                    {voice.language}
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px]">
+                    {CATEGORY_LABELS[voice.category] || voice.category}
+                  </Badge>
+                  {isApiDefault && <Badge className="text-[10px]">API default</Badge>}
+                </div>
+
+                {voice.note && (
+                  <p className="line-clamp-2 text-xs text-muted-foreground">{voice.note}</p>
+                )}
+
+                <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-1">
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant={isPreviewing ? 'secondary' : 'outline'}
+                    disabled={previewing !== null && !isPreviewing}
+                    onClick={() => void previewVoice(voice)}
+                  >
+                    {isPreviewing ? (
+                      <>
+                        <Loader2 className="animate-spin" /> Generating…
+                      </>
+                    ) : previewUrl && previewName === voice.display_name ? (
+                      <>
+                        <Square /> Stop
+                      </>
+                    ) : (
+                      <>
+                        <Play /> Preview
+                      </>
+                    )}
+                  </Button>
+                  <Button type="button" size="xs" variant="ghost" onClick={() => setDetail(voice)}>
+                    Details
+                  </Button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      <Sheet open={detail !== null} onOpenChange={(open) => !open && setDetail(null)}>
+        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
+          {detail && (
+            <>
+              <SheetHeader>
+                <SheetTitle>{detail.display_name}</SheetTitle>
+                <SheetDescription>
+                  Built-in Pocket voice — ready to serve without a saved reference.
+                </SheetDescription>
+              </SheetHeader>
+              <div className="flex flex-col gap-4 px-4 pb-6">
+                <div className="flex flex-wrap gap-1.5">
+                  <Badge variant="outline">Pocket</Badge>
+                  <Badge variant="outline">{detail.language}</Badge>
+                  <Badge variant="outline">
+                    {CATEGORY_LABELS[detail.category] || detail.category}
+                  </Badge>
+                  {apiDefault?.voice === detail.voice_id && <Badge>API default</Badge>}
+                </div>
+                {detail.note && <p className="text-sm text-muted-foreground">{detail.note}</p>}
+
+                <div className="flex flex-col gap-1">
+                  <span className="micro-label">API voice ID</span>
+                  <div className="flex items-center gap-1.5">
+                    <code className="flex-1 rounded-control border border-border bg-muted/30 px-2 py-1 font-mono text-[11px]">
+                      {detail.voice_id}
+                    </code>
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label="Copy voice ID"
+                      onClick={() => void copyVoiceId(detail.voice_id)}
+                    >
+                      {copiedId === detail.voice_id ? <Check /> : <Copy />}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={previewing !== null && previewing !== detail.voice_id}
+                    onClick={() => void previewVoice(detail)}
+                  >
+                    {previewing === detail.voice_id ? (
+                      <>
+                        <Loader2 className="animate-spin" /> Generating…
+                      </>
+                    ) : (
+                      <>
+                        <Play /> Preview
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      setVoiceId(detail.voice_id)
+                      setPage('speak')
+                    }}
+                  >
+                    Use in Speak
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={settingDefault === detail.voice_id || apiDefault?.voice === detail.voice_id}
+                    onClick={() => void makeDefault(detail)}
+                  >
+                    {settingDefault === detail.voice_id ? (
+                      <Loader2 className="animate-spin" />
+                    ) : apiDefault?.voice === detail.voice_id ? (
+                      'API default'
+                    ) : (
+                      'Set as API default'
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setFavorites(toggleFavoriteVoice(detail.voice_id))}
+                  >
+                    <Star
+                      className={cn(
+                        favorites.includes(detail.voice_id) && 'fill-current text-warning',
+                      )}
+                    />
+                    {favorites.includes(detail.voice_id) ? 'Favorited' : 'Favorite'}
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
+    </div>
+  )
+}

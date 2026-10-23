@@ -32,7 +32,6 @@ from persona_forge.audio_post import (
     plan_boundary_pauses,
 )
 from persona_forge.audio_style import (
-    analyze_reference,
     apply_style_preset,
     detect_pause_intervals,
     get_pause_targets,
@@ -396,7 +395,7 @@ def get_alignment_directed_wav(
             return None
 
     identity = _fa.cache_identity(_fa.sha256_bytes(wav_bytes), _fa.sha256_text(transcript))
-    cached = meta.get("alignment")
+    cached = meta.get("alignment") or {}
     if _fa.identity_matches(cached, identity):
         boundaries = list(cached.get("boundaries", []))
     else:
@@ -550,7 +549,7 @@ def create_prosody_variant(
     if result is None:
         return None
 
-    adjusted, sr = result
+    adjusted, sr = result[0], result[1]
 
     slug = _slugify_variant(style_preset, pace_multiplier, voice_id)
     variant_filename = f"prosody_{slug}.wav"
@@ -611,7 +610,7 @@ def preview_prosody_variant(
     if result is None:
         return None
 
-    adjusted, sr = result
+    adjusted, sr = result[0], result[1]
     buf = io.BytesIO()
     sf.write(buf, adjusted, sr, format="WAV", subtype="PCM_16")
     return buf.getvalue()

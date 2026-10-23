@@ -65,12 +65,27 @@ def _boolean(value: Any) -> str | None:
     return None if isinstance(value, bool) else "must be a boolean"
 
 
+def _string_list(max_items: int, max_length: int) -> Validator:
+    def validate(value: Any) -> str | None:
+        if not isinstance(value, list):
+            return "must be a list"
+        if len(value) > max_items:
+            return f"must have at most {max_items} items"
+        if any(not isinstance(item, str) or len(item) > max_length for item in value):
+            return f"items must be strings of at most {max_length} characters"
+        return None
+
+    return validate
+
+
 ALLOWED_KEYS: dict[str, Validator] = {
     "theme": _string(32),
     "experienceLevel": _string(32),
-    "voiceLibrary.tab": _one_of("voices", "segments"),
+    "voiceLibrary.tab": _one_of("voices", "builtin", "segments"),
     "voiceLibrary.layout": _string(32),
     "voiceLibrary.analysisExpanded": _boolean,
+    "voiceFavorites": _string_list(500, 96),
+    "voiceCatalog.language": _one_of("en", "all"),
     "updates.dismissedVersion": _string(64),
 }
 

@@ -17,7 +17,10 @@ import {
   cancelGenerate,
   listBuiltInVoices,
   listVoices,
+  getApiDefault,
+  setApiDefault,
   warmVoice,
+  type ApiDefaultRecord,
   type BuiltInVoiceMeta,
 } from '@/lib/api'
 import { useAppStore } from '@/store'
@@ -147,6 +150,9 @@ export function SpeakPage() {
   const [stylePreset, setStylePreset] = useState<(typeof POLISH_OPTIONS)[number]['id']>('off')
   const [seedInput, setSeedInput] = useState('')
   const [builtInVoices, setBuiltInVoices] = useState<BuiltInVoiceMeta[]>([])
+  const [apiDefault, setApiDefaultState] = useState<ApiDefaultRecord | null>(null)
+  const [savingApiDefault, setSavingApiDefault] = useState(false)
+  const [apiDefaultError, setApiDefaultError] = useState<string | null>(null)
   const [resultMeta, setResultMeta] = useState<SpeakResultMeta | null>(null)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const runtimeTtsBackend = useAppStore((s) => s.runtimeTtsBackend)
@@ -164,6 +170,12 @@ export function SpeakPage() {
   useEffect(() => {
     refreshVoices()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    getApiDefault()
+      .then(setApiDefaultState)
+      .catch(() => setApiDefaultState(null))
   }, [])
 
   useEffect(() => {
@@ -312,6 +324,20 @@ export function SpeakPage() {
     }
   }
 
+  async function makeApiDefault() {
+    if (!voiceId) return
+    setSavingApiDefault(true)
+    setApiDefaultError(null)
+    try {
+      const record = await setApiDefault({ voice: voiceId })
+      setApiDefaultState(record)
+    } catch (err) {
+      setApiDefaultError(String((err as Error)?.message || err))
+    } finally {
+      setSavingApiDefault(false)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <motion.div 
@@ -361,6 +387,36 @@ export function SpeakPage() {
             voiceId={voiceId}
             onChange={handleVoiceChange}
           />
+
+          <div className="flex flex-col gap-1">
+            <span className="micro-label">API default</span>
+            <div className="flex items-center gap-2">
+              <span
+                className="max-w-44 truncate text-xs text-muted-foreground"
+                title={apiDefault?.voice}
+              >
+                {apiDefault ? apiDefault.display_name || apiDefault.voice : 'Runtime reference'}
+              </span>
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                disabled={!voiceId || savingApiDefault || apiDefault?.voice === voiceId}
+                onClick={() => void makeApiDefault()}
+              >
+                {savingApiDefault ? (
+                  <Loader2 className="animate-spin" />
+                ) : apiDefault?.voice === voiceId ? (
+                  'Current'
+                ) : (
+                  'Set current'
+                )}
+              </Button>
+            </div>
+            {apiDefaultError && (
+              <span className="max-w-56 text-[10px] text-destructive">{apiDefaultError}</span>
+            )}
+          </div>
 
           <div className="flex flex-col gap-1">
             <span id={languageLabelId} className="micro-label">
