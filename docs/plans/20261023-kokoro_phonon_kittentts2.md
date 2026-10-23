@@ -398,7 +398,13 @@ checkpoint — pick a French-capable model or an English voice".
    requested French voice over the API still serves (enforcement off), then errors with the §5.8
    message after turning enforcement on.
 
-## 6. Evaluation (Phase B)
+## 6. Evaluation (Phase B: technical screening)
+
+Phase B answers **"can this engine run and serve on this target, fast enough?"** It is deliberately
+before integration because it decides what is worth integrating. It is **not** the final quality
+judgement: blind listening and inclusion tiers are decided in Phase E through the integrated
+Compare tab, where engines are compared as the app actually serves them. Preliminary listening in
+B only rules out clearly broken output (garbled, leaking, truncated); it does not rank survivors.
 
 ### 6.1 Targets
 
@@ -419,14 +425,15 @@ idle-unloaded. None of the candidate packages installed. Transient; recapture be
 - **Corpus (frozen + hashed before first run):** "Hello. Your timer is ready."; a 2–3 sentence
   assistant reply; 500–1,000 characters of narration; structured text ("At 9:45 a.m. on October 23,
   invoice AB-104 totals $1,234.56 for 3.5 kilograms."); questions, abbreviations, URLs, names,
-  long multi-chunk input; one French and one German sentence (the catalog already has 7
+  long multi-chunk input; one French and one German sentence (the catalog already has 6
   non-English entries).
 - **Voices:** ≥2 presets per engine per relevant language; 3 saved references with different
   accents/delivery incl. one OmniVoice-designed; reviewed transcripts; 5/10/30 s reference trials
   for cloning engines; KokoClone source-voice variants.
-- **Screening pass first** (few trials, labelled preliminary): does it install, run on the intended
-  device, and sound good? Blind A/B against Pocket and each other. Engines failing to sound good on
-  every target stop here.
+- **Technical screening pass first** (few trials): does it install, run on the intended device,
+  clone/prepare where claimed, and stay within memory? Does output sound clearly broken? This is
+  the input to Phase C engine selection. Survivors are measured, then integrated; ranking happens
+  in Phase E.
 - **Measurement pass** for survivors: 2 warmups + ≥20 trials; median/p95; cold download, cold load,
   preparation, warm, idle reload. Time to first playable audio, total time, audio duration, RTF
   (compute s / audio s) and throughput, inter-chunk gaps. Memory: parent + child RSS, VRAM
@@ -441,9 +448,9 @@ idle-unloaded. None of the candidate packages installed. Transient; recapture be
 
 ### 6.3 Inclusion criteria and tiers
 
-- **Include** an engine on a target if blind listening rates it good (comparable to or preferred
-  over Pocket on at least some voices/use cases), it runs on the intended device, and it fits the
-  device's memory with clean unload.
+- **Include** an engine on a target if it runs on the intended device, fits the device's memory
+  with clean unload, and later rates well in Phase E blind listening (comparable to or preferred
+  over Pocket on at least some voices/use cases). Phase B applies only the technical half.
 - Label each engine/target with a tier shown in the UI: **Conversational** (p95 first audio ≤ 1 s,
   sustained RTF ≤ 1) or **Batch quality** (slower, labelled). Batch engines are still valuable.
 - Record unsupported/untested combinations explicitly; claim only tested combinations.
@@ -454,10 +461,10 @@ idle-unloaded. None of the candidate packages installed. Transient; recapture be
 | --- | --- | --- |
 | **A1 — Integrations & status fixes** | Snippets from effective API default; idle-unloaded shown as Ready; preset (`pocket:*`) settable as API default with persisted engine+voice+variant; Test endpoint; IDs table includes presets | Pocket preset served as default after restart; old clients and saved IDs unchanged |
 | **A2 — Unified voice catalog (Pocket only)** | Voices tabs, Built-in grid/search/filters/preview/drawer, searchable Speak combobox, favorites, Speak vs API default labelling | Journey 1 passes; keyboard-accessible; no new model dependency |
-| **B — Evaluation** | §6 screening on 5090, MacBook, CPU; then measurement pass for survivors | Per-target results table; list of engines to include with tiers; locked env/pin manifests |
-| **C — Engine framework + first new engine** | Adapter interface, Pocket refactor, engine packs/provisioning, Speech engines manager, child-process lifecycle, API `model` routing, `/v1/models`, `/v1/audio/voices`, bindings; first engine = best survivor (likely Kitten 2 on GPU or Kokoro on CPU) | Journeys 2/3 (for chosen engine), 5, 6; lifecycle/cancel/unload/memory gates; Pocket rollback |
+| **B — Technical screening** | §6 screen on 5090, MacBook, CPU: installs, runs on the intended device, clone/prepare, latency/RTF/footprint; then measurement pass for survivors | Per-target feasibility table; candidate engines for C/D with locked env/pin manifests; no final quality ranking |
+| **C — Engine framework + first new engine** | Adapter interface, Pocket refactor, engine packs/provisioning, Speech engines manager, child-process lifecycle, API `model` routing, `/v1/models`, `/v1/audio/voices`, bindings; first engine = best screened survivor (likely Kitten 2 on GPU or Kokoro on CPU) | Journeys 2/3 (for chosen engine), 5, 6; lifecycle/cancel/unload/memory gates; Pocket rollback |
 | **D — Remaining engines** | Each surviving engine, incl. Phonon (31M, 40M with token flow) and KokoClone composite | Per-engine smoke test on each claimed target; capability-correct UI; imported-voice validation |
-| **E — Compare & polish** | In-app blind A/B with saved ratings, hardware-aware recommendations, per-machine benchmark, docs | Journey 3 compare flow; recommendations correct on 5090/MacBook/CPU-only |
+| **E — Compare, listening, polish** | In-app blind A/B with saved ratings (final quality ranking + inclusion tiers), hardware-aware recommendations, per-machine benchmark, docs | Journey 3 compare flow; ranked results per engine/voice; recommendations correct on 5090/MacBook/CPU-only |
 
 A1/A2 can proceed in parallel with B.
 
