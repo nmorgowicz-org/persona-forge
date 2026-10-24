@@ -260,7 +260,7 @@ def run(args):
             "elapsed_s": b["elapsed_s"],
             "frames": b["frames"],
             "audio_s": b["audio_s"],
-            "rss_mib": current_rss_bytes() // (1024 * 1024) if current_rss_bytes() else None,
+            "rss_mib": _rss_mib(),
         })
 
         # Short pause to let stateful cache settle and memory release
@@ -285,7 +285,7 @@ def run(args):
             "chunk_count": s["chunk_count"],
             "max_abs": s["max_abs"],
             "snr_db": s["snr_db"],
-            "rss_mib": current_rss_bytes() // (1024 * 1024) if current_rss_bytes() else None,
+            "rss_mib": _rss_mib(),
         })
 
         # Parity between batch and stream WAV
@@ -393,6 +393,12 @@ def run(args):
                 flush=True,
             )
         print("[bench_streaming_comparison] VERDICT: PASS — exact parity confirmed", flush=True)
+
+
+def _rss_mib():
+    """Resident set size in MiB, or None when it cannot be measured."""
+    rss = current_rss_bytes()
+    return rss // (1024 * 1024) if rss else None
 
 
 def main():
