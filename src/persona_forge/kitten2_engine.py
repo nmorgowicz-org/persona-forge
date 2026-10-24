@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import io
 import os
-import sys
 import threading
 import wave
 from pathlib import Path
@@ -17,7 +16,7 @@ from typing import Any, Iterator
 
 import numpy as np
 
-from persona_forge import engine_packs, kitten2_worker, voice_library
+from persona_forge import engine_packs, kitten2_pack, kitten2_worker, voice_library
 from persona_forge.pack_process import PackProcess, PackProcessError
 
 ENGINE_ID = "kitten2"
@@ -35,18 +34,27 @@ class InvalidVoice(ValueError):
     """The requested voice or preset does not exist for this engine."""
 
 
+def pack_directory(root: Path | None = None) -> Path | None:
+    return engine_packs.find_pack_dir(ENGINE_ID, root)
+
+
 def pack_python(root: Path | None = None) -> Path | None:
-    """Interpreter inside the installed pack, or the ``KITTEN2_PYTHON`` development override."""
+    """Interpreter of the installed pack, or the ``KITTEN2_PYTHON`` development override.
+
+    A pack only counts once its provisioner has published the verified stamp, so a half-finished
+    install is never started.
+    """
     override = os.environ.get("KITTEN2_PYTHON")
     if override:
         path = Path(override).expanduser()
         return path if path.is_file() else None
-    pack_dir = engine_packs.find_pack_dir(ENGINE_ID, root)
-    if pack_dir is None:
+    directory = pack_directory(root)
+    if directory is None:
         return None
-    relative = Path("venv") / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-    candidate = pack_dir / relative
-    return candidate if candidate.is_file() else None
+    if engine_packs.inspect_pack(directory).status != "verified":
+        return None
+    python = kitten2_pack.venv_python(directory)
+    return python if python.is_file() else None
 
 
 def is_installed(root: Path | None = None) -> bool:
@@ -77,10 +85,37 @@ class Kitten2Engine:
         self._prepared: dict[str, tuple[str, float]] = {}
         self._timer: threading.Timer | None = None
         self._load_info: dict[str, Any] = {}
+        self._load_state = "idle"  # idle | loading | ready | error
+        self._load_error: str | None = None
 
     def status(self) -> dict[str, Any]:
-        """Last load result: speed mode and, when compiling was unavailable, why."""
-        return dict(self._load_info)
+        """Load state plus the speed mode and, when fast mode is unavailable, why."""
+        return {**self._load_info, "state": self._load_state, "error": self._load_error}
+
+    def recheck(self) -> bool:
+        """Reload the worker in the background so a newly installed compiler is picked up.
+
+        Returns False when a load is already running.
+        """
+        with self._lock:
+            if self._load_state == "loading":
+                return False
+            self._load_state = "loading"
+            self._load_error = None
+        threading.Thread(target=self._load_in_background, name="kitten2-recheck", daemon=True).start()
+        return True
+
+    def _load_in_background(self) -> None:
+        try:
+            self.unload()
+            with self._lock:
+                self._ensure_started()
+                self._arm_idle_timer()
+        except EngineUnavailable as exc:
+            self._load_state = "error"
+            self._load_error = str(exc)
+        else:
+            self._load_state = "ready"
 
     def describe(self) -> dict[str, Any]:
         from persona_forge import speech_engines
@@ -103,20 +138,31 @@ class Kitten2Engine:
                 "The Kitten TTS 2 engine pack is not installed; install it in Settings → "
                 "Speech engines."
             )
+        env: dict[str, str] = {}
+        load_request: dict[str, Any] = {"op": "load"}
+        directory = None if os.environ.get("KITTEN2_PYTHON") else pack_directory()
+        if directory is not None:
+            # Serve from the pack's own weights and never download mid-request: a missing file
+            # must fail fast and explain itself, not stall a request for minutes.
+            weights = kitten2_pack.weights_dir(directory)
+            env = {"HF_HOME": str(weights), "HF_HUB_OFFLINE": "1"}
+            load_request["cache_dir"] = str(weights)
         process = PackProcess(
             [str(python), str(Path(kitten2_worker.__file__).resolve())],
+            env=env,
             request_timeout=REQUEST_TIMEOUT_S,
         )
         process.start()
         try:
-            loaded = process.request({"op": "load"}, timeout=LOAD_TIMEOUT_S)
+            loaded = process.request(load_request, timeout=LOAD_TIMEOUT_S)
         except PackProcessError as exc:
             process.close()
             raise EngineUnavailable(str(exc)) from exc
         self._process = process
+        self._load_state = "ready"
         self._load_info = {
             "mode": loaded.get("mode"),
-            "fast_mode_error": loaded.get("fast_mode_error"),
+            "fast_mode_issue": loaded.get("fast_mode_issue"),
         }
         return process
 

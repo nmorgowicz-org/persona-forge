@@ -53,6 +53,79 @@ def choose_runtime(
     )
 
 
+BUILD_TOOLS_URL = "https://visualstudio.microsoft.com/visual-cpp-build-tools/"
+
+
+def explain_compile_failure(
+    error: str, platform: str | None = None, *, triton_missing: bool | None = None
+) -> dict[str, Any]:
+    """Turn a raw compile failure into a message a user can act on.
+
+    The raw text stays in ``detail`` for support; ``message`` and ``action`` are for the UI.
+    """
+    platform = platform or sys.platform
+    text = (error or "").strip()
+    lowered = text.lower()
+    if triton_missing is None:
+        triton_missing = "no module named 'triton'" in lowered or "no module named triton" in lowered
+    if triton_missing:
+        return {
+            "code": "triton_missing",
+            "message": "Fast mode needs a component that is missing from this engine install.",
+            "action": "Use Repair on the engine card to reinstall it.",
+            "help_url": None,
+            "detail": text,
+        }
+    if platform == "win32" and (
+        "winerror 2" in lowered
+        or "cl.exe" in lowered
+        or "vcvars" in lowered
+        or "visual studio" in lowered
+        or "c compiler" in lowered
+        or "cannot find a c" in lowered
+        or "failed to find" in lowered
+    ):
+        return {
+            "code": "needs_build_tools",
+            "message": (
+                "Fast mode needs the Microsoft C++ Build Tools, which are not installed. "
+                "Kitten TTS 2 is running in standard mode, which is slower than real time."
+            ),
+            "action": (
+                "Install 'Build Tools for Visual Studio' with the 'Desktop development with "
+                "C++' workload, then choose Re-check on the engine card. No restart is needed."
+            ),
+            "help_url": BUILD_TOOLS_URL,
+            "detail": text,
+        }
+    if platform.startswith("linux") and (
+        "c compiler" in lowered or "gcc" in lowered or "cc" in lowered.split() or "nvcc" in lowered
+    ):
+        return {
+            "code": "needs_build_tools",
+            "message": (
+                "Fast mode needs a C compiler, which is not installed. Kitten TTS 2 is running "
+                "in standard mode, which is slower than real time."
+            ),
+            "action": (
+                "Install one (for example 'sudo apt install build-essential'), then choose "
+                "Re-check on the engine card."
+            ),
+            "help_url": None,
+            "detail": text,
+        }
+    return {
+        "code": "fast_mode_failed",
+        "message": (
+            "Fast mode could not start, so Kitten TTS 2 is running in standard mode, which is "
+            "slower than real time."
+        ),
+        "action": "Choose Re-check on the engine card to try again.",
+        "help_url": None,
+        "detail": text,
+    }
+
+
 def _wav_bytes(audio: np.ndarray, sample_rate: int) -> bytes:
     samples = np.clip(np.asarray(audio, dtype=np.float32).ravel(), -1.0, 1.0)
     pcm = (samples * 32767.0).astype("<i2")
@@ -103,7 +176,7 @@ class Kitten2Worker:
         return {"ok": True, "loaded": self._model is not None}
 
     def _op_load(self, request: Mapping[str, Any]) -> dict[str, Any]:
-        fast_error: str | None = None
+        fast_issue: dict[str, Any] | None = None
         if self._model is None:
             self._runtime = self._choose()
             if request.get("fast_mode") is False:
@@ -118,7 +191,12 @@ class Kitten2Worker:
                     raise
                 # Compiling needs a C/C++ toolchain (Triton). Without one, run eager: about
                 # 1.4x slower than real time instead of 0.3x, but it works with no setup.
-                fast_error = (str(exc) or type(exc).__name__).strip().splitlines()[0][:300]
+                raw = f"{type(exc).__name__}: {exc}".strip()
+                fast_issue = explain_compile_failure(
+                    raw.splitlines()[0][:300] if raw else "",
+                    triton_missing=isinstance(exc, ModuleNotFoundError)
+                    and "triton" in str(exc).lower(),
+                )
                 self._model = None
                 self._runtime = {**self._runtime, "static_cache": False}
                 self._model = self._factory(request.get("cache_dir"), self._runtime)
@@ -133,7 +211,7 @@ class Kitten2Worker:
             "ok": True,
             "backend": self._runtime.get("backend") or self._runtime.get("device"),
             "mode": mode,
-            "fast_mode_error": fast_error,
+            "fast_mode_issue": fast_issue,
             "sample_rate": int(self._model.sample_rate),
         }
 

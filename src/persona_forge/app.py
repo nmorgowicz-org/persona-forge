@@ -30,6 +30,7 @@ from persona_forge import (
     engine_packs,
     frontend,
     kitten2_engine,
+    kitten2_pack,
     model,
     omnivoice_engine,
     project_library,
@@ -2565,7 +2566,13 @@ def engines_verify(engine_id: str):
 
 @app.post("/engines/<engine_id>/install")
 def engines_install(engine_id: str):
-    """Download, verify and publish a pack's artifacts."""
+    """Install an engine pack. Provisioned packs run as a background job; poll the status route."""
+    if engine_id == kitten2_engine.ENGINE_ID:
+        started = kitten2_pack.start_install()
+        return (
+            jsonify({"started": started, "job": kitten2_pack.job_status()}),
+            202 if started else 409,
+        )
     try:
         status = engine_packs.install_pack(engine_id)
     except engine_packs.PackInstallError as exc:
@@ -2573,6 +2580,28 @@ def engines_install(engine_id: str):
     cards = engine_packs.engine_cards(getattr(model, "TTS_BACKEND", None))
     card = next((item for item in cards if item["id"] == engine_id), None)
     return jsonify({"engine": card, "state": status.as_dict()})
+
+
+@app.get("/engines/<engine_id>/install")
+def engines_install_status(engine_id: str):
+    """Progress of a background install: state, current step, and any error."""
+    if engine_id != kitten2_engine.ENGINE_ID:
+        return jsonify({"error": "engine has no background install"}), 404
+    return jsonify({"job": kitten2_pack.job_status()})
+
+
+@app.post("/engines/<engine_id>/recheck")
+def engines_recheck(engine_id: str):
+    """Reload an engine in the background so newly installed prerequisites are picked up."""
+    if engine_id != kitten2_engine.ENGINE_ID:
+        return jsonify({"error": "engine does not support re-check"}), 404
+    adapter = speech_engines.ADAPTERS[engine_id]
+    if not isinstance(adapter, kitten2_engine.Kitten2Engine):
+        return jsonify({"error": "engine does not support re-check"}), 404
+    if not kitten2_engine.is_installed():
+        return jsonify({"error": "The engine is not installed."}), 409
+    started = adapter.recheck()
+    return jsonify({"started": started, "status": adapter.status()}), 202 if started else 409
 
 
 @app.post("/engines/<engine_id>/remove")

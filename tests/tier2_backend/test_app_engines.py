@@ -410,3 +410,62 @@ def test_speech_route_returns_400_for_an_unknown_kitten2_preset(client, app_modu
 
     assert response.status_code == 400
     assert "unknown preset" in response.get_json()["error"]["message"]
+
+
+def test_install_route_starts_a_background_job_and_reports_progress(client, monkeypatch):
+    from persona_forge import kitten2_pack
+
+    kitten2_pack.reset_job()
+    started = []
+    monkeypatch.setattr(kitten2_pack, "start_install", lambda *a, **k: started.append(1) or True)
+    monkeypatch.setattr(kitten2_pack, "job_status", lambda: {"state": "running", "step": "x"})
+
+    response = client.post("/engines/kitten2/install")
+
+    assert response.status_code == 202
+    assert started == [1]
+    assert client.get("/engines/kitten2/install").get_json()["job"]["state"] == "running"
+
+
+def test_install_route_rejects_a_second_concurrent_install(client, monkeypatch):
+    from persona_forge import kitten2_pack
+
+    monkeypatch.setattr(kitten2_pack, "start_install", lambda *a, **k: False)
+
+    assert client.post("/engines/kitten2/install").status_code == 409
+
+
+def test_recheck_requires_an_installed_pack(client, monkeypatch, tmp_path):
+    monkeypatch.delenv("KITTEN2_PYTHON", raising=False)
+    monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path))
+
+    response = client.post("/engines/kitten2/recheck")
+
+    assert response.status_code == 409
+    assert "not installed" in response.get_json()["error"]
+
+
+def test_recheck_reloads_the_worker_and_reports_status(client, monkeypatch, tmp_path):
+    engine = _kitten_engine(monkeypatch, tmp_path)
+    monkeypatch.setitem(speech_engines.ADAPTERS, "kitten2", engine)
+
+    response = client.post("/engines/kitten2/recheck")
+
+    assert response.status_code == 202
+    for _ in range(100):
+        if engine.status()["state"] != "loading":
+            break
+        import time
+
+        time.sleep(0.02)
+    assert engine.status()["state"] == "ready"
+    assert len(_FakeWorker.instances) == 1
+
+
+def test_engine_card_carries_install_job_and_load_status(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path))
+
+    card = {c["id"]: c for c in client.get("/engines").get_json()["engines"]}["kitten2"]
+
+    assert card["install_job"]["state"] in {"idle", "running", "done", "error"}
+    assert card["load_status"]["state"] == "idle"

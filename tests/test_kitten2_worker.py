@@ -209,7 +209,7 @@ def test_cuda_runs_compiled_when_the_toolchain_works():
     response = worker.handle({"op": "load"})
 
     assert response["mode"] == "compiled"
-    assert response["fast_mode_error"] is None
+    assert response["fast_mode_issue"] is None
     assert built == [True]
 
 
@@ -219,7 +219,8 @@ def test_cuda_falls_back_to_eager_with_the_reason_when_compiling_fails():
     response = worker.handle({"op": "load"})
 
     assert response["mode"] == "eager"
-    assert response["fast_mode_error"] == "Failed to find C compiler. Please specify via CC"
+    assert response["fast_mode_issue"]["code"] == "fast_mode_failed"
+    assert "Failed to find C compiler" in response["fast_mode_issue"]["detail"]
     assert built == [True, False]
     assert worker.handle({"op": "synthesize", "text": "hi"})["ok"] is True
 
@@ -230,7 +231,7 @@ def test_fast_mode_can_be_declined():
     response = worker.handle({"op": "load", "fast_mode": False})
 
     assert response["mode"] == "eager"
-    assert response["fast_mode_error"] is None
+    assert response["fast_mode_issue"] is None
     assert built == [False]
 
 
@@ -238,3 +239,61 @@ def test_mlx_reports_its_own_mode():
     worker, _ = make_worker()
 
     assert worker.handle({"op": "load", "warmup": False})["mode"] == "mlx"
+
+
+def test_the_real_windows_missing_compiler_error_becomes_a_build_tools_message():
+    raw = "FileNotFoundError: [WinError 2] The system cannot find the file specified"
+
+    issue = kw.explain_compile_failure(raw, "win32")
+
+    assert issue["code"] == "needs_build_tools"
+    assert "C++ Build Tools" in issue["message"]
+    assert "Re-check" in issue["action"]
+    assert issue["help_url"] == kw.BUILD_TOOLS_URL
+    assert issue["detail"] == raw
+    assert "WinError" not in issue["message"] + issue["action"]
+
+
+def test_linux_missing_compiler_gets_an_install_hint():
+    issue = kw.explain_compile_failure("RuntimeError: Failed to find C compiler", "linux")
+
+    assert issue["code"] == "needs_build_tools"
+    assert "build-essential" in issue["action"]
+    assert issue["help_url"] is None
+
+
+def test_missing_triton_points_to_repair_not_to_build_tools():
+    issue = kw.explain_compile_failure("ModuleNotFoundError: No module named 'triton'", "win32")
+
+    assert issue["code"] == "triton_missing"
+    assert "Repair" in issue["action"]
+
+
+def test_unknown_compile_failures_keep_the_raw_detail():
+    issue = kw.explain_compile_failure("RuntimeError: something new", "darwin")
+
+    assert issue["code"] == "fast_mode_failed"
+    assert issue["detail"] == "RuntimeError: something new"
+
+
+def test_a_windows_compile_failure_reaches_the_load_response():
+    class Broken(StubModel):
+        def __init__(self, compiled: bool) -> None:
+            super().__init__()
+            self.compiled = compiled
+
+        def generate(self, text, **kwargs):
+            if self.compiled:
+                raise FileNotFoundError(2, "The system cannot find the file specified")
+            return super().generate(text, **kwargs)
+
+    worker = kw.Kitten2Worker(
+        factory=lambda cache, runtime: Broken(bool(runtime["static_cache"])),
+        runtime_chooser=lambda: {"backend": None, "device": "cuda", "static_cache": True},
+    )
+
+    response = worker.handle({"op": "load"})
+
+    assert response["mode"] == "eager"
+    expected = "needs_build_tools" if sys.platform == "win32" else "fast_mode_failed"
+    assert response["fast_mode_issue"]["code"] == expected

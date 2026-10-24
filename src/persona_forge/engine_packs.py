@@ -65,6 +65,9 @@ class PackManifest:
     artifacts: tuple[PackArtifact, ...]
     revision: str | None = None
     notes: str | None = None
+    # Packs built by running installers (venv + packages + weights) instead of hashed downloads
+    # name their provisioner here; they may then declare no artifacts.
+    provisioner: str | None = None
     manifest_sha256: str = ""
     raw: Mapping[str, Any] = field(default_factory=dict)
 
@@ -80,6 +83,7 @@ class PackManifest:
             "artifacts": [artifact.as_dict() for artifact in self.artifacts],
             "revision": self.revision,
             "notes": self.notes,
+            "provisioner": self.provisioner,
             "manifest_sha256": self.manifest_sha256,
         }
 
@@ -114,8 +118,13 @@ def parse_manifest(payload: Mapping[str, Any], manifest_sha256: str = "") -> Pac
     if not isinstance(version, str) or not version.strip():
         raise PackManifestError("version must be a non-empty string")
 
-    artifacts_raw = payload.get("artifacts")
-    if not isinstance(artifacts_raw, list) or not artifacts_raw:
+    provisioner = payload.get("provisioner")
+    if provisioner is not None and (
+        not isinstance(provisioner, str) or not _ID_RE.match(provisioner)
+    ):
+        raise PackManifestError("provisioner must be a lowercase slug")
+    artifacts_raw = payload.get("artifacts", [] if provisioner else None)
+    if not isinstance(artifacts_raw, list) or (not artifacts_raw and not provisioner):
         raise PackManifestError("artifacts must be a non-empty list")
     artifacts: list[PackArtifact] = []
     for index, item in enumerate(artifacts_raw):
@@ -150,6 +159,7 @@ def parse_manifest(payload: Mapping[str, Any], manifest_sha256: str = "") -> Pac
         artifacts=tuple(artifacts),
         revision=payload.get("revision") if isinstance(payload.get("revision"), str) else None,
         notes=payload.get("notes") if isinstance(payload.get("notes"), str) else None,
+        provisioner=provisioner,
         manifest_sha256=manifest_sha256,
         raw=payload,
     )
@@ -185,6 +195,8 @@ class PackStatus:
         if self.errors:
             return "invalid"
         if self.artifacts_present < self.artifacts_total:
+            return "not-installed"
+        if self.pack.provisioner and not self.verified:
             return "not-installed"
         return "verified" if self.verified else "installed"
 
@@ -272,6 +284,11 @@ def inspect_pack(pack_dir: Path, *, verify: bool = False) -> PackStatus:
                 hashes_ok = False
                 status.errors.append(f"cannot read {artifact.path}")
 
+    if manifest.provisioner:
+        # Only the provisioner publishes the stamp, after its steps succeed. Verify must never
+        # mint one, or an empty pack directory would look installed.
+        status.verified = all_present and not status.errors and stamp_current
+        return status
     status.verified = (
         all_present
         and not status.errors
@@ -479,6 +496,17 @@ def engine_cards(backend: str | None, root: Path | None = None) -> list[dict[str
             card["state"] = pack_status.as_dict()
             card["requirements"] = list(pack_status.pack.requirements)
             card["pack"] = pack_status.pack.as_dict()
+    kitten = cards.get("kitten2")
+    if kitten is not None:
+        from persona_forge import kitten2_pack
+
+        from persona_forge import kitten2_engine
+
+        adapter = speech_engines.ADAPTERS.get("kitten2")
+        kitten["install_job"] = kitten2_pack.job_status()
+        kitten["load_status"] = (
+            adapter.status() if isinstance(adapter, kitten2_engine.Kitten2Engine) else {}
+        )
     return list(cards.values())
 
 
