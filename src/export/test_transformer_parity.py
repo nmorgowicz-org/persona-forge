@@ -216,7 +216,7 @@ def _compare_core(
         position_ids.numpy(),
         cache_position.numpy(),
     ]
-    if predictor:
+    if predictor and gen_steps is not None:
         ov_prefill_inputs.append(gen_steps.numpy())
 
     ov_out_prefill, ov_prefill_seconds = _timed(lambda: _ov_infer(ov_prefill, *ov_prefill_inputs))
@@ -243,6 +243,7 @@ def _compare_core(
     prefill_row["top1_agreement"] = _top1_agreement(pt_logits_prefill, ov_logits)
 
     # INT8 prefill comparison (if available)
+    int8_kv_flat: list = []
     if has_int8:
         int8_out, int8_seconds = _timed(lambda: _ov_infer(int8_prefill, *ov_prefill_inputs))
         int8_hidden = int8_out[0]
@@ -282,6 +283,7 @@ def _compare_core(
         decode_pos = torch.tensor([[prior]])
         decode_cache_pos = torch.tensor([prior])
         gen_steps_decode = torch.tensor([step + 1], dtype=torch.long) if predictor else None
+        int8_kv_flat_updated: list | None = None
 
         pt_cache = _build_cache(pt_kv_flat, num_layers)
         pt_dec_out, pt_dec_seconds = _timed(lambda: _run_core(
@@ -299,7 +301,7 @@ def _compare_core(
             decode_pos.numpy(),
             decode_cache_pos.numpy(),
         ]
-        if predictor:
+        if predictor and gen_steps_decode is not None:
             ov_decode_inputs.append(gen_steps_decode.numpy())
         ov_decode_inputs.extend(ov_kv_flat)
 
@@ -356,7 +358,7 @@ def _compare_core(
         # Carry each backend's own updated cache forward so accumulated divergence is visible.
         pt_kv_flat = pt_kv_flat_updated
         ov_kv_flat = ov_kv_flat_updated
-        if has_int8:
+        if has_int8 and int8_kv_flat_updated is not None:
             int8_kv_flat = int8_kv_flat_updated
 
     return results, failures
