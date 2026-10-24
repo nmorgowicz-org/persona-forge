@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -31,6 +32,19 @@ KITTENML_VERSION = "0.9.6"
 TRITON_WINDOWS = "triton-windows==3.8.0.post29"
 PACK_PYTHON = "3.12"  # the version every benchmark ran on
 STEP_TAIL_CHARS = 600
+
+
+# Run inside the pack. Fails when the installed torch has no kernels for this GPU, which import
+# checks cannot see: such a build loads fine and breaks on the first synthesis.
+_CHECK_SCRIPT = (
+    "import kittenml, torch\n"
+    "assert torch.cuda.is_available(), 'torch cannot see the GPU'\n"
+    "major, minor = torch.cuda.get_device_capability(0)\n"
+    "arch = f'sm_{major}{minor}'\n"
+    "archs = torch.cuda.get_arch_list()\n"
+    "assert arch in archs or f'compute_{major}{minor}' in archs, "
+    "f'torch {torch.__version__} has no kernels for {arch} (has {archs})'\n"
+)
 
 
 class UnsupportedMachine(RuntimeError):
@@ -57,10 +71,34 @@ def _nvidia_smi(args: Sequence[str]) -> str | None:
     return result.stdout if result.returncode == 0 else None
 
 
+_CUDA_BANNER = re.compile(r"CUDA\s+(?:UMD\s+)?Version:\s*(\d+)")
+
+
+def parse_cuda_major(banner: str | None, driver_version: str | None = None) -> int | None:
+    """Driver CUDA major from the ``nvidia-smi`` banner, else inferred from the driver version.
+
+    Newer drivers print ``CUDA UMD Version: 13.4`` where older ones printed ``CUDA Version:``.
+    The fallback maps the driver release to the CUDA generation it ships with.
+    """
+    if banner:
+        match = _CUDA_BANNER.search(banner)
+        if match:
+            return int(match.group(1))
+    if driver_version:
+        try:
+            release = int(driver_version.strip().split(".")[0])
+        except ValueError:
+            return None
+        if release >= 580:
+            return 13
+        if release >= 525:
+            return 12
+    return None
+
+
 def _cuda_facts() -> tuple[tuple[int, int] | None, int | None]:
     """(compute capability, driver CUDA major) from nvidia-smi, or Nones."""
     capability: tuple[int, int] | None = None
-    major: int | None = None
     cap_text = _nvidia_smi(["--query-gpu=compute_cap", "--format=csv,noheader"])
     if cap_text and cap_text.strip():
         first = cap_text.strip().splitlines()[0].strip()
@@ -69,14 +107,9 @@ def _cuda_facts() -> tuple[tuple[int, int] | None, int | None]:
             capability = (int(left), int(right or 0))
         except ValueError:
             capability = None
-    banner = _nvidia_smi([])
-    if banner and "CUDA Version:" in banner:
-        tail = banner.split("CUDA Version:", 1)[1].strip().split()[0]
-        try:
-            major = int(tail.split(".")[0])
-        except ValueError:
-            major = None
-    return capability, major
+    driver = _nvidia_smi(["--query-gpu=driver_version", "--format=csv,noheader"])
+    driver_version = driver.strip().splitlines()[0] if driver and driver.strip() else None
+    return capability, parse_cuda_major(_nvidia_smi([]), driver_version)
 
 
 def detect_target(
@@ -100,7 +133,16 @@ def detect_target(
             "Kitten TTS 2 needs an NVIDIA GPU (or an Apple silicon Mac). "
             "No NVIDIA GPU was found, and CPU-only runs are too slow to use."
         )
-    return Target("cuda", accelerator_manifest.select_cuda_pin(capability, major))
+    pin = accelerator_manifest.select_cuda_pin(capability, major)
+    if capability >= (10, 0) and pin.extra == "cuda12":
+        # The cu126 wheels carry no Blackwell kernels, so the install would "work" and then fail
+        # on first use. Refuse now with the reason instead.
+        raise UnsupportedMachine(
+            "This GPU (compute capability "
+            f"{capability[0]}.{capability[1]}) needs the CUDA 13 runtime, but the NVIDIA driver "
+            "could not be confirmed as CUDA 13 capable. Update the NVIDIA driver and try again."
+        )
+    return Target("cuda", pin)
 
 
 def torch_requirements(target: Target) -> tuple[list[str], str | None]:
@@ -297,7 +339,7 @@ def install(
         ("Downloading the voice models (about 2.4 GB)", lambda: prefetch(python, directory)),
         (
             "Checking the install",
-            lambda: runner([str(python), "-c", "import kittenml"]),
+            lambda: runner([str(python), "-c", _CHECK_SCRIPT if target.kind == "cuda" else "import kittenml"]),
         ),
         ("Finishing", lambda: _publish(directory)),
     ]

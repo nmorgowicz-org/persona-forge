@@ -200,3 +200,42 @@ def test_only_one_install_runs_at_a_time(tmp_path):
     assert started.wait(5)
     assert kp.start_install(tmp_path) is False
     gate.set()
+
+
+def test_parses_the_new_umd_banner_from_the_5090_driver():
+    banner = "| NVIDIA-SMI 617.42   KMD Version: 617.42   CUDA UMD Version: 13.4 |"
+    assert kp.parse_cuda_major(banner) == 13
+
+
+def test_parses_the_classic_banner():
+    assert kp.parse_cuda_major("| Driver Version: 550.54  CUDA Version: 12.4 |") == 12
+
+
+def test_falls_back_to_the_driver_release_when_the_banner_is_unreadable():
+    assert kp.parse_cuda_major("garbage", "617.42") == 13
+    assert kp.parse_cuda_major(None, "550.54.15") == 12
+    assert kp.parse_cuda_major(None, "400.1") is None
+    assert kp.parse_cuda_major(None, None) is None
+
+
+def test_blackwell_with_an_unknown_driver_is_refused_not_given_cu126():
+    with pytest.raises(kp.UnsupportedMachine, match="CUDA 13"):
+        kp.detect_target("win32", "AMD64", cuda_facts=lambda: ((12, 0), None))
+
+
+def test_older_gpu_with_an_unknown_driver_still_gets_cu126():
+    target = kp.detect_target("linux", "x86_64", cuda_facts=lambda: ((8, 6), None))
+    assert target.pin is not None and target.pin.extra == "cuda12"
+
+
+def test_cuda_install_checks_the_gpu_architecture_not_just_the_import(tmp_path):
+    runner, _ = run_install(tmp_path, target=cuda_target(), platform="linux")
+
+    check = " ".join(runner.commands[-1])
+    assert "get_arch_list" in check and "has no kernels for" in check
+
+
+def test_mac_install_keeps_the_plain_import_check(tmp_path):
+    runner, _ = run_install(tmp_path, target=kp.Target("mlx"), platform="darwin")
+
+    assert runner.commands[-1][-1] == "import kittenml"
