@@ -3,7 +3,9 @@ import {
   CheckCircle2,
   CircleSlash,
   Download,
+  ExternalLink,
   HardDrive,
+  Zap,
   Loader2,
   RefreshCw,
   Trash2,
@@ -11,6 +13,7 @@ import {
 import {
   installEngine,
   listEngines,
+  recheckEngine,
   removeEngine,
   verifyEngine,
   type EngineCard,
@@ -47,8 +50,23 @@ export function SpeechEnginesCard() {
   const [error, setError] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<{
     id: string
-    action: 'verify' | 'install' | 'remove'
+    action: 'verify' | 'install' | 'remove' | 'recheck'
   } | null>(null)
+
+  const busy = engines.some(
+    (engine) => engine.install_job?.state === 'running' || engine.load_status?.state === 'loading',
+  )
+
+  // Installs and re-checks run in the background; refresh the cards until they settle.
+  useEffect(() => {
+    if (!busy) return
+    const timer = window.setInterval(() => {
+      listEngines()
+        .then(setEngines)
+        .catch(() => undefined)
+    }, 2000)
+    return () => window.clearInterval(timer)
+  }, [busy])
 
   useEffect(() => {
     let cancelled = false
@@ -87,9 +105,26 @@ export function SpeechEnginesCard() {
     setError(null)
     try {
       const refreshed = await installEngine(engineId)
-      setEngines((current) =>
-        current.map((engine) => (engine.id === refreshed.id ? refreshed : engine)),
-      )
+      if (refreshed) {
+        setEngines((current) =>
+          current.map((engine) => (engine.id === refreshed.id ? refreshed : engine)),
+        )
+      } else {
+        setEngines(await listEngines())
+      }
+    } catch (err) {
+      setError(String((err as Error)?.message || err))
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
+  async function recheck(engineId: string) {
+    setPendingAction({ id: engineId, action: 'recheck' })
+    setError(null)
+    try {
+      await recheckEngine(engineId)
+      setEngines(await listEngines())
     } catch (err) {
       setError(String((err as Error)?.message || err))
     } finally {
@@ -118,7 +153,7 @@ export function SpeechEnginesCard() {
       </div>
       <p className="text-xs text-muted-foreground">
         One active engine serves the API. Packs are verified locally against their pinned
-        hashes before use; installing additional engines arrives with the pack installer.
+        hashes before use. Installing an engine downloads it once; it then runs offline.
       </p>
 
       {error && (
@@ -195,7 +230,7 @@ export function SpeechEnginesCard() {
                         type="button"
                         size="xs"
                         variant="outline"
-                        disabled={pendingAction !== null}
+                        disabled={pendingAction !== null || engine.install_job?.state === 'running'}
                         onClick={() => void install(engine.id)}
                       >
                         {pendingAction?.id === engine.id &&
@@ -226,7 +261,11 @@ export function SpeechEnginesCard() {
                       type="button"
                       size="xs"
                       variant="ghost"
-                      disabled={engine.active || pendingAction !== null}
+                      disabled={
+                        engine.active ||
+                        pendingAction !== null ||
+                        engine.install_job?.state === 'running'
+                      }
                       title={
                         engine.active
                           ? 'Switch to another engine before removing this one'
@@ -245,6 +284,91 @@ export function SpeechEnginesCard() {
                   </>
                 )}
               </div>
+
+              {engine.install_job?.state === 'running' && (
+                <div className="flex flex-col gap-1" role="status">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full bg-primary transition-all"
+                      style={{
+                        width: `${Math.round(
+                          (engine.install_job.step_index / Math.max(engine.install_job.step_count, 1)) * 100,
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Step {engine.install_job.step_index} of {engine.install_job.step_count}:{' '}
+                    {engine.install_job.step}. This can take several minutes the first time.
+                  </p>
+                </div>
+              )}
+
+              {engine.install_job?.state === 'error' && engine.install_job.error && (
+                <p className="rounded-control border border-destructive/30 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
+                  Install failed: {engine.install_job.error} Choose Repair to try again.
+                </p>
+              )}
+
+              {engine.load_status?.mode && engine.state.status === 'verified' && (
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                  <Zap className="size-3" />
+                  {engine.load_status.mode === 'eager'
+                    ? 'Running in standard mode (slower than real time).'
+                    : engine.load_status.mode === 'compiled'
+                      ? 'Running in fast mode.'
+                      : 'Running on Apple silicon.'}
+                </div>
+              )}
+
+              {engine.load_status?.state === 'error' && engine.load_status.error && (
+                <p className="rounded-control border border-destructive/30 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
+                  {engine.load_status.error}
+                </p>
+              )}
+
+              {engine.load_status?.fast_mode_issue && (
+                <div className="flex flex-col gap-1.5 rounded-control border border-border bg-muted/40 px-3 py-2 text-[11px]">
+                  <p>{engine.load_status.fast_mode_issue.message}</p>
+                  <p className="text-muted-foreground">{engine.load_status.fast_mode_issue.action}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {engine.load_status.fast_mode_issue.help_url && (
+                      <a
+                        href={engine.load_status.fast_mode_issue.help_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
+                      >
+                        <ExternalLink className="size-3" />
+                        Get the tools
+                      </a>
+                    )}
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      disabled={pendingAction !== null || engine.load_status.state === 'loading'}
+                      onClick={() => void recheck(engine.id)}
+                    >
+                      {engine.load_status.state === 'loading' ||
+                      (pendingAction?.id === engine.id && pendingAction.action === 'recheck') ? (
+                        <Loader2 className="animate-spin" />
+                      ) : (
+                        <RefreshCw />
+                      )}
+                      Re-check
+                    </Button>
+                  </div>
+                  {engine.load_status.fast_mode_issue.detail && (
+                    <details className="text-muted-foreground">
+                      <summary className="cursor-pointer select-none">Technical details</summary>
+                      <code className="font-mono text-[10px]">
+                        {engine.load_status.fast_mode_issue.detail}
+                      </code>
+                    </details>
+                  )}
+                </div>
+              )}
 
               {engine.state.errors.length > 0 && (
                 <ul className="flex flex-col gap-1 rounded-control border border-destructive/30 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">

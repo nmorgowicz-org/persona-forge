@@ -448,6 +448,29 @@ export interface EnginePackArtifact {
   source: string | null
 }
 
+export interface EngineInstallJob {
+  state: 'idle' | 'running' | 'done' | 'error'
+  step: string
+  step_index: number
+  step_count: number
+  error: string | null
+}
+
+export interface FastModeIssue {
+  code: string
+  message: string
+  action: string
+  help_url?: string | null
+  detail?: string | null
+}
+
+export interface EngineLoadStatus {
+  state?: 'idle' | 'loading' | 'ready' | 'error'
+  error?: string | null
+  mode?: 'compiled' | 'eager' | 'mlx' | null
+  fast_mode_issue?: FastModeIssue | null
+}
+
 export interface EngineCard {
   id: string
   label: string
@@ -461,6 +484,8 @@ export interface EngineCard {
   capabilities: Partial<EngineCapabilities>
   state: EngineState
   requirements: string[]
+  install_job?: EngineInstallJob
+  load_status?: EngineLoadStatus
   pack: {
     id: string
     version: string
@@ -485,13 +510,22 @@ export async function verifyEngine(engineId: string): Promise<EngineCard> {
   return body.engine
 }
 
-export async function installEngine(engineId: string): Promise<EngineCard> {
+/** Install a pack. Provisioned packs run in the background and return no card (poll `listEngines`). */
+export async function installEngine(engineId: string): Promise<EngineCard | null> {
   const res = await fetch(`/engines/${encodeURIComponent(engineId)}/install`, {
     method: 'POST',
   })
-  if (!res.ok) throw new Error(await readError(res))
-  const body = await res.json()
-  return body.engine
+  if (!res.ok && res.status !== 409) throw new Error(await readError(res))
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok && !body?.job) throw new Error(body?.error || `Install failed (${res.status})`)
+  return body.engine ?? null
+}
+
+export async function recheckEngine(engineId: string): Promise<void> {
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/recheck`, {
+    method: 'POST',
+  })
+  if (!res.ok && res.status !== 409) throw new Error(await readError(res))
 }
 
 export async function removeEngine(engineId: string): Promise<void> {
