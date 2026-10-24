@@ -74,7 +74,10 @@ Request body (JSON):
   contract as `/generate`.
 - `model` (string, optional) — engine selector. Known values: `pocket-tts` (and aliases
   `pocket`, `pocket_tts`, `persona-forge`, `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts`, `default`,
-  or omitted → active engine). An unknown label is treated as a client-side name and served by
+  or omitted → active engine) and, once the pack is installed, `kitten2` (aliases `kitten-2`,
+  `kitten-tts-2`). Pack engines are served beside the active backend in a separate process (no
+  409); a missing pack returns 503 with an install hint. Kitten 2 holds roughly 2 GB while loaded
+  and stops itself after `KITTEN2_IDLE_UNLOAD_S` of inactivity. An unknown label is treated as a client-side name and served by
   the active engine, so existing OpenAI clients keep working; the response reports
   `X-Model-Recognized: false`. Naming a registered engine that is not active returns 409.
 
@@ -117,7 +120,11 @@ Important notes:
 - Response 200: `{ "object": "list", "data": [ ... ] }`, each entry:
   `voice_id` (`vd_...` or `pocket:<name>`), `object` (`voice`), `engine`, `kind`
   (`library`|`preset`), `display_name`, `language`, `language_code`, `servable`.
-- Presets are included only when the Pocket backend is active.
+- Pocket presets (`pocket:<name>`) are included only when the Pocket backend is active.
+- When the Kitten TTS 2 pack is installed, its 115 built-in voices are listed as `kitten2:<Name>`
+  (`engine: "kitten2"`, `kind: "preset"`). Names come from the downloaded weights, so listing never
+  loads the model. Saved library voices work with Kitten 2 too (cloning); an unknown preset name
+  returns 400.
 
 ### GET /engines
 
@@ -128,6 +135,10 @@ Important notes:
   `capabilities`, `requirements`, `pack` (manifest + artifacts) and `state`:
   `status` (`built-in`|`not-installed`|`installed`|`verified`|`invalid`),
   `artifacts_present`, `artifacts_total`, `disk_bytes`, `verified`, `errors`.
+- Provisioned packs (Kitten TTS 2) also carry `install_job` (`state` `idle|running|done|error`,
+  `step`, `step_index`, `step_count`, `error`) and `load_status` (`state`
+  `idle|loading|ready|error`, `error`, `mode` `compiled|eager|mlx`, and `fast_mode_issue` with
+  `code`, `message`, `action`, `help_url`, `detail` when fast mode is unavailable).
 - Read-only and local: no network access, no model load.
 
 ### POST /engines/{engine_id}/verify
@@ -145,6 +156,26 @@ Important notes:
 - 409: no manifest, active install, not enough disk, unsupported source scheme, or verification
   failure (`{ "error": "..." }`). Partial downloads are kept as `<artifact>.part` for retry;
   unverified bytes are never published as the artifact.
+
+### POST /engines/kitten2/install
+
+- Purpose: provision the Kitten TTS 2 pack in the background: a private Python 3.12 environment, the
+  GPU runtime on NVIDIA machines, `kittenml`, and the model weights (about 2.4 GB), then a
+  verification stamp. The pack runs offline afterwards.
+- 202: `{ "started": true, "job": { ... } }`. 409 (`started: false`) when an install is already
+  running. Poll `GET /engines/kitten2/install` (or `GET /engines`) for `job.state`, `step`,
+  `step_index` / `step_count`, and `error`. Retrying resumes: an existing environment is reused.
+- Supported machines: Apple silicon (MLX) and NVIDIA GPUs with a recent driver (CUDA 12 or 13,
+  chosen automatically). Linux CUDA shares the code path but is untested. Unsupported machines get
+  a plain-language reason in `job.error`.
+
+### POST /engines/kitten2/recheck
+
+- Purpose: reload the engine in the background so a newly installed compiler is picked up (fast
+  mode on NVIDIA needs a C++ compiler: Microsoft C++ Build Tools on Windows, `build-essential` on
+  Linux). No restart is needed.
+- 202 `{ "started": true, "status": { ... } }`; 409 when the pack is not installed or a load is
+  already running.
 
 ### POST /engines/{engine_id}/remove
 
@@ -1058,7 +1089,7 @@ Response (JSON):
 - 400:
   - If segments/instruct/params invalid.
 
-### GET /omnivoice/audition/progress?job_id=...
+### GET /omnivoice/audition/progress?job_id=
 
 - Purpose: Poll the progress and results of an audition job; returns completed candidates as they finish.
 
