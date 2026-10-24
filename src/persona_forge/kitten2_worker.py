@@ -103,15 +103,37 @@ class Kitten2Worker:
         return {"ok": True, "loaded": self._model is not None}
 
     def _op_load(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        fast_error: str | None = None
         if self._model is None:
             self._runtime = self._choose()
+            if request.get("fast_mode") is False:
+                self._runtime = {**self._runtime, "static_cache": False}
             self._model = self._factory(request.get("cache_dir"), self._runtime)
         if request.get("warmup", True):
             # The first compiled CUDA call takes about 33 s; pay it here, not on a request.
-            self._model.generate("Ready.", voice=DEFAULT_PRESET)
+            try:
+                self._model.generate("Ready.", voice=DEFAULT_PRESET)
+            except Exception as exc:
+                if not self._runtime.get("static_cache"):
+                    raise
+                # Compiling needs a C/C++ toolchain (Triton). Without one, run eager: about
+                # 1.4x slower than real time instead of 0.3x, but it works with no setup.
+                fast_error = (str(exc) or type(exc).__name__).strip().splitlines()[0][:300]
+                self._model = None
+                self._runtime = {**self._runtime, "static_cache": False}
+                self._model = self._factory(request.get("cache_dir"), self._runtime)
+                self._model.generate("Ready.", voice=DEFAULT_PRESET)
+        if self._runtime.get("backend") == "mlx":
+            mode = "mlx"
+        elif self._runtime.get("static_cache"):
+            mode = "compiled"
+        else:
+            mode = "eager"
         return {
             "ok": True,
             "backend": self._runtime.get("backend") or self._runtime.get("device"),
+            "mode": mode,
+            "fast_mode_error": fast_error,
             "sample_rate": int(self._model.sample_rate),
         }
 

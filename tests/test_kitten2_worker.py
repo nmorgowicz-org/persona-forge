@@ -177,3 +177,64 @@ def test_worker_drives_through_the_real_transport(tmp_path: Path):
             assert handle.getnframes() == 480
         with pytest.raises(PackProcessError, match="unknown preset"):
             process.synthesize({"text": "Hello", "preset": "Nobody"})
+
+
+def _cuda_worker(fail_when_compiled: bool):
+    built: list[bool] = []
+
+    class Model(StubModel):
+        def __init__(self, compiled: bool) -> None:
+            super().__init__()
+            self.compiled = compiled
+
+        def generate(self, text, **kwargs):
+            if self.compiled and fail_when_compiled:
+                raise RuntimeError("Failed to find C compiler. Please specify via CC\nmore detail")
+            return super().generate(text, **kwargs)
+
+    def factory(cache_dir, runtime):
+        built.append(bool(runtime["static_cache"]))
+        return Model(bool(runtime["static_cache"]))
+
+    worker = kw.Kitten2Worker(
+        factory=factory,
+        runtime_chooser=lambda: {"backend": None, "device": "cuda", "static_cache": True},
+    )
+    return worker, built
+
+
+def test_cuda_runs_compiled_when_the_toolchain_works():
+    worker, built = _cuda_worker(fail_when_compiled=False)
+
+    response = worker.handle({"op": "load"})
+
+    assert response["mode"] == "compiled"
+    assert response["fast_mode_error"] is None
+    assert built == [True]
+
+
+def test_cuda_falls_back_to_eager_with_the_reason_when_compiling_fails():
+    worker, built = _cuda_worker(fail_when_compiled=True)
+
+    response = worker.handle({"op": "load"})
+
+    assert response["mode"] == "eager"
+    assert response["fast_mode_error"] == "Failed to find C compiler. Please specify via CC"
+    assert built == [True, False]
+    assert worker.handle({"op": "synthesize", "text": "hi"})["ok"] is True
+
+
+def test_fast_mode_can_be_declined():
+    worker, built = _cuda_worker(fail_when_compiled=True)
+
+    response = worker.handle({"op": "load", "fast_mode": False})
+
+    assert response["mode"] == "eager"
+    assert response["fast_mode_error"] is None
+    assert built == [False]
+
+
+def test_mlx_reports_its_own_mode():
+    worker, _ = make_worker()
+
+    assert worker.handle({"op": "load", "warmup": False})["mode"] == "mlx"

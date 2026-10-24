@@ -76,12 +76,18 @@ class Kitten2Engine:
         self._process: PackProcess | None = None
         self._prepared: dict[str, tuple[str, float]] = {}
         self._timer: threading.Timer | None = None
+        self._load_info: dict[str, Any] = {}
+
+    def status(self) -> dict[str, Any]:
+        """Last load result: speed mode and, when compiling was unavailable, why."""
+        return dict(self._load_info)
 
     def describe(self) -> dict[str, Any]:
         from persona_forge import speech_engines
 
         info = speech_engines.ENGINES[self.id].as_dict()
         info["installed"] = is_installed()
+        info["status"] = self.status()
         return info
 
     # -- lifecycle -----------------------------------------------------------------------------
@@ -103,11 +109,15 @@ class Kitten2Engine:
         )
         process.start()
         try:
-            process.request({"op": "load"}, timeout=LOAD_TIMEOUT_S)
+            loaded = process.request({"op": "load"}, timeout=LOAD_TIMEOUT_S)
         except PackProcessError as exc:
             process.close()
             raise EngineUnavailable(str(exc)) from exc
         self._process = process
+        self._load_info = {
+            "mode": loaded.get("mode"),
+            "fast_mode_error": loaded.get("fast_mode_error"),
+        }
         return process
 
     def _arm_idle_timer(self) -> None:
