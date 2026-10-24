@@ -469,3 +469,18 @@ def test_engine_card_carries_install_job_and_load_status(client, monkeypatch, tm
 
     assert card["install_job"]["state"] in {"idle", "running", "done", "error"}
     assert card["load_status"]["state"] == "idle"
+
+
+def test_kitten2_engine_module_imports_first_without_a_cycle():
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import persona_forge.kitten2_engine as k; print(k.ENGINE_ID)"],
+        capture_output=True,
+        text=True,
+        env={**__import__("os").environ, "PYTHONPATH": "src"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "kitten2"

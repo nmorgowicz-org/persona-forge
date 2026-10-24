@@ -2595,7 +2595,7 @@ def engines_recheck(engine_id: str):
     """Reload an engine in the background so newly installed prerequisites are picked up."""
     if engine_id != kitten2_engine.ENGINE_ID:
         return jsonify({"error": "engine does not support re-check"}), 404
-    adapter = speech_engines.ADAPTERS[engine_id]
+    adapter = speech_engines.get_adapter(engine_id)
     if not isinstance(adapter, kitten2_engine.Kitten2Engine):
         return jsonify({"error": "engine does not support re-check"}), 404
     if not kitten2_engine.is_installed():

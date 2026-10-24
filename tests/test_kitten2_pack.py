@@ -112,7 +112,7 @@ def test_cuda_install_runs_every_step_in_order(tmp_path):
     assert "--index-url https://download.pytorch.org/whl/cu130" in torch_step
     package_step = next(item for item in flat if f"kittenml=={kp.KITTENML_VERSION}" in item)
     assert "--index-url" not in package_step and kp.TRITON_WINDOWS in package_step
-    assert flat[-1].endswith("-c import kittenml")
+    assert "import kittenml, torch" in flat[-1]
     assert len(prefetched) == 1
 
 

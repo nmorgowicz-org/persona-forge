@@ -502,7 +502,7 @@ def engine_cards(backend: str | None, root: Path | None = None) -> list[dict[str
 
         from persona_forge import kitten2_engine
 
-        adapter = speech_engines.ADAPTERS.get("kitten2")
+        adapter = speech_engines.get_adapter("kitten2")
         kitten["install_job"] = kitten2_pack.job_status()
         kitten["load_status"] = (
             adapter.status() if isinstance(adapter, kitten2_engine.Kitten2Engine) else {}

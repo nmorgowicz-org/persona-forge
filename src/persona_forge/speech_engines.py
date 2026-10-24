@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -259,18 +259,31 @@ class PocketTtsEngine:
         )
 
 
-def _build_adapters() -> dict[str, SpeechEngine]:
+ADAPTERS: dict[str, SpeechEngine] = {"pocket-tts": PocketTtsEngine()}
+
+
+def _make_kitten2() -> SpeechEngine:
+    # Imported on first use: the adapter imports this module's registry, so building it at import
+    # time would make the import order matter.
     from persona_forge.kitten2_engine import Kitten2Engine
 
-    return {"pocket-tts": PocketTtsEngine(), "kitten2": Kitten2Engine()}
+    return Kitten2Engine()
 
 
-ADAPTERS: dict[str, SpeechEngine] = _build_adapters()
+_ADAPTER_FACTORIES: dict[str, Callable[[], SpeechEngine]] = {"kitten2": _make_kitten2}
+
+
+def get_adapter(engine_id: str) -> SpeechEngine | None:
+    """Return the adapter for ``engine_id``, creating lazily built ones on first use."""
+    adapter = ADAPTERS.get(engine_id)
+    if adapter is None and engine_id in _ADAPTER_FACTORIES:
+        adapter = ADAPTERS.setdefault(engine_id, _ADAPTER_FACTORIES[engine_id]())
+    return adapter
 
 
 def adapter_for(engine: EngineInfo) -> SpeechEngine:
     """Return the serving adapter for ``engine``; raises LookupError when none is registered."""
-    adapter = ADAPTERS.get(engine.id)
+    adapter = get_adapter(engine.id)
     if adapter is None:
         raise LookupError(f"No adapter registered for engine {engine.id!r}")
     return adapter
