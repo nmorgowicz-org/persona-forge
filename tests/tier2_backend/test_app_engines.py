@@ -388,3 +388,25 @@ def test_engines_endpoint_marks_kitten2_as_an_uninstalled_pack(client, app_modul
     assert cards["kitten2"]["kind"] == "pack"
     assert cards["kitten2"]["state"]["status"] == "not-installed"
     assert cards["kitten2"]["state"]["verified"] is False
+
+
+def test_speech_route_returns_400_for_an_unknown_kitten2_preset(client, app_module, monkeypatch, tmp_path):
+    from persona_forge.pack_process import PackProcessError
+
+    engine = _kitten_engine(monkeypatch, tmp_path)
+
+    def reject(self, payload):
+        raise PackProcessError("unknown preset 'Nobody'")
+
+    monkeypatch.setattr(_FakeWorker, "synthesize", reject)
+    monkeypatch.setitem(speech_engines.ADAPTERS, "kitten2", engine)
+    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+    monkeypatch.setattr(app_module, "_generation_ready", lambda: True)
+    monkeypatch.setattr(app_module.model, "_service_started", True, raising=False)
+
+    response = client.post(
+        "/v1/audio/speech", json={"model": "kitten2", "input": "hi", "voice": "Nobody"}
+    )
+
+    assert response.status_code == 400
+    assert "unknown preset" in response.get_json()["error"]["message"]

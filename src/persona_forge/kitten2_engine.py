@@ -31,6 +31,10 @@ class EngineUnavailable(RuntimeError):
     """The pack is missing or the machine cannot run the engine."""
 
 
+class InvalidVoice(ValueError):
+    """The requested voice or preset does not exist for this engine."""
+
+
 def pack_python(root: Path | None = None) -> Path | None:
     """Interpreter inside the installed pack, or the ``KITTEN2_PYTHON`` development override."""
     override = os.environ.get("KITTEN2_PYTHON")
@@ -183,7 +187,9 @@ class Kitten2Engine:
                 )
             try:
                 audio = process.synthesize(request)
-            except PackProcessError:
+            except PackProcessError as exc:
+                if str(exc).startswith("unknown preset"):
+                    raise InvalidVoice(str(exc)) from exc
                 # A timed-out worker is killed by the transport; drop it so the next request
                 # starts a fresh one instead of reusing a dead handle.
                 if not process.is_alive:

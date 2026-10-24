@@ -2742,6 +2742,8 @@ def openai_audio_speech():
         audio, media_type = _encode(wav, sr, fmt)
     except kitten2_engine.EngineUnavailable as exc:
         return _openai_error(str(exc), 503, "api_error")
+    except kitten2_engine.InvalidVoice as exc:
+        return _openai_error(str(exc), 400, "invalid_request_error")
     except Exception as exc:
         if _is_capacity_error(exc):
             print(
