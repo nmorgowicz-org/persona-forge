@@ -229,8 +229,10 @@ class PocketTtsEngine:
         seed_value: int | None = None,
         instruct: str | None = None,
     ) -> tuple[Any, int, str | None]:
-        from persona_forge import model
+        from persona_forge import model, text_normalizer
 
+        if text_normalizer.enabled():
+            text = text_normalizer.normalize(text)
         return model.executor.submit(
             model._run_generate,
             text,
@@ -252,8 +254,10 @@ class PocketTtsEngine:
         voice_id: str | None = None,
         seed_value: int | None = None,
     ) -> Iterator[bytes]:
-        from persona_forge import model
+        from persona_forge import model, text_normalizer
 
+        if text_normalizer.enabled():
+            text = text_normalizer.normalize(text)
         yield from model._run_generate_pocket_tts_stream(
             text, language, voice_id=voice_id, seed_value=seed_value
         )

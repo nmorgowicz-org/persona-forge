@@ -484,3 +484,24 @@ def test_kitten2_engine_module_imports_first_without_a_cycle():
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "kitten2"
+
+
+def test_pocket_adapter_normalises_text_but_the_switch_turns_it_off(monkeypatch):
+    from persona_forge import model
+
+    seen = []
+
+    class _Done:
+        def result(self, timeout=None):
+            return ("wav", 24000, None)
+
+    monkeypatch.setattr(
+        model.executor, "submit", lambda fn, text, *a, **k: seen.append(text) or _Done()
+    )
+    engine = speech_engines.ADAPTERS["pocket-tts"]
+
+    engine.synthesize("Room 101", "English")
+    monkeypatch.setenv("TTS_NORMALIZE_TEXT", "0")
+    engine.synthesize("Room 101", "English")
+
+    assert seen == ["Room one hundred one", "Room 101"]
