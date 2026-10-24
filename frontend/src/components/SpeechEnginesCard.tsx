@@ -306,7 +306,7 @@ export function SpeechEnginesCard() {
 
               {engine.install_job?.state === 'error' && engine.install_job.error && (
                 <p className="rounded-control border border-destructive/30 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
-                  Install failed: {engine.install_job.error} Choose Repair to try again.
+                  Install failed: {engine.install_job.error} Choose {engine.state.status === 'not-installed' ? 'Install' : 'Repair'} to try again.
                 </p>
               )}
 
