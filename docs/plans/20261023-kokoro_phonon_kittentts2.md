@@ -625,6 +625,54 @@ engine is reachable from `/v1/models`.
 the compiled-CUDA latency spikes (9 s, 41 s, 85 s trials; decide warm-up and timeout values from
 it), and Pocket on the Intel and 5090 hosts for the speed comparison.
 
+#### 7.1.1 Decision: fast mode is optional, and the upgrade path is one click
+
+Compiled CUDA is the whole speedup: on the 5090, static cache without compiling measured RTF 1.4,
+the same as eager, while compiled measured 0.3-0.5 (the machine was under RAM pressure for the
+later runs). Compiling needs a C/C++ toolchain through Triton. The owner's rule is to remove
+friction wherever possible, so:
+
+- **Nobody is forced to install build tools.** The worker tries compiled mode first. If the warm-up
+  fails it reloads eager and reports `mode: "eager"` plus a `fast_mode_issue`
+  (`code`, `message`, `action`, `help_url`, raw `detail`). Eager still works, at about 1.4x slower
+  than real time; Pocket stays the fast cloner on such machines.
+- **Plain-language messages.** The raw Windows error `FileNotFoundError: [WinError 2]` is mapped to
+  "Fast mode needs the Microsoft C++ Build Tools" with the Visual Studio download link and the
+  workload name; Linux gets a `build-essential` hint; a missing Triton says to use Repair.
+- **The golden path needs no restart.** `POST /engines/kitten2/recheck` unloads and reloads in the
+  background; the next load re-tests the compiler. Install the tools, press Re-check, done.
+- **Detection is by trying, not by looking.** `cl.exe` is not on PATH in a normal shell yet compiled
+  mode works, because `triton-windows` finds Visual Studio itself, so a PATH check would give false
+  negatives.
+- **Mac is unaffected.** MLX is plain Python with no compiler.
+- **Recompiles.** A new text length triggers one recompile (76 chars: 9.0 s first, 2.3 s repeated).
+  This explains the earlier 9/41/85 s spikes. Warm-up covers one short length only; treat the first
+  request at a new length as slow, or pad/bucket lengths later.
+
+#### 7.1.2 Status
+
+Done on `feat/multi-engine-speech`: worker, adapter, registry entry, pack-only routing, 400/503
+error mapping, fast-mode fallback, and the provisioner (`kitten2_pack.py`).
+
+- **Provisioner:** detects Apple silicon or an NVIDIA GPU (refusing anything else with a reason),
+  creates a private Python 3.12 environment with `uv` (falling back to `venv` and `pip`), installs
+  torch from the pinned CUDA index in its own step (so PyPI cannot shadow it), installs
+  `kittenml==0.9.6` (plus `triton-windows` on Windows), prefetches every weight into the pack's `hf/`
+  folder, checks `import kittenml`, then publishes the verified stamp. Only the provisioner can
+  mint the stamp, so an empty or half-finished pack never reads as installed.
+- **Background job.** A real install outlives gunicorn's 300 s request timeout, so
+  `POST /engines/kitten2/install` returns 202 and `GET` reports `state`, `step`, `step_index`,
+  `step_count` and `error`. Retrying resumes: an existing environment is reused.
+- **Offline serving.** The worker runs with `HF_HOME` set to the pack and `HF_HUB_OFFLINE=1`, so a
+  missing file fails fast instead of stalling a request while 2.4 GB downloads. This removed the
+  503 s first request seen when weights downloaded mid-request.
+- **Real result on the Mac (scratch pack dir, no dev override):** install 144 s (packages were
+  cached; weights dominate), pack 2.0 GB weights + 1.5 GB environment. Serving: first request 9.1 s
+  including worker start, then 0.8 s preset and 1.5 s clone; `/engines` reports `verified` and
+  `mode: mlx`; Re-check returned to `ready` in under 12 s.
+- **Not yet verified:** a real install on the 5090 (the CUDA index, `triton-windows`, and the Visual
+  Studio message end to end through the app), the engine-manager UI, and the text normaliser.
+
 Docs deliverables ride the phases: Phase C updates `docs/api/HTTP_API_REFERENCE.md`,
 `docs/ENV_REFERENCE.md` and `docs/agent-reference/RUNTIME_AND_MEMORY.md`; Phase E adds user-facing
 engine-manager and Compare docs.
