@@ -7,6 +7,18 @@
 * **desktop:** recognize NVIDIA's CUDA UMD version header so CUDA 13-capable drivers select the correct accelerator environment.
 * **packaging:** preserve package-specific accelerator wheel sources in standalone launcher and desktop requirements.
 
+## [3.2.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.2.0...persona-forge-v3.2.1) (2026-10-24)
+
+
+### Miscellaneous Chores
+
+* **deps:** bump ip-address from 10.7.2 to 10.7.4 in /frontend ([#432](https://github.com/nmorgowicz-org/persona-forge/issues/432)) ([0d9b811](https://github.com/nmorgowicz-org/persona-forge/commit/0d9b8114d8b576b221b1b621d435176d4d9c8f7c))
+* **deps:** update astral-sh/setup-uv action to v10.3.2 ([#429](https://github.com/nmorgowicz-org/persona-forge/issues/429)) ([a0c7107](https://github.com/nmorgowicz-org/persona-forge/commit/a0c71077278a77a731c13e15417e2b4410bfc0ca))
+* **deps:** update dependency motion to v14.4.0 ([#430](https://github.com/nmorgowicz-org/persona-forge/issues/430)) ([2fb3677](https://github.com/nmorgowicz-org/persona-forge/commit/2fb36774109aaa109761c533d606c0098bfe620e))
+* **deps:** update frontend npm dependencies ([#433](https://github.com/nmorgowicz-org/persona-forge/issues/433)) ([ee7f4ff](https://github.com/nmorgowicz-org/persona-forge/commit/ee7f4ffb464caedb66d1812dfb047ec2a952543a))
+* **deps:** update frontend npm dependencies ([#435](https://github.com/nmorgowicz-org/persona-forge/issues/435)) ([8e9dc73](https://github.com/nmorgowicz-org/persona-forge/commit/8e9dc73876b5d9a6ceca8d3ae488eed8aa4491f2))
+* **deps:** update python:3.13-slim docker digest to 57b29a7 ([#428](https://github.com/nmorgowicz-org/persona-forge/issues/428)) ([1ac50b8](https://github.com/nmorgowicz-org/persona-forge/commit/1ac50b8572a88962b2384068c0db8037e62e9579))
+
 ## [3.2.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.6...persona-forge-v3.2.0) (2026-10-22)
 
 
