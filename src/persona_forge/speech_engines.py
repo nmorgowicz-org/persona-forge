@@ -52,6 +52,7 @@ class EngineInfo:
     license: str
     capabilities: EngineCapabilities
     installed: bool = True
+    pack_only: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -64,6 +65,7 @@ class EngineInfo:
             "source": self.source,
             "license": self.license,
             "installed": self.installed,
+            "pack_only": self.pack_only,
             "capabilities": self.capabilities.as_dict(),
         }
 
@@ -80,6 +82,18 @@ POCKET_CAPABILITIES = EngineCapabilities(
     instructions=True,
 )
 
+KITTEN2_CAPABILITIES = EngineCapabilities(
+    clone=True,
+    presets=True,
+    import_prepared_voice=False,
+    streaming="none",
+    languages=("en",),
+    speed=False,
+    expression_tags=False,
+    seed=True,
+    instructions=False,
+)
+
 ENGINES: dict[str, EngineInfo] = {
     "pocket-tts": EngineInfo(
         id="pocket-tts",
@@ -90,6 +104,21 @@ ENGINES: dict[str, EngineInfo] = {
         source="kyutai/pocket-tts",
         license="see upstream",
         capabilities=POCKET_CAPABILITIES,
+    ),
+    "kitten2": EngineInfo(
+        id="kitten2",
+        label="Kitten TTS 2",
+        description=(
+            "Cloning and 115 built-in voices on Apple silicon (MLX) or an NVIDIA GPU. "
+            "Installed as an engine pack; not usable on CPU-only machines."
+        ),
+        backend="kitten2",
+        runtime="python-mlx-or-cuda",
+        source="KittenML/kitten-tts-2",
+        license="Stellon Labs Community License",
+        capabilities=KITTEN2_CAPABILITIES,
+        installed=False,
+        pack_only=True,
     ),
 }
 
@@ -108,6 +137,9 @@ MODEL_ALIASES: dict[str, str | None] = {
     "pocket": "pocket-tts",
     "pocket-tts": "pocket-tts",
     "pocket_tts": "pocket-tts",
+    "kitten2": "kitten2",
+    "kitten-2": "kitten2",
+    "kitten-tts-2": "kitten2",
 }
 
 
@@ -227,9 +259,13 @@ class PocketTtsEngine:
         )
 
 
-ADAPTERS: dict[str, SpeechEngine] = {
-    "pocket-tts": PocketTtsEngine(),
-}
+def _build_adapters() -> dict[str, SpeechEngine]:
+    from persona_forge.kitten2_engine import Kitten2Engine
+
+    return {"pocket-tts": PocketTtsEngine(), "kitten2": Kitten2Engine()}
+
+
+ADAPTERS: dict[str, SpeechEngine] = _build_adapters()
 
 
 def adapter_for(engine: EngineInfo) -> SpeechEngine:

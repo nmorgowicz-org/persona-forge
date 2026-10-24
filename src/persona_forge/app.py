@@ -29,6 +29,7 @@ from persona_forge import (
     audio_style,
     engine_packs,
     frontend,
+    kitten2_engine,
     model,
     omnivoice_engine,
     project_library,
@@ -2598,6 +2599,8 @@ def openai_models():
     data = []
     for engine in speech_engines.list_engines():
         entry = engine.as_dict()
+        if engine.id == "kitten2":
+            entry["installed"] = kitten2_engine.is_installed()
         entry["created"] = 0
         entry["owned_by"] = "local"
         entry["active"] = active is not None and engine.id == active.id
@@ -2663,7 +2666,10 @@ def openai_audio_speech():
             503,
             "api_error",
         )
-    if engine is not None and engine.id != active_engine.id:
+    # Pack-only engines run in their own worker process beside the active backend, so asking for
+    # one does not require switching TTS_BACKEND.
+    serving_engine = engine if engine is not None and engine.pack_only else active_engine
+    if engine is not None and not engine.pack_only and engine.id != active_engine.id:
         return _openai_error(
             f"Model {engine.id!r} is not active; the active engine is {active_engine.id!r}.",
             409,
@@ -2711,6 +2717,7 @@ def openai_audio_speech():
     # Only activates for PCM format (Hermes requirement); mp3/wav use batch for compatibility.
     if (
         model.TTS_BACKEND == "pocket_tts"
+        and serving_engine.id == "pocket-tts"
         and fmt == "pcm"
         and not repair_requested
     ):
@@ -2720,7 +2727,7 @@ def openai_audio_speech():
 
     # Batch path: all other backends/formats, plus repair-enabled requests.
     try:
-        adapter = speech_engines.adapter_for(active_engine)
+        adapter = speech_engines.adapter_for(serving_engine)
         wav, sr, job_id = adapter.synthesize(
             text,
             language,
@@ -2733,6 +2740,8 @@ def openai_audio_speech():
             instruct=instruct,
         )
         audio, media_type = _encode(wav, sr, fmt)
+    except kitten2_engine.EngineUnavailable as exc:
+        return _openai_error(str(exc), 503, "api_error")
     except Exception as exc:
         if _is_capacity_error(exc):
             print(

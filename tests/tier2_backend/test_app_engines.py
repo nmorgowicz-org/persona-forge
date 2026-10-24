@@ -8,10 +8,13 @@ import json
 from persona_forge import speech_engines, voice_library
 
 
-def test_registry_describes_pocket():
+def test_registry_describes_pocket_and_the_pack_only_kitten2():
     engines = [engine.as_dict() for engine in speech_engines.list_engines()]
 
-    assert [engine["id"] for engine in engines] == ["pocket-tts"]
+    assert [engine["id"] for engine in engines] == ["pocket-tts", "kitten2"]
+    assert [engine["pack_only"] for engine in engines] == [False, True]
+    assert engines[1]["capabilities"]["clone"] is True
+    assert engines[1]["capabilities"]["streaming"] == "none"
     capabilities = engines[0]["capabilities"]
     assert capabilities["clone"] is True
     assert capabilities["presets"] is True
@@ -227,3 +230,161 @@ def test_speech_accepts_persona_forge_alias(client, app_module, monkeypatch):
     assert response.status_code == 500
     assert "Unknown model" not in response.get_data(as_text=True)
     assert captured["voice_id"] is None
+
+
+class _FakeWorker:
+    """Stands in for PackProcess so the Kitten 2 adapter runs without a worker or weights."""
+
+    instances: list["_FakeWorker"] = []
+
+    def __init__(self, command, **_kwargs):
+        self.command = command
+        self.requests: list[dict] = []
+        self.is_alive = True
+        self.closed = False
+        _FakeWorker.instances.append(self)
+
+    def start(self):
+        pass
+
+    def request(self, payload, *, timeout=None):
+        self.requests.append(dict(payload))
+        return {"ok": True}
+
+    def synthesize(self, payload):
+        import io
+        import wave
+
+        self.requests.append({"op": "synthesize", **payload})
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(24000)
+            handle.writeframes(b"\x00\x10" * 240)
+        return buffer.getvalue()
+
+    def close(self):
+        self.closed = True
+
+
+def _kitten_engine(monkeypatch, tmp_path):
+    from persona_forge import kitten2_engine
+
+    _FakeWorker.instances.clear()
+    python = tmp_path / "python"
+    python.write_text("")
+    monkeypatch.setenv("KITTEN2_PYTHON", str(python))
+    monkeypatch.setattr(kitten2_engine, "PackProcess", _FakeWorker)
+    return kitten2_engine.Kitten2Engine(idle_unload_s=0)
+
+
+def test_kitten2_adapter_serves_a_preset(monkeypatch, tmp_path):
+    engine = _kitten_engine(monkeypatch, tmp_path)
+
+    wav, rate, job = engine.synthesize("hi", "English", voice_id="kitten2:Luna", seed_value=5)
+
+    assert rate == 24000 and job is None and len(wav) == 240
+    worker = _FakeWorker.instances[0]
+    assert worker.requests[0] == {"op": "load"}
+    assert worker.requests[-1] == {"op": "synthesize", "text": "hi", "seed": 5, "preset": "Luna"}
+
+
+def test_kitten2_adapter_prepares_a_saved_voice_once(monkeypatch, tmp_path):
+    engine = _kitten_engine(monkeypatch, tmp_path)
+    saved = voice_library.save_voice(
+        b"RIFF....", description="x", sample_text="Some words.", language="English"
+    )
+
+    engine.synthesize("one", "English", voice_id=saved["voice_id"])
+    engine.synthesize("two", "English", voice_id=saved["voice_id"])
+
+    ops = [request["op"] for request in _FakeWorker.instances[0].requests]
+    assert ops == ["load", "prepare", "synthesize", "synthesize"]
+    prepare = _FakeWorker.instances[0].requests[1]
+    assert prepare["reference_text"] == "Some words."
+    assert _FakeWorker.instances[0].requests[-1]["voice_id"] == saved["voice_id"]
+
+
+def test_kitten2_adapter_ignores_pocket_voices(monkeypatch, tmp_path):
+    engine = _kitten_engine(monkeypatch, tmp_path)
+
+    engine.synthesize("hi", "English", voice_id="pocket:vera")
+
+    assert _FakeWorker.instances[0].requests[-1] == {"op": "synthesize", "text": "hi"}
+
+
+def test_kitten2_adapter_unload_closes_the_worker(monkeypatch, tmp_path):
+    engine = _kitten_engine(monkeypatch, tmp_path)
+    engine.synthesize("hi", "English")
+
+    engine.unload()
+    engine.synthesize("again", "English")
+
+    assert _FakeWorker.instances[0].closed is True
+    assert len(_FakeWorker.instances) == 2
+
+
+def test_kitten2_adapter_reports_a_missing_pack(monkeypatch, tmp_path):
+    from persona_forge import kitten2_engine
+
+    monkeypatch.delenv("KITTEN2_PYTHON", raising=False)
+    monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path))
+
+    try:
+        kitten2_engine.Kitten2Engine(idle_unload_s=0).synthesize("hi", "English")
+    except kitten2_engine.EngineUnavailable as exc:
+        assert "not installed" in str(exc)
+    else:
+        raise AssertionError("expected EngineUnavailable")
+
+
+def test_speech_route_serves_kitten2_beside_pocket(client, app_module, monkeypatch, tmp_path):
+    engine = _kitten_engine(monkeypatch, tmp_path)
+    monkeypatch.setitem(speech_engines.ADAPTERS, "kitten2", engine)
+    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+    monkeypatch.setattr(app_module, "_generation_ready", lambda: True)
+    monkeypatch.setattr(app_module.model, "_service_started", True, raising=False)
+
+    response = client.post(
+        "/v1/audio/speech",
+        json={"model": "kitten2", "input": "hello", "voice": "Bruno", "response_format": "wav"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["X-Model-Recognized"] == "true"
+    assert _FakeWorker.instances[0].requests[-1]["preset"] == "Bruno"
+
+
+def test_speech_route_returns_503_when_the_pack_is_missing(client, app_module, monkeypatch, tmp_path):
+    monkeypatch.delenv("KITTEN2_PYTHON", raising=False)
+    monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path))
+    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+    monkeypatch.setattr(app_module, "_generation_ready", lambda: True)
+    monkeypatch.setattr(app_module.model, "_service_started", True, raising=False)
+
+    response = client.post("/v1/audio/speech", json={"model": "kitten2", "input": "hello"})
+
+    assert response.status_code == 503
+    assert "not installed" in response.get_json()["error"]["message"]
+
+
+def test_models_endpoint_reports_kitten2_install_state(client, monkeypatch, tmp_path):
+    monkeypatch.delenv("KITTEN2_PYTHON", raising=False)
+    monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path))
+
+    entries = {item["id"]: item for item in client.get("/v1/models").get_json()["data"]}
+
+    assert entries["kitten2"]["installed"] is False
+    assert entries["kitten2"]["pack_only"] is True
+
+
+def test_engines_endpoint_marks_kitten2_as_an_uninstalled_pack(client, app_module, monkeypatch, tmp_path):
+    monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path))
+    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+
+    cards = {card["id"]: card for card in client.get("/engines").get_json()["engines"]}
+
+    assert cards["kitten2"]["kind"] == "pack"
+    assert cards["kitten2"]["state"]["status"] == "not-installed"
+    assert cards["kitten2"]["state"]["verified"] is False
