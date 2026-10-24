@@ -1,7 +1,9 @@
 # Multi-engine speech: Kokoro, Phonon, Kitten TTS, and first-class built-in voices
 
-**Date:** 2026-10-23 (revised same day after review). **Status:** research-backed proposal; no
-integration implemented, no model installed, no synthesis or listening test performed.
+**Date:** 2026-10-23 (revised same day after review and Phase B screening). **Status:** research-backed
+proposal; no integration implemented. Phase B technical screening and an objective cloning bake-off
+have run (see [20261023-phase-b-screening.md](20261023-phase-b-screening.md)); the blind listening
+pass has not, so no engine is quality-ranked yet.
 
 **Purpose:** turn Persona Forge from a single-renderer app (Pocket-TTS) into a **multi-engine**
 speech studio where:
@@ -29,6 +31,29 @@ Single exception: user-clicked upstream preview samples, cached per §9.2. |
 | Inclusion bar | An engine ships (as optional install) if it passes A/B listening on at least one target and meets lifecycle/memory gates there. CPU/Docker support is a bonus, not a requirement; GPU-only engines are fine. |
 | Default | Pocket stays the default engine for new installs and the rollback target. |
 
+### 0.1 Phase B outcome (screening, not ranking)
+
+Measured 2026-10-23 on the MacBook (M5 Max), the Windows RTX 5090 (torch 2.14.0+cu130, the app's
+pin) and the docker-agent Intel i7-1360P container. Details, caveats and raw numbers are in
+[20261023-phase-b-screening.md](20261023-phase-b-screening.md).
+
+| Engine | Result |
+| --- | --- |
+| Phonon 31M | Fastest on Intel CPU (RTF 0.26-0.31, first audio 0.10 s, about 2x faster than Pocket there). English only, 2 voices, **no local cloning**. |
+| Kokoro 82M | Intel CPU RTF 1.4-1.7 with defaults, **0.64-0.70 once ONNX threads are pinned to 4**. Needs explicit thread settings. 5090 RTF 0.008-0.030. No cloning. |
+| KokoClone | M5 CPU cloning RTF 0.14-0.30. Speaker similarity near the different-speaker floor (0.85). |
+| Kitten TTS 2 | Clones and has 115 voices. M5 MLX RTF 0.15-0.18 (cloning), 5090 compiled 0.25-0.34, **5090 eager 1.2-1.3**, M5 torch CPU 1.7-1.9, not viable on Intel. Compile path needs `triton-windows` plus MSVC Build Tools on Windows. |
+| Kitten nano (0.1) | Intel RTF 0.50-0.63, no streaming. Not worth integrating. |
+| Pocket-TTS (baseline) | Intel RTF 0.51-0.53 (preset), M5 cloning RTF 0.06-0.10. Best identity **by ear on the two Aussie references** (similarity 4.5 vs 2.4-3.6 of 5). On real US and UK references the objective gap closes (0.92-0.98 for all engines) and listening is pending. Misreads numbers and codes in structured text on three of four references. |
+
+Owner decisions since this plan was written: use is private and personal, every cloning option is in
+scope, each is compared against Pocket-TTS, and the product should let users choose. vLLM was
+ruled out for Kitten 2.
+
+**Open before any engine is ranked:** the blind listening ratings, Pocket-TTS on the Intel and 5090
+targets for a like-for-like speed comparison, the compiled Kitten 2 tail-latency cause, and whether
+`kittenml` co-installs with the app's `transformers` lockfile.
+
 ## 1. Candidate engines at a glance
 
 All reviewed families output 24 kHz; adapters must still report the actual rate.
@@ -36,7 +61,7 @@ All reviewed families output 24 kHz; adapters must still report the actual rate.
 | Engine | Cloning | Built-in voices | Best targets (to be verified) | Streaming | Role in Persona Forge |
 | --- | --- | --- | --- | --- | --- |
 | **Pocket-TTS** (current) | Local, from reference audio; cached states | 30 curated app entries (24 English + 6 non-English) | CPU everywhere; existing accelerator families | PCM frame streaming (existing) | Default, universal, low-resource |
-| **Kitten TTS 2** 1.7B | Local in-context, 5–30 s ref + transcript (Python); native C++ needs offline-prepared refs | 115 entries in pinned manifest, multiple languages (docs disagree on totals) | CUDA GPU (Python), Apple silicon (MLX, documented), x86 CPU (C++/GGML) | Sentence-chunk (Python and C++ binding) | High-quality cloning + large preset catalog |
+| **Kitten TTS 2** 1.7B | Local in-context, 5–30 s ref + transcript (Python); native C++ needs offline-prepared refs | 115 entries in pinned manifest, multiple languages (docs disagree on totals) | CUDA GPU (Python, **fast only with a static cache and compiled decode step**), Apple silicon (MLX, measured), not Intel CPU (measured on M5 CPU only; C++/GGML path dropped, see §9.3) | Sentence-chunk (Python and C++ binding) | High-quality cloning + large preset catalog |
 | **KokoClone** (Kokoro + Kanade + vocoder) | Local voice conversion of Kokoro output toward a reference | Inherits Kokoro presets as source | CUDA or CPU; no MPS in wrapper | None (complete audio) | Cloning alternative; batch quality tier |
 | **Kokoro 82M** (native or ONNX) | None (blending ≠ cloning) | ~54 voices, US/UK English + other languages | CPU (ONNX), CUDA, MPS (native, unverified) | Sentence/segment | Fast, light preset engine |
 | **Phonon 31M English** | No local cloning from recordings (released speaker codec unavailable); imports prepared voice files | 102 catalog voices, 37 English | CPU (Rust, AVX2/ARM), no Torch | Frame-level | Very light streaming preset engine |
@@ -272,6 +297,66 @@ an explicit error rather than silently degrading.
 - Streaming is advertised honestly (`frame`/`sentence`/`none`); batch engines still serve PCM as a
   single chunk when requested. Cancel on disconnect; release the executor only after worker cleanup.
 
+### 4.6 Design deltas from Phase B measurements
+
+The sections above stand. Screening found eight things the design did not yet cover; each is a
+change to a section above, not a new subsystem.
+
+1. **Runtime tuning belongs in the pack manifest (§4.4).** Kokoro ONNX ran at RTF 1.4-1.7 with default
+   thread settings and 0.64-0.70 with `intra_op_num_threads=4` on the same host, because the runtime
+   sized its pool to all 16 logical CPUs. A pack manifest therefore carries named runtime settings
+   (thread counts, execution provider, cache implementation) that the adapter applies, and the
+   user-visible default is whatever the pack's own benchmark supports.
+2. **The smoke test must measure speed, not just device (§4.4).** Today it proves the device is used.
+   Kitten 2 on the 5090 used the GPU correctly yet decoded at 17-24 % utilisation and RTF 1.2-1.3.
+   The smoke test records a short RTF and shows "runs slower than real time on this machine" instead
+   of a plain green tick.
+3. **Add a `warming` engine state (§4.1, §4.3).** The compiled Kitten 2 path spends about 33 s on its
+   first call and showed one-off trials of 9 s, 41 s and 85 s against 1-4 s medians. The state
+   machine becomes `loading` → `warming` → `active`. During `warming`, the API returns a documented
+   retryable response and the UI shows progress. Warm-up runs fixed shape buckets, and the compile
+   cache lives under the app data directory so a restart does not pay it again. Worst-case latency,
+   not the median, is what gets reported on the engine card.
+4. **Normalise output loudness at the serving layer (§4.5).** Kitten 2 output is peak-normalised to
+   0.99 with RMS 0.16-0.22; Pocket and KokoClone sit near 0.09. Without correction, changing the API
+   default changes the volume every client hears, and any A/B test is biased toward the louder
+   engine. Apply one consistent target level before encoding, with an opt-out, and level-match Compare
+   playback.
+5. **One shared text normaliser in front of the adapters (§4.2).** Pocket read "AB-104 totals
+   $1,234.56" as "AB 10 of 4 totals $1020.34.56"; Kitten 2 and KokoClone read it correctly. Numbers,
+   currency and codes are normalised once before synthesis, with a per-engine opt-out because Kitten 2
+   already normalises internally and must not be normalised twice. The structured corpus case is a
+   regression test for it.
+   **Tested:** Pocket misread the sentence on all three references tried (r2 Aussie, r3 US, r4 UK;
+   Whisper heard e.g. "1,234 Donfab C6", "$134.34 to $34.5 kilograms"). With the numbers spelled out
+   before synthesis it read correctly on all three, in two variants (kittenml's `normalize_text`, and a
+   hand-spelled one using "AM", "twenty-third", "three and a half"). `kittenml.normalize_text` is not
+   safe to adopt as-is: it raised `ValueError` on "XJ-4471 ... B-12", read a phone number as "five
+   hundred fifty-five to one hundred forty-two", and spelled "www.example.com" letter by letter. Neither
+   the app nor `pocket-tts` normalises text today, so build a small app-owned normaliser (currency,
+   times, ordinals, decimals, units, hyphenated codes read as letters plus digits), with
+   `num2words`-style number conversion, fall back to the raw text on any error, and test it against
+   the structured corpus case on every cloning engine.
+6. **Prepare clones with the transcript (§4.1 binding).** Kitten 2 cloning without `reference_text`
+   loads a Whisper model at synthesis time. Saved voices already carry a transcript
+   (`sample_text`); the binding is prepared with it, and a missing transcript is resolved once at
+   preparation, never during an API request.
+7. **Toolchain prerequisites in the manifest (§4.4).** Compiled Kitten 2 on Windows needs
+   `triton-windows` and MSVC Build Tools; on Linux it needs a C compiler. The pack declares host
+   prerequisites and detects them. If they are missing, the engine card says what is needed and
+   offers the slower eager path as a labelled fallback (RTF 1.2-1.3 on a 5090) rather than failing.
+8. **Benchmarks are per machine, not per engine (§5.2).** The same engine ranges from RTF 0.15
+   (Apple MLX) to 1.9 (the same machine's CPU) to not viable (Intel). Engine cards show the measured
+   speed on this machine from a quick benchmark, with the load average at the time, and never a
+   fixed global claim.
+
+Cloning identity, as heard (one listener, 8 clips per engine per round): on the owner's two female
+Aussie references Pocket-TTS led clearly (similarity 4.5 vs 2.4-3.6). On real American and British
+female recordings all four cloners landed within 0.3 of each other (similarity 4.1-4.4, naturalness
+4.0-4.5, no artifacts), so the first-round gap is specific to those references. Pocket stays the
+default for speed and incumbency; Kitten 2 and KokoClone are credible optional engines. Male voices and
+the owner's own recordings are untested.
+
 ## 5. UI/UX
 
 Guiding principles: one voice catalog, one engine manager, one way to choose defaults; every state
@@ -398,6 +483,27 @@ checkpoint — pick a French-capable model or an English voice".
    requested French voice over the API still serves (enforcement off), then errors with the §5.8
    message after turning enforcement on.
 
+### 5.10 Compare refinements from the bake-off
+
+The prototype listening sheet (`bench/listen/index.html`, 8 items by 4 clips) is the working model
+for §5.5. What it taught:
+
+- **Level-match every clip** before playback. One engine's output was about twice as loud as the
+  others'; unmatched playback would have decided the result.
+- **Play the reference first** in each item, with its transcript visible, so "sounds like the
+  reference" is a judgement against something heard seconds earlier.
+- **Three separate ratings**, not one: similarity to the reference, naturalness, artifacts. The
+  objective check already showed these can diverge: the engine that is most similar to the reference
+  also misread numbers.
+- **Keep the key hidden until export**, and shuffle clip order per item, so A/B/C/D never means the
+  same engine twice.
+- **Show worst-trial latency next to the median** on each slot, and show a `warming` engine as such.
+- **Include the structured text** (numbers, currency, codes) in the default preset corpus. It is the
+  case that exposed a real failure.
+- Automatic scores (speaker-similarity, Whisper word error rate) may appear as small "auto-check"
+  hints under a clip, labelled non-authoritative. The similarity metric used here is not calibrated
+  for synthetic voices and must never replace the rating.
+
 ## 6. Evaluation (Phase B: technical screening)
 
 Phase B answers **"can this engine run and serve on this target, fast enough?"** It is deliberately
@@ -472,6 +578,53 @@ RTX 5090. Kitten TTS 2 is blocked on its Windows build.
 
 A1/A2 can proceed in parallel with B.
 
+### 7.1 Phase C4: Kitten 2 as the first new engine
+
+Owner decision: Kitten 2 goes first (clone-capable, MLX on the Mac, compiled CUDA on the 5090).
+Phonon 31M follows as the Intel CPU preset engine.
+
+**Already on `feat/multi-engine-speech`:** engine registry and `/v1/models` discovery
+(`speech_engines.py`), the `SpeechEngine` adapter protocol with a Pocket adapter, pack manifests,
+verification and installer (`engine_packs.py`), and the newline-JSON worker transport
+(`pack_process.py`, with `ping` and `synthesize` ops and a hard kill on timeout). The transport's
+own docstring says no worker is spawned yet; Kitten 2 is that first worker.
+
+**Dependency check (done):** `kittenml` 0.9.6 resolves against the app's exact pins
+(`transformers==5.12.1`, `numpy==2.4.6`; it pulls torch 2.14.x, librosa, phonemizer, espeakng-loader,
+onnx). The Mac bench already ran on transformers 5.12.1. It would co-install, but it adds heavy
+packages and a second torch consumer, so it stays a **pack with its own venv and child process**, as
+§4.4 specifies, not an app dependency.
+
+**Tasks, in order:**
+
+1. **Worker** (`kitten2_worker.py`, runs inside the pack venv): ops `ping`, `load` (device and
+   backend chosen at load: `mlx` on Apple silicon, `cuda` with `cache_implementation="static"` on
+   NVIDIA, otherwise refuse), `prepare` (reference audio plus transcript, so Whisper runs at
+   preparation and never during a request, per §4.6 item 6), `synthesize`, `unload`. A first
+   synthesize on CUDA compiles for about 33 s, so `load` runs a warm-up request and the UI shows
+   "warming up" instead of hanging.
+2. **Pack manifest** for `kitten2` with per-platform runtime variants (`python-mlx`, `python-cuda`),
+   locked dependencies, artifact hashes, and the CUDA extras (`triton-windows`, MSVC check on
+   Windows) reported as a preflight failure with an actionable message, not a stack trace.
+3. **Adapter** `Kitten2Engine` in `speech_engines.py`: maps `voice_id` to a prepared clone or one of
+   the 115 presets, forwards `seed_value`, returns `(wav, sample_rate, job_id)`; capability flags
+   `clone=True`, `presets=True`, `streaming="none"`, no `instructions`. Register it in `ENGINES`,
+   `MODEL_ALIASES` (`kitten2`, `kitten-tts-2`) and `ADAPTERS`.
+4. **Text normaliser** (§4.6 item 5) with a per-engine opt-out; Kitten 2 opts out because it
+   normalises internally. Pocket gets it first as the proving ground.
+5. **Tests:** worker protocol against a stub model (no weights in CI), manifest parsing, adapter
+   routing, and an opt-in smoke test that runs real weights on a machine that has the pack.
+6. **UI:** Speech engines manager card (install, warm-up state, remove), clone-prepare action on a
+   saved voice, and capability-correct controls (no streaming toggle, no instruction field).
+
+**Gate:** a saved voice cloned through the API with `model: kitten2` on the Mac (MLX) and the 5090
+(compiled), cancel and unload release memory, Pocket is untouched when the pack is absent, and the
+engine is reachable from `/v1/models`.
+
+**Open validations that do not block the start:** seed-matched MLX versus CUDA output, the cause of
+the compiled-CUDA latency spikes (9 s, 41 s, 85 s trials; decide warm-up and timeout values from
+it), and Pocket on the Intel and 5090 hosts for the speed comparison.
+
 Docs deliverables ride the phases: Phase C updates `docs/api/HTTP_API_REFERENCE.md`,
 `docs/ENV_REFERENCE.md` and `docs/agent-reference/RUNTIME_AND_MEMORY.md`; Phase E adds user-facing
 engine-manager and Compare docs.
@@ -512,6 +665,9 @@ These decisions supersede earlier tentative wording about previews and small Poc
 3. **Kitten 2 C++ is a test decision, not a user choice now:** compare Python/MLX/CUDA and native
    CPU serving where supported, including clone preparation cost, output quality, cancellation,
    latency and total dependencies. Choose supported paths from evidence.
+   **Resolved by Phase B:** the C++ fork fails to build on Windows (MSVC 19.44, `char8_t`) and ships
+   no prebuilt binaries, so it is dropped as a shipping path. Python on MLX and on compiled CUDA is
+   the supported route, with the Triton/MSVC packaging constraint above.
 4. **KokoClone has two different voices:** the target reference is the existing saved
    OmniVoice-designed voice. Kokoro first speaks the text in a built-in source voice, then Kanade
    converts that speech toward the target reference. The source voice is an intermediate technical
