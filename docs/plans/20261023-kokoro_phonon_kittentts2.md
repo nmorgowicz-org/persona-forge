@@ -670,8 +670,26 @@ error mapping, fast-mode fallback, and the provisioner (`kitten2_pack.py`).
   cached; weights dominate), pack 2.0 GB weights + 1.5 GB environment. Serving: first request 9.1 s
   including worker start, then 0.8 s preset and 1.5 s clone; `/engines` reports `verified` and
   `mode: mlx`; Re-check returned to `ready` in under 12 s.
-- **Not yet verified:** a real install on the 5090 (the CUDA index, `triton-windows`, and the Visual
-  Studio message end to end through the app), the engine-manager UI, and the text normaliser.
+- **Real install on the 5090 (Windows, scratch pack dir):** 159 s with warm package caches (the
+  first attempt took 669 s). It picked `cuda13` (cu130, torch 2.14.0) and installed
+  `triton-windows`. Serving from the pack: first request 62.6 s including the compile, then 1.0-1.3 s
+  for 2.7 s of audio (RTF 0.36-0.5 with the machine busy), mode `compiled`.
+- **Broken compiler, through the real adapter:** mode `eager` (RTF 1.3, still works) and the status
+  carries `needs_build_tools` with the plain-language message, the "Desktop development with C++"
+  workload, the Visual Studio download link and the raw `InductorError ... WinError 2` kept only in
+  `detail`.
+- **Two bugs the real 5090 run found, both fixed with tests:**
+  1. Newer drivers print `CUDA UMD Version: 13.4`, not `CUDA Version:`, so the parser returned
+     nothing and the 5090 was given the **cu126** wheels. Those have no `sm_120` kernels, yet the
+     old check (`import kittenml`) still reported the pack verified. Detection now parses both
+     banners, falls back to the driver release, refuses Blackwell on an unconfirmed driver, and the
+     install check asserts that torch has kernels for the GPU's architecture.
+  2. Importing `kitten2_engine` before `speech_engines` raised a circular import (the app only
+     worked through import order). The adapter is now built on first use via `get_adapter`.
+- **Not yet verified:** the engine-manager UI, the text normaliser, Kitten's presets in
+  `/v1/audio/voices`, and a Linux CUDA install (the code path is shared but untested). A pack
+  installed by the buggy build (wrong torch) must be removed and reinstalled; retrying reuses the
+  environment.
 
 Docs deliverables ride the phases: Phase C updates `docs/api/HTTP_API_REFERENCE.md`,
 `docs/ENV_REFERENCE.md` and `docs/agent-reference/RUNTIME_AND_MEMORY.md`; Phase E adds user-facing
