@@ -172,7 +172,6 @@ class OpenVinoVocoderRuntime:
         # Use the minimal valid shape the IR was traced with: [1, 16, 325] or similar.
         # If last dim is dynamic (-1), we pick 325 as reference.
         try:
-            from openvino.runtime import PartialShape
             p = self.compiled_model.input(0).get_partial_shape()
             seq_dim = int(p[2]) if p[2].is_static else 325
         except Exception:

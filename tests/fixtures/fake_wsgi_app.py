@@ -37,4 +37,3 @@ _rt = FakeModelRuntime(
 )
 _rt.install()
 
-from persona_forge.app import app  # noqa: E402

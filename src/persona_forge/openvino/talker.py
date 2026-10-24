@@ -875,7 +875,8 @@ class OVTalkerRuntime:
                 past_key_values=past_key_values,
             ), inputs_embeds)
             try:
-                import os as _os2, numpy as _np2
+                import os as _os2
+                import numpy as _np2
                 if _os2.path.exists("/tmp/tts_dump") and inputs_embeds is not None and inputs_embeds.shape[1] > 1:
                     _np2.save("/tmp/dump_ie_prefill.npy", inputs_embeds.detach().float().cpu().numpy())
                     _np2.save("/tmp/dump_out_prefill.npy", out.last_hidden_state.detach().float().cpu().numpy())
@@ -895,7 +896,6 @@ class OVTalkerRuntime:
                     and inputs_embeds.shape[1] == 1  # decode only
                     and _main_diag["n"] < 12
                 ):
-                    import torch as _t
                     iv = inputs_embeds.float().reshape(-1)
                     ov = out.last_hidden_state.float().reshape(-1)
                     din = (

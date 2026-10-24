@@ -154,7 +154,6 @@ def patch_eager_attention_mask_broadcast() -> None:
     _patch_eager_attention_mask_broadcast_applied = True
 
     from qwen_tts.core.models import modeling_qwen3_tts as M
-    import torch
 
     # 1) Patch sdpa_attention_forward for stale-mask slicing
     from transformers.integrations import sdpa_attention

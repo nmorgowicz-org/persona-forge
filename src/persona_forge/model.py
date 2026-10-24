@@ -261,7 +261,7 @@ def _validate_ov_metadata(model_dir: str, model_repo: str, revision: str | None)
         raise RuntimeError(f"OV_MODEL_DIR missing metadata.json: {meta_path}")
 
     ov_metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-    from persona_forge.openvino.runtime_config import get_ov_config, resolve_inference_threads
+    from persona_forge.openvino.runtime_config import get_ov_config
     ov_config = get_ov_config()
 
     # Validate metadata matches loaded model
@@ -2144,8 +2144,8 @@ def _run_generate(
             _bf16_auto_fallback = os.environ.get("TTS_DIAG_BF16_AUTO_FALLBACK", "").lower() in ("1", "true")
             if _bf16_auto_fallback and TTS_BACKEND == "pytorch" and TORCH_DTYPE_NAME == "bfloat16":
                 print(
-                    f"[diag] pytorch+bfloat16 timed out; TTS_DIAG_BF16_AUTO_FALLBACK is set, "
-                    f"switching to float32 to avoid future hangs",
+                    "[diag] pytorch+bfloat16 timed out; TTS_DIAG_BF16_AUTO_FALLBACK is set, "
+                    "switching to float32 to avoid future hangs",
                     flush=True,
                 )
                 try:
@@ -2157,8 +2157,8 @@ def _run_generate(
                     print(f"[diag] Failed to switch to float32 on timeout: {ex}", flush=True)
             elif not _bf16_auto_fallback and TTS_BACKEND == "pytorch" and TORCH_DTYPE_NAME == "bfloat16":
                 print(
-                    f"[diag] pytorch+bfloat16 timed out; auto-fallback to float32 is disabled "
-                    f"(set TTS_DIAG_BF16_AUTO_FALLBACK=1 to enable).",
+                    "[diag] pytorch+bfloat16 timed out; auto-fallback to float32 is disabled "
+                    "(set TTS_DIAG_BF16_AUTO_FALLBACK=1 to enable).",
                     flush=True,
                 )
 

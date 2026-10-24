@@ -22,7 +22,7 @@ _UI_PREFERENCES_MAX_BODY = 16 * 1024
 
 
 import soundfile as sf
-from flask import Flask, Response, jsonify, request, send_from_directory, send_file
+from flask import Flask, Response, jsonify, request, send_from_directory
 
 from persona_forge import (
     audio_diagnostics,

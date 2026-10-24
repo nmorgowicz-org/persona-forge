@@ -6,7 +6,6 @@ persona_forge.app so that model-heavy imports see the fake, not the real runtime
 
 from __future__ import annotations
 
-import sys
 
 import pytest
 

@@ -427,7 +427,7 @@ def run() -> int:
     if metadata.get("compression") in {"int8", "both"} and not has_all_int8:
         raise SystemExit("metadata requires INT8 parity but no complete INT8 artifact set exists")
 
-    from export_openvino import _resolve_vocoder_decoder, _set_eager_attention
+    from export_openvino import _set_eager_attention
     from persona_forge.model_config import configure_hf_token
     configure_hf_token()
 

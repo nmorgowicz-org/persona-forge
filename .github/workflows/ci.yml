@@ -43,6 +43,9 @@ jobs:
       - name: Check whitespace
         run: git diff --check
 
+      - name: Lint (ruff, correctness rules)
+        run: ruff check .
+
       - name: Validate repository
         run: python scripts/validate_repo.py
 

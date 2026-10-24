@@ -665,7 +665,6 @@ def run() -> int:
         print(f"[logits-parity] {logits_section['NOTE']}", flush=True)
 
     # ── Compose report ──────────────────────────────────────────────────────────
-    import shutil
     report = {
         "mode": args.mode,
         "model_repo": metadata["model_repo"],
