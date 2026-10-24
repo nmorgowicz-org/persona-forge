@@ -505,3 +505,28 @@ def test_pocket_adapter_normalises_text_but_the_switch_turns_it_off(monkeypatch)
     engine.synthesize("Room 101", "English")
 
     assert seen == ["Room one hundred one", "Room 101"]
+
+
+def test_voice_catalog_lists_kitten_presets_from_the_installed_weights(client, monkeypatch, tmp_path):
+    from persona_forge import kitten2_engine
+
+    snapshot = tmp_path / "pack" / "hf" / "models--KittenML--kitten-tts-2" / "snapshots" / "abc" / "voices"
+    snapshot.mkdir(parents=True)
+    (snapshot / "voices.json").write_text('{"Bruno": {}, "Luna": {}}')
+    monkeypatch.setattr(kitten2_engine, "pack_directory", lambda root=None: tmp_path / "pack")
+    monkeypatch.setattr(kitten2_engine, "is_installed", lambda root=None: True)
+
+    voices = client.get("/v1/audio/voices").get_json()["data"]
+
+    ids = {v["voice_id"] for v in voices if v["engine"] == "kitten2"}
+    assert ids == {"kitten2:Bruno", "kitten2:Luna"}
+
+
+def test_voice_catalog_has_no_kitten_presets_when_not_installed(client, monkeypatch):
+    from persona_forge import kitten2_engine
+
+    monkeypatch.setattr(kitten2_engine, "is_installed", lambda root=None: False)
+
+    voices = client.get("/v1/audio/voices").get_json()["data"]
+
+    assert not [v for v in voices if v["engine"] == "kitten2"]

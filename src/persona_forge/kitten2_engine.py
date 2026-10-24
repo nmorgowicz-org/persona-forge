@@ -8,6 +8,7 @@ GPU/unified memory comes back. Pocket-TTS is never touched.
 from __future__ import annotations
 
 import io
+import json
 import os
 import threading
 import wave
@@ -59,6 +60,21 @@ def pack_python(root: Path | None = None) -> Path | None:
 
 def is_installed(root: Path | None = None) -> bool:
     return pack_python(root) is not None
+
+
+def list_presets(root: Path | None = None) -> list[str]:
+    """Names of the built-in voices, read from the downloaded weights (no model load needed)."""
+    directory = pack_directory(root)
+    if directory is None or not is_installed(root):
+        return []
+    for catalog in sorted((directory / "hf").glob("models--*kitten-tts-2/snapshots/*/voices/voices.json")):
+        try:
+            data = json.loads(catalog.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            return sorted(str(name) for name in data)
+    return []
 
 
 def _decode_wav(data: bytes) -> tuple[np.ndarray, int]:

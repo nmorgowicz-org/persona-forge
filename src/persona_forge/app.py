@@ -2671,6 +2671,19 @@ def openai_voices():
                     "servable": True,
                 }
             )
+    for name in kitten2_engine.list_presets():
+        data.append(
+            {
+                "voice_id": f"{kitten2_engine.PRESET_PREFIX}{name}",
+                "object": "voice",
+                "engine": kitten2_engine.ENGINE_ID,
+                "kind": "preset",
+                "display_name": name,
+                "language": None,
+                "language_code": None,
+                "servable": True,
+            }
+        )
     return jsonify({"object": "list", "data": data})
 
 
