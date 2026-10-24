@@ -64,3 +64,8 @@ def test_env_switch_disables_normalisation(monkeypatch):
     assert text_normalizer.enabled() is False
     monkeypatch.delenv("TTS_NORMALIZE_TEXT")
     assert text_normalizer.enabled() is True
+
+
+def test_iso_dates_are_read_as_dates():
+    assert normalize("on 2025-02-09 it") == "on February ninth, twenty twenty-five it"
+    assert normalize("on 2005-12-31") == "on December thirty-first, two thousand five"

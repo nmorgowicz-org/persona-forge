@@ -151,6 +151,25 @@ def _code(match: re.Match[str]) -> str:
     return " ".join(spoken)
 
 
+_MONTHS = (
+    "January February March April May June July August September October November December"
+).split()
+
+
+def _iso_date(match: re.Match[str]) -> str:
+    year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        return match.group(0)
+    return f"{_MONTHS[month - 1]} {_ordinal(day)}, {_integer_year(year)}"
+
+
+def _integer_year(year: int) -> str:
+    head, tail = divmod(year, 100)
+    if 1000 <= year <= 2099 and tail and not (head == 20 and tail < 10):
+        return f"{number_to_words(head)} {'oh ' if tail < 10 else ''}{number_to_words(tail)}"
+    return number_to_words(year)
+
+
 def _unit(match: re.Match[str]) -> str:
     number, unit = match.group(1), match.group(2)
     spoken_unit = _UNITS.get(unit.lower())
@@ -170,6 +189,7 @@ def _unit(match: re.Match[str]) -> str:
 _RULES: tuple[tuple[re.Pattern[str], object], ...] = (
     (re.compile(r"([$£€])\s?(\d[\d,]*)(?:\.(\d{2}))?(?!\d)"), _money),
     (re.compile(r"\b(\d{1,2}):(\d{2})\s?([AaPp]\.?[Mm]\.?)?(?![\d:])"), _time),
+    (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"), _iso_date),
     (re.compile(r"\b[A-Z]{1,5}-\d+(?:-[A-Z0-9]+)*\b|\b\d+-[A-Z]{1,5}\b"), _code),
     (re.compile(r"\b\d{3}-\d{4}\b"), lambda m: _digits(m.group(0))),
     (re.compile(r"(\d[\d,]*(?:\.\d+)?)\s?%"), lambda m: _decimal_or_int(m.group(1)) + " percent"),
