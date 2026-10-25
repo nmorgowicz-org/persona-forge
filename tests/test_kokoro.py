@@ -6,7 +6,7 @@ import wave
 import numpy as np
 import pytest
 
-from persona_forge import engine_packs, kokoro_engine, kokoro_pack, kokoro_worker, speech_engines
+from persona_forge import engine_packs, kokoro_engine, pack_preset_engine, kokoro_pack, kokoro_worker, speech_engines
 from persona_forge.kitten2_engine import EngineUnavailable, InvalidVoice
 
 
@@ -243,7 +243,7 @@ def engine(monkeypatch, tmp_path):
     pack = tmp_path / "pack"
     monkeypatch.setenv("KOKORO_PYTHON", str(python))
     monkeypatch.setattr(kokoro_engine, "pack_directory", lambda root=None: pack)
-    monkeypatch.setattr(kokoro_engine, "PackProcess", FakeProcess)
+    monkeypatch.setattr(pack_preset_engine, "PackProcess", FakeProcess)
     return kokoro_engine.KokoroEngine(idle_unload_s=0)
 
 
@@ -257,7 +257,7 @@ def test_adapter_serves_a_voice_at_the_requested_speed(engine):
 
 
 def test_adapter_refuses_to_clone_a_saved_voice(engine, monkeypatch):
-    monkeypatch.setattr(kokoro_engine.voice_library, "get_voice", lambda vid: {"voice_id": vid})
+    monkeypatch.setattr(pack_preset_engine.voice_library, "get_voice", lambda vid: {"voice_id": vid})
 
     with pytest.raises(InvalidVoice, match="cannot clone"):
         engine.synthesize("hi", "English", voice_id="vd_abc")
@@ -265,7 +265,7 @@ def test_adapter_refuses_to_clone_a_saved_voice(engine, monkeypatch):
 
 def test_adapter_maps_an_unknown_voice_to_invalid_voice(engine, monkeypatch):
     def fail(self, payload):
-        raise kokoro_engine.PackProcessError("unknown preset 'xx_nobody'")
+        raise pack_preset_engine.PackProcessError("unknown preset 'xx_nobody'")
 
     monkeypatch.setattr(FakeProcess, "synthesize", fail)
 

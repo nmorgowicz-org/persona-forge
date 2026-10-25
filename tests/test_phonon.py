@@ -5,7 +5,7 @@ import wave
 import numpy as np
 import pytest
 
-from persona_forge import engine_packs, phonon_engine, phonon_pack, phonon_worker, speech_engines
+from persona_forge import engine_packs, pack_preset_engine, phonon_engine, phonon_pack, phonon_worker, speech_engines
 from persona_forge.kitten2_engine import EngineUnavailable, InvalidVoice
 
 
@@ -208,7 +208,7 @@ def engine(monkeypatch, tmp_path):
     python = tmp_path / "python"
     python.write_text("")
     monkeypatch.setenv("PHONON_PYTHON", str(python))
-    monkeypatch.setattr(phonon_engine, "PackProcess", FakeProcess)
+    monkeypatch.setattr(pack_preset_engine, "PackProcess", FakeProcess)
     return phonon_engine.PhononEngine(idle_unload_s=0)
 
 
@@ -223,7 +223,7 @@ def test_adapter_serves_a_preset(engine):
 
 
 def test_adapter_refuses_to_clone_a_saved_voice(engine, monkeypatch):
-    monkeypatch.setattr(phonon_engine.voice_library, "get_voice", lambda vid: {"voice_id": vid})
+    monkeypatch.setattr(pack_preset_engine.voice_library, "get_voice", lambda vid: {"voice_id": vid})
 
     with pytest.raises(InvalidVoice, match="cannot clone"):
         engine.synthesize("hi", "English", voice_id="vd_abc")
@@ -231,7 +231,7 @@ def test_adapter_refuses_to_clone_a_saved_voice(engine, monkeypatch):
 
 def test_adapter_maps_an_unknown_preset_to_invalid_voice(engine, monkeypatch):
     def fail(self, payload):
-        raise phonon_engine.PackProcessError("unknown preset 'Nobody'")
+        raise pack_preset_engine.PackProcessError("unknown preset 'Nobody'")
 
     monkeypatch.setattr(FakeProcess, "synthesize", fail)
 
