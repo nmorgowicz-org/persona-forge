@@ -40,6 +40,7 @@ from real tensors via `DynamicCache.from_legacy_cache`, so lazy init never runs.
 from __future__ import annotations
 
 import os
+from typing import Any
 from pathlib import Path
 
 import numpy as np
@@ -152,8 +153,8 @@ class _OVCore:
         self._buffer_kv = os.getenv("OPENVINO_BUFFER_KV", "0") == "1"
 
         # Persistent K/V and output buffers (only when buffer mode is enabled).
-        self._kv_buf = None          # [L][2][1, kv_heads, max_seq, head_dim]
-        self._out_decode = None      # [1, 1, hidden] reused every decode step
+        self._kv_buf: Any = None          # [L][2][1, kv_heads, max_seq, head_dim]
+        self._out_decode: Any = None      # [1, 1, hidden] reused every decode step
         self._cache_len = 0
         self._dims_set = False
 
@@ -313,9 +314,9 @@ class _OVCore:
         present = _dynamic_cache_from_kv(legacy_present)
 
         return BaseModelOutputWithPast(
-            last_hidden_state=last_hidden,
+            last_hidden_state=last_hidden,  # pyright: ignore[reportArgumentType]
             past_key_values=present,
-            hidden_states=(last_hidden,),
+            hidden_states=(last_hidden,),  # pyright: ignore[reportArgumentType]
             attentions=None,
         )
 
@@ -391,9 +392,9 @@ class _OVCore:
         present = _dynamic_cache_from_kv(legacy_present)
 
         return BaseModelOutputWithPast(
-            last_hidden_state=last_hidden,
+            last_hidden_state=last_hidden,  # pyright: ignore[reportArgumentType]
             past_key_values=present,
-            hidden_states=(last_hidden,),
+            hidden_states=(last_hidden,),  # pyright: ignore[reportArgumentType]
             attentions=None,
         )
 
@@ -430,7 +431,7 @@ def _length_only_cache(seq_length: int, num_layers: int):
         def get_seq_length(self, layer_idx: int = 0) -> int:
             return self._seq_length
 
-        def get_mask_sizes(self, cache_position, layer_idx: int) -> tuple[int, int]:
+        def get_mask_sizes(self, cache_position, layer_idx: int) -> tuple[int, int]:  # pyright: ignore[reportIncompatibleMethodOverride]
             return self._seq_length + cache_position.shape[0], 0
 
         def get_max_cache_shape(self, layer_idx: int = 0) -> int:
@@ -569,9 +570,9 @@ class _OVStatefulCore:
                 )
         cache = _length_only_cache(self._cache_len, self.num_layers)
         return BaseModelOutputWithPast(
-            last_hidden_state=hidden,
+            last_hidden_state=hidden,  # pyright: ignore[reportArgumentType]
             past_key_values=cache,
-            hidden_states=(hidden,),
+            hidden_states=(hidden,),  # pyright: ignore[reportArgumentType]
             attentions=None,
         )
 
@@ -593,13 +594,13 @@ class OVTalkerRuntime:
 
     def __init__(self, model_dir, talker, ov_config=None, *, compression: str | None = None,
                  core=None, speech_tokenizer=None):
-        import openvino as ov
+        import openvino as ov  # pyright: ignore[reportMissingImports]
 
         from persona_forge.openvino.runtime_config import get_ov_config
 
         self.model_dir = Path(model_dir)
         self._talker = talker
-        self._ov_config = dict(ov_config) if ov_config is not None else get_ov_config()
+        self._ov_config: dict[str, Any] = dict(ov_config) if ov_config is not None else get_ov_config()
         self.core = core or ov.Core()
         self.compression = (compression or self._default_compression()).lower()
 
@@ -869,7 +870,7 @@ class OVTalkerRuntime:
             inputs_embeds=None, use_cache=None, output_attentions=None,
             output_hidden_states=None, cache_position=None, **kwargs,
         ):
-            out = _match_dtype(main_runner.run(
+            out: Any = _match_dtype(main_runner.run(
                 inputs_embeds=inputs_embeds, attention_mask=attention_mask,
                 position_ids=position_ids, cache_position=cache_position,
                 past_key_values=past_key_values,
@@ -1011,13 +1012,15 @@ class OVTalkerRuntime:
             st = self._speech_tokenizer
             if st is not None:
                 self._orig_st_decode = st.decode
+                orig_decode = st.decode
+                vocoder = self.vocoder_runtime
 
                 # One-time warning on first fallback to avoid silent PyTorch takeover.
                 first_decode_failure = [True]
 
                 def _ov_decode(inputs, *args, **kwargs):
                     try:
-                        return self.vocoder_runtime.decode(inputs, *args, **kwargs)
+                        return vocoder.decode(inputs, *args, **kwargs)
                     except Exception:
                         if self._codec_released:
                             # Fail-closed: the PyTorch codec was freed after startup, so
@@ -1036,7 +1039,7 @@ class OVTalkerRuntime:
                                 "Subsequent calls will keep using PyTorch without logging.",
                                 flush=True,
                             )
-                        return self._orig_st_decode(inputs, *args, **kwargs)
+                        return orig_decode(inputs, *args, **kwargs)
 
                 st.decode = _ov_decode
 
