@@ -13,6 +13,7 @@ interface ModelEntry {
   id: string
   label: string
   installed?: boolean
+  warming?: boolean
   capabilities: { clone?: boolean }
 }
 interface VoiceEntry {
@@ -20,6 +21,11 @@ interface VoiceEntry {
   engine: string | null
   kind: 'library' | 'preset'
   display_name: string
+}
+interface Reference {
+  name: string
+  text: string
+  src: string
 }
 interface Slot {
   engine: string
@@ -86,6 +92,7 @@ export function CompareTab() {
   const [running, setRunning] = useState(false)
   const [playing, setPlaying] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [reference, setReference] = useState<Reference | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [summary, setSummary] = useState<{ count: number; rows: EngineSummary[] }>({ count: 0, rows: [] })
   const buffers = useRef<Record<number, AudioBuffer>>({})
@@ -102,6 +109,15 @@ export function CompareTab() {
       .then(([m, v]) => {
         const list: ModelEntry[] = m.data ?? []
         setModels(list)
+        // Engines still loading their worker answer slowly; say so instead of looking broken.
+        fetch('/engines')
+          .then((res) => res.json())
+          .then((body: { engines?: { id: string; load_status?: { state?: string } }[] }) => {
+            const cards = body.engines ?? []
+            const warming = new Set(cards.filter((c) => c.load_status?.state === 'loading').map((c) => c.id))
+            setModels((cur) => cur.map((e) => ({ ...e, warming: warming.has(e.id) })))
+          })
+          .catch(() => undefined)
         setVoices(v.data ?? [])
         const ready = list.filter((e) => e.installed !== false)
         setSlots(ready.slice(0, 2).map((e) => ({ engine: e.id, voice: '' })))
@@ -115,6 +131,15 @@ export function CompareTab() {
       (v) => (v.kind === 'preset' && v.engine === engine) || (v.kind === 'library' && info?.capabilities.clone),
     )
   }
+
+  // One saved voice, rendered by every installed engine that can clone it (at most four).
+  const cloneVoice = (
+    slots.map((slot) => voices.find((v) => v.voice_id === slot.voice && v.kind === 'library')).find(Boolean) ??
+    voices.find((v) => v.kind === 'library')
+  )?.voice_id
+  const cloners = models.filter((m) => m.installed !== false && m.capabilities.clone).slice(0, 4)
+  const sameVoicePlan: Slot[] | null =
+    cloneVoice && cloners.length >= 2 ? cloners.map((m) => ({ engine: m.id, voice: cloneVoice })) : null
 
   function isClone(slot: Slot): boolean {
     const id = slot.voice || voicesFor(slot.engine)[0]?.voice_id
@@ -132,6 +157,24 @@ export function CompareTab() {
     setRevealed(false)
     setRatings({})
     setOrder(shuffled(slots.map((_, i) => i)))
+    setReference(null)
+    const refId = slots
+      .map((slot) => slot.voice || voicesFor(slot.engine)[0]?.voice_id)
+      .find((id) => voices.some((v) => v.voice_id === id && v.kind === 'library'))
+    if (refId) {
+      fetch(`/voices/${encodeURIComponent(refId)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((meta) => {
+          if (meta?.audio_base64) {
+            setReference({
+              name: meta.description || refId,
+              text: (meta.sample_text || '').trim(),
+              src: `data:audio/wav;base64,${meta.audio_base64}`,
+            })
+          }
+        })
+        .catch(() => undefined)
+    }
     setResults(slots.map(() => ({ status: 'idle' })))
     const ctx = (audio.current ??= { ctx: new AudioContext() }).ctx
     for (let i = 0; i < slots.length; i++) {
@@ -271,7 +314,7 @@ export function CompareTab() {
               {models.map((m) => (
                 <option key={m.id} value={m.id} disabled={m.installed === false}>
                   {m.label}
-                  {m.installed === false ? ' (install to compare)' : ''}
+                  {m.installed === false ? ' (install to compare)' : m.warming ? ' (warming up)' : ''}
                 </option>
               ))}
             </select>
@@ -310,6 +353,20 @@ export function CompareTab() {
             <Plus />
             Add slot
           </Button>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            disabled={!sameVoicePlan}
+            title={
+              sameVoicePlan
+                ? undefined
+                : 'Needs a saved voice and at least two installed engines that can clone it'
+            }
+            onClick={() => sameVoicePlan && setSlots(sameVoicePlan)}
+          >
+            Same voice on every cloning engine
+          </Button>
           <label className="flex items-center gap-1.5 text-xs">
             <input type="checkbox" checked={blind} onChange={(event) => setBlind(event.target.checked)} />
             <Shuffle className="size-3" />
@@ -327,6 +384,18 @@ export function CompareTab() {
 
       {results.length > 0 && (
         <div className="flex flex-col gap-2">
+          {reference && (
+            <div className="flex flex-col gap-1 rounded-control border border-border p-3" data-testid="compare-reference">
+              <span className="text-xs font-medium">Reference: {reference.name}</span>
+              <audio controls src={reference.src} className="h-8 w-full max-w-md" />
+              <p className="text-[11px] text-muted-foreground">
+                {reference.text ? `“${reference.text}”` : 'No transcript saved for this voice.'}
+              </p>
+              <span className="text-[11px] text-muted-foreground">
+                Listen to this first, then judge how closely each clip sounds like it.
+              </span>
+            </div>
+          )}
           <p className="text-[11px] text-muted-foreground">
             Clips are level-matched to {TARGET_RMS_DB} dB RMS on playback, so loudness cannot decide the result.
           </p>

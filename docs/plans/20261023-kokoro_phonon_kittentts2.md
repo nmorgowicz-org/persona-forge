@@ -438,8 +438,11 @@ is level-matched to -23 dB RMS in the browser. Verified with Pocket, Kitten 2, P
 slots. A failed slot no longer blocks the reveal. **Update.** Ratings are now saved on the server (`/compare/results`, see the API reference), ratings
 from the first browser-only version are uploaded once, a Similar rating appears for cloned voices,
 the summary shows median and worst generation time, and each engine card shows "Your ratings".
-**Still not built:** reference clip played first with its transcript, the "compare this voice on all
-ready engines" shortcut, `warming` engines shown as such, and the optional automatic-check hints.
+**Also built (Mac, browser-checked):** the reference clip is played first with its transcript
+(or "No transcript saved"), a "Same voice on every cloning engine" button fills up to four slots with
+one saved voice, and an engine whose worker is still loading shows "(warming up)" (checked with a
+stubbed `/engines` response, not a real slow load). **Still not built:** the optional automatic-check
+hints (word error, speaker similarity), deliberately skipped.
 Ratings left at the default 3 are saved as 3, so they count in the averages. Cloning a saved voice
 that has no transcript on Kitten 2 returns a plain 400 (it used to try a network model download).
 
