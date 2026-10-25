@@ -436,8 +436,8 @@ engines), serial generation with generate time and audio length per slot, blind 
 letters, Natural and Clean ratings (1-5), a favourite, and a reveal that saves the session. Playback
 is level-matched to -23 dB RMS in the browser. Verified with Pocket, Kitten 2, Phonon and Kokoro
 slots. A failed slot no longer blocks the reveal. **Deviations from the spec:** ratings are saved in
-the browser (`localStorage`), not server JSON; there is no per-engine summary or "Your ratings" on
-the engine card yet; no reference-clip-first flow, no similarity rating, no worst-trial latency, no
+the browser (`localStorage`), not server JSON; there is no "Your ratings" on
+the engine card yet (a per-engine summary table sits under the Compare results: clips, mean Natural and Clean, favourites, median generation time per second of audio); no reference-clip-first flow, no similarity rating, no worst-trial latency, no
 "compare this voice on all ready engines" shortcut. Finding: cloning a saved voice that has no
 transcript on Kitten 2 now returns a plain 400 (it used to try a network model download).
 

@@ -42,6 +42,65 @@ const TARGET_RMS_DB = -23
 const STORE_KEY = 'pf-compare-results'
 const LETTERS = 'ABCD'
 const clock = () => performance.now()
+interface SavedSlot extends Slot, Partial<Rating> {
+  voiceName?: string
+  ms?: number
+  seconds?: number
+}
+interface SavedSession {
+  at: string
+  text: string
+  slots: SavedSlot[]
+}
+
+function loadSessions(): SavedSession[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(STORE_KEY) || '[]')
+    return Array.isArray(parsed) ? (parsed as SavedSession[]) : []
+  } catch {
+    return []
+  }
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+
+interface EngineSummary {
+  engine: string
+  clips: number
+  natural: number
+  clean: number
+  favourites: number
+  speed: number
+}
+
+function summarise(sessions: SavedSession[]): EngineSummary[] {
+  const byEngine = new Map<string, SavedSlot[]>()
+  for (const session of sessions) {
+    for (const slot of session.slots) {
+      if (slot.naturalness === undefined || slot.artifacts === undefined) continue
+      byEngine.set(slot.engine, [...(byEngine.get(slot.engine) ?? []), slot])
+    }
+  }
+  return [...byEngine.entries()]
+    .map(([engine, clips]) => {
+      const mean = (pick: (c: SavedSlot) => number) => clips.reduce((a, c) => a + pick(c), 0) / clips.length
+      const speeds = clips.filter((c) => c.ms && c.seconds).map((c) => c.ms! / 1000 / c.seconds!)
+      return {
+        engine,
+        clips: clips.length,
+        natural: mean((c) => c.naturalness ?? 0),
+        clean: mean((c) => c.artifacts ?? 0),
+        favourites: clips.filter((c) => c.favourite).length,
+        speed: speeds.length ? median(speeds) : 0,
+      }
+    })
+    .sort((a, b) => b.natural + b.clean - (a.natural + a.clean))
+}
+
 const DEFAULT_RATING: Rating = { naturalness: 3, artifacts: 3, favourite: false }
 
 function shuffled<T>(items: T[]): T[] {
@@ -80,6 +139,7 @@ export function CompareTab() {
   const [running, setRunning] = useState(false)
   const [playing, setPlaying] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [sessions, setSessions] = useState<SavedSession[]>(loadSessions)
   const buffers = useRef<Record<number, AudioBuffer>>({})
   const audio = useRef<{ ctx: AudioContext; source?: AudioBufferSourceNode } | null>(null)
 
@@ -191,18 +251,21 @@ export function CompareTab() {
   function reveal() {
     setRevealed(true)
     try {
-      const saved = JSON.parse(localStorage.getItem(STORE_KEY) || '[]')
+      const saved = loadSessions()
       saved.push({
         at: new Date().toISOString(),
         text,
         slots: slots.map((slot, i) => ({
           ...slot,
+          voiceName: voices.find((v) => v.voice_id === (slot.voice || voicesFor(slot.engine)[0]?.voice_id))?.display_name,
           ms: results[i]?.ms,
           seconds: results[i]?.seconds,
-          ...(ratings[i] ?? {}),
+          ...(results[i]?.status === 'done' ? (ratings[i] ?? DEFAULT_RATING) : {}),
         })),
       })
-      localStorage.setItem(STORE_KEY, JSON.stringify(saved.slice(-200)))
+      const kept = saved.slice(-200)
+      localStorage.setItem(STORE_KEY, JSON.stringify(kept))
+      setSessions(kept)
     } catch {
       // Ratings are a convenience; failing to save them must not hide the reveal.
     }
@@ -359,12 +422,58 @@ export function CompareTab() {
               </div>
             )
           })}
-          {blind && !revealed && !running && done > 0 && (
+          {!revealed && !running && done > 0 && (
             <Button type="button" size="sm" variant="outline" onClick={reveal}>
-              Reveal engines and save ratings
+              {blind ? 'Reveal engines and save ratings' : 'Save ratings'}
             </Button>
           )}
           {revealed && <p className="text-[11px] text-muted-foreground">Saved on this device.</p>}
+        </div>
+      )}
+
+      {sessions.length > 0 && (
+        <div className="flex flex-col gap-1.5" data-testid="compare-summary">
+          <h3 className="text-xs font-medium">Your ratings so far ({sessions.length} saved comparisons)</h3>
+          <table className="w-full text-left text-[11px]">
+            <thead className="text-muted-foreground">
+              <tr>
+                <th className="py-1 font-normal">Engine</th>
+                <th className="font-normal">Clips</th>
+                <th className="font-normal">Natural</th>
+                <th className="font-normal">Clean</th>
+                <th className="font-normal">Favourites</th>
+                <th className="font-normal">Speed (s per s of audio)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summarise(sessions).map((row) => (
+                <tr key={row.engine} className="border-t border-border">
+                  <td className="py-1">{models.find((m) => m.id === row.engine)?.label ?? row.engine}</td>
+                  <td>{row.clips}</td>
+                  <td>{row.natural.toFixed(1)}</td>
+                  <td>{row.clean.toFixed(1)}</td>
+                  <td>{row.favourites}</td>
+                  <td>{row.speed ? row.speed.toFixed(2) : '–'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-[11px] text-muted-foreground">
+            Stored in this browser only. Ratings are subjective and depend on the text and voice you tried.
+          </p>
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            className="self-start"
+            onClick={() => {
+              localStorage.removeItem(STORE_KEY)
+              setSessions([])
+            }}
+          >
+            <Trash2 />
+            Clear saved ratings
+          </Button>
         </div>
       )}
     </div>
