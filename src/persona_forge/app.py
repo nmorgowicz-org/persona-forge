@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import os
+from datetime import datetime, timezone
 import queue
 import sys
 import time
@@ -38,6 +39,7 @@ from persona_forge import (
     segment_library,
     speech_engines,
     compare_store,
+    hardware_fit,
     ui_preferences_store,
     voice_design,
     voice_library,
@@ -1518,12 +1520,13 @@ def omnivoice_audition():
 
     # Per-segment durations (preferred) or legacy global duration (for compat)
     durations = data.get("durations")
+    cleaned_durations: list[float | None] | None
     if durations is not None:
         if not isinstance(durations, list):
             return jsonify({"error": "durations must be a list of numbers or null"}), 400
         if len(durations) != len(segments):
             return jsonify({"error": "durations length must match segments length"}), 400
-        cleaned_durations: list[float | None] = []
+        cleaned_durations = []
         for d in durations:
             if d is None:
                 cleaned_durations.append(None)
@@ -2582,6 +2585,57 @@ def engines_list():
     return jsonify(
         {"engines": engine_packs.engine_cards(getattr(model, "TTS_BACKEND", None))}
     )
+
+
+_benchmark_lock = threading.Lock()
+
+
+@app.post("/engines/<engine_id>/benchmark")
+def engines_benchmark(engine_id: str):
+    """Time one cold and three warm requests through /v1/audio/speech and save the result."""
+    import io
+    import wave
+
+    if next((e for e in speech_engines.list_engines() if e.id == engine_id), None) is None:
+        return jsonify({"error": "Unknown engine"}), 404
+    if not _benchmark_lock.acquire(blocking=False):
+        return jsonify({"error": "A benchmark is already running. Wait for it to finish."}), 409
+    try:
+        client = app.test_client()
+        voices = client.get("/v1/audio/voices?language=all").get_json()["data"]
+        info = next((e for e in speech_engines.list_engines() if e.id == engine_id), None)
+        pick = next((v for v in voices if v.get("engine") == engine_id and v.get("kind") == "preset"), None)
+        if pick is None and info is not None and info.capabilities.clone:
+            pick = next((v for v in voices if v.get("kind") == "library"), None)
+        if pick is None:
+            return jsonify({"error": "No voice is available to benchmark this engine with."}), 400
+        runs: list[tuple[float, float]] = []
+        for _ in range(4):
+            started = time.perf_counter()
+            res = client.post(
+                "/v1/audio/speech",
+                json={"model": engine_id, "input": hardware_fit.BENCH_TEXT, "voice": pick["voice_id"], "response_format": "wav"},
+            )
+            taken = time.perf_counter() - started
+            if res.status_code != 200:
+                body = res.get_json(silent=True) or {}
+                message = (body.get("error") or {}).get("message") if isinstance(body.get("error"), dict) else body.get("error")
+                return jsonify({"error": message or f"Benchmark request failed ({res.status_code})"}), 409
+            with wave.open(io.BytesIO(res.data)) as wav:
+                runs.append((taken, wav.getnframes() / wav.getframerate()))
+        try:
+            load_average: float | None = round(os.getloadavg()[0], 2)
+        except (OSError, AttributeError):
+            load_average = None
+        result = {
+            **hardware_fit.summarise_runs(runs, load_average),
+            "voice": pick.get("display_name") or pick["voice_id"],
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        hardware_fit.save_result(engine_id, result)
+        return jsonify({"engine": engine_id, "benchmark": result})
+    finally:
+        _benchmark_lock.release()
 
 
 @app.post("/engines/<engine_id>/verify")

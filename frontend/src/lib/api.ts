@@ -471,6 +471,16 @@ export interface EngineLoadStatus {
   fast_mode_issue?: FastModeIssue | null
 }
 
+export interface EngineBenchmark {
+  cold_seconds: number
+  rtf_median: number | null
+  rtf_worst: number | null
+  warm_runs: number
+  load_average: number | null
+  voice: string
+  at: string
+}
+
 export interface EngineCard {
   id: string
   label: string
@@ -486,6 +496,8 @@ export interface EngineCard {
   requirements: string[]
   install_job?: EngineInstallJob
   load_status?: EngineLoadStatus
+  hardware_fit?: { level: 'recommended' | 'ok' | 'unsupported' | 'unknown'; text: string }
+  benchmark?: EngineBenchmark | null
   pack: {
     id: string
     version: string
@@ -1557,4 +1569,12 @@ export async function setSegmentProject(
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
+}
+
+/** Time one cold and three warm requests on this machine and save the result. */
+export async function benchmarkEngine(engineId: string): Promise<EngineBenchmark> {
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/benchmark`, { method: 'POST' })
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  return body.benchmark
 }

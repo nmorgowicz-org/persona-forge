@@ -392,6 +392,16 @@ One card per engine (pattern from `EngineSelector.tsx`):
   it never uninstalls anything. Preparing a clone whose transcript is non-English warns but is
   allowed. Engines are never hidden as a whole, only their non-English variants.
 
+**Manager status (Mac, browser-checked).** Each card shows a hardware-fit line and "Run quick
+benchmark" (one cold plus three warm requests; the card shows median and worst seconds per second of
+audio, first-request time and the load average, or "Speed not measured"). Fit text claims only what
+is tested: Kitten 2 says "Recommended for Apple silicon" or "for your NVIDIA GPU" or the plain
+unsupported reason; CPU engines say "Runs on CPU" and add "Not tested on this operating system" on
+Windows. First benchmark on the Mac: Pocket 0.10, Kitten 0.18, Phonon 0.03, Kokoro 0.10 (load about
+5, so pessimistic). **Not built:** Make active (pack engines are served beside the active backend, so
+there is nothing to switch), Details (pins, logs), the Hugging Face token field, and the first-run
+nudge.
+
 ### 5.3 Built-in voices tab
 
 - Searchable grid/list across all engines, including not-installed ones (metadata from pinned

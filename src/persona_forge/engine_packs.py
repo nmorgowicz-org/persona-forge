@@ -505,6 +505,13 @@ def engine_cards(backend: str | None, root: Path | None = None) -> list[dict[str
         adapter = speech_engines.get_managed_adapter(provisioned.engine_id)
         card["install_job"] = provisioned.pack.job_status()
         card["load_status"] = adapter.status() if adapter is not None else {}
+    from persona_forge import hardware_fit
+
+    facts = hardware_fit.machine_facts()
+    saved = hardware_fit.load()
+    for engine_id, card in cards.items():
+        card["hardware_fit"] = hardware_fit.fit_for(engine_id, facts)
+        card["benchmark"] = saved.get(engine_id)
     return list(cards.values())
 
 

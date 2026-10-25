@@ -514,6 +514,17 @@ Saved Compare-tab listening sessions (`compare_results.json` next to `ui_prefere
   newest 500 kept). 400 on a malformed session, 413 above 512 KB.
 - `DELETE`: clears all saved sessions.
 
+### POST /engines/{engine_id}/benchmark
+
+Times one cold and three warm requests of a fixed sentence through `/v1/audio/speech` (first
+preset voice, or the first saved voice for cloning engines) and saves the result to
+`engine_benchmarks.json`. Returns `{engine, benchmark}` with `cold_seconds`, `rtf_median`,
+`rtf_worst` (generation seconds per second of audio), `warm_runs`, `load_average`, `voice`, `at`.
+404 unknown engine, 400 when no voice is available, 409 when another benchmark is running or the
+engine cannot serve (for example a pack that is not installed). `GET /engines` cards now carry
+`hardware_fit` (`level` of `recommended`, `ok`, `unsupported`, `unknown`, and `text`) and `benchmark`
+(the saved result or null). The result depends on machine load, so the card shows the load average.
+
 ### POST /ui/preferences
 
 - Purpose: merge UI preference values (theme, experience level, voice-library layout/toggle,

@@ -12,6 +12,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import {
+  benchmarkEngine,
   installEngine,
   listEngines,
   recheckEngine,
@@ -52,7 +53,7 @@ export function SpeechEnginesCard() {
   const [error, setError] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<{
     id: string
-    action: 'verify' | 'install' | 'remove' | 'recheck'
+    action: 'verify' | 'install' | 'remove' | 'recheck' | 'benchmark'
   } | null>(null)
 
   const [language, setLanguage] = useState<'en' | 'all'>(() =>
@@ -113,6 +114,21 @@ export function SpeechEnginesCard() {
       )
     } catch (err) {
       setError(String((err as Error)?.message || err))
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
+  async function benchmark(engineId: string) {
+    setPendingAction({ id: engineId, action: 'benchmark' })
+    setError(null)
+    try {
+      const result = await benchmarkEngine(engineId)
+      setEngines((current) =>
+        current.map((engine) => (engine.id === engineId ? { ...engine, benchmark: result } : engine)),
+      )
+    } catch (err) {
+      setError(`Benchmark failed: ${String((err as Error)?.message || err)}`)
     } finally {
       setPendingAction(null)
     }
@@ -246,6 +262,15 @@ export function SpeechEnginesCard() {
                 <Badge variant="outline" className="text-[10px]">
                   {engine.runtime}
                 </Badge>
+                {engine.hardware_fit && (
+                  <Badge
+                    variant={engine.hardware_fit.level === 'recommended' ? 'secondary' : 'outline'}
+                    className={cn('text-[10px]', engine.hardware_fit.level === 'unsupported' && 'text-destructive')}
+                    data-testid={`engine-fit-${engine.id}`}
+                  >
+                    {engine.hardware_fit.text}
+                  </Badge>
+                )}
                 {ratings[engine.id] && (
                   <Badge variant="outline" className="text-[10px]" data-testid={`engine-ratings-${engine.id}`}>
                     Your ratings: {ratings[engine.id].natural.toFixed(1)} natural,{' '}
@@ -262,6 +287,27 @@ export function SpeechEnginesCard() {
                   </span>
                 )}
                 {engine.state.disk_bytes > 0 && <span>{formatBytes(engine.state.disk_bytes)}</span>}
+                <span data-testid={`engine-benchmark-${engine.id}`}>
+                  {engine.benchmark
+                    ? `Measured here: ${engine.benchmark.rtf_median?.toFixed(2)} s per s of audio (worst ${engine.benchmark.rtf_worst?.toFixed(2)}), first request ${engine.benchmark.cold_seconds.toFixed(1)} s${engine.benchmark.load_average !== null ? `, load ${engine.benchmark.load_average}` : ''}`
+                    : 'Speed not measured'}
+                </span>
+                {engine.state.status !== 'not-installed' && (
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    disabled={pendingAction !== null}
+                    onClick={() => void benchmark(engine.id)}
+                  >
+                    {pendingAction?.id === engine.id && pendingAction.action === 'benchmark' ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Zap />
+                    )}
+                    Run quick benchmark
+                  </Button>
+                )}
                 {engine.kind !== 'builtin' && (
                   <>
                     {engine.state.status !== 'verified' && (
