@@ -600,3 +600,33 @@ def test_kitten_clone_without_a_transcript_explains_how_to_fix_it(monkeypatch, t
     with _pytest.raises(kitten2_engine.InvalidVoice, match="Transcribe"):
         engine.synthesize("hi", "English", voice_id=voice["voice_id"])
     assert not [r for r in _FakeWorker.instances[0].requests if r["op"] == "prepare"]
+
+
+def test_builtin_catalog_lists_pack_presets_only_when_asked(client, monkeypatch):
+    from persona_forge import provisioned_engines
+
+    class _Stub:
+        PRESET_PREFIX = "kokoro:"
+
+        def is_installed(self):
+            return True
+
+        def list_presets(self):
+            return ["af_heart", "ff_siwis"]
+
+        def preset_language(self, name):
+            return "fr" if name.startswith("ff") else "en"
+
+    class _Entry:
+        engine = _Stub()
+        engine_id = "kokoro"
+
+    monkeypatch.setattr(provisioned_engines, "get", lambda eid: _Entry() if eid == "kokoro" else None)
+    plain = client.get("/voices/built-in").get_json()
+    assert all(v["backend"] == "pocket_tts" for v in plain["voices"]) and "engines" not in plain
+    full = client.get("/voices/built-in?engines=all").get_json()
+    ids = {v["voice_id"] for v in full["voices"]}
+    assert {"kokoro:af_heart", "kokoro:ff_siwis"} <= ids
+    kokoro = next(e for e in full["engines"] if e["id"] == "kokoro")
+    assert kokoro == {"id": "kokoro", "label": "Kokoro 82M", "installed": True, "voices": 2}
+    assert next(v for v in full["voices"] if v["voice_id"] == "kokoro:ff_siwis")["language_code"] == "fr"

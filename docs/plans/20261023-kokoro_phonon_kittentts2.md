@@ -417,6 +417,19 @@ nudge.
   If the engine isn't installed: **Install engine** inline.
 - No autoplay; one preview playing at a time; previews are queued serialized jobs with cancel.
 
+**Catalog status (Mac, browser-checked).** The Built-in tab now lists Pocket plus every installed
+engine's presets (`GET /voices/built-in?engines=all`; the plain route is unchanged for Speak).
+With Phonon and Kokoro installed it showed 89 English voices; an engine filter, engine badges, and
+a note naming engines that are not installed. Preview generates locally through `/v1/audio/speech`
+(a real Kokoro preview played). Pack voices can be favourited and copied; "Use in Speak" and "Set as
+API default" are hidden for them, with the reason in the drawer. **Preview cache (§9.2) not built,
+on purpose:** it exists for downloading upstream sample files, and none of these engines ships
+sample URLs, so there is nothing to cache. If an upstream sample source is added later the cache
+spec still stands. **Not built:** Compare from a voice's drawer, uninstalled engines' voices
+(needs a bundled catalog per engine; today only installed engines list voices), and the API default
+for pack voices (the default applies to the active engine, so it needs the same design decision as
+engine switching).
+
 ### 5.4 My voices tab (cloning)
 
 - Existing families/variants preserved.

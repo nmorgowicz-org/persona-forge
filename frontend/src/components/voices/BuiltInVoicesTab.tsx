@@ -12,9 +12,10 @@ import {
 import {
   generateSpeech,
   getApiDefault,
-  listBuiltInVoices,
+  listCatalogVoices,
   setApiDefault,
   type ApiDefaultRecord,
+  type BuiltInEngineSummary,
   type BuiltInVoiceMeta,
 } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -51,6 +52,10 @@ const CATEGORY_LABELS: Record<string, string> = {
   other: 'Other',
 }
 
+function isPackVoice(voice: BuiltInVoiceMeta): boolean {
+  return Boolean(voice.engine) && voice.engine !== 'pocket-tts'
+}
+
 function isEnglishVoice(voice: BuiltInVoiceMeta): boolean {
   const code = (voice.language_code || '').toLowerCase()
   return code.startsWith('en') || /english/i.test(voice.language || '')
@@ -68,6 +73,8 @@ export function BuiltInVoicesTab() {
     getPref<'en' | 'all'>('voiceCatalog.language', 'en'),
   )
   const [category, setCategory] = useState('all')
+  const [engineFilter, setEngineFilter] = useState('all')
+  const [engines, setEngines] = useState<BuiltInEngineSummary[]>([])
   const [favorites, setFavorites] = useState<string[]>(() => readFavoriteVoiceIds())
   const [previewing, setPreviewing] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -81,10 +88,11 @@ export function BuiltInVoicesTab() {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([listBuiltInVoices(), getApiDefault()])
+    Promise.all([listCatalogVoices(), getApiDefault()])
       .then(([catalog, effective]) => {
         if (cancelled) return
-        setVoices(catalog)
+        setVoices(catalog.voices)
+        setEngines(catalog.engines)
         setApiDefaultState(effective)
       })
       .catch((err: unknown) => {
@@ -118,6 +126,7 @@ export function BuiltInVoicesTab() {
     return voices.filter((voice) => {
       if (language === 'en' && !isEnglishVoice(voice)) return false
       if (category !== 'all' && voice.category !== category) return false
+      if (engineFilter !== 'all' && (voice.engine ?? 'pocket-tts') !== engineFilter) return false
       if (!q) return true
       return (
         voice.display_name.toLowerCase().includes(q) ||
@@ -126,7 +135,7 @@ export function BuiltInVoicesTab() {
         (voice.note || '').toLowerCase().includes(q)
       )
     })
-  }, [voices, language, category, query])
+  }, [voices, language, category, engineFilter, query])
 
   function changeLanguage(next: 'en' | 'all') {
     setLanguage(next)
@@ -151,13 +160,25 @@ export function BuiltInVoicesTab() {
     setPreviewName(voice.display_name)
     setPreviewing(voice.voice_id)
     try {
-      const result = await generateSpeech({
-        text: `Hi, I'm ${voice.display_name}. This is how I sound.`,
-        voiceId: voice.voice_id,
-        responseFormat: 'mp3',
-      })
+      const text = `Hi, I'm ${voice.display_name}. This is how I sound.`
+      let blob: Blob
+      if (isPackVoice(voice)) {
+        // Pack engines are served beside the active backend through the OpenAI-compatible route.
+        const res = await fetch('/v1/audio/speech', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: voice.engine, input: text, voice: voice.voice_id, response_format: 'wav' }),
+        })
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error(body?.error?.message || `HTTP ${res.status}`)
+        }
+        blob = await res.blob()
+      } else {
+        blob = (await generateSpeech({ text, voiceId: voice.voice_id, responseFormat: 'mp3' })).blob
+      }
       if (token !== previewToken.current) return
-      setPreviewUrl(URL.createObjectURL(result.blob))
+      setPreviewUrl(URL.createObjectURL(blob))
     } catch (err) {
       if (token === previewToken.current) {
         setPreviewError(String((err as Error)?.message || err))
@@ -212,6 +233,23 @@ export function BuiltInVoicesTab() {
             <SelectItem value="all">All languages</SelectItem>
           </SelectContent>
         </Select>
+        {engines.length > 1 && (
+          <Select value={engineFilter} onValueChange={setEngineFilter}>
+            <SelectTrigger className="w-44" aria-label="Engine filter">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All engines</SelectItem>
+              {engines
+                .filter((engine) => engine.installed)
+                .map((engine) => (
+                  <SelectItem key={engine.id} value={engine.id}>
+                    {engine.label}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={category} onValueChange={setCategory}>
           <SelectTrigger className="w-40" aria-label="Category filter">
             <SelectValue />
@@ -241,6 +279,19 @@ export function BuiltInVoicesTab() {
           >
             Show all languages
           </button>
+        </p>
+      )}
+
+      {engines.some((engine) => !engine.installed) && (
+        <p className="text-xs text-muted-foreground" data-testid="catalog-not-installed">
+          {engines
+            .filter((engine) => !engine.installed)
+            .map((engine) => engine.label)
+            .join(', ')}{' '}
+          {engines.filter((engine) => !engine.installed).length === 1 ? 'is' : 'are'} not installed, so{' '}
+          {engines.filter((engine) => !engine.installed).length === 1 ? 'its voices are' : 'their voices are'} not
+          listed. Install {engines.filter((engine) => !engine.installed).length === 1 ? 'it' : 'them'} under Runtime →
+          Speech engines.
         </p>
       )}
 
@@ -316,7 +367,7 @@ export function BuiltInVoicesTab() {
 
                 <div className="flex flex-wrap items-center gap-1.5">
                   <Badge variant="outline" className="text-[10px]">
-                    Pocket
+                    {voice.engine_label ?? 'Pocket'}
                   </Badge>
                   <Badge variant="outline" className="text-[10px]">
                     {voice.language}
@@ -370,12 +421,14 @@ export function BuiltInVoicesTab() {
               <SheetHeader>
                 <SheetTitle>{detail.display_name}</SheetTitle>
                 <SheetDescription>
-                  Built-in Pocket voice — ready to serve without a saved reference.
+                  {isPackVoice(detail)
+                    ? `Built-in ${detail.engine_label} voice, generated locally. Served beside the active engine.`
+                    : 'Built-in Pocket voice — ready to serve without a saved reference.'}
                 </SheetDescription>
               </SheetHeader>
               <div className="flex flex-col gap-4 px-4 pb-6">
                 <div className="flex flex-wrap gap-1.5">
-                  <Badge variant="outline">Pocket</Badge>
+                  <Badge variant="outline">{detail.engine_label ?? 'Pocket'}</Badge>
                   <Badge variant="outline">{detail.language}</Badge>
                   <Badge variant="outline">
                     {CATEGORY_LABELS[detail.category] || detail.category}
@@ -383,6 +436,13 @@ export function BuiltInVoicesTab() {
                   {apiDefault?.voice === detail.voice_id && <Badge>API default</Badge>}
                 </div>
                 {detail.note && <p className="text-sm text-muted-foreground">{detail.note}</p>}
+                {isPackVoice(detail) && (
+                  <p className="text-xs text-muted-foreground">
+                    To use this voice, pick {detail.engine_label} in the Engine selector on Speak, or pass{' '}
+                    <code>model: {detail.engine}</code> and this voice ID to the API. It can't be set as the API
+                    default yet, because the default applies to the active engine.
+                  </p>
+                )}
 
                 <div className="flex flex-col gap-1">
                   <span className="micro-label">API voice ID</span>
@@ -420,16 +480,19 @@ export function BuiltInVoicesTab() {
                       </>
                     )}
                   </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => {
-                      setVoiceId(detail.voice_id)
-                      setPage('speak')
-                    }}
-                  >
-                    Use in Speak
-                  </Button>
+                  {!isPackVoice(detail) && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        setVoiceId(detail.voice_id)
+                        setPage('speak')
+                      }}
+                    >
+                      Use in Speak
+                    </Button>
+                  )}
+                  {!isPackVoice(detail) && (
                   <Button
                     type="button"
                     size="sm"
@@ -445,6 +508,7 @@ export function BuiltInVoicesTab() {
                       'Set as API default'
                     )}
                   </Button>
+                  )}
                   <Button
                     type="button"
                     size="sm"

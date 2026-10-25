@@ -159,7 +159,9 @@ export interface VoiceMeta {
 export interface BuiltInVoiceMeta {
   voice_id: string
   builtin_voice: string
-  backend: 'pocket_tts'
+  backend: string
+  engine?: string
+  engine_label?: string
   display_name: string
   source: string
   license: string
@@ -168,8 +170,16 @@ export interface BuiltInVoiceMeta {
   category: 'conversation' | 'reading' | 'multilingual' | 'other' | string
   note: string
   prompt: string
-  requires_backend: 'pocket_tts'
+  requires_backend: string | null
 }
+
+export interface BuiltInEngineSummary {
+  id: string
+  label: string
+  installed: boolean
+  voices: number
+}
+
 
 export interface GenerateResult {
   blob: Blob
@@ -384,6 +394,17 @@ export async function listBuiltInVoices(): Promise<BuiltInVoiceMeta[]> {
   if (!res.ok) throw new Error(await readError(res))
   const body = await res.json()
   return body.voices ?? body
+}
+
+/** Pocket's voices plus every installed pack engine's presets, and which engines are installed. */
+export async function listCatalogVoices(): Promise<{
+  voices: BuiltInVoiceMeta[]
+  engines: BuiltInEngineSummary[]
+}> {
+  const res = await fetch('/voices/built-in?engines=all')
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  return { voices: body.voices ?? [], engines: body.engines ?? [] }
 }
 
 export interface ApiDefaultRecord {

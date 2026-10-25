@@ -502,8 +502,39 @@ def voices_builtin():
             "note": meta["note"],
             "prompt": vid,
             "requires_backend": "pocket_tts",
+            "engine": "pocket-tts",
+            "engine_label": "Pocket TTS",
         })
-    return jsonify({"voices": voices})
+    if request.args.get("engines") != "all":
+        return jsonify({"voices": voices})
+    # Unified catalog: add every installed pack engine's presets (generated locally on preview).
+    engines = [{"id": "pocket-tts", "label": "Pocket TTS", "installed": True, "voices": len(voices)}]
+    for info in speech_engines.list_engines():
+        provisioned = provisioned_engines.get(info.id)
+        if provisioned is None:
+            continue
+        installed = provisioned.engine.is_installed()
+        names = provisioned.engine.list_presets() if installed else []
+        for name in names:
+            code = provisioned.engine.preset_language(name) or "en"
+            voices.append({
+                "voice_id": f"{provisioned.engine.PRESET_PREFIX}{name}",
+                "builtin_voice": name,
+                "backend": info.id,
+                "display_name": name,
+                "source": info.source,
+                "license": info.license,
+                "language": "English" if code == "en" else code,
+                "language_code": code,
+                "category": "preset",
+                "note": "",
+                "prompt": name,
+                "requires_backend": None,
+                "engine": info.id,
+                "engine_label": info.label,
+            })
+        engines.append({"id": info.id, "label": info.label, "installed": installed, "voices": len(names)})
+    return jsonify({"voices": voices, "engines": engines})
 
 
 def _api_default_view() -> dict[str, Any] | None:
