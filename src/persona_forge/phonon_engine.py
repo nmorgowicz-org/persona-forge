@@ -52,7 +52,7 @@ def list_presets(root: Path | None = None) -> list[str]:
     directory = pack_directory(root)
     if directory is None or not is_installed(root):
         return []
-    for catalog in sorted((directory / "hf").glob("models--*phonon-voices/snapshots/*/voices.jsonl")):
+    for catalog in sorted((directory / "hf").glob("**/models--*phonon-voices/snapshots/*/voices.jsonl")):
         names: list[str] = []
         try:
             for line in catalog.read_text(encoding="utf-8").splitlines():

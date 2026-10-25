@@ -583,6 +583,19 @@ A1/A2 can proceed in parallel with B.
 Owner decision: Kitten 2 goes first (clone-capable, MLX on the Mac, compiled CUDA on the 5090).
 Phonon 31M follows as the Intel CPU preset engine.
 
+**Phonon 31M status (implemented, verified on the Mac only).** A pack engine like Kitten 2, but
+tiny: `ptts==0.4.1` (native, no torch, GPU or compiler), model and the English catalog prefetched
+into the pack and served offline. Real install into a scratch directory: 38 s, 72 MB. Through the
+HTTP API: 37 English voices listed as `phonon:<Name>`, warm requests 0.09-0.17 s for 2-4 s of audio,
+a saved-voice request returns a clear 400 (no cloning), an unknown preset returns 400, Pocket is
+unaffected. **Structured text needs no normaliser:** Whisper heard "Invoice AB 104 totals $1,234.56
+due on the 23rd at 3.30pm" with the raw text, and my normaliser made `AB-104` worse, so Phonon opts
+out like Kitten 2. Seeded output matches to within one least-significant bit (thread rounding).
+**Not verified:** Intel CPU (the AVX2 check and RTF), Windows, streaming (the adapter returns the
+whole utterance; the worker has no frame stream yet), and the `speed` control.
+The routes, engine cards and voice catalog now go through `provisioned_engines.py`, so the next pack
+engine (tuned Kokoro) is one registry line plus its own pack, worker and adapter modules.
+
 **Already on `feat/multi-engine-speech`:** engine registry and `/v1/models` discovery
 (`speech_engines.py`), the `SpeechEngine` adapter protocol with a Pocket adapter, pack manifests,
 verification and installer (`engine_packs.py`), and the newline-JSON worker transport

@@ -75,8 +75,8 @@ Request body (JSON):
 - `model` (string, optional) — engine selector. Known values: `pocket-tts` (and aliases
   `pocket`, `pocket_tts`, `persona-forge`, `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts`, `default`,
   or omitted → active engine) and, once the pack is installed, `kitten2` (aliases `kitten-2`,
-  `kitten-tts-2`). Pack engines are served beside the active backend in a separate process (no
-  409); a missing pack returns 503 with an install hint. Kitten 2 holds roughly 2 GB while loaded
+  `kitten-tts-2`) or `phonon-31m` (aliases `phonon`, `phonon31m`). Pack engines are served beside
+  the active backend in a separate process (no 409); a missing pack returns 503 with an install hint. Kitten 2 holds roughly 2 GB while loaded
   and stops itself after `KITTEN2_IDLE_UNLOAD_S` of inactivity. An unknown label is treated as a client-side name and served by
   the active engine, so existing OpenAI clients keep working; the response reports
   `X-Model-Recognized: false`. Naming a registered engine that is not active returns 409.
@@ -168,6 +168,17 @@ Important notes:
 - Supported machines: Apple silicon (MLX) and NVIDIA GPUs with a recent driver (CUDA 12 or 13,
   chosen automatically). Linux CUDA shares the code path but is untested. Unsupported machines get
   a plain-language reason in `job.error`.
+
+### POST /engines/phonon-31m/install
+
+- Purpose: provision the Phonon 31M pack in the background (same job shape, polling and retry
+  behaviour as `POST /engines/kitten2/install`): a private Python environment, the `ptts` native
+  runtime, and the model plus the English voice catalog (about 70 MB). No GPU, torch or compiler is
+  needed; it takes under a minute. A final offline synthesis proves the prefetch is complete.
+- Needs a CPU with AVX2 on Intel/AMD (about 2013 or newer) or Apple silicon; otherwise
+  `job.error` says so in plain language.
+- Phonon cannot clone: naming a saved library voice returns 400. Its 37 English voices are listed
+  as `phonon:<Name>` (names can contain spaces). `POST /engines/phonon-31m/recheck` reloads it.
 
 ### POST /engines/kitten2/recheck
 

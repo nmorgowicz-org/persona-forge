@@ -139,7 +139,7 @@ def test_start_install_refuses_a_second_concurrent_job(monkeypatch):
 
 def write_catalog(tmp_path):
     pack = tmp_path / "pack"
-    snap = pack / "hf" / "models--gradium--phonon-voices" / "snapshots" / "abc"
+    snap = pack / "hf" / "hub" / "models--gradium--phonon-voices" / "snapshots" / "abc"
     snap.mkdir(parents=True)
     rows = [
         {"name": "Zoey", "language": "en"},

@@ -207,12 +207,14 @@ When cloning is available, the mounted REF_AUDIO is automatically registered as 
 | `ENGINE_PACKS_UV` | auto-detected | Path to `uv` used to build the Kitten TTS 2 pack environment. Without it the installer falls back to `python -m venv` and `pip`. |
 | `KITTEN2_PYTHON` | unset | Development override: run the Kitten TTS 2 worker with this interpreter instead of the installed pack. |
 | `KITTEN2_IDLE_UNLOAD_S` | `600` | Seconds of inactivity before the Kitten TTS 2 worker process is stopped to free memory (`0` keeps it loaded). It restarts on the next request. |
+| `PHONON_PYTHON` | unset | Development override: run the Phonon 31M worker with this interpreter instead of the installed pack. |
+| `PHONON_IDLE_UNLOAD_S` | `600` | Seconds of inactivity before the Phonon worker process is stopped (`0` keeps it loaded). |
 
 ## Text normalisation
 
 | Var | Default | Description |
 |-----|---------|-------------|
-| `TTS_NORMALIZE_TEXT` | `1` | Spell out numbers, money, times, ordinals, units, ISO dates and codes before Pocket-TTS synthesis (English). Set `0` to send text unchanged. Kitten TTS 2 normalises internally and never uses this. |
+| `TTS_NORMALIZE_TEXT` | `1` | Spell out numbers, money, times, ordinals, units, ISO dates and codes before Pocket-TTS synthesis (English). Set `0` to send text unchanged. Kitten TTS 2 and Phonon 31M read structured text correctly themselves and never use this. |
 
 ## Debug / dev (do not use in production)
 
