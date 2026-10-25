@@ -550,3 +550,38 @@ def test_phonon_is_listed_installable_and_has_voices(client, monkeypatch):
     }
     assert models["phonon-31m"]["installed"] is True
     assert installed.status_code == 202
+
+
+def test_voice_catalog_hides_non_english_unless_asked(client, monkeypatch):
+    from persona_forge import kokoro_engine
+
+    monkeypatch.setattr(kokoro_engine, "is_installed", lambda root=None: True)
+    monkeypatch.setattr(kokoro_engine, "list_presets", lambda root=None: ["af_heart", "ff_siwis"])
+
+    english = client.get("/v1/audio/voices").get_json()
+    everything = client.get("/v1/audio/voices?language=all").get_json()
+
+    kokoro = lambda body: {v["voice_id"] for v in body["data"] if v["engine"] == "kokoro"}  # noqa: E731
+    assert kokoro(english) == {"kokoro:af_heart"}
+    assert kokoro(everything) == {"kokoro:af_heart", "kokoro:ff_siwis"}
+    assert english["language_filter"] == "en" and english["hidden_by_language_filter"] >= 1
+    assert everything["language_filter"] == "all" and everything["hidden_by_language_filter"] == 0
+
+
+def test_a_hidden_voice_can_still_be_requested(client, monkeypatch):
+    from persona_forge import kokoro_engine
+
+    class Fake:
+        def synthesize(self, text, language, **kw):
+            import numpy as np
+            return np.zeros(240, dtype="float32"), 24000, None
+
+    monkeypatch.setattr(speech_engines, "adapter_for", lambda engine: Fake())
+    monkeypatch.setattr(kokoro_engine, "is_installed", lambda root=None: True)
+
+    response = client.post(
+        "/v1/audio/speech",
+        json={"model": "kokoro", "input": "Bonjour", "voice": "kokoro:ff_siwis", "response_format": "wav"},
+    )
+
+    assert response.status_code == 200

@@ -77,6 +77,24 @@ def list_presets(root: Path | None = None) -> list[str]:
     return []
 
 
+_NON_ENGLISH = {"ar", "zh", "fr", "de", "hi", "it", "pt", "ru", "es"}
+
+
+def preset_language(name: str, root: Path | None = None) -> str:
+    """Language code of a preset, from its catalog ``voice_id`` prefix (``fr_...``); default ``en``."""
+    directory = pack_directory(root)
+    if directory is None:
+        return "en"
+    for catalog in (directory / "hf").glob("models--*kitten-tts-2/snapshots/*/voices/voices.json"):
+        try:
+            entry = json.loads(catalog.read_text(encoding="utf-8")).get(name, {})
+        except (OSError, ValueError):
+            continue
+        prefix = str(entry.get("voice_id", ""))[:3]
+        return prefix[:2] if prefix[2:] == "_" and prefix[:2] in _NON_ENGLISH else "en"
+    return "en"
+
+
 def _decode_wav(data: bytes) -> tuple[np.ndarray, int]:
     with wave.open(io.BytesIO(data)) as handle:
         rate = handle.getframerate()

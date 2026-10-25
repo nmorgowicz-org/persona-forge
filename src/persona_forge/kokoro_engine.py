@@ -60,6 +60,11 @@ def list_presets(root: Path | None = None) -> list[str]:
     return sorted(name for name in names if kokoro_worker.language_for(name))
 
 
+def preset_language(name: str, root: Path | None = None) -> str:
+    """Language code of a voice (``a``/``b`` prefixes are US/UK English)."""
+    return "en" if name[:1] in {"a", "b"} else (kokoro_worker.language_for(name) or "??")[:2]
+
+
 def _idle_from_env(default: float = 600.0) -> float:
     try:
         return float(os.environ.get("KOKORO_IDLE_UNLOAD_S", default))

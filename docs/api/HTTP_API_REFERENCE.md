@@ -120,6 +120,11 @@ Important notes:
 - Response 200: `{ "object": "list", "data": [ ... ] }`, each entry:
   `voice_id` (`vd_...` or `pocket:<name>`), `object` (`voice`), `engine`, `kind`
   (`library`|`preset`), `display_name`, `language`, `language_code`, `servable`.
+- **Language filter:** by default only English voices are listed. The setting is the UI
+  preference `voiceCatalog.language` (`en` or `all`, in Speech engines or the Built-in voices tab);
+  `?language=all` or `?language=en` overrides it per call. The response carries `language_filter` and
+  `hidden_by_language_filter`. This only affects listing: a request may name any voice, in any
+  language, and is served. Each voice has `language_code`; saved voices without one are always shown.
 - Pocket presets (`pocket:<name>`) are included only when the Pocket backend is active.
 - When the Kitten TTS 2 pack is installed, its 115 built-in voices are listed as `kitten2:<Name>`
   (`engine: "kitten2"`, `kind: "preset"`). Names come from the downloaded weights, so listing never

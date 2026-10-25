@@ -2674,8 +2674,8 @@ def openai_voices():
                 }
             )
     for provisioned in provisioned_engines.all_engines():
-        language = "English" if provisioned.engine_id == "phonon-31m" else None
         for name in provisioned.engine.list_presets():
+            code = provisioned.engine.preset_language(name)
             data.append(
                 {
                     "voice_id": f"{provisioned.engine.PRESET_PREFIX}{name}",
@@ -2683,12 +2683,26 @@ def openai_voices():
                     "engine": provisioned.engine_id,
                     "kind": "preset",
                     "display_name": name,
-                    "language": language,
-                    "language_code": "en" if language else None,
+                    "language": "English" if code == "en" else code,
+                    "language_code": code,
                     "servable": True,
                 }
             )
-    return jsonify({"object": "list", "data": data})
+    scope = request.args.get("language") or ui_preferences_store.load().get("voiceCatalog.language", "en")
+    hidden = 0
+    if scope != "all":
+        # Listing only: a request can still name any voice explicitly.
+        kept = [v for v in data if (v.get("language_code") or "en").lower().split("-")[0] == "en"]
+        hidden = len(data) - len(kept)
+        data = kept
+    return jsonify(
+        {
+            "object": "list",
+            "data": data,
+            "language_filter": "all" if scope == "all" else "en",
+            "hidden_by_language_filter": hidden,
+        }
+    )
 
 
 @app.post("/v1/audio/speech")

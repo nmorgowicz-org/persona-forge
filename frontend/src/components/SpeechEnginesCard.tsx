@@ -19,6 +19,7 @@ import {
   type EngineCard,
   type EngineState,
 } from '@/lib/api'
+import { getPref, setPref } from '@/lib/uiPreferences'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -52,6 +53,15 @@ export function SpeechEnginesCard() {
     id: string
     action: 'verify' | 'install' | 'remove' | 'recheck'
   } | null>(null)
+
+  const [language, setLanguage] = useState<'en' | 'all'>(() =>
+    getPref<'en' | 'all'>('voiceCatalog.language', 'en'),
+  )
+
+  function changeLanguage(next: 'en' | 'all') {
+    setLanguage(next)
+    setPref('voiceCatalog.language', next)
+  }
 
   const busy = engines.some(
     (engine) => engine.install_job?.state === 'running' || engine.load_status?.state === 'loading',
@@ -155,6 +165,21 @@ export function SpeechEnginesCard() {
         One active engine serves the API. Packs are verified locally against their pinned
         hashes before use. Installing an engine downloads it once; it then runs offline.
       </p>
+
+      <label className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-medium">Voice languages</span>
+        <select
+          className="rounded-control border border-border bg-background px-2 py-1 text-xs"
+          value={language}
+          onChange={(event) => changeLanguage(event.target.value === 'all' ? 'all' : 'en')}
+        >
+          <option value="en">English only</option>
+          <option value="all">All languages</option>
+        </select>
+        <span className="text-muted-foreground">
+          Hides other languages from voice lists. Requests can still name any voice.
+        </span>
+      </label>
 
       {error && (
         <p className="rounded-control border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">

@@ -65,6 +65,10 @@ def list_presets(root: Path | None = None) -> list[str]:
     return []
 
 
+def preset_language(name: str, root: Path | None = None) -> str:
+    return "en"  # only English voices are listed
+
+
 def _idle_from_env(default: float = 600.0) -> float:
     try:
         return float(os.environ.get("PHONON_IDLE_UNLOAD_S", default))
