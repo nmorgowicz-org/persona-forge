@@ -595,7 +595,14 @@ out like Kitten 2. Seeded output matches to within one least-significant bit (th
 the chunks, and `/v1/audio/speech` with `pcm` streams Phonon (first byte about 20 ms). `speed` maps
 onto `duration_delta` by a table measured with fixed seeds (0.73-1.5x; below -1 the model breaks, so
 it is clamped); the length it produces is approximate.
-**Not verified:** Intel CPU (the AVX2 check and RTF), Windows.
+**Intel CPU (docker-agent i7-1360P, throwaway container from the app image, live services running,
+load average 3.6-5.4, so treat timings as pessimistic):** the real install took 47 s on Python 3.13
+(`ptts` has wheels for it), all 37 voices were listed, the first request including worker start took
+1.44 s, and warm RTF was 0.175-0.204 (about 2.5x faster than Pocket's 0.51-0.53 measured on this host
+earlier). Streaming first audio took 0.26 s there (8 ms on the Mac), 33 chunks for 4.7 s of audio.
+The live service was not touched; the scratch directory was deleted.
+**Not verified:** Windows (needs a native SSH run, no WSL), and the plain-language message on an
+unsupported CPU beyond a unit test.
 The routes, engine cards and voice catalog now go through `provisioned_engines.py`, so the next pack
 engine (tuned Kokoro) is one registry line plus its own pack, worker and adapter modules.
 
