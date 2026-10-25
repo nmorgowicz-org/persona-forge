@@ -595,6 +595,20 @@ out like Kitten 2. Seeded output matches to within one least-significant bit (th
 the chunks, and `/v1/audio/speech` with `pcm` streams Phonon (first byte about 20 ms). `speed` maps
 onto `duration_delta` by a table measured with fixed seeds (0.73-1.5x; below -1 the model breaks, so
 it is clamped); the length it produces is approximate.
+**Kokoro 82M status (implemented; verified on the Mac and the Intel host).** A pack engine on
+`kokoro-onnx==0.6.1` with the int8 model and voices downloaded from a pinned release (sha256 checked;
+resume keeps a verified file). **The "needs system espeak-ng" worry was wrong for this package:**
+`espeakng-loader` bundles the library in its wheel, and a real install with Homebrew's `espeak-ng`
+hidden from PATH passed its synthesis check (7 s install on the Mac, 11 s on Intel). Threads are pinned
+to min(4, cores). Through the HTTP API on the Mac: 41 voices, English/French/Spanish/Italian/
+Portuguese transcribed correctly by Whisper, `speed` 1.4 gave 1.47x shorter audio, unknown voice 400,
+saved voice 400. Structured English text is read acceptably as is ("Ways 3. 5 kg" for "weighs 3.5 kg"
+was the only slip), and the English-only normaliser would hurt other languages, so Kokoro opts out.
+Intel (docker-agent, load average 5.8): first request 2.38 s, warm RTF 0.31-0.34, faster than Pocket
+(0.51-0.53) and better than the 0.64 screened earlier. Not done: Japanese/Chinese voices (extra
+packages), frame streaming, Windows, the fp32 model as an option. KokoClone (cloning on top of Kokoro)
+remains an evaluation item.
+
 **Intel CPU (docker-agent i7-1360P, throwaway container from the app image, live services running,
 load average 3.6-5.4, so treat timings as pessimistic):** the real install took 47 s on Python 3.13
 (`ptts` has wheels for it), all 37 voices were listed, the first request including worker start took

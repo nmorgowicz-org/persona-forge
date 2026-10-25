@@ -75,7 +75,7 @@ Request body (JSON):
 - `model` (string, optional) — engine selector. Known values: `pocket-tts` (and aliases
   `pocket`, `pocket_tts`, `persona-forge`, `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts`, `default`,
   or omitted → active engine) and, once the pack is installed, `kitten2` (aliases `kitten-2`,
-  `kitten-tts-2`) or `phonon-31m` (aliases `phonon`, `phonon31m`). Pack engines are served beside
+  `kitten-tts-2`) `phonon-31m` (aliases `phonon`, `phonon31m`) or `kokoro` (aliases `kokoro-82m`, `kokoro82m`). Pack engines are served beside
   the active backend in a separate process (no 409); a missing pack returns 503 with an install hint. Kitten 2 holds roughly 2 GB while loaded
   and stops itself after `KITTEN2_IDLE_UNLOAD_S` of inactivity. An unknown label is treated as a client-side name and served by
   the active engine, so existing OpenAI clients keep working; the response reports
@@ -186,6 +186,20 @@ Important notes:
   clamped). The mapping is calibrated on one sentence, so the resulting length is approximate
   (1.34 gave 1.33x, 0.82 gave about 0.90x on another). Engines without a speed control ignore it,
   as before; streaming responses carry `X-Speed-Applied: true|false`. A non-numeric `speed` is 400.
+
+### POST /engines/kokoro/install
+
+- Purpose: provision the Kokoro 82M pack in the background (same job shape as the other packs): a
+  private Python environment, `kokoro-onnx` (its phonemizer library is bundled in the wheel, so no
+  system `espeak-ng` is needed), and the int8 model plus voice file (about 120 MB) from a pinned
+  release, verified by size and SHA-256. Takes about ten seconds to a minute on a good connection.
+- Voices are `kokoro:<voice>` (41 listed: English US/UK, Spanish, French, Hindi, Italian,
+  Portuguese). The voice name selects the language, so `language` is ignored. Japanese and Chinese
+  voices exist upstream but need extra packages and are not served. No cloning: a saved-voice
+  request is 400. `speed` (0.5-2.0) is honoured natively; output is not frame-streamed.
+- ONNX Runtime is pinned to four threads (fewer on smaller machines): its default oversubscribes
+  and was 2-3x slower on Intel.
+- Network failures while downloading say so plainly and are retried by choosing Install again.
 
 ### POST /engines/kitten2/recheck
 
