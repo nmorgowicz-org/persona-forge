@@ -94,6 +94,18 @@ KITTEN2_CAPABILITIES = EngineCapabilities(
     instructions=False,
 )
 
+PHONON_CAPABILITIES = EngineCapabilities(
+    clone=False,
+    presets=True,
+    import_prepared_voice=False,
+    streaming="none",
+    languages=("en",),
+    speed=False,
+    expression_tags=False,
+    seed=True,
+    instructions=False,
+)
+
 ENGINES: dict[str, EngineInfo] = {
     "pocket-tts": EngineInfo(
         id="pocket-tts",
@@ -120,6 +132,21 @@ ENGINES: dict[str, EngineInfo] = {
         installed=False,
         pack_only=True,
     ),
+    "phonon-31m": EngineInfo(
+        id="phonon-31m",
+        label="Phonon 31M",
+        description=(
+            "Very fast English voices (37 built-in) on any CPU, about twice as fast as "
+            "Pocket on Intel. No cloning. Installed as a small engine pack."
+        ),
+        backend="phonon-31m",
+        runtime="ptts-native-cpu",
+        source="gradium/phonon-31m-en",
+        license="see upstream",
+        capabilities=PHONON_CAPABILITIES,
+        installed=False,
+        pack_only=True,
+    ),
 }
 
 # Model names OpenAI clients already send, plus conventional aliases. `None` means "the active
@@ -140,6 +167,9 @@ MODEL_ALIASES: dict[str, str | None] = {
     "kitten2": "kitten2",
     "kitten-2": "kitten2",
     "kitten-tts-2": "kitten2",
+    "phonon": "phonon-31m",
+    "phonon-31m": "phonon-31m",
+    "phonon31m": "phonon-31m",
 }
 
 
@@ -274,7 +304,30 @@ def _make_kitten2() -> SpeechEngine:
     return Kitten2Engine()
 
 
-_ADAPTER_FACTORIES: dict[str, Callable[[], SpeechEngine]] = {"kitten2": _make_kitten2}
+def _make_phonon() -> SpeechEngine:
+    from persona_forge.phonon_engine import PhononEngine
+
+    return PhononEngine()
+
+
+_ADAPTER_FACTORIES: dict[str, Callable[[], SpeechEngine]] = {
+    "kitten2": _make_kitten2,
+    "phonon-31m": _make_phonon,
+}
+
+
+@runtime_checkable
+class ManagedEngine(Protocol):
+    """An adapter that runs in a pack process and can report load state and reload."""
+
+    def status(self) -> dict[str, Any]: ...
+
+    def recheck(self) -> bool: ...
+
+
+def get_managed_adapter(engine_id: str) -> ManagedEngine | None:
+    adapter = get_adapter(engine_id)
+    return adapter if isinstance(adapter, ManagedEngine) else None
 
 
 def get_adapter(engine_id: str) -> SpeechEngine | None:

@@ -11,8 +11,8 @@ from persona_forge import speech_engines, voice_library
 def test_registry_describes_pocket_and_the_pack_only_kitten2():
     engines = [engine.as_dict() for engine in speech_engines.list_engines()]
 
-    assert [engine["id"] for engine in engines] == ["pocket-tts", "kitten2"]
-    assert [engine["pack_only"] for engine in engines] == [False, True]
+    assert [engine["id"] for engine in engines] == ["pocket-tts", "kitten2", "phonon-31m"]
+    assert [engine["pack_only"] for engine in engines] == [False, True, True]
     assert engines[1]["capabilities"]["clone"] is True
     assert engines[1]["capabilities"]["streaming"] == "none"
     capabilities = engines[0]["capabilities"]
@@ -530,3 +530,23 @@ def test_voice_catalog_has_no_kitten_presets_when_not_installed(client, monkeypa
     voices = client.get("/v1/audio/voices").get_json()["data"]
 
     assert not [v for v in voices if v["engine"] == "kitten2"]
+
+
+def test_phonon_is_listed_installable_and_has_voices(client, monkeypatch):
+    from persona_forge import phonon_engine, phonon_pack
+
+    monkeypatch.setattr(phonon_engine, "is_installed", lambda root=None: True)
+    monkeypatch.setattr(phonon_engine, "list_presets", lambda root=None: ["Easton", "Zoey"])
+    monkeypatch.setattr(phonon_pack, "start_install", lambda *a, **k: True)
+
+    cards = {c["id"]: c for c in client.get("/engines").get_json()["engines"]}
+    voices = client.get("/v1/audio/voices").get_json()["data"]
+    models = {m["id"]: m for m in client.get("/v1/models").get_json()["data"]}
+    installed = client.post("/engines/phonon-31m/install")
+
+    assert cards["phonon-31m"]["install_job"]["state"] in {"idle", "running", "done", "error"}
+    assert {v["voice_id"] for v in voices if v["engine"] == "phonon-31m"} == {
+        "phonon:Easton", "phonon:Zoey",
+    }
+    assert models["phonon-31m"]["installed"] is True
+    assert installed.status_code == 202

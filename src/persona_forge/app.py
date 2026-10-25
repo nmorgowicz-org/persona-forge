@@ -30,7 +30,7 @@ from persona_forge import (
     engine_packs,
     frontend,
     kitten2_engine,
-    kitten2_pack,
+    provisioned_engines,
     model,
     omnivoice_engine,
     project_library,
@@ -2567,10 +2567,11 @@ def engines_verify(engine_id: str):
 @app.post("/engines/<engine_id>/install")
 def engines_install(engine_id: str):
     """Install an engine pack. Provisioned packs run as a background job; poll the status route."""
-    if engine_id == kitten2_engine.ENGINE_ID:
-        started = kitten2_pack.start_install()
+    provisioned = provisioned_engines.get(engine_id)
+    if provisioned is not None:
+        started = provisioned.pack.start_install()
         return (
-            jsonify({"started": started, "job": kitten2_pack.job_status()}),
+            jsonify({"started": started, "job": provisioned.pack.job_status()}),
             202 if started else 409,
         )
     try:
@@ -2585,20 +2586,20 @@ def engines_install(engine_id: str):
 @app.get("/engines/<engine_id>/install")
 def engines_install_status(engine_id: str):
     """Progress of a background install: state, current step, and any error."""
-    if engine_id != kitten2_engine.ENGINE_ID:
+    provisioned = provisioned_engines.get(engine_id)
+    if provisioned is None:
         return jsonify({"error": "engine has no background install"}), 404
-    return jsonify({"job": kitten2_pack.job_status()})
+    return jsonify({"job": provisioned.pack.job_status()})
 
 
 @app.post("/engines/<engine_id>/recheck")
 def engines_recheck(engine_id: str):
     """Reload an engine in the background so newly installed prerequisites are picked up."""
-    if engine_id != kitten2_engine.ENGINE_ID:
+    provisioned = provisioned_engines.get(engine_id)
+    adapter = speech_engines.get_managed_adapter(engine_id) if provisioned is not None else None
+    if provisioned is None or adapter is None:
         return jsonify({"error": "engine does not support re-check"}), 404
-    adapter = speech_engines.get_adapter(engine_id)
-    if not isinstance(adapter, kitten2_engine.Kitten2Engine):
-        return jsonify({"error": "engine does not support re-check"}), 404
-    if not kitten2_engine.is_installed():
+    if not provisioned.engine.is_installed():
         return jsonify({"error": "The engine is not installed."}), 409
     started = adapter.recheck()
     return jsonify({"started": started, "status": adapter.status()}), 202 if started else 409
@@ -2628,8 +2629,9 @@ def openai_models():
     data = []
     for engine in speech_engines.list_engines():
         entry = engine.as_dict()
-        if engine.id == "kitten2":
-            entry["installed"] = kitten2_engine.is_installed()
+        provisioned = provisioned_engines.get(engine.id)
+        if provisioned is not None:
+            entry["installed"] = provisioned.engine.is_installed()
         entry["created"] = 0
         entry["owned_by"] = "local"
         entry["active"] = active is not None and engine.id == active.id
@@ -2671,19 +2673,21 @@ def openai_voices():
                     "servable": True,
                 }
             )
-    for name in kitten2_engine.list_presets():
-        data.append(
-            {
-                "voice_id": f"{kitten2_engine.PRESET_PREFIX}{name}",
-                "object": "voice",
-                "engine": kitten2_engine.ENGINE_ID,
-                "kind": "preset",
-                "display_name": name,
-                "language": None,
-                "language_code": None,
-                "servable": True,
-            }
-        )
+    for provisioned in provisioned_engines.all_engines():
+        language = "English" if provisioned.engine_id == "phonon-31m" else None
+        for name in provisioned.engine.list_presets():
+            data.append(
+                {
+                    "voice_id": f"{provisioned.engine.PRESET_PREFIX}{name}",
+                    "object": "voice",
+                    "engine": provisioned.engine_id,
+                    "kind": "preset",
+                    "display_name": name,
+                    "language": language,
+                    "language_code": "en" if language else None,
+                    "servable": True,
+                }
+            )
     return jsonify({"object": "list", "data": data})
 
 

@@ -496,17 +496,15 @@ def engine_cards(backend: str | None, root: Path | None = None) -> list[dict[str
             card["state"] = pack_status.as_dict()
             card["requirements"] = list(pack_status.pack.requirements)
             card["pack"] = pack_status.pack.as_dict()
-    kitten = cards.get("kitten2")
-    if kitten is not None:
-        from persona_forge import kitten2_pack
+    from persona_forge import provisioned_engines
 
-        from persona_forge import kitten2_engine
-
-        adapter = speech_engines.get_adapter("kitten2")
-        kitten["install_job"] = kitten2_pack.job_status()
-        kitten["load_status"] = (
-            adapter.status() if isinstance(adapter, kitten2_engine.Kitten2Engine) else {}
-        )
+    for provisioned in provisioned_engines.all_engines():
+        card = cards.get(provisioned.engine_id)
+        if card is None:
+            continue
+        adapter = speech_engines.get_managed_adapter(provisioned.engine_id)
+        card["install_job"] = provisioned.pack.job_status()
+        card["load_status"] = adapter.status() if adapter is not None else {}
     return list(cards.values())
 
 
