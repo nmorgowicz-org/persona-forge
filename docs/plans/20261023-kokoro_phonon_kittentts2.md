@@ -667,6 +667,12 @@ load average 3.6-5.4, so treat timings as pessimistic):** the real install took 
 1.44 s, and warm RTF was 0.175-0.204 (about 2.5x faster than Pocket's 0.51-0.53 measured on this host
 earlier). Streaming first audio took 0.26 s there (8 ms on the Mac), 33 chunks for 4.7 s of audio.
 The live service was not touched; the scratch directory was deleted.
+**Intel re-run after the shared adapter base (same host and image, throwaway container):** both
+packs install and synthesize through the refactored classes (Phonon install 51 s, Kokoro 13 s; 37 and
+41 presets). Warm RTF was 0.23-0.31 for Phonon and 0.41-0.46 for Kokoro, slower than the earlier
+0.175-0.204 and 0.31-0.34. The load average was 4.8-5.8 (earlier 3.6-5.4) on a host with live
+services, so I cannot say whether that is the refactor or the load. The refactor only moved
+code between classes, but no controlled A/B was run.
 **Windows (RTX 5090 box, native over SSH, Python 3.12, no WSL):** Phonon installed in 153 s, listed
 37 presets and ran warm at RTF 0.16-0.18 (first request 1.64 s); Kokoro installed in 199 s, listed 41
 presets and ran warm at RTF 0.23-0.24 (first request 2.59 s). Both ran through the real engine
