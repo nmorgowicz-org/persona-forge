@@ -585,3 +585,18 @@ def test_a_hidden_voice_can_still_be_requested(client, monkeypatch):
     )
 
     assert response.status_code == 200
+
+
+def test_kitten_clone_without_a_transcript_explains_how_to_fix_it(monkeypatch, tmp_path):
+    import pytest as _pytest
+
+    from persona_forge import kitten2_engine
+
+    voice = voice_library.save_voice(
+        b"RIFF....", description="x", sample_text="", language="English"
+    )
+    engine = _kitten_engine(monkeypatch, tmp_path)
+
+    with _pytest.raises(kitten2_engine.InvalidVoice, match="Transcribe"):
+        engine.synthesize("hi", "English", voice_id=voice["voice_id"])
+    assert not [r for r in _FakeWorker.instances[0].requests if r["op"] == "prepare"]

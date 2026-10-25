@@ -72,6 +72,7 @@ import { AlignmentCompare } from '@/components/waveform/AlignmentCompare'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { BuiltInVoicesTab } from '@/components/voices/BuiltInVoicesTab'
+import { CompareTab } from '@/components/voices/CompareTab'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useProsodyEditor } from '@/components/prosody/useProsodyEditor'
 import { ProsodyControls } from '@/components/prosody/ProsodyControls'
@@ -1198,14 +1199,14 @@ export function VoiceLibraryPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [groupByProject, setGroupByProject] = useState(false)
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
-  const [activeTab, setActiveTab] = useState<'voices' | 'builtin' | 'segments'>(() =>
-    getPref<'voices' | 'builtin' | 'segments'>('voiceLibrary.tab', 'voices'),
+  const [activeTab, setActiveTab] = useState<'voices' | 'builtin' | 'segments' | 'compare'>(() =>
+    getPref<'voices' | 'builtin' | 'segments' | 'compare'>('voiceLibrary.tab', 'voices'),
   )
   // setPref only on genuine user/system-driven changes below (Tabs onValueChange, the
   // deep-link effect) -- not here. A useEffect keyed on activeTab also fires on the initial
   // mount, which would silently write the *default* value to the server the first time
   // anyone opens the library, before the user has chosen anything.
-  function selectTab(tab: 'voices' | 'builtin' | 'segments') {
+  function selectTab(tab: 'voices' | 'builtin' | 'segments' | 'compare') {
     setActiveTab(tab)
     setPref('voiceLibrary.tab', tab)
   }
@@ -1844,13 +1845,16 @@ export function VoiceLibraryPage() {
         <Tabs
           value={activeTab}
           onValueChange={(v) =>
-            selectTab(v === 'segments' ? 'segments' : v === 'builtin' ? 'builtin' : 'voices')
+            selectTab(
+              v === 'segments' ? 'segments' : v === 'builtin' ? 'builtin' : v === 'compare' ? 'compare' : 'voices',
+            )
           }
         >
           <TabsList>
             <TabsTrigger value="voices" data-testid="voice-library-tab-voices">My voices</TabsTrigger>
             <TabsTrigger value="builtin" data-testid="voice-library-tab-builtin">Built-in voices</TabsTrigger>
             <TabsTrigger value="segments" data-testid="voice-library-tab-segments">Segments</TabsTrigger>
+            <TabsTrigger value="compare" data-testid="voice-library-tab-compare">Compare</TabsTrigger>
           </TabsList>
           <TabsContent value="voices" className="flex flex-col gap-6">
           {voices.length === 0 && !error && (
@@ -1962,6 +1966,10 @@ export function VoiceLibraryPage() {
 
           <TabsContent value="builtin" className="flex flex-col gap-6">
             <BuiltInVoicesTab />
+          </TabsContent>
+
+          <TabsContent value="compare" className="flex flex-col gap-6">
+            <CompareTab />
           </TabsContent>
 
           <TabsContent value="segments" className="flex flex-col gap-6">

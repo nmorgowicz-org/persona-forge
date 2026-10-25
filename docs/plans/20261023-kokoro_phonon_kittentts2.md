@@ -430,6 +430,17 @@ One card per engine (pattern from `EngineSelector.tsx`):
 - Missing engines show "Install to compare" instead of failing.
 - Builds on `VariantCompare.tsx`.
 
+**Compare status (first version built; Mac, real packs, headless browser).** Voices page, Compare
+tab: text plus sample sentences, 2-4 slots (engine and voice, "install to compare" for missing
+engines), serial generation with generate time and audio length per slot, blind mode with shuffled
+letters, Natural and Clean ratings (1-5), a favourite, and a reveal that saves the session. Playback
+is level-matched to -23 dB RMS in the browser. Verified with Pocket, Kitten 2, Phonon and Kokoro
+slots. A failed slot no longer blocks the reveal. **Deviations from the spec:** ratings are saved in
+the browser (`localStorage`), not server JSON; there is no per-engine summary or "Your ratings" on
+the engine card yet; no reference-clip-first flow, no similarity rating, no worst-trial latency, no
+"compare this voice on all ready engines" shortcut. Finding: cloning a saved voice that has no
+transcript on Kitten 2 now returns a plain 400 (it used to try a network model download).
+
 ### 5.6 Speak page
 
 - Voice picker becomes a searchable combobox with sections (Favorites, My voices, Built-in by

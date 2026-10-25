@@ -231,6 +231,14 @@ class Kitten2Engine:
             wav_path = wav_path.resolve()
         if not wav_path.is_file():
             return False
+        transcript = (meta.get("sample_text") or "").strip()
+        if not transcript:
+            # Without a transcript Kitten would load a speech-recognition model mid-request, which
+            # an offline pack cannot do. Say what to do instead of failing with a network error.
+            raise InvalidVoice(
+                "This voice has no transcript, which Kitten TTS 2 needs to clone it. Open the "
+                "voice in Voice Library and choose Transcribe (or type the words), then try again."
+            )
         stamp = wav_path.stat().st_mtime
         cached = self._prepared.get(voice_id)
         if cached is None or cached != (str(wav_path), stamp):
@@ -239,7 +247,7 @@ class Kitten2Engine:
                     "op": "prepare",
                     "voice_id": voice_id,
                     "reference_path": str(wav_path),
-                    "reference_text": (meta.get("sample_text") or "").strip() or None,
+                    "reference_text": transcript,
                 }
             )
             self._prepared[voice_id] = (str(wav_path), stamp)

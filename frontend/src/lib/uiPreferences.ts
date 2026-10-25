@@ -35,7 +35,7 @@ type Codec = {
 // would reject with a 400 and lose the rest of the batch.
 const THEMES = ['violet', 'teal', 'amber', 'rose']
 const EXPERIENCE_LEVELS = ['guided', 'expert']
-const VOICE_LIBRARY_TABS = ['voices', 'builtin', 'segments']
+const VOICE_LIBRARY_TABS = ['voices', 'builtin', 'segments', 'compare']
 
 const isString = (value: unknown): value is string => typeof value === 'string'
 const oneOf =

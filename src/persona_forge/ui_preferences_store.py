@@ -81,7 +81,7 @@ def _string_list(max_items: int, max_length: int) -> Validator:
 ALLOWED_KEYS: dict[str, Validator] = {
     "theme": _string(32),
     "experienceLevel": _string(32),
-    "voiceLibrary.tab": _one_of("voices", "builtin", "segments"),
+    "voiceLibrary.tab": _one_of("voices", "builtin", "segments", "compare"),
     "voiceLibrary.layout": _string(32),
     "voiceLibrary.analysisExpanded": _boolean,
     "voiceFavorites": _string_list(500, 96),
