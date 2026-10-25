@@ -17,8 +17,9 @@ def test_kitten_needs_apple_silicon_or_nvidia():
 
 def test_cpu_engines_and_untested_os_is_unknown():
     assert hardware_fit.fit_for("kokoro", facts())["level"] == "ok"
-    windows = hardware_fit.fit_for("phonon-31m", facts(platform="win32"))
-    assert windows["level"] == "unknown" and "Not tested" in windows["text"]
+    assert hardware_fit.fit_for("phonon-31m", facts(platform="win32"))["level"] == "ok"
+    freebsd = hardware_fit.fit_for("phonon-31m", facts(platform="freebsd14"))
+    assert freebsd["level"] == "unknown" and "Not tested" in freebsd["text"]
     assert hardware_fit.fit_for("nope", facts())["level"] == "unknown"
 
 

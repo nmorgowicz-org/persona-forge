@@ -59,7 +59,7 @@ def fit_for(engine_id: str, facts: dict[str, Any] | None = None) -> dict[str, st
             return _verdict("recommended", "Recommended for Apple silicon (runs on MLX).")
         return _verdict("recommended", "Recommended for your NVIDIA GPU (needs a compiler for fast mode; falls back otherwise).")
     if engine_id in ("phonon-31m", "kokoro"):
-        tested = apple or facts["platform"].startswith("linux")
+        tested = apple or facts["platform"] == "win32" or facts["platform"].startswith("linux")
         note = "" if tested else " Not tested on this operating system."
         return _verdict("ok" if tested else "unknown", f"Runs on CPU ({cores} cores); no GPU needed.{note}")
     if engine_id == "pocket-tts":
