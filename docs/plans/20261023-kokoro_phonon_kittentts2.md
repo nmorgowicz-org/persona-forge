@@ -468,6 +468,19 @@ that has no transcript on Kitten 2 returns a plain 400 (it used to try a network
 - If the selection needs an engine swap: inline note such as "Generating will switch from Pocket to
   Kitten 2" with measured memory/load time when known (otherwise "not measured").
 
+**Speak and Integrations status (Mac, browser-checked).** Speak has an Engine selector (shown when
+more than one engine is installed). The default is the active engine and the old job path. Choosing
+a pack engine generates through `/v1/audio/speech` straight into the same player, with that
+engine's own preset voices (or the selected saved voice, cloned, when the engine clones). The seed
+box is disabled with the reason for engines without seeds, post-processing is disabled for pack
+engines, and a note says the engine runs beside the active one and nothing is unloaded. Integrations
+has an "Enforce English on the API" checkbox (off by default, saved on the server): when on, a
+non-English voice or `language` gets a 400 that names the voice and the setting. **Not built:** the
+rest of the §5.6 picker (engine sections inside the voice combobox, an engine dropdown for saved
+voices beyond the one above, measured swap time), and "Allow API requests to switch engines". Pack
+engines never need a switch, and switching the built-in backends on demand means unloading and
+reloading the runtime from an API request, which is a separate design decision.
+
 ### 5.7 Integrations page
 
 - Header card: **effective API default** (engine, voice, variant), engine state ("Ready — loads on

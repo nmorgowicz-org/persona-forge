@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { PageHeader } from '@/components/ui/page-header'
 import { MOTION } from '@/lib/motion'
+import { getPref, setPref } from '@/lib/uiPreferences'
 import { cn } from '@/lib/utils'
 import {
   getApiDefault,
@@ -104,6 +105,7 @@ export function IntegrationsPage() {
   const [apiDefault, setApiDefaultState] = useState<ApiDefaultRecord | null>(null)
   const [voices, setVoices] = useState<VoiceMeta[]>(storeVoices)
   const [builtIns, setBuiltIns] = useState<BuiltInVoiceMeta[]>([])
+  const [enforceLanguage, setEnforceLanguage] = useState(() => getPref<boolean>('api.enforceLanguage', false))
   const [useSpeakVoice, setUseSpeakVoice] = useState(false)
   const [pendingVoice, setPendingVoice] = useState<string | null>(null)
   const [pageError, setPageError] = useState<string | null>(null)
@@ -292,6 +294,22 @@ export function IntegrationsPage() {
           </p>
         )}
         {pageError && <p className="text-xs text-destructive">{pageError}</p>}
+        <label className="flex items-start gap-2 text-xs" data-testid="enforce-language">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={enforceLanguage}
+            onChange={(event) => {
+              setEnforceLanguage(event.target.checked)
+              setPref('api.enforceLanguage', event.target.checked)
+            }}
+          />
+          <span>
+            <span className="font-medium">Enforce English on the API.</span> When on, requests for non-English
+            voices or languages get an error that says why, instead of audio. When off (the default), the
+            request is served as asked, even if the voice is hidden from lists.
+          </span>
+        </label>
       </motion.div>
 
       <motion.div

@@ -28,6 +28,8 @@ import { cn } from '@/lib/utils'
 import { VoiceSelector } from '@/components/VoiceSelector'
 import { AudioPlayer } from '@/components/AudioPlayer'
 import { InfoIcon } from '@/components/InfoIcon'
+import { SpeakEngineChoice } from '@/components/SpeakEngineChoice'
+import { useSpeakEngines } from '@/lib/speakEngines'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { PageHeader } from '@/components/ui/page-header'
@@ -42,6 +44,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { AdvancedDrawer } from '@/components/audio/AdvancedDrawer'
 import { useReducedMotionSafe } from '@/lib/motion'
 
+
+const speakClock = () => performance.now()
 
 function StructuredError({ error }: { error: string }) {
   const info = classifyGenerateError(error, null)
@@ -154,6 +158,10 @@ export function SpeakPage() {
   const [savingApiDefault, setSavingApiDefault] = useState(false)
   const [apiDefaultError, setApiDefaultError] = useState<string | null>(null)
   const [resultMeta, setResultMeta] = useState<SpeakResultMeta | null>(null)
+  const { models: engineModels, presets: enginePresets } = useSpeakEngines()
+  const [engineChoice, setEngineChoice] = useState('')
+  const [enginePreset, setEnginePreset] = useState('')
+  const chosenEngine = engineModels.find((m) => m.id === engineChoice)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const runtimeTtsBackend = useAppStore((s) => s.runtimeTtsBackend)
   const isPocketBackend = runtimeTtsBackend === 'pocket_tts'
@@ -277,12 +285,62 @@ export function SpeakPage() {
     poll()
   }
 
+  // A pack engine is served beside the active one, so it skips the job queue and plays directly.
+  async function generateWithEngine(engineId: string, voice: string | null) {
+    const started = speakClock()
+    try {
+      const res = await fetch('/v1/audio/speech', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: engineId,
+          input: text,
+          voice: voice ?? undefined,
+          response_format: 'wav',
+          ...(seedInput.trim() && chosenEngine?.capabilities.seed ? { seed: Number(seedInput) } : {}),
+        }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body?.error?.message || body?.error || `HTTP ${res.status}`)
+      }
+      const seedHeader = res.headers.get('X-Seed')
+      if (seedHeader) setSpeakLastSeed(Number(seedHeader))
+      const blob = await res.blob()
+      const ctx = new AudioContext()
+      const seconds = (await ctx.decodeAudioData(await blob.arrayBuffer())).duration
+      void ctx.close()
+      const elapsed = (speakClock() - started) / 1000
+      const existing = useAppStore.getState().speakAudioUrl
+      if (existing) URL.revokeObjectURL(existing)
+      setSpeakAudioBlob(blob)
+      setSpeakAudioUrl(URL.createObjectURL(blob))
+      setResultMeta({
+        jobId: null,
+        backend: engineId,
+        stylePreset: null,
+        appliedSteps: [],
+        rtf: seconds > 0 ? elapsed / seconds : null,
+        audioSeconds: seconds,
+      })
+      announce(`Generation complete. ${seconds.toFixed(1)}s of audio ready.`)
+    } catch (err) {
+      setSpeakError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSpeakIsGenerating(false)
+    }
+  }
+
   async function handleGenerate() {
     if (!text.trim() || speakIsGenerating) return
     setSpeakIsGenerating(true)
     setSpeakError(null)
     setSpeakJobProgress(null)
     setResultMeta(null)
+    if (chosenEngine) {
+      await generateWithEngine(chosenEngine.id, enginePreset || voiceId)
+      return
+    }
     try {
       const seed = seedInput.trim() ? Number(seedInput) : undefined
       const { job_id } = await generateAsync({
@@ -418,6 +476,15 @@ export function SpeakPage() {
             )}
           </div>
 
+          <SpeakEngineChoice
+            models={engineModels}
+            presets={enginePresets}
+            engine={engineChoice}
+            preset={enginePreset}
+            onEngine={setEngineChoice}
+            onPreset={setEnginePreset}
+          />
+
           <div className="flex flex-col gap-1">
             <span id={languageLabelId} className="micro-label">
               Language
@@ -444,7 +511,7 @@ export function SpeakPage() {
             <span id={polishLabelId} className="micro-label">
               Post-processing
             </span>
-            <Select value={stylePreset} onValueChange={(value) => setStylePreset(value as typeof stylePreset)}>
+            <Select disabled={Boolean(chosenEngine)} value={stylePreset} onValueChange={(value) => setStylePreset(value as typeof stylePreset)}>
               <SelectTrigger className="w-44" aria-labelledby={polishLabelId}>
                 <SelectValue placeholder="Tone / polish" />
               </SelectTrigger>
@@ -470,6 +537,8 @@ export function SpeakPage() {
               inputMode="numeric"
               placeholder="Random seed"
               value={seedInput}
+              disabled={Boolean(chosenEngine) && !chosenEngine?.capabilities.seed}
+              title={chosenEngine && !chosenEngine.capabilities.seed ? `${chosenEngine.label} doesn't support seeds` : undefined}
               onChange={(e) => setSeedInput(e.target.value)}
               className="h-9 w-32 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             />

@@ -2705,6 +2705,39 @@ def engines_remove(engine_id: str):
     return jsonify({"removed": engine_id})
 
 
+def _voice_language_code(voice_id: str | None) -> str:
+    """Language of a voice id: presets know theirs, saved voices carry it in their metadata."""
+    if not voice_id:
+        return "en"
+    if voice_id.startswith("pocket:"):
+        entry = POCKET_BUILTIN_VOICES.get(voice_id.split(":", 1)[1])
+        return str((entry or {}).get("language_code") or "en")
+    for provisioned in provisioned_engines.all_engines():
+        prefix = provisioned.engine.PRESET_PREFIX
+        if voice_id.startswith(prefix):
+            return provisioned.engine.preset_language(voice_id[len(prefix):]) or "en"
+    return str((voice_library.get_voice(voice_id) or {}).get("language_code") or "en")
+
+
+def _language_enforcement_error(voice_id: str | None, language: str) -> str | None:
+    """With "Enforce language on the API" on, refuse non-English voices and languages."""
+    if not ui_preferences_store.load().get("api.enforceLanguage"):
+        return None
+    code = _voice_language_code(voice_id).lower().split("-")[0]
+    if code != "en":
+        return (
+            f"Voice {voice_id!r} is not English (language {code!r}), and the English-only setting "
+            "is enforced on the API. Pick an English voice, or turn off Enforce language "
+            "on the Integrations page."
+        )
+    if language.strip().lower() not in ("english", "en"):
+        return (
+            f"Language {language!r} is not English, and the English-only setting is enforced on the "
+            "API. Use an English language, or turn off Enforce language on the Integrations page."
+        )
+    return None
+
+
 @app.get("/v1/models")
 def openai_models():
     """List registered speech engines in an OpenAI-compatible shape."""
@@ -2849,6 +2882,9 @@ def openai_audio_speech():
     voice_id, builtin_error = _resolve_builtin_voice(data, voice_id)
     if builtin_error:
         return _openai_error(builtin_error, 400)
+    language_error = _language_enforcement_error(voice_id, language)
+    if language_error:
+        return _openai_error(language_error, 400)
     instruct = (data.get("instruct") or "").strip() or None
     seed = data.get("seed")
     if seed is not None and not isinstance(seed, int):

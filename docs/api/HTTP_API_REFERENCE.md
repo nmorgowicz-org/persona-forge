@@ -514,6 +514,13 @@ Saved Compare-tab listening sessions (`compare_results.json` next to `ui_prefere
   newest 500 kept). 400 on a malformed session, 413 above 512 KB.
 - `DELETE`: clears all saved sessions.
 
+### API language enforcement
+
+The UI preference `api.enforceLanguage` (Integrations page, "Enforce English on the API", default
+off) makes `POST /v1/audio/speech` return 400 for a non-English voice or a non-English `language`,
+with a message naming the voice and the setting. Off, any voice is served even when hidden from
+`/v1/audio/voices`.
+
 ### POST /engines/{engine_id}/benchmark
 
 Times one cold and three warm requests of a fixed sentence through `/v1/audio/speech` (first

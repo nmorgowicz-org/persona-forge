@@ -21,6 +21,7 @@ export type PrefKey =
   | 'voiceLibrary.analysisExpanded'
   | 'voiceFavorites'
   | 'voiceCatalog.language'
+  | 'api.enforceLanguage'
   | 'updates.dismissedVersion'
 
 type Codec = {
@@ -87,6 +88,11 @@ const CODECS: Record<PrefKey, Codec> = {
     storageKey: 'voice-catalog-language',
     decode: oneOf(['en', 'all']),
     encode: (value) => String(value),
+  },
+  'api.enforceLanguage': {
+    storageKey: 'api-enforce-language',
+    decode: (raw) => (raw === 'false' ? false : raw === 'true' ? true : undefined),
+    encode: (value) => String(Boolean(value)),
   },
   'updates.dismissedVersion': {
     storageKey: 'pf-update-dismissed-version',
