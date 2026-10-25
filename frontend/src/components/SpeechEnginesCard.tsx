@@ -1,3 +1,4 @@
+import { loadCompareSummary, type EngineSummary } from '@/lib/compareResults'
 import { useEffect, useState } from 'react'
 import {
   CheckCircle2,
@@ -77,6 +78,13 @@ export function SpeechEnginesCard() {
     }, 2000)
     return () => window.clearInterval(timer)
   }, [busy])
+
+  const [ratings, setRatings] = useState<Record<string, EngineSummary>>({})
+  useEffect(() => {
+    loadCompareSummary()
+      .then((saved) => setRatings(Object.fromEntries(saved.summary.map((row) => [row.engine, row]))))
+      .catch(() => undefined)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -238,6 +246,12 @@ export function SpeechEnginesCard() {
                 <Badge variant="outline" className="text-[10px]">
                   {engine.runtime}
                 </Badge>
+                {ratings[engine.id] && (
+                  <Badge variant="outline" className="text-[10px]" data-testid={`engine-ratings-${engine.id}`}>
+                    Your ratings: {ratings[engine.id].natural.toFixed(1)} natural,{' '}
+                    {ratings[engine.id].clean.toFixed(1)} clean ({ratings[engine.id].clips})
+                  </Badge>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">

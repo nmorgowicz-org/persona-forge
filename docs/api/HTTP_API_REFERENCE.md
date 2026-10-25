@@ -502,6 +502,18 @@ Important notes:
 - Response (JSON): `{"values": {...}}` — `{}` when nothing has been saved yet.
 - Persisted to `ui_preferences.json` in the same directory as `runtime.json`.
 
+### /compare/results
+
+Saved Compare-tab listening sessions (`compare_results.json` next to `ui_preferences.json`).
+
+- `GET`: `{count, summary}`. `summary` has one row per engine: `clips`, `natural`, `clean`,
+  `similarity` (null when no cloned clip was rated), `favourites`, `speed_median` and `speed_worst`
+  (generation seconds per second of audio).
+- `POST {sessions: [{at, text, slots: [{engine, voice, voiceName, ms, seconds, naturalness,
+  artifacts, similarity, favourite}]}]}`: appends validated sessions (ratings 1-5, at most 8 slots,
+  newest 500 kept). 400 on a malformed session, 413 above 512 KB.
+- `DELETE`: clears all saved sessions.
+
 ### POST /ui/preferences
 
 - Purpose: merge UI preference values (theme, experience level, voice-library layout/toggle,

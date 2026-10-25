@@ -37,6 +37,7 @@ from persona_forge import (
     prosody_repair,
     segment_library,
     speech_engines,
+    compare_store,
     ui_preferences_store,
     voice_design,
     voice_library,
@@ -2388,6 +2389,34 @@ def ui_preferences_post():
         # py/information-exposure-through-exception)
         return jsonify({"error": exc.safe_message}), 400
     return jsonify({"values": merged})
+
+
+@app.get("/compare/results")
+def compare_results_get():
+    sessions = compare_store.load()
+    return jsonify({"count": len(sessions), "summary": compare_store.summarise(sessions)})
+
+
+@app.post("/compare/results")
+def compare_results_post():
+    if request.content_length and request.content_length > 512 * 1024:
+        return jsonify({"error": "Compare results body too large"}), 413
+    data = _json_body()
+    sessions = data.get("sessions") if isinstance(data, dict) else None
+    if not isinstance(sessions, list) or not 1 <= len(sessions) <= compare_store.MAX_SESSIONS:
+        return jsonify({"error": "Body must be {'sessions': [...]} with at least one session"}), 400
+    try:
+        compare_store.append(sessions)
+    except compare_store.SessionInvalid as exc:
+        return jsonify({"error": exc.safe_message}), 400
+    sessions_now = compare_store.load()
+    return jsonify({"count": len(sessions_now), "summary": compare_store.summarise(sessions_now)})
+
+
+@app.delete("/compare/results")
+def compare_results_delete():
+    compare_store.clear()
+    return jsonify({"count": 0, "summary": []})
 
 
 @app.post("/generate")
