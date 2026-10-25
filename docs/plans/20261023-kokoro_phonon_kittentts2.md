@@ -591,8 +591,11 @@ a saved-voice request returns a clear 400 (no cloning), an unknown preset return
 unaffected. **Structured text needs no normaliser:** Whisper heard "Invoice AB 104 totals $1,234.56
 due on the 23rd at 3.30pm" with the raw text, and my normaliser made `AB-104` worse, so Phonon opts
 out like Kitten 2. Seeded output matches to within one least-significant bit (thread rounding).
-**Not verified:** Intel CPU (the AVX2 check and RTF), Windows, streaming (the adapter returns the
-whole utterance; the worker has no frame stream yet), and the `speed` control.
+**Streaming and speed (done, Mac only):** the worker has a `stream` op, `PackProcess.stream` carries
+the chunks, and `/v1/audio/speech` with `pcm` streams Phonon (first byte about 20 ms). `speed` maps
+onto `duration_delta` by a table measured with fixed seeds (0.73-1.5x; below -1 the model breaks, so
+it is clamped); the length it produces is approximate.
+**Not verified:** Intel CPU (the AVX2 check and RTF), Windows.
 The routes, engine cards and voice catalog now go through `provisioned_engines.py`, so the next pack
 engine (tuned Kokoro) is one registry line plus its own pack, worker and adapter modules.
 

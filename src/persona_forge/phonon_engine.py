@@ -12,7 +12,6 @@ import threading
 from pathlib import Path
 from typing import Any, Iterator
 
-import numpy as np
 
 from persona_forge import engine_packs, phonon_pack, phonon_worker, voice_library
 from persona_forge.kitten2_engine import EngineUnavailable, InvalidVoice, _decode_wav
@@ -167,6 +166,19 @@ class PhononEngine:
         if process is not None:
             process.close()
 
+    @staticmethod
+    def _fill_request(
+        request: dict[str, Any], requested: str, seed_value: int | None, speed: float | None
+    ) -> None:
+        if seed_value is not None:
+            request["seed"] = int(seed_value)
+        if speed is not None:
+            request["speed"] = float(speed)
+        if requested and not requested.startswith("pocket:"):
+            request["preset"] = (
+                requested[len(PRESET_PREFIX) :] if requested.startswith(PRESET_PREFIX) else requested
+            )
+
     def synthesize(
         self,
         text: str,
@@ -179,6 +191,7 @@ class PhononEngine:
         prosody_repair: bool = False,
         seed_value: int | None = None,
         instruct: str | None = None,
+        speed: float | None = None,
     ) -> tuple[Any, int, str | None]:
         # Pocket-only options do not apply here; they are accepted so the route stays generic.
         del language, style_preset, postprocess, prosody_repair, instruct
@@ -191,14 +204,7 @@ class PhononEngine:
         with self._lock:
             process = self._ensure_started()
             request: dict[str, Any] = {"op": "synthesize", "text": text}
-            if seed_value is not None:
-                request["seed"] = int(seed_value)
-            if requested and not requested.startswith("pocket:"):
-                request["preset"] = (
-                    requested[len(PRESET_PREFIX) :]
-                    if requested.startswith(PRESET_PREFIX)
-                    else requested
-                )
+            self._fill_request(request, requested, seed_value, speed)
             try:
                 audio = process.synthesize(request)
             except PackProcessError as exc:
@@ -218,7 +224,29 @@ class PhononEngine:
         *,
         voice_id: str | None = None,
         seed_value: int | None = None,
+        speed: float | None = None,
     ) -> Iterator[bytes]:
-        # Not frame-streamed yet; return the whole utterance as one PCM chunk.
-        wav, _rate, _job = self.synthesize(text, language, voice_id=voice_id, seed_value=seed_value)
-        yield (np.clip(wav, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
+        """Yield int16 PCM chunks as the model produces them (first audio in a few ms)."""
+        del language
+        requested = (voice_id or "").strip()
+        if requested and voice_library.get_voice(requested) is not None:
+            raise InvalidVoice(
+                "Phonon 31M cannot clone a saved voice; choose a 'phonon:<Name>' voice or use "
+                "an engine that clones."
+            )
+        request: dict[str, Any] = {"text": text}
+        self._fill_request(request, requested, seed_value, speed)
+        with self._lock:
+            process = self._ensure_started()
+        try:
+            yield from process.stream(request)
+        except PackProcessError as exc:
+            if str(exc).startswith("unknown preset"):
+                raise InvalidVoice(str(exc)) from exc
+            raise
+        finally:
+            if not process.is_alive:
+                with self._lock:
+                    if self._process is process:
+                        self._process = None
+            self._arm_idle_timer()

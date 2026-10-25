@@ -179,6 +179,13 @@ Important notes:
   `job.error` says so in plain language.
 - Phonon cannot clone: naming a saved library voice returns 400. Its 37 English voices are listed
   as `phonon:<Name>` (names can contain spaces). `POST /engines/phonon-31m/recheck` reloads it.
+- **Streaming:** `response_format: "pcm"` streams raw int16 PCM as the model produces it (first
+  bytes in about 20 ms on Apple silicon); other formats return the whole clip. Disconnecting
+  mid-stream stops the worker, and the next request restarts it in about 0.1 s.
+- **`speed`:** a number, honoured by Phonon only, from about 0.73 to 1.5 (values outside are
+  clamped). The mapping is calibrated on one sentence, so the resulting length is approximate
+  (1.34 gave 1.33x, 0.82 gave about 0.90x on another). Engines without a speed control ignore it,
+  as before; streaming responses carry `X-Speed-Applied: true|false`. A non-numeric `speed` is 400.
 
 ### POST /engines/kitten2/recheck
 

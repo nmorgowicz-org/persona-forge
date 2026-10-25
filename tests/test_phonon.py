@@ -14,6 +14,15 @@ class StubModel:
 
     def __init__(self):
         self.calls = []
+        self.conditions = []
+
+    def set_conditions(self, conditions):
+        self.conditions.append(conditions)
+
+    def stream(self, text, **kwargs):
+        self.calls.append((text, kwargs))
+        yield np.full(1200, 0.25, dtype=np.float32)
+        yield np.full(1200, -0.25, dtype=np.float32)
 
     def synth(self, text, **kwargs):
         self.calls.append((text, kwargs))
@@ -244,3 +253,42 @@ def test_registry_knows_phonon_and_its_aliases():
     assert info.pack_only and info.capabilities.clone is False
     for alias in ("phonon", "phonon31m", "phonon-31m"):
         assert speech_engines.MODEL_ALIASES[alias] == "phonon-31m"
+
+
+def test_speed_maps_to_the_measured_duration_delta():
+    assert phonon_worker.speed_to_delta(1.0) == 0.0
+    assert phonon_worker.speed_to_delta(1.51) == -1.0
+    assert phonon_worker.speed_to_delta(9.0) == -1.0  # clamped, never extrapolated
+    assert phonon_worker.speed_to_delta(0.1) == 2.0
+    assert -0.5 < phonon_worker.speed_to_delta(1.2) < 0 < phonon_worker.speed_to_delta(0.9)
+
+
+def test_worker_always_resets_conditions_so_speed_does_not_stick():
+    worker, stub = make_worker()
+    worker.handle({"op": "load"})
+
+    worker.handle({"op": "synthesize", "text": "a", "speed": 1.34})
+    worker.handle({"op": "synthesize", "text": "b"})
+
+    assert stub.conditions == [{"duration_delta": -0.5}, {"duration_delta": 0.0}]
+
+
+def test_worker_streams_chunks_then_done():
+    worker, _ = make_worker()
+    worker.handle({"op": "load"})
+
+    messages = list(worker.stream({"text": "hi", "preset": "Zoey"}))
+
+    assert [m.get("done", False) for m in messages] == [False, False, True]
+    assert len(__import__("base64").b64decode(messages[0]["chunk_b64"])) == 2400
+
+
+def test_serve_writes_one_line_per_stream_message():
+    worker, _ = make_worker()
+    worker.handle({"op": "load"})
+    out = io.StringIO()
+
+    phonon_worker.serve(worker, io.StringIO(json.dumps({"op": "stream", "text": "hi"}) + "\n"), out)
+
+    lines = [json.loads(x) for x in out.getvalue().splitlines()]
+    assert len(lines) == 3 and lines[-1] == {"ok": True, "done": True}

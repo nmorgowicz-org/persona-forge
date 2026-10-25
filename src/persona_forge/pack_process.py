@@ -18,7 +18,7 @@ import queue
 import subprocess
 import threading
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 
 class PackProcessError(RuntimeError):
@@ -130,6 +130,46 @@ class PackProcess:
             if not response.get("ok"):
                 raise PackProcessError(str(response.get("error") or "worker error"))
             return response
+
+    def stream(self, payload: Mapping[str, Any], *, timeout: float | None = None) -> Iterator[bytes]:
+        """Send a ``stream`` request and yield decoded audio chunks until the worker says done.
+
+        Holds the request lock for the whole stream, so requests are serialised. ``timeout``
+        applies to each chunk, not the total. Closing the generator early kills the worker: the
+        protocol has no cancel message, and the next request starts a fresh one.
+        """
+        if not self._alive() or self._process is None or self._process.stdin is None:
+            raise PackProcessError(f"worker is not running{self._stderr_suffix()}")
+        data = json.dumps({"op": "stream", **payload}, separators=(",", ":"))
+        wait = self._timeout if timeout is None else timeout
+        finished = False
+        with self._lock:
+            try:
+                self._process.stdin.write(data + "\n")
+                self._process.stdin.flush()
+            except (BrokenPipeError, OSError) as exc:
+                raise PackProcessError(f"worker pipe closed: {exc}") from exc
+            try:
+                while True:
+                    try:
+                        message = self._responses.get(timeout=wait)
+                    except queue.Empty as exc:
+                        self.kill()
+                        raise PackProcessError(f"worker timed out after {wait:g}s") from exc
+                    if message is None:
+                        raise PackProcessError(f"worker exited unexpectedly{self._stderr_suffix()}")
+                    if not message.get("ok"):
+                        raise PackProcessError(str(message.get("error") or "worker error"))
+                    if message.get("done"):
+                        finished = True
+                        return
+                    try:
+                        yield base64.b64decode(message.get("chunk_b64", ""))
+                    except ValueError as exc:
+                        raise PackProcessError(f"worker returned invalid base64: {exc}") from exc
+            finally:
+                if not finished:
+                    self.kill()
 
     def _stderr_suffix(self) -> str:
         tail = self.stderr_tail

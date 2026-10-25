@@ -2757,6 +2757,19 @@ def openai_audio_speech():
     if seed is not None and not isinstance(seed, int):
         return _openai_error("seed must be an integer", 400)
     resolved_seed = model.resolve_seed(seed)
+    speed = data.get("speed")
+    if speed is not None and (isinstance(speed, bool) or not isinstance(speed, (int, float))):
+        return _openai_error("speed must be a number", 400)
+    # Engines without a speed control ignore it, as before; the header says whether it applied.
+    speed_applied = bool(speed is not None and serving_engine.capabilities.speed)
+
+    # Phonon streams raw PCM from its worker process.
+    if fmt == "pcm" and serving_engine.id == "phonon-31m" and not repair_requested:
+        return _openai_audio_speech_stream_pack(
+            serving_engine, text, language, voice_id, resolved_seed,
+            float(speed) if speed_applied and speed is not None else None,
+            model_recognized,
+        )
 
     # Pocket-TTS streaming path: Hermes TTS streaming via OpenAI SDK with_streaming_response.
     # Returns chunked PCM (int16 LE, 24kHz) — no post-processing for low latency.
@@ -2784,6 +2797,7 @@ def openai_audio_speech():
             prosody_repair=repair_requested,
             seed_value=resolved_seed,
             instruct=instruct,
+            speed=float(speed) if speed_applied and speed is not None else None,
         )
         audio, media_type = _encode(wav, sr, fmt)
     except kitten2_engine.EngineUnavailable as exc:
@@ -2829,6 +2843,52 @@ def openai_audio_speech():
                 steps = prog["applied_steps"]
                 response.headers["X-Applied-Steps"] = ", ".join(steps) if isinstance(steps, list) else str(steps)
     return response
+
+
+def _openai_audio_speech_stream_pack(
+    engine: Any,
+    text: str,
+    language: str,
+    voice_id: str | None,
+    resolved_seed: int | None,
+    speed: float | None,
+    model_recognized: bool,
+):
+    """Stream a pack engine's audio as raw int16 PCM (its worker process produces the chunks)."""
+    adapter = speech_engines.adapter_for(engine)
+    stream = adapter.stream_pcm(
+        text, language, voice_id=voice_id, seed_value=resolved_seed, speed=speed
+    )
+    try:
+        first = next(stream, b"")  # surface a bad voice or missing pack as a normal error
+    except kitten2_engine.EngineUnavailable as exc:
+        return _openai_error(str(exc), 503, "api_error")
+    except kitten2_engine.InvalidVoice as exc:
+        return _openai_error(str(exc), 400, "invalid_request_error")
+
+    def body():
+        try:
+            if first:
+                yield first
+            yield from stream
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
+
+    return Response(
+        body(),
+        content_type="audio/pcm",
+        headers={
+            "X-Seed": str(resolved_seed) if resolved_seed is not None else "",
+            "X-Model-Recognized": "true" if model_recognized else "false",
+            "X-Speed-Applied": "true" if speed is not None else "false",
+            "X-Audio-Sample-Rate": "24000",
+            "X-Audio-Channels": "1",
+            "X-Audio-Bits": "16",
+        },
+        direct_passthrough=True,
+    )
 
 
 def _openai_audio_speech_stream_pocket_tts(

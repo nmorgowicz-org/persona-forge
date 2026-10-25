@@ -98,9 +98,9 @@ PHONON_CAPABILITIES = EngineCapabilities(
     clone=False,
     presets=True,
     import_prepared_voice=False,
-    streaming="none",
+    streaming="frame",
     languages=("en",),
-    speed=False,
+    speed=True,
     expression_tags=False,
     seed=True,
     instructions=False,
@@ -217,6 +217,7 @@ class SpeechEngine(Protocol):
         prosody_repair: bool = False,
         seed_value: int | None = None,
         instruct: str | None = None,
+        speed: float | None = None,
     ) -> tuple[Any, int, str | None]:
         """Return ``(wav, sample_rate, job_id)`` for one complete request."""
         ...
@@ -228,6 +229,7 @@ class SpeechEngine(Protocol):
         *,
         voice_id: str | None = None,
         seed_value: int | None = None,
+        speed: float | None = None,
     ) -> Iterator[bytes]:
         """Yield raw int16 LE mono PCM chunks."""
         ...
@@ -258,6 +260,7 @@ class PocketTtsEngine:
         prosody_repair: bool = False,
         seed_value: int | None = None,
         instruct: str | None = None,
+        speed: float | None = None,
     ) -> tuple[Any, int, str | None]:
         from persona_forge import model, text_normalizer
 
@@ -274,7 +277,7 @@ class PocketTtsEngine:
             prosody_repair=prosody_repair,
             seed_value=seed_value,
             instruct=instruct,
-        ).result(timeout=480)
+        ).result(timeout=480)  # Pocket has no speed control; ``speed`` is ignored
 
     def stream_pcm(
         self,
@@ -283,6 +286,7 @@ class PocketTtsEngine:
         *,
         voice_id: str | None = None,
         seed_value: int | None = None,
+        speed: float | None = None,
     ) -> Iterator[bytes]:
         from persona_forge import model, text_normalizer
 

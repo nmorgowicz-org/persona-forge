@@ -239,10 +239,11 @@ class Kitten2Engine:
         prosody_repair: bool = False,
         seed_value: int | None = None,
         instruct: str | None = None,
+        speed: float | None = None,
     ) -> tuple[Any, int, str | None]:
         # Pocket-only options (style presets, prosody repair, instruct) do not apply to this
         # engine; they are accepted so the shared route can stay engine-agnostic.
-        del language, style_preset, postprocess, prosody_repair, instruct
+        del language, style_preset, postprocess, prosody_repair, instruct, speed
         requested = (voice_variant_id or voice_id or "").strip()
         with self._lock:
             process = self._ensure_started()
@@ -279,6 +280,7 @@ class Kitten2Engine:
         *,
         voice_id: str | None = None,
         seed_value: int | None = None,
+        speed: float | None = None,
     ) -> Iterator[bytes]:
         # Kitten 2 has no frame streaming; return the whole utterance as one PCM chunk.
         wav, _rate, _job = self.synthesize(text, language, voice_id=voice_id, seed_value=seed_value)
