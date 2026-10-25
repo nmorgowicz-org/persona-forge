@@ -849,6 +849,44 @@ These decisions supersede earlier tentative wording about previews and small Poc
    preset-only or that current cached voice states are compatible. Include available newer Pocket
    preset catalog entries as well, after checking artifact and language compatibility.
 
+### 9.1 Small Pocket checkpoints: evaluation results (2026-10-25)
+
+`pocket-tts` 4.0.0 ships configs for three smaller English models, each with a reward-fine-tuned
+("refl") twin: `english_18m_2026-10` (27.9M parameters loaded, 18.2M by upstream's count),
+`english_7m_2026-10` (16.6M) and `english_2m_2026-10` (11.7M), against the baseline `english`
+(109.5M loaded). The cloning weights live in the gated `kyutai/pocket-tts` repo (access already
+granted on this machine; nothing was accepted on anyone's behalf); the ungated
+`pocket-tts-without-voice-cloning` repo carries non-cloning weights for the same sizes. All runs used a
+scratch `HF_HOME`; the weights were copied to the Intel host as files, never the token.
+
+- **Loads and clones:** all seven load and clone from a reference; built-in voice `alba` also works.
+- **Intelligibility:** Whisper tiny.en WER on the plain sentence 0.06 and on the emotive sentence
+  0.0 for every model, baseline included. (The structured-text WER of about 1.0 for every model,
+  baseline included, is the metric comparing digits with spoken words; not a model difference.)
+- **Speed, Mac (warm RTF):** baseline 0.09-0.13, 18M 0.05-0.07, 7M 0.05-0.06, 2M 0.04-0.05.
+- **Speed, Intel (docker-agent, one torch thread, load about 4.5, two rounds, clone path):** baseline
+  0.28-0.40, 18M 0.10-0.14, 7M 0.08-0.09, 2M 0.05-0.07 (roughly 3x, 4x and 5-6x faster).
+- **Cloning similarity (WavLM-SV cosine to the reference, mean of 3 sentences; different-speaker
+  floor 0.854):**
+
+  | Model | r1_default | r2_aussie |
+  | --- | --- | --- |
+  | baseline `english` | 0.964 | 0.968 |
+  | 18M / 18M refl | 0.922 / 0.927 | 0.916 / 0.923 |
+  | 7M / 7M refl | 0.889 / 0.895 | 0.904 / 0.892 |
+  | 2M / 2M refl | 0.876 / 0.863 | 0.853 / 0.856 |
+
+  The metric is not calibrated for synthetic voices and is a screen only. Read literally: 18M keeps
+  most of the identity, 7M keeps some, and 2M is at the different-speaker floor, so 2M does not
+  clone in any useful sense. Whether 18M and 7M *sound* acceptable needs a listen:
+  `/tmp/pfbench/pocket_small/listen.html` (reference first, then each model on three sentences).
+- **Not done:** no integration into the app. The app pins Pocket weights and voice-state caches per
+  model, so a variant needs its own pins, its own voice-state cache (states from the baseline are not
+  compatible) and a way to choose it that does not change the existing default. The "refl"
+  variants did not measurably differ from their base models on any metric here.
+- **Candidate shape if it passes listening:** a separate "Pocket Lite" engine (18M, optionally 7M)
+  beside Pocket, using the same pack-style isolation so the baseline runtime is untouched.
+
 ## 10. Evidence and reproducibility
 
 Upstream revisions inspected (not approved pins): Kokoro GitHub
