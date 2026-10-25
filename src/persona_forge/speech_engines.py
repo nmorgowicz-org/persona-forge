@@ -106,6 +106,18 @@ PHONON_CAPABILITIES = EngineCapabilities(
     instructions=False,
 )
 
+KOKORO_CAPABILITIES = EngineCapabilities(
+    clone=False,
+    presets=True,
+    import_prepared_voice=False,
+    streaming="none",
+    languages=("en", "es", "fr", "hi", "it", "pt"),
+    speed=True,
+    expression_tags=False,
+    seed=False,
+    instructions=False,
+)
+
 ENGINES: dict[str, EngineInfo] = {
     "pocket-tts": EngineInfo(
         id="pocket-tts",
@@ -147,6 +159,21 @@ ENGINES: dict[str, EngineInfo] = {
         installed=False,
         pack_only=True,
     ),
+    "kokoro": EngineInfo(
+        id="kokoro",
+        label="Kokoro 82M",
+        description=(
+            "Multilingual voices (English US/UK, Spanish, French, Hindi, Italian, Portuguese) "
+            "on any CPU, with a speed control. No cloning. Installed as an engine pack."
+        ),
+        backend="kokoro",
+        runtime="onnxruntime-cpu",
+        source="hexgrad/Kokoro-82M",
+        license="see upstream",
+        capabilities=KOKORO_CAPABILITIES,
+        installed=False,
+        pack_only=True,
+    ),
 }
 
 # Model names OpenAI clients already send, plus conventional aliases. `None` means "the active
@@ -170,6 +197,9 @@ MODEL_ALIASES: dict[str, str | None] = {
     "phonon": "phonon-31m",
     "phonon-31m": "phonon-31m",
     "phonon31m": "phonon-31m",
+    "kokoro": "kokoro",
+    "kokoro-82m": "kokoro",
+    "kokoro82m": "kokoro",
 }
 
 
@@ -314,7 +344,14 @@ def _make_phonon() -> SpeechEngine:
     return PhononEngine()
 
 
+def _make_kokoro() -> SpeechEngine:
+    from persona_forge.kokoro_engine import KokoroEngine
+
+    return KokoroEngine()
+
+
 _ADAPTER_FACTORIES: dict[str, Callable[[], SpeechEngine]] = {
+    "kokoro": _make_kokoro,
     "kitten2": _make_kitten2,
     "phonon-31m": _make_phonon,
 }

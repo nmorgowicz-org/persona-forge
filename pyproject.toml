@@ -207,3 +207,8 @@ exclude = [
 
 [tool.hatch.build.hooks.custom]
 path = "hatch_build.py"
+
+[tool.pyright]
+# The export scripts import each other as top-level modules (run from src/export), so type
+# checkers need both roots on the path.
+extraPaths = ["src", "src/export"]

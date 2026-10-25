@@ -11,8 +11,8 @@ from persona_forge import speech_engines, voice_library
 def test_registry_describes_pocket_and_the_pack_only_kitten2():
     engines = [engine.as_dict() for engine in speech_engines.list_engines()]
 
-    assert [engine["id"] for engine in engines] == ["pocket-tts", "kitten2", "phonon-31m"]
-    assert [engine["pack_only"] for engine in engines] == [False, True, True]
+    assert [engine["id"] for engine in engines] == ["pocket-tts", "kitten2", "phonon-31m", "kokoro"]
+    assert [engine["pack_only"] for engine in engines] == [False, True, True, True]
     assert engines[1]["capabilities"]["clone"] is True
     assert engines[1]["capabilities"]["streaming"] == "none"
     capabilities = engines[0]["capabilities"]
@@ -29,7 +29,7 @@ def test_model_aliases_resolve_to_the_active_engine():
 
 
 def test_unknown_model_falls_back_to_active_but_is_flagged():
-    engine, recognized = speech_engines.resolve_model("kokoro-82m", "pocket_tts")
+    engine, recognized = speech_engines.resolve_model("some-other-tts", "pocket_tts")
 
     assert engine is not None and engine.id == "pocket-tts"
     assert recognized is False
