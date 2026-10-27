@@ -75,7 +75,7 @@ Request body (JSON):
 - `model` (string, optional) — engine selector. Known values: `pocket-tts` (and aliases
   `pocket`, `pocket_tts`, `persona-forge`, `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts`, `default`,
   or omitted → active engine) and, once the pack is installed, `kitten2` (aliases `kitten-2`,
-  `kitten-tts-2`) `phonon-31m` (aliases `phonon`, `phonon31m`) or `kokoro` (aliases `kokoro-82m`, `kokoro82m`). Pack engines are served beside
+  `kitten-tts-2`) `phonon-31m` (aliases `phonon`, `phonon31m`) `kokoro` (aliases `kokoro-82m`, `kokoro82m`) or `pocket-lite` (aliases `pocket_lite`, `pocket-lite-18m`). Pack engines are served beside
   the active backend in a separate process (no 409); a missing pack returns 503 with an install hint. Kitten 2 holds roughly 2 GB while loaded
   and stops itself after `KITTEN2_IDLE_UNLOAD_S` of inactivity. An unknown label is treated as a client-side name and served by
   the active engine, so existing OpenAI clients keep working; the response reports
@@ -205,6 +205,21 @@ Important notes:
 - ONNX Runtime is pinned to four threads (fewer on smaller machines): its default oversubscribes
   and was 2-3x slower on Intel.
 - Network failures while downloading say so plainly and are retried by choosing Install again.
+
+### POST /engines/pocket-lite/install
+
+- Purpose: provision Pocket Lite, the 18M-parameter Pocket checkpoint (`english_18m_2026-10`), in the
+  background (same job shape as the other packs). It runs on the application's own Python, so there is
+  no virtual environment: the install downloads the model and 21 English voices (about 190 MB) into
+  the pack's own `hf/` folder, then verifies them offline. About a minute and a half on a good link.
+- **Needs a Hugging Face token** whose owner has accepted the terms of the gated `kyutai/pocket-tts`
+  repository (cloning weights live there): `HF_TOKEN` or `huggingface-cli login`. A missing token or
+  unaccepted terms fails with a message that says so; nothing is accepted on the user's behalf. The
+  token goes to the download process only and is never stored or logged.
+- Clones a saved voice from its reference clip (no transcript needed) and serves the English presets as
+  `pocket-lite:<name>` (the standard `pocket:<name>` names also work). `seed` is honoured (repeat runs
+  agree to within one 16-bit step, the same as the standard model); `speed` is not supported; output
+  is not frame-streamed. Its voice states are separate from the standard Pocket runtime.
 
 ### POST /engines/kitten2/recheck
 

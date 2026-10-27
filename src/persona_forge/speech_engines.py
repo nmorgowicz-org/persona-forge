@@ -94,6 +94,18 @@ KITTEN2_CAPABILITIES = EngineCapabilities(
     instructions=False,
 )
 
+POCKET_LITE_CAPABILITIES = EngineCapabilities(
+    clone=True,
+    presets=True,
+    import_prepared_voice=False,
+    streaming="none",
+    languages=("en",),
+    speed=False,
+    expression_tags=False,
+    seed=True,
+    instructions=False,
+)
+
 PHONON_CAPABILITIES = EngineCapabilities(
     clone=False,
     presets=True,
@@ -128,6 +140,22 @@ ENGINES: dict[str, EngineInfo] = {
         source="kyutai/pocket-tts",
         license="see upstream",
         capabilities=POCKET_CAPABILITIES,
+    ),
+    "pocket-lite": EngineInfo(
+        id="pocket-lite",
+        label="Pocket Lite (18M)",
+        description=(
+            "A smaller Pocket model that still clones: about 3x faster than Pocket on Intel, "
+            "English only, and close to Pocket in listening tests. Needs a Hugging Face token "
+            "to install (its cloning weights are gated)."
+        ),
+        backend="pocket-lite",
+        runtime="python-cpu",
+        source="kyutai/pocket-tts",
+        license="see upstream",
+        capabilities=POCKET_LITE_CAPABILITIES,
+        installed=False,
+        pack_only=True,
     ),
     "kitten2": EngineInfo(
         id="kitten2",
@@ -191,6 +219,9 @@ MODEL_ALIASES: dict[str, str | None] = {
     "pocket": "pocket-tts",
     "pocket-tts": "pocket-tts",
     "pocket_tts": "pocket-tts",
+    "pocket-lite": "pocket-lite",
+    "pocket_lite": "pocket-lite",
+    "pocket-lite-18m": "pocket-lite",
     "kitten2": "kitten2",
     "kitten-2": "kitten2",
     "kitten-tts-2": "kitten2",
@@ -350,8 +381,15 @@ def _make_kokoro() -> SpeechEngine:
     return KokoroEngine()
 
 
+def _make_pocket_lite() -> SpeechEngine:
+    from persona_forge.pocket_lite_engine import PocketLiteEngine
+
+    return PocketLiteEngine()
+
+
 _ADAPTER_FACTORIES: dict[str, Callable[[], SpeechEngine]] = {
     "kokoro": _make_kokoro,
+    "pocket-lite": _make_pocket_lite,
     "kitten2": _make_kitten2,
     "phonon-31m": _make_phonon,
 }

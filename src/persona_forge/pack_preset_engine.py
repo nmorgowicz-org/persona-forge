@@ -139,6 +139,15 @@ class PackPresetEngine:
         if process is not None:
             process.close()
 
+    def _check_voice(self, requested: str) -> None:
+        """Called before the worker starts; engines that clone override this to allow saved voices."""
+        self._refuse_clone(requested)
+
+    def _prepare_voice(self, process: PackProcess, requested: str) -> bool:
+        """Clone-capable engines prepare a saved voice here and return True; presets return False."""
+        del process, requested
+        return False
+
     def _refuse_clone(self, requested: str) -> None:
         if requested and voice_library.get_voice(requested) is not None:
             raise InvalidVoice(
@@ -177,11 +186,14 @@ class PackPresetEngine:
         # Pocket-only options do not apply here; they are accepted so the route stays generic.
         del language, style_preset, postprocess, prosody_repair, instruct
         requested = (voice_variant_id or voice_id or "").strip()
-        self._refuse_clone(requested)
+        self._check_voice(requested)
         with self._lock:
             process = self._ensure_started()
             request: dict[str, Any] = {"op": "synthesize", "text": text}
-            self._fill_request(request, requested, seed_value, speed)
+            cloned = self._prepare_voice(process, requested)
+            if cloned:
+                request["voice_id"] = requested
+            self._fill_request(request, "" if cloned else requested, seed_value, speed)
             try:
                 audio = process.synthesize(request)
             except PackProcessError as exc:

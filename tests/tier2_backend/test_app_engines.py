@@ -11,10 +11,12 @@ from persona_forge import speech_engines, voice_library
 def test_registry_describes_pocket_and_the_pack_only_kitten2():
     engines = [engine.as_dict() for engine in speech_engines.list_engines()]
 
-    assert [engine["id"] for engine in engines] == ["pocket-tts", "kitten2", "phonon-31m", "kokoro"]
-    assert [engine["pack_only"] for engine in engines] == [False, True, True, True]
-    assert engines[1]["capabilities"]["clone"] is True
-    assert engines[1]["capabilities"]["streaming"] == "none"
+    assert [engine["id"] for engine in engines] == ["pocket-tts", "pocket-lite", "kitten2", "phonon-31m", "kokoro"]
+    assert [engine["pack_only"] for engine in engines] == [False, True, True, True, True]
+    kitten = engines[2]
+    assert kitten["id"] == "kitten2"
+    assert kitten["capabilities"]["clone"] is True
+    assert kitten["capabilities"]["streaming"] == "none"
     capabilities = engines[0]["capabilities"]
     assert capabilities["clone"] is True
     assert capabilities["presets"] is True

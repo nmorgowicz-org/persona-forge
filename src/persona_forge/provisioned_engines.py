@@ -21,6 +21,7 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "kitten2": ("persona_forge.kitten2_engine", "persona_forge.kitten2_pack"),
     "phonon-31m": ("persona_forge.phonon_engine", "persona_forge.phonon_pack"),
     "kokoro": ("persona_forge.kokoro_engine", "persona_forge.kokoro_pack"),
+    "pocket-lite": ("persona_forge.pocket_lite_engine", "persona_forge.pocket_lite_pack"),
 }
 
 

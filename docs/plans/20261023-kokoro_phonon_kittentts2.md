@@ -888,7 +888,7 @@ scratch `HF_HOME`; the weights were copied to the Intel host as files, never the
   2M have robotic artifacts and sound much less natural, so they are rejected despite the speed. The
   owner was unsure the "refl" variants are better; no measurable gain, so use plain 18M. This matches
   the similarity ordering (0.92 / 0.89 / 0.86), so the screen was a usable predictor here.
-- **Candidate shape (18M only):** a separate "Pocket Lite" engine (18M, optionally 7M)
+- **Built (18M only):** see §9.3. Candidate shape was: a separate "Pocket Lite" engine (18M, optionally 7M)
   beside Pocket, using the same pack-style isolation so the baseline runtime is untouched.
 
 ### 9.2 KokoClone source-voice leakage (2026-10-25, Mac CPU)
@@ -915,6 +915,29 @@ Conversion takes about 0.7-0.8 s per clip after the Kokoro step. Screen only, on
   single small model and no composite dependency. Listening page:
   `/tmp/pfbench/kc_leak/listen.html`. If listening shows the output clearly sounds like the reference,
   revisit this.
+
+### 9.3 Pocket Lite 18M engine (built 2026-10-27)
+
+Engine id `pocket-lite`, pack-style isolation without a virtualenv (the worker runs on the app's
+interpreter, which already ships `pocket-tts` 4.0.0). Files: `pocket_lite_worker.py`,
+`pocket_lite_pack.py`, `pocket_lite_engine.py` (a subclass of the shared pack adapter, which gained two
+small hooks so a pack engine can clone), plus registry lines. Nothing in the standard Pocket runtime
+changed.
+
+- **Install (real, Mac):** 93 s, 191 MB, verified offline; needs a Hugging Face token with the terms
+  accepted for `kyutai/pocket-tts` (gated); the failure message says so.
+- **Through HTTP:** clone of a saved voice, English presets, seeded requests, an unknown preset is
+  400; `GET /engines` card shows Verified, cloning, hardware fit and the benchmark (RTF 0.051 median
+  on the Mac, first request 0.23 s); the Compare tab runs Pocket against Pocket Lite blind on one saved
+  voice (1.41 s against 0.26 s for one sentence).
+- **Seeds:** a given seed reproduces the audio to within one 16-bit step; the standard Pocket model does
+  exactly the same on this machine, so it is a property of torch there, not of this engine. A warm-up
+  after load was tried and did not change it, and was removed.
+- **Clone similarity through the app:** 0.894 on the app's saved voice with one sentence (the 0.92 in
+  §9.1 was the bake-off references). Single sample.
+- **Not done:** frame streaming, Windows and Linux runs, an Intel run through the app (the Intel
+  speed above is from the model directly), pinning weight hashes ourselves (revisions are the commit
+  pins in `pocket-tts` 4.0.0's own config, which it downloads by hash-addressed file).
 
 ## 10. Evidence and reproducibility
 
