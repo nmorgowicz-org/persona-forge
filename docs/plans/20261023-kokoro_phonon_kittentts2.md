@@ -939,6 +939,16 @@ changed.
   speed above is from the model directly), pinning weight hashes ourselves (revisions are the commit
   pins in `pocket-tts` 4.0.0's own config, which it downloads by hash-addressed file).
 
+### 9.4 Phonon 40M screening (2026-10-27, Mac CPU)
+
+With the owner's token (terms accepted by the owner), `gradium/phonon-40m-en@cc738b7e` loads in the
+31M pack's own `ptts` 0.4.1 with no code change: `ptts.TTS("hf://gradium/phonon-40m-en@<rev>", lang="en",
+quant="q8")`. Same 37 English catalog voices. Warm RTF 0.025-0.028 against 31M's 0.024 (load about 31 s
+each on the first, uncached run). Files: `model.q8.gguf` 74.6 MB (31M is smaller), `model.q4k.gguf` 60.4 MB.
+Not yet judged by ear: `/tmp/pf_ph40/listen.html` plays 31M then 40M on three voices and three sentences.
+Integration, if it sounds better, is a model choice inside the existing Phonon pack (a pinned revision
+and a gated-token install step like Pocket Lite), not a new runtime.
+
 ## 10. Evidence and reproducibility
 
 Upstream revisions inspected (not approved pins): Kokoro GitHub
