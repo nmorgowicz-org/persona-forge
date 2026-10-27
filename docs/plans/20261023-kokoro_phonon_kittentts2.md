@@ -891,6 +891,31 @@ scratch `HF_HOME`; the weights were copied to the Intel host as files, never the
 - **Candidate shape (18M only):** a separate "Pocket Lite" engine (18M, optionally 7M)
   beside Pocket, using the same pack-style isolation so the baseline runtime is untouched.
 
+### 9.2 KokoClone source-voice leakage (2026-10-25, Mac CPU)
+
+The upstream wrapper hard-codes `af_bella` as the Kokoro source voice for English. I overrode it to
+`af_bella`, `am_michael`, `bf_emma` and `bm_george` and converted one sentence toward each of the four
+bake-off references, scoring WavLM-SV cosine to the reference and to the raw (unconverted) source.
+Conversion takes about 0.7-0.8 s per clip after the Kokoro step. Screen only, one sentence, one run.
+
+- **The source voice matters.** The same reference gave outputs that differ from each other by only
+  0.90-0.94 similarity across sources, and the similarity to the reference ranged 0.80-0.97 depending on the
+  source. Mean similarity to the reference per source: bf_emma 0.92, bm_george 0.91, af_bella 0.90,
+  am_michael 0.88, which is within noise of each other.
+- **Leakage is real in places.** `r3_us_f` with `bf_emma` scored 0.80 to the reference and 0.96 to the
+  raw source, and `r2_aussie` with `af_bella` or `bf_emma` scored higher to the source than to the
+  reference: the conversion barely moved those. Mixed-sex pairs (female source, male reference) were
+  not systematically worse.
+- **No single best source.** `af_bella` is best for one reference and `bf_emma` for three, so a fixed
+  default cannot be justified from these numbers, and a per-reference choice needs a listening step.
+- **Versus alternatives:** mean similarity to the reference is about 0.90, below the baseline Pocket
+  (0.96) and about the same as Pocket 18M (0.92), at the cost of two torch models (Kokoro and the
+  ~120M Kanade), an unpinned Git dependency and CUDA/CPU-only support.
+- **Assessment:** not recommended for integration. Pocket Lite 18M gives comparable similarity with a
+  single small model and no composite dependency. Listening page:
+  `/tmp/pfbench/kc_leak/listen.html`. If listening shows the output clearly sounds like the reference,
+  revisit this.
+
 ## 10. Evidence and reproducibility
 
 Upstream revisions inspected (not approved pins): Kokoro GitHub
