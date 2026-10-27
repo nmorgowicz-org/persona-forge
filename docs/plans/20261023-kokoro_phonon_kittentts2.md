@@ -884,7 +884,11 @@ scratch `HF_HOME`; the weights were copied to the Intel host as files, never the
   model, so a variant needs its own pins, its own voice-state cache (states from the baseline are not
   compatible) and a way to choose it that does not change the existing default. The "refl"
   variants did not measurably differ from their base models on any metric here.
-- **Candidate shape if it passes listening:** a separate "Pocket Lite" engine (18M, optionally 7M)
+- **Listening verdict (owner, 2026-10-25):** 18M is very close to the baseline and acceptable. 7M and
+  2M have robotic artifacts and sound much less natural, so they are rejected despite the speed. The
+  owner was unsure the "refl" variants are better; no measurable gain, so use plain 18M. This matches
+  the similarity ordering (0.92 / 0.89 / 0.86), so the screen was a usable predictor here.
+- **Candidate shape (18M only):** a separate "Pocket Lite" engine (18M, optionally 7M)
   beside Pocket, using the same pack-style isolation so the baseline runtime is untouched.
 
 ## 10. Evidence and reproducibility
