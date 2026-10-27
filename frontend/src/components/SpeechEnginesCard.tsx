@@ -256,7 +256,8 @@ export function SpeechEnginesCard() {
                 )}
                 {engine.capabilities.languages && engine.capabilities.languages.length > 0 && (
                   <Badge variant="outline" className="text-[10px]">
-                    {engine.capabilities.languages.length} languages
+                    {engine.capabilities.languages.length}{' '}
+                    {engine.capabilities.languages.length === 1 ? 'language' : 'languages'}
                   </Badge>
                 )}
                 <Badge variant="outline" className="text-[10px]">
