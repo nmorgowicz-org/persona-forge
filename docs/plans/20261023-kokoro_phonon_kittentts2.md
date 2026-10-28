@@ -322,6 +322,19 @@ change to a section above, not a new subsystem.
    default changes the volume every client hears, and any A/B test is biased toward the louder
    engine. Apply one consistent target level before encoding, with an opt-out, and level-match Compare
    playback.
+   **Built (serving layer, `/v1/audio/speech`):** `src/persona_forge/output_level.py` moves the RMS of
+   the active speech (20 ms frames above -55 dBFS, so pauses do not count) to **-23 dBFS**, boosts by at
+   most 12 dB, and soft-limits peaks under -1 dBFS, for every engine including Pocket, before
+   encoding. Silent or non-finite audio is returned unchanged. **On by default** (the plan's intent is
+   that changing engine must not change volume); opt out with `TTS_NORMALIZE_LOUDNESS=0` or
+   `normalize_loudness: false` on the request (the request overrides the env). Responses carry
+   `X-Loudness-Normalized` and `X-Loudness-Gain-Db`. Two sources at RMS 0.09 and 0.2 served through the
+   route end within 1 dB of each other (route test).
+   **Streaming decision: streamed PCM is not normalised.** A stream cannot know the whole clip's
+   level, and a fixed per-engine gain table would be a guess (cloned voices vary by several dB; no
+   measured table exists for Phonon or Pocket Lite). Those responses say `X-Loudness-Normalized: false`.
+   Engines that return a whole clip (Kitten 2, Kokoro) are normalised even for `pcm`. **Not built:** the
+   Integrations-page preference (env plus request field only) and level-matching Compare playback.
 5. **One shared text normaliser in front of the adapters (§4.2).** Pocket read "AB-104 totals
    $1,234.56" as "AB 10 of 4 totals $1020.34.56"; Kitten 2 and KokoClone read it correctly. Numbers,
    currency and codes are normalised once before synthesis, with a per-engine opt-out because Kitten 2

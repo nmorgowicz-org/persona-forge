@@ -218,6 +218,12 @@ When cloning is available, the mounted REF_AUDIO is automatically registered as 
 |-----|---------|-------------|
 | `TTS_NORMALIZE_TEXT` | `1` | Spell out numbers, money, times, ordinals, units, ISO dates and codes before Pocket-TTS synthesis (English). Set `0` to send text unchanged. Kitten TTS 2, Phonon 31M and Kokoro read structured text correctly themselves (Kokoro is multilingual, and this normaliser is English-only) and never use this. |
 
+## Output loudness
+
+| Var | Default | Description |
+|-----|---------|-------------|
+| `TTS_NORMALIZE_LOUDNESS` | `1` | Level-match every complete clip served by `POST /v1/audio/speech` to −23 dBFS RMS (active speech only, boost capped at 12 dB, soft peak limit at −1 dBFS) so switching engine does not change the volume. Set `0`/`false`/`no`/`off` to serve each engine's native level; a request's `normalize_loudness` field overrides this per call. Streamed PCM is never normalised. See `docs/api/HTTP_API_REFERENCE.md`. |
+
 ## Debug / dev (do not use in production)
 
 | Var | Default | Description |

@@ -37,6 +37,7 @@ from persona_forge import (
     omnivoice_engine,
     project_library,
     prosody_repair,
+    output_level,
     segment_library,
     speech_engines,
     voice_catalog,
@@ -2901,6 +2902,9 @@ def openai_audio_speech():
     seed = data.get("seed")
     if seed is not None and not isinstance(seed, int):
         return _openai_error("seed must be an integer", 400)
+    normalize_loudness = data.get("normalize_loudness")
+    if normalize_loudness is not None and not isinstance(normalize_loudness, bool):
+        return _openai_error("normalize_loudness must be a boolean", 400)
     resolved_seed = model.resolve_seed(seed)
     speed = data.get("speed")
     if speed is not None and (isinstance(speed, bool) or not isinstance(speed, (int, float))):
@@ -2949,7 +2953,10 @@ def openai_audio_speech():
             instruct=instruct,
             speed=float(speed) if speed_applied and speed is not None else None,
         )
-        audio, media_type = _encode(wav, sr, fmt)
+        level = output_level.normalize(
+            wav, sr, enabled=output_level.resolve_enabled(normalize_loudness)
+        )
+        audio, media_type = _encode(level.audio, sr, fmt)
     except kitten2_engine.EngineUnavailable as exc:
         return _openai_error(str(exc), 503, "api_error")
     except kitten2_engine.InvalidVoice as exc:
@@ -2972,6 +2979,9 @@ def openai_audio_speech():
     response = Response(audio, content_type=media_type)
     response.headers["X-Model-Recognized"] = "true" if model_recognized else "false"
     response.headers["X-Seed"] = str(resolved_seed)
+    response.headers["X-Loudness-Normalized"] = "true" if level.applied else "false"
+    if level.applied:
+        response.headers["X-Loudness-Gain-Db"] = f"{level.gain_db:.2f}"
     if job_id:
         response.headers["X-Job-Id"] = job_id
         prog = model.get_job_progress(job_id)
@@ -3032,6 +3042,7 @@ def _openai_audio_speech_stream_pack(
         headers={
             "X-Seed": str(resolved_seed) if resolved_seed is not None else "",
             "X-Model-Recognized": "true" if model_recognized else "false",
+            "X-Loudness-Normalized": "false",  # a stream cannot know the whole clip's level
             "X-Speed-Applied": "true" if speed is not None else "false",  # None unless supported
             "X-Audio-Sample-Rate": "24000",
             "X-Audio-Channels": "1",
@@ -3091,6 +3102,7 @@ def _openai_audio_speech_stream_pocket_tts(
         headers={
             "X-Seed": str(resolved_seed) if resolved_seed is not None else "",
             "X-Model-Recognized": "true" if model_recognized else "false",
+            "X-Loudness-Normalized": "false",  # a stream cannot know the whole clip's level
             "X-Audio-Sample-Rate": "24000",
             "X-Audio-Channels": "1",
             "X-Audio-Bits": "16",

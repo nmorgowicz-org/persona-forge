@@ -70,6 +70,9 @@ Request body (JSON):
 - `response_format` (string, optional, default "mp3") — "mp3", "wav", or "pcm"
   (raw int16 LE mono, `audio/pcm`).
 - `seed` (integer, optional) — RNG seed.
+- `normalize_loudness` (boolean, optional) — `false` skips the loudness normalisation described
+  below for this request; `true` forces it on even when the server default is off
+  (`TTS_NORMALIZE_LOUDNESS=0`). Omitted → the server default (on). A non-boolean value returns 400.
 - `prosody_repair` (boolean, optional, default false) — same bounded complete-file repair
   contract as `/generate`.
 - `model` (string, optional) — engine selector. Known values: `pocket-tts` (and aliases
@@ -89,10 +92,14 @@ Response:
   - Header: `X-Model-Recognized`: `true` when `model` matched an engine/alias, `false` when an
     unknown label was accepted for compatibility.
   - Headers: the same `X-Prosody-Repair-*` outcome metadata as `/generate`.
+  - Header: `X-Loudness-Normalized`: `true` when the clip was level-normalised, `false` when it was
+    not (opt-out, silent audio, or a streamed response). `X-Loudness-Gain-Db`: the applied gain in
+    dB, present only when normalised.
 - 503:
   - If model not loaded or a runtime reconfiguration is in progress.
 - 400:
-  - If JSON invalid, input text missing, unsupported `response_format`, or invalid `seed`.
+  - If JSON invalid, input text missing, unsupported `response_format`, invalid `seed`, or a
+    non-boolean `normalize_loudness`.
 - 500:
   - If an inference error occurs.
 
@@ -103,6 +110,21 @@ Error format:
 Important notes:
 
 - Same FIFO queueing behind swaps as `/generate`.
+- **Loudness normalisation.** Engines differ in native level (Kitten TTS 2 is peak-normalised to
+  RMS 0.16–0.22, Pocket sits near 0.09), so every complete clip is brought to one level before
+  encoding, whichever engine produced it: the RMS of the active speech (frames below −55 dBFS
+  are ignored, so pauses do not count) is moved to **−23 dBFS**, boosting by at most 12 dB, and a
+  soft-knee peak limiter keeps samples under **−1 dBFS** so nothing clips. Silent, empty or
+  unmeasurable audio is returned unchanged. It is **on by default**; opt out per request with
+  `normalize_loudness: false` or server-wide with `TTS_NORMALIZE_LOUDNESS=0`. Applies to `mp3`,
+  `wav` and to `pcm` from engines that return a whole clip (Kitten TTS 2, Kokoro, and any
+  non-streamed request). Implementation: `src/persona_forge/output_level.py`.
+- **Streamed PCM is not normalised.** `response_format: "pcm"` from an engine that streams
+  (Pocket-TTS, Phonon 31M, Pocket Lite) is sent chunk by chunk as produced; a stream cannot know
+  the whole clip's level, and a fixed per-engine gain would be a guess because cloned voices vary
+  by several dB. Those responses carry `X-Loudness-Normalized: false`. Request `wav`/`mp3`
+  (or an engine that does not stream) when level consistency matters more than first-audio
+  latency.
 
 ### GET /v1/models
 
