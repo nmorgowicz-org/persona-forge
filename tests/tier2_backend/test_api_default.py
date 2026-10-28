@@ -21,8 +21,8 @@ def test_api_default_starts_unset(client):
     assert response.get_json() == {"default": None}
 
 
-def test_preset_can_be_api_default(client, app_module, monkeypatch):
-    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+def test_preset_can_be_api_default(client, rt, monkeypatch):
+    monkeypatch.setattr(rt, "TTS_BACKEND", "pocket_tts")
 
     response = client.put("/api-default", json={"voice": "pocket:vera"})
 
@@ -39,8 +39,8 @@ def test_preset_can_be_api_default(client, app_module, monkeypatch):
     assert persisted["display_name"]
 
 
-def test_preset_rejected_for_non_pocket_backend(client, app_module, monkeypatch):
-    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "openvino")
+def test_preset_rejected_for_non_pocket_backend(client, rt, monkeypatch):
+    monkeypatch.setattr(rt, "TTS_BACKEND", "openvino")
 
     response = client.put("/api-default", json={"voice": "pocket:vera"})
 
@@ -48,8 +48,8 @@ def test_preset_rejected_for_non_pocket_backend(client, app_module, monkeypatch)
     assert "TTS_BACKEND" in response.get_json()["error"]
 
 
-def test_unknown_preset_is_rejected(client, app_module, monkeypatch):
-    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+def test_unknown_preset_is_rejected(client, rt, monkeypatch):
+    monkeypatch.setattr(rt, "TTS_BACKEND", "pocket_tts")
 
     response = client.put("/api-default", json={"voice": "pocket:not-a-real-voice"})
 
@@ -57,8 +57,8 @@ def test_unknown_preset_is_rejected(client, app_module, monkeypatch):
     assert voice_library.get_api_default() is None
 
 
-def test_audio_speech_applies_preset_default(client, app_module, monkeypatch):
-    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+def test_audio_speech_applies_preset_default(client, rt, monkeypatch):
+    monkeypatch.setattr(rt, "TTS_BACKEND", "pocket_tts")
     client.put("/api-default", json={"voice": "pocket:vera"})
     captured: dict[str, object] = {}
 
@@ -66,7 +66,7 @@ def test_audio_speech_applies_preset_default(client, app_module, monkeypatch):
         captured.update(kwargs)
         raise RuntimeError("stop after capture")
 
-    monkeypatch.setattr(app_module.model, "_run_generate", fake_generate)
+    monkeypatch.setattr(rt, "_run_generate", fake_generate)
 
     response = client.post(
         "/v1/audio/speech",
@@ -79,8 +79,8 @@ def test_audio_speech_applies_preset_default(client, app_module, monkeypatch):
     assert captured["voice_id"] == "pocket:vera"
 
 
-def test_explicit_voice_wins_over_default(client, app_module, monkeypatch):
-    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+def test_explicit_voice_wins_over_default(client, rt, monkeypatch):
+    monkeypatch.setattr(rt, "TTS_BACKEND", "pocket_tts")
     client.put("/api-default", json={"voice": "pocket:vera"})
     captured: dict[str, object] = {}
 
@@ -88,7 +88,7 @@ def test_explicit_voice_wins_over_default(client, app_module, monkeypatch):
         captured.update(kwargs)
         raise RuntimeError("stop after capture")
 
-    monkeypatch.setattr(app_module.model, "_run_generate", fake_generate)
+    monkeypatch.setattr(rt, "_run_generate", fake_generate)
 
     response = client.post(
         "/v1/audio/speech",

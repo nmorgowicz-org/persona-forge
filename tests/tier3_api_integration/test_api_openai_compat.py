@@ -16,7 +16,7 @@ def test_openai_speech_minimal_request(base_url: str):
         json={"input": TEST_INPUT},
         timeout=10,
     )
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     ct = (r.headers.get("content-type") or "").lower()
     assert "audio" in ct
     assert len(r.content) > 100

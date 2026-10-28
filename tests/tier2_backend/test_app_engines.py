@@ -53,13 +53,13 @@ def test_models_endpoint_is_openai_shaped(client):
 
 
 def test_voices_endpoint_lists_saved_and_presets(
-    client, app_module, monkeypatch, tmp_path
+    client, rt, monkeypatch, tmp_path
 ):
     monkeypatch.setattr(voice_library, "VOICE_LIBRARY_DIR", tmp_path)
     monkeypatch.setattr(
         voice_library, "ACTIVE_DEFAULT_FILE", tmp_path / ".active_default"
     )
-    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+    monkeypatch.setattr(rt, "TTS_BACKEND", "pocket_tts")
     saved = voice_library.save_voice(
         b"RIFF....", description="calm narrator", sample_text="hello", language="English"
     )
@@ -85,14 +85,14 @@ def test_registry_exposes_a_matching_adapter():
     assert isinstance(adapter, speech_engines.SpeechEngine)
 
 
-def test_pocket_adapter_delegates_synthesis(app_module, monkeypatch):
+def test_pocket_adapter_delegates_synthesis(rt, monkeypatch):
     captured: dict[str, object] = {}
 
     def fake_generate(_text, _language, **kwargs):
         captured.update(kwargs)
         return object(), 24000, "job-1"
 
-    monkeypatch.setattr(app_module.model, "_run_generate", fake_generate)
+    monkeypatch.setattr(rt, "_run_generate", fake_generate)
 
     wav, sample_rate, job_id = speech_engines.adapter_for(
         speech_engines.ENGINES["pocket-tts"]
@@ -128,9 +128,9 @@ def test_pocket_adapter_streams_pcm(monkeypatch):
     assert chunks == [b"\x00\x00"]
 
 
-def test_engines_endpoint_lists_builtin(client, app_module, monkeypatch, tmp_path):
+def test_engines_endpoint_lists_builtin(client, rt, monkeypatch, tmp_path):
     monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path))
-    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+    monkeypatch.setattr(rt, "TTS_BACKEND", "pocket_tts")
 
     response = client.get("/engines")
 
@@ -216,15 +216,15 @@ def test_speech_unknown_model_still_serves_and_is_flagged(client):
     assert response.headers["X-Model-Recognized"] == "false"
 
 
-def test_speech_accepts_persona_forge_alias(client, app_module, monkeypatch):
+def test_speech_accepts_persona_forge_alias(client, rt, monkeypatch):
     captured: dict[str, object] = {}
 
     def fake_generate(_text, _language, **kwargs):
         captured.update(kwargs)
         raise RuntimeError("stop after capture")
 
-    monkeypatch.setattr(app_module.model, "_run_generate", fake_generate)
-    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+    monkeypatch.setattr(rt, "_run_generate", fake_generate)
+    monkeypatch.setattr(rt, "TTS_BACKEND", "pocket_tts")
 
     response = client.post(
         "/v1/audio/speech",
@@ -343,12 +343,12 @@ def test_kitten2_adapter_reports_a_missing_pack(monkeypatch, tmp_path):
         raise AssertionError("expected EngineUnavailable")
 
 
-def test_speech_route_serves_kitten2_beside_pocket(client, app_module, monkeypatch, tmp_path):
+def test_speech_route_serves_kitten2_beside_pocket(client, app_module, rt, monkeypatch, tmp_path):
     engine = _kitten_engine(monkeypatch, tmp_path)
     monkeypatch.setitem(speech_engines.ADAPTERS, "kitten2", engine)
-    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+    monkeypatch.setattr(rt, "TTS_BACKEND", "pocket_tts")
     monkeypatch.setattr(app_module, "_generation_ready", lambda: True)
-    monkeypatch.setattr(app_module.model, "_service_started", True, raising=False)
+    monkeypatch.setattr(rt, "_service_started", True)
 
     response = client.post(
         "/v1/audio/speech",
@@ -360,12 +360,12 @@ def test_speech_route_serves_kitten2_beside_pocket(client, app_module, monkeypat
     assert _FakeWorker.instances[0].requests[-1]["preset"] == "Bruno"
 
 
-def test_speech_route_returns_503_when_the_pack_is_missing(client, app_module, monkeypatch, tmp_path):
+def test_speech_route_returns_503_when_the_pack_is_missing(client, app_module, rt, monkeypatch, tmp_path):
     monkeypatch.delenv("KITTEN2_PYTHON", raising=False)
     monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path))
-    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+    monkeypatch.setattr(rt, "TTS_BACKEND", "pocket_tts")
     monkeypatch.setattr(app_module, "_generation_ready", lambda: True)
-    monkeypatch.setattr(app_module.model, "_service_started", True, raising=False)
+    monkeypatch.setattr(rt, "_service_started", True)
 
     response = client.post("/v1/audio/speech", json={"model": "kitten2", "input": "hello"})
 
@@ -383,9 +383,9 @@ def test_models_endpoint_reports_kitten2_install_state(client, monkeypatch, tmp_
     assert entries["kitten2"]["pack_only"] is True
 
 
-def test_engines_endpoint_marks_kitten2_as_an_uninstalled_pack(client, app_module, monkeypatch, tmp_path):
+def test_engines_endpoint_marks_kitten2_as_an_uninstalled_pack(client, rt, monkeypatch, tmp_path):
     monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path))
-    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+    monkeypatch.setattr(rt, "TTS_BACKEND", "pocket_tts")
 
     cards = {card["id"]: card for card in client.get("/engines").get_json()["engines"]}
 
@@ -394,7 +394,7 @@ def test_engines_endpoint_marks_kitten2_as_an_uninstalled_pack(client, app_modul
     assert cards["kitten2"]["state"]["verified"] is False
 
 
-def test_speech_route_returns_400_for_an_unknown_kitten2_preset(client, app_module, monkeypatch, tmp_path):
+def test_speech_route_returns_400_for_an_unknown_kitten2_preset(client, app_module, rt, monkeypatch, tmp_path):
     from persona_forge.pack_process import PackProcessError
 
     engine = _kitten_engine(monkeypatch, tmp_path)
@@ -404,9 +404,9 @@ def test_speech_route_returns_400_for_an_unknown_kitten2_preset(client, app_modu
 
     monkeypatch.setattr(_FakeWorker, "synthesize", reject)
     monkeypatch.setitem(speech_engines.ADAPTERS, "kitten2", engine)
-    monkeypatch.setattr(app_module.model, "TTS_BACKEND", "pocket_tts")
+    monkeypatch.setattr(rt, "TTS_BACKEND", "pocket_tts")
     monkeypatch.setattr(app_module, "_generation_ready", lambda: True)
-    monkeypatch.setattr(app_module.model, "_service_started", True, raising=False)
+    monkeypatch.setattr(rt, "_service_started", True)
 
     response = client.post(
         "/v1/audio/speech", json={"model": "kitten2", "input": "hi", "voice": "Nobody"}
@@ -682,3 +682,39 @@ def test_kokoro_does_not_stream_even_for_pcm(client, monkeypatch):
     assert response.status_code == 200
     assert calls and calls[0].get("whole") is True  # one whole clip, never the chunk path
     assert speech_engines.ENGINES["kokoro"].capabilities.streaming == "none"
+
+
+def test_temporary_model_patches_restore_generation_and_adapters(client, app_module, rt):
+    """A failed capture request must not poison the next test's shared fake."""
+    original_backend = rt.TTS_BACKEND
+    original_generate = rt._run_generate
+    original_started = rt._service_started
+    original_adapters = dict(speech_engines.ADAPTERS)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(rt, "_service_started", not original_started)
+        assert app_module.model._service_started is not original_started
+    assert rt._service_started == app_module.model._service_started == original_started
+
+    def capture_only(*args, **kwargs):
+        raise RuntimeError("temporary capture failure")
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(rt, "_run_generate", capture_only)
+        patch.setattr(rt, "TTS_BACKEND", "pocket_tts")
+        patch.setattr(rt, "_service_started", True)
+        patch.setattr(rt, "_capture_only_marker", True, raising=False)
+        patch.setitem(speech_engines.ADAPTERS, "kitten2", object())
+        response = client.post("/v1/audio/speech", json={"input": "hello"})
+        assert response.status_code == 500
+        assert "temporary capture failure" in response.get_json()["error"]["message"]
+
+    assert rt.TTS_BACKEND == app_module.model.TTS_BACKEND == original_backend
+    assert rt._run_generate is app_module.model._run_generate is original_generate
+    assert rt._service_started == app_module.model._service_started == original_started
+    assert not hasattr(rt, "_capture_only_marker")
+    assert not hasattr(app_module.model, "_capture_only_marker")
+    assert speech_engines.ADAPTERS == original_adapters
+    response = client.post("/v1/audio/speech", json={"input": "hello"})
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert response.content_type.startswith("audio/")
