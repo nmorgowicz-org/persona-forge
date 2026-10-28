@@ -60,7 +60,7 @@ concurrency:
 env:
   UV_VERSION: "0.12.9"
   PYTHON_VERSION: "3.13"
-  NODE_VERSION: "24"
+  NODE_VERSION: "26"
   # Allow slow reads throughout Python provisioning, native installs, and resolution.
   # Cold Linux CPython/Torch downloads hit uv's 30-second default; job timeouts still apply.
   UV_HTTP_TIMEOUT: "300"

@@ -23,9 +23,9 @@
     },
     {
       "customType": "regex",
-      "description": "Keep the renovate-config-validator pin in ci.yml current with the latest Renovate release.",
+      "description": "Keep the renovate-config-validator pin in ci-renovate.yml current with the latest Renovate release.",
       "managerFilePatterns": [
-        "//^\\.github\\/workflows\\/ci\\.yml$//"
+        "/^\\.github\\/workflows\\/ci-renovate\\.yml$/"
       ],
       "matchStrings": ["--package renovate@(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
       "depNameTemplate": "renovate",
@@ -170,22 +170,30 @@
       "enabled": false
     },
     {
-      "description": "Keep the frontend runtime and Node types on 24. Renovate 44.171.4 requires Node ^24.11.0, and Node 26 fails installation on the Linux CI runners. Review the validator and runner support together before lifting this gate.",
+      "description": "Keep the frontend runtime and Node types on 26, independently of the Renovate validator runtime.",
       "matchManagers": ["npm"],
       "matchPackageNames": ["node", "@types/node"],
-      "allowedVersions": ">=24.11.0 <25"
+      "allowedVersions": ">=26.0.0 <27"
     },
     {
-      "description": "Keep the digest-pinned frontend builder on Node 24, matching CI and frontend/package.json.",
+      "description": "Keep the digest-pinned frontend builder on Node 26, matching CI and frontend/package.json.",
       "matchManagers": ["dockerfile", "docker-compose"],
       "matchPackageNames": ["node"],
-      "allowedVersions": "/^24(?:[.-]|$)/"
+      "allowedVersions": "/^26(?:[.-]|$)/"
     },
     {
-      "description": "Keep actions/setup-node inputs on Node 24. The github-actions manager names the dependency node but its package actions/node-versions.",
+      "description": "Keep app/build actions/setup-node inputs on Node 26. The dependency is named node but its package is actions/node-versions.",
       "matchManagers": ["github-actions"],
       "matchDatasources": ["github-releases"],
       "matchDepNames": ["node"],
+      "allowedVersions": ">=26.0.0 <27"
+    },
+    {
+      "description": "Only the isolated Renovate validator stays on Node 24: Renovate 44.171.4 requires ^24.11.0. Override the general workflow rule above.",
+      "matchManagers": ["github-actions"],
+      "matchDatasources": ["github-releases"],
+      "matchDepNames": ["node"],
+      "matchFileNames": [".github/workflows/ci-renovate.yml"],
       "allowedVersions": ">=24.11.0 <25"
     },
     {

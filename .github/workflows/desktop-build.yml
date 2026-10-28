@@ -64,7 +64,7 @@ concurrency:
 env:
   UV_VERSION: "0.12.9"
   PYTHON_VERSION: "3.13"
-  NODE_VERSION: "24"
+  NODE_VERSION: "26"
   RUST_VERSION: "1.98"
   TAURI_CLI_VERSION: "2.11.5"
 
