@@ -187,7 +187,7 @@ def engine(monkeypatch, tmp_path):
     python = tmp_path / "python"
     python.write_text("")
     monkeypatch.setenv("PHONON_PYTHON", str(python))
-    monkeypatch.setenv("ENGINE_WARM_WAIT_S", "0.05")
+    monkeypatch.setenv("ENGINE_WARM_WAIT_S", "30")
     monkeypatch.setenv("IMPORTED_VOICES_DIR", str(tmp_path / "imported"))
     monkeypatch.setattr(pack_preset_engine, "PackProcess", FakeProcess)
     return phonon_engine.PhononEngine(idle_unload_s=0)

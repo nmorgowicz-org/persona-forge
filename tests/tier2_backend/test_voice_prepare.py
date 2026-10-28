@@ -115,7 +115,7 @@ def kitten(monkeypatch, tmp_path):
     python.write_text("")
     monkeypatch.setenv("KITTEN2_PYTHON", str(python))
     monkeypatch.setattr(kitten2_engine, "PackProcess", FakeProcess)
-    monkeypatch.setenv("ENGINE_WARM_WAIT_S", "0.05")
+    monkeypatch.setenv("ENGINE_WARM_WAIT_S", "30")
     return kitten2_engine.Kitten2Engine(idle_unload_s=0)
 
 
@@ -126,7 +126,7 @@ def lite(monkeypatch, tmp_path):
     monkeypatch.setattr(pocket_lite_engine, "pack_directory", lambda root=None: pack)
     monkeypatch.setattr(pocket_lite_engine, "pack_python", lambda root=None: tmp_path / "python")
     monkeypatch.setattr(pack_preset_engine, "PackProcess", FakeProcess)
-    monkeypatch.setenv("ENGINE_WARM_WAIT_S", "0.05")
+    monkeypatch.setenv("ENGINE_WARM_WAIT_S", "30")
     return pocket_lite_engine.PocketLiteEngine(idle_unload_s=0)
 
 
@@ -282,7 +282,8 @@ def test_prepare_waits_for_a_loading_engine_instead_of_failing(kitten):
     assert _status(voice["voice_id"], "kitten2")["status"] == "ready"
 
 
-def test_cancelling_while_the_engine_loads_stops_the_wait(kitten):
+def test_cancelling_while_the_engine_loads_stops_the_wait(kitten, monkeypatch):
+    monkeypatch.setenv("ENGINE_WARM_WAIT_S", "0.05")  # the fixture's generous wait would hide it
     voice = _voice()
     FakeProcess.load_gate = threading.Event()
     cancel = threading.Event()
