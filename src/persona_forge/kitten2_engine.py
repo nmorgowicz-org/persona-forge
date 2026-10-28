@@ -79,20 +79,39 @@ def list_presets(root: Path | None = None) -> list[str]:
 
 _NON_ENGLISH = {"ar", "zh", "fr", "de", "hi", "it", "pt", "ru", "es"}
 
+# Many voices carry no id prefix but are named for their language ("KoreanNewsAnchor").
+_LANGUAGE_WORDS = {
+    "Arabic": "ar", "Chinese": "zh", "Dutch": "nl", "French": "fr", "German": "de", "Hindi": "hi",
+    "Indonesian": "id", "Italian": "it", "Japanese": "ja", "Korean": "ko", "Polish": "pl",
+    "Portuguese": "pt", "Russian": "ru", "Spanish": "es", "Turkish": "tr",
+}  # fmt: skip
+
+
+def language_from_name(name: str) -> str | None:
+    """Language code when the voice name starts with a language word, else ``None``."""
+    for word, code in _LANGUAGE_WORDS.items():
+        if name.startswith(word):
+            return code
+    return None
+
 
 def preset_language(name: str, root: Path | None = None) -> str:
-    """Language code of a preset, from its catalog ``voice_id`` prefix (``fr_...``); default ``en``."""
+    """Language code of a preset: the catalog ``voice_id`` prefix (``fr_...``), else the name's
+    leading language word, else ``en``."""
+    named = language_from_name(name)
     directory = pack_directory(root)
     if directory is None:
-        return "en"
+        return named or "en"
     for catalog in (directory / "hf").glob("models--*kitten-tts-2/snapshots/*/voices/voices.json"):
         try:
             entry = json.loads(catalog.read_text(encoding="utf-8")).get(name, {})
         except (OSError, ValueError):
             continue
         prefix = str(entry.get("voice_id", ""))[:3]
-        return prefix[:2] if prefix[2:] == "_" and prefix[:2] in _NON_ENGLISH else "en"
-    return "en"
+        if prefix[2:] == "_" and prefix[:2] in _NON_ENGLISH:
+            return prefix[:2]
+        return named or "en"
+    return named or "en"
 
 
 def _decode_wav(data: bytes) -> tuple[np.ndarray, int]:

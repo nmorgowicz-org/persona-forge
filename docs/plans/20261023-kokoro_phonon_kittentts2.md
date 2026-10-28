@@ -429,6 +429,19 @@ spec still stands. **Compare from a saved voice's actions menu: built** ("Compar
 
 **Uninstalled engines' voices: built.** `src/persona_forge/engine_voice_catalog.json` bundles each pack engine's voice names and languages (Kitten 115, Phonon 37, Kokoro 41; Pocket Lite's 21 come from its worker), so the tab lists them before install with a "Needs install" badge, an **Install** button on the card and in the drawer, an "Installed only" toggle, and every engine in the engine filter. The install runs inline with step progress and the list reloads with the engine's real voices when it finishes. The file is generated from installed packs (`python -m persona_forge.voice_catalog`), and `tests/tier2_backend/test_voice_catalog.py` compares it with any pack that is installed, so a stale list fails the test. Preview stays disabled until install (nothing upstream to play). Checked in a real browser: browsed with only Kokoro installed, installed Phonon inline (about 40 s), and its cards switched to Preview, which produced real audio.
 
+**Voice metadata and filters.** The first version kept only names; the engines' own data carries more, so each catalog entry now has `gender`, `gender_source`, `accent`, `age` and a description, and the tab has Gender and Accent filters plus badges. Sources:
+
+| Engine | Gender | Other |
+| --- | --- | --- |
+| Phonon | upstream `gender` (13 female, 12 male, 12 "character" voices with none) | `locale` as accent, `age`, upstream `description` |
+| Kokoro | the second letter of the name (`af_`, `bm_` ...), all 41 voices | accent from the first letter (a American, b British) |
+| Pocket, Pocket Lite | the app's existing notes ("Female reading"), 20 of 21 Lite voices | the note |
+| Kitten 2 | none upstream. 9 from an explicit word in the name (`NewsAnchorFemale`, `Grandma...`), 106 **estimated** from the median pitch of the voice's reference clip | the name split into words |
+
+The Kitten estimate is shown as "Female (est.)" and is a stopgap until upstream states a gender. Median pitch of at least 165 Hz reads as female. Against 27 voices whose gender I judged from first names it agreed on 22 (10 of 12 female, 12 of 15 male); the misses were Dolores, Martha, Jasper, Laurence and Leo, which is the expected failure for low female and high male voices. That sample is my own judgement, not ground truth. `gender_source` (`upstream`, `name`, `estimated`) is kept per voice so the estimates can be replaced without a UI change.
+
+Finding while doing this: Kitten has no language field, and only some voice ids carry a prefix, so 65 voices named for a language (`KoreanNewsAnchor`) were listed as English and slipped through the English-only filter. `preset_language` now also reads the leading language word; English-only went from 216 to 160 voices on the checked setup. `POCKET_BUILTIN_VOICES` moved to `pocket_voices.py` so the catalog can read it without importing the whole app (which starts the model loader).
+
 ### 5.4 My voices tab (cloning)
 
 - Existing families/variants preserved.

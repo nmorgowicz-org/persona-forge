@@ -173,6 +173,11 @@ export interface BuiltInVoiceMeta {
   requires_backend: string | null
   /** False when the voice comes from the bundled catalog of an engine that is not installed. */
   installed?: boolean
+  gender?: 'female' | 'male' | null
+  /** `estimated` is a pitch guess (Kitten ships no gender); show it as an estimate. */
+  gender_source?: 'upstream' | 'name' | 'estimated' | null
+  accent?: string | null
+  age?: string | null
 }
 
 export interface BuiltInEngineSummary {

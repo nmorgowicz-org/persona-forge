@@ -65,6 +65,12 @@ function needsInstall(voice: BuiltInVoiceMeta): boolean {
   return voice.installed === false
 }
 
+function genderBadge(voice: BuiltInVoiceMeta): string | null {
+  if (!voice.gender) return null
+  const label = voice.gender === 'female' ? 'Female' : 'Male'
+  return voice.gender_source === 'estimated' ? `${label} (est.)` : label
+}
+
 function isEnglishVoice(voice: BuiltInVoiceMeta): boolean {
   const code = (voice.language_code || '').toLowerCase()
   return code.startsWith('en') || /english/i.test(voice.language || '')
@@ -83,6 +89,8 @@ export function BuiltInVoicesTab() {
   )
   const [category, setCategory] = useState('all')
   const [engineFilter, setEngineFilter] = useState('all')
+  const [genderFilter, setGenderFilter] = useState('all')
+  const [accentFilter, setAccentFilter] = useState('all')
   const [engines, setEngines] = useState<BuiltInEngineSummary[]>([])
   const [favorites, setFavorites] = useState<string[]>(() => readFavoriteVoiceIds())
   const [previewing, setPreviewing] = useState<string | null>(null)
@@ -138,6 +146,10 @@ export function BuiltInVoicesTab() {
     () => Array.from(new Set(voices.map((voice) => voice.category).filter(Boolean))).sort(),
     [voices],
   )
+  const accents = useMemo(
+    () => Array.from(new Set(voices.map((voice) => voice.accent).filter((value): value is string => Boolean(value)))).sort(),
+    [voices],
+  )
   const hiddenByLanguage = useMemo(
     () => (language === 'en' ? voices.filter((voice) => !isEnglishVoice(voice)).length : 0),
     [voices, language],
@@ -149,6 +161,10 @@ export function BuiltInVoicesTab() {
       if (category !== 'all' && voice.category !== category) return false
       if (engineFilter !== 'all' && (voice.engine ?? 'pocket-tts') !== engineFilter) return false
       if (installedOnly && needsInstall(voice)) return false
+      if (genderFilter === 'unspecified' ? Boolean(voice.gender) : genderFilter !== 'all' && voice.gender !== genderFilter) {
+        return false
+      }
+      if (accentFilter !== 'all' && voice.accent !== accentFilter) return false
       if (!q) return true
       return (
         voice.display_name.toLowerCase().includes(q) ||
@@ -157,7 +173,7 @@ export function BuiltInVoicesTab() {
         (voice.note || '').toLowerCase().includes(q)
       )
     })
-  }, [voices, language, category, engineFilter, installedOnly, query])
+  }, [voices, language, category, engineFilter, genderFilter, accentFilter, installedOnly, query])
 
   function changeLanguage(next: 'en' | 'all') {
     setLanguage(next)
@@ -326,6 +342,32 @@ export function BuiltInVoicesTab() {
             </SelectContent>
           </Select>
         )}
+        <Select value={genderFilter} onValueChange={setGenderFilter}>
+          <SelectTrigger className="w-36" aria-label="Gender filter">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Any gender</SelectItem>
+            <SelectItem value="female">Female</SelectItem>
+            <SelectItem value="male">Male</SelectItem>
+            <SelectItem value="unspecified">Unspecified</SelectItem>
+          </SelectContent>
+        </Select>
+        {accents.length > 1 && (
+          <Select value={accentFilter} onValueChange={setAccentFilter}>
+            <SelectTrigger className="w-36" aria-label="Accent filter">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Any accent</SelectItem>
+              {accents.map((value) => (
+                <SelectItem key={value} value={value}>
+                  {value}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={category} onValueChange={setCategory}>
           <SelectTrigger className="w-40" aria-label="Category filter">
             <SelectValue />
@@ -474,6 +516,25 @@ export function BuiltInVoicesTab() {
                   <Badge variant="outline" className="text-[10px]">
                     {CATEGORY_LABELS[voice.category] || voice.category}
                   </Badge>
+                  {genderBadge(voice) && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px]"
+                      title={voice.gender_source === 'estimated' ? "Guessed from the voice's pitch; the engine does not say." : undefined}
+                    >
+                      {genderBadge(voice)}
+                    </Badge>
+                  )}
+                  {voice.accent && (
+                    <Badge variant="outline" className="text-[10px]">
+                      {voice.accent}
+                    </Badge>
+                  )}
+                  {voice.age && (
+                    <Badge variant="outline" className="text-[10px]">
+                      {voice.age}
+                    </Badge>
+                  )}
                   {needsInstall(voice) && (
                     <Badge variant="secondary" className="text-[10px]">
                       Needs install
@@ -543,6 +604,9 @@ export function BuiltInVoicesTab() {
                   <Badge variant="outline">
                     {CATEGORY_LABELS[detail.category] || detail.category}
                   </Badge>
+                  {genderBadge(detail) && <Badge variant="outline">{genderBadge(detail)}</Badge>}
+                  {detail.accent && <Badge variant="outline">{detail.accent}</Badge>}
+                  {detail.age && <Badge variant="outline">{detail.age}</Badge>}
                   {needsInstall(detail) && <Badge variant="secondary">Needs install</Badge>}
                   {apiDefault?.voice === detail.voice_id && <Badge>API default</Badge>}
                 </div>
