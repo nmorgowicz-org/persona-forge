@@ -948,6 +948,17 @@ each on the first, uncached run). Files: `model.q8.gguf` 74.6 MB (31M is smaller
 **Listening verdict (owner, 2026-10-27):** no audible difference in voice, naturalness or anything else between 31M and 40M on three voices and three sentences (`/tmp/pf_ph40/listen.html`).
 **Decision: not integrated.** It would add a gated, token-required install and a larger model for no audible gain. 31M stays the only Phonon model.
 
+### 9.5 Newer Pocket preset catalog entries (2026-10-27)
+
+Compared `pocket-tts` 4.0.0's predefined-voice catalogue (27 names) with the app's built-in list (30
+entries). Every English name upstream is already in the app. The only upstream name the app lacks is
+`daan`, a Dutch voice (`cml_tts_nl` recording); the app serves English, French, German, Spanish,
+Italian and Portuguese and has no Dutch config, so adding it would list a voice nothing can speak, and it
+was left out. The app's extra four `hf_*` entries are its own reference-clip voices, not upstream names.
+Result: **no preset to add.** Separately, the model repository also carries newer full-size English
+checkpoints (for example `english_2026-10`) that 4.0.0 has no config for; those are model variants, not
+presets, and are not evaluated here.
+
 ## 10. Evidence and reproducibility
 
 Upstream revisions inspected (not approved pins): Kokoro GitHub
