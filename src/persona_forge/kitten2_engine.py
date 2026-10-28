@@ -235,7 +235,7 @@ class Kitten2Engine:
 
     def _not_installed(self) -> EngineUnavailable:
         return EngineUnavailable(
-            "The Kitten TTS 2 engine pack is not installed; install it in Settings → "
+            "The Kitten TTS 2 engine pack is not installed; install it in Runtime → "
             "Speech engines."
         )
 
@@ -339,7 +339,10 @@ class Kitten2Engine:
         if wav_path.is_symlink():
             wav_path = wav_path.resolve()
         if not wav_path.is_file():
-            return False
+            raise InvalidVoice(
+                f"The reference clip for voice {voice_id!r} is missing. "
+                "Restore the clip or save the voice again in Voice Library."
+            )
         transcript = (meta.get("sample_text") or "").strip()
         if not transcript:
             # Without a transcript Kitten would load a speech-recognition model mid-request, which

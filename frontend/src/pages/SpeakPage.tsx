@@ -165,10 +165,12 @@ export function SpeakPage() {
   const [apiDefaultError, setApiDefaultError] = useState<string | null>(null)
   const [resultMeta, setResultMeta] = useState<SpeakResultMeta | null>(null)
   const { models: engineModels, presets: enginePresets } = useSpeakEngines()
-  const [engineChoice, setEngineChoice] = useState('')
+  const engineChoice = useAppStore((s) => s.speakEngineChoice)
+  const setEngineChoice = useAppStore((s) => s.setSpeakEngineChoice)
   const { status: engineLoadStatus, cards: engineCards, refresh: refreshEngineStatus } = useEngineLoadStatus()
   const [engineWait, setEngineWait] = useState<string | null>(null)
-  const [enginePreset, setEnginePreset] = useState('')
+  const enginePreset = useAppStore((s) => s.speakEnginePreset)
+  const setEnginePreset = useAppStore((s) => s.setSpeakEnginePreset)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const runtimeTtsBackend = useAppStore((s) => s.runtimeTtsBackend)
   const isPocketBackend = runtimeTtsBackend === 'pocket_tts'
@@ -367,8 +369,11 @@ export function SpeakPage() {
     setSpeakError(null)
     setSpeakJobProgress(null)
     setResultMeta(null)
-    if (effectiveEngine) {
-      await generateWithEngine(effectiveEngine.id, enginePreset || voiceId)
+    // Discovery may still be pending on a remount. An explicit choice must never fall
+    // through to the active-runtime job path just because its model card has not arrived.
+    const requestedEngine = presetEngineId ?? engineChoice
+    if (requestedEngine) {
+      await generateWithEngine(requestedEngine, enginePreset || voiceId)
       return
     }
     try {

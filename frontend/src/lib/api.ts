@@ -124,6 +124,8 @@ export interface VoiceMeta {
   description: string
   sample_text: string
   language: string
+  /** Optional persisted code used by API language enforcement; missing means English. */
+  language_code?: string | null
   seed?: number | null
   selections?: unknown
   created_at: number

@@ -130,7 +130,7 @@ class PackPresetEngine:
 
     def _not_installed(self) -> EngineUnavailable:
         return EngineUnavailable(
-            f"The {self.label} engine pack is not installed; install it in Settings → "
+            f"The {self.label} engine pack is not installed; install it in Runtime → "
             "Speech engines."
         )
 

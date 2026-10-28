@@ -191,6 +191,27 @@ def test_a_request_naming_another_engine_does_not_use_the_default(client, packs,
     assert served[0][0] == "pocket-tts" and served[0][1]["voice_id"] is None
 
 
+@pytest.mark.parametrize("default_kind", ["pocket", "saved"])
+@pytest.mark.parametrize("model_name,engine_id", [
+    ("kitten-tts-2", "kitten2"), ("kokoro-82m", "kokoro"),
+])
+@pytest.mark.parametrize("fmt", ["wav", "pcm"])
+def test_a_named_pack_uses_its_own_voice_instead_of_the_active_backends_default(
+    client, packs, served, default_kind, model_name, engine_id, fmt
+):
+    voice = "pocket:vera" if default_kind == "pocket" else _saved_voice()
+    voice_library.set_api_default("pocket_tts", voice)
+
+    response = _speak(client, model=model_name, response_format=fmt)
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert response.data
+    assert len(served) == 1
+    assert served[0][0] == engine_id
+    assert served[0][1]["voice_id"] is None
+    assert served[0][1].get("voice_variant_id") is None
+
+
 def test_an_explicit_voice_wins_over_the_default(client, packs, served):
     client.put("/api-default", json={"voice": "kokoro:af_heart"})
 
@@ -202,9 +223,13 @@ def test_an_explicit_voice_wins_over_the_default(client, packs, served):
 def test_a_namespaced_voice_implies_its_engine(client, packs, served):
     _speak(client, voice="phonon:Zoey", model="tts-1")
     _speak(client, voice="kokoro:af_heart")
-    _speak(client, voice="kokoro:af_heart", model="pocket-tts")  # an explicit model still wins
+    mismatch = _speak(client, voice="kokoro:af_heart", model="pocket-tts")
 
-    assert [c[0] for c in served] == ["phonon-31m", "kokoro", "pocket-tts"]
+    # An explicit model remains authoritative: reject its mismatched voice, never render it
+    # with another speaker (or silently route to the voice's engine).
+    assert mismatch.status_code == 400
+    assert "engine" in mismatch.get_json()["error"]["message"]
+    assert [c[0] for c in served] == ["phonon-31m", "kokoro"]
 
 
 def test_pocket_and_saved_voice_defaults_are_served_as_before(client, packs, served):

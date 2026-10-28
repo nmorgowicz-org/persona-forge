@@ -127,6 +127,14 @@ Unless you're tuning performance, leave these at defaults.
 | `FRONTEND_ENABLED` | `1` | Serve web UI at `/`. Set `0` for API-only. |
 | `FRONTEND_DIST_DIR` | Auto-resolved | Path to compiled frontend static files; normally auto-resolved. |
 
+`PERSONA_FORGE_BASE_URL` in the Integrations snippets is a **client-side** environment
+variable, not a server setting. Set it to the service origin (for example,
+`http://127.0.0.1:8318`); the generated curl/Python/JavaScript examples also accept the
+Desktop SDK URL ending in `/v1`, with or without a trailing slash. They normalize the suffix
+before appending `/v1/audio/speech` (curl) or `/v1` (SDK base URL), exactly once. Python and
+JavaScript read the environment explicitly; they do not treat `$PERSONA_FORGE_BASE_URL` as
+an interpolated string. The server does not need this variable.
+
 ## VoiceDesign / model (advanced)
 
 Leave at defaults unless you know what you're doing.
@@ -141,7 +149,7 @@ Leave at defaults unless you know what you're doing.
 | `MODEL_REVISION` | unset | Pin specific Base revision; must match exported IR metadata. |
 | `HF_TOKEN` | (from HF_TOKEN_FILE if set) | Hugging Face token for gated checkpoints. |
 | `HF_TOKEN_FILE` | unset | Path to a file containing HF_TOKEN (Docker secret pattern). |
-| (stored engine token) | unset | Not an env var: a token pasted on a gated engine's card (Settings → Speech engines) is kept in `<DATA_DIR>/.engine_hf_token` (0600) and used only for that engine's download, ahead of `HF_TOKEN`. `HF_TOKEN` still works when none is stored. No env change is needed. |
+| (stored engine token) | unset | Not an env var: a token pasted on a gated engine's card (Runtime → Speech engines) is kept in `<DATA_DIR>/.engine_hf_token` (0600) and used only for that engine's download, ahead of `HF_TOKEN`. `HF_TOKEN` still works when none is stored. No env change is needed. |
 | `MODEL_CACHE_CONTAINER_PATH` | `/root/.cache/huggingface/hub` | Internal: mount reporting path for HF cache. |
 
 ## OmniVoice / ASR (advanced)

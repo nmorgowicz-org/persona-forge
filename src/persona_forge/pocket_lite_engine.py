@@ -75,7 +75,7 @@ class PocketLiteEngine(PackPresetEngine):
         directory = pack_directory()
         if directory is None:
             raise EngineUnavailable(
-                "The Pocket Lite engine pack is not installed; install it in Settings → "
+                "The Pocket Lite engine pack is not installed; install it in Runtime → "
                 "Speech engines."
             )
         installed_with = self._installed_with(directory)
@@ -85,7 +85,7 @@ class PocketLiteEngine(PackPresetEngine):
             # old release no longer matches; say so instead of surfacing a Hub lookup error.
             raise EngineUnavailable(
                 f"Pocket Lite was installed with pocket-tts {installed_with} but the app now has "
-                f"{current}. Choose Repair in Settings → Speech engines to download the matching "
+                f"{current}. Choose Repair in Runtime → Speech engines to download the matching "
                 "weights."
             )
         env = pocket_lite_pack.worker_env(directory, offline=True)
@@ -137,7 +137,10 @@ class PocketLiteEngine(PackPresetEngine):
         if wav_path.is_symlink():
             wav_path = wav_path.resolve()
         if not wav_path.is_file():
-            raise InvalidVoice(f"The reference clip for voice {requested!r} is missing.")
+            raise InvalidVoice(
+                f"The reference clip for voice {requested!r} is missing. "
+                "Restore the clip or save the voice again in Voice Library."
+            )
         key = voice_bindings.current_key(meta, ENGINE_ID)
         if force or self._prepared.get(requested) != key:
             process.request(

@@ -80,7 +80,7 @@ class KokoroEngine(PackPresetEngine):
         directory = pack_directory()
         if directory is None:
             raise EngineUnavailable(
-                "The Kokoro 82M engine pack is not installed; install it in Settings → Speech engines."
+                "The Kokoro 82M engine pack is not installed; install it in Runtime → Speech engines."
             )
         return {
             "op": "load",

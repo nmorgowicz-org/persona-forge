@@ -88,6 +88,10 @@ class FakeProcess:
         self.requests.append({"op": "synthesize", **payload})
         return _speech()
 
+    def stream(self, payload):
+        self.requests.append({"op": "stream", **payload})
+        yield b"\x00\x10" * 240
+
     def close(self):
         self.is_alive = False
 
@@ -697,3 +701,359 @@ def test_edit_during_worker_prepare_does_not_publish_or_synthesize_stale_inputs(
         kitten.synthesize("hello", "English", voice_id=voice_id)
     assert _status(voice_id, "kitten2")["status"] == "needs_preparation"
     assert "synthesize" not in FakeProcess.instances[0].ops()
+
+
+# -- speech route: readiness is descriptive, not a mandatory explicit-Prepare gate -----------------
+
+
+@pytest.fixture
+def speech_route(monkeypatch, rt, app_module, kitten, lite, library):
+    monkeypatch.setattr(rt, "TTS_BACKEND", "pocket_tts")
+    monkeypatch.setattr(rt, "_service_started", True)
+    monkeypatch.setattr(app_module, "_generation_ready", lambda: True)
+    monkeypatch.setattr(voice_bindings, "_is_installed", lambda _: True)
+    monkeypatch.setenv("ENGINE_WARM_WAIT_S", "5")
+    monkeypatch.setitem(speech_engines.ADAPTERS, "kitten2", kitten)
+    monkeypatch.setitem(speech_engines.ADAPTERS, "pocket-lite", lite)
+    monkeypatch.setattr(voice_library, "API_DEFAULT_FILE", library / ".api_default.json")
+    monkeypatch.setattr(voice_library, "ACTIVE_DEFAULT_FILE", library / ".active_default")
+
+    def no_fallback(*args, **kwargs):
+        pytest.fail("a pack request must not generate on or swap the built-in backend")
+
+    # _FakeModule delegates writes to rt but has no matching attributes in its own __dict__.
+    # Patch the owning runtime so pytest restores, rather than deleting from the proxy.
+    monkeypatch.setattr(rt, "_run_generate", no_fallback)
+    monkeypatch.setattr(rt, "apply_runtime_config", no_fallback)
+
+
+def _post_speech(client, engine_id, voice_id, fmt="wav"):
+    return client.post(
+        "/v1/audio/speech",
+        json={"model": engine_id, "voice": voice_id, "input": "hello", "response_format": fmt},
+    )
+
+
+def _speech_error(response, status, *message_parts):
+    assert response.status_code == status, response.get_data(as_text=True)
+    assert response.is_json
+    error = response.get_json()["error"]
+    assert error["type"] == ("invalid_request_error" if status == 400 else "api_error")
+    assert error["code"] is None
+    for part in message_parts:
+        assert part.lower() in error["message"].lower()
+    assert "Retry-After" not in response.headers
+    assert not any(
+        r["op"] in ("synthesize", "stream") for p in FakeProcess.instances for r in p.requests
+    )
+
+
+@pytest.mark.parametrize("engine_id,fmt", [
+    ("kitten2", "wav"), ("pocket-lite", "wav"), ("pocket-lite", "pcm"),
+])
+@pytest.mark.parametrize("state", ["needs_preparation", "failed", "ready", "stale"])
+def test_speech_lazily_prepares_without_requiring_an_explicit_ready_binding(
+    client, speech_route, engine_id, fmt, state
+):
+    from pathlib import Path
+
+    voice_id = _voice()["voice_id"]
+    meta = voice_bindings.meta_with_path(voice_id)
+    assert meta is not None
+    key = voice_bindings.current_key(meta, engine_id)
+    if state == "failed":
+        voice_bindings.set_job(voice_id, engine_id, "failed", key=key, error="previous worker died")
+    elif state in ("ready", "stale"):
+        voice_bindings.write_marker(voice_id, engine_id, key)
+        if state == "stale":
+            Path(meta["wav_path"]).write_bytes(_clip(seed=7))
+    expected = "needs_preparation" if state == "stale" else state
+    assert _status(voice_id, engine_id)["status"] == expected
+
+    response = _post_speech(client, engine_id, voice_id, fmt)
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert response.content_type.startswith("audio/")
+    assert response.data
+    # Even a persisted ready marker needs local state after worker start/idle unload.
+    assert len(_prepare_requests()) == 1
+    assert _prepare_requests()[0]["voice_id"] == voice_id
+    assert _status(voice_id, engine_id)["status"] == "ready"
+
+
+@pytest.mark.parametrize("fmt", ["wav", "pcm"])
+@pytest.mark.parametrize("engine_id", ["kitten2", "pocket-lite"])
+@pytest.mark.parametrize("ready_marker", [False, True])
+def test_speech_failed_lazy_prepare_returns_actionable_json_before_audio(
+    client, speech_route, engine_id, fmt, ready_marker
+):
+    voice_id = _voice()["voice_id"]
+    if ready_marker:
+        meta = voice_bindings.meta_with_path(voice_id)
+        assert meta is not None
+        voice_bindings.write_marker(voice_id, engine_id, voice_bindings.current_key(meta, engine_id))
+    FakeProcess.fail_prepare = "reference encoder crashed"
+
+    response = _post_speech(client, engine_id, voice_id, fmt)
+
+    _speech_error(response, 503, "reference encoder crashed", "Voice Library", "Prepare", "Repair",
+                  "Runtime → Speech engines")
+    # Readiness is a validated-input marker, not a guarantee that this worker can encode it.
+    assert _status(voice_id, engine_id)["status"] == ("ready" if ready_marker else "needs_preparation")
+
+
+@pytest.mark.parametrize("engine_id", ["kitten2", "pocket-lite"])
+def test_speech_missing_pack_overrides_a_previously_ready_marker(
+    client, speech_route, engine_id, monkeypatch
+):
+    voice_id = _voice()["voice_id"]
+    meta = voice_bindings.meta_with_path(voice_id)
+    assert meta is not None
+    voice_bindings.write_marker(voice_id, engine_id, voice_bindings.current_key(meta, engine_id))
+    monkeypatch.setattr(voice_bindings, "_is_installed", lambda _: False)
+    if engine_id == "kitten2":
+        monkeypatch.setattr(kitten2_engine, "pack_python", lambda root=None: None)
+    else:
+        monkeypatch.setattr(pocket_lite_engine, "pack_python", lambda root=None: None)
+    binding = _status(voice_id, engine_id)
+    assert binding["installed"] is False and binding["blocker"] == "engine_not_installed"
+
+    response = _post_speech(client, engine_id, voice_id)
+
+    _speech_error(response, 503, "not installed", "install", "Runtime → Speech engines")
+    assert FakeProcess.instances == []
+
+
+@pytest.mark.parametrize("engine_id", ["kitten2", "pocket-lite"])
+def test_speech_missing_reference_is_not_replaced_by_a_preset(
+    client, speech_route, engine_id
+):
+    from pathlib import Path
+
+    voice_id = _voice()["voice_id"]
+    meta = voice_library.get_voice(voice_id)
+    assert meta is not None
+    Path(meta["wav_path"]).unlink()
+
+    response = _post_speech(client, engine_id, voice_id)
+
+    _speech_error(response, 400, "reference clip", "missing", "Voice Library")
+
+
+@pytest.mark.parametrize("review", [False, True])
+def test_speech_kitten_transcript_blocker_names_the_repair(
+    client, speech_route, library, review
+):
+    import json
+
+    voice_id = _voice(text="unconfirmed words" if review else "")["voice_id"]
+    if review:
+        path = library / voice_id / "meta.json"
+        meta = json.loads(path.read_text())
+        meta["asr"] = {"severity": "fail"}
+        path.write_text(json.dumps(meta))
+
+    response = _post_speech(client, "kitten2", voice_id)
+
+    _speech_error(response, 400, "transcript", "Voice Library",
+                  "confirm" if review else "Transcribe")
+    assert _prepare_requests() == []
+
+
+def test_speech_queued_explicit_prepare_does_not_make_a_lazy_request_fail(
+    client, speech_route, rt, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+
+    voice_id = _voice()["voice_id"]
+    gate, entered = threading.Event(), threading.Event()
+
+    def hold_executor():
+        entered.set()
+        assert gate.wait(5), "test never released executor"
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        monkeypatch.setattr(rt, "executor", executor)
+        blocker = executor.submit(hold_executor)
+        assert entered.wait(5)
+        try:
+            binding = voice_prepare.start(voice_id, "kitten2")
+            assert binding["status"] == "preparing"
+            # Pack synthesis uses its adapter lock, not the model executor: it can finish before
+            # the queued explicit job. A request-time "must be ready" gate would reject it.
+            response = _post_speech(client, "kitten2", voice_id)
+            assert response.status_code == 200, response.get_data(as_text=True)
+        finally:
+            gate.set()
+            blocker.result(5)
+            executor.submit(lambda: None).result(5)  # drain the explicit job, not just the blocker
+            voice_prepare.reset()
+    assert len(_prepare_requests()) == 1
+    assert _status(voice_id, "kitten2")["status"] == "ready"
+
+
+@pytest.mark.parametrize("engine_id,voice_id", [
+    ("kitten2", "pocket:vera"), ("kokoro", "pocket:vera"),
+    ("pocket-tts", "kitten2:Bruno"), ("kitten2", "kokoro:af_heart"),
+])
+def test_speech_explicit_engine_mismatch_never_uses_a_default_speaker(
+    client, speech_route, engine_id, voice_id
+):
+    response = _post_speech(client, engine_id, voice_id)
+    _speech_error(response, 400, "voice", "engine")
+    assert FakeProcess.instances == []
+
+
+@pytest.mark.parametrize("engine_id,fmt", [
+    ("kokoro", "wav"), ("phonon-31m", "wav"), ("phonon-31m", "pcm"),
+])
+def test_speech_noncloning_engine_refuses_saved_voice_with_an_alternative(
+    client, speech_route, engine_id, fmt
+):
+    voice_id = _voice()["voice_id"]
+    response = _post_speech(client, engine_id, voice_id, fmt)
+    _speech_error(response, 400, "cannot clone", "choose", "voice")
+    assert FakeProcess.instances == []
+
+
+def test_speech_lite_needs_no_transcript_and_keeps_the_pocket_preset_alias(
+    client, speech_route
+):
+    voice_id = _voice(text="")["voice_id"]
+    response = _post_speech(client, "pocket-lite", voice_id)
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert len(_prepare_requests()) == 1
+
+    preset = _post_speech(client, "pocket-lite", "pocket:vera")
+    assert preset.status_code == 200, preset.get_data(as_text=True)
+    assert FakeProcess.instances[0].requests[-1]["preset"] == "vera"
+
+
+def test_speech_pocket_preset_requires_the_pocket_backend(client, speech_route, rt, monkeypatch):
+    monkeypatch.setattr(rt, "TTS_BACKEND", "openvino")
+    response = _post_speech(client, "pocket-tts", "pocket:vera")
+    _speech_error(response, 400, "pocket_tts", "Runtime")
+
+
+@pytest.mark.parametrize("backend", ["pocket_tts", "openvino"])
+def test_speech_active_runtime_saved_voice_has_no_pack_preparation_gate(
+    client, speech_route, app_module, rt, monkeypatch, backend
+):
+    voice_id = _voice(text="")["voice_id"]
+    monkeypatch.setattr(rt, "TTS_BACKEND", backend)
+    received = []
+
+    def generate(text, language, **kwargs):
+        received.append(kwargs["voice_id"])
+        return np.zeros(240, dtype=np.float32), 24000, None
+
+    monkeypatch.setattr(rt, "_run_generate", generate)
+    assert _status(voice_id, "pocket-tts")["status"] == "ready"
+
+    response = _post_speech(client, "pocket-tts", voice_id)
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert received == [voice_id]
+    assert FakeProcess.instances == []
+
+
+@pytest.mark.parametrize("engine_id,fmt", [
+    ("kitten2", "wav"), ("pocket-lite", "wav"), ("pocket-lite", "pcm"),
+])
+def test_speech_reference_changed_during_lazy_prepare_returns_no_stale_audio(
+    client, speech_route, engine_id, fmt, monkeypatch
+):
+    from pathlib import Path
+
+    voice_id = _voice()["voice_id"]
+    meta = voice_library.get_voice(voice_id)
+    assert meta is not None
+    request = FakeProcess.request
+
+    def edit_during_prepare(process, payload, **kwargs):
+        if payload["op"] == "prepare":
+            Path(meta["wav_path"]).write_bytes(_clip(seed=8))
+        return request(process, payload, **kwargs)
+
+    monkeypatch.setattr(FakeProcess, "request", edit_during_prepare)
+    response = _post_speech(client, engine_id, voice_id, fmt)
+
+    _speech_error(response, 400, "changed", "Prepare", "again")
+    assert _status(voice_id, engine_id)["status"] == "needs_preparation"
+
+
+@pytest.mark.parametrize("engine_id,voice_id", [
+    ("kokoro", "kokoro:af_heart"), ("phonon-31m", "phonon:Zoey"),
+])
+@pytest.mark.parametrize("fmt", ["wav", "pcm"])
+def test_speech_missing_preset_pack_names_runtime_install_action(
+    client, speech_route, engine_id, voice_id, fmt, monkeypatch
+):
+    from persona_forge.kokoro_engine import KokoroEngine
+    from persona_forge.phonon_engine import PhononEngine
+
+    adapter = KokoroEngine(idle_unload_s=0) if engine_id == "kokoro" else PhononEngine(idle_unload_s=0)
+    monkeypatch.setattr(adapter, "_pack_python", lambda: None)
+    monkeypatch.setitem(speech_engines.ADAPTERS, engine_id, adapter)
+
+    response = _post_speech(client, engine_id, voice_id, fmt)
+
+    _speech_error(response, 503, "not installed", "install", "Runtime → Speech engines")
+    assert FakeProcess.instances == []
+
+
+@pytest.mark.parametrize("fmt", ["wav", "mp3", "pcm"])
+@pytest.mark.parametrize("include_voice", [False, True])
+@pytest.mark.parametrize("model_name,voice,variant", [
+    ("kitten-tts-2", "kitten2:Bruno", "pocket:vera"),
+    ("pocket-lite", "pocket-lite:jane", "kokoro:af_heart"),
+])
+def test_speech_validates_the_effective_variant_namespace_before_default_or_audio(
+    client, speech_route, model_name, voice, variant, include_voice, fmt
+):
+    # The request's higher-precedence voice must not bypass the model/voice guard, whether
+    # supplied alone or alongside a perfectly valid lower-precedence voice.
+    payload = {
+        "model": model_name, "input": "hello", "response_format": fmt,
+        "voice_variant_id": variant,
+    }
+    if include_voice:
+        payload["voice"] = voice
+    response = client.post("/v1/audio/speech", json=payload)
+
+    _speech_error(response, 400, "voice", "engine")
+    assert FakeProcess.instances == []
+
+
+@pytest.mark.parametrize("fmt", ["wav", "pcm"])
+@pytest.mark.parametrize("engine_id", ["kitten2", "pocket-lite"])
+@pytest.mark.parametrize("include_voice", [False, True])
+def test_speech_dotted_variant_is_the_effective_voice_for_batch_and_pcm(
+    client, speech_route, library, engine_id, fmt, include_voice
+):
+    import json
+
+    voice_id = _voice()["voice_id"]
+    variant_id = f"{voice_id}.test-take"
+    (library / voice_id / "test-take.wav").write_bytes(_clip(seed=3))
+    (library / voice_id / "variants.json").write_text(
+        json.dumps({"test-take": {"filename": "test-take.wav"}})
+    )
+    # Even a stored default must not be injected in place of an explicitly requested variant.
+    voice_library.set_api_default("pocket_tts", "pocket:vera")
+    payload = {
+        "model": engine_id, "input": "hello", "response_format": fmt,
+        "voice_variant_id": variant_id,
+    }
+    if include_voice:
+        # A mismatched lower-precedence preset must not reject the actual valid saved variant.
+        payload["voice_id"] = "kokoro:af_heart"
+    response = client.post("/v1/audio/speech", json=payload)
+
+    assert response.status_code == 200, response.get_data(as_text=True)
+    assert response.data
+    assert _prepare_requests()[0]["voice_id"] == variant_id
+    rendered = [
+        r for p in FakeProcess.instances for r in p.requests if r["op"] in ("synthesize", "stream")
+    ]
+    assert len(rendered) == 1 and rendered[0]["voice_id"] == variant_id

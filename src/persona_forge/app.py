@@ -55,6 +55,7 @@ from persona_forge import (
 )
 from persona_forge.asr_check import transcribe_reference_audio, validate_reference_text
 from persona_forge.alignment_jobs import AlignmentJobManager
+from persona_forge.pack_process import PackProcessError
 
 # candidate_id -> (wav, sample_rate). In-memory only, single-user local tool (locked decision,
 # docs/architecture/PERSONA_FORGE_STUDIO.md §5): cleared at the start of every /omnivoice/audition call, so
@@ -3331,7 +3332,7 @@ def openai_audio_speech():
     active_engine = speech_engines.active_engine(getattr(model, "TTS_BACKEND", None))
     if active_engine is None:
         return _openai_error(
-            "No speech engine is active; install one in Settings → Speech engines.",
+            "No speech engine is active; install one in Runtime → Speech engines.",
             503,
             "api_error",
         )
@@ -3359,7 +3360,10 @@ def openai_audio_speech():
         )
     language = (data.get("language") or "English").strip()
     # OpenAI SDK sends "voice", our internal convention uses "voice_id" — accept both.
-    voice_id = (data.get("voice_id") or data.get("voice") or "").strip() or None
+    # Resolve the same higher-precedence voice the batch adapters use before applying defaults
+    # or routing namespaces. PCM receives this effective ID too, rather than dropping variants.
+    voice_variant_id = (data.get("voice_variant_id") or "").strip() or None
+    voice_id = voice_variant_id or (data.get("voice_id") or data.get("voice") or "").strip() or None
     named_engine = speech_engines.named_engine(data.get("model"))
     if voice_id is None and not (data.get("builtin_voice") or "").strip():
         # No voice in the request: apply the persisted API default. Saved voices already
@@ -3382,7 +3386,7 @@ def openai_audio_speech():
                     )
                 serving_engine = default_pack
                 voice_id = default["voice"]
-        elif default and (
+        elif default and (named_engine is None or named_engine.id == active_engine.id) and (
             voice_library.is_preset_voice_id(default["voice"])
             or voice_library.get_voice(default["voice"]) is not None
         ):
@@ -3398,9 +3402,33 @@ def openai_audio_speech():
         implied = _pack_voice_engine(voice_id)
         if implied is not None:
             serving_engine = implied
-    voice_id, builtin_error = _resolve_builtin_voice(data, voice_id)
-    if builtin_error:
-        return _openai_error(builtin_error, 400)
+    if voice_variant_id is None:
+        voice_id, builtin_error = _resolve_builtin_voice(data, voice_id)
+        if builtin_error:
+            return _openai_error(builtin_error, 400)
+    # A named engine is authoritative, but must never silently replace another engine's
+    # speaker. Pocket Lite deliberately accepts pocket:<name> as a preset alias.
+    voice_engine = _pack_voice_engine(voice_id)
+    pocket_preset = bool(voice_id and voice_id.startswith("pocket:"))
+    if (
+        (voice_engine is not None and voice_engine.id != serving_engine.id)
+        or (pocket_preset and serving_engine.id not in ("pocket-tts", "pocket-lite"))
+    ):
+        return _openai_error(
+            f"Voice {voice_id!r} does not belong to engine {serving_engine.id!r}; "
+            "choose a voice from that engine or change model to the voice's engine.",
+            400,
+        )
+    if (
+        pocket_preset
+        and serving_engine.id == "pocket-tts"
+        and model.TTS_BACKEND != "pocket_tts"
+    ):
+        return _openai_error(
+            "Pocket preset voices require TTS_BACKEND=pocket_tts. Select Pocket in Runtime "
+            "before requesting this voice; API requests never switch the backend.",
+            400,
+        )
     language_error = _language_enforcement_error(voice_id, language)
     if language_error:
         return _openai_error(language_error, 400)
@@ -3451,7 +3479,7 @@ def openai_audio_speech():
             text,
             language,
             voice_id=voice_id,
-            voice_variant_id=data.get("voice_variant_id"),
+            voice_variant_id=voice_variant_id,
             style_preset=data.get("style_preset"),
             postprocess=data.get("postprocess"),
             prosody_repair=repair_requested,
@@ -3469,6 +3497,8 @@ def openai_audio_speech():
         return _openai_error(str(exc), 503, "api_error")
     except kitten2_engine.InvalidVoice as exc:
         return _openai_error(str(exc), 400, "invalid_request_error")
+    except PackProcessError as exc:
+        return _pack_worker_error(serving_engine, exc)
     except Exception as exc:
         if _is_capacity_error(exc):
             print(
@@ -3513,6 +3543,17 @@ def openai_audio_speech():
     return response
 
 
+def _pack_worker_error(engine: Any, exc: PackProcessError):
+    # In particular, lazy preparation can fail before the first PCM chunk. Keep that response
+    # JSON-shaped, just like batch, and do not mislabel a failed worker as a warming engine.
+    return _openai_error(
+        f"{engine.label} worker failed: {exc}. For a saved voice, retry Prepare in Voice "
+        "Library; if it still fails, choose Repair in Runtime → Speech engines and view logs.",
+        503,
+        "api_error",
+    )
+
+
 def _openai_audio_speech_stream_pack(
     engine: Any,
     text: str,
@@ -3535,6 +3576,8 @@ def _openai_audio_speech_stream_pack(
         return _openai_error(str(exc), 503, "api_error")
     except kitten2_engine.InvalidVoice as exc:
         return _openai_error(str(exc), 400, "invalid_request_error")
+    except PackProcessError as exc:
+        return _pack_worker_error(engine, exc)
 
     def body():
         try:

@@ -53,6 +53,44 @@ class TestUiPreferences:
         assert client.get("/ui/preferences").get_json() == {"values": values}
         assert json.loads(_isolated_store.read_text())["values"] == values
 
+    @pytest.mark.parametrize("value", [True, False])
+    def test_integrations_servable_only_round_trip(self, client, _isolated_store, value):
+        seeded = client.post("/ui/preferences", json={"values": {"theme": "teal"}})
+        assert seeded.status_code == 200
+        values = {"theme": "teal", "integrations.servableOnly": value}
+
+        resp = client.post(
+            "/ui/preferences", json={"values": {"integrations.servableOnly": value}}
+        )
+
+        assert resp.status_code == 200
+        assert resp.get_json() == {"values": values}
+        fetched = client.get("/ui/preferences")
+        assert fetched.status_code == 200
+        assert fetched.get_json() == {"values": values}
+        assert json.loads(_isolated_store.read_text())["values"] == values
+
+    @pytest.mark.parametrize("value", ["true", "false", 0, 1, None, [], {}])
+    def test_integrations_servable_only_rejects_nonboolean(
+        self, client, _isolated_store, value
+    ):
+        values = {"theme": "teal", "integrations.servableOnly": True}
+        seeded = client.post("/ui/preferences", json={"values": values})
+        assert seeded.status_code == 200
+        before = _isolated_store.read_bytes()
+
+        resp = client.post(
+            "/ui/preferences",
+            json={"values": {"theme": "rose", "integrations.servableOnly": value}},
+        )
+
+        assert resp.status_code == 400
+        assert resp.get_json()["error"].startswith(
+            "integrations.servableOnly: must be a boolean"
+        )
+        assert client.get("/ui/preferences").get_json() == {"values": values}
+        assert _isolated_store.read_bytes() == before
+
     def test_favorites_reject_non_string_items(self, client):
         resp = client.post(
             "/ui/preferences", json={"values": {"voiceFavorites": ["ok", 3]}}

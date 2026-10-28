@@ -4,8 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test": "playwright test",
-    "test:ci": "playwright test --reporter=list --workers=1 --retries=2",
+    "test": "npm run test:helpers && playwright test",
+    "test:ci": "npm run test:helpers && playwright test --reporter=list --workers=1 --retries=2",
+    "test:helpers": "node --test helpers/*.test.mjs",
     "capture": "node capture/index.mjs",
     "capture:group": "node capture/cli-group.mjs",
     "capture:manifest": "node capture/cli-manifest.mjs --strict",

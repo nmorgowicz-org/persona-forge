@@ -23,6 +23,7 @@ export type PrefKey =
   | 'voiceFavorites'
   | 'voiceCatalog.language'
   | 'api.enforceLanguage'
+  | 'integrations.servableOnly'
   | 'engines.nudgeDismissed'
   | 'updates.dismissedVersion'
 
@@ -93,6 +94,11 @@ const CODECS: Record<PrefKey, Codec> = {
   },
   'api.enforceLanguage': {
     storageKey: 'api-enforce-language',
+    decode: (raw) => (raw === 'false' ? false : raw === 'true' ? true : undefined),
+    encode: (value) => String(Boolean(value)),
+  },
+  'integrations.servableOnly': {
+    storageKey: 'integrations-servable-only',
     decode: (raw) => (raw === 'false' ? false : raw === 'true' ? true : undefined),
     encode: (value) => String(Boolean(value)),
   },

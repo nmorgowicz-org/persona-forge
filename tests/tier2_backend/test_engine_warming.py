@@ -333,7 +333,11 @@ def test_a_missing_pack_is_not_reported_as_warming(client, serving, monkeypatch,
     response = _speak(client, "kitten2")
 
     assert response.status_code == 503 and "Retry-After" not in response.headers
-    assert "not installed" in response.get_json()["error"]["message"]
+    message = response.get_json()["error"]["message"]
+    assert "not installed" in message
+    # Journey 5: the error must name the exact action — install it, in the page that hosts
+    # the Speech engines card (Runtime), not a stale Settings reference.
+    assert "Runtime → Speech engines" in message
     assert _status(client, "kitten2")["state"] == "idle"
 
 

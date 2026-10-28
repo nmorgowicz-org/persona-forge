@@ -26,8 +26,10 @@ def test_on_blocks_non_english_voice_and_language(app_module, monkeypatch, tmp_p
     assert app_module._language_enforcement_error(None, "english") is None
 
 
-def test_http_returns_400_with_the_reason(client, monkeypatch, tmp_path):
+def test_http_returns_400_with_the_reason(client, rt, monkeypatch, tmp_path):
     _set(monkeypatch, tmp_path, True)
+    # Exercise the language refusal on a valid Pocket pair, not the independent backend guard.
+    monkeypatch.setattr(rt, "TTS_BACKEND", "pocket_tts")
     voice = client.post(
         "/v1/audio/speech", json={"model": "kokoro", "input": "bonjour", "voice": "kokoro:ff_siwis"}
     )

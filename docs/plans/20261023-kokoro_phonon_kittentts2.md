@@ -562,7 +562,7 @@ spec still stands. **Compare from a saved voice's actions menu: built** ("Compar
 - **Validated twice.** At set time (engine installed, voice offered, saved voice exists and has what the engine needs; shape checked against a per-namespace allowlist, never used as a path) and at use time on every request that relies on the default.
 - **Repair, not fallback.** An engine removed outside the app (or damaged), a voice the pack stopped offering, or a deleted saved voice gives `409 api_default_unavailable` on a request that relies on the default, with the message and repair named; `GET /api-default` returns the record with `servable: false` and a `problem` (`engine_not_installed` | `voice_missing`, plus `repair`). Deleting a saved voice that is a pack-engine default keeps the record so this surfaces (a default on the active backend is still cleared, as before). Integrations shows a "needs repair" banner with **Open Speech engines** and **Choose another default**; the drawer shows the same text on the voice.
 - **Removing the engine that serves the default is blocked** (journey 6): `POST /engines/<id>/remove` returns `409` with `code: "api_default_engine"` and "Change the API default first"; the Runtime engine card shows an "API default" badge, a note and a disabled Remove (`GET /engines` carries `api_default`).
-- Integrations: the effective default shows the engine badge, readiness, and snippets (curl, Python, Test endpoint) with the namespaced id and `model` set to the engine id. The "Available voice IDs" table still lists saved and Pocket voices only (a pack engine's 40-115 voices would swamp it); pack voices are set from Voices → Built-in.
+- Integrations: the effective default shows the engine badge, readiness, and snippets (curl, Python, Test endpoint) with the namespaced id and `model` set to the engine id. The "Available voice IDs" table originally listed saved and Pocket voices only; item 10 (§5.7) now lists every pack preset and imported voice too, paginated and searchable, with copy buttons and a "Servable now" filter. Pack voices are still set as the default from Voices → Built-in.
 
 Checked in a real browser with the packs in `/tmp/pf_all` (Kitten 2, Phonon, Kokoro): set `kokoro:af_heart` from the drawer, Integrations showed "Kokoro 82M · ready" and copyable snippets, the server was restarted, and a bare request returned the same bytes as an explicit Kokoro request; Remove was refused (API 409, UI button disabled with the note); the Phonon default streamed PCM; moving the Phonon pack aside produced the 409 error and the red banner, and a Kitten clone default served a bare request and, after the voice was deleted, reported `voice_missing`. Pocket Lite was not installed on that machine (its weights are gated), so it is covered by the stub-pack route tests only.
 
@@ -623,7 +623,6 @@ re-imported under a distinct name through the UI (validation, engine round trip,
 the catalog file untouched; pickle/shape/path/extension rejects return the documented 400/422 codes.
 The catalog roundtrip is also covered by `test_real_catalog_safetensors_roundtrip_when_fixture_is_supplied`
 (set `PHONON_CATALOG_VOICE_FILE`).
-
 
 ### 5.5 Compare (A/B) tab
 
@@ -714,6 +713,93 @@ can now be the API default (§5.3).
   non-English voices/models get the §5.8 language error instead of audio; when off, the request is
   served as-is.
 
+**Item 10 status: built and verified (2026-10-28, Mac, real packs in `/tmp/pf_all`, isolated server).**
+
+- **Available IDs table.** One flat row per addressable ID: Pocket presets, every pack engine's
+  presets (Kitten's 115 included), valid imported voices, and saved voices. Columns: ID with a
+  copy button, label, Engine chips, default/"Set default". A saved voice carries one chip per engine
+  that can run it ("Active engine" plus each cloning pack); engines that cannot clone at all are not
+  repeated on every row. Search (IDs, labels, kinds, languages, engines) applies before flat 25-row
+  pagination; the count line states what is shown, what is hidden and why. Presets stay flat on
+  purpose: grouping by engine would hide the copyable IDs. **Servable now** is on by default and
+  persisted as `integrations.servableOnly`; a row stays when at least one engine can serve it, and
+  a blocked chip reads as the fixing action ("Install Pocket Lite", "Pocket — not active") with the
+  full sentence in its tooltip. Servable means *eligible from a read-only snapshot*, not "weights
+  resident": idle engines load on request and valid saved voices prepare lazily. The page never
+  warms, prepares or installs anything.
+- **Snippet toggle.** "Use the selected Speak voice instead" derives curl/Python/JS from the real
+  in-session Speak voice **and** its engine/preset override (`speakEngineChoice`/`speakEnginePreset`
+  now live in the store so Integrations reads what Speak will actually send). A selection that is
+  not servable (not in the catalog, engine missing, transcript missing, language enforcement)
+  falls back to the API default with an inline reason; nothing is guessed from "the first ready
+  binding". Snippets read `PERSONA_FORGE_BASE_URL`, strip any trailing slashes and one `/v1`, then
+  add `/v1` exactly once (curl appends `/v1/audio/speech`, SDKs get `base_url`/`baseURL` ending in
+  `/v1`).
+- **Journey 5 (below)** is reconciled with the lazy-preparation policy rather than replaced by a
+  mandatory Prepare gate; the API route work is listed under "Backend changes in this item".
+
+**Verified on real packs** (Kitten 2, Phonon, Kokoro installed, Pocket Lite absent; one saved voice
+prepared on Kitten 2 through the real Prepare endpoint, one never prepared, one with no transcript):
+
+- Table: 247 IDs (244 catalog + 3 saved); Servable now shows 226 (the 21 uninstalled Pocket Lite
+  presets are hidden, and listed with "Install Pocket Lite" when the filter is off); the Kitten
+  search spans 5 pages of 115 rows, the last holding 15; copy button put `kokoro:bm_george` on the
+  clipboard.
+- Toggle: with "Narrator Ready" selected in Speak, snippets switched from `kokoro` / `kokoro:af_heart`
+  to `kitten2` / `vd_cae820fbd6b0`. Choosing "No Words" with the Kitten 2 engine produced the
+  inline reason "needs a transcript — Transcribe or type the words in Voice Library" and snippets
+  stayed on the API default.
+- Generated curl, run for real with `PERSONA_FORGE_BASE_URL` set to `…:8791`, `…:8791/`, `…:8791/v1`,
+  `…:8791/v1/` and `…:8791//`, produced the identical 11 256-byte MP3 each time.
+- `/v1/audio/speech`: a never-prepared saved voice on `kitten2` **prepared lazily and returned
+  audio (200)**; the no-transcript voice returned 400 naming Voice Library → Transcribe; a saved
+  voice on `pocket-lite` and a `pocket-lite:alba` preset returned 503 "install it in Runtime →
+  Speech engines"; a saved voice on `kokoro` returned 400 naming the voice kinds Kokoro can serve;
+  `kokoro:af_heart` on `kitten2` returned 400 about the engine mismatch. None produced audio,
+  swapped a backend or transcribed.
+- **Gates:** `npm run test:ci` in `tests/ui` (50 Node helper tests, then Playwright 217 passed, 2
+  skipped, none flaky; `integrations-voices.spec.js` has 29 scenarios), backend `tier1_unit` +
+  `tier2_backend` 1773 passed, 5 skipped, 3 failed. The 3 failures are `test_cli.py`
+  `TestSpawnedProcessAcceptance` (a spawned `persona_forge serve` never answers `/health` on this
+  machine); the one I re-ran fails identically on an untouched HEAD checkout, so they predate this
+  item and were left alone. Frontend `oxlint --deny-warnings` and `tsc -b`/`vite build` clean;
+  `ruff` clean.
+- **Not re-verified live:** the broken-API-default 409. Moving a pack directory aside under a
+  running server did not change `GET /engines` (the verification stamp is cached), so a bare
+  request still served from the loaded engine. The 409 `api_default_unavailable` path stays
+  covered by the route tests (`test_api_default_packs.py`) and by §5.3's earlier live check.
+
+**Backend changes in this item, and why each exists:**
+
+- `app.py` speech route: (a) `voice_variant_id` is resolved first and is the effective voice for
+  default resolution, namespace routing and PCM as well as batch (Integrations offers dotted
+  variant IDs; the old code dropped them on the PCM path); (b) the persisted default's voice is
+  used only when the request names no engine or names the default's own engine, so a request for
+  one engine never gets another engine's speaker; (c) a namespaced voice that does not belong to the
+  named engine, or a `pocket:` preset on a non-Pocket backend, is a 400 with the fix, never a
+  substitution; (d) `PackProcessError` (including a lazy preparation that fails before the first
+  PCM chunk) is an OpenAI-shaped 503 naming Prepare/Repair/View logs; before, the route had no
+  `PackProcessError` handling, so a worker failure became a generic 500 "Inference error". These implement Journey 5's "actionable error, no audio, no swap".
+- `kitten2_engine.py` / `pocket_lite_engine.py`: a saved voice whose reference clip is missing now
+  raises `InvalidVoice` with "restore the clip or save the voice again in Voice Library" (Kitten
+  previously returned `False`, which its caller reads as "not a saved voice", hiding the real
+  problem; Pocket Lite's message lacked the action).
+- `kokoro_engine.py`, `pack_preset_engine.py`, `pocket_lite_engine.py`, `pocket_lite_worker.py`,
+  `voice_prepare.py` and the `app.py` no-engine message: "Settings → Speech engines" became "Runtime →
+  Speech engines". Speech engines live on the Runtime page (§5.1); an error that names the wrong
+  page is not actionable. Tests and ENV docs were updated to match.
+- `ui_preferences_store.py`: the `integrations.servableOnly` key (boolean) so the filter choice
+  persists like `api.enforceLanguage`; documented in the `/ui/preferences` key table.
+
+**Limitations kept explicit:** the §4.5 goal that an explicitly supplied saved ID inherits a
+pack-default engine is not implemented: omitted/generic `model` still uses the active runtime for
+that saved ID. Snippets name the chosen pack engine explicitly. The stored default `variant` field
+is display metadata and is not applied by no-voice dispatch; resolvable dotted voice IDs work. The
+snippet toggle is page-local and resets when you leave Integrations. Speak shows a generic
+"Generation failed" headline for a rejected request and keeps the server's actionable sentence
+behind **Details**; the API message is the actionable surface for this item. Item 10 does not
+silently redefine either policy.
+
 ### 5.8 States and errors
 
 Every surface uses the same vocabulary: Not installed / Downloading n% / Installed / Loading /
@@ -733,7 +819,14 @@ checkpoint — pick a French-capable model or an English voice".
    voice for Kitten 2 (transcript review) → Compare Pocket vs Kitten 2 blind → set Kitten 2 version
    as API default.
 4. On the MacBook: install Kitten 2 (MLX) or record "unsupported" with a clear message.
-5. Request an unprepared voice/engine pair via API → actionable error, no audio, no swap.
+5. Request a saved voice/engine pair whose preparation is **blocked or fails** via API →
+   actionable error, no audio, no swap. **Clarification (item 10):** "unprepared" alone is not a
+   prohibition: §§5.4/5.6 already support lazy first-use preparation. Valid installed Kitten 2/
+   Pocket Lite pairs still prepare and serve, including retry after a previous failure or while
+   an explicit Prepare is queued. Missing/unreviewed Kitten transcript, missing reference, absent
+   pack, unsupported cloning or a failed preparation during the request must not substitute a
+   voice/backend or start transcription. This reconciles the original Journey 5 shorthand with
+   the existing lazy policy rather than introducing a mandatory explicit-Prepare gate.
 6. Remove an engine that is the API default → blocked with "change API default first" or guided
    repair. **Built:** blocked (API 409 and a disabled Remove with a note); a default whose engine
    disappeared outside the app gets the repair banner (§5.3).

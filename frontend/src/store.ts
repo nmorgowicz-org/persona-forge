@@ -126,6 +126,11 @@ interface StoreState {
   healthChecked: boolean
   text: string
   voiceId: string | null
+  /** In-session Speak engine/preset choices; shared with Integrations, never API defaults. */
+  speakEngineChoice: string
+  speakEnginePreset: string
+  setSpeakEngineChoice: (engine: string) => void
+  setSpeakEnginePreset: (preset: string) => void
   voices: VoiceMeta[]
    speakAudioUrl: string | null
    speakIsGenerating: boolean
@@ -396,6 +401,10 @@ export const useAppStore = create<StoreState>((set) => ({
   healthChecked: false,
   text: '',
   voiceId: null,
+  speakEngineChoice: '',
+  speakEnginePreset: '',
+  setSpeakEngineChoice: (speakEngineChoice) => set({ speakEngineChoice }),
+  setSpeakEnginePreset: (speakEnginePreset) => set({ speakEnginePreset }),
    voices: [],
    speakAudioUrl: null,
    speakIsGenerating: false,
@@ -436,7 +445,9 @@ export const useAppStore = create<StoreState>((set) => ({
   setServiceStarted: (serviceStarted) => set({ serviceStarted }),
   setLoadingMessage: (loadingMessage) => set({ loadingMessage }),
   setText: (text) => set({ text }),
-  setVoiceId: (voiceId) => set({ voiceId }),
+  setVoiceId: (voiceId) => set((state) => state.voiceId === voiceId
+    ? { voiceId }
+    : { voiceId, speakEngineChoice: '', speakEnginePreset: '' }),
   setVoices: (voices) => set({ voices }),
   setSpeakAudioUrl: (url) => set({ speakAudioUrl: url }),
   setSpeakIsGenerating: (v) => set({ speakIsGenerating: v }),

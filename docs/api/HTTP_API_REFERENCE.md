@@ -13,6 +13,26 @@ In Persona Forge Desktop, open **Settings** and copy the OpenAI-compatible base 
 the server. It has the form `http://<host>:<port>/v1`; use the loopback address for tools on the
 same machine or a listed LAN address when network access is enabled.
 
+The **Integrations** page generates curl, Python and JavaScript examples. Set the client
+environment variable `PERSONA_FORGE_BASE_URL` to the origin, e.g. `http://127.0.0.1:8318`.
+Generated examples also accept the copied SDK URL ending in `/v1` (and a trailing slash):
+curl appends `/v1/audio/speech`, while SDK `base_url`/`baseURL` ends in `/v1`, exactly once.
+Python and JavaScript read the environment explicitly.
+
+Snippets use the effective API default unless **Use the selected Speak voice instead** is on.
+That option uses Speak's in-session voice and engine/preset choice, not another prepared
+engine. A missing voice, uninstalled engine or blocked pair shows an inline reason and uses
+the API default instead; it never changes the persisted default. With no explicit default,
+examples omit the voice and let the route resolve the runtime reference.
+
+The Available voice IDs table includes pack presets, imported voices and saved voice/engine
+bindings. **Servable now** defaults on and retains a voice if at least one engine can use it;
+an unavailable binding still explains its repair on that row. Search spans IDs, labels and
+engines before flat 25-row pagination. Status is a read-only snapshot, not a guarantee that a
+worker is resident or healthy: idle/loading engines remain eligible, and valid saved references
+may prepare lazily. Refresh IDs reconciles external pack changes; in-progress preparations
+refresh automatically. These reads and snippet toggles never warm or prepare an engine.
+
 ---
 
 ## Core TTS
@@ -66,6 +86,9 @@ Request body (JSON):
 - `input` or `text` (string, required) — text to synthesize (`input` preferred).
 - `language` (string, optional, default "English") — language label.
 - `voice_id` (string, optional) — ID of a voice to clone.
+- `voice_variant_id` (string, optional) — explicit effective voice override. It takes precedence
+  over `voice_id`/`voice` and `builtin_voice` before default resolution, namespace routing and
+  validation; batch and PCM use the same resolved ID. Use a resolvable dotted saved-variant ID.
 - `instruct` (string, optional) — instruction/steering prompt.
 - `response_format` (string, optional, default "mp3") — "mp3", "wav", or "pcm"
   (raw int16 LE mono, `audio/pcm`).
@@ -90,6 +113,9 @@ Request body (JSON):
   engine, so a Kokoro or Phonon default serves a bare request. A request that names a different
   engine does not use the default's voice. A default that cannot be served is an error, never
   another speaker (409 `api_default_unavailable`, below).
+  For an explicitly supplied saved `vd_...` ID, omitted/generic `model` currently uses the
+  active built-in runtime, not a saved default's pack engine; name `kitten2` or `pocket-lite`
+  explicitly to clone on that pack. Integrations does this for a selected pack binding.
 
 Response:
 
@@ -109,9 +135,19 @@ Response:
     `engine_warming`. See "Engine warm-up" below.
   - A pack that is not installed, or whose worker failed to load, also answers 503 with the reason
     in `message` but **no** `Retry-After` and no `engine_warming` code: retrying will not help.
+  - A pack worker/transport failure, including failed lazy preparation **before the first PCM
+    chunk**, returns OpenAI-shaped 503 JSON with a Prepare/Repair/View logs hint, no
+    `Retry-After`, and no `engine_warming` code. Once streaming audio has begun, a later failure
+    cannot be replaced with a JSON response.
 - 400:
   - If JSON invalid, input text missing, unsupported `response_format`, invalid `seed`, or a
     non-boolean `normalize_loudness`.
+  - An explicit engine/voice namespace mismatch: choose a voice belonging to the named engine,
+    or change `model` to the voice's engine. This rejects silent speaker substitution. Pocket
+    Lite intentionally still accepts `pocket:<name>` as a preset alias.
+  - A saved reference clip is missing: restore it or save the voice again in Voice Library.
+    Kitten 2 also refuses missing/unreviewed transcript text; add/Transcribe and confirm the
+    words in Voice Library, then Prepare or retry. No audio or backend swap occurs.
 - 409 (`api_default_unavailable`): the request relies on the API default (no voice, and no other
   engine named) and the default's engine was removed or its voice no longer exists. The message
   names the default, what is missing and the repair ("Install Kokoro 82M again in Runtime → Speech
@@ -129,6 +165,13 @@ Error format:
 Important notes:
 
 - Same FIFO queueing behind swaps as `/generate`.
+- **Preparation is still lazy when possible.** `needs_preparation` is not an API prohibition.
+  Installed Kitten 2/Pocket Lite prepare valid saved references on first use; a prior `failed`
+  preparation may retry, and `preparing` serializes through the adapter lock (a queued explicit
+  job may be overtaken by the lazy path). Missing packs, missing audio, or Kitten transcript
+  blockers fail with the repairs above rather than audio or a substituted voice. Synthesis
+  never transcribes or downloads a transcript model. A `ready` marker validates inputs, not
+  current worker health; unload/death requires local prepared-state rebuilding.
 - **Loudness normalisation.** Engines differ in native level (Kitten TTS 2 is peak-normalised to
   RMS 0.16–0.22, Pocket sits near 0.09), so every complete clip is brought to one level before
   encoding, whichever engine produced it: the RMS of the active speech (frames below −55 dBFS
@@ -769,6 +812,11 @@ The UI preference `api.enforceLanguage` (Integrations page, "Enforce English on 
 off) makes `POST /v1/audio/speech` return 400 for a non-English voice or a non-English `language`,
 with a message naming the voice and the setting. Off, any voice is served even when hidden from
 `/v1/audio/voices`.
+Integrations applies the same rule to its table and selected-Speak fallback. Voice enforcement
+uses `language_code`, lowercased with the first `-` suffix removed (`en-US` → `en`); missing or
+empty codes currently default to English. It does not infer a code from a saved voice's free-text
+`language` label. This existing limitation is preserved rather than changing language policy
+inside the Integrations UI.
 
 ### POST /engines/{engine_id}/benchmark
 
@@ -794,9 +842,14 @@ Allowed keys:
 | --- | --- |
 | `theme` | string, ≤ 32 chars |
 | `experienceLevel` | string, ≤ 32 chars |
-| `voiceLibrary.tab` | `"voices"` or `"segments"` |
+| `voiceLibrary.tab` | `"voices"`, `"builtin"`, `"segments"` or `"compare"` |
 | `voiceLibrary.layout` | string, ≤ 32 chars |
 | `voiceLibrary.analysisExpanded` | boolean |
+| `voiceFavorites` | list of ≤ 500 strings, each ≤ 96 chars |
+| `voiceCatalog.language` | `"en"` or `"all"` |
+| `api.enforceLanguage` | boolean (Integrations: "Enforce English on the API") |
+| `integrations.servableOnly` | boolean; Integrations "Servable now" filter for the Available voice IDs table, default on. Display-only: it never changes what the endpoint serves |
+| `engines.nudgeDismissed` | boolean |
 | `updates.dismissedVersion` | string, ≤ 64 chars |
 
 - 200: full merged `{"values": {...}}`.
@@ -1040,7 +1093,6 @@ Response (JSON):
   `imported: true` plus `provenance` (`source_filename`, `sha256`, `size`, `imported_at`,
   `engine_revision`). The `engines` summary includes `import_prepared_voice`.
 
-
 ### POST /voices/{voice_id}/duplicate
 
 - Purpose: Fork a voice into an independent `voice_id` (also used as a safety copy before
@@ -1187,6 +1239,10 @@ Response (JSON):
   or the pack engine id such as `kokoro`, `phonon-31m`), `engine_label`, `variant`, `kind`
   (`preset`|`library`), `display_name`, `language`, `language_code`, `updated_at`, `source`
   (`record`|`legacy`), `servable` and `problem`.
+- `variant` is stored/displayed metadata under the current dispatch contract; it is not
+  automatically applied to no-voice synthesis. To request a saved variant, use its resolvable
+  dotted voice ID (or an explicit `voice_variant_id`). Snippets preserve `record.voice` as-is;
+  they do not concatenate arbitrary `variant` text into an ID.
 - `problem` is `null` when the default can be served. For a default on a pack engine it is
   `{ "code", "engine", "message", "repair" }` when it cannot: `engine_not_installed` (the pack was
   removed or is damaged) or `voice_missing` (the pack no longer offers the voice, or the saved voice

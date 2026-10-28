@@ -87,7 +87,7 @@ class PocketLiteWorker:
             if not getattr(model, "has_voice_cloning", True):
                 raise WorkerError(
                     "The cloning weights for Pocket Lite are not installed. Repair the engine in "
-                    "Settings → Speech engines (it needs a Hugging Face token for kyutai/pocket-tts)."
+                    "Runtime → Speech engines (it needs a Hugging Face token for kyutai/pocket-tts)."
                 )
             self._model = model
         return {"ok": True, "mode": "cpu"}

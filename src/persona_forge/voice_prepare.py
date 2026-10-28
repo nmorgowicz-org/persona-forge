@@ -150,7 +150,7 @@ def _start(
     if not binding["installed"]:
         raise PrepareRefused(
             "engine_not_installed",
-            f"Install {engine.label} in Settings → Speech engines first.",
+            f"Install {engine.label} in Runtime → Speech engines first.",
             409,
         )
     if binding["status"] == "preparing":
