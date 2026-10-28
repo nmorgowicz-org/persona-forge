@@ -233,8 +233,19 @@ an idle engine starts that load in the background. Nothing blocks until a gunico
   `capabilities`, `requirements`, `pack` (manifest + artifacts) and `state`:
   `status` (`built-in`|`not-installed`|`installed`|`verified`|`invalid`),
   `artifacts_present`, `artifacts_total`, `disk_bytes`, `verified`, `errors`.
+- The response also carries `nudge`: the first-run hint, or `null`. It is non-null only while **no
+  pack engine is installed** and `hardware_fit` has something true to say: `{ "kind":
+  "gpu"|"apple"|"cpu", "engines": [ids], "text", "basis" }` (`basis` is the hardware-fit sentence it
+  rests on). It claims support only (an NVIDIA GPU or Apple silicon for Kitten TTS 2; "runs on CPU
+  without a GPU" for Phonon, Kokoro and Pocket Lite), never quality or speed. The UI's dismissal is the
+  persisted preference `engines.nudgeDismissed` (boolean, `/ui/preferences`).
+- Engines whose download is gated on Hugging Face also carry `hf_gate`: `{ "repo", "url", "token":
+  { "set", "source", "can_clear" } }` (today only `pocket-lite`). It never contains the token.
 - Provisioned packs (Kitten TTS 2) also carry `install_job` (`state` `idle|running|done|error`,
-  `step`, `step_index`, `step_count`, `error`) and `load_status`:
+  `step`, `step_index`, `step_count`, `error`, `error_code`, `error_link`) and `load_status`.
+  `error_code` is set for a failure the user can fix: `needs_token`, `terms_not_accepted`,
+  `token_rejected` or `network`; `error_link` is the page that helps (the gated repository, or the
+  Hugging Face token settings) and is `null` for `network`:
   - `state`: `idle` (installed, loads on demand, also after an idle unload) → `loading` (worker
     starting) → `warming` (worker loaded; first call compiling) → `ready`, or `error`. `ready` is
     the plan's "active": the worker can serve now. Engines whose worker has no warm-up step go
@@ -268,6 +279,51 @@ an idle engine starts that load in the background. Nothing blocks until a gunico
   The record is stored as `.install_check.json` in the pack directory and goes away with it.
   `POST /engines/{engine_id}/benchmark` is the separate, repeatable measurement (`benchmark`).
 - Read-only and local: no network access, no model load.
+
+### GET /engines/{engine_id}/details
+
+- Purpose: the card's **Details** panel. Read from the machine, never assumed from the manifest: a
+  value that cannot be read is `null`.
+- Response 200: `{ "details": { ... } }` with `id`, `label`, `installed`, `engine` (`pack_id`,
+  `pack_version`, `revision`, `provisioner`, `manifest_sha256`, `source`, `license`), `packages`
+  (`name`, `pinned`, `installed` read from the pack's own virtualenv, or the application environment
+  for a pack without one, `where`), `other_pins` (non-package pins such as the checkpoint name),
+  `weights` (Hugging Face cache models with commit `revision` and `size_bytes`, plus files a pack pins
+  itself, with `sha256` and `present`), `artifacts`, `runtime` (`variant`, `device`, `mode`,
+  `load_state`, `hardware_fit`), `install_check`, `idle_unload` (`seconds`, `source`:
+  `argument|env|manifest|default`, `manifest_seconds`), `disk_bytes` (the pack folder, `null` when there
+  is none), `install_job`, `hf_gate` and `logs`.
+- `logs`: `{ "install": {...}, "worker": {...}, "max_lines": 200 }`, each `{ "lines", "dropped",
+  "updated_at", "source": "memory"|"file"|"none" }`. The install log is the last 200 lines of step
+  markers and install-command output; it is also written to `<pack>/install.log` (mode 0600) when an
+  install ends, so a failure is still readable after a restart (`source: "file"`). The worker log is
+  the pack worker's stderr, in memory only. Every line is redacted before it is stored: the stored and
+  environment tokens, `hf_...`-shaped strings, `Authorization`/`Bearer` values, `HF_TOKEN=` style
+  assignments and `?token=` query values are replaced with `[redacted]`.
+- 404: unknown engine, or a built-in engine (no pack).
+
+### GET /engines/{engine_id}/logs
+
+- Purpose: just the `logs` object above, cheap enough to poll while an install runs.
+- 404: the engine has no pack logs.
+
+### GET /engines/hf-token, PUT /engines/hf-token, DELETE /engines/hf-token
+
+- Purpose: the Hugging Face token for **gated pack downloads** (the card's token field). Responses are
+  always `{ "set": bool, "source": "stored"|"environment"|"login"|null, "can_clear": bool }` (DELETE adds
+  `"removed": bool`) with `Cache-Control: no-store`. **No route ever returns the token.**
+- `PUT` body `{ "token": "<token>" }`: letters, digits, `_`, `-`, `.`; 6 to 512 characters. 400 with a
+  message that does not repeat the value when it is not usable; 500 if the file cannot be written.
+- The token is stored in `<DATA_DIR>/.engine_hf_token` (owner-only, mode 0600 on POSIX), separately
+  from `HF_TOKEN_FILE` (which may be a read-only Docker secret). It is passed only to the pack download
+  child process, never put in the server's own environment (so the standard Pocket runtime is not
+  affected), and never written to a log or manifest.
+- Resolution for a download: the stored token, else `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` from the
+  environment, else the user's own `huggingface-cli login`. `DELETE` removes only the stored token.
+- The app never accepts a gate's terms for anyone. A failed install says which of these it was:
+  `needs_token` (nothing is set; Hugging Face answered 401), `token_rejected` (a token is set but
+  Hugging Face answered 401: mistyped, revoked or not a token), `terms_not_accepted` (a valid token
+  whose account has not accepted the terms; 403) or `network`, with the repository link.
 
 ### POST /engines/{engine_id}/verify
 
@@ -336,9 +392,12 @@ an idle engine starts that load in the background. Nothing blocks until a gunico
   no virtual environment: the install downloads the model and 21 English voices (about 190 MB) into
   the pack's own `hf/` folder, then verifies them offline. About a minute and a half on a good link.
 - **Needs a Hugging Face token** whose owner has accepted the terms of the gated `kyutai/pocket-tts`
-  repository (cloning weights live there): `HF_TOKEN` or `huggingface-cli login`. A missing token or
-  unaccepted terms fails with a message that says so; nothing is accepted on the user's behalf. The
-  token goes to the download process only and is never stored or logged.
+  repository (cloning weights live there): paste one on the engine card (`PUT /engines/hf-token`), or
+  set `HF_TOKEN`, or use `huggingface-cli login`. The download first asks Hugging Face whether the token
+  may read the repository, so a missing token, a token it rejects and unaccepted terms fail with
+  different codes (`install_job.error_code`, above) and a link; nothing is accepted on the user's
+  behalf. The token goes to the download process only and is never logged (logs and errors are
+  redacted) or written to the manifest.
 - Clones a saved voice from its reference clip (no transcript needed) and serves the English presets as
   `pocket-lite:<name>` (the standard `pocket:<name>` names also work). `seed` is honoured (repeat runs
   agree to within one 16-bit step, the same as the standard model); `speed` is not supported. With

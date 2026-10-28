@@ -89,7 +89,9 @@ export function BuiltInVoicesTab() {
     getPref<'en' | 'all'>('voiceCatalog.language', 'en'),
   )
   const [category, setCategory] = useState('all')
-  const [engineFilter, setEngineFilter] = useState('all')
+  const pendingEngine = useAppStore((s) => s.pendingBuiltinEngine)
+  const setPendingEngine = useAppStore((s) => s.setPendingBuiltinEngine)
+  const [engineFilter, setEngineFilter] = useState(() => pendingEngine ?? 'all')
   const [genderFilter, setGenderFilter] = useState('all')
   const [accentFilter, setAccentFilter] = useState('all')
   const [engines, setEngines] = useState<BuiltInEngineSummary[]>([])
@@ -136,6 +138,11 @@ export function BuiltInVoicesTab() {
       cancelled = true
     }
   }, [])
+
+  // An engine card sent us here to pick that engine's API default voice; the filter is set above.
+  useEffect(() => {
+    if (pendingEngine) setPendingEngine(null)
+  }, [pendingEngine, setPendingEngine])
 
   useEffect(() => subscribeFavoriteVoices(() => setFavorites(readFavoriteVoiceIds())), [])
 

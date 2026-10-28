@@ -10,6 +10,7 @@ Nothing here imports torch or kittenml; the work happens in the pack's own inter
 
 from __future__ import annotations
 
+import collections
 import json
 import os
 import re
@@ -22,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from persona_forge import accelerator_manifest, engine_packs, install_check
+from persona_forge import accelerator_manifest, engine_packs, install_check, pack_logs
 
 ENGINE_ID = "kitten2"
 PACK_VERSION = "1"
@@ -34,6 +35,7 @@ KITTENML_VERSION = "0.9.6"
 TRITON_WINDOWS = "triton-windows==3.8.0.post29"
 PACK_PYTHON = "3.12"  # the version every benchmark ran on
 STEP_TAIL_CHARS = 600
+STEP_TAIL_LINES = 40  # lines kept per stream to build the failure tail
 
 
 # Run inside the pack. Fails when the installed torch has no kernels for this GPU, which import
@@ -206,21 +208,50 @@ class StepFailed(RuntimeError):
 
 
 def run_command(command: Sequence[str], env: dict[str, str] | None = None) -> None:
-    """Run one install command; raise StepFailed with the tail of its output on failure."""
+    """Run one install command; raise StepFailed with the tail of its output on failure.
+
+    Output is streamed line by line into the running install's log (when there is one), and every
+    line and the failure tail are redacted, so a token a tool echoes never leaves this function.
+    """
     merged = {**os.environ, **(env or {})}
+    sink = pack_logs.current_sink()
+    if sink is not None:
+        sink.command([str(part) for part in command])
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             list(command),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
+            errors="replace",
             env=merged,
-            check=False,
         )
     except OSError as exc:
         raise StepFailed(f"could not run {Path(command[0]).name}: {exc}") from exc
-    if result.returncode != 0:
-        output = (result.stderr or result.stdout or "").strip()
-        raise StepFailed(output[-STEP_TAIL_CHARS:] or f"exit code {result.returncode}")
+
+    tails: dict[str, collections.deque[str]] = {
+        "out": collections.deque(maxlen=STEP_TAIL_LINES),
+        "err": collections.deque(maxlen=STEP_TAIL_LINES),
+    }
+
+    def pump(stream: Any, name: str) -> None:
+        for line in stream:
+            tails[name].append(line)
+            if sink is not None:
+                sink.line(line)
+
+    readers = [
+        threading.Thread(target=pump, args=(process.stdout, "out"), daemon=True),
+        threading.Thread(target=pump, args=(process.stderr, "err"), daemon=True),
+    ]
+    for reader in readers:
+        reader.start()
+    returncode = process.wait()
+    for reader in readers:
+        reader.join()
+    if returncode != 0:
+        output = ("".join(tails["err"]) or "".join(tails["out"])).strip()
+        raise StepFailed(pack_logs.redact(output[-STEP_TAIL_CHARS:]) or f"exit code {returncode}")
 
 
 def prefetch_weights(python: Path, directory: Path) -> None:
@@ -230,10 +261,12 @@ def prefetch_weights(python: Path, directory: Path) -> None:
 
     hf = weights_dir(directory)
     hf.mkdir(parents=True, exist_ok=True)
+    sink = pack_logs.current_sink()
     process = PackProcess(
         [str(python), str(Path(kitten2_worker.__file__).resolve())],
         env={"HF_HOME": str(hf)},
         request_timeout=3600,
+        log=sink.line if sink is not None else None,
     )
     try:
         process.start()
@@ -277,6 +310,10 @@ class Job:
     step_index: int = 0
     step_count: int = 0
     error: str | None = None
+    # Set when the failure is one the user can fix (see hf_access.classify): needs_token,
+    # terms_not_accepted, token_rejected or network, with a page that helps.
+    error_code: str | None = None
+    error_link: str | None = None
     started_at: float | None = None
     finished_at: float | None = None
 
@@ -287,6 +324,8 @@ class Job:
             "step_index": self.step_index,
             "step_count": self.step_count,
             "error": self.error,
+            "error_code": self.error_code,
+            "error_link": self.error_link,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
         }
@@ -305,8 +344,10 @@ def _set(**changes: Any) -> None:
     with _job_lock:
         for key, value in changes.items():
             setattr(_job, key, value)
+    pack_logs.record_job_change(changes)
 
 
+@pack_logs.logs_install(ENGINE_ID, lambda root: pack_dir(root))
 def install(
     root: Path | None = None,
     *,
@@ -400,6 +441,8 @@ def start_install(root: Path | None = None, **kwargs: Any) -> bool:
         _job.step_index = 0
         _job.step_count = 0
         _job.error = None
+        _job.error_code = None
+        _job.error_link = None
         _job.started_at = time.time()
         _job.finished_at = None
     threading.Thread(

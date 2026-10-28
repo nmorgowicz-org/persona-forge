@@ -75,6 +75,42 @@ def fit_for(engine_id: str, facts: dict[str, Any] | None = None) -> dict[str, st
     return _verdict("unknown", "No hardware guidance for this engine.")
 
 
+def first_run_nudge(facts: dict[str, Any], pack_installed: bool) -> dict[str, Any] | None:
+    """The one-line hint for a machine with no pack engine installed, or None.
+
+    It says only what ``fit_for`` reports: an NVIDIA GPU or Apple silicon is what Kitten TTS 2
+    needs, and the CPU engines run without a GPU. It makes no claim about quality, and none about
+    speed here (nothing has been measured until an engine is installed). Unknown fit gives no hint.
+    """
+    if pack_installed:
+        return None
+    gpu = fit_for("kitten2", facts)
+    if gpu["level"] == "recommended":
+        apple = facts["platform"] == "darwin"
+        return {
+            "kind": "apple" if apple else "gpu",
+            "engines": ["kitten2"],
+            "text": (
+                "Your Mac's Apple silicon can run Kitten TTS 2 (on MLX)."
+                if apple
+                else "Your NVIDIA GPU can run Kitten TTS 2 (a GPU engine)."
+            ),
+            "basis": gpu["text"],
+        }
+    cpu = fit_for("phonon-31m", facts)
+    if cpu["level"] == "ok":
+        return {
+            "kind": "cpu",
+            "engines": ["phonon-31m", "kokoro", "pocket-lite"],
+            "text": (
+                "No supported GPU was found, but light engines like Phonon, Kokoro and Pocket "
+                "Lite run on this CPU without one. Install one to measure its speed here."
+            ),
+            "basis": cpu["text"],
+        }
+    return None
+
+
 def _path() -> Path:
     return Path(paths.runtime_data_dir()) / _FILENAME
 

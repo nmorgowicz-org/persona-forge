@@ -18,7 +18,9 @@ import queue
 import subprocess
 import threading
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
+
+from persona_forge import pack_logs
 
 
 class PackProcessError(RuntimeError):
@@ -40,7 +42,10 @@ class PackProcess:
         cwd: str | Path | None = None,
         env: Mapping[str, str] | None = None,
         request_timeout: float = 120.0,
+        log: Callable[[str], None] | None = None,
     ) -> None:
+        # ``log`` receives each stderr line (already redacted) for the card's "View logs".
+        self._log = log
         self._command = list(command)
         self._cwd = str(cwd) if cwd is not None else None
         self._env = dict(os.environ)
@@ -93,7 +98,7 @@ class PackProcess:
             try:
                 message = json.loads(line)
             except ValueError:
-                self._stderr_lines.append(f"non-JSON worker output: {line[:200]}")
+                self._stderr_lines.append(f"non-JSON worker output: {pack_logs.redact(line[:200])}")
                 continue
             self._responses.put(message)
         self._responses.put(None)
@@ -101,7 +106,10 @@ class PackProcess:
     def _read_stderr(self) -> None:
         assert self._process is not None and self._process.stderr is not None
         for line in self._process.stderr:
-            self._stderr_lines.append(line.rstrip())
+            clean = pack_logs.redact(line.rstrip())
+            self._stderr_lines.append(clean)
+            if self._log is not None:
+                self._log(clean)
             if len(self._stderr_lines) > 200:
                 del self._stderr_lines[:100]
 

@@ -1,12 +1,17 @@
 import { loadCompareSummary, type EngineSummary } from '@/lib/compareResults'
 import { engineLoadNote, isEngineBusy } from '@/lib/engineStatus'
+import { formatBytes, installCheckText } from '@/lib/engineFormat'
 import { useEffect, useState } from 'react'
 import {
   CheckCircle2,
   CircleSlash,
   Download,
   ExternalLink,
+  FileText,
   HardDrive,
+  Info,
+  Mic2,
+  X,
   Zap,
   Loader2,
   RefreshCw,
@@ -16,14 +21,18 @@ import {
   benchmarkEngine,
   installEngine,
   listEngines,
+  listEnginesWithNudge,
   recheckEngine,
   removeEngine,
   verifyEngine,
   type EngineCard,
-  type EngineInstallCheck,
+  type EngineNudge,
   type EngineState,
 } from '@/lib/api'
-import { getPref, setPref } from '@/lib/uiPreferences'
+import { useAppStore } from '@/store'
+import { EngineDetailsPanel } from '@/components/EngineDetailsPanel'
+import { HfTokenField } from '@/components/HfTokenField'
+import { getPref, setPref, subscribePrefs } from '@/lib/uiPreferences'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -34,27 +43,6 @@ const STATUS_LABEL: Record<EngineState['status'], string> = {
   installed: 'Installed',
   verified: 'Verified',
   invalid: 'Invalid',
-}
-
-/** "Install check: RTF 0.18 on mps", or the slower-than-real-time warning, or why it was not measured. */
-function installCheckText(check: EngineInstallCheck): string {
-  if (check.outcome === 'unavailable') {
-    return `Install check: speed could not be measured${check.error ? ` (${check.error})` : ''}`
-  }
-  const rtf = check.rtf !== null ? `RTF ${check.rtf.toFixed(2)}` : 'RTF unknown'
-  const where = check.device
-    ? ` on ${check.device}${check.mode && check.mode !== check.device ? ` (${check.mode})` : ''}`
-    : ''
-  const load = check.load_average !== null ? `, load ${check.load_average}` : ''
-  return check.outcome === 'slow'
-    ? `Install check: runs slower than real time on this machine (${rtf}${where}${load})`
-    : `Install check: ${rtf}${where}${load}`
-}
-
-function formatBytes(value: number): string {
-  if (value <= 0) return '0 MB'
-  const mib = value / (1024 * 1024)
-  return mib >= 1024 ? `${(mib / 1024).toFixed(1)} GB` : `${mib.toFixed(0)} MB`
 }
 
 function statusVariant(status: EngineState['status']) {
@@ -72,6 +60,46 @@ export function SpeechEnginesCard() {
     id: string
     action: 'verify' | 'install' | 'remove' | 'recheck' | 'benchmark'
   } | null>(null)
+
+  const [nudge, setNudge] = useState<EngineNudge | null>(null)
+  const [nudgeDismissed, setNudgeDismissed] = useState<boolean>(() =>
+    getPref<boolean>('engines.nudgeDismissed', false),
+  )
+  const [openDetails, setOpenDetails] = useState<Set<string>>(() => new Set())
+  const setPage = useAppStore((s) => s.setPage)
+  const setPendingBuiltinEngine = useAppStore((s) => s.setPendingBuiltinEngine)
+
+  function toggleDetails(engineId: string, open?: boolean) {
+    setOpenDetails((current) => {
+      const next = new Set(current)
+      const want = open ?? !next.has(engineId)
+      if (want) next.add(engineId)
+      else next.delete(engineId)
+      return next
+    })
+  }
+
+  // The server's saved value arrives after first paint on a fresh page load; follow it.
+  useEffect(
+    () => subscribePrefs(() => setNudgeDismissed(getPref<boolean>('engines.nudgeDismissed', false))),
+    [],
+  )
+
+  function dismissNudge() {
+    setNudgeDismissed(true)
+    setPref('engines.nudgeDismissed', true)
+  }
+
+  function browseEngines() {
+    document.getElementById('speech-engines-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  /** Pack engines run beside the active backend, so "use" means: pick the voice the API serves. */
+  function chooseApiDefaultVoice(engineId: string) {
+    setPref('voiceLibrary.tab', 'builtin')
+    setPendingBuiltinEngine(engineId)
+    setPage('voice-library')
+  }
 
   const [language, setLanguage] = useState<'en' | 'all'>(() =>
     getPref<'en' | 'all'>('voiceCatalog.language', 'en'),
@@ -106,9 +134,11 @@ export function SpeechEnginesCard() {
 
   useEffect(() => {
     let cancelled = false
-    listEngines()
-      .then((cards) => {
-        if (!cancelled) setEngines(cards)
+    listEnginesWithNudge()
+      .then(({ engines: cards, nudge: hint }) => {
+        if (cancelled) return
+        setEngines(cards)
+        setNudge(hint)
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(String((err as Error)?.message || err))
@@ -222,6 +252,33 @@ export function SpeechEnginesCard() {
         </span>
       </label>
 
+      {nudge && !nudgeDismissed && (
+        <div
+          role="note"
+          data-testid="engines-nudge"
+          data-kind={nudge.kind}
+          className="flex flex-wrap items-center gap-2 rounded-control border border-primary/30 bg-primary/5 px-3 py-2 text-xs"
+        >
+          <Info className="size-3.5 shrink-0 text-primary" />
+          <span className="min-w-0 flex-1" title={nudge.basis}>
+            {nudge.text}
+          </span>
+          <Button type="button" size="xs" variant="outline" onClick={browseEngines}>
+            Browse engines
+          </Button>
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Dismiss this hint"
+            data-testid="engines-nudge-dismiss"
+            onClick={dismissNudge}
+          >
+            <X />
+          </Button>
+        </div>
+      )}
+
       {error && (
         <p className="rounded-control border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
           {error}
@@ -231,7 +288,7 @@ export function SpeechEnginesCard() {
       {loading ? (
         <p className="text-xs text-muted-foreground">Loading engines…</p>
       ) : (
-        <div className="flex flex-col divide-y divide-border">
+        <div id="speech-engines-list" className="flex flex-col divide-y divide-border">
           {engines.map((engine) => (
             <div key={engine.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -344,6 +401,37 @@ export function SpeechEnginesCard() {
                   </Button>
                 )}
                 {engine.kind !== 'builtin' && (
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    aria-expanded={openDetails.has(engine.id)}
+                    data-testid={`engine-details-toggle-${engine.id}`}
+                    onClick={() => toggleDetails(engine.id)}
+                  >
+                    <Info />
+                    {openDetails.has(engine.id) ? 'Hide details' : 'Details'}
+                  </Button>
+                )}
+                {engine.kind !== 'builtin' && engine.state.status === 'verified' && (
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    disabled={engine.api_default}
+                    data-testid={`engine-use-api-default-${engine.id}`}
+                    title={
+                      engine.api_default
+                        ? 'This engine already serves the API default. Change the voice from Voices → Built-in.'
+                        : 'Pack engines run beside the active engine, so there is nothing to switch. This opens Voices → Built-in for this engine, where Set as API default picks the voice the API serves.'
+                    }
+                    onClick={() => chooseApiDefaultVoice(engine.id)}
+                  >
+                    <Mic2 />
+                    {engine.api_default ? 'Is the API default' : 'Use as API default…'}
+                  </Button>
+                )}
+                {engine.kind !== 'builtin' && (
                   <>
                     {engine.state.status !== 'verified' && (
                       <Button
@@ -435,9 +523,84 @@ export function SpeechEnginesCard() {
               )}
 
               {engine.install_job?.state === 'error' && engine.install_job.error && (
-                <p className="rounded-control border border-destructive/30 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
-                  Install failed: {engine.install_job.error} Choose {engine.state.status === 'not-installed' ? 'Install' : 'Repair'} to try again.
-                </p>
+                <div
+                  role="alert"
+                  data-testid={`engine-install-error-${engine.id}`}
+                  data-code={engine.install_job.error_code ?? ''}
+                  className="flex flex-col gap-2 rounded-control border border-destructive/30 bg-destructive/5 px-3 py-2 text-[11px] text-destructive"
+                >
+                  <p>Install failed: {engine.install_job.error}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      disabled={pendingAction !== null}
+                      onClick={() => void install(engine.id)}
+                    >
+                      <RefreshCw />
+                      Retry
+                    </Button>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      onClick={() => {
+                        toggleDetails(engine.id, true)
+                        window.setTimeout(
+                          () => document.getElementById(`engine-logs-${engine.id}`)?.scrollIntoView({ block: 'nearest' }),
+                          300,
+                        )
+                      }}
+                    >
+                      <FileText />
+                      View logs
+                    </Button>
+                    {engine.install_job.error_link && (
+                      <a
+                        href={engine.install_job.error_link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 underline-offset-2 hover:underline"
+                      >
+                        <ExternalLink className="size-3" />
+                        {engine.install_job.error_code === 'token_rejected' ? 'Hugging Face token settings' : 'Open the repository page'}
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {engine.hf_gate && engine.state.status !== 'verified' && (
+                <HfTokenField
+                  engineId={engine.id}
+                  gate={engine.hf_gate}
+                  highlight={['needs_token', 'terms_not_accepted', 'token_rejected'].includes(
+                    engine.install_job?.error_code ?? '',
+                  )}
+                  onChanged={(token) =>
+                    setEngines((current) =>
+                      current.map((item) =>
+                        item.hf_gate ? { ...item, hf_gate: { ...item.hf_gate, token } } : item,
+                      ),
+                    )
+                  }
+                />
+              )}
+
+              {openDetails.has(engine.id) && (
+                <EngineDetailsPanel
+                  engineId={engine.id}
+                  installing={engine.install_job?.state === 'running'}
+                  showTokenField={engine.state.status === 'verified'}
+                  onTokenChanged={(token) =>
+                    setEngines((current) =>
+                      current.map((item) =>
+                        item.hf_gate ? { ...item, hf_gate: { ...item.hf_gate, token } } : item,
+                      ),
+                    )
+                  }
+                />
               )}
 
               {isEngineBusy(engine.load_status) && (
@@ -458,7 +621,9 @@ export function SpeechEnginesCard() {
                     ? 'Running in standard mode (slower than real time).'
                     : engine.load_status.mode === 'compiled'
                       ? 'Running in fast mode.'
-                      : 'Running on Apple silicon.'}
+                      : engine.load_status.mode === 'mlx'
+                        ? 'Running on Apple silicon.'
+                        : `Running: ${engine.load_status.mode}.`}
                 </div>
               )}
 

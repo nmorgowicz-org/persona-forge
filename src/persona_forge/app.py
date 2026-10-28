@@ -29,8 +29,10 @@ from persona_forge.pocket_voices import POCKET_BUILTIN_VOICES, gender_of
 from persona_forge import (
     audio_diagnostics,
     audio_style,
+    engine_details,
     engine_packs,
     frontend,
+    hf_access,
     kitten2_engine,
     provisioned_engines,
     model,
@@ -38,6 +40,7 @@ from persona_forge import (
     project_library,
     prosody_repair,
     output_level,
+    pack_logs,
     segment_library,
     speech_engines,
     voice_catalog,
@@ -2837,7 +2840,66 @@ def engines_list():
     for card in cards:
         # Lets the card explain why Remove is disabled (the API refuses it too).
         card["api_default"] = holder is not None and card.get("id") == holder.id
-    return jsonify({"engines": cards})
+    pack_installed = any(
+        card.get("kind") != "builtin" and card.get("state", {}).get("status") in ("verified", "installed")
+        for card in cards
+    )
+    # The first-run hint (None once any pack is installed, or when the fit is unknown). The UI
+    # keeps its own "dismissed" preference; this only says whether there is something true to show.
+    nudge = hardware_fit.first_run_nudge(hardware_fit.machine_facts(), pack_installed)
+    return jsonify({"engines": cards, "nudge": nudge})
+
+
+@app.get("/engines/hf-token")
+def engines_hf_token_status():
+    """Whether a Hugging Face token is available for gated engine downloads. Never the token."""
+    return _no_store(jsonify(hf_access.status()))
+
+
+@app.put("/engines/hf-token")
+def engines_hf_token_save():
+    """Store the token for gated pack downloads (owner-only file; sent only to the download).
+
+    The response is the same ``{set, source, can_clear}`` status as GET; the token is not echoed.
+    """
+    payload = request.get_json(silent=True)
+    token = payload.get("token") if isinstance(payload, dict) else None
+    try:
+        hf_access.save(token)
+    except hf_access.InvalidToken as exc:
+        return _no_store(jsonify({"error": str(exc)})), 400
+    except OSError:
+        return _no_store(jsonify({"error": "The token could not be saved to the app data folder."})), 500
+    return _no_store(jsonify(hf_access.status()))
+
+
+@app.delete("/engines/hf-token")
+def engines_hf_token_clear():
+    """Forget the stored token. An environment or login token, if any, still applies."""
+    removed = hf_access.clear()
+    return _no_store(jsonify({**hf_access.status(), "removed": removed}))
+
+
+def _no_store(response):
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/engines/<engine_id>/details")
+def engines_details(engine_id: str):
+    """Pins, installed versions, weights, runtime, install check, idle unload, disk and log tails."""
+    details = engine_details.build(engine_id, getattr(model, "TTS_BACKEND", None))
+    if details is None:
+        return jsonify({"error": "Details are available for pack engines only"}), 404
+    return jsonify({"details": details})
+
+
+@app.get("/engines/<engine_id>/logs")
+def engines_logs(engine_id: str):
+    """The last install and worker log lines (bounded and redacted); cheap enough to poll."""
+    if provisioned_engines.get(engine_id) is None:
+        return jsonify({"error": "engine has no pack logs"}), 404
+    return jsonify({"logs": pack_logs.read(engine_id, engine_packs.find_pack_dir(engine_id))})
 
 
 _benchmark_lock = threading.Lock()
@@ -2976,6 +3038,7 @@ def engines_remove(engine_id: str):
         return jsonify({"error": str(exc)}), 409
     if not removed:
         return jsonify({"error": "pack not found or not removable"}), 404
+    pack_logs.forget(engine_id)
     return jsonify({"removed": engine_id})
 
 

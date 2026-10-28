@@ -20,7 +20,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
-from persona_forge import engine_packs, install_check
+from persona_forge import engine_packs, install_check, pack_logs
 from persona_forge.kitten2_pack import (
     PACK_PYTHON,
     Job,
@@ -77,6 +77,7 @@ def _set(**changes: Any) -> None:
     with _state.lock:
         for key, value in changes.items():
             setattr(_state.job, key, value)
+    pack_logs.record_job_change(changes)
 
 
 def reset_job() -> None:
@@ -98,6 +99,25 @@ def model_path(directory: Path) -> Path:
 
 def voices_path(directory: Path) -> Path:
     return models_dir(directory) / VOICES_FILE[0]
+
+
+def weight_pins(directory: Path) -> list[dict[str, Any]]:
+    """The pinned model files, with whether each is on disk (hashes are checked at install)."""
+    pins: list[dict[str, Any]] = []
+    for name, size, sha in (MODEL_FILE, VOICES_FILE):
+        path = models_dir(directory) / name
+        present = path.is_file()
+        pins.append(
+            {
+                "kind": "file",
+                "name": name,
+                "revision": f"{RELEASE.rsplit('/', 1)[-1]}",
+                "size_bytes": path.stat().st_size if present else size,
+                "sha256": sha,
+                "present": present,
+            }
+        )
+    return pins
 
 
 def build_manifest() -> dict[str, Any]:
@@ -173,6 +193,7 @@ def explain_install_failure(label: str, raw: str) -> str:
     return f"{label} failed: {raw}"
 
 
+@pack_logs.logs_install(ENGINE_ID, lambda root: pack_dir(root))
 def install(
     root: Path | None = None,
     *,

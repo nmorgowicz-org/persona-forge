@@ -446,9 +446,59 @@ audio, first-request time and the load average, or "Speed not measured"). Fit te
 is tested: Kitten 2 says "Recommended for Apple silicon" or "for your NVIDIA GPU" or the plain
 unsupported reason; CPU engines say "Runs on CPU" and add "Not tested on this operating system" on
 Windows. First benchmark on the Mac: Pocket 0.10, Kitten 0.18, Phonon 0.03, Kokoro 0.10 (load about
-5, so pessimistic). **Not built:** Make active (pack engines are served beside the active backend, so
-there is nothing to switch), Details (pins, logs), the Hugging Face token field, and the first-run
-nudge.
+5, so pessimistic).
+
+**Details, token, nudge and "Make active" (built 2026-10-28; Mac, browser-checked against `/tmp/pf_all`'s
+packs, an empty `ENGINE_PACKS_DIR` and a real Pocket Lite install attempt).**
+
+- **Details** is an inline expander per pack engine (`GET /engines/<id>/details`, `EngineDetailsPanel`):
+  pack version, revision and manifest hash; runtime variant, device and mode; the install check; the
+  idle-unload value and where it came from; disk used (the whole pack folder; the card's own
+  `disk_bytes` stays artifact-only because it is polled); packages as pinned and as **installed in the
+  pack's own virtualenv** (read from `.dist-info`, flagged when they differ); weights as pinned (Hugging
+  Face cache models with commit revision and size, and Kokoro's two files with their SHA-256) and the
+  last install and worker log lines. Real result for Kokoro: `kokoro-onnx pinned 0.6.1 · installed 0.6.1`,
+  `kokoro-v1.0.int8.onnx · 88 MB · sha256 6e742170d309…`, 235 MB on disk, 10 min idle unload (default).
+- **Logs** are bounded (last 200 lines), redacted when stored (exact stored and environment tokens,
+  `hf_…`-shaped strings, `Authorization`/`Bearer`, `HF_TOKEN=`, `?token=`) and have two sources. The
+  install log records step markers and the streamed output of every install command (`run_command` now
+  streams instead of buffering) and is also written to `<pack>/install.log` (0600) when the install
+  ends, so it survives a restart. The worker log is the pack worker's stderr, in memory only
+  (`PackProcess` gained a `log` sink; its `stderr_tail`, which flows into error messages, is redacted
+  too). A failed install shows **Retry** and **View logs** (opens the Details panel at the log), plus
+  the repository link when the failure is one the user can fix.
+- **Hugging Face token** (gated engines only: today Pocket Lite): a masked field on the card
+  (`PUT/GET/DELETE /engines/hf-token`). Stored in `<DATA_DIR>/.engine_hf_token`, 0600, separate from
+  `HF_TOKEN_FILE` (which may be a read-only Docker secret). Resolution is stored, then `HF_TOKEN`, then
+  the user's `huggingface-cli login`; it is handed only to the pack's download child (never put in the
+  server's environment, so standard Pocket is unaffected) and no response, log, manifest or error ever
+  contains it. Responses carry `{set, source, can_clear}`. The app still never accepts terms for anyone.
+- **Install errors now tell the cases apart (§2.4).** `pocket-tts` hides every gate failure behind
+  "no cloning weights" (it silently falls back to the ungated model), so the prefetch step asks
+  Hugging Face first (`HfApi.auth_check`) and prints the HTTP status: 401 with no token is
+  `needs_token`; 401 with a token is `token_rejected` (Hugging Face answers 401 to an unknown token
+  exactly as to no token, so those two cannot be told apart by the server, only by whether one was
+  sent); 403 is `terms_not_accepted`; connection errors are `network`. Each has an actionable message
+  and a link (`install_job.error_code`, `error_link`). Checked for real in a browser with a dummy
+  token: save shows only "Token set", the install failed as `token_rejected`, Clear then Retry failed as
+  `needs_token`, and neither dummy nor token file remained on disk afterwards. **Not tested:** a real
+  403 (it needs an account that has not accepted the terms); that path is covered by the stub tests.
+- **First-run nudge:** a dismissible banner at the top of Speech engines, shown only while no pack
+  engine is installed and `hardware_fit.first_run_nudge` has something true to say. It states support,
+  not quality or speed: "Your NVIDIA GPU can run Kitten TTS 2 (a GPU engine)", "Your Mac's Apple
+  silicon can run Kitten TTS 2 (on MLX)", or, with no GPU, "light engines like Phonon, Kokoro and Pocket
+  Lite run on this CPU without one. Install one to measure its speed here." (speed is never claimed
+  before something is measured). An unknown fit shows nothing. The dismissal is the persisted UI
+  preference `engines.nudgeDismissed`; checked after a reload with the local copy wiped.
+- **"Make active": decided, not built as a switch.** Pack engines run beside the active backend, so
+  there is nothing to make active, and switching built-in backends from a request stays out of scope
+  (§4.3). What the verb honestly means here is the API default, which already exists as engine + voice
+  (§5.3). Each installed pack card therefore has **Use as API default…**, which opens Voices → Built-in
+  filtered to that engine, where **Set as API default** chooses the voice (disabled with "Is the API
+  default" when that engine already serves it). No confirmation with "memory impact" is shown because
+  nothing is loaded or unloaded by it.
+- **Small fix on the way:** a card whose engine reported a mode other than `mlx` always said "Running on
+  Apple silicon"; it now says "Running: <mode>".
 
 ### 5.3 Built-in voices tab
 
@@ -1003,7 +1053,8 @@ small hooks so a pack engine can clone), plus registry lines. Nothing in the sta
 changed.
 
 - **Install (real, Mac):** 93 s, 191 MB, verified offline; needs a Hugging Face token with the terms
-  accepted for `kyutai/pocket-tts` (gated); the failure message says so.
+  accepted for `kyutai/pocket-tts` (gated); the failure message says so, and since 2026-10-28 the token
+  can be pasted on the card and the failure is classified (§5.2).
 - **Through HTTP:** clone of a saved voice, English presets, seeded requests, an unknown preset is
   400; `GET /engines` card shows Verified, cloning, hardware fit and the benchmark (RTF 0.051 median
   on the Mac, first request 0.23 s); the Compare tab runs Pocket against Pocket Lite blind on one saved

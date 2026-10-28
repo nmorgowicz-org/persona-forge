@@ -141,6 +141,7 @@ Leave at defaults unless you know what you're doing.
 | `MODEL_REVISION` | unset | Pin specific Base revision; must match exported IR metadata. |
 | `HF_TOKEN` | (from HF_TOKEN_FILE if set) | Hugging Face token for gated checkpoints. |
 | `HF_TOKEN_FILE` | unset | Path to a file containing HF_TOKEN (Docker secret pattern). |
+| (stored engine token) | unset | Not an env var: a token pasted on a gated engine's card (Settings → Speech engines) is kept in `<DATA_DIR>/.engine_hf_token` (0600) and used only for that engine's download, ahead of `HF_TOKEN`. `HF_TOKEN` still works when none is stored. No env change is needed. |
 | `MODEL_CACHE_CONTAINER_PATH` | `/root/.cache/huggingface/hub` | Internal: mount reporting path for HF cache. |
 
 ## OmniVoice / ASR (advanced)

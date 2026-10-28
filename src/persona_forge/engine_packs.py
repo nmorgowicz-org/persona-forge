@@ -22,7 +22,7 @@ from typing import Any, Mapping
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from persona_forge import install_check, paths, speech_engines
+from persona_forge import hf_access, install_check, paths, speech_engines
 
 MANIFEST_FILENAME = "manifest.json"
 VERIFIED_FILENAME = ".verified.json"
@@ -535,6 +535,10 @@ def engine_cards(backend: str | None, root: Path | None = None) -> list[dict[str
         adapter = speech_engines.get_managed_adapter(provisioned.engine_id)
         card["install_job"] = provisioned.pack.job_status()
         card["load_status"] = adapter.status() if adapter is not None else {}
+        gate = getattr(provisioned.pack, "HF_GATE", None)
+        if isinstance(gate, dict):
+            # Whether a token is set, never the token itself.
+            card["hf_gate"] = {**gate, "token": hf_access.status()}
     from persona_forge import hardware_fit
 
     facts = hardware_fit.machine_facts()

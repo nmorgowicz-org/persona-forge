@@ -113,6 +113,7 @@ def test_round_trip_all_keys(prefs_json):
         "voiceFavorites": ["pocket:vera", "vd_000000000001"],
         "voiceCatalog.language": "all",
         "api.enforceLanguage": True,
+        "engines.nudgeDismissed": True,
         "updates.dismissedVersion": "2.3.0",
     }
     assert set(values) == set(ui_preferences_store.ALLOWED_KEYS)

@@ -494,6 +494,30 @@ export interface EngineInstallJob {
   step_index: number
   step_count: number
   error: string | null
+  /** Set when the user can fix it: a missing or rejected Hugging Face token, unaccepted terms, or no network. */
+  error_code?: 'needs_token' | 'terms_not_accepted' | 'token_rejected' | 'network' | null
+  /** The page that fixes `error_code` (the gated repository, or the token settings page). */
+  error_link?: string | null
+}
+
+/** Whether a Hugging Face token is available; the token itself is never sent to the browser. */
+export interface HfTokenStatus {
+  set: boolean
+  source: 'stored' | 'environment' | 'login' | null
+  can_clear: boolean
+}
+
+export interface EngineHfGate {
+  repo: string
+  url: string
+  token: HfTokenStatus
+}
+
+export interface EngineNudge {
+  kind: 'gpu' | 'apple' | 'cpu'
+  engines: string[]
+  text: string
+  basis: string
 }
 
 export interface FastModeIssue {
@@ -561,6 +585,8 @@ export interface EngineCard {
   hardware_fit?: { level: 'recommended' | 'ok' | 'unsupported' | 'unknown'; text: string }
   benchmark?: EngineBenchmark | null
   install_check?: EngineInstallCheck | null
+  /** Present for engines whose download is gated on Hugging Face (today: Pocket Lite). */
+  hf_gate?: EngineHfGate
   pack: {
     id: string
     version: string
@@ -569,11 +595,97 @@ export interface EngineCard {
   } | null
 }
 
-export async function listEngines(): Promise<EngineCard[]> {
+export async function listEnginesWithNudge(): Promise<{ engines: EngineCard[]; nudge: EngineNudge | null }> {
   const res = await fetch('/engines')
   if (!res.ok) throw new Error(await readError(res))
   const body = await res.json()
-  return body.engines ?? []
+  return { engines: body.engines ?? [], nudge: body.nudge ?? null }
+}
+
+export async function listEngines(): Promise<EngineCard[]> {
+  return (await listEnginesWithNudge()).engines
+}
+
+export interface EngineLogTail {
+  lines: string[]
+  dropped: number
+  updated_at: number | null
+  source: 'memory' | 'file' | 'none'
+}
+
+export interface EngineLogs {
+  install: EngineLogTail
+  worker: EngineLogTail
+  max_lines: number
+}
+
+export interface EngineWeight {
+  kind: 'huggingface' | 'file'
+  name: string
+  revision: string | null
+  size_bytes: number
+  sha256: string | null
+  present: boolean
+}
+
+export interface EngineDetails {
+  id: string
+  label: string
+  installed: boolean
+  engine: {
+    pack_id: string | null
+    pack_version: string | null
+    revision: string | null
+    provisioner: string | null
+    manifest_sha256: string | null
+    source: string | null
+    license: string | null
+  }
+  packages: { name: string; pinned: string; installed: string | null; where: string }[]
+  other_pins: string[]
+  weights: EngineWeight[]
+  artifacts: EnginePackArtifact[]
+  runtime: {
+    variant: string | null
+    device: string | null
+    mode: string | null
+    load_state: string | null
+    hardware_fit: { level: string; text: string } | null
+  }
+  install_check: EngineInstallCheck | null
+  idle_unload: { seconds: number | null; source: string | null; manifest_seconds: number | null }
+  disk_bytes: number | null
+  install_job: EngineInstallJob | null
+  hf_gate: EngineHfGate | null
+  logs: EngineLogs
+}
+
+export async function getEngineDetails(engineId: string): Promise<EngineDetails> {
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/details`)
+  if (!res.ok) throw new Error(await readError(res))
+  return (await res.json()).details
+}
+
+export async function getEngineLogs(engineId: string): Promise<EngineLogs> {
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/logs`)
+  if (!res.ok) throw new Error(await readError(res))
+  return (await res.json()).logs
+}
+
+export async function saveHfToken(token: string): Promise<HfTokenStatus> {
+  const res = await fetch('/engines/hf-token', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function clearHfToken(): Promise<HfTokenStatus> {
+  const res = await fetch('/engines/hf-token', { method: 'DELETE' })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
 }
 
 export async function verifyEngine(engineId: string): Promise<EngineCard> {

@@ -220,15 +220,29 @@ def test_install_without_a_token_does_not_send_one(tmp_path):
     assert "HF_TOKEN" not in runner.envs[0]
 
 
-def test_a_gated_download_failure_tells_the_user_to_accept_the_terms(tmp_path):
+def test_a_gated_download_without_a_token_says_a_token_is_needed(tmp_path):
     runner = Recorder(fail_on="has_voice_cloning", message="AssertionError: no cloning weights")
 
     pocket_lite_pack.install(tmp_path, runner=runner, token="")
 
     job = pocket_lite_pack.job_status()
-    assert job["state"] == "error" and "accept its terms" in job["error"].lower()
+    assert job["state"] == "error" and job["error_code"] == "needs_token"
+    assert "token" in job["error"].lower() and "kyutai/pocket-tts" in job["error"]
+    assert job["error_link"] == "https://huggingface.co/kyutai/pocket-tts"
     assert "hf_" not in job["error"]
     assert engine_packs.inspect_pack(pocket_lite_pack.pack_dir(tmp_path)).status == "not-installed"
+
+
+def test_a_gated_download_with_a_token_says_the_terms_are_not_accepted(tmp_path):
+    runner = Recorder(fail_on="has_voice_cloning", message="AssertionError: no cloning weights")
+
+    pocket_lite_pack.install(tmp_path, runner=runner, token="hf_dummytoken123")
+
+    job = pocket_lite_pack.job_status()
+    assert job["error_code"] == "terms_not_accepted"
+    assert "accept the terms" in job["error"] and "does not accept terms for you" in job["error"]
+    assert job["error_link"] == "https://huggingface.co/kyutai/pocket-tts"
+    assert "hf_dummytoken123" not in job["error"]
 
 
 def test_a_network_failure_asks_the_user_to_check_the_connection(tmp_path):

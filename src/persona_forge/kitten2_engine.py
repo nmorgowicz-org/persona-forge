@@ -17,7 +17,7 @@ from typing import Any, Callable, Iterator
 
 import numpy as np
 
-from persona_forge import engine_packs, kitten2_pack, kitten2_worker, voice_library
+from persona_forge import engine_packs, kitten2_pack, kitten2_worker, pack_logs, voice_library
 from persona_forge.engine_lifecycle import IN_FLIGHT, IdleUnloader, LoadTracker, warm_wait_s
 from persona_forge.pack_process import PackProcess, PackProcessError
 
@@ -273,6 +273,7 @@ class Kitten2Engine:
             [str(python), str(Path(kitten2_worker.__file__).resolve())],
             env=env,
             request_timeout=REQUEST_TIMEOUT_S,
+            log=pack_logs.worker_sink(ENGINE_ID),
         )
         process.start()
         try:

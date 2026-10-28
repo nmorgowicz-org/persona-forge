@@ -170,6 +170,11 @@ interface StoreState {
   announce: (text: string) => void
   clearAnnouncedMessage: () => void
 
+  // Engine id the Built-in voices tab should filter to the next time it opens (set by an engine
+  // card's "Use as API default"); the tab reads it once and clears it.
+  pendingBuiltinEngine: string | null
+  setPendingBuiltinEngine: (engineId: string | null) => void
+
   setPage: (page: Page) => void
   setTheme: (theme: Theme) => void
   setUiExperienceLevel: (level: ExperienceLevel) => void
@@ -408,6 +413,9 @@ export const useAppStore = create<StoreState>((set) => ({
     refTextValidation: null,
     voiceLibraryFocusVoiceId: null,
     announcedMessage: null,
+
+    pendingBuiltinEngine: null,
+    setPendingBuiltinEngine: (engineId) => set({ pendingBuiltinEngine: engineId }),
 
     setPage: (page) => set({ page }),
   setTheme: (theme) => {

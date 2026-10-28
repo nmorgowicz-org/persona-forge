@@ -11,6 +11,7 @@
 //   experienceLevel            lib/experienceLevel.ts
 //   voiceLibrary.tab/layout    pages/VoiceLibraryPage.tsx
 //   voiceLibrary.analysisExpanded  pages/VoiceLibraryPage.tsx ('true'/'false', default true)
+//   engines.nudgeDismissed     components/SpeechEnginesCard.tsx ('true'/'false', default false)
 //   updates.dismissedVersion   lib/updateCheck.ts
 
 export type PrefKey =
@@ -22,6 +23,7 @@ export type PrefKey =
   | 'voiceFavorites'
   | 'voiceCatalog.language'
   | 'api.enforceLanguage'
+  | 'engines.nudgeDismissed'
   | 'updates.dismissedVersion'
 
 type Codec = {
@@ -91,6 +93,11 @@ const CODECS: Record<PrefKey, Codec> = {
   },
   'api.enforceLanguage': {
     storageKey: 'api-enforce-language',
+    decode: (raw) => (raw === 'false' ? false : raw === 'true' ? true : undefined),
+    encode: (value) => String(Boolean(value)),
+  },
+  'engines.nudgeDismissed': {
+    storageKey: 'engines-nudge-dismissed',
     decode: (raw) => (raw === 'false' ? false : raw === 'true' ? true : undefined),
     encode: (value) => String(Boolean(value)),
   },

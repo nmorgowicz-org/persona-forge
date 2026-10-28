@@ -87,6 +87,7 @@ ALLOWED_KEYS: dict[str, Validator] = {
     "voiceFavorites": _string_list(500, 96),
     "voiceCatalog.language": _one_of("en", "all"),
     "api.enforceLanguage": _boolean,
+    "engines.nudgeDismissed": _boolean,
     "updates.dismissedVersion": _string(64),
 }
 
