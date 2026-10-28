@@ -3261,6 +3261,8 @@ def engines_remove(engine_id: str):
         removed = engine_packs.remove_pack(engine_id)
     except engine_packs.PackInstallError as exc:
         return jsonify({"error": exc.public_message}), 409
+    if callable(unload):
+        unload()  # a request that raced the delete may have restarted the worker
     if not removed:
         return jsonify({"error": "pack not found or not removable"}), 404
     pack_logs.forget(engine_id)

@@ -139,10 +139,12 @@ class PackPresetEngine:
         and the request waits at most ``ENGINE_WARM_WAIT_S`` for it, then gets ``EngineWarming``.
         """
         process = self._process
+        if self._pack_python() is None:
+            if process is not None:
+                self.unload()  # the pack was removed under a running worker
+            raise self._not_installed()  # not a load state: nothing is starting
         if process is not None and process.is_alive and self._tracker.state == "ready":
             return
-        if self._pack_python() is None:
-            raise self._not_installed()  # not a load state: nothing is starting
         if self._tracker.claim_load():
             self._start_load(reload=False, name=f"{self.id}-load")
         state = self._tracker.wait_settled(warm_wait_s())

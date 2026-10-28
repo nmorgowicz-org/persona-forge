@@ -186,6 +186,12 @@ export function SpeakPage() {
   // The pair Generate actually sends, so "Set current" saves exactly what was just heard.
   const effectiveVoice = enginePreset || voiceId
   const effectiveEngineId = presetEngineId ?? (engineChoice || null)
+  // Only a pack engine is named in the default. The active built-in engine is the server's
+  // fallback, so naming it would store an id the server does not treat as the active backend.
+  const defaultEngineId =
+    effectiveEngineId && engineCards.find((card) => card.id === effectiveEngineId)?.kind !== 'builtin'
+      ? effectiveEngineId
+      : null
   const effectiveEngine = engineModels.find((m) => m.id === (presetEngineId ?? engineChoice))
 
 
@@ -460,14 +466,14 @@ export function SpeakPage() {
   const isCurrentApiDefault =
     !!apiDefault &&
     apiDefault.voice === effectiveVoice &&
-    (!effectiveEngineId || apiDefault.engine === effectiveEngineId)
+    (!defaultEngineId || apiDefault.engine === defaultEngineId)
 
   async function makeApiDefault() {
     if (!effectiveVoice) return
     setSavingApiDefault(true)
     setApiDefaultError(null)
     try {
-      const record = await setApiDefault({ voice: effectiveVoice, engine: effectiveEngineId })
+      const record = await setApiDefault({ voice: effectiveVoice, engine: defaultEngineId })
       setApiDefaultState(record)
     } catch (err) {
       setApiDefaultError(String((err as Error)?.message || err))

@@ -35,7 +35,7 @@ def test_removing_a_pack_stops_its_loaded_worker(client, monkeypatch, tmp_path):
     response = client.post("/engines/demo-engine/remove")
 
     assert response.status_code == 200
-    assert stopped == ["unloaded"]
+    assert stopped == ["unloaded", "unloaded"]  # before the delete, and for a racing restart
 
 
 def test_kokoro_verify_catches_a_damaged_or_missing_model_file(tmp_path):
@@ -86,3 +86,24 @@ def test_pocket_normalises_numbers_only_for_english(monkeypatch):
 
     assert seen[0] == text_normalizer.normalize("I have 2 cats") != "I have 2 cats"
     assert seen[1:] == ["J'ai 2 chats", "J'ai 2 chats"]
+
+    monkeypatch.delenv("POCKET_TTS_LANGUAGE")
+    adapter.synthesize("J'ai 2 chats", "Auto")  # auto-detected French
+    adapter.synthesize("I have 2 cats", "Auto")  # auto-detected English
+    assert seen[3] == "J'ai 2 chats"
+    assert seen[4] == seen[0]
+
+
+def test_a_ready_worker_stops_serving_once_its_pack_is_gone(engine, store, monkeypatch):  # noqa: F811
+    import pytest
+
+    from persona_forge.kitten2_engine import EngineUnavailable
+
+    engine._ensure_started()
+    process = engine._process
+    monkeypatch.setattr(engine, "_pack_python", lambda: None)
+
+    with pytest.raises(EngineUnavailable):
+        engine._await_ready()
+
+    assert engine._process is None and not process.is_alive

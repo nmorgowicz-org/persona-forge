@@ -301,22 +301,45 @@ class SpeechEngine(Protocol):
         ...
 
 
-def _normalize_english(text: str, language: str | None) -> str:
-    """Spell out numbers and symbols, but only on an English rendering path.
+_ENGLISH_HINTS = frozenset(
+    "the a an and is are was were to of in it i you that for on with this have be not".split()
+)
+_FOREIGN_HINTS = frozenset(
+    "le la les des un une et est je j ai de du el los las y der die das und ich il che di "
+    "não uma um que se por con para mit nicht ist ne pas dans".split()
+)
 
-    The normaliser is English-only, so a French request or a non-English Pocket install would
-    otherwise get "J'ai two chats" for "J'ai 2 chats".
+
+def _looks_english(text: str) -> bool:
+    """Cheap guess for "auto" language: English function words, no foreign ones, no accents."""
+    import re
+
+    if not text.isascii():
+        return False
+    words = re.findall(r"[a-z]+", text.lower())
+    return any(w in _ENGLISH_HINTS for w in words) and not any(w in _FOREIGN_HINTS for w in words)
+
+
+def _normalize_english(text: str, language: str | None) -> str:
+    """Spell out numbers and symbols, but only when the speech is known to be English.
+
+    The normaliser is English-only. An explicit non-English request, a non-English Pocket install,
+    or "auto" text that does not look English is left alone: "J'ai 2 chats" must not become
+    "J'ai two chats".
     """
     import os
 
     from persona_forge import text_normalizer
 
-    installed = (os.environ.get("POCKET_TTS_LANGUAGE") or "english").strip().lower()
-    requested = (language or "english").strip().lower()
-    english = {"english", "en", "auto", ""}
-    if not text_normalizer.enabled() or installed not in english or requested not in english:
+    if not text_normalizer.enabled():
         return text
-    return text_normalizer.normalize(text)
+    installed = (os.environ.get("POCKET_TTS_LANGUAGE") or "english").strip().lower()
+    if installed not in {"english", "en"}:
+        return text
+    requested = (language or "auto").strip().lower()
+    if requested in {"english", "en"} or (requested in {"auto", ""} and _looks_english(text)):
+        return text_normalizer.normalize(text)
+    return text
 
 
 class PocketTtsEngine:
