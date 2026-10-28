@@ -959,6 +959,22 @@ Result: **no preset to add.** Separately, the model repository also carries newe
 checkpoints (for example `english_2026-10`) that 4.0.0 has no config for; those are model variants, not
 presets, and are not evaluated here.
 
+#### 9.3.1 Intel through the app, and a version finding (2026-10-27)
+
+- **Intel (docker-agent, throwaway container, app server, load about 3.3):** Pocket warm RTF 0.40-0.41,
+  Pocket Lite 0.09-0.10 (about 4x faster), first request 1.4-1.6 s against 0.37 s. A saved-voice clone
+  returned 200 in 0.5 s for 5 s of audio, a seeded repeat agreed to within one 16-bit step, an unknown
+  preset was 400. The pack was built on the Mac and copied as files; the token never left it.
+- **Finding:** the app pins `pocket-tts==4.0.1` (`pyproject.toml`), and each release pins its own
+  weight revisions. The 18M cloning weights differ between 4.0.0 (the stale Mac venv used in §9.1 and
+  the first Mac run) and 4.0.1 (different file hashes). A pack installed under one release has an
+  offline cache that the other cannot find, which first showed up as a bare Hub lookup error. The pack now
+  records the `pocket-tts` version in its manifest and the engine says "installed with X, app has Y,
+  choose Repair" instead.
+- **Re-measured with 4.0.1 (what the app really serves):** clone similarity mean 0.953 for 18M against
+  0.965 for the standard model (four references, three sentences). The listening verdict in §9.1 was
+  on the 4.0.0 weights; `/tmp/pfbench/pl401/listen.html` has the 4.0.1 pairs for a re-listen.
+
 ## 10. Evidence and reproducibility
 
 Upstream revisions inspected (not approved pins): Kokoro GitHub

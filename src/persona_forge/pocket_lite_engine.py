@@ -70,10 +70,28 @@ class PocketLiteEngine(PackPresetEngine):
                 "The Pocket Lite engine pack is not installed; install it in Settings → "
                 "Speech engines."
             )
+        installed_with = self._installed_with(directory)
+        current = pocket_lite_pack.pocket_tts_version()
+        if installed_with and installed_with != current:
+            # Each pocket-tts release pins its own weight revisions, so the offline cache from the
+            # old release no longer matches; say so instead of surfacing a Hub lookup error.
+            raise EngineUnavailable(
+                f"Pocket Lite was installed with pocket-tts {installed_with} but the app now has "
+                f"{current}. Choose Repair in Settings → Speech engines to download the matching "
+                "weights."
+            )
         env = pocket_lite_pack.worker_env(directory, offline=True)
         # Keep the standard Pocket runtime's settings from leaking into this model.
         env.setdefault("POCKET_TTS_MODEL_SOURCE", "auto")
         return {"op": "load"}, env
+
+    @staticmethod
+    def _installed_with(directory: Path) -> str | None:
+        try:
+            requirements = engine_packs.load_manifest(directory).requirements
+        except (engine_packs.PackManifestError, OSError):
+            return None
+        return next((r.split("==", 1)[1] for r in requirements if r.startswith("pocket-tts==")), None)
 
     def unload(self) -> None:
         super().unload()

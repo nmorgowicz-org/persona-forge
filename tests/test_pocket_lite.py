@@ -237,6 +237,23 @@ def engine(monkeypatch, tmp_path):
     return pocket_lite_engine.PocketLiteEngine(idle_unload_s=0)
 
 
+def test_adapter_asks_for_a_repair_when_pocket_tts_changed_since_install(engine, monkeypatch, tmp_path):
+    pocket_lite_pack.install(tmp_path, runner=Recorder(), token="x")
+    pack = pocket_lite_pack.pack_dir(tmp_path)
+    monkeypatch.setattr(pocket_lite_engine, "pack_directory", lambda root=None: pack)
+    monkeypatch.setattr(pocket_lite_pack, "pocket_tts_version", lambda: "9.9.9")
+
+    with pytest.raises(EngineUnavailable, match="Repair"):
+        engine.synthesize("hi", "English", voice_id="pocket-lite:jane")
+
+
+def test_the_manifest_records_the_pocket_tts_version_used_for_the_download(tmp_path):
+    pocket_lite_pack.install(tmp_path, runner=Recorder(), token="x")
+
+    manifest = engine_packs.load_manifest(pocket_lite_pack.pack_dir(tmp_path))
+    assert f"pocket-tts=={pocket_lite_pack.pocket_tts_version()}" in manifest.requirements
+
+
 def saved_voice(monkeypatch, tmp_path, name="vd_1"):
     wav = tmp_path / f"{name}.wav"
     wav.write_bytes(b"RIFF")

@@ -86,6 +86,16 @@ def worker_env(directory: Path, *, offline: bool) -> dict[str, str]:
     return env
 
 
+def pocket_tts_version() -> str:
+    """The ``pocket-tts`` version the weights are fetched for. Each release pins its own revisions."""
+    from importlib import metadata
+
+    try:
+        return metadata.version("pocket-tts")
+    except metadata.PackageNotFoundError:
+        return "unknown"
+
+
 def build_manifest() -> dict[str, Any]:
     return {
         "id": ENGINE_ID,
@@ -95,7 +105,7 @@ def build_manifest() -> dict[str, Any]:
         "description": "A smaller, faster Pocket model that still clones. Runs in the app's Python.",
         "runtime": "python-cpu",
         "provisioner": ENGINE_ID,
-        "requirements": [f"pocket-tts checkpoint {MODEL_NAME}"],
+        "requirements": [f"pocket-tts=={pocket_tts_version()}", f"checkpoint {MODEL_NAME}"],
         "artifacts": [],
     }
 
