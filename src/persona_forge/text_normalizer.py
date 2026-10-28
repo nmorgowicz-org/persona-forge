@@ -232,7 +232,12 @@ def normalize(text: str) -> str:
             masked[key] = match.group(0)
             return key
 
-        working = re.sub(r"\S*(?:://|www\.|@)\S*", _mask, text)
+        def _mask_token(match: re.Match[str]) -> str:
+            token = match.group(0)
+            return _mask(match) if ("://" in token or "www." in token or "@" in token) else token
+
+        # One linear pass over whitespace-delimited tokens (a URL or address has no spaces).
+        working = re.sub(r"\S+", _mask_token, text)
         for pattern, handler in _RULES:
             working = pattern.sub(handler, working)  # type: ignore[arg-type]
         for key, value in masked.items():

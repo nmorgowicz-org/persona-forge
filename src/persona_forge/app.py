@@ -764,8 +764,9 @@ def _activate_library_voice_for_api(
     try:
         # Run on the model executor so the voice-state forward pass never races generation.
         model.executor.submit(rebuild, voice_id).result(timeout=120)
-    except Exception as exc:
-        return None, (jsonify({"error": f"Activate failed: {exc}"}), 500)
+    except Exception:
+        logger.exception("Voice activation failed")
+        return None, (jsonify({"error": "Activate failed; see the server log."}), 500)
     return meta, None
 
 
@@ -839,7 +840,8 @@ def _set_pack_default(
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except OSError as exc:
-        return jsonify({"error": f"Could not save the API default: {exc}"}), 500
+        logger.warning("Could not save the API default: %s", exc)
+        return jsonify({"error": "Could not save the API default; check the data folder is writable."}), 500
     return jsonify({"default": _api_default_view()})
 
 
@@ -902,7 +904,8 @@ def api_default_put():
         return jsonify({"error": f"Could not save the API default: {exc}"}), 400
     except OSError as exc:
         _restore_runtime_voice(previous_mirror, voice)
-        return jsonify({"error": f"Could not save the API default: {exc}"}), 500
+        logger.warning("Could not save the API default: %s", exc)
+        return jsonify({"error": "Could not save the API default; check the data folder is writable."}), 500
     return jsonify({"default": _api_default_view()})
 
 
@@ -2858,9 +2861,12 @@ def compare_autocheck_run():
         meta = voice_library.get_voice(reference_voice_id)
         if meta is None:
             return jsonify({"error": "reference voice not found"}), 404
-        reference_path = (meta.get("wav_path") or "").strip()
-        if not reference_path or not os.path.isfile(reference_path):
+        candidate = os.path.normpath((meta.get("wav_path") or "").strip() or os.sep)
+        library = os.path.normpath(str(voice_library.VOICE_LIBRARY_DIR))
+        # Only audio that lives in the voice library can be a reference.
+        if not candidate.startswith(library + os.sep) or not os.path.isfile(candidate):
             return jsonify({"error": "The reference voice has no readable audio"}), 400
+        reference_path = candidate
 
     checker = compare_autocheck.get_checker()
     try:

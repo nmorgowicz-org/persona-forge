@@ -341,8 +341,16 @@ def _require_importer(engine_id: str) -> speech_engines.EngineInfo:
 
 
 def _record_paths(engine_id: str, slug: str) -> tuple[Path, Path]:
-    base = _engine_dir(engine_id)
-    return base / f"{slug}.safetensors", base / f"{slug}.json"
+    base = os.path.normpath(str(_engine_dir(engine_id)))
+    paths_out: list[Path] = []
+    for suffix in (".safetensors", ".json"):
+        full = os.path.normpath(os.path.join(base, slug + suffix))
+        # The slug is already limited to [a-z0-9-]; this keeps the path inside the engine folder
+        # even if that ever changes.
+        if not full.startswith(base + os.sep):
+            raise _bad("That name would leave the imported-voice folder.")
+        paths_out.append(Path(full))
+    return paths_out[0], paths_out[1]
 
 
 def import_voice(

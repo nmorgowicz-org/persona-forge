@@ -76,7 +76,7 @@ def test_check_with_a_reference_voice_returns_similarity(client, stub, app_modul
     reference.write_bytes(wav(220.0))
     with patch.object(
         app_module.voice_library, "get_voice", return_value={"voice_id": "vd_aabbccddeeff", "wav_path": str(reference)}
-    ) as get_voice:
+    ) as get_voice, patch.object(app_module.voice_library, "VOICE_LIBRARY_DIR", tmp_path):
         resp = post(client, reference_voice_id="vd_aabbccddeeff")
     get_voice.assert_called_once_with("vd_aabbccddeeff")
     assert resp.status_code == 200
@@ -90,10 +90,22 @@ def test_unknown_reference_voice_is_404(client, stub, app_module):
     assert resp.get_json()["error"]
 
 
+def test_reference_audio_outside_the_voice_library_is_refused(client, stub, app_module, tmp_path):
+    library = tmp_path / "library"
+    library.mkdir()
+    outside = tmp_path / "elsewhere.wav"
+    outside.write_bytes(wav(220.0))
+    with patch.object(
+        app_module.voice_library, "get_voice", return_value={"voice_id": "vd_aabbccddeeff", "wav_path": str(outside)}
+    ), patch.object(app_module.voice_library, "VOICE_LIBRARY_DIR", library):
+        resp = post(client, reference_voice_id="vd_aabbccddeeff")
+    assert resp.status_code == 400
+
+
 def test_reference_voice_without_audio_on_disk_is_400(client, stub, app_module, tmp_path):
     with patch.object(
         app_module.voice_library, "get_voice", return_value={"voice_id": "vd_aabbccddeeff", "wav_path": str(tmp_path / "gone.wav")}
-    ):
+    ), patch.object(app_module.voice_library, "VOICE_LIBRARY_DIR", tmp_path):
         resp = post(client, reference_voice_id="vd_aabbccddeeff")
     assert resp.status_code == 400
 
