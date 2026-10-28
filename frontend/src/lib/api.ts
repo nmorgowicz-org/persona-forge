@@ -514,6 +514,21 @@ export interface EngineBenchmark {
   at: string
 }
 
+/** One short synthesis timed right after the pack installed; `slow` means slower than real time. */
+export interface EngineInstallCheck {
+  outcome: 'ok' | 'slow' | 'unavailable'
+  rtf: number | null
+  compute_seconds: number | null
+  audio_seconds: number | null
+  device: string | null
+  mode: string | null
+  warmup_seconds: number | null
+  load_average: number | null
+  note: string | null
+  error: string | null
+  at: string
+}
+
 export interface EngineCard {
   id: string
   label: string
@@ -531,6 +546,7 @@ export interface EngineCard {
   load_status?: EngineLoadStatus
   hardware_fit?: { level: 'recommended' | 'ok' | 'unsupported' | 'unknown'; text: string }
   benchmark?: EngineBenchmark | null
+  install_check?: EngineInstallCheck | null
   pack: {
     id: string
     version: string

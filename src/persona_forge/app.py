@@ -2658,12 +2658,8 @@ def engines_benchmark(engine_id: str):
                 return jsonify({"error": message or f"Benchmark request failed ({res.status_code})"}), 409
             with wave.open(io.BytesIO(res.data)) as wav:
                 runs.append((taken, wav.getnframes() / wav.getframerate()))
-        try:
-            load_average: float | None = round(os.getloadavg()[0], 2)
-        except (OSError, AttributeError):
-            load_average = None
         result = {
-            **hardware_fit.summarise_runs(runs, load_average),
+            **hardware_fit.summarise_runs(runs, hardware_fit.load_average()),
             "voice": pick.get("display_name") or pick["voice_id"],
             "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }

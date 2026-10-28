@@ -21,7 +21,7 @@ from typing import Any, Mapping
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from persona_forge import paths, speech_engines
+from persona_forge import install_check, paths, speech_engines
 
 MANIFEST_FILENAME = "manifest.json"
 VERIFIED_FILENAME = ".verified.json"
@@ -471,7 +471,9 @@ def engine_cards(backend: str | None, root: Path | None = None) -> list[dict[str
         engine.id: _engine_card(engine, backend)
         for engine in speech_engines.list_engines()
     }
+    install_checks: dict[str, dict[str, Any] | None] = {}
     for pack_status in discover_packs(root):
+        install_checks[pack_status.pack.engine_id] = install_check.read_record(pack_status.directory)
         card = cards.get(pack_status.pack.engine_id)
         if card is None:
             card = {
@@ -512,6 +514,7 @@ def engine_cards(backend: str | None, root: Path | None = None) -> list[dict[str
     for engine_id, card in cards.items():
         card["hardware_fit"] = hardware_fit.fit_for(engine_id, facts)
         card["benchmark"] = saved.get(engine_id)
+        card["install_check"] = install_checks.get(engine_id)
     return list(cards.values())
 
 

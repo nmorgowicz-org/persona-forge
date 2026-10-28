@@ -20,7 +20,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
-from persona_forge import engine_packs
+from persona_forge import engine_packs, install_check
 from persona_forge.kitten2_pack import (
     PACK_PYTHON,
     Job,
@@ -112,6 +112,21 @@ def build_manifest() -> dict[str, Any]:
     }
 
 
+def speed_check_spec(directory: Path, python: Path) -> install_check.SpeedCheckSpec:
+    """The worker command and load request the engine adapter uses, for the install speed check."""
+    from persona_forge import kokoro_worker
+
+    return install_check.SpeedCheckSpec(
+        command=(str(python), str(Path(kokoro_worker.__file__).resolve())),
+        env={},
+        load_request={
+            "op": "load",
+            "model_path": str(model_path(directory)),
+            "voices_path": str(voices_path(directory)),
+        },
+    )
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -162,6 +177,7 @@ def install(
     downloader: Callable[[Path, tuple[str, int, str]], None] = download_file,
     uv: str | None = None,
     platform: str | None = None,
+    measure: Callable[[install_check.SpeedCheckSpec], dict[str, Any]] | None = None,
 ) -> None:
     """Provision the pack synchronously. Failures leave the directory so a retry resumes."""
     platform = platform or sys.platform
@@ -208,6 +224,9 @@ def install(
             ]
         )
 
+    def speed() -> None:
+        install_check.check_and_record(directory, speed_check_spec(directory, python), measure)
+
     def publish() -> None:
         manifest = engine_packs.load_manifest(directory)
         engine_packs._write_verification_stamp(directory, manifest.manifest_sha256)
@@ -218,6 +237,7 @@ def install(
         ("Installing Kokoro", install_package),
         ("Downloading the voices (about 120 MB)", fetch),
         ("Checking the install", check),
+        ("Measuring speed", speed),
         ("Finishing", publish),
     ]
     _set(step_count=len(steps), step_index=0, error=None)

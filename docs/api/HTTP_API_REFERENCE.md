@@ -203,6 +203,22 @@ an idle engine starts that load in the background. Nothing blocks until a gunico
     with `code`, `message`, `action`, `help_url`, `detail` when fast mode is unavailable.
   While `loading` or `warming`, `POST /v1/audio/speech` for that engine answers a retryable 503
   (see "Engine warm-up").
+- Provisioned packs also carry `install_check`: one short sentence synthesised through the pack's
+  own worker right after its install verified, timed after the engine's warm-up (Kitten TTS 2's
+  compile-heavy first call is sent as the `warmup` request and kept out of the timing; engines
+  without a warm-up get one untimed priming call). `null` for built-ins and for packs installed
+  before the check existed or with `ENGINE_INSTALL_SPEED_CHECK=0`. Fields:
+  - `outcome`: `ok` (RTF at or under 1), `slow` (slower than real time on this machine) or
+    `unavailable` (the worker could not be measured; see `error`). A slow machine is a labelled
+    outcome, never an install failure, and the check never mints or changes the verification
+    stamp (only the provisioner does).
+  - `rtf` (compute seconds per second of audio), `compute_seconds`, `audio_seconds`,
+    `warmup_seconds` (`null` when the engine had no separate warm-up), `device` (the worker's
+    backend, for example `cuda` or `mlx`, else its mode, for example `cpu`), `mode`
+    (`compiled|eager|mlx|cpu...`), `load_average` (1-minute, `null` where the OS has none), `note`
+    (for example why fast mode is unavailable), `error`, `at` (UTC timestamp).
+  The record is stored as `.install_check.json` in the pack directory and goes away with it.
+  `POST /engines/{engine_id}/benchmark` is the separate, repeatable measurement (`benchmark`).
 - Read-only and local: no network access, no model load.
 
 ### POST /engines/{engine_id}/verify

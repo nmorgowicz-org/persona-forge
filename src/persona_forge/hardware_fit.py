@@ -24,6 +24,14 @@ _lock = threading.Lock()
 BENCH_TEXT = "The quick brown fox jumps over the lazy dog, and then it takes a short rest."
 
 
+def load_average() -> float | None:
+    """One-minute load average, or None where the OS does not report it (Windows)."""
+    try:
+        return round(os.getloadavg()[0], 2)
+    except (OSError, AttributeError):
+        return None
+
+
 def machine_facts() -> dict[str, Any]:
     from persona_forge import kitten2_pack
 

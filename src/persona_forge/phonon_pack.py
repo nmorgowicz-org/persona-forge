@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from persona_forge import engine_packs
+from persona_forge import engine_packs, install_check
 from persona_forge.kitten2_pack import (
     PACK_PYTHON,
     Job,
@@ -80,6 +80,17 @@ def weights_dir(directory: Path) -> Path:
     return directory / "hf"
 
 
+def speed_check_spec(directory: Path, python: Path) -> install_check.SpeedCheckSpec:
+    """The worker command and load request the engine adapter uses, for the install speed check."""
+    from persona_forge import phonon_worker
+
+    return install_check.SpeedCheckSpec(
+        command=(str(python), str(Path(phonon_worker.__file__).resolve())),
+        env={"HF_HOME": str(weights_dir(directory)), "HF_HUB_OFFLINE": "1"},
+        load_request={"op": "load"},
+    )
+
+
 def build_manifest() -> dict[str, Any]:
     return {
         "id": ENGINE_ID,
@@ -112,6 +123,7 @@ def install(
     runner: Callable[..., None] = run_command,
     uv: str | None = None,
     platform: str | None = None,
+    measure: Callable[[install_check.SpeedCheckSpec], dict[str, Any]] | None = None,
 ) -> None:
     """Provision the pack synchronously. Failures leave the directory so a retry resumes."""
     platform = platform or sys.platform
@@ -151,6 +163,9 @@ def install(
             env={"HF_HOME": str(hf), "HF_HUB_OFFLINE": "1"},
         )
 
+    def speed() -> None:
+        install_check.check_and_record(directory, speed_check_spec(directory, python), measure)
+
     def publish() -> None:
         manifest = engine_packs.load_manifest(directory)
         engine_packs._write_verification_stamp(directory, manifest.manifest_sha256)
@@ -161,6 +176,7 @@ def install(
         ("Installing Phonon", install_ptts),
         ("Downloading the voices (about 70 MB)", prefetch),
         ("Checking the install", check),
+        ("Measuring speed", speed),
         ("Finishing", publish),
     ]
     _set(step_count=len(steps), step_index=0, error=None)

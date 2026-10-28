@@ -20,6 +20,7 @@ import {
   removeEngine,
   verifyEngine,
   type EngineCard,
+  type EngineInstallCheck,
   type EngineState,
 } from '@/lib/api'
 import { getPref, setPref } from '@/lib/uiPreferences'
@@ -33,6 +34,21 @@ const STATUS_LABEL: Record<EngineState['status'], string> = {
   installed: 'Installed',
   verified: 'Verified',
   invalid: 'Invalid',
+}
+
+/** "Install check: RTF 0.18 on mps", or the slower-than-real-time warning, or why it was not measured. */
+function installCheckText(check: EngineInstallCheck): string {
+  if (check.outcome === 'unavailable') {
+    return `Install check: speed could not be measured${check.error ? ` (${check.error})` : ''}`
+  }
+  const rtf = check.rtf !== null ? `RTF ${check.rtf.toFixed(2)}` : 'RTF unknown'
+  const where = check.device
+    ? ` on ${check.device}${check.mode && check.mode !== check.device ? ` (${check.mode})` : ''}`
+    : ''
+  const load = check.load_average !== null ? `, load ${check.load_average}` : ''
+  return check.outcome === 'slow'
+    ? `Install check: runs slower than real time on this machine (${rtf}${where}${load})`
+    : `Install check: ${rtf}${where}${load}`
 }
 
 function formatBytes(value: number): string {
@@ -289,11 +305,23 @@ export function SpeechEnginesCard() {
                   </span>
                 )}
                 {engine.state.disk_bytes > 0 && <span>{formatBytes(engine.state.disk_bytes)}</span>}
-                <span data-testid={`engine-benchmark-${engine.id}`}>
-                  {engine.benchmark
-                    ? `Measured here: ${engine.benchmark.rtf_median?.toFixed(2)} s per s of audio (worst ${engine.benchmark.rtf_worst?.toFixed(2)}), first request ${engine.benchmark.cold_seconds.toFixed(1)} s${engine.benchmark.load_average !== null ? `, load ${engine.benchmark.load_average}` : ''}`
-                    : 'Speed not measured'}
-                </span>
+                {(engine.benchmark || !engine.install_check) && (
+                  <span data-testid={`engine-benchmark-${engine.id}`}>
+                    {engine.benchmark
+                      ? `Measured here: ${engine.benchmark.rtf_median?.toFixed(2)} s per s of audio (worst ${engine.benchmark.rtf_worst?.toFixed(2)}), first request ${engine.benchmark.cold_seconds.toFixed(1)} s${engine.benchmark.load_average !== null ? `, load ${engine.benchmark.load_average}` : ''}`
+                      : 'Speed not measured'}
+                  </span>
+                )}
+                {engine.install_check && (
+                  <span
+                    data-testid={`engine-install-check-${engine.id}`}
+                    data-outcome={engine.install_check.outcome}
+                    title={engine.install_check.note ?? undefined}
+                    className={cn(engine.install_check.outcome !== 'ok' && 'text-warning')}
+                  >
+                    {installCheckText(engine.install_check)}
+                  </span>
+                )}
                 {engine.state.status !== 'not-installed' && (
                   <Button
                     type="button"

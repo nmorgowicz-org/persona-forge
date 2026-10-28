@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from persona_forge import accelerator_manifest, engine_packs
+from persona_forge import accelerator_manifest, engine_packs, install_check
 
 ENGINE_ID = "kitten2"
 PACK_VERSION = "1"
@@ -241,6 +241,22 @@ def prefetch_weights(python: Path, directory: Path) -> None:
         process.close()
 
 
+def speed_check_spec(directory: Path, python: Path) -> install_check.SpeedCheckSpec:
+    """The worker command and load request the engine adapter uses, for the install speed check.
+
+    ``warmup`` is False so the check sends the compile-heavy first call itself, as the adapter's
+    "warming" state does, and keeps it out of the timing.
+    """
+    from persona_forge import kitten2_worker
+
+    weights = weights_dir(directory)
+    return install_check.SpeedCheckSpec(
+        command=(str(python), str(Path(kitten2_worker.__file__).resolve())),
+        env={"HF_HOME": str(weights), "HF_HUB_OFFLINE": "1"},
+        load_request={"op": "load", "warmup": False, "cache_dir": str(weights)},
+    )
+
+
 def find_uv() -> str | None:
     override = os.environ.get("ENGINE_PACKS_UV")
     if override and Path(override).is_file():
@@ -296,6 +312,7 @@ def install(
     prefetch: Callable[[Path, Path], None] = prefetch_weights,
     uv: str | None = None,
     platform: str | None = None,
+    measure: Callable[[install_check.SpeedCheckSpec], dict[str, Any]] | None = None,
 ) -> None:
     """Provision the pack synchronously. Failures leave the directory so a retry resumes."""
     platform = platform or sys.platform
@@ -340,6 +357,10 @@ def install(
         (
             "Checking the install",
             lambda: runner([str(python), "-c", _CHECK_SCRIPT if target.kind == "cuda" else "import kittenml"]),
+        ),
+        (
+            "Measuring speed",
+            lambda: install_check.check_and_record(directory, speed_check_spec(directory, python), measure),
         ),
         ("Finishing", lambda: _publish(directory)),
     ]

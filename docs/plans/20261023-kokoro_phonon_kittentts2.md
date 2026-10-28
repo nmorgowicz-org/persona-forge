@@ -311,6 +311,12 @@ change to a section above, not a new subsystem.
    Kitten 2 on the 5090 used the GPU correctly yet decoded at 17-24 % utilisation and RTF 1.2-1.3.
    The smoke test records a short RTF and shows "runs slower than real time on this machine" instead
    of a plain green tick.
+   *Implemented:* every pack install (Kitten 2, Phonon 31M, Kokoro, Pocket Lite) ends with a
+   "Measuring speed" step, after the verify step and before the provisioner publishes the stamp. It
+   times one short sentence through the pack's own worker after warm-up and records RTF, device or
+   mode and load average in `.install_check.json`; `GET /engines` returns it as `install_check` and
+   the engine card shows "Install check: RTF 0.18 on mps" or the slower-than-real-time warning. A slow
+   or unmeasurable result is a labelled outcome, never an install failure. `src/persona_forge/install_check.py`.
 3. **Add a `warming` engine state (§4.1, §4.3).** The compiled Kitten 2 path spends about 33 s on its
    first call and showed one-off trials of 9 s, 41 s and 85 s against 1-4 s medians. The state
    machine becomes `loading` → `warming` → `active`. During `warming`, the API returns a documented

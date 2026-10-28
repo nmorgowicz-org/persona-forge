@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from persona_forge import engine_packs
+from persona_forge import engine_packs, install_check
 from persona_forge.kitten2_pack import Job, StepFailed, run_command
 from persona_forge.pocket_lite_worker import ENGLISH_PRESETS, MODEL_NAME
 
@@ -86,6 +86,19 @@ def worker_env(directory: Path, *, offline: bool) -> dict[str, str]:
     return env
 
 
+def speed_check_spec(directory: Path) -> install_check.SpeedCheckSpec:
+    """The worker command and load request the engine adapter uses, for the install speed check."""
+    from persona_forge import pocket_lite_worker
+
+    env = worker_env(directory, offline=True)
+    env["POCKET_TTS_MODEL_SOURCE"] = "auto"  # as the adapter: keep standard Pocket's settings out
+    return install_check.SpeedCheckSpec(
+        command=(sys.executable, str(Path(pocket_lite_worker.__file__).resolve())),
+        env=env,
+        load_request={"op": "load"},
+    )
+
+
 def pocket_tts_version() -> str:
     """The ``pocket-tts`` version the weights are fetched for. Each release pins its own revisions."""
     from importlib import metadata
@@ -144,6 +157,7 @@ def install(
     *,
     runner: Callable[..., None] = run_command,
     token: str | None = None,
+    measure: Callable[[install_check.SpeedCheckSpec], dict[str, Any]] | None = None,
 ) -> None:
     """Provision the pack synchronously. Failures leave the directory so a retry resumes."""
     directory = pack_dir(root)
@@ -169,6 +183,9 @@ def install(
             env=worker_env(directory, offline=True),
         )
 
+    def speed() -> None:
+        install_check.check_and_record(directory, speed_check_spec(directory), measure)
+
     def publish() -> None:
         manifest = engine_packs.load_manifest(directory)
         engine_packs._write_verification_stamp(directory, manifest.manifest_sha256)
@@ -177,6 +194,7 @@ def install(
         ("Preparing the engine folder", write_manifest),
         (f"Downloading the model and {len(ENGLISH_PRESETS)} voices (about 150 MB)", prefetch),
         ("Checking the install", check),
+        ("Measuring speed", speed),
         ("Finishing", publish),
     ]
     _set(step_count=len(steps), step_index=0, error=None)
