@@ -11,10 +11,10 @@
 # the equivalent pins/patches directly against the host Python instead of a container build;
 # accelerator wheels are opt-in extras at install time there rather than a first-boot install
 # into a persisted volume. See docs/MIGRATION.md for moving a deployment between the two.
-ARG PYTHON_IMAGE=python:3.13-slim@sha256:b3575dcf816cdacc5292df77a6e3e59b8941631078373a045efa2ac1e9c5c3b2
+ARG PYTHON_IMAGE=python:3.13-slim@sha256:5dde09372dfa8e7762892b2a12619fcf6c23b0b78bce1058a9fa5a3a7a40e68e
 # Not digest-pinned like PYTHON_IMAGE below (build-stage only, never shipped in the final
 # image) — override via --build-arg if you need reproducibility guarantees for CI.
-ARG NODE_IMAGE=node:26-slim@sha256:94816674c62774da0d099a947bf4613b9e1972a2733abd0d0cd80e795f8411d0
+ARG NODE_IMAGE=node:24-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c
 
 # Static export, served by Flask at / (see src/persona_forge/app.py). Independent stage so the
 # final image never needs a Node toolchain.
