@@ -198,13 +198,12 @@ class PackPresetEngine:
         self._idle.arm()
 
     def _unload_if_idle(self) -> None:
-        with self._lock:
-            if self._active:
-                return  # a stream is running; its end re-arms the timer
-        self.unload()
+        self.unload(only_if_idle=True)
 
-    def unload(self) -> None:
+    def unload(self, *, only_if_idle: bool = False) -> None:
         with self._lock:
+            if only_if_idle and self._active:
+                return  # a stream is running; its end re-arms the timer
             self._idle.cancel()
             process, self._process = self._process, None
             if self._tracker.state == "ready":

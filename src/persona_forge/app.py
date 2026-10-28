@@ -3253,6 +3253,10 @@ def engines_remove(engine_id: str):
             ),
             409,
         )
+    loaded = speech_engines.ADAPTERS.get(engine_id)
+    unload = getattr(loaded, "unload", None)
+    if callable(unload):
+        unload()  # stop the worker so it neither keeps serving nor holds the files open
     try:
         removed = engine_packs.remove_pack(engine_id)
     except engine_packs.PackInstallError as exc:

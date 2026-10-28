@@ -101,9 +101,10 @@ class PocketLiteEngine(PackPresetEngine):
             return None
         return next((r.split("==", 1)[1] for r in requirements if r.startswith("pocket-tts==")), None)
 
-    def unload(self) -> None:
-        super().unload()
-        self._prepared.clear()
+    def unload(self, *, only_if_idle: bool = False) -> None:
+        super().unload(only_if_idle=only_if_idle)
+        if not (only_if_idle and self._active):
+            self._prepared.clear()
 
     def _fill_request(
         self,
