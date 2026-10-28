@@ -1,9 +1,35 @@
 import { test, expect } from '@playwright/test'
 
+async function renderedVariantIds(page) {
+  return page.getByTestId('voice-edit-variant').evaluateAll((rows) =>
+    rows.map((row) => {
+      const label = row.firstElementChild
+      return label?.getAttribute('data-app-tooltip') ?? label?.getAttribute('title')
+    }),
+  )
+}
+
+async function waitForVoiceVariants(page, voiceId, onSample = () => {}) {
+  const response = await page.request.get(`/voices/${encodeURIComponent(voiceId)}/variants`)
+  expect(response.ok()).toBe(true)
+  const { entries } = await response.json()
+  // The editor retains the previous voice's rows while this voice loads. Visibility
+  // (or even the same row count) cannot establish that the selected voice is rendered.
+  await expect.poll(async () => {
+    const ids = await renderedVariantIds(page)
+    onSample(ids)
+    return ids
+  }).toEqual(entries.map((entry) => entry.id))
+  return page.getByTestId('voice-edit-variant')
+}
+
 async function openVoiceEdit(page) {
   await page.goto('/')
   await page.getByTestId('nav-voice-edit').click()
   await expect(page.getByTestId('voice-edit-page')).toBeVisible()
+  const picker = page.getByTestId('voice-edit-picker')
+  await expect(picker).not.toHaveValue('')
+  await waitForVoiceVariants(page, await picker.inputValue())
 }
 
 test.describe('Voice Edit workspace', () => {
@@ -29,9 +55,8 @@ test.describe('Voice Edit workspace', () => {
 
   test('variant saved in Voice Edit appears in Voice Library prosody editor', async ({ page }) => {
     await openVoiceEdit(page)
-    await page.getByTestId('voice-edit-picker').selectOption({ index: 1 })
-    const variants = page.getByTestId('voice-edit-variant')
-    await expect(variants.first()).toBeVisible()
+    const [voiceId] = await page.getByTestId('voice-edit-picker').selectOption({ index: 1 })
+    const variants = await waitForVoiceVariants(page, voiceId)
     const countBefore = await variants.count()
     await page.getByTestId('voice-edit-save-variant').click()
     await expect(variants).toHaveCount(countBefore + 1, { timeout: 20000 })
@@ -46,6 +71,48 @@ test.describe('Voice Edit workspace', () => {
     await expect(page.getByTestId('voice-card').first().getByText('Neutral 1.0x').first()).toBeVisible()
   })
 
+  test('variant synchronization waits for the selected voice while its response is held', async ({ page }) => {
+    await openVoiceEdit(page)
+    const picker = page.getByTestId('voice-edit-picker')
+    const previousIds = await renderedVariantIds(page)
+    const voiceId = await picker.locator('option').nth(2).getAttribute('value')
+    expect(voiceId).not.toBe(await picker.inputValue())
+    const variantsPath = `/voices/${encodeURIComponent(voiceId)}/variants`
+    let releaseResponse
+    const responseGate = new Promise((resolve) => { releaseResponse = resolve })
+    await page.route((url) => url.pathname === variantsPath, async (route) => {
+      await responseGate
+      await route.continue()
+    }, { times: 1 })
+    const requested = page.waitForRequest((request) =>
+      request.method() === 'GET' && new URL(request.url()).pathname === variantsPath,
+    )
+    let synchronization
+    let synchronized = false
+
+    try {
+      await picker.selectOption(voiceId)
+      await requested
+      // Reproduce the old guard succeeding with another voice's rows, without sleeps.
+      await expect(page.getByTestId('voice-edit-variant').first()).toBeVisible()
+      expect(await renderedVariantIds(page)).toEqual(previousIds)
+      let samples = 0
+      let markRetried
+      const retried = new Promise((resolve) => { markRetried = resolve })
+      synchronization = waitForVoiceVariants(page, voiceId, () => {
+        if (++samples === 2) markRetried()
+      }).then(() => { synchronized = true })
+      // A second sample proves the identity assertion rejected the stale rows and
+      // retried while the browser response was still held, rather than resolving early.
+      await Promise.race([retried, synchronization])
+      expect(synchronized).toBe(false)
+    } finally {
+      releaseResponse()
+    }
+    await synchronization
+    expect(await renderedVariantIds(page)).not.toEqual(previousIds)
+  })
+
   test('promoting a saved variant moves the primary flag and serves its audio', async ({ page }) => {
     await openVoiceEdit(page)
     const picker = page.getByTestId('voice-edit-picker')
@@ -55,8 +122,7 @@ test.describe('Voice Edit workspace', () => {
     await picker.selectOption({ index: 2 })
     const voiceId = await picker.inputValue()
 
-    const variants = page.getByTestId('voice-edit-variant')
-    await expect(variants.first()).toBeVisible()
+    const variants = await waitForVoiceVariants(page, voiceId)
     const countBefore = await variants.count()
     await page.getByTestId('voice-edit-save-variant').click()
     await expect(variants).toHaveCount(countBefore + 1, { timeout: 20000 })
