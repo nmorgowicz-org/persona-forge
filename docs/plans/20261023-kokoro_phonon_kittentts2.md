@@ -421,6 +421,33 @@ explained; no surprise downloads, swaps or speaker fallbacks; keyboard accessibl
 - Global status chip in the shell: active engine, state (Ready / Loading / Busy / Error), device.
   Engine state reaches the UI via the existing polling pattern first — no new SSE/WebSocket
   transport in v1.
+  **Chip (browser-checked with real packs, plus Playwright stubs).** The shell header carries the
+  chip on every page: the watched engine's label, a state word and dot (Ready green / Warming
+  amber pulsing / Loading spinner / Error red), and the device when known (`md:` up). The watched
+  engine is the API default's engine when one is set, else the active backend's engine (Pocket
+  today). States come only from signals that exist: a server-reported model load (`/health`
+  `loading_message`, or `status: error` with the reason) wins, then the watched card's
+  `load_status` (`warming` → Warming with the measured-warm-up note, `loading` → Loading,
+  `error` → Error with the reason), then install progress and failures (`install_job`
+  `running` → Loading with the current step, errors such as a needed HF token → Error with the
+  reason, `invalid` files → Error, an API default whose engine is not installed → Error) — else
+  Ready. **No Busy by design:** neither GET /engines nor the store carries a request/queue signal
+  today (the store's `activityStatus` is OmniVoice audition-only, a different subsystem), so an
+  idle-but-serving engine reads Ready rather than inventing an endpoint. Transport is the existing
+  polling pattern: GET /engines every 2 s while any engine loads/warms plus a 10 s idle re-read
+  (so a load an API request started outside the tab still arrives), and device rides the store's
+  existing /health poll. Clicking the chip opens Runtime; the tooltip (hover and keyboard focus)
+  says which role the engine plays and the actionable reason; state changes are announced via a
+  polite `aria-live` region. With no engine information at all the chip renders nothing. Verified
+  against `/tmp/pf_all` (Kitten 2/Phonon/Kokoro installed) with Kitten 2 as API default: the chip
+  read "Kitten TTS 2 / Ready / mlx" on Speak, Voice Library and Runtime, then tracked a real
+  `/v1/audio/speech` request live through Loading → Warming → Ready (tooltip "Kitten TTS 2 serves
+  the API default. Ready on mlx."), with no header overflow at 375 px. Playwright:
+  `tests/ui/core/engine-status-chip.spec.js` covers Ready, Loading (server-driven via the fake
+  server's `/_test/simulate-base-load`), Warming, both Error flavors, the API-default-wins rule, a
+  mid-install API default (Loading, not Error), keyboard access, the empty case and the narrow
+  viewport (including the long-label wizard page), stubbing GET /engines at the API boundary with
+  real payload shapes (the documented pack-dependent-UI approach).
 
 ### 5.2 Speech engines manager
 

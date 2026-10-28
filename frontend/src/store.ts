@@ -117,6 +117,9 @@ interface StoreState {
   loadingMessage: string | null
   healthStatus: string | null
   healthError: string | null
+  /** The device the active backend runs on, from /health (cpu / mps / cuda / xpu). Null until
+   * /health reports one; the shell's engine status chip shows it. */
+  healthDevice: string | null
   /** True once /health has answered at least once -- a 503 counts. Without it, "the service
    * has never started" and "nobody has asked yet" are the same state, and the cold-boot
    * splash would flash on every ordinary page load. */
@@ -389,6 +392,7 @@ export const useAppStore = create<StoreState>((set) => ({
   loadingMessage: null,
   healthStatus: null,
   healthError: null,
+  healthDevice: null,
   healthChecked: false,
   text: '',
   voiceId: null,
@@ -783,6 +787,9 @@ const PROGRESS_POLL_MS = 700
       }
       if ((data.error || null) !== store.healthError) {
         useAppStore.setState({ healthError: data.error || null })
+      }
+      if ((data.device || null) !== store.healthDevice) {
+        useAppStore.setState({ healthDevice: data.device || null })
       }
       if (data.swap_in_progress !== store.swapInProgress) {
         useAppStore.setState({ swapInProgress: Boolean(data.swap_in_progress) })

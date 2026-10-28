@@ -33,16 +33,93 @@ export function engineLoadSuffix(status?: EngineLoadStatus | null): string {
 }
 
 /**
+ * State of the engine the shell's status chip (§5.1) watches, in the plan §5.8 vocabulary the
+ * UI can honestly claim from GET /engines plus the startup/health state. There is no Busy here
+ * on purpose: neither /engines nor the store carries a request/queue signal today, so an
+ * idle-but-serving engine reads as Ready instead of inventing one.
+ */
+export type EngineChipState = 'ready' | 'loading' | 'warming' | 'error'
+
+export const ENGINE_CHIP_WORD: Record<EngineChipState, string> = {
+  ready: 'Ready',
+  loading: 'Loading',
+  warming: 'Warming',
+  error: 'Error',
+}
+
+/**
+ * The engine the chip watches: the engine that serves the API default when one is set (it
+ * answers the endpoint's default requests), else the active backend's engine (Pocket today).
+ */
+export function chooseChipEngine(cards: EngineCard[]): EngineCard | null {
+  return cards.find((card) => card.api_default) ?? cards.find((card) => card.active) ?? null
+}
+
+/**
+ * Chip state from the signals that exist: a server-reported model load wins (it blocks every
+ * engine), then the watched engine's own load state, then its install/verification failures.
+ * The reason, when there is one, is the actionable text for the tooltip.
+ */
+export function deriveChipState(
+  card: EngineCard | null,
+  health: { loadingMessage: string | null; healthStatus: string | null; healthError: string | null },
+): { state: EngineChipState; reason: string | null } {
+  if (health.healthStatus === 'error') {
+    return {
+      state: 'error',
+      reason: health.healthError || health.loadingMessage || 'The model failed to load.',
+    }
+  }
+  if (health.loadingMessage) {
+    return { state: 'loading', reason: health.loadingMessage }
+  }
+  if (!card) return { state: 'ready', reason: null }
+  const load = card.load_status
+  if (load?.state === 'warming') return { state: 'warming', reason: engineLoadNote(card.label, load) }
+  if (load?.state === 'loading') return { state: 'loading', reason: engineLoadNote(card.label, load) }
+  if (load?.state === 'error') {
+    return { state: 'error', reason: load.error || `${card.label} failed to load.` }
+  }
+  // An install of the watched engine runs in the background while its card already exists
+  // (and may already be the API default); that is progress, not a failure.
+  if (card.install_job?.state === 'running') {
+    const step = card.install_job.step ? ` (${card.install_job.step})` : ''
+    return { state: 'loading', reason: `Installing ${card.label}${step}.` }
+  }
+  if (card.install_job?.state === 'error') {
+    return { state: 'error', reason: card.install_job.error || `${card.label} could not be installed.` }
+  }
+  if (card.state.status === 'invalid') {
+    return {
+      state: 'error',
+      reason: card.state.errors.join(' ') || `The ${card.label} files failed verification.`,
+    }
+  }
+  if (card.api_default && card.state.status === 'not-installed') {
+    return { state: 'error', reason: `The API default needs ${card.label}, which is not installed.` }
+  }
+  return { state: 'ready', reason: null }
+}
+
+/**
  * Load state of every engine, straight from GET /engines. Polls every 2 s while any engine is
  * loading or warming; call ``refresh`` when something may have started a load (a request that
  * was told to wait). Also returns the whole cards, so callers can read measured data such as
  * the install check's warm-up time.
+ *
+ * ``idleIntervalMs`` keeps a slow poll running while nothing is in flight, so a always-mounted
+ * surface (the shell's engine status chip) notices a load an API request started outside this
+ * tab. Page-level callers omit it and keep the mount-plus-while-busy behavior.
  */
-export function useEngineLoadStatus(): {
+export function useEngineLoadStatus(options?: {
+  /** Slow re-read period while no engine is loading or warming. */
+  idleIntervalMs?: number
+}): {
   status: Record<string, EngineLoadStatus | undefined>
   cards: EngineCard[]
   refresh: () => void
 } {
+  const idleIntervalMs = options?.idleIntervalMs
   const [status, setStatus] = useState<Record<string, EngineLoadStatus | undefined>>({})
   const [cards, setCards] = useState<EngineCard[]>([])
   const refresh = useCallback(() => {
@@ -62,6 +139,11 @@ export function useEngineLoadStatus(): {
     const timer = window.setInterval(refresh, 2000)
     return () => window.clearInterval(timer)
   }, [busy, refresh])
+  useEffect(() => {
+    if (busy || !idleIntervalMs) return
+    const timer = window.setInterval(refresh, idleIntervalMs)
+    return () => window.clearInterval(timer)
+  }, [busy, refresh, idleIntervalMs])
   return { status, cards, refresh }
 }
 
