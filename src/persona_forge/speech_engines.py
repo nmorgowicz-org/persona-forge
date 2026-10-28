@@ -150,7 +150,7 @@ ENGINES: dict[str, EngineInfo] = {
         id="pocket-lite",
         label="Pocket Lite (18M)",
         description=(
-            "A smaller Pocket model that still clones: about 3x faster than Pocket on Intel, "
+            "A smaller Pocket model that still clones: about 4x faster than Pocket on Intel, "
             "English only, and close to Pocket in listening tests. Needs a Hugging Face token "
             "to install (its cloning weights are gated)."
         ),

@@ -1,12 +1,14 @@
 """Managed child process for pack engines (Phase C3b).
 
-Every non-Pocket engine will run in its own process so its dependencies, crashes and memory
+Every non-Pocket engine runs in its own process so its dependencies, crashes and memory
 cannot reach the web worker. This module is the transport only: newline-delimited JSON over
 stdin/stdout, one request in flight, health ping, bounded waits and a hard kill on timeout.
 Engine-specific work lives in the worker, not here.
 
-The API does not spawn workers yet — that lands with the first screened engine. Keeping the
-transport tested now means the adapter work adds a protocol, not a process manager.
+The engine adapters (``PackPresetEngine`` and the Kitten 2 adapter) each own at most one
+``PackProcess``, started lazily on the first request that needs the engine and closed again by
+idle unload. Keeping the transport separate means an adapter adds a protocol, not a process
+manager.
 """
 
 from __future__ import annotations

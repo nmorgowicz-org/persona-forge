@@ -233,8 +233,10 @@ export function SpeechEnginesCard() {
         <p className="text-sm font-semibold">Speech engines</p>
       </div>
       <p className="text-xs text-muted-foreground">
-        One active engine serves the API. Packs are verified locally against their pinned
-        hashes before use. Installing an engine downloads it once; it then runs offline.
+        Pack engines run beside the active backend, so installing one never switches or unloads it;
+        the API default decides which engine and voice a request without an engine uses. Packs are
+        verified locally against their pinned hashes before use. Installing an engine downloads it
+        once; it then runs offline.
       </p>
 
       <label className="flex flex-wrap items-center gap-2 text-xs">
@@ -433,7 +435,8 @@ export function SpeechEnginesCard() {
                 )}
                 {engine.kind !== 'builtin' && (
                   <>
-                    {engine.state.status !== 'verified' && (
+                    {(engine.state.status !== 'verified' ||
+                      engine.load_status?.state === 'error') && (
                       <Button
                         type="button"
                         size="xs"
@@ -477,7 +480,7 @@ export function SpeechEnginesCard() {
                       }
                       title={
                         engine.active
-                          ? 'Switch to another engine before removing this one'
+                          ? 'This engine is the server\u2019s active backend, so it can\u2019t be removed.'
                           : engine.api_default
                             ? 'This engine serves the API default. Change the API default first (Voices → Built-in, or Integrations).'
                             : undefined
