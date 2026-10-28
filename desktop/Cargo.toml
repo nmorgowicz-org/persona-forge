@@ -27,11 +27,11 @@ tauri-runtime = "=2.12.2"
 tauri-runtime-wry = "=2.12.3"
 tauri-macros = "=2.7.4"
 tauri-utils = "=2.10.2"
-tauri-plugin-single-instance = "=2.5.4"
+tauri-plugin-single-instance = "=2.5.5"
 tauri-plugin-window-state = "=2.5.0"
-tauri-plugin-dialog = "=2.8.3"
+tauri-plugin-dialog = "=2.8.4"
 tauri-plugin-opener = "=2.7.2"
-tauri-plugin-notification = "=2.7.0"
+tauri-plugin-notification = "=2.8.0"
 tauri-plugin-log = "=2.10.1"
 tauri-plugin-clipboard-manager = "=2.5.0"
 if-addrs = "=0.15.0"
@@ -42,7 +42,7 @@ parking_lot = "0.13"
 libc = "=0.2.191"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-tauri-plugin-updater = "=2.14.0"
+tauri-plugin-updater = "=2.14.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # macOS 26+ Liquid Glass (NSGlassEffectView) with NSVisualEffectView fallback on older macOS;
