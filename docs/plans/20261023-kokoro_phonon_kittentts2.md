@@ -425,7 +425,7 @@ a note naming engines that are not installed. Preview generates locally through 
 API default" are hidden for them, with the reason in the drawer. **Preview cache (§9.2) not built,
 on purpose:** it exists for downloading upstream sample files, and none of these engines ships
 sample URLs, so there is nothing to cache. If an upstream sample source is added later the cache
-spec still stands. **Not built:** Compare from a voice's drawer, uninstalled engines' voices
+spec still stands. **Compare from a saved voice's actions menu: built** ("Compare engines" opens the Compare tab with that voice on every installed cloning engine; checked in a real browser with two saved voices). **Not built:** uninstalled engines' voices
 (needs a bundled catalog per engine; today only installed engines list voices), and the API default
 for pack voices (the default applies to the active engine, so it needs the same design decision as
 engine switching).

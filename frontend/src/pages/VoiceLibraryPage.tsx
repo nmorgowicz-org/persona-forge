@@ -742,6 +742,7 @@ function VoiceCard({
   layoutMode,
   onUse,
   onDesignFrom,
+  onCompare,
   onReopenInStitchStudio,
   onDelete,
   onDuplicate,
@@ -768,6 +769,7 @@ function VoiceCard({
   layoutMode: string
   onUse: () => void
   onDesignFrom: (() => void) | null
+  onCompare: () => void
   onReopenInStitchStudio: (() => void) | null
   onDelete: () => void
   // Fork this voice into a brand-new voice_id. Omitting variantFilename forks whichever
@@ -1142,6 +1144,7 @@ function VoiceCard({
           <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => onDuplicate()} title="Materialize the currently-active audio as a brand-new, independent voice_id"><GitFork /> Fork to independent voice_id</Button>
           <Button size="sm" variant="ghost" className="w-full justify-start" disabled={voice.api_active} onClick={onActivateForApi}><Radio /> Activate for API</Button>
           {onDesignFrom && <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onDesignFrom}><Sparkles /> Design from voice</Button>}
+          <Button data-testid="voice-compare-engines" size="sm" variant="ghost" className="w-full justify-start" onClick={onCompare} title="Render this voice on every installed cloning engine and rate them"><Columns2 /> Compare engines</Button>
           {onReopenInStitchStudio && <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onReopenInStitchStudio}><Layers /> Open in Stitch Studio</Button>}
           <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => setEditing(true)}><Pencil /> Edit transcript</Button>
           <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => runMutation(onNormalize)}><Wand2 /> Normalize loudness</Button>
@@ -1210,6 +1213,8 @@ export function VoiceLibraryPage() {
     setActiveTab(tab)
     setPref('voiceLibrary.tab', tab)
   }
+  // Set by "Compare engines" on a voice; the Compare tab uses it as its starting voice.
+  const [compareVoice, setCompareVoice] = useState<string | null>(null)
   const setVoiceId = useAppStore((s) => s.setVoiceId)
 
   const setPage = useAppStore((s) => s.setPage)
@@ -1684,6 +1689,10 @@ export function VoiceLibraryPage() {
       onDesignFrom={
         hasChipSelections(voice.selections) ? () => designFromVoice(voice.voice_id) : null
       }
+      onCompare={() => {
+        setCompareVoice(voice.voice_id)
+        selectTab('compare')
+      }}
       onReopenInStitchStudio={
         (voice.selections as OmniVoiceSelections | null | undefined)?.stitch_plan?.clips?.length
           ? () => reopenInStitchStudio(voice)
@@ -1969,7 +1978,7 @@ export function VoiceLibraryPage() {
           </TabsContent>
 
           <TabsContent value="compare" className="flex flex-col gap-6">
-            <CompareTab />
+            <CompareTab startVoice={compareVoice} onStarted={() => setCompareVoice(null)} />
           </TabsContent>
 
           <TabsContent value="segments" className="flex flex-col gap-6">

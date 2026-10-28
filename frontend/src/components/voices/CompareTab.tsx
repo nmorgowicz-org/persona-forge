@@ -79,7 +79,13 @@ function levelGain(buffer: AudioBuffer): number {
   return peak > 0 ? Math.min(wanted, 0.98 / peak) : 1
 }
 
-export function CompareTab() {
+export function CompareTab({
+  startVoice = null,
+  onStarted,
+}: {
+  startVoice?: string | null
+  onStarted?: () => void
+}) {
   const [models, setModels] = useState<ModelEntry[]>([])
   const [voices, setVoices] = useState<VoiceEntry[]>([])
   const [text, setText] = useState(SAMPLES[0])
@@ -92,6 +98,7 @@ export function CompareTab() {
   const [running, setRunning] = useState(false)
   const [playing, setPlaying] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
   const [reference, setReference] = useState<Reference | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [summary, setSummary] = useState<{ count: number; rows: EngineSummary[] }>({ count: 0, rows: [] })
@@ -121,9 +128,24 @@ export function CompareTab() {
         setVoices(v.data ?? [])
         const ready = list.filter((e) => e.installed !== false)
         setSlots(ready.slice(0, 2).map((e) => ({ engine: e.id, voice: '' })))
+        setLoaded(true)
       })
       .catch((err: unknown) => setError(String((err as Error)?.message || err)))
   }, [])
+
+  // Arriving from a voice's "Compare engines": start with that voice on every cloning engine.
+  useEffect(() => {
+    if (!startVoice || !loaded) return
+    if (!voices.some((v) => v.voice_id === startVoice && v.kind === 'library')) return
+    const cloning = models.filter((m) => m.installed !== false && m.capabilities.clone).slice(0, 4)
+    if (cloning.length >= 2) setSlots(cloning.map((m) => ({ engine: m.id, voice: startVoice })))
+    else setSlots((cur) => cur.map((slot) => ({ ...slot, voice: startVoice })))
+    setResults([])
+    setReference(null)
+    onStarted?.()
+    // models and voices are loaded once with `loaded`; only a new start voice should re-seed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startVoice, loaded])
 
   function voicesFor(engine: string): VoiceEntry[] {
     const info = models.find((m) => m.id === engine)
