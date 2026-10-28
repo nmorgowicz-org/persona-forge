@@ -27,6 +27,7 @@ class PrepareRefused(Exception):
         self, code: str, message: str, status: int, extra: dict[str, Any] | None = None
     ) -> None:
         super().__init__(message)
+        self.public_message = message
         self.code = code
         self.status = status
         self.extra = extra or {}

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -30,12 +31,26 @@ _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
+logger = logging.getLogger(__name__)
+
+
 class PackManifestError(ValueError):
     """A manifest is malformed. The message is safe to show to the user."""
 
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.public_message = message
+
 
 class PackInstallError(RuntimeError):
-    """An install cannot proceed (bad source, disk space, hash mismatch)."""
+    """An install cannot proceed (bad source, disk space, hash mismatch).
+
+    ``public_message`` is the text safe to show a client; it never carries OS or network detail.
+    """
+
+    def __init__(self, message: str, public_message: str | None = None) -> None:
+        super().__init__(message)
+        self.public_message = public_message or message
 
 
 @dataclass(frozen=True)
@@ -191,7 +206,7 @@ def load_manifest(pack_dir: Path) -> PackManifest:
     try:
         payload = json.loads(raw_bytes)
     except ValueError as exc:
-        raise PackManifestError(f"invalid JSON: {exc}") from exc
+        raise PackManifestError("invalid JSON") from exc
     if not isinstance(payload, Mapping):
         raise PackManifestError("manifest must be a JSON object")
     return parse_manifest(payload, hashlib.sha256(raw_bytes).hexdigest())
@@ -269,7 +284,7 @@ def inspect_pack(pack_dir: Path, *, verify: bool = False) -> PackStatus:
             artifacts=(),
         )
         return PackStatus(
-            pack=placeholder, directory=pack_dir, errors=[str(exc)], artifacts_total=0
+            pack=placeholder, directory=pack_dir, errors=[exc.public_message], artifacts_total=0
         )
 
     status = PackStatus(
@@ -399,7 +414,11 @@ def _download_artifact(url: str, dest: Path, artifact: PackArtifact, *, allow_fi
                     handle.write(chunk)
                     written += len(chunk)
     except (OSError, ValueError) as exc:
-        raise PackInstallError(f"{artifact.path}: download failed: {exc}") from exc
+        logger.warning("Download of %s failed: %s", artifact.path, exc)
+        raise PackInstallError(
+            f"{artifact.path}: download failed: {exc}",
+            f"{artifact.path}: download failed; check the connection and disk space, then retry.",
+        ) from exc
 
     if written != artifact.size:
         part.unlink(missing_ok=True)
@@ -479,7 +498,11 @@ def remove_pack(engine_id: str, root: Path | None = None) -> bool:
     try:
         shutil.rmtree(pack_dir)
     except OSError as exc:
-        raise PackInstallError(f"could not remove pack: {exc}") from exc
+        logger.warning("Could not remove pack %s: %s", engine_id, exc)
+        raise PackInstallError(
+            f"could not remove pack: {exc}",
+            "could not remove the pack; check that its folder is writable and not in use.",
+        ) from exc
     return True
 
 

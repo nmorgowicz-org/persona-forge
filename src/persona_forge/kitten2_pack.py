@@ -54,6 +54,10 @@ _CHECK_SCRIPT = (
 class UnsupportedMachine(RuntimeError):
     """Kitten TTS 2 cannot run here; the message says what would be needed."""
 
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.public_message = message
+
 
 @dataclass(frozen=True)
 class Target:

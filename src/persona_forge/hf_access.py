@@ -41,6 +41,10 @@ _cache: tuple[tuple[int, int], str | None] | None = None  # ((mtime_ns, size), t
 class InvalidToken(ValueError):
     """The submitted token is not usable. The message never contains the token."""
 
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.public_message = message
+
 
 def token_path() -> Path:
     return Path(paths.runtime_data_dir()) / TOKEN_FILENAME

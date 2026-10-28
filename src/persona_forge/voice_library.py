@@ -174,6 +174,14 @@ def _restore_text(path: Path, payload: str | None) -> None:
         _write_text_atomic(path, payload)
 
 
+class ApiDefaultError(ValueError):
+    """The requested API default is not valid; the message is safe to show."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.public_message = message
+
+
 def set_api_default(
     engine: str | None,
     voice: str,
@@ -190,12 +198,12 @@ def set_api_default(
     """
     voice = (voice or "").strip()
     if not voice:
-        raise ValueError("voice is required")
+        raise ApiDefaultError("voice is required")
     is_preset = is_preset_voice_id(voice)
     if ":" in voice and not is_preset:
-        raise ValueError(f"invalid preset voice: {voice!r}")
+        raise ApiDefaultError(f"invalid preset voice: {voice!r}")
     if not is_preset and not _is_valid_voice_id(voice):
-        raise ValueError(f"invalid voice_id: {voice!r}")
+        raise ApiDefaultError(f"invalid voice_id: {voice!r}")
 
     record = {
         "engine": (engine or "").strip() or None,

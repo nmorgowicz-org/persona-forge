@@ -159,7 +159,7 @@ def _engine_warming_error(exc: "kitten2_engine.EngineWarming"):
 
     Retryable by design: OpenAI-style clients retry a 503 and honour ``Retry-After``.
     """
-    body, status = _openai_error(str(exc), 503, "api_error", code="engine_warming")
+    body, status = _openai_error(exc.public_message, 503, "api_error", code="engine_warming")
     response = make_response(body, status)
     response.headers["Retry-After"] = str(exc.retry_after_s)
     return response
@@ -837,8 +837,10 @@ def _set_pack_default(
         # The saved-voice mirror drives the *active backend's* runtime voice; a pack engine's
         # default must not touch it.
         voice_library.set_api_default(pack.id, voice, variant, mirror_legacy=False)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+    except voice_library.ApiDefaultError as exc:
+        return jsonify({"error": exc.public_message}), 400
+    except ValueError:
+        return jsonify({"error": "That voice cannot be the API default."}), 400
     except OSError as exc:
         logger.warning("Could not save the API default: %s", exc)
         return jsonify({"error": "Could not save the API default; check the data folder is writable."}), 500
@@ -901,7 +903,8 @@ def api_default_put():
         voice_library.set_api_default(engine or backend, voice, variant)
     except ValueError as exc:
         _restore_runtime_voice(previous_mirror, voice)
-        return jsonify({"error": f"Could not save the API default: {exc}"}), 400
+        reason = exc.public_message if isinstance(exc, voice_library.ApiDefaultError) else "invalid voice"
+        return jsonify({"error": f"Could not save the API default: {reason}"}), 400
     except OSError as exc:
         _restore_runtime_voice(previous_mirror, voice)
         logger.warning("Could not save the API default: %s", exc)
@@ -1041,7 +1044,7 @@ def voices_engine_prepare(voice_id: str, engine_id: str):
             on_transcript_saved=_invalidate_voice_clone_state,
         )
     except voice_prepare.PrepareRefused as refused:
-        return jsonify({"error": str(refused), "code": refused.code, **refused.extra}), refused.status
+        return jsonify({"error": refused.public_message, "code": refused.code, **refused.extra}), refused.status
     return jsonify({"binding": binding}), 202
 
 
@@ -2871,8 +2874,10 @@ def compare_autocheck_run():
     checker = compare_autocheck.get_checker()
     try:
         result = checker.check(data, text, reference_path)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+    except compare_autocheck.ClipError as exc:
+        return jsonify({"error": exc.public_message}), 400
+    except ValueError:
+        return jsonify({"error": "The audio clip could not be checked."}), 400
     except compare_autocheck.AutoCheckBusy:
         return jsonify({"error": "Another auto-check is still running.", "code": "busy"}), 429
     except compare_autocheck.AutoCheckUnavailable:
@@ -3083,7 +3088,7 @@ def engines_hf_token_save():
     try:
         hf_access.save(token)
     except hf_access.InvalidToken as exc:
-        return _no_store(jsonify({"error": str(exc)})), 400
+        return _no_store(jsonify({"error": exc.public_message})), 400
     except OSError:
         return _no_store(jsonify({"error": "The token could not be saved to the app data folder."})), 500
     return _no_store(jsonify(hf_access.status()))
@@ -3196,7 +3201,7 @@ def engines_install(engine_id: str):
     try:
         status = engine_packs.install_pack(engine_id)
     except engine_packs.PackInstallError as exc:
-        return jsonify({"error": str(exc)}), 409
+        return jsonify({"error": exc.public_message}), 409
     cards = engine_packs.engine_cards(getattr(model, "TTS_BACKEND", None))
     card = next((item for item in cards if item["id"] == engine_id), None)
     return jsonify({"engine": card, "state": status.as_dict()})
@@ -3251,7 +3256,7 @@ def engines_remove(engine_id: str):
     try:
         removed = engine_packs.remove_pack(engine_id)
     except engine_packs.PackInstallError as exc:
-        return jsonify({"error": str(exc)}), 409
+        return jsonify({"error": exc.public_message}), 409
     if not removed:
         return jsonify({"error": "pack not found or not removable"}), 404
     pack_logs.forget(engine_id)
@@ -3259,7 +3264,7 @@ def engines_remove(engine_id: str):
 
 
 def _import_refusal(refused: "imported_voices.ImportRefused"):
-    return jsonify({"error": str(refused), "code": refused.code}), refused.status
+    return jsonify({"error": refused.public_message, "code": refused.code}), refused.status
 
 
 @app.get("/engines/<engine_id>/imported-voices")
@@ -3602,9 +3607,9 @@ def openai_audio_speech():
     except kitten2_engine.EngineWarming as exc:
         return _engine_warming_error(exc)
     except kitten2_engine.EngineUnavailable as exc:
-        return _openai_error(str(exc), 503, "api_error")
+        return _openai_error(exc.public_message, 503, "api_error")
     except kitten2_engine.InvalidVoice as exc:
-        return _openai_error(str(exc), 400, "invalid_request_error")
+        return _openai_error(exc.public_message, 400, "invalid_request_error")
     except PackProcessError as exc:
         return _pack_worker_error(serving_engine, exc)
     except Exception as exc:
@@ -3681,9 +3686,9 @@ def _openai_audio_speech_stream_pack(
     except kitten2_engine.EngineWarming as exc:
         return _engine_warming_error(exc)
     except kitten2_engine.EngineUnavailable as exc:
-        return _openai_error(str(exc), 503, "api_error")
+        return _openai_error(exc.public_message, 503, "api_error")
     except kitten2_engine.InvalidVoice as exc:
-        return _openai_error(str(exc), 400, "invalid_request_error")
+        return _openai_error(exc.public_message, 400, "invalid_request_error")
     except PackProcessError as exc:
         return _pack_worker_error(engine, exc)
 

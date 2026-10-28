@@ -54,6 +54,14 @@ DISCLAIMER = (
 )
 
 
+class ClipError(ValueError):
+    """The uploaded clip cannot be checked; the message is safe to show."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.public_message = message
+
+
 class AutoCheckUnavailable(RuntimeError):
     """None of the requested metrics can run because their models are not on disk."""
 
@@ -202,15 +210,15 @@ def decode_clip(data: bytes) -> np.ndarray:
     import soundfile as sf
 
     if not data:
-        raise ValueError("The audio clip is empty.")
+        raise ClipError("The audio clip is empty.")
     try:
         samples, sr = sf.read(io.BytesIO(data), dtype="float32", always_2d=True)
     except Exception as exc:  # noqa: BLE001 - soundfile raises several unrelated types
-        raise ValueError("The audio clip could not be read as audio.") from exc
+        raise ClipError("The audio clip could not be read as audio.") from exc
     if samples.shape[0] == 0:
-        raise ValueError("The audio clip is empty.")
+        raise ClipError("The audio clip is empty.")
     if samples.shape[0] / sr > MAX_CLIP_SECONDS:
-        raise ValueError(f"The audio clip is too long (over {MAX_CLIP_SECONDS:.0f} seconds).")
+        raise ClipError(f"The audio clip is too long (over {MAX_CLIP_SECONDS:.0f} seconds).")
     return _to_16k_mono(samples, sr)
 
 

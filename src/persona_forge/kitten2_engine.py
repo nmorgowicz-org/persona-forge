@@ -50,9 +50,17 @@ PREPARE_TIMEOUT_S = 120.0  # one ``prepare`` op on a loaded worker; it only reco
 class EngineUnavailable(RuntimeError):
     """The pack is missing or the machine cannot run the engine."""
 
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.public_message = message
+
 
 class InvalidVoice(ValueError):
     """The requested voice or preset does not exist for this engine."""
+
+    def __init__(self, message: str = "") -> None:
+        super().__init__(message)
+        self.public_message = message
 
 
 class EngineWarming(EngineUnavailable):

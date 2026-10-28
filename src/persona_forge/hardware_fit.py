@@ -62,7 +62,7 @@ def fit_for(engine_id: str, facts: dict[str, Any] | None = None) -> dict[str, st
                 facts["platform"], facts["machine"], lambda: (facts["cuda_capability"], facts["cuda_major"])
             )
         except kitten2_pack.UnsupportedMachine as exc:
-            return _verdict("unsupported", str(exc))
+            return _verdict("unsupported", exc.public_message)
         if target.kind == "mlx":
             return _verdict("recommended", "Recommended for Apple silicon (runs on MLX).")
         return _verdict("recommended", "Recommended for your NVIDIA GPU (needs a compiler for fast mode; falls back otherwise).")
