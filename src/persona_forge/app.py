@@ -38,6 +38,7 @@ from persona_forge import (
     prosody_repair,
     segment_library,
     speech_engines,
+    voice_catalog,
     compare_store,
     hardware_fit,
     ui_preferences_store,
@@ -504,19 +505,23 @@ def voices_builtin():
             "requires_backend": "pocket_tts",
             "engine": "pocket-tts",
             "engine_label": "Pocket TTS",
+            "installed": True,
         })
     if request.args.get("engines") != "all":
         return jsonify({"voices": voices})
-    # Unified catalog: add every installed pack engine's presets (generated locally on preview).
+    # Unified catalog: every pack engine's presets. An installed engine reports its own voices;
+    # one that is not installed lists the bundled catalog so it can be browsed before installing.
     engines = [{"id": "pocket-tts", "label": "Pocket TTS", "installed": True, "voices": len(voices)}]
     for info in speech_engines.list_engines():
         provisioned = provisioned_engines.get(info.id)
         if provisioned is None:
             continue
         installed = provisioned.engine.is_installed()
-        names = provisioned.engine.list_presets() if installed else []
-        for name in names:
-            code = provisioned.engine.preset_language(name) or "en"
+        entries = (
+            voice_catalog.installed_voices(provisioned) if installed else voice_catalog.bundled_voices(info.id)
+        )
+        for entry in entries:
+            name, code = entry["name"], entry["language"]
             voices.append({
                 "voice_id": f"{provisioned.engine.PRESET_PREFIX}{name}",
                 "builtin_voice": name,
@@ -532,8 +537,9 @@ def voices_builtin():
                 "requires_backend": None,
                 "engine": info.id,
                 "engine_label": info.label,
+                "installed": installed,
             })
-        engines.append({"id": info.id, "label": info.label, "installed": installed, "voices": len(names)})
+        engines.append({"id": info.id, "label": info.label, "installed": installed, "voices": len(entries)})
     return jsonify({"voices": voices, "engines": engines})
 
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   Copy,
+  Download,
   Loader2,
   Play,
   Search,
@@ -12,11 +13,14 @@ import {
 import {
   generateSpeech,
   getApiDefault,
+  installEngine,
   listCatalogVoices,
+  listEngines,
   setApiDefault,
   type ApiDefaultRecord,
   type BuiltInEngineSummary,
   type BuiltInVoiceMeta,
+  type EngineInstallJob,
 } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/store'
@@ -56,6 +60,11 @@ function isPackVoice(voice: BuiltInVoiceMeta): boolean {
   return Boolean(voice.engine) && voice.engine !== 'pocket-tts'
 }
 
+/** Voices of an engine that is not installed come from the bundled catalog and cannot be previewed yet. */
+function needsInstall(voice: BuiltInVoiceMeta): boolean {
+  return voice.installed === false
+}
+
 function isEnglishVoice(voice: BuiltInVoiceMeta): boolean {
   const code = (voice.language_code || '').toLowerCase()
   return code.startsWith('en') || /english/i.test(voice.language || '')
@@ -84,7 +93,19 @@ export function BuiltInVoicesTab() {
   const [apiDefault, setApiDefaultState] = useState<ApiDefaultRecord | null>(null)
   const [settingDefault, setSettingDefault] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [installedOnly, setInstalledOnly] = useState(false)
+  const [installingId, setInstallingId] = useState<string | null>(null)
+  const [installJob, setInstallJob] = useState<EngineInstallJob | null>(null)
+  const [installError, setInstallError] = useState<string | null>(null)
   const previewToken = useRef(0)
+  const mounted = useRef(true)
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -127,6 +148,7 @@ export function BuiltInVoicesTab() {
       if (language === 'en' && !isEnglishVoice(voice)) return false
       if (category !== 'all' && voice.category !== category) return false
       if (engineFilter !== 'all' && (voice.engine ?? 'pocket-tts') !== engineFilter) return false
+      if (installedOnly && needsInstall(voice)) return false
       if (!q) return true
       return (
         voice.display_name.toLowerCase().includes(q) ||
@@ -135,7 +157,7 @@ export function BuiltInVoicesTab() {
         (voice.note || '').toLowerCase().includes(q)
       )
     })
-  }, [voices, language, category, engineFilter, query])
+  }, [voices, language, category, engineFilter, installedOnly, query])
 
   function changeLanguage(next: 'en' | 'all') {
     setLanguage(next)
@@ -147,6 +169,61 @@ export function BuiltInVoicesTab() {
     setPreviewing(null)
     setPreviewName(null)
     setPreviewUrl(null)
+  }
+
+  /** Install an engine from the catalog, follow its progress, then refresh the list with its real voices. */
+  async function installFromCatalog(engineId: string) {
+    if (installingId) return
+    setInstallingId(engineId)
+    setInstallJob(null)
+    setInstallError(null)
+    try {
+      await installEngine(engineId)
+      for (;;) {
+        const card = (await listEngines()).find((engine) => engine.id === engineId)
+        if (!mounted.current) return
+        const job = card?.install_job ?? null
+        setInstallJob(job)
+        if (job?.state === 'error') {
+          setInstallError(job.error || 'The install failed.')
+          return
+        }
+        if (job?.state !== 'running' && card && card.state.status !== 'not-installed') break
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+        if (!mounted.current) return
+      }
+      const catalog = await listCatalogVoices()
+      if (!mounted.current) return
+      setVoices(catalog.voices)
+      setEngines(catalog.engines)
+    } catch (err) {
+      if (mounted.current) setInstallError(String((err as Error)?.message || err))
+    } finally {
+      if (mounted.current) setInstallingId(null)
+    }
+  }
+
+  function installButton(voice: BuiltInVoiceMeta, size: 'xs' | 'sm') {
+    const busy = installingId === voice.engine
+    return (
+      <Button
+        type="button"
+        size={size}
+        variant="outline"
+        disabled={installingId !== null}
+        onClick={() => voice.engine && void installFromCatalog(voice.engine)}
+      >
+        {busy ? (
+          <>
+            <Loader2 className="animate-spin" /> Installing…
+          </>
+        ) : (
+          <>
+            <Download /> Install {voice.engine_label}
+          </>
+        )}
+      </Button>
+    )
   }
 
   async function previewVoice(voice: BuiltInVoiceMeta) {
@@ -235,18 +312,17 @@ export function BuiltInVoicesTab() {
         </Select>
         {engines.length > 1 && (
           <Select value={engineFilter} onValueChange={setEngineFilter}>
-            <SelectTrigger className="w-44" aria-label="Engine filter">
+            <SelectTrigger className="w-56" aria-label="Engine filter">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All engines</SelectItem>
-              {engines
-                .filter((engine) => engine.installed)
-                .map((engine) => (
-                  <SelectItem key={engine.id} value={engine.id}>
-                    {engine.label}
-                  </SelectItem>
-                ))}
+              {engines.map((engine) => (
+                <SelectItem key={engine.id} value={engine.id}>
+                  {engine.label}
+                  {engine.installed ? '' : ' (not installed)'}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         )}
@@ -263,6 +339,17 @@ export function BuiltInVoicesTab() {
             ))}
           </SelectContent>
         </Select>
+        {engines.some((engine) => !engine.installed) && (
+          <Button
+            type="button"
+            size="sm"
+            variant={installedOnly ? 'secondary' : 'outline'}
+            aria-pressed={installedOnly}
+            onClick={() => setInstalledOnly((value) => !value)}
+          >
+            Installed only
+          </Button>
+        )}
         <span className="text-xs text-muted-foreground tabular-nums">
           {filtered.length} voice{filtered.length === 1 ? '' : 's'}
         </span>
@@ -284,14 +371,26 @@ export function BuiltInVoicesTab() {
 
       {engines.some((engine) => !engine.installed) && (
         <p className="text-xs text-muted-foreground" data-testid="catalog-not-installed">
+          Voices marked "Needs install" belong to engines that are not installed yet (
           {engines
             .filter((engine) => !engine.installed)
             .map((engine) => engine.label)
-            .join(', ')}{' '}
-          {engines.filter((engine) => !engine.installed).length === 1 ? 'is' : 'are'} not installed, so{' '}
-          {engines.filter((engine) => !engine.installed).length === 1 ? 'its voices are' : 'their voices are'} not
-          listed. Install {engines.filter((engine) => !engine.installed).length === 1 ? 'it' : 'them'} under Runtime →
-          Speech engines.
+            .join(', ')}
+          ). You can browse them now; install an engine here or under Runtime → Speech engines to hear it.
+        </p>
+      )}
+      {installingId && (
+        <p className="text-xs text-muted-foreground" data-testid="catalog-install-progress">
+          Installing {engines.find((engine) => engine.id === installingId)?.label ?? installingId}
+          {installJob && installJob.step_count > 0
+            ? `: step ${installJob.step_index} of ${installJob.step_count}, ${installJob.step}.`
+            : '…'}{' '}
+          This can take several minutes the first time.
+        </p>
+      )}
+      {installError && (
+        <p className="rounded-control border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          Install failed: {installError}
         </p>
       )}
 
@@ -375,6 +474,11 @@ export function BuiltInVoicesTab() {
                   <Badge variant="outline" className="text-[10px]">
                     {CATEGORY_LABELS[voice.category] || voice.category}
                   </Badge>
+                  {needsInstall(voice) && (
+                    <Badge variant="secondary" className="text-[10px]">
+                      Needs install
+                    </Badge>
+                  )}
                   {isApiDefault && <Badge className="text-[10px]">API default</Badge>}
                 </div>
 
@@ -383,6 +487,9 @@ export function BuiltInVoicesTab() {
                 )}
 
                 <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-1">
+                  {needsInstall(voice) ? (
+                    installButton(voice, 'xs')
+                  ) : (
                   <Button
                     type="button"
                     size="xs"
@@ -404,6 +511,7 @@ export function BuiltInVoicesTab() {
                       </>
                     )}
                   </Button>
+                  )}
                   <Button type="button" size="xs" variant="ghost" onClick={() => setDetail(voice)}>
                     Details
                   </Button>
@@ -421,7 +529,9 @@ export function BuiltInVoicesTab() {
               <SheetHeader>
                 <SheetTitle>{detail.display_name}</SheetTitle>
                 <SheetDescription>
-                  {isPackVoice(detail)
+                  {needsInstall(detail)
+                    ? `${detail.engine_label} is not installed yet. This voice is listed from the engine's catalog; install the engine to hear it.`
+                    : isPackVoice(detail)
                     ? `Built-in ${detail.engine_label} voice, generated locally. Served beside the active engine.`
                     : 'Built-in Pocket voice — ready to serve without a saved reference.'}
                 </SheetDescription>
@@ -433,6 +543,7 @@ export function BuiltInVoicesTab() {
                   <Badge variant="outline">
                     {CATEGORY_LABELS[detail.category] || detail.category}
                   </Badge>
+                  {needsInstall(detail) && <Badge variant="secondary">Needs install</Badge>}
                   {apiDefault?.voice === detail.voice_id && <Badge>API default</Badge>}
                 </div>
                 {detail.note && <p className="text-sm text-muted-foreground">{detail.note}</p>}
@@ -463,6 +574,9 @@ export function BuiltInVoicesTab() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
+                  {needsInstall(detail) ? (
+                    installButton(detail, 'sm')
+                  ) : (
                   <Button
                     type="button"
                     size="sm"
@@ -480,6 +594,7 @@ export function BuiltInVoicesTab() {
                       </>
                     )}
                   </Button>
+                  )}
                   {!isPackVoice(detail) && (
                     <Button
                       type="button"

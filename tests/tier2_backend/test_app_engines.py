@@ -634,6 +634,38 @@ def test_builtin_catalog_lists_pack_presets_only_when_asked(client, monkeypatch)
     kokoro = next(e for e in full["engines"] if e["id"] == "kokoro")
     assert kokoro == {"id": "kokoro", "label": "Kokoro 82M", "installed": True, "voices": 2}
     assert next(v for v in full["voices"] if v["voice_id"] == "kokoro:ff_siwis")["language_code"] == "fr"
+    assert all(v["installed"] for v in full["voices"])
+
+
+def test_builtin_catalog_lists_an_uninstalled_engine_from_the_bundled_catalog(client, monkeypatch):
+    from persona_forge import provisioned_engines, voice_catalog
+
+    class _NotInstalled:
+        PRESET_PREFIX = "kokoro:"
+
+        def is_installed(self):
+            return False
+
+        def list_presets(self):  # an engine that is not installed has nothing to report
+            return []
+
+        def preset_language(self, name):
+            return "en"
+
+    class _Entry:
+        engine = _NotInstalled()
+        engine_id = "kokoro"
+
+    monkeypatch.setattr(provisioned_engines, "get", lambda eid: _Entry() if eid == "kokoro" else None)
+    full = client.get("/voices/built-in?engines=all").get_json()
+
+    bundled = voice_catalog.bundled_voices("kokoro")
+    listed = [v for v in full["voices"] if v["engine"] == "kokoro"]
+    assert bundled and len(listed) == len(bundled)
+    assert not any(v["installed"] for v in listed)
+    assert next(v for v in full["voices"] if v["engine"] == "pocket-tts")["installed"] is True
+    summary = next(e for e in full["engines"] if e["id"] == "kokoro")
+    assert summary["installed"] is False and summary["voices"] == len(bundled)
 
 
 def _streaming_fake(calls):

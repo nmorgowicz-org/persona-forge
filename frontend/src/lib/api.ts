@@ -171,6 +171,8 @@ export interface BuiltInVoiceMeta {
   note: string
   prompt: string
   requires_backend: string | null
+  /** False when the voice comes from the bundled catalog of an engine that is not installed. */
+  installed?: boolean
 }
 
 export interface BuiltInEngineSummary {

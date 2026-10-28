@@ -1,0 +1,780 @@
+{
+ "kitten2": [
+  {
+   "language": "en",
+   "name": "AirportAnnouncer"
+  },
+  {
+   "language": "en",
+   "name": "Alfred"
+  },
+  {
+   "language": "ar",
+   "name": "Arabic"
+  },
+  {
+   "language": "en",
+   "name": "ArabicFalconer"
+  },
+  {
+   "language": "en",
+   "name": "ArabicMother"
+  },
+  {
+   "language": "en",
+   "name": "ArabicNews"
+  },
+  {
+   "language": "en",
+   "name": "AudiobookNarratorFemale"
+  },
+  {
+   "language": "en",
+   "name": "Bella"
+  },
+  {
+   "language": "en",
+   "name": "BoredTeenager"
+  },
+  {
+   "language": "en",
+   "name": "Bruno"
+  },
+  {
+   "language": "en",
+   "name": "CalmHostageNegotiator"
+  },
+  {
+   "language": "zh",
+   "name": "Chinese"
+  },
+  {
+   "language": "en",
+   "name": "ChineseLivestreamSeller"
+  },
+  {
+   "language": "en",
+   "name": "ChineseNewsCctv"
+  },
+  {
+   "language": "en",
+   "name": "ChineseXianxiaMaster"
+  },
+  {
+   "language": "en",
+   "name": "Claire"
+  },
+  {
+   "language": "en",
+   "name": "Dante"
+  },
+  {
+   "language": "en",
+   "name": "Diana"
+  },
+  {
+   "language": "en",
+   "name": "Dolores"
+  },
+  {
+   "language": "en",
+   "name": "DutchBaker"
+  },
+  {
+   "language": "en",
+   "name": "DutchGrandpaStory"
+  },
+  {
+   "language": "en",
+   "name": "DutchWeatherPresenter"
+  },
+  {
+   "language": "en",
+   "name": "Edith"
+  },
+  {
+   "language": "en",
+   "name": "Eleanor"
+  },
+  {
+   "language": "en",
+   "name": "Elliot"
+  },
+  {
+   "language": "en",
+   "name": "FairytaleNarratorWhimsical"
+  },
+  {
+   "language": "en",
+   "name": "Frank"
+  },
+  {
+   "language": "fr",
+   "name": "French"
+  },
+  {
+   "language": "en",
+   "name": "FrenchDocumentary"
+  },
+  {
+   "language": "en",
+   "name": "FrenchGrandmereRecette"
+  },
+  {
+   "language": "en",
+   "name": "FrenchTeacher"
+  },
+  {
+   "language": "en",
+   "name": "FrenchWaiter"
+  },
+  {
+   "language": "de",
+   "name": "German"
+  },
+  {
+   "language": "en",
+   "name": "GermanKneipe"
+  },
+  {
+   "language": "en",
+   "name": "GermanProfessor"
+  },
+  {
+   "language": "en",
+   "name": "GermanTrainAnnouncement"
+  },
+  {
+   "language": "en",
+   "name": "Grace"
+  },
+  {
+   "language": "en",
+   "name": "GrandmaBedtimeStory"
+  },
+  {
+   "language": "en",
+   "name": "GriefEulogy"
+  },
+  {
+   "language": "en",
+   "name": "Herbert"
+  },
+  {
+   "language": "hi",
+   "name": "Hindi"
+  },
+  {
+   "language": "en",
+   "name": "HindiBollywoodDrama"
+  },
+  {
+   "language": "en",
+   "name": "HindiCollegeFriends"
+  },
+  {
+   "language": "en",
+   "name": "HindiDadiKahani"
+  },
+  {
+   "language": "en",
+   "name": "HindiYogaTeacher"
+  },
+  {
+   "language": "en",
+   "name": "Hugo"
+  },
+  {
+   "language": "en",
+   "name": "IndonesianNewsAnchor"
+  },
+  {
+   "language": "en",
+   "name": "IndonesianTourGuide"
+  },
+  {
+   "language": "en",
+   "name": "Iris"
+  },
+  {
+   "language": "it",
+   "name": "Italian"
+  },
+  {
+   "language": "en",
+   "name": "ItalianFashionDesigner"
+  },
+  {
+   "language": "en",
+   "name": "ItalianFootballFan"
+  },
+  {
+   "language": "en",
+   "name": "ItalianGondolier"
+  },
+  {
+   "language": "en",
+   "name": "ItalianNonnaKitchen"
+  },
+  {
+   "language": "en",
+   "name": "ItalianOperaTenor"
+  },
+  {
+   "language": "en",
+   "name": "JapaneseAnimeHeroine"
+  },
+  {
+   "language": "en",
+   "name": "JapaneseGrandma"
+  },
+  {
+   "language": "en",
+   "name": "JapaneseSalarymanApology"
+  },
+  {
+   "language": "en",
+   "name": "JapaneseTrainConductor"
+  },
+  {
+   "language": "en",
+   "name": "Jasper"
+  },
+  {
+   "language": "en",
+   "name": "Julian"
+  },
+  {
+   "language": "en",
+   "name": "Kiki"
+  },
+  {
+   "language": "en",
+   "name": "KoreanGrandpaAdvice"
+  },
+  {
+   "language": "en",
+   "name": "KoreanKdramaConfession"
+  },
+  {
+   "language": "en",
+   "name": "KoreanNewsAnchor"
+  },
+  {
+   "language": "en",
+   "name": "Laurence"
+  },
+  {
+   "language": "en",
+   "name": "Leo"
+  },
+  {
+   "language": "en",
+   "name": "Luna"
+  },
+  {
+   "language": "en",
+   "name": "Maeve"
+  },
+  {
+   "language": "en",
+   "name": "Marcus"
+  },
+  {
+   "language": "en",
+   "name": "Martha"
+  },
+  {
+   "language": "en",
+   "name": "Matthew"
+  },
+  {
+   "language": "en",
+   "name": "Miles"
+  },
+  {
+   "language": "en",
+   "name": "NervousFirstDate"
+  },
+  {
+   "language": "en",
+   "name": "NewsAnchorFemale"
+  },
+  {
+   "language": "en",
+   "name": "Otis"
+  },
+  {
+   "language": "en",
+   "name": "PilotCabinAnnouncement"
+  },
+  {
+   "language": "en",
+   "name": "PolishBabciaPierogi"
+  },
+  {
+   "language": "en",
+   "name": "PolishMountainGuide"
+  },
+  {
+   "language": "en",
+   "name": "PolishNewsAnchor"
+  },
+  {
+   "language": "en",
+   "name": "PolishPoetryStudent"
+  },
+  {
+   "language": "pt",
+   "name": "Portuguese"
+  },
+  {
+   "language": "en",
+   "name": "PortugueseBeach"
+  },
+  {
+   "language": "en",
+   "name": "PortugueseBusiness"
+  },
+  {
+   "language": "en",
+   "name": "PortugueseFado"
+  },
+  {
+   "language": "en",
+   "name": "PortugueseGrandpaFarm"
+  },
+  {
+   "language": "en",
+   "name": "PortugueseNewsAnchor"
+  },
+  {
+   "language": "en",
+   "name": "Raven"
+  },
+  {
+   "language": "en",
+   "name": "Reginald"
+  },
+  {
+   "language": "en",
+   "name": "Rosie"
+  },
+  {
+   "language": "ru",
+   "name": "Russian"
+  },
+  {
+   "language": "en",
+   "name": "RussianBabushka"
+  },
+  {
+   "language": "en",
+   "name": "RussianFairyTale"
+  },
+  {
+   "language": "en",
+   "name": "RussianHockeyCheer"
+  },
+  {
+   "language": "en",
+   "name": "RussianLiteratureTeacher"
+  },
+  {
+   "language": "en",
+   "name": "RussianSpaceControl"
+  },
+  {
+   "language": "en",
+   "name": "RussianTaxiDriver"
+  },
+  {
+   "language": "en",
+   "name": "Sable"
+  },
+  {
+   "language": "en",
+   "name": "Saoirse"
+  },
+  {
+   "language": "en",
+   "name": "SarcasticCoworker"
+  },
+  {
+   "language": "en",
+   "name": "Serena"
+  },
+  {
+   "language": "es",
+   "name": "Spanish"
+  },
+  {
+   "language": "en",
+   "name": "SpanishAbuela"
+  },
+  {
+   "language": "en",
+   "name": "SpanishBreakupSad"
+  },
+  {
+   "language": "en",
+   "name": "SpanishNews"
+  },
+  {
+   "language": "en",
+   "name": "SpanishTango"
+  },
+  {
+   "language": "en",
+   "name": "TurkishFisherman"
+  },
+  {
+   "language": "en",
+   "name": "TurkishGrandmaCooking"
+  },
+  {
+   "language": "en",
+   "name": "TurkishNewsAnchor"
+  },
+  {
+   "language": "en",
+   "name": "Victor"
+  },
+  {
+   "language": "en",
+   "name": "Victoria"
+  },
+  {
+   "language": "en",
+   "name": "Vincent"
+  },
+  {
+   "language": "en",
+   "name": "Walter"
+  },
+  {
+   "language": "en",
+   "name": "WeatherPresenterCheerful"
+  },
+  {
+   "language": "en",
+   "name": "Willow"
+  }
+ ],
+ "kokoro": [
+  {
+   "language": "en",
+   "name": "af_alloy"
+  },
+  {
+   "language": "en",
+   "name": "af_aoede"
+  },
+  {
+   "language": "en",
+   "name": "af_bella"
+  },
+  {
+   "language": "en",
+   "name": "af_heart"
+  },
+  {
+   "language": "en",
+   "name": "af_jessica"
+  },
+  {
+   "language": "en",
+   "name": "af_kore"
+  },
+  {
+   "language": "en",
+   "name": "af_nicole"
+  },
+  {
+   "language": "en",
+   "name": "af_nova"
+  },
+  {
+   "language": "en",
+   "name": "af_river"
+  },
+  {
+   "language": "en",
+   "name": "af_sarah"
+  },
+  {
+   "language": "en",
+   "name": "af_sky"
+  },
+  {
+   "language": "en",
+   "name": "am_adam"
+  },
+  {
+   "language": "en",
+   "name": "am_echo"
+  },
+  {
+   "language": "en",
+   "name": "am_eric"
+  },
+  {
+   "language": "en",
+   "name": "am_fenrir"
+  },
+  {
+   "language": "en",
+   "name": "am_liam"
+  },
+  {
+   "language": "en",
+   "name": "am_michael"
+  },
+  {
+   "language": "en",
+   "name": "am_onyx"
+  },
+  {
+   "language": "en",
+   "name": "am_puck"
+  },
+  {
+   "language": "en",
+   "name": "am_santa"
+  },
+  {
+   "language": "en",
+   "name": "bf_alice"
+  },
+  {
+   "language": "en",
+   "name": "bf_emma"
+  },
+  {
+   "language": "en",
+   "name": "bf_isabella"
+  },
+  {
+   "language": "en",
+   "name": "bf_lily"
+  },
+  {
+   "language": "en",
+   "name": "bm_daniel"
+  },
+  {
+   "language": "en",
+   "name": "bm_fable"
+  },
+  {
+   "language": "en",
+   "name": "bm_george"
+  },
+  {
+   "language": "en",
+   "name": "bm_lewis"
+  },
+  {
+   "language": "es",
+   "name": "ef_dora"
+  },
+  {
+   "language": "es",
+   "name": "em_alex"
+  },
+  {
+   "language": "es",
+   "name": "em_santa"
+  },
+  {
+   "language": "fr",
+   "name": "ff_siwis"
+  },
+  {
+   "language": "hi",
+   "name": "hf_alpha"
+  },
+  {
+   "language": "hi",
+   "name": "hf_beta"
+  },
+  {
+   "language": "hi",
+   "name": "hm_omega"
+  },
+  {
+   "language": "hi",
+   "name": "hm_psi"
+  },
+  {
+   "language": "it",
+   "name": "if_sara"
+  },
+  {
+   "language": "it",
+   "name": "im_nicola"
+  },
+  {
+   "language": "pt",
+   "name": "pf_dora"
+  },
+  {
+   "language": "pt",
+   "name": "pm_alex"
+  },
+  {
+   "language": "pt",
+   "name": "pm_santa"
+  }
+ ],
+ "phonon-31m": [
+  {
+   "language": "en",
+   "name": "Alfie"
+  },
+  {
+   "language": "en",
+   "name": "Azgorath"
+  },
+  {
+   "language": "en",
+   "name": "Bryony"
+  },
+  {
+   "language": "en",
+   "name": "Captain Silas Blackwater"
+  },
+  {
+   "language": "en",
+   "name": "Delia"
+  },
+  {
+   "language": "en",
+   "name": "Easton"
+  },
+  {
+   "language": "en",
+   "name": "Edwin"
+  },
+  {
+   "language": "en",
+   "name": "Elodie-Rose"
+  },
+  {
+   "language": "en",
+   "name": "Everly"
+  },
+  {
+   "language": "en",
+   "name": "Fairy Godmother"
+  },
+  {
+   "language": "en",
+   "name": "Fennick the Young Elf"
+  },
+  {
+   "language": "en",
+   "name": "Freya"
+  },
+  {
+   "language": "en",
+   "name": "Grub the Ogre"
+  },
+  {
+   "language": "en",
+   "name": "Hadley"
+  },
+  {
+   "language": "en",
+   "name": "Harper"
+  },
+  {
+   "language": "en",
+   "name": "Hugh"
+  },
+  {
+   "language": "en",
+   "name": "Imogen"
+  },
+  {
+   "language": "en",
+   "name": "Juniper"
+  },
+  {
+   "language": "en",
+   "name": "Lottie"
+  },
+  {
+   "language": "en",
+   "name": "Maeve"
+  },
+  {
+   "language": "en",
+   "name": "Master Aldric"
+  },
+  {
+   "language": "en",
+   "name": "Micah"
+  },
+  {
+   "language": "en",
+   "name": "Miles"
+  },
+  {
+   "language": "en",
+   "name": "Morwenna of the Deep"
+  },
+  {
+   "language": "en",
+   "name": "Old Mortlake"
+  },
+  {
+   "language": "en",
+   "name": "Pippa"
+  },
+  {
+   "language": "en",
+   "name": "Preston"
+  },
+  {
+   "language": "en",
+   "name": "Russell"
+  },
+  {
+   "language": "en",
+   "name": "Sir Bramwell"
+  },
+  {
+   "language": "en",
+   "name": "Spencer"
+  },
+  {
+   "language": "en",
+   "name": "Teddy"
+  },
+  {
+   "language": "en",
+   "name": "The Snow Queen"
+  },
+  {
+   "language": "en",
+   "name": "The Thing Under the Stairs"
+  },
+  {
+   "language": "en",
+   "name": "Toby"
+  },
+  {
+   "language": "en",
+   "name": "Trevor"
+  },
+  {
+   "language": "en",
+   "name": "Vyrmathrax the Ancient"
+  },
+  {
+   "language": "en",
+   "name": "Zoey"
+  }
+ ]
+}
