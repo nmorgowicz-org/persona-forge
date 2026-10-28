@@ -945,9 +945,8 @@ With the owner's token (terms accepted by the owner), `gradium/phonon-40m-en@cc7
 31M pack's own `ptts` 0.4.1 with no code change: `ptts.TTS("hf://gradium/phonon-40m-en@<rev>", lang="en",
 quant="q8")`. Same 37 English catalog voices. Warm RTF 0.025-0.028 against 31M's 0.024 (load about 31 s
 each on the first, uncached run). Files: `model.q8.gguf` 74.6 MB (31M is smaller), `model.q4k.gguf` 60.4 MB.
-Not yet judged by ear: `/tmp/pf_ph40/listen.html` plays 31M then 40M on three voices and three sentences.
-Integration, if it sounds better, is a model choice inside the existing Phonon pack (a pinned revision
-and a gated-token install step like Pocket Lite), not a new runtime.
+**Listening verdict (owner, 2026-10-27):** no audible difference in voice, naturalness or anything else between 31M and 40M on three voices and three sentences (`/tmp/pf_ph40/listen.html`).
+**Decision: not integrated.** It would add a gated, token-required install and a larger model for no audible gain. 31M stays the only Phonon model.
 
 ## 10. Evidence and reproducibility
 
