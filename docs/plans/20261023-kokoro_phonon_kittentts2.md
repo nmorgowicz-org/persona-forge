@@ -984,6 +984,16 @@ cloned from its reference path (Windows paths) at warm RTF 0.16; a seeded repeat
 16-bit step; an unknown preset raised the invalid-voice error. This used the default CPU torch
 wheel: no GPU was involved. Scratch files removed.
 
+#### 9.3.3 Windows install timing (2026-10-27)
+
+The earlier Windows installs (Phonon 153 s, Kokoro 199 s) were not reproduced. Re-timed per step on the
+same host with an empty uv cache and the current code: **Phonon 50 s** (venv 0.5 s, package 4.3 s,
+model and 37 voices download 44.5 s, offline check 0.9 s) and **Kokoro 13 s** (venv 0.4 s, package 6.5 s,
+model 1.5 s, voices 1.2 s). The download of the model and voices dominates Phonon; nothing in our steps
+is slow. The 153 s and 199 s runs probably included first-time Python 3.12 provisioning and a colder
+network; that was not isolated, so treat the new numbers as typical and the old ones as a cold-start
+worst case. No code change.
+
 ## 10. Evidence and reproducibility
 
 Upstream revisions inspected (not approved pins): Kokoro GitHub
