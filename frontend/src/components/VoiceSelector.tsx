@@ -1,9 +1,15 @@
 import { useId, useMemo, useState } from 'react'
 import { Check, ChevronDown, Plus, Search, Star } from 'lucide-react'
-import type { BuiltInVoiceMeta, VoiceMeta } from '../lib/api'
+import type { BuiltInVoiceMeta, VoiceEngineBinding, VoiceMeta } from '../lib/api'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/store'
 import { readFavoriteVoiceIds, toggleFavoriteVoice } from '@/lib/voiceFavorites'
+import {
+  READINESS_BADGE_CLASSES,
+  presetReadinessBadge,
+  savedVoiceBadges,
+  type ReadinessBadge,
+} from '@/lib/voiceReadiness'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -61,9 +67,14 @@ function getSourceBadge(source?: string) {
 
 interface VoiceSelectorProps {
   voices: VoiceMeta[]
-  builtInVoices?: BuiltInVoiceMeta[]
+  /** The unified built-in catalog (Pocket plus every provisioned engine's presets), /voices/built-in?engines=all. */
+  catalogVoices?: BuiltInVoiceMeta[]
+  /** Per-saved-voice engine bindings (GET /voices/engines), for the readiness badges. */
+  readiness?: Record<string, VoiceEngineBinding[]>
   voiceId: string | null
   onChange: (voiceId: string | null) => void
+  /** Called when the popover opens, so readiness badges can be refreshed. */
+  onOpen?: () => void
 }
 
 interface VoiceOption {
@@ -89,11 +100,27 @@ function voiceLabel(voice: VoiceMeta): string {
   return label.length > 42 ? `${label.slice(0, 42)}…` : label
 }
 
+function ReadinessChip({ badge }: { badge: ReadinessBadge }) {
+  return (
+    <span
+      title={badge.text}
+      className={cn(
+        'shrink-0 rounded-full border px-1.5 py-px text-[9px] font-medium tracking-wide uppercase',
+        READINESS_BADGE_CLASSES[badge.tone],
+      )}
+    >
+      {badge.text}
+    </span>
+  )
+}
+
 export function VoiceSelector({
   voices,
-  builtInVoices = [],
+  catalogVoices = [],
+  readiness,
   voiceId,
   onChange,
+  onOpen,
 }: VoiceSelectorProps) {
   const labelId = useId()
   const listboxId = useId()
@@ -153,14 +180,14 @@ export function VoiceSelector({
       if (!matches(voice.voice_id, voiceLabel(voice), voice.language)) return
       favoriteOptions.push({ ...buildVoiceOption(voice), group: 'favorites' })
     })
-    builtInVoices.forEach((voice) => {
+    catalogVoices.forEach((voice) => {
       if (!favoriteIds.includes(voice.voice_id)) return
       if (!matches(voice.voice_id, voice.display_name, voice.language)) return
       favoriteOptions.push({
         group: 'favorites',
         id: voice.voice_id,
         label: voice.display_name,
-        hint: `${voice.language} · built-in`,
+        hint: `${voice.language} · ${voice.engine === 'pocket-tts' ? 'built-in' : (voice.engine_label ?? voice.engine)}`,
         builtin: voice,
         index: 0,
       })
@@ -200,36 +227,37 @@ export function VoiceSelector({
       result.push({ key: 'general', label: 'My voices', options: generalOptions })
     }
 
-    const builtInsByCategory = new Map<string, BuiltInVoiceMeta[]>()
-    builtInVoices.forEach((voice) => {
-      if (!matches(voice.voice_id, voice.display_name, voice.language)) return
-      const category = voice.category || 'other'
-      if (!builtInsByCategory.has(category)) builtInsByCategory.set(category, [])
-      builtInsByCategory.get(category)!.push(voice)
+    // Built-in presets grouped by engine (plan §5.6): Pocket first, then each provisioned
+    // engine in catalog order; a pack that is only provisioned shows its bundled catalog
+    // with an "Install …" readiness badge.
+    const builtInsByEngine = new Map<string, BuiltInVoiceMeta[]>()
+    catalogVoices.forEach((voice) => {
+      if (!matches(voice.voice_id, voice.display_name, voice.engine_label ?? voice.engine)) return
+      const engine = voice.engine || 'pocket-tts'
+      if (!builtInsByEngine.has(engine)) builtInsByEngine.set(engine, [])
+      builtInsByEngine.get(engine)!.push(voice)
     })
-    const categoryOrder = ['conversation', 'reading', 'multilingual', 'other']
-    Array.from(builtInsByCategory.entries())
-      .sort(
-        ([a], [b]) =>
-          (categoryOrder.indexOf(a) === -1 ? 99 : categoryOrder.indexOf(a)) -
-          (categoryOrder.indexOf(b) === -1 ? 99 : categoryOrder.indexOf(b)),
-      )
-      .forEach(([category, categoryVoices]) => {
-        result.push({
-          key: `builtin-${category}`,
-          label: `Built-in · ${category}`,
-          options: categoryVoices.map((voice) =>
-            next(
-              'builtin',
-              voice.voice_id,
-              voice.display_name,
-              `${voice.language} · built-in`,
-              undefined,
-              voice,
-            ),
+    Array.from(builtInsByEngine.entries()).forEach(([engine, engineVoices]) => {
+      // "Pocket" reads better than the runtime label 'Pocket TTS'.
+      const sectionLabel =
+        engine === 'pocket-tts' || !engine
+          ? 'Built-in · Pocket'
+          : `Built-in · ${engineVoices[0]?.engine_label ?? engine}`
+      result.push({
+        key: `builtin-${engine}`,
+        label: sectionLabel,
+        options: engineVoices.map((voice) =>
+          next(
+            'builtin',
+            voice.voice_id,
+            voice.display_name,
+            `${voice.language} · ${voice.imported ? 'imported' : engine === 'pocket-tts' ? 'built-in' : 'preset'}`,
+            undefined,
+            voice,
           ),
-        })
+        ),
       })
+    })
 
     // Reassign indices after merging favorites so keyboard order matches render order.
     index = 0
@@ -239,7 +267,7 @@ export function VoiceSelector({
       })
     })
     return result
-  }, [voices, builtInVoices, favoriteIds, query])
+  }, [voices, catalogVoices, favoriteIds, query])
 
   const flatOptions = useMemo(
     () => sections.flatMap((section) => section.options),
@@ -290,6 +318,7 @@ export function VoiceSelector({
             setFavoriteIds(readFavoriteVoiceIds())
             setQuery('')
             setHighlight(0)
+            onOpen?.()
           }
         }}
       >
@@ -371,6 +400,11 @@ export function VoiceSelector({
                   {section.options.map((option) => {
                     const active = option.id === voiceId
                     const isFavorite = option.id ? favoriteIds.includes(option.id) : false
+                    const badges: ReadinessBadge[] = option.voice
+                      ? savedVoiceBadges(readiness?.[option.voice.voice_id])
+                      : option.builtin
+                        ? [presetReadinessBadge(option.builtin)]
+                        : []
                     return (
                       <div
                         key={`${option.group}-${option.id ?? 'default'}`}
@@ -392,7 +426,9 @@ export function VoiceSelector({
                             {option.voice && getSourceBadge(option.voice.source)}
                             {option.builtin && (
                               <Badge variant="outline" className="text-[9px]">
-                                Pocket
+                                {option.builtin.engine === 'pocket-tts'
+                                  ? 'Pocket'
+                                  : (option.builtin.engine_label ?? option.builtin.engine)}
                               </Badge>
                             )}
                           </span>
@@ -427,6 +463,9 @@ export function VoiceSelector({
                             </TooltipContent>
                           </Tooltip>
                         )}
+                        {badges.map((badge) => (
+                          <ReadinessChip key={badge.text} badge={badge} />
+                        ))}
                         {active && <Check className="size-3.5 shrink-0 text-primary" />}
                         {option.id && (
                           <button

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { listEngines, type EngineLoadStatus } from '@/lib/api'
+import { listEngines, type EngineCard, type EngineLoadStatus } from '@/lib/api'
 
 /** An engine that is still getting ready: its worker is loading, or compiling its first call. */
 export function isEngineBusy(status?: EngineLoadStatus | null): boolean {
@@ -35,16 +35,22 @@ export function engineLoadSuffix(status?: EngineLoadStatus | null): string {
 /**
  * Load state of every engine, straight from GET /engines. Polls every 2 s while any engine is
  * loading or warming; call ``refresh`` when something may have started a load (a request that
- * was told to wait).
+ * was told to wait). Also returns the whole cards, so callers can read measured data such as
+ * the install check's warm-up time.
  */
 export function useEngineLoadStatus(): {
   status: Record<string, EngineLoadStatus | undefined>
+  cards: EngineCard[]
   refresh: () => void
 } {
   const [status, setStatus] = useState<Record<string, EngineLoadStatus | undefined>>({})
+  const [cards, setCards] = useState<EngineCard[]>([])
   const refresh = useCallback(() => {
     listEngines()
-      .then((cards) => setStatus(Object.fromEntries(cards.map((card) => [card.id, card.load_status]))))
+      .then((next) => {
+        setCards(next)
+        setStatus(Object.fromEntries(next.map((card) => [card.id, card.load_status])))
+      })
       .catch(() => undefined)
   }, [])
   useEffect(() => {
@@ -56,7 +62,7 @@ export function useEngineLoadStatus(): {
     const timer = window.setInterval(refresh, 2000)
     return () => window.clearInterval(timer)
   }, [busy, refresh])
-  return { status, refresh }
+  return { status, cards, refresh }
 }
 
 export interface SpeechWait {

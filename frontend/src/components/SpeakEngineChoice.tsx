@@ -1,5 +1,5 @@
 import { engineLoadNote } from '@/lib/engineStatus'
-import type { EngineLoadStatus } from '@/lib/api'
+import type { EngineCard, EngineLoadStatus } from '@/lib/api'
 import type { PresetVoice, SpeakEngineModel } from '@/lib/speakEngines'
 
 interface Props {
@@ -11,8 +11,19 @@ interface Props {
   onPreset: (preset: string) => void
   /** Real load state per engine from GET /engines. */
   loadStatus?: Record<string, EngineLoadStatus | undefined>
+  /** The chosen engine's card, for the measured install-check / benchmark times in the note. */
+  card?: EngineCard | null
   /** The server's message while a request to the chosen engine is being retried. */
   waiting?: string | null
+}
+
+/** The measured load/warm time the engine card carries, or null when nothing was measured. */
+function measuredWarmSeconds(card: EngineCard | null | undefined): number | null {
+  const warmup = card?.install_check?.warmup_seconds
+  if (typeof warmup === 'number' && warmup > 0) return warmup
+  const cold = card?.benchmark?.cold_seconds
+  if (typeof cold === 'number' && cold > 0) return cold
+  return null
 }
 
 /**
@@ -28,12 +39,15 @@ export function SpeakEngineChoice({
   onEngine,
   onPreset,
   loadStatus,
+  card,
   waiting,
 }: Props) {
   const active = models.find((m) => m.active)
   const chosen = models.find((m) => m.id === engine)
   const engineVoices = presets.filter((v) => v.engine === engine)
   const busyNote = chosen ? engineLoadNote(chosen.label, loadStatus?.[chosen.id]) : null
+  const chosenCard = card?.id === engine ? card : undefined
+  const measuredS = measuredWarmSeconds(chosenCard)
   if (models.length < 2) return null
   return (
     <div className="flex flex-col gap-1" data-testid="speak-engine-choice">
@@ -80,8 +94,16 @@ export function SpeakEngineChoice({
         </span>
       )}
       {chosen && (
-        <span className="max-w-72 text-[10px] text-muted-foreground">
+        <span
+          data-testid="speak-engine-beside-note"
+          className="max-w-72 text-[10px] text-muted-foreground"
+        >
           {chosen.label} runs beside {active?.label ?? 'the active engine'}; nothing is unloaded.
+          {measuredS !== null
+            ? ` Install check measured a ${Math.round(measuredS)} s warm-up.`
+            : chosenCard && chosenCard.kind !== 'builtin'
+              ? ' Load time not measured yet.'
+              : ''}
           {!chosen.capabilities.seed && ` ${chosen.label} doesn't support seeds.`} Post-processing applies to the
           active engine only.
         </span>

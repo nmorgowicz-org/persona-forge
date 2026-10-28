@@ -645,9 +645,24 @@ engine's own preset voices (or the selected saved voice, cloned, when the engine
 box is disabled with the reason for engines without seeds, post-processing is disabled for pack
 engines, and a note says the engine runs beside the active one and nothing is unloaded. Integrations
 has an "Enforce English on the API" checkbox (off by default, saved on the server): when on, a
-non-English voice or `language` gets a 400 that names the voice and the setting. **Not built:** the
-rest of the §5.6 picker (engine sections inside the voice combobox, an engine dropdown for saved
-voices beyond the one above, measured swap time), and "Allow API requests to switch engines".
+non-English voice or `language` gets a 400 that names the voice and the setting.
+**Picker (browser-checked with real packs and a prepared voice).** The voice picker is the planned
+searchable combobox: sections for Favorites, My voices (family variants first) and Built-in by
+engine — Pocket, then every provisioned pack's presets (a provisioned pack that is not installed
+shows its bundled catalog). Every entry carries a readiness badge: presets read "Ready" or
+"Install …"; saved voices read their `/voices/engines` binding status per pack cloning engine
+("Ready on Kitten 2", "Prepare Kitten 2 first", preparing/failed, "Install Pocket Lite" while the
+pack is absent). Selecting a pack preset implies its engine (the Engine selector and its preset
+dropdown follow the voice). A saved voice gets a small "Runs on" dropdown listing Pocket plus the
+pack engines it can run on (ready/preparable), defaulting to the prepared engine; choosing one
+drives the same `/v1/audio/speech` path. The note under the engine says a pack engine runs beside
+the active one and adds the measured time when known — the install check's warm-up seconds, else
+the benchmark's cold request — or "Load time not measured yet."; a saved voice whose chosen pack
+engine is not yet prepared gets "Generating will first prepare this voice for … — one-time".
+Pack engines never swap anything and no built-in-backend swap is promised (§4.3). Verified against
+`/tmp/pf_all` (Kitten 2/Phonon/Kokoro installed, Pocket Lite absent) with one voice prepared on
+Kitten 2: badges, dropdown default, measured 1 s warm-up, and generation through the dropdown
+choice all read from the live API. **Not built:** "Allow API requests to switch engines".
 **Switching: investigated, not built, by decision (see §4.3).** Pack engines never need a switch, and
 a swap among the built-in backends from an API request would need a lifecycle redesign. A pack voice
 can now be the API default (§5.3).

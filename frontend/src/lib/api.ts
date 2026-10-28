@@ -758,6 +758,13 @@ export async function getVoiceEngineBindings(voiceId: string): Promise<VoiceEngi
   return (await res.json()).engines ?? []
 }
 
+/** Binding status for every saved voice in one call (GET /voices/engines), keyed by voice_id. */
+export async function listAllVoiceBindings(): Promise<Record<string, VoiceEngineBinding[]>> {
+  const res = await fetch('/voices/engines')
+  if (!res.ok) throw new Error(await readError(res))
+  return (await res.json()).voices ?? {}
+}
+
 /** The server wants the transcript confirmed or typed before an engine that clones with it can prepare. */
 export class TranscriptReviewRequired extends Error {
   reason: 'missing' | 'unreviewed'
