@@ -301,6 +301,24 @@ class SpeechEngine(Protocol):
         ...
 
 
+def _normalize_english(text: str, language: str | None) -> str:
+    """Spell out numbers and symbols, but only on an English rendering path.
+
+    The normaliser is English-only, so a French request or a non-English Pocket install would
+    otherwise get "J'ai two chats" for "J'ai 2 chats".
+    """
+    import os
+
+    from persona_forge import text_normalizer
+
+    installed = (os.environ.get("POCKET_TTS_LANGUAGE") or "english").strip().lower()
+    requested = (language or "english").strip().lower()
+    english = {"english", "en", "auto", ""}
+    if not text_normalizer.enabled() or installed not in english or requested not in english:
+        return text
+    return text_normalizer.normalize(text)
+
+
 class PocketTtsEngine:
     """Pocket adapter over the existing runtime.
 
@@ -328,10 +346,9 @@ class PocketTtsEngine:
         instruct: str | None = None,
         speed: float | None = None,
     ) -> tuple[Any, int, str | None]:
-        from persona_forge import model, text_normalizer
+        from persona_forge import model
 
-        if text_normalizer.enabled():
-            text = text_normalizer.normalize(text)
+        text = _normalize_english(text, language)
         return model.executor.submit(
             model._run_generate,
             text,
@@ -354,10 +371,9 @@ class PocketTtsEngine:
         seed_value: int | None = None,
         speed: float | None = None,
     ) -> Iterator[bytes]:
-        from persona_forge import model, text_normalizer
+        from persona_forge import model
 
-        if text_normalizer.enabled():
-            text = text_normalizer.normalize(text)
+        text = _normalize_english(text, language)
         yield from model._run_generate_pocket_tts_stream(
             text, language, voice_id=voice_id, seed_value=seed_value
         )
