@@ -132,6 +132,11 @@ def build_manifest() -> dict[str, Any]:
         "idle_unload_after": IDLE_UNLOAD_AFTER_S,
         "requirements": [f"kokoro-onnx=={KOKORO_ONNX_VERSION}"],
         "artifacts": [],
+        # Fetched by the provisioner, but hashed by "Verify hashes" (never by the cheap status).
+        "pinned_files": [
+            {"path": f"models/{name}", "sha256": sha, "size": size}
+            for name, size, sha in (MODEL_FILE, VOICES_FILE)
+        ],
     }
 
 

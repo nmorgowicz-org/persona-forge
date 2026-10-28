@@ -271,6 +271,30 @@ def _write_verification_stamp(pack_dir: Path, manifest_sha256: str) -> None:
         pass
 
 
+def _verify_pinned_files(pack_dir: Path, manifest: PackManifest, status: PackStatus) -> None:
+    """Hash the files a provisioner downloads (``pinned_files``); problems land in ``errors``."""
+    pinned = manifest.raw.get("pinned_files")
+    if not isinstance(pinned, list):
+        return
+    for item in pinned:
+        if not isinstance(item, Mapping):
+            continue
+        try:
+            relative = _safe_relative_path(item.get("path"))
+        except PackManifestError:
+            status.errors.append("invalid pinned file entry")
+            continue
+        target = pack_dir / relative
+        if not target.is_file():
+            status.errors.append(f"missing {relative}")
+            continue
+        try:
+            if _sha256_file(target) != item.get("sha256"):
+                status.errors.append(f"hash mismatch: {relative}")
+        except OSError:
+            status.errors.append(f"cannot read {relative}")
+
+
 def inspect_pack(pack_dir: Path, *, verify: bool = False) -> PackStatus:
     """Compute a pack's local status, optionally hashing every artifact."""
     try:
@@ -319,6 +343,8 @@ def inspect_pack(pack_dir: Path, *, verify: bool = False) -> PackStatus:
                 hashes_ok = False
                 status.errors.append(f"cannot read {artifact.path}")
 
+    if verify and manifest.provisioner:
+        _verify_pinned_files(pack_dir, manifest, status)
     if manifest.provisioner:
         # Only the provisioner publishes the stamp, after its steps succeed. Verify must never
         # mint one, or an empty pack directory would look installed.
