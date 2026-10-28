@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 
+import pytest
+
 from persona_forge import speech_engines, voice_library
 
 
@@ -632,3 +634,51 @@ def test_builtin_catalog_lists_pack_presets_only_when_asked(client, monkeypatch)
     kokoro = next(e for e in full["engines"] if e["id"] == "kokoro")
     assert kokoro == {"id": "kokoro", "label": "Kokoro 82M", "installed": True, "voices": 2}
     assert next(v for v in full["voices"] if v["voice_id"] == "kokoro:ff_siwis")["language_code"] == "fr"
+
+
+def _streaming_fake(calls):
+    class Fake:
+        def stream_pcm(self, text, language, **kw):
+            calls.append(kw)
+            yield b"\x01\x00" * 50
+            yield b"\x02\x00" * 50
+
+        def synthesize(self, text, language, **kw):
+            import numpy as np
+
+            calls.append({"whole": True, **kw})
+            return np.zeros(240, dtype="float32"), 24000, None
+
+    return Fake()
+
+
+@pytest.mark.parametrize(
+    ("model_name", "voice"), [("phonon-31m", "phonon:Zoey"), ("pocket-lite", "pocket-lite:jane")]
+)
+def test_streaming_pack_engines_send_pcm_chunks(client, monkeypatch, model_name, voice):
+    calls = []
+    monkeypatch.setattr(speech_engines, "adapter_for", lambda engine: _streaming_fake(calls))
+
+    response = client.post(
+        "/v1/audio/speech",
+        json={"model": model_name, "input": "hi", "voice": voice, "response_format": "pcm", "seed": 5},
+    )
+
+    assert response.status_code == 200 and response.content_type == "audio/pcm"
+    assert response.data == b"\x01\x00" * 50 + b"\x02\x00" * 50
+    assert response.headers["X-Seed"] == "5" and response.headers["X-Audio-Sample-Rate"] == "24000"
+    assert calls == [{"voice_id": voice, "seed_value": 5, "speed": None}]
+
+
+def test_kokoro_does_not_stream_even_for_pcm(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(speech_engines, "adapter_for", lambda engine: _streaming_fake(calls))
+
+    response = client.post(
+        "/v1/audio/speech",
+        json={"model": "kokoro", "input": "hi", "voice": "kokoro:af_heart", "response_format": "pcm"},
+    )
+
+    assert response.status_code == 200
+    assert calls and calls[0].get("whole") is True  # one whole clip, never the chunk path
+    assert speech_engines.ENGINES["kokoro"].capabilities.streaming == "none"

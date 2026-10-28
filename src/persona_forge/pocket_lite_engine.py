@@ -55,6 +55,7 @@ class PocketLiteEngine(PackPresetEngine):
     idle_env = "POCKET_LITE_IDLE_UNLOAD_S"
     worker_file = str(Path(pocket_lite_worker.__file__).resolve())
     preset_prefix = PRESET_PREFIX
+    streams = True
 
     def __init__(self, idle_unload_s: float | None = None) -> None:
         super().__init__(idle_unload_s)

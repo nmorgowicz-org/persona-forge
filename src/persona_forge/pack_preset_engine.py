@@ -224,11 +224,14 @@ class PackPresetEngine:
             return
         del language
         requested = (voice_id or "").strip()
-        self._refuse_clone(requested)
+        self._check_voice(requested)
         request: dict[str, Any] = {"text": text}
-        self._fill_request(request, requested, seed_value, speed)
         with self._lock:
             process = self._ensure_started()
+            cloned = self._prepare_voice(process, requested)
+            if cloned:
+                request["voice_id"] = requested
+            self._fill_request(request, "" if cloned else requested, seed_value, speed)
         try:
             yield from process.stream(request)
         except PackProcessError as exc:

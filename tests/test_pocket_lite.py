@@ -19,6 +19,7 @@ from persona_forge.kitten2_engine import EngineUnavailable, InvalidVoice
 
 class StubModel:
     sample_rate = 24000
+    chunks = 3
 
     def __init__(self, cloning=True):
         self.has_voice_cloning = cloning
@@ -28,6 +29,11 @@ class StubModel:
     def get_state_for_audio_prompt(self, source):
         self.prompts.append(str(source))
         return {"state": str(source)}
+
+    def generate_audio_stream(self, state, text):
+        self.generated.append((state["state"], text))
+        for _ in range(self.chunks):
+            yield np.full(480, 0.5, dtype=np.float32)
 
     def generate_audio(self, state, text):
         self.generated.append((state["state"], text))
@@ -84,6 +90,51 @@ def test_a_seed_is_applied_to_every_generator_the_model_draws_from(monkeypatch):
         draws.append((torch.rand(1).item(), np.random.rand(), random.random()))
 
     assert draws[0] == draws[1]
+
+
+def test_worker_streams_pcm_chunks_then_done():
+    worker, model = make_worker()
+    worker.handle({"op": "load"})
+
+    messages = list(worker.stream({"text": "Hello", "preset": "jane"}))
+
+    assert [m.get("done", False) for m in messages] == [False, False, False, True]
+    pcm = np.frombuffer(base64.b64decode(messages[0]["chunk_b64"]), dtype="<i2")
+    assert len(pcm) == 480 and abs(int(pcm[0]) - 16383) <= 1
+    assert model.generated == [("jane", "Hello")]
+
+
+def test_worker_stream_clones_a_prepared_voice_and_rejects_bad_requests():
+    worker, model = make_worker()
+    worker.handle({"op": "load"})
+    worker.handle({"op": "prepare", "voice_id": "vd_1", "reference_path": "/ref.wav"})
+
+    list(worker.stream({"text": "hi", "voice_id": "vd_1"}))
+    assert model.generated[-1][0] == "/ref.wav"
+    with pytest.raises(pocket_lite_worker.WorkerError, match="needs text"):
+        list(worker.stream({"text": ""}))
+    with pytest.raises(pocket_lite_worker.WorkerError, match="unknown preset"):
+        list(worker.stream({"text": "hi", "preset": "giovanni"}))
+
+
+def test_serve_writes_one_line_per_stream_message_and_survives_a_bad_request():
+    import json
+
+    worker, _ = make_worker()
+    worker.handle({"op": "load"})
+    lines = [
+        json.dumps({"op": "stream", "text": "hi", "preset": "jane"}),
+        json.dumps({"op": "stream", "text": ""}),
+        json.dumps({"op": "ping"}),
+    ]
+    out = io.StringIO()
+
+    pocket_lite_worker.serve(worker, io.StringIO("\n".join(lines) + "\n"), out)
+
+    replies = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert [r.get("done", False) for r in replies[:4]] == [False, False, False, True]
+    assert replies[4]["ok"] is False and "needs text" in replies[4]["error"]
+    assert replies[5]["ok"] is True
 
 
 def test_worker_refuses_a_model_without_cloning_weights():
@@ -212,6 +263,11 @@ class FakeProcess:
         self.requests.append(dict(payload))
         return {"ok": True, "mode": "cpu"}
 
+    def stream(self, payload):
+        self.requests.append({"op": "stream", **payload})
+        yield b"\x01\x00" * 100
+        yield b"\x02\x00" * 100
+
     def synthesize(self, payload):
         self.requests.append({"op": "synthesize", **payload})
         buffer = io.BytesIO()
@@ -307,6 +363,23 @@ def test_adapter_prepares_a_voice_once_and_again_when_the_clip_changes(engine, m
     assert len(prepares()) == 2
 
 
+def test_adapter_streams_a_preset_in_chunks(engine):
+    chunks = list(engine.stream_pcm("hi", "English", voice_id="pocket-lite:jane", seed_value=4))
+
+    assert len(chunks) == 2 and all(len(c) == 200 for c in chunks)
+    assert FakeProcess.instances[0].requests[-1] == {"op": "stream", "text": "hi", "seed": 4, "preset": "jane"}
+
+
+def test_adapter_streams_a_cloned_saved_voice(engine, monkeypatch, tmp_path):
+    wav = saved_voice(monkeypatch, tmp_path)
+
+    list(engine.stream_pcm("hi", "English", voice_id="vd_1"))
+
+    requests = FakeProcess.instances[0].requests
+    assert requests[1] == {"op": "prepare", "voice_id": "vd_1", "reference_path": str(wav)}
+    assert requests[-1] == {"op": "stream", "text": "hi", "voice_id": "vd_1"}
+
+
 def test_adapter_reports_a_missing_reference_clip(engine, monkeypatch, tmp_path):
     wav = saved_voice(monkeypatch, tmp_path)
     wav.unlink()
@@ -345,6 +418,7 @@ def test_registry_knows_pocket_lite_and_its_aliases():
     info = speech_engines.ENGINES["pocket-lite"]
 
     assert info.pack_only and info.capabilities.clone and info.capabilities.seed
+    assert info.capabilities.streaming == "frame"
     assert info.capabilities.languages == ("en",)
     for alias in ("pocket-lite", "pocket_lite", "pocket-lite-18m"):
         assert speech_engines.MODEL_ALIASES[alias] == "pocket-lite"

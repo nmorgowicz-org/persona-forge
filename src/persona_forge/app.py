@@ -2927,8 +2927,13 @@ def openai_audio_speech():
     # Engines without a speed control ignore it, as before; the header says whether it applied.
     speed_applied = bool(speed is not None and serving_engine.capabilities.speed)
 
-    # Phonon streams raw PCM from its worker process.
-    if fmt == "pcm" and serving_engine.id == "phonon-31m" and not repair_requested:
+    # Pack engines whose worker streams (Phonon, Pocket Lite) send raw PCM chunks as produced.
+    if (
+        fmt == "pcm"
+        and serving_engine.pack_only
+        and serving_engine.capabilities.streaming == "frame"
+        and not repair_requested
+    ):
         return _openai_audio_speech_stream_pack(
             serving_engine, text, language, voice_id, resolved_seed,
             float(speed) if speed_applied and speed is not None else None,
@@ -3046,7 +3051,7 @@ def _openai_audio_speech_stream_pack(
         headers={
             "X-Seed": str(resolved_seed) if resolved_seed is not None else "",
             "X-Model-Recognized": "true" if model_recognized else "false",
-            "X-Speed-Applied": "true" if speed is not None else "false",
+            "X-Speed-Applied": "true" if speed is not None else "false",  # None unless supported
             "X-Audio-Sample-Rate": "24000",
             "X-Audio-Channels": "1",
             "X-Audio-Bits": "16",

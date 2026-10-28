@@ -218,8 +218,11 @@ Important notes:
   token goes to the download process only and is never stored or logged.
 - Clones a saved voice from its reference clip (no transcript needed) and serves the English presets as
   `pocket-lite:<name>` (the standard `pocket:<name>` names also work). `seed` is honoured (repeat runs
-  agree to within one 16-bit step, the same as the standard model); `speed` is not supported; output
-  is not frame-streamed. Its voice states are separate from the standard Pocket runtime.
+  agree to within one 16-bit step, the same as the standard model); `speed` is not supported. With
+  `response_format: "pcm"` it streams raw int16 PCM as the model produces it, like Phonon, for presets
+  and cloned saved voices (first audio about 0.02 s warm on the Mac, against 0.3 s for a whole clip;
+  the streamed audio matches the whole-clip render within one 16-bit step). Its voice states are
+  separate from the standard Pocket runtime.
 
 ### POST /engines/kitten2/recheck
 
