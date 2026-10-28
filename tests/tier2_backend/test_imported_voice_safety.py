@@ -149,7 +149,11 @@ def test_import_and_removal_of_the_same_slug_are_serialized(store, monkeypatch):
 
 def test_reload_parser_failures_stop_the_import_being_offered(runtime, monkeypatch):
     adapter, _root = runtime
+    # A background load may still be in flight on a slow runner; settle it before unloading and
+    # give the synthesis below room to finish its own load.
+    monkeypatch.setenv("ENGINE_WARM_WAIT_S", "30")
     _import()
+    adapter._tracker.wait_settled(30)
     adapter.unload()
     original = FakeProcess.request
 
