@@ -463,10 +463,11 @@ export function SpeakPage() {
     }
   }
 
+  const packEngineIds = new Set(engineCards.filter((card) => card.kind !== 'builtin').map((card) => card.id))
   const isCurrentApiDefault =
     !!apiDefault &&
     apiDefault.voice === effectiveVoice &&
-    (!defaultEngineId || apiDefault.engine === defaultEngineId)
+    (apiDefault.engine && packEngineIds.has(apiDefault.engine) ? apiDefault.engine : null) === defaultEngineId
 
   async function makeApiDefault() {
     if (!effectiveVoice) return
