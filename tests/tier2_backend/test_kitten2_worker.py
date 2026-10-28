@@ -260,8 +260,8 @@ def test_cuda_falls_back_to_eager_with_the_reason_when_compiling_fails():
     response = worker.handle({"op": "load"})
 
     assert response["mode"] == "eager"
-    # On Windows a missing compiler is the build-tools case, with its own guidance.
-    expected = "needs_build_tools" if sys.platform == "win32" else "fast_mode_failed"
+    # On Windows and Linux a missing compiler is the build-tools case, with its own guidance.
+    expected = "needs_build_tools" if sys.platform == "win32" or sys.platform.startswith("linux") else "fast_mode_failed"
     assert response["fast_mode_issue"]["code"] == expected
     assert "Failed to find C compiler" in response["fast_mode_issue"]["detail"]
     assert built == [True, False]

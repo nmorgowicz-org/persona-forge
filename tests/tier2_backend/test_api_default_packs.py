@@ -7,6 +7,7 @@ adapter, so no worker process starts; everything above that is the real route co
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 
@@ -414,11 +415,16 @@ def test_the_default_survives_a_restart(client, packs, tmp_path):
     )
     out = subprocess.run(
         [sys.executable, "-c", code],
-        env={"VOICE_LIBRARY_DIR": str(tmp_path), "PATH": "", "PYTHONPATH": ":".join(sys.path)},
+        env={
+            **os.environ,
+            "VOICE_LIBRARY_DIR": str(tmp_path),
+            "PYTHONPATH": os.pathsep.join(p for p in sys.path if p),
+        },
         capture_output=True,
         text=True,
-        check=True,
-    ).stdout
+    )
+    assert out.returncode == 0, out.stderr[-2000:]
+    out = out.stdout
     restored = json.loads(out)
 
     assert restored["voice"] == "phonon:Zoey" and restored["engine"] == "phonon-31m"
