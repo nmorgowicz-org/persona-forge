@@ -1,9 +1,15 @@
 # Multi-engine speech: Kokoro, Phonon, Kitten TTS, and first-class built-in voices
 
-**Date:** 2026-10-23 (updated through 2026-10-28). **Status:** implementation in progress; the engine
-framework, optional packs and voice UI described as **Built** below are integrated. Phase B
-screening and an objective cloning bake-off have run (see
-[20261023-phase-b-screening.md](20261023-phase-b-screening.md)); no final engine quality ranking.
+**Date:** 2026-10-23 (updated through 2026-10-28). **Status:** built and served; this file is now a
+finished record. Five engines are served: Pocket (the default) and, as optional packs running beside
+it, Kitten TTS 2, Phonon 31M, Kokoro 82M and Pocket Lite (18M). KokoClone, Phonon 40M and the Pocket
+7M/2M checkpoints were evaluated and not integrated (§9.1, §9.2, §9.4). Phase B screening and the
+objective cloning bake-off are in [20261023-phase-b-screening.md](20261023-phase-b-screening.md).
+Blind listening by the owner is recorded for the bake-off rounds (§4.6) and for the small Pocket and
+Phonon 40M checks (§9.1, §9.4); the owner also reports blind listening in the in-app Compare tab, but
+no ratings or verdict from it are written into this plan, so **no final engine quality ranking is
+recorded here**. What was built (with commits), what was not and why, and what was never tested are
+listed in [§11](#11-outcome-and-open-items).
 
 **Purpose:** turn Persona Forge from a single-renderer app (Pocket-TTS) into a **multi-engine**
 speech studio where:
@@ -50,23 +56,26 @@ Owner decisions since this plan was written: use is private and personal, every 
 scope, each is compared against Pocket-TTS, and the product should let users choose. vLLM was
 ruled out for Kitten 2.
 
-**Open before any engine is ranked:** the blind listening ratings, Pocket-TTS on the Intel and 5090
-targets for a like-for-like speed comparison, the compiled Kitten 2 tail-latency cause, and whether
-`kittenml` co-installs with the app's `transformers` lockfile.
+**Open before any engine is ranked (status 2026-10-28):** the blind listening ratings (the Compare tab
+exists, §5.5; no ratings are recorded here); Pocket on the Intel host, **measured** (0.40-0.41 through the
+app, §9.3.1; Pocket on the 5090 is not recorded); the compiled Kitten 2 tail-latency cause, **explained**
+as recompiles at a new text length (§7.1.1); and whether `kittenml` co-installs with the app's
+`transformers` lockfile, **it does** (§7.1 "Dependency check"), and it stays a pack anyway.
 
 ## 1. Candidate engines at a glance
 
 All reviewed families output 24 kHz; adapters must still report the actual rate.
 
-| Engine | Cloning | Built-in voices | Best targets (to be verified) | Streaming | Role in Persona Forge |
-| --- | --- | --- | --- | --- | --- |
-| **Pocket-TTS** (current) | Local, from reference audio; cached states | 30 curated app entries (24 English + 6 non-English) | CPU everywhere; existing accelerator families | PCM frame streaming (existing) | Default, universal, low-resource |
-| **Kitten TTS 2** 1.7B | Local in-context, 5–30 s ref + transcript (Python); native C++ needs offline-prepared refs | 115 entries in pinned manifest, multiple languages (docs disagree on totals) | CUDA GPU (Python, **fast only with a static cache and compiled decode step**), Apple silicon (MLX, measured), not Intel CPU (measured on M5 CPU only; C++/GGML path dropped, see §9.3) | Sentence-chunk (Python and C++ binding) | High-quality cloning + large preset catalog |
-| **KokoClone** (Kokoro + Kanade + vocoder) | Local voice conversion of Kokoro output toward a reference | Inherits Kokoro presets as source | CUDA or CPU; no MPS in wrapper | None (complete audio) | Cloning alternative; batch quality tier |
-| **Kokoro 82M** (native or ONNX) | None (blending ≠ cloning) | ~54 voices, US/UK English + other languages | CPU (ONNX), CUDA, MPS (native, unverified) | Sentence/segment | Fast, light preset engine |
-| **Phonon 31M English** | No local cloning from recordings (released speaker codec unavailable); imports prepared voice files | 102 catalog voices, 37 English | CPU (Rust, AVX2/ARM), no Torch | Frame-level | Very light streaming preset engine |
-| **Phonon 40M** (en/fr/de/es/pt + multilingual) | Same as 31M | Same catalog | Same | Frame-level | Multilingual preset engine; gated HF download |
-| **Kitten 0.8** mini/micro/nano(-int8) | None | 8 English presets | CPU (ONNX) | Treat as batch | Tiny footprint option; low priority |
+| Engine | Cloning | Built-in voices | Best targets (to be verified) | Streaming | Role in Persona Forge | Outcome |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Pocket-TTS** (current) | Local, from reference audio; cached states | 30 curated app entries (24 English + 6 non-English) | CPU everywhere; existing accelerator families | PCM frame streaming (existing) | Default, universal, low-resource | **Outcome: built-in default**, first adapter (§4.2) |
+| **Kitten TTS 2** 1.7B | Local in-context, 5–30 s ref + transcript (Python); native C++ needs offline-prepared refs | 115 entries in pinned manifest, multiple languages (docs disagree on totals) | CUDA GPU (Python, **fast only with a static cache and compiled decode step**), Apple silicon (MLX, measured), not Intel CPU (measured on M5 CPU only; C++/GGML path dropped, see §9 item 3) | Sentence-chunk (Python and C++ binding) | High-quality cloning + large preset catalog | **Outcome: built** as a pack (§7.1); serves whole clips, streaming `none` (§7.1 task 3) |
+| **KokoClone** (Kokoro + Kanade + vocoder) | Local voice conversion of Kokoro output toward a reference | Inherits Kokoro presets as source | CUDA or CPU; no MPS in wrapper | None (complete audio) | Cloning alternative; batch quality tier | **Outcome: evaluated, not integrated** (§9.2; bake-off in §4.6) |
+| **Kokoro 82M** (native or ONNX) | None (blending ≠ cloning) | ~54 voices, US/UK English + other languages | CPU (ONNX), CUDA, MPS (native, unverified) | Sentence/segment | Fast, light preset engine | **Outcome: built** as an ONNX pack (§7.1); whole clips only, streaming deliberately excluded (§9.3.4) |
+| **Phonon 31M English** | No local cloning from recordings (released speaker codec unavailable); imports prepared voice files | 102 catalog voices, 37 English | CPU (Rust, AVX2/ARM), no Torch | Frame-level | Very light streaming preset engine | **Outcome: built** as a pack (§7.1); frame streaming over PCM (§9.3.4) |
+| **Phonon 40M** (en/fr/de/es/pt + multilingual) | Same as 31M | Same catalog | Same | Frame-level | Multilingual preset engine; gated HF download | **Outcome: screened, not integrated** (§9.4): no audible gain over 31M, adds a gated install |
+| **Kitten 0.8** mini/micro/nano(-int8) | None | 8 English presets | CPU (ONNX) | Treat as batch | Tiny footprint option; low priority | **Outcome: not integrated**: nano was screened and judged not worth a slot (§0.1); mini and micro were not evaluated |
+| **Pocket small checkpoints** 18M / 7M / 2M | Clone from a reference (§9.1); similarity falls with size | 21 English presets for the 18M (from its worker) | CPU | Frame streaming (Pocket Lite, §9.3.4) | "Pocket Lite" variant beside Pocket | **Outcome:** 18M **built** as Pocket Lite (§9.3); 7M and 2M rejected after listening (§9.1) |
 
 Counts are upstream observations, not constants to bake into UI or tests. Sources:
 [Kokoro card][k-card], [voices][k-voices], [Phonon card][p-card], [runtime][p-runtime],
@@ -109,6 +118,11 @@ Counts are upstream observations, not constants to bake into UI or tests. Source
 
 ### 2.2 KokoClone
 
+**Outcome: evaluated, not integrated.** See §9.2 (source-voice leakage; mean similarity about 0.90
+against Pocket's 0.96 and Pocket Lite's 0.92, with two torch models and an unpinned Git dependency)
+and §4.6 (in the bake-off listening it landed within 0.3 of the other cloners, so it was not rejected
+by ear).
+
 - Pipeline: Kokoro preset synthesis (English source voice currently `af_bella`) →
   `frothywater/kanade-12.5hz` voice conversion → vocoder. A composite renderer, not Kokoro cloning.
   Kanade tokenizer alone is ~120M parameters ([card][kanade-card]).
@@ -137,6 +151,10 @@ Counts are upstream observations, not constants to bake into UI or tests. Source
 
 ### 2.4 Phonon
 
+**Outcome:** Phonon 31M **built** as a pack (§7.1, streaming in §9.3.4). Phonon 40M was screened and
+**not integrated** (§9.4). Local cloning was never available, so the engine serves catalog voices and
+imported prepared voices.
+
 - Rust runtime, no Torch; Python wheel (`ptts`) depends on NumPy. q8 model files 64.5/74.6 MB
   (31M/40M), excluding the audio tokenizer. Wheels: Linux and Windows x86_64 require x86-64-v3
   (AVX2 — the docker-agent i7-1360P qualifies; older CPUs need a source build); macOS arm64 wheels
@@ -157,6 +175,10 @@ Counts are upstream observations, not constants to bake into UI or tests. Source
   `instructions`, rejects `speed`. We do not expose it.
 
 ### 2.5 Kitten 0.8 tiny models and small Pocket models
+
+**Outcome:** Kitten nano was screened and **not integrated** (§0.1). The small Pocket models were
+evaluated in §9.1: the 18M was **built** as Pocket Lite (§9.3); 7M and 2M were **rejected** after
+listening.
 
 - Eight English presets, ONNX, no cloning. Evaluate nano-int8 first; add only if it sounds good
   enough to justify a slot.
@@ -195,8 +217,9 @@ See [runtime invariants](../agent-reference/RUNTIME_AND_MEMORY.md),
 
 ### 4.1 Core concepts
 
-- **Engine:** a speech-model family + runtime, e.g. `pocket`, `kitten2`, `kokoclone`, `kokoro`,
-  `phonon-31m`, `phonon-40m`. Has a manifest (pinned artifacts, hashes, sizes), runtime variants
+- **Engine:** a speech-model family + runtime, e.g. `pocket-tts`, `kitten2`, `kokoro`, `phonon-31m`,
+  `pocket-lite` (the first design also named `kokoclone` and `phonon-40m`; **Outcome:** neither was
+  built, see §1). Has a manifest (pinned artifacts, hashes, sizes), runtime variants
   (`python-cuda`, `python-mlx`, `cpp-cpu`, `onnx-cpu`, `rust-cpu`…), and capabilities.
 - **Capabilities:** `clone` (local from audio), `presets`, `import_prepared_voice`, `streaming`
   (`frame` | `sentence` | `none`), languages (per engine and per voice; "unknown" is shown, never
@@ -233,7 +256,7 @@ an explicit error rather than silently degrading.
 
 - Keep one web worker and the single-thread inference executor as the sole lifecycle authority.
   Load, prepare, generate, stream ownership, unload and OmniVoice swaps remain serialized.
-- **One active engine at a time** (multi-model composites like KokoClone count as one, with
+- **One active engine at a time** (multi-model composites like KokoClone, which was not built, count as one, with
   aggregate RAM/VRAM accounting, staged loading, and full teardown). Switching engines unloads the
   current one first; OmniVoice creation unloads any active engine.
 - Requests targeting a non-active engine trigger a queued, visible swap only if the user enabled
@@ -305,8 +328,8 @@ an explicit error rather than silently degrading.
   the current `instruct` and OpenAI's `instructions` spelling; unsupported controls fail with
   OpenAI-shaped errors naming the engine. Phonon's `duration_delta` backs `speed`.
 - New endpoints: `GET /v1/models` (installed engines + capabilities), `GET /v1/audio/voices`
-  (unified catalog; local extension), engine management (`/engines`, install/remove/activate/prepare,
-  progress), and `PUT /api-default`.
+  (unified catalog; local extension), engine management (`/engines`, install/remove/prepare,
+  progress; **activate was not built**, §4.3), and `PUT /api-default`.
 - Engine-management endpoints (`/engines` install/activate/prepare) fetch and run code: when
   network exposure is enabled they accept only local-origin requests, or require explicit
   confirmation in settings.
@@ -372,7 +395,8 @@ change to a section above, not a new subsystem.
    level, and a fixed per-engine gain table would be a guess (cloned voices vary by several dB; no
    measured table exists for Phonon or Pocket Lite). Those responses say `X-Loudness-Normalized: false`.
    Engines that return a whole clip (Kitten 2, Kokoro) are normalised even for `pcm`. **Not built:** the
-   Integrations-page preference (env plus request field only) and level-matching Compare playback.
+   Integrations-page preference (env plus request field only). Compare playback **is** level-matched, in
+   the browser (§5.5).
 5. **One shared text normaliser in front of the adapters (§4.2).** Pocket read "AB-104 totals
    $1,234.56" as "AB 10 of 4 totals $1020.34.56"; Kitten 2 and KokoClone read it correctly. Numbers,
    currency and codes are normalised once before synthesis, with a per-engine opt-out because Kitten 2
@@ -418,7 +442,8 @@ explained; no surprise downloads, swaps or speaker fallbacks; keyboard accessibl
 - **Voices** (was Voice Library): tabs **My voices | Built-in voices | Compare**.
 - **Settings → Speech engines** (new section next to Acceleration in `RuntimeConfigPage`).
 - **Integrations**: reworked around the API default.
-- Global status chip in the shell: active engine, state (Ready / Loading / Busy / Error), device.
+- Global status chip in the shell: active engine, state (Ready / Loading / Busy / Error), device. **Busy
+  was not built** (no request or queue signal exists; see below).
   Engine state reaches the UI via the existing polling pattern first — no new SSE/WebSocket
   transport in v1.
   **Chip (browser-checked with real packs, plus Playwright stubs).** The shell header carries the
@@ -462,7 +487,8 @@ One card per engine (pattern from `EngineSelector.tsx`):
   first-audio latency from the last benchmark run) or "not measured".
 - Actions: **Install**, **Remove**, **Make active**, **Run quick benchmark**, **Hugging Face token**
   (gated only), **Details** (pins, smoke-test device result, logs).
-- Make active shows a confirmation with memory impact and what will unload.
+- Make active shows a confirmation with memory impact and what will unload. **Not built as a switch**
+  (decision below): the card has **Use as API default…** instead.
 - First-run nudge (dismissible): "Your GPU can run higher-quality engines — browse engines".
 - Section setting **Languages**: "English only" (default) or "All languages". English only hides
   non-English voices and language-specific checkpoints (e.g. Phonon fr/de/es/pt) across the
@@ -529,6 +555,15 @@ packs, an empty `ENGINE_PACKS_DIR` and a real Pocket Lite install attempt).**
   nothing is loaded or unloaded by it.
 - **Small fix on the way:** a card whose engine reported a mode other than `mlx` always said "Running on
   Apple silicon"; it now says "Running: <mode>".
+- **Repair after a failed load (2026-10-28, docs audit):** the Repair button used to appear only when
+  the pack's files did not verify, yet Pocket Lite's "installed with pocket-tts X, app has Y, choose
+  Repair" error comes from a pack whose hashes do verify, so the message pointed at a missing button.
+  The card now also shows Repair when the engine's last load failed (`load_status.state` is `error`);
+  Playwright covers it in `tests/ui/runtime/engine-card-repair.spec.js` (stubbed `/engines`). The card
+  intro and the Remove tooltip were reworded: pack engines run beside the active backend, and Remove is
+  blocked while an engine is the active backend or the API default (`3121f68`). Reading the code, a
+  finished Repair does not clear the old load error; it clears on the next request or Re-check. That was
+  not exercised in a browser.
 
 ### 5.3 Built-in voices tab
 
@@ -541,7 +576,9 @@ packs, an empty `ENGINE_PACKS_DIR` and a real Pocket Lite install attempt).**
   fetched on click, labelled "upstream sample"; or "generate locally" if engine installed),
   favorite star.
 - Detail drawer: description, engine/revision, exact API voice ID with copy button, measured
-  performance, and actions **Use in Speak**, **Set as API default**, **Compare…**, **Favorite**.
+  performance, and actions **Use in Speak**, **Set as API default**, **Favorite**. A **Compare…** action
+  in this drawer was planned and **not built** (the drawer has Use in Speak, Set as API default and
+  Favorite; Compare is reached from a saved voice's actions menu and from the Compare tab, below).
   If the engine isn't installed: **Install engine** inline.
 - No autoplay; one preview playing at a time; previews are queued serialized jobs with cancel.
 
@@ -585,8 +622,8 @@ Finding while doing this: Kitten has no language field, and only some voice ids 
 
 - Existing families/variants preserved.
 - Each voice gets an **Engines** row: per cloning-capable engine status chips (Pocket ✓ Ready,
-  Kitten 2 • Prepare, KokoClone • Prepare, Kokoro — not supported, Phonon — not supported (no local
-  cloning)). Hover/tap explains why.
+  Kitten 2 • Prepare, Pocket Lite · Install to use, Kokoro and Phonon — not supported (no local
+  cloning); the design also listed KokoClone, which was not built). Hover/tap explains why.
 - **Prepare for…** runs preparation (transcript review step when the engine needs one and the stored
   transcript is unreviewed or mismatched).
 - Import prepared voice appears under Built-in → "Add imported voice", stored with provenance.
@@ -809,6 +846,8 @@ CUDA wheel lacks sm_120). Reinstall with a CUDA 12.8+ build or run on CPU". Lang
 fail explicitly, e.g. "Voice 'estelle' (French) cannot render with the English-only Pocket
 checkpoint — pick a French-capable model or an English voice".
 
+**Not built:** the **Busy (queue position)** state (§5.1).
+
 ### 5.9 Acceptance journeys
 
 1. Built-in → filter English/Pocket → preview Vera → Set as API default → copy SDK snippet → same
@@ -959,14 +998,14 @@ RTX 5090. Kitten TTS 2 is blocked on its Windows build.
 
 ## 7. Phases
 
-| Phase | Scope | Completion gate |
-| --- | --- | --- |
-| **A1 — Integrations & status fixes** | Snippets from effective API default; idle-unloaded shown as Ready; preset (`pocket:*`) settable as API default with persisted engine+voice+variant; Test endpoint; IDs table includes presets | Pocket preset served as default after restart; old clients and saved IDs unchanged |
-| **A2 — Unified voice catalog (Pocket only)** | Voices tabs, Built-in grid/search/filters/preview/drawer, searchable Speak combobox, favorites, Speak vs API default labelling | Journey 1 passes; keyboard-accessible; no new model dependency |
-| **B — Technical screening** | §6 screen on 5090, MacBook, CPU: installs, runs on the intended device, clone/prepare, latency/RTF/footprint; then measurement pass for survivors | Per-target feasibility table; candidate engines for C/D with locked env/pin manifests; no final quality ranking |
-| **C — Engine framework + first new engine** | Adapter interface, Pocket refactor, engine packs/provisioning, Speech engines manager, child-process lifecycle, API `model` routing, `/v1/models`, `/v1/audio/voices`, bindings; first engine = best screened survivor (likely Kitten 2 on GPU or Kokoro on CPU) | Journeys 2/3 (for chosen engine), 5, 6; lifecycle/cancel/unload/memory gates; Pocket rollback |
-| **D — Remaining engines** | Each surviving engine, incl. Phonon (31M, 40M with token flow) and KokoClone composite | Per-engine smoke test on each claimed target; capability-correct UI; imported-voice validation |
-| **E — Compare, listening, polish** | In-app blind A/B with saved ratings (final quality ranking + inclusion tiers), hardware-aware recommendations, per-machine benchmark, docs | Journey 3 compare flow; ranked results per engine/voice; recommendations correct on 5090/MacBook/CPU-only |
+| Phase | Scope | Completion gate | Status (2026-10-28) |
+| --- | --- | --- | --- |
+| **A1 — Integrations & status fixes** | Snippets from effective API default; idle-unloaded shown as Ready; preset (`pocket:*`) settable as API default with persisted engine+voice+variant; Test endpoint; IDs table includes presets | Pocket preset served as default after restart; old clients and saved IDs unchanged | **Built.** `adbc46b` (explicit, preset-capable API default), `959ba9a` (IDs table, Speak snippets, actionable errors), later `e01a7c1` (pack voices as the default). |
+| **A2 — Unified voice catalog (Pocket only)** | Voices tabs, Built-in grid/search/filters/preview/drawer, searchable Speak combobox, favorites, Speak vs API default labelling | Journey 1 passes; keyboard-accessible; no new model dependency | **Built.** `b43bd6c` (catalog, searchable picker), then `72a1208`, `bd754f2`, `3479ff2`, `b21679d`, `45405a3` (English filter, every installed engine, uninstalled engines' voices, gender and accent filters, picker sections and readiness badges). Drawer Compare… and the preview cache were not built (§5.3). |
+| **B — Technical screening** | §6 screen on 5090, MacBook, CPU: installs, runs on the intended device, clone/prepare, latency/RTF/footprint; then measurement pass for survivors | Per-target feasibility table; candidate engines for C/D with locked env/pin manifests; no final quality ranking | **Done.** Recorded in [20261023-phase-b-screening.md](20261023-phase-b-screening.md) (`0799088`, `379423d`), with later screens in §9 (`bfd7c2a`, `bac2db2`, `927e9b6`). No final ranking. |
+| **C — Engine framework + first new engine** | Adapter interface, Pocket refactor, engine packs/provisioning, Speech engines manager, child-process lifecycle, API `model` routing, `/v1/models`, `/v1/audio/voices`, bindings; first engine = best screened survivor (likely Kitten 2 on GPU or Kokoro on CPU) | Journeys 2/3 (for chosen engine), 5, 6; lifecycle/cancel/unload/memory gates; Pocket rollback | **Built, except the engine switch** (not built by decision, §4.3). Framework `d339039`, `69ff568`, `d0feef0`, `58968dc`; first engine Kitten 2 (`3e0ce2c`, `669f7f9`, `3715c00`); bindings `659f812`; lifecycle `20bd7cf`, `9c0fe70`; manager `63bf39c`. |
+| **D — Remaining engines** | Each surviving engine, incl. Phonon (31M, 40M with token flow) and KokoClone composite | Per-engine smoke test on each claimed target; capability-correct UI; imported-voice validation | **Partly built.** Phonon 31M (`e97f1ae`, `237cf4e`), Kokoro (`059a55b`), Pocket Lite 18M (`d910ddc`, `c2f7109`). Not built: KokoClone (§9.2), Phonon 40M (§9.4), Pocket 7M and 2M (§9.1). Claimed targets were not all tested (§11.4). |
+| **E — Compare, listening, polish** | In-app blind A/B with saved ratings (final quality ranking + inclusion tiers), hardware-aware recommendations, per-machine benchmark, docs | Journey 3 compare flow; ranked results per engine/voice; recommendations correct on 5090/MacBook/CPU-only | **Built, ranking not recorded.** Compare `46a26f0`, `ad83d6c`, `41f67a9`, `4125d39`, `f041650`; auto-check `e8d0595`; hardware fit and benchmark `4c007cf`; user docs `f42d322`. No final ranking or inclusion tiers are recorded here, and the §6.3 tier labels were not built (no such label exists in the frontend or backend code). |
 
 A1/A2 can proceed in parallel with B.
 
@@ -998,8 +1037,9 @@ saved voice 400. Structured English text is read acceptably as is ("Ways 3. 5 kg
 was the only slip), and the English-only normaliser would hurt other languages, so Kokoro opts out.
 Intel (docker-agent, load average 5.8): first request 2.38 s, warm RTF 0.31-0.34, faster than Pocket
 (0.51-0.53) and better than the 0.64 screened earlier. Not done: Japanese/Chinese voices (extra
-packages), frame streaming, Windows, the fp32 model as an option. KokoClone (cloning on top of Kokoro)
-remains an evaluation item.
+packages) and the fp32 model as an option; frame streaming was later excluded on purpose (§9.3.4) and
+Windows was run afterwards (below). KokoClone (cloning on top of Kokoro) was evaluated in §9.2 and not
+integrated.
 
 **Intel CPU (docker-agent i7-1360P, throwaway container from the app image, live services running,
 load average 3.6-5.4, so treat timings as pessimistic):** the real install took 47 s on Python 3.13
@@ -1028,8 +1068,9 @@ engine (tuned Kokoro) is one registry line plus its own pack, worker and adapter
 **Already on `feat/multi-engine-speech`:** engine registry and `/v1/models` discovery
 (`speech_engines.py`), the `SpeechEngine` adapter protocol with a Pocket adapter, pack manifests,
 verification and installer (`engine_packs.py`), and the newline-JSON worker transport
-(`pack_process.py`, with `ping` and `synthesize` ops and a hard kill on timeout). The transport's
-own docstring says no worker is spawned yet; Kitten 2 is that first worker.
+(`pack_process.py`, with `ping` and `synthesize` ops and a hard kill on timeout). At that point the
+transport's docstring said no worker was spawned yet; Kitten 2 was that first worker, and the docstring
+was corrected in `3121f68`.
 
 **Dependency check (done):** `kittenml` 0.9.6 resolves against the app's exact pins
 (`transformers==5.12.1`, `numpy==2.4.6`; it pulls torch 2.14.x, librosa, phonemizer, espeakng-loader,
@@ -1037,7 +1078,7 @@ onnx). The Mac bench already ran on transformers 5.12.1. It would co-install, bu
 packages and a second torch consumer, so it stays a **pack with its own venv and child process**, as
 §4.4 specifies, not an app dependency.
 
-**Tasks, in order:**
+**Tasks, in order (all six are done; the status follows each):**
 
 1. **Worker** (`kitten2_worker.py`, runs inside the pack venv): ops `ping`, `load` (device and
    backend chosen at load: `mlx` on Apple silicon, `cuda` with `cache_implementation="static"` on
@@ -1045,27 +1086,51 @@ packages and a second torch consumer, so it stays a **pack with its own venv and
    runs in the worker or during a request, per §4.6 item 6), `synthesize`, `unload`. A first
    synthesize on CUDA compiles for about 33 s, so `load` runs a warm-up request and the UI shows
    "warming up" instead of hanging.
+   **Done** (`3e0ce2c`, `20bd7cf`, `f009953`): `load` no longer warms; a separate `warmup` op does
+   (§4.6 item 3). Compiled first, eager fallback when the warm-up fails (§7.1.1).
 2. **Pack manifest** for `kitten2` with per-platform runtime variants (`python-mlx`, `python-cuda`),
    locked dependencies, artifact hashes, and the CUDA extras (`triton-windows`, MSVC check on
    Windows) reported as a preflight failure with an actionable message, not a stack trace.
+   **Done** (`d0feef0`, `3715c00`, `1f62a98`): the missing toolchain is reported as a `fast_mode_issue`,
+   found by trying rather than by looking (§7.1.1); the CUDA 13 and GPU architecture checks are in §7.1.2.
 3. **Adapter** `Kitten2Engine` in `speech_engines.py`: maps `voice_id` to a prepared clone or one of
    the 115 presets, forwards `seed_value`, returns `(wav, sample_rate, job_id)`; capability flags
    `clone=True`, `presets=True`, `streaming="none"`, no `instructions`. Register it in `ENGINES`,
    `MODEL_ALIASES` (`kitten2`, `kitten-tts-2`) and `ADAPTERS`.
+   **Done** (`669f7f9`, `dbd06fd`, `715be6f`): registered in `ENGINES`; the adapter is built on first use
+   through `get_adapter` (§7.1.2). Streaming is `none`.
 4. **Text normaliser** (§4.6 item 5) with a per-engine opt-out; Kitten 2 opts out because it
    normalises internally. Pocket gets it first as the proving ground.
+   **Done** (`1667acb`, `fd193f6`): Pocket uses it; Kitten 2, Phonon and Kokoro opt out (§4.6 item 5,
+   §7.1).
 5. **Tests:** worker protocol against a stub model (no weights in CI), manifest parsing, adapter
    routing, and an opt-in smoke test that runs real weights on a machine that has the pack.
+   **Done in CI form** (`tests/tier2_backend/test_kitten2_worker.py`, `test_kitten2_pack.py`,
+   `tests/tier1_unit/test_pack_process.py`, `test_engine_packs.py`; `bfb5793` runs pack tests in CI). The
+   real-weight runs were done by hand (§7.1.2, §9.3.x); no automated opt-in smoke test is recorded in
+   this plan.
 6. **UI:** Speech engines manager card (install, warm-up state, remove), clone-prepare action on a
    saved voice, and capability-correct controls (no streaming toggle, no instruction field).
+   **Done** (`3eaca32`, `659f812`, `63bf39c`, `e13f135`): manager card with install progress, warm-up
+   state, Re-check and Remove; Prepare on a saved voice; Speak disables seed and post-processing for
+   engines that lack them (§5.6).
 
 **Gate:** a saved voice cloned through the API with `model: kitten2` on the Mac (MLX) and the 5090
 (compiled), cancel and unload release memory, Pocket is untouched when the pack is absent, and the
 engine is reachable from `/v1/models`.
 
+**Gate status:** the Mac (MLX) half is met over HTTP (§7.1.2: 1.5 s clone; §5.7: a never-prepared saved
+voice prepared lazily and returned audio). On the 5090 the pack served in `compiled` mode (§7.1.2: 62.6 s
+first request, then 1.0-1.3 s), but a saved-voice clone over HTTP on the 5090 is not recorded. Memory
+release on cancel and unload is not recorded for Kitten 2 here (§9.3.4 records a mid-stream disconnect
+for Pocket Lite and Phonon only).
+
 **Open validations that do not block the start:** seed-matched MLX versus CUDA output, the cause of
 the compiled-CUDA latency spikes (9 s, 41 s, 85 s trials; decide warm-up and timeout values from
 it), and Pocket on the Intel and 5090 hosts for the speed comparison.
+
+**Since then:** the 9, 41 and 85 s spikes were recompiles at a new text length (§7.1.1); Pocket on Intel
+was measured (§9.3.1); Pocket on the 5090 and seed-matched MLX versus CUDA output are not recorded.
 
 #### 7.1.1 Decision: fast mode is optional, and the upgrade path is one click
 
@@ -1128,10 +1193,13 @@ error mapping, fast-mode fallback, and the provisioner (`kitten2_pack.py`).
      install check asserts that torch has kernels for the GPU's architecture.
   2. Importing `kitten2_engine` before `speech_engines` raised a circular import (the app only
      worked through import order). The adapter is now built on first use via `get_adapter`.
-- **Not yet verified:** the engine-manager UI, the text normaliser, Kitten's presets in
-  `/v1/audio/voices`, and a Linux CUDA install (the code path is shared but untested). A pack
-  installed by the buggy build (wrong torch) must be removed and reinstalled; retrying reuses the
-  environment.
+- **Verified since (2026-10-28):** the engine-manager UI (browser-checked on the Mac with real packs,
+  §5.2; the Repair case with Playwright stubs); the text normaliser (Pocket's misreads fixed, §4.6 item
+  5, `tests/tier1_unit/test_text_normalizer.py`); Kitten's presets in `/v1/audio/voices` (`cc8128b`
+  with a route test in `tests/tier2_backend/test_app_engines.py`) and in the Voices catalog and IDs
+  table (115 Kitten rows from the real pack, §5.7). **Still not verified:** a Linux CUDA install (the
+  code path is shared but untested). A pack installed by the buggy build (wrong torch) must be removed
+  and reinstalled; retrying reuses the environment.
 
 Docs deliverables ride the phases: Phase C updates `docs/api/HTTP_API_REFERENCE.md`,
 `docs/ENV_REFERENCE.md` and `docs/agent-reference/RUNTIME_AND_MEMORY.md`; Phase E adds user-facing
@@ -1178,6 +1246,8 @@ These decisions supersede earlier tentative wording about previews and small Poc
    Cache keys include engine/voice/revision. Delete only app-owned preview files, never library
    recordings, model weights, prepared voices or saved comparison results. Sample downloads are an
    explicit exception to the network-policy wording in §0; never send text or reference audio.
+   **Outcome:** not built, on purpose (§5.3): none of the shipped engines has upstream sample URLs, so
+   there is nothing to cache.
 3. **Kitten 2 C++ is a test decision, not a user choice now:** compare Python/MLX/CUDA and native
    CPU serving where supported, including clone preparation cost, output quality, cancellation,
    latency and total dependencies. Choose supported paths from evidence.
@@ -1189,6 +1259,7 @@ These decisions supersede earlier tentative wording about previews and small Poc
    converts that speech toward the target reference. The source voice is an intermediate technical
    setting, not a replacement for the library voice. During evaluation vary it to test leakage;
    normally hide it behind an evaluated default, exposing an advanced override only if useful.
+   **Outcome:** evaluated in §9.2 and not integrated.
 5. **Small Pocket checkpoints are in evaluation scope:** these are smaller synthesis models
    (18.2M/6.9M/1.9M), not additional named speakers. Inspect their manifests and test compatible
    built-in voice references for browse/preview/Speak/API use, with model variant distinct from
@@ -1196,6 +1267,8 @@ These decisions supersede earlier tentative wording about previews and small Poc
    existing Pocket baseline implicitly. Test cloning separately rather than assuming these are
    preset-only or that current cached voice states are compatible. Include available newer Pocket
    preset catalog entries as well, after checking artifact and language compatibility.
+   **Outcome:** 18M built as Pocket Lite (§9.3); 7M and 2M rejected after listening (§9.1); no preset to
+   add (§9.5).
 
 ### 9.1 Small Pocket checkpoints: evaluation results (2026-10-25)
 
@@ -1228,7 +1301,7 @@ scratch `HF_HOME`; the weights were copied to the Intel host as files, never the
   most of the identity, 7M keeps some, and 2M is at the different-speaker floor, so 2M does not
   clone in any useful sense. Whether 18M and 7M *sound* acceptable needs a listen:
   `/tmp/pfbench/pocket_small/listen.html` (reference first, then each model on three sentences).
-- **Not done:** no integration into the app. The app pins Pocket weights and voice-state caches per
+- **Not done when this was written (18M was built afterwards, §9.3; 7M and 2M were rejected):** no integration into the app. The app pins Pocket weights and voice-state caches per
   model, so a variant needs its own pins, its own voice-state cache (states from the baseline are not
   compatible) and a way to choose it that does not change the existing default. The "refl"
   variants did not measurably differ from their base models on any metric here.
@@ -1263,11 +1336,14 @@ Conversion takes about 0.7-0.8 s per clip after the Kokoro step. Screen only, on
   single small model and no composite dependency. Listening page:
   `/tmp/pfbench/kc_leak/listen.html`. If listening shows the output clearly sounds like the reference,
   revisit this.
+- **Outcome:** not integrated. The bake-off listening had it within 0.3 of the other cloners (§4.6),
+  so it was not rejected by ear; the reasons recorded are the screen above and the single-model
+  alternative in Pocket Lite.
 
 ### 9.3 Pocket Lite 18M engine (built 2026-10-27)
 
 Engine id `pocket-lite`, pack-style isolation without a virtualenv (the worker runs on the app's
-interpreter, which already ships `pocket-tts` 4.0.0). Files: `pocket_lite_worker.py`,
+interpreter, which ships `pocket-tts`: 4.0.0 when this was written, 4.0.1 now, see §9.3.1). Files: `pocket_lite_worker.py`,
 `pocket_lite_pack.py`, `pocket_lite_engine.py` (a subclass of the shared pack adapter, which gained two
 small hooks so a pack engine can clone), plus registry lines. Nothing in the standard Pocket runtime
 changed.
@@ -1284,9 +1360,12 @@ changed.
   after load was tried and did not change it, and was removed.
 - **Clone similarity through the app:** 0.894 on the app's saved voice with one sentence (the 0.92 in
   §9.1 was the bake-off references). Single sample.
-- **Not done:** frame streaming, Windows and Linux runs, an Intel run through the app (the Intel
-  speed above is from the model directly), pinning weight hashes ourselves (revisions are the commit
-  pins in `pocket-tts` 4.0.0's own config, which it downloads by hash-addressed file).
+- **Not done when this was written:** frame streaming, Windows and Linux runs, an Intel run through
+  the app (the Intel speed above is from the model directly), pinning weight hashes ourselves
+  (revisions are the commit pins in `pocket-tts` 4.0.0's own config, which it downloads by
+  hash-addressed file). **Since:** the Intel run through the app, in a Linux container (§9.3.1), a
+  Windows run of the engine class (§9.3.2) and streaming (§9.3.4). We still do not pin the hashes
+  ourselves. The follow-up sections 9.3.1-9.3.4 come after §9.5.
 
 ### 9.4 Phonon 40M screening (2026-10-27, Mac CPU)
 
@@ -1319,7 +1398,8 @@ presets, and are not evaluated here.
   the first Mac run) and 4.0.1 (different file hashes). A pack installed under one release has an
   offline cache that the other cannot find, which first showed up as a bare Hub lookup error. The pack now
   records the `pocket-tts` version in its manifest and the engine says "installed with X, app has Y,
-  choose Repair" instead.
+  choose Repair" instead. That message pointed at a button that was hidden for a pack whose hashes
+  verify; the card now shows Repair after a failed load (`3121f68`, §5.2).
 - **Re-measured with 4.0.1 (what the app really serves):** clone similarity mean 0.953 for 18M against
   0.965 for the standard model (four references, three sentences). The listening verdict in §9.1 was
   on the 4.0.0 weights; `/tmp/pfbench/pl401/listen.html` has the 4.0.1 pairs for a re-listen.
@@ -1375,6 +1455,76 @@ Kitten 2 `1f00fee525c7b2e30bbe9ca9ba67529734fce9c9`. Tiny Kitten cards:
 [ptts 0.4.1](https://pypi.org/pypi/ptts/json) and Kitten C++
 [kitten-tts-cpp 0.2.0](https://pypi.org/pypi/kitten-tts-cpp/json) metadata re-checked 2026-10-23.
 Revalidate before locking.
+
+## 11. Outcome and open items
+
+Compiled on 2026-10-28 from the sections above and `git log main..HEAD`. Nothing here is new
+verification: each line points at the section or commit that records it.
+
+### 11.1 Built
+
+| Item | Commits | Section |
+| --- | --- | --- |
+| Engine registry, `/v1/models`, `/v1/audio/voices`; Pocket as the first adapter; pack manifests and verification; installer and worker process manager | `d339039`, `69ff568`, `d0feef0`, `58968dc` | §4.2-§4.5 |
+| Kitten TTS 2 pack: worker, API serving, eager CUDA fallback, background install, CUDA 13 detection, lazy adapter, install progress and Re-check | `3e0ce2c`, `669f7f9`, `dbd06fd`, `f009953`, `3715c00`, `1f62a98`, `715be6f`, `3eaca32` | §7.1 |
+| Text normaliser (numbers, codes, ISO dates) in front of Pocket | `1667acb`, `fd193f6` | §4.6 item 5 |
+| Phonon 31M pack, streaming and `speed` | `e97f1ae`, `7780023`, `237cf4e` | §7.1 |
+| Kokoro 82M pack; one shared adapter base for Phonon and Kokoro | `059a55b`, `f1e3ed6` | §7.1 |
+| Pocket Lite 18M; version-change notice; PCM streaming for Pocket Lite and Phonon | `d910ddc`, `313367e`, `470ef96`, `c2f7109` | §9.3, §9.3.1, §9.3.4 |
+| Built-in voice catalog, searchable picker, English filter, every installed engine, uninstalled engines' voices, gender and accent filters, picker sections and badges | `b43bd6c`, `72a1208`, `bd754f2`, `3479ff2`, `b21679d`, `45405a3` | §5.3, §5.6 |
+| API default explicit and preset-capable; Integrations IDs table, Speak snippets, actionable errors | `adbc46b`, `959ba9a` | §5.7 |
+| A pack voice as the API default, and the removal guard | `e01a7c1` | §5.3 |
+| Engine bindings, Prepare, imported prepared voices | `659f812` | §5.4 |
+| Speak engine choice and English enforcement on the API | `e13f135` | §5.6 |
+| Engine cards: hardware fit and quick benchmark | `4c007cf` | §5.2 |
+| Speed measured at pack install | `f4f78f6` | §4.6 item 2 |
+| Output loudness normalisation at the serving layer | `1300dca` | §4.6 item 4 |
+| `warming` state and retryable 503 | `20bd7cf` | §4.6 item 3 |
+| Manifest-driven idle unload for every pack engine | `9c0fe70` | §4.3 |
+| Engine details, Hugging Face token field, first-run nudge, install logs | `63bf39c` | §5.2 |
+| Global engine status chip | `551009d` | §5.1 |
+| Compare tab: blind, server-saved ratings, per-engine summary, reference clip, same-voice shortcut, warming label | `46a26f0`, `41f67a9`, `ad83d6c`, `4125d39` | §5.5 |
+| Compare engines from a saved voice's menu | `f041650` | §5.3 |
+| Compare auto-check hints (word error, speaker similarity) | `e8d0595` | §5.10 |
+| Pack tests in CI, Windows fixes | `bfb5793` | §8 |
+| Reference and user docs | `f42d322` (earlier feature docs: `33cc0c5`, `55ad0c6`) | §7.1.2 |
+| Docs-audit fixes: stale text, Repair after a failed load, Pocket Lite speed claim | `3121f68` | §5.2 |
+| Screening and listening records | `0799088`, `379423d`, `65e9c81`, `61b21e1`, `bfd7c2a`, `bac2db2`, `927e9b6`, `c3a3e55`, `8f81bcb`, `13ae17d`, `1f23f1a` | §9 |
+
+### 11.2 Evaluated, not integrated
+
+- **KokoClone:** §9.2 (leakage screen), §4.6 (bake-off).
+- **Phonon 40M:** §9.4 (no audible gain over 31M; `c3a3e55`).
+- **Pocket 7M and 2M:** §9.1 (robotic artifacts in listening; `bfd7c2a`).
+- **Kitten nano, mini, micro:** §0.1 (nano screened only).
+- **Kitten 2 C++/GGML:** fails to build on Windows and ships no prebuilt binaries (§9 item 3).
+- **Newer Pocket presets:** none to add (§9.5).
+
+### 11.3 Not built, and why
+
+| Item | Reason on record |
+| --- | --- |
+| Switching engines from a request ("Allow API requests to switch engines"; Make active as a switch) | **Not applicable.** Pack engines run beside the active backend, so there is nothing to switch; a swap among the built-in backends would need a lifecycle redesign (§4.3, §5.2, §5.6, §5.7). The API default (engine + voice) and **Use as API default…** are the substitute. |
+| Compile cache and shape-bucket warm-up | Not built (§4.6 item 3); the worker still compiles in-process. The `warming` state and the retryable 503 shipped instead. No other reason is recorded. |
+| Busy state in the status chip (and Busy in §5.8) | No request or queue signal exists to report it (§5.1). |
+| Compare ratings and auto-check scores stored together | The scores are not saved with the ratings and do not feed the engine summary; they are unvalidated hints (§5.10). |
+| Kitten gender "Female (est.)" confirmed by ear | 106 of 115 voices are estimated from pitch; the only check was the author's own judgement of 27 names, 22 agreeing (§5.3). No one listened. |
+| Built-in drawer **Compare…** action (§5.3) | Not built; the drawer has Use in Speak, Set as API default and Favorite. Compare is reached from a saved voice's menu (`f041650`) and from the Compare tab. |
+| Integrations-page loudness preference; loudness on streamed PCM | Env and request field only; a stream cannot know the clip's level and no measured gain table exists (§4.6 item 4). |
+| Preview cache | None of the engines ships upstream sample URLs (§5.3, §9 item 2). |
+| Conversational / Batch-quality tier labels (§6.3) | Not built; the plan records no decision. Found by searching the code, not from a plan note. |
+| Frame streaming for Kokoro | Excluded on purpose: sentence chunking would add audible seams (§9.3.4). |
+| A saved ID inheriting a pack default's engine when `model` is omitted | Not implemented (§5.7 "Limitations kept explicit"). |
+
+### 11.4 Untested environments and checks
+
+- **Linux CUDA:** the Kitten 2 install path is shared but untested (§7.1.2).
+- **Windows HTTP path and streaming:** Phonon, Kokoro and Pocket Lite ran through the engine classes there, not the HTTP app (§7.1, §9.3.2); Windows streaming was not measured (§9.3.4).
+- **Intel streaming:** not measured (§9.3.4).
+- **Pocket Lite 403 (`terms_not_accepted`) live:** needs an account that has not accepted the terms; only stub tests cover it (§5.2).
+- **A genuinely slow Kitten compile in the UI:** the "(warming up)" label in Compare was checked with a stubbed `/engines` response (§5.5).
+- **Streamed chunk seams by ear:** nobody has listened (§9.3.4).
+- **Also recorded elsewhere:** the broken-API-default 409 live (§5.7); the plain-language unsupported-CPU message beyond a unit test (§7.1); male voices and the owner's own recordings (§4.6); Pocket Lite re-listen on 4.0.1 weights (§9.3.1); non-English auto-check (§5.10); a real Kokoro run on Windows confirming its bundled espeak (§7.1).
 
 [k-card]: https://huggingface.co/hexgrad/Kokoro-82M
 [k-voices]: https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md
