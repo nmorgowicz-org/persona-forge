@@ -9,6 +9,8 @@ import {
   Search,
   Square,
   Star,
+  Trash2,
+  Upload,
   Volume2,
 } from 'lucide-react'
 import {
@@ -17,6 +19,7 @@ import {
   installEngine,
   listCatalogVoices,
   listEngines,
+  removeImportedVoice,
   setApiDefault,
   type ApiDefaultRecord,
   type BuiltInEngineSummary,
@@ -35,6 +38,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ImportVoiceDialog } from '@/components/voices/ImportVoiceDialog'
 import {
   Select,
   SelectContent,
@@ -109,6 +113,9 @@ export function BuiltInVoicesTab() {
   const [installingId, setInstallingId] = useState<string | null>(null)
   const [installJob, setInstallJob] = useState<EngineInstallJob | null>(null)
   const [installError, setInstallError] = useState<string | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
+  const [importNote, setImportNote] = useState<string | null>(null)
+  const [removingImport, setRemovingImport] = useState<string | null>(null)
   const previewToken = useRef(0)
   const mounted = useRef(true)
 
@@ -225,6 +232,32 @@ export function BuiltInVoicesTab() {
       if (mounted.current) setInstallError(String((err as Error)?.message || err))
     } finally {
       if (mounted.current) setInstallingId(null)
+    }
+  }
+
+  /** The engine that can import prepared voice files (Phonon), if the server offers one. */
+  const importer = engines.find((engine) => engine.import_prepared_voice) ?? null
+
+  async function reloadCatalog() {
+    const catalog = await listCatalogVoices()
+    if (!mounted.current) return
+    setVoices(catalog.voices)
+    setEngines(catalog.engines)
+  }
+
+  async function removeImport(voice: BuiltInVoiceMeta) {
+    if (!voice.engine) return
+    if (!window.confirm(`Remove the imported voice "${voice.display_name}"? Its file is deleted.`)) return
+    setRemovingImport(voice.voice_id)
+    setError(null)
+    try {
+      await removeImportedVoice(voice.engine, voice.builtin_voice)
+      setDetail(null)
+      await reloadCatalog()
+    } catch (err) {
+      setError(String((err as Error)?.message || err))
+    } finally {
+      if (mounted.current) setRemovingImport(null)
     }
   }
 
@@ -407,10 +440,47 @@ export function BuiltInVoicesTab() {
             Installed only
           </Button>
         )}
+        {importer && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            data-testid="add-imported-voice"
+            disabled={!importer.installed}
+            title={
+              importer.installed
+                ? `Add a prepared voice file to ${importer.label}`
+                : `Install ${importer.label} first: it checks every imported voice`
+            }
+            onClick={() => {
+              setImportNote(null)
+              setImportOpen(true)
+            }}
+          >
+            <Upload /> Add imported voice
+          </Button>
+        )}
         <span className="text-xs text-muted-foreground tabular-nums">
           {filtered.length} voice{filtered.length === 1 ? '' : 's'}
         </span>
       </div>
+
+      {importNote && (
+        <p role="status" data-testid="import-note" className="rounded-control border border-success/40 bg-success/10 px-3 py-2 text-xs text-success">
+          {importNote}
+        </p>
+      )}
+      {importer && (
+        <ImportVoiceDialog
+          engine={importer}
+          open={importOpen}
+          onOpenChange={setImportOpen}
+          onImported={(voiceId, displayName) => {
+            setImportNote(`Imported "${displayName}" as ${voiceId}. It is listed below and served like any built-in voice.`)
+            void reloadCatalog()
+          }}
+        />
+      )}
 
       {hiddenByLanguage > 0 && (
         <p className="text-xs text-muted-foreground">
@@ -555,6 +625,11 @@ export function BuiltInVoicesTab() {
                       {voice.age}
                     </Badge>
                   )}
+                  {voice.imported && (
+                    <Badge variant="secondary" className="text-[10px]" data-testid="imported-badge">
+                      Imported
+                    </Badge>
+                  )}
                   {needsInstall(voice) && (
                     <Badge variant="secondary" className="text-[10px]">
                       Needs install
@@ -631,6 +706,23 @@ export function BuiltInVoicesTab() {
                   {apiDefault?.voice === detail.voice_id && <Badge>API default</Badge>}
                 </div>
                 {detail.note && <p className="text-sm text-muted-foreground">{detail.note}</p>}
+                {detail.imported && detail.provenance && (
+                  <dl
+                    data-testid="import-provenance"
+                    className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-control border border-border bg-muted/20 p-2 text-[11px]"
+                  >
+                    <dt className="text-muted-foreground">Imported from</dt>
+                    <dd className="break-all">{detail.provenance.source_filename}</dd>
+                    <dt className="text-muted-foreground">Date</dt>
+                    <dd>{detail.provenance.imported_at}</dd>
+                    <dt className="text-muted-foreground">SHA-256</dt>
+                    <dd className="break-all font-mono">{detail.provenance.sha256}</dd>
+                    <dt className="text-muted-foreground">Size</dt>
+                    <dd>{detail.provenance.size.toLocaleString()} bytes</dd>
+                    <dt className="text-muted-foreground">Engine revision</dt>
+                    <dd className="font-mono">{detail.provenance.engine_revision || 'unknown'}</dd>
+                  </dl>
+                )}
                 {isPackVoice(detail) && (
                   <p className="text-xs text-muted-foreground">
                     To use this voice, pick {detail.engine_label} in the Engine selector on Speak, or pass{' '}
@@ -731,6 +823,18 @@ export function BuiltInVoicesTab() {
                     />
                     {favorites.includes(detail.voice_id) ? 'Favorited' : 'Favorite'}
                   </Button>
+                  {detail.imported && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      data-testid="remove-imported-voice"
+                      disabled={removingImport === detail.voice_id}
+                      onClick={() => void removeImport(detail)}
+                    >
+                      {removingImport === detail.voice_id ? <Loader2 className="animate-spin" /> : <Trash2 />} Remove imported voice
+                    </Button>
+                  )}
                 </div>
               </div>
             </>

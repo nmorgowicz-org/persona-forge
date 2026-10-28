@@ -13,7 +13,13 @@ from typing import Any, Callable, Iterator
 import numpy as np
 
 from persona_forge import engine_packs, pack_logs, voice_library
-from persona_forge.engine_lifecycle import IN_FLIGHT, IdleUnloader, LoadTracker, warm_wait_s
+from persona_forge.engine_lifecycle import (
+    IN_FLIGHT,
+    IdleUnloader,
+    LoadTracker,
+    wait_until_ready,
+    warm_wait_s,
+)
 from persona_forge.kitten2_engine import (
     EngineUnavailable,
     EngineWarming,
@@ -157,6 +163,7 @@ class PackPresetEngine:
 
     def _spawn(self) -> PackProcess:
         self._process = None
+        self._on_process_lost()
         self._load_info = {"mode": None, "fast_mode_issue": None}
         python = self._pack_python()
         if python is None:
@@ -175,6 +182,7 @@ class PackPresetEngine:
             if loaded.get("warmup_pending"):
                 self._tracker.enter("warming")
                 loaded = {**loaded, **process.request({"op": "warmup"}, timeout=WARMUP_TIMEOUT_S)}
+            self._on_loaded(load_request, loaded)
         except PackProcessError as exc:
             process.close()
             raise EngineUnavailable(str(exc)) from exc
@@ -182,6 +190,9 @@ class PackPresetEngine:
         self._load_info = {"mode": loaded.get("mode"), "fast_mode_issue": None}
         self._tracker.enter("ready")
         return process
+
+    def _on_loaded(self, request: dict[str, Any], reply: dict[str, Any]) -> None:
+        """Inspect per-voice load results before publishing the worker as ready."""
 
     def _arm_idle_timer(self) -> None:
         self._idle.arm()
@@ -205,10 +216,40 @@ class PackPresetEngine:
         """Called before the worker starts; engines that clone override this to allow saved voices."""
         self._refuse_clone(requested)
 
-    def _prepare_voice(self, process: PackProcess, requested: str) -> bool:
-        """Clone-capable engines prepare a saved voice here and return True; presets return False."""
-        del process, requested
+    def _prepare_voice(self, process: PackProcess, requested: str, *, force: bool = False) -> bool:
+        """Clone-capable engines prepare a saved voice here and return True; presets return False.
+
+        ``force`` re-runs the worker's prepare even if it already holds the voice (an explicit
+        Prepare, which must refresh the binding marker).
+        """
+        del process, requested, force
         return False
+
+    def _on_process_lost(self) -> None:
+        """The worker died; engines that remember prepared voices forget them here."""
+
+    def prepare_voice(self, voice_id: str, *, cancel: threading.Event | None = None) -> None:
+        """Prepare a saved voice now, instead of at its first synthesis (clone-capable engines).
+
+        Waits for a cold engine to load (this is a background job, not a request that can be
+        told to retry) and stops early when ``cancel`` is set. Preset-only engines refuse.
+        """
+        self._check_voice(voice_id)
+        wait_until_ready(self._await_ready, EngineWarming, cancel=cancel)
+        with self._lock:
+            process = self._ensure_started()
+            try:
+                prepared = self._prepare_voice(process, voice_id)
+            except PackProcessError:
+                if not process.is_alive:
+                    self._process = None
+                    self._on_process_lost()
+                raise
+            if not prepared:
+                raise InvalidVoice(
+                    f"{voice_id!r} is not a saved voice, or {self.label} cannot clone it."
+                )
+            self._arm_idle_timer()
 
     def _refuse_clone(self, requested: str) -> None:
         if requested and voice_library.get_voice(requested) is not None:

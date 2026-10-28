@@ -33,6 +33,7 @@ from persona_forge import (
     engine_packs,
     frontend,
     hf_access,
+    imported_voices,
     kitten2_engine,
     provisioned_engines,
     model,
@@ -48,7 +49,9 @@ from persona_forge import (
     hardware_fit,
     ui_preferences_store,
     voice_design,
+    voice_bindings,
     voice_library,
+    voice_prepare,
 )
 from persona_forge.asr_check import transcribe_reference_audio, validate_reference_text
 from persona_forge.alignment_jobs import AlignmentJobManager
@@ -499,7 +502,7 @@ def voices_builtin():
         return jsonify({"voices": voices})
     # Unified catalog: every pack engine's presets. An installed engine reports its own voices;
     # one that is not installed lists the bundled catalog so it can be browsed before installing.
-    engines = [{"id": "pocket-tts", "label": "Pocket TTS", "installed": True, "voices": len(voices)}]
+    engines = [{"id": "pocket-tts", "label": "Pocket TTS", "installed": True, "voices": len(voices), "import_prepared_voice": False}]
     for info in speech_engines.list_engines():
         provisioned = provisioned_engines.get(info.id)
         if provisioned is None:
@@ -531,8 +534,49 @@ def voices_builtin():
                 "engine_label": info.label,
                 "installed": installed,
             })
-        engines.append({"id": info.id, "label": info.label, "installed": installed, "voices": len(entries)})
+        imported = imported_voices.list_imported(info.id) if info.capabilities.import_prepared_voice else []
+        for record in imported:
+            voices.append({
+                "voice_id": record["voice_id"],
+                "builtin_voice": record["slug"],
+                "backend": info.id,
+                "display_name": record["display_name"],
+                "source": record["source_filename"],
+                "license": info.license,
+                "language": "English",
+                "language_code": "en",
+                "category": "imported",
+                "note": f"Imported {record['imported_at'][:10]} from {record['source_filename']}",
+                "gender": None,
+                "gender_source": None,
+                "accent": None,
+                "age": None,
+                "prompt": record["slug"],
+                "requires_backend": None,
+                "engine": info.id,
+                "engine_label": info.label,
+                "installed": installed,
+                "imported": True,
+                "provenance": {
+                    key: record.get(key)
+                    for key in ("source_filename", "sha256", "size", "imported_at", "engine_revision")
+                },
+            })
+        engines.append({
+            "id": info.id,
+            "label": info.label,
+            "installed": installed,
+            "voices": len(entries) + len(imported),
+            "import_prepared_voice": info.capabilities.import_prepared_voice,
+        })
     return jsonify({"voices": voices, "engines": engines})
+
+
+def _offered_voice_names(provisioned: Any) -> list[str]:
+    """Built-in voice names an installed pack engine serves: its presets plus the user's imports."""
+    names = list(provisioned.engine.list_presets())
+    imported = getattr(provisioned.engine, "list_imported", None)
+    return names + (list(imported()) if imported is not None else [])
 
 
 def _pack_voice_engine(voice: str | None) -> "speech_engines.EngineInfo | None":
@@ -579,7 +623,7 @@ def _api_default_problem(
         }
     prefix = provisioned.engine.PRESET_PREFIX
     if voice.startswith(prefix):
-        if voice[len(prefix):] not in provisioned.engine.list_presets():
+        if voice[len(prefix):] not in _offered_voice_names(provisioned):
             return {
                 "code": "voice_missing",
                 "engine": engine.id,
@@ -759,7 +803,7 @@ def _set_pack_default(
     assert provisioned is not None
     prefix = provisioned.engine.PRESET_PREFIX
     if voice.startswith(prefix):
-        if voice[len(prefix):] not in provisioned.engine.list_presets():
+        if voice[len(prefix):] not in _offered_voice_names(provisioned):
             return jsonify({"error": f"unknown {pack.label} voice: {voice}"}), 404
     else:
         if not pack.capabilities.clone:
@@ -941,6 +985,69 @@ def voices_transcribe(voice_id: str):
         return jsonify({"error": "voice_id not found"}), 404
     _invalidate_voice_clone_state(voice_id)
     return jsonify(updated)
+
+
+@app.get("/voices/engines")
+def voices_engines_all():
+    """Per-engine binding status for every saved voice in one call (no worker is contacted)."""
+    return jsonify(
+        {
+            "engines": [
+                {
+                    "id": engine.id,
+                    "label": engine.label,
+                    "clone": engine.capabilities.clone,
+                    "import_prepared_voice": engine.capabilities.import_prepared_voice,
+                }
+                for engine in speech_engines.list_engines()
+            ],
+            "voices": voice_bindings.all_bindings(),
+        }
+    )
+
+
+@app.get("/voices/<voice_id>/engines")
+def voices_engines_get(voice_id: str):
+    """Binding status of one saved voice on every engine (poll this while preparing)."""
+    bindings = voice_bindings.bindings_for_voice(voice_id)
+    if not bindings:
+        return jsonify({"error": "voice_id not found"}), 404
+    return jsonify({"voice_id": voice_id, "engines": bindings})
+
+
+@app.post("/voices/<voice_id>/engines/<engine_id>/prepare")
+def voices_engine_prepare(voice_id: str, engine_id: str):
+    """Prepare a saved voice on a cloning engine now; returns 202 and the binding to poll.
+
+    For an engine that clones with the transcript, ``transcript`` (typed words) or
+    ``transcript_confirmed: true`` (keep the stored words) is the review step.
+    """
+    data = request.get_json(silent=True)
+    data = data if isinstance(data, dict) else {}
+    transcript = data.get("transcript")
+    if transcript is not None and not isinstance(transcript, str):
+        return jsonify({"error": "transcript must be a string", "code": "bad_request"}), 400
+    try:
+        binding = voice_prepare.start(
+            voice_id,
+            engine_id,
+            transcript=transcript,
+            confirm_transcript=data.get("transcript_confirmed") is True,
+            on_transcript_saved=_invalidate_voice_clone_state,
+        )
+    except voice_prepare.PrepareRefused as refused:
+        return jsonify({"error": str(refused), "code": refused.code, **refused.extra}), refused.status
+    return jsonify({"binding": binding}), 202
+
+
+@app.delete("/voices/<voice_id>/engines/<engine_id>/prepare")
+def voices_engine_prepare_cancel(voice_id: str, engine_id: str):
+    """Stop a queued or waiting preparation. ``cancelled: false`` when none is running."""
+    cancelled = voice_prepare.cancel(voice_id, engine_id)
+    bindings = voice_bindings.bindings_for_voice(voice_id)
+    binding = next((b for b in bindings if b["engine"] == engine_id), None)
+    return jsonify({"cancelled": cancelled, "binding": binding})
+
 
 
 @app.post("/voices/<voice_id>/duplicate")
@@ -3042,6 +3149,53 @@ def engines_remove(engine_id: str):
     return jsonify({"removed": engine_id})
 
 
+def _import_refusal(refused: "imported_voices.ImportRefused"):
+    return jsonify({"error": str(refused), "code": refused.code}), refused.status
+
+
+@app.get("/engines/<engine_id>/imported-voices")
+def engines_imported_list(engine_id: str):
+    """Imported prepared voices of an engine, with their provenance."""
+    info = speech_engines.ENGINES.get(engine_id)
+    if info is None:
+        return jsonify({"error": "Unknown engine", "code": "unknown_engine"}), 404
+    if not info.capabilities.import_prepared_voice:
+        return jsonify({"error": f"{info.label} cannot import prepared voices.", "code": "import_unsupported"}), 400
+    return jsonify({"voices": imported_voices.list_imported(engine_id, include_broken=True)})
+
+
+@app.post("/engines/<engine_id>/imported-voices")
+def engines_imported_add(engine_id: str):
+    """Import a prepared voice file (multipart ``file`` + ``name``); validated, engine-checked, stored."""
+    upload = request.files.get("file")
+    if upload is None:
+        return jsonify({"error": "Choose a prepared voice file to import.", "code": "missing_file"}), 400
+    # Read one byte past the cap so an oversized upload is refused without buffering all of it.
+    data = upload.stream.read(imported_voices.MAX_FILE_BYTES + 1)
+    try:
+        record = imported_voices.import_voice(
+            engine_id,
+            filename=upload.filename or "",
+            data=data,
+            display_name=request.form.get("name") or "",
+        )
+    except imported_voices.ImportRefused as refused:
+        return _import_refusal(refused)
+    return jsonify({"voice": record}), 201
+
+
+@app.delete("/engines/<engine_id>/imported-voices/<slug>")
+def engines_imported_remove(engine_id: str, slug: str):
+    """Remove an imported voice (its file and provenance) and stop the engine serving it."""
+    try:
+        removed = imported_voices.remove(engine_id, slug)
+    except imported_voices.ImportRefused as refused:
+        return _import_refusal(refused)
+    if not removed:
+        return jsonify({"error": "No such imported voice.", "code": "not_found"}), 404
+    return jsonify({"removed": slug})
+
+
 def _voice_language_code(voice_id: str | None) -> str:
     """Language of a voice id: presets know theirs, saved voices carry it in their metadata."""
     if not voice_id:
@@ -3127,20 +3281,22 @@ def openai_voices():
                 }
             )
     for provisioned in provisioned_engines.all_engines():
-        for name in provisioned.engine.list_presets():
+        imported_names = set(getattr(provisioned.engine, "list_imported", lambda: [])())
+        for name in _offered_voice_names(provisioned):
             code = provisioned.engine.preset_language(name)
-            data.append(
-                {
-                    "voice_id": f"{provisioned.engine.PRESET_PREFIX}{name}",
-                    "object": "voice",
-                    "engine": provisioned.engine_id,
-                    "kind": "preset",
-                    "display_name": name,
-                    "language": "English" if code == "en" else code,
-                    "language_code": code,
-                    "servable": True,
-                }
-            )
+            entry = {
+                "voice_id": f"{provisioned.engine.PRESET_PREFIX}{name}",
+                "object": "voice",
+                "engine": provisioned.engine_id,
+                "kind": "preset",
+                "display_name": name,
+                "language": "English" if code == "en" else code,
+                "language_code": code,
+                "servable": True,
+            }
+            if name in imported_names:
+                entry["imported"] = True
+            data.append(entry)
     scope = request.args.get("language") or ui_preferences_store.load().get("voiceCatalog.language", "en")
     hidden = 0
     if scope != "all":

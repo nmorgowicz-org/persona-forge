@@ -106,10 +106,15 @@ POCKET_LITE_CAPABILITIES = EngineCapabilities(
     instructions=False,
 )
 
+# Phonon's runtime registers a precomputed speaker embedding (``TTS.add_voice(name, file)``), the
+# same safetensors format its catalog voices ship in, so prepared voice files can be imported even
+# though the 31M release has no speaker codec to clone from audio. Verified with a real catalog
+# voice re-imported under a new name (see ``imported_voices``). Kitten stays False on purpose: its
+# voices are read from the pinned snapshot at construction and there is no runtime add call.
 PHONON_CAPABILITIES = EngineCapabilities(
     clone=False,
     presets=True,
-    import_prepared_voice=False,
+    import_prepared_voice=True,
     streaming="frame",
     languages=("en",),
     speed=True,

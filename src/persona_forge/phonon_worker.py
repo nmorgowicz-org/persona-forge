@@ -12,10 +12,16 @@ Ops: ``ping``, ``load``, ``synthesize``, ``unload``. Phonon has no local cloning
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
+import os
+import re
+import stat
 import sys
+import tempfile
 import wave
+from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
 import numpy as np
@@ -65,11 +71,64 @@ def _default_factory() -> tuple[Any, list[str]]:
     return model, sorted(names)
 
 
+# Imported prepared voices are registered under a namespaced name the app generated; nothing else
+# is accepted, so an import can never replace a built-in voice or smuggle in a path.
+_IMPORT_NAME = re.compile(r"^imported-[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$")
+_MAX_IMPORT_BYTES = 1 << 20
+
+
+def _verified_import_bytes(path: str, digest: str | None) -> bytes:
+    """Read the original, not a substituted symlink/FIFO/device, and verify the parent's digest.
+
+    Keep this boundary self-contained: the pack worker runs as a script in its own environment,
+    without importing the application or its dependency stack. A ``digest`` is enforced when the
+    parent supplies one; without it the read is still bounded and symlink-safe.
+    """
+    source = Path(path)
+    directory_fd = None
+    try:
+        if source.is_symlink() or source.resolve() != source:
+            raise OSError("import paths must not contain symlinks")
+        before = source.lstat()
+        if not stat.S_ISREG(before.st_mode) or before.st_size > _MAX_IMPORT_BYTES:
+            raise OSError("not a bounded regular voice file")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        if os.open in os.supports_dir_fd:
+            directory_fd = os.open(
+                source.parent,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+            )
+            fd = os.open(source.name, flags, dir_fd=directory_fd)
+        else:
+            fd = os.open(source, flags)
+        with os.fdopen(fd, "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_size > _MAX_IMPORT_BYTES
+                or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+            ):
+                raise OSError("voice file changed while opening it")
+            data = handle.read(_MAX_IMPORT_BYTES + 1)
+        if len(data) > _MAX_IMPORT_BYTES or (
+            digest is not None and hashlib.sha256(data).hexdigest() != digest
+        ):
+            raise OSError("voice file no longer matches its verified SHA-256")
+        return data
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise WorkerError(f"import needs an existing verified .safetensors file: {exc}") from exc
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)
+
+
 class PhononWorker:
     def __init__(self, factory: Callable[[], tuple[Any, list[str]]] | None = None) -> None:
         self._factory = factory or _default_factory
         self._model: Any = None
         self._voices: list[str] = []
+        self._catalog_voices: frozenset[str] = frozenset()
+        self._imported: dict[str, tuple[str, str | None]] = {}
 
     def handle(self, request: Mapping[str, Any]) -> dict[str, Any]:
         op = request.get("op")
@@ -81,10 +140,86 @@ class PhononWorker:
     def _op_ping(self, _request: Mapping[str, Any]) -> dict[str, Any]:
         return {"ok": True, "loaded": self._model is not None}
 
-    def _op_load(self, _request: Mapping[str, Any]) -> dict[str, Any]:
+    def _op_load(self, request: Mapping[str, Any]) -> dict[str, Any]:
         if self._model is None:
             self._model, self._voices = self._factory()
-        return {"ok": True, "mode": "cpu", "voices": len(self._voices)}
+            self._catalog_voices = frozenset(self._voices)
+            self._imported = {}
+        failed: list[str] = []
+        for entry in request.get("imported") or []:
+            try:
+                self._register_import(entry.get("name"), entry.get("path"), entry.get("sha256"))
+            except (WorkerError, AttributeError):
+                failed.append(str(entry.get("name") if isinstance(entry, dict) else entry))
+        reply: dict[str, Any] = {"ok": True, "mode": "cpu", "voices": len(self._voices)}
+        if failed:
+            reply["imported_failed"] = failed
+        return reply
+
+    def _drop_import(self, name: str) -> None:
+        self._imported.pop(name, None)
+        if name not in self._catalog_voices:
+            self._voices = [voice for voice in self._voices if voice != name]
+
+    def _check_import(self, name: Any) -> None:
+        if isinstance(name, str) and name in self._imported:
+            path, digest = self._imported[name]
+            try:
+                _verified_import_bytes(path, digest)
+            except WorkerError as exc:
+                self._drop_import(name)
+                raise WorkerError(f"unknown preset {name!r}: imported voice changed: {exc}") from exc
+
+    def _register_import(self, name: Any, path: Any, digest: Any) -> None:
+        """Register a prepared voice file; the native parser's refusal is the final word.
+
+        With a digest the parse is pinned to the exact verified bytes: they are re-read once,
+        checked, and handed to the model as a private read-only copy, so substituting the file
+        between verification and parse cannot change what is served. Without a digest (a direct
+        registration) the file is only bounded-read and symlink-checked, and the path itself is
+        parsed; every later synthesis re-checks it either way (``_check_import``).
+        """
+        if self._model is None:
+            raise WorkerError("load the model first")
+        if not isinstance(name, str) or not _IMPORT_NAME.fullmatch(name):
+            raise WorkerError("an imported voice is named imported-<name>")
+        if name in self._catalog_voices:
+            raise WorkerError(f"{name!r} is a built-in voice name")
+        # Invalidate first: a failed replacement must never leave the old cached voice usable.
+        self._drop_import(name)
+        if (
+            not isinstance(path, str)
+            or not os.path.isabs(path)
+            or not path.endswith(".safetensors")
+            or not os.path.exists(path)
+        ):
+            raise WorkerError("import needs an existing .safetensors file at an absolute path")
+        if digest is not None and (not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None):
+            raise WorkerError("import needs the verified SHA-256 of the prepared voice")
+        pinned = digest is not None
+        data = _verified_import_bytes(path, digest)
+        try:
+            if pinned:
+                with tempfile.TemporaryDirectory(prefix="phonon-voice-") as directory:
+                    snapshot = Path(directory) / "voice.safetensors"
+                    snapshot.write_bytes(data)
+                    snapshot.chmod(0o400)
+                    try:
+                        self._model.add_voice(name, str(snapshot))
+                    finally:
+                        # Windows cannot unlink a read-only file.
+                        snapshot.chmod(0o600)
+            else:
+                self._model.add_voice(name, path)
+        except Exception as exc:  # the native loader's own message is the useful part
+            raise WorkerError(f"Phonon could not read this voice file: {exc}") from exc
+        self._imported[name] = (path, digest if isinstance(digest, str) else None)
+        if name not in self._voices:
+            self._voices = sorted([*self._voices, name])
+
+    def _op_import_voice(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        self._register_import(request.get("name"), request.get("path"), request.get("sha256"))
+        return {"ok": True, "voice": request.get("name")}
 
     def _op_synthesize(self, request: Mapping[str, Any]) -> dict[str, Any]:
         if self._model is None:
@@ -94,6 +229,7 @@ class PhononWorker:
             raise WorkerError("synthesize needs text")
         kwargs = self._prepare(request)
         audio = self._model.synth(text, **kwargs)
+        self._check_import(request.get("preset"))
         rate = int(getattr(self._model, "sample_rate", SAMPLE_RATE))
         return {
             "ok": True,
@@ -109,6 +245,7 @@ class PhononWorker:
         if preset:
             if preset not in self._voices:
                 raise WorkerError(f"unknown preset {preset!r}")
+            self._check_import(preset)
             kwargs["voice"] = preset
         seed = request.get("seed")
         if isinstance(seed, int):
@@ -129,6 +266,7 @@ class PhononWorker:
         stream = self._model.stream(text, **kwargs)
         try:
             for chunk in stream:
+                self._check_import(request.get("preset"))
                 pcm = (np.clip(np.asarray(chunk, dtype=np.float32), -1.0, 1.0) * 32767.0).astype("<i2")
                 yield {"ok": True, "chunk_b64": base64.b64encode(pcm.tobytes()).decode("ascii")}
         finally:
@@ -140,6 +278,8 @@ class PhononWorker:
     def _op_unload(self, _request: Mapping[str, Any]) -> dict[str, Any]:
         self._model = None
         self._voices = []
+        self._catalog_voices = frozenset()
+        self._imported = {}
         return {"ok": True}
 
 

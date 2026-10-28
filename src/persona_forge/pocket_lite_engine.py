@@ -8,18 +8,24 @@ voice states, separate process. Listening tests found this size close to the sta
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 from typing import Any
 
-from persona_forge import engine_packs, pocket_lite_pack, pocket_lite_worker, voice_library
+from persona_forge import (
+    engine_packs,
+    pocket_lite_pack,
+    pocket_lite_worker,
+    voice_bindings,
+    voice_library,
+)
 from persona_forge.kitten2_engine import EngineUnavailable, InvalidVoice
 from persona_forge.pack_preset_engine import PackPresetEngine
 from persona_forge.pack_process import PackProcess
 
 ENGINE_ID = pocket_lite_pack.ENGINE_ID
 PRESET_PREFIX = "pocket-lite:"
+PREPARE_TIMEOUT_S = 120.0  # encoding one reference clip on CPU takes seconds, not minutes
 
 __all__ = ["EngineUnavailable", "InvalidVoice", "PocketLiteEngine", "is_installed", "list_presets"]
 
@@ -60,7 +66,7 @@ class PocketLiteEngine(PackPresetEngine):
 
     def __init__(self, idle_unload_s: float | None = None, **kwargs: Any) -> None:
         super().__init__(idle_unload_s, **kwargs)
-        self._prepared: dict[str, tuple[str, float]] = {}
+        self._prepared: dict[str, dict[str, str]] = {}
 
     def _pack_python(self) -> Path | None:
         return pack_python()
@@ -120,7 +126,10 @@ class PocketLiteEngine(PackPresetEngine):
     def _check_voice(self, requested: str) -> None:
         del requested  # saved voices are cloned here, so nothing is refused up front
 
-    def _prepare_voice(self, process: PackProcess, requested: str) -> bool:
+    def _on_process_lost(self) -> None:
+        self._prepared.clear()
+
+    def _prepare_voice(self, process: PackProcess, requested: str, *, force: bool = False) -> bool:
         meta = voice_library.get_voice(requested) if requested else None
         if meta is None:
             return False
@@ -129,10 +138,16 @@ class PocketLiteEngine(PackPresetEngine):
             wav_path = wav_path.resolve()
         if not wav_path.is_file():
             raise InvalidVoice(f"The reference clip for voice {requested!r} is missing.")
-        stamp = os.stat(wav_path).st_mtime
-        if self._prepared.get(requested) != (str(wav_path), stamp):
+        key = voice_bindings.current_key(meta, ENGINE_ID)
+        if force or self._prepared.get(requested) != key:
             process.request(
-                {"op": "prepare", "voice_id": requested, "reference_path": str(wav_path)}
+                {"op": "prepare", "voice_id": requested, "reference_path": str(wav_path)},
+                timeout=PREPARE_TIMEOUT_S,
             )
-            self._prepared[requested] = (str(wav_path), stamp)
+            fresh = voice_bindings.meta_with_path(requested)
+            if fresh is None or voice_bindings.current_key(fresh, ENGINE_ID) != key:
+                self._prepared.pop(requested, None)
+                raise InvalidVoice("The voice changed during preparation. Prepare it again.")
+            self._prepared[requested] = key
+            voice_bindings.write_marker(requested, ENGINE_ID, key)
         return True

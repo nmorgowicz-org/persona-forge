@@ -426,6 +426,50 @@ an idle engine starts that load in the background. Nothing blocks until a gunico
   Remove is unavailable.
 - 404: no removable pack for that id.
 
+### POST /engines/{engine_id}/imported-voices
+
+Import a **prepared voice file**, not a recording. Currently only `phonon-31m` declares
+`import_prepared_voice: true`; Kitten's native `voices.json`/NPZ format is **not accepted**.
+Use **Voices → Built-in → Add imported voice** or multipart form fields:
+
+```sh
+curl -F 'name=My narrator' -F 'file=@voice.safetensors' \
+  http://localhost:8318/engines/phonon-31m/imported-voices
+```
+
+- `name`: 1–40 ASCII letters/digits/spaces/dots/underscores/dashes, starting with a letter or digit.
+  Generates a namespaced slug such as `imported-my-narrator`, never a filesystem path. An existing
+  name is not overwritten; catalog voices cannot be shadowed.
+- `file`: a plain filename ending in `.safetensors`, at most **1 MiB**. Paths/URLs, pickle,
+  Torch/NumPy archives, object arrays, malformed headers, extra tensors, non-finite or implausible
+  values and unsafe metadata are refused. Phonon 31M requires exactly `speaker_wavs`, `F32`,
+  shape `[1,512,125]`, with offsets covering exactly 256,000 payload bytes.
+- Validation is local/offline. The installed engine's own parser must also accept the file before
+  it is committed. The original catalog file can be imported under a **distinct name** to check
+  compatibility; Pocket voice states are not interchangeable with Phonon files.
+- 201: `{ "voice": { "engine", "slug", "voice_id", "display_name", "source_filename", "sha256",
+  "size", "imported_at", "engine_revision", "schema", "metadata" } }`.
+  Serve `voice_id` (e.g. `phonon:imported-my-narrator`) through `/v1/audio/speech`, or make it
+  the API default. Imports are stored separately from engine packs under
+  `<app data>/imported-voices` (`IMPORTED_VOICES_DIR` overrides).
+- Errors use `{ "error": "...", "code": "..." }`: 400 `invalid_name`, `invalid_filename`,
+  `bad_extension`, `missing_file` or `import_unsupported`; 404 `unknown_engine`; 409
+  `engine_not_installed` or `name_taken`; 413 `file_too_large`; 422 `invalid_voice_file` or
+  `engine_rejected`; 503 `engine_unavailable`. No record is kept on failure.
+
+### GET /engines/{engine_id}/imported-voices
+
+200: `{ "voices": [ ...provenance records... ] }`, with `broken: bool`. Damaged, incompatible or
+changed files are not offered for synthesis. 404 `unknown_engine`; 400 `import_unsupported`.
+Catalog endpoints include valid imports alongside presets; provenance never supplies a serving path.
+
+### DELETE /engines/{engine_id}/imported-voices/{slug}
+
+Delete only the app-owned imported file and its provenance, and forget the loaded copy. Catalog
+voices and source files are untouched. 200 `{ "removed": "<slug>" }`; 404 `not_found`; 400
+`invalid_name` for a non-import slug. If this voice was the API default, its record remains so the
+usual `api_default_unavailable` repair is visible rather than silently choosing another speaker.
+
 ### POST /generate/with_metrics
 
 - Purpose: Same generation as `/generate` but returns a JSON envelope with base64 audio,
@@ -917,6 +961,57 @@ Response:
   - 422: if Whisper detects no usable speech.
   - 503: if the model service is not ready.
 
+### GET /voices/engines, GET /voices/{voice_id}/engines
+
+Saved voice × engine readiness, without loading an engine or contacting a worker:
+
+- Collection: `{ "engines": [{ "id", "label", "clone", "import_prepared_voice" }],
+  "voices": { "<voice_id>": [ ...bindings... ] } }`.
+- One voice (including a dotted saved-variant ID): `{ "voice_id": "...", "engines": [ ...bindings... ] }`;
+  404 if the voice/reference is missing.
+- A binding has `engine`, `label`, `status`, `supported`, `installed`, `needs_transcript`,
+  `blocker`, `reason`, `error`, `prepared_at` (Unix seconds or null), `can_prepare`.
+- `status`: `ready` | `needs_preparation` | `preparing` | `failed` | `unsupported`.
+  Pocket is always ready (its existing per-request cloning); Phonon/Kokoro are unsupported for
+  local cloning, with reason `no local cloning`.
+- `blocker`: null | `engine_not_installed` | `transcript_missing` | `transcript_unreviewed`.
+  A stored ASR disagreement needs review until the user confirms/types the words; an audio-only
+  quality warning is not a transcript disagreement.
+- Ready markers match the **actual reference hash**, transcript hash when used, and installed pack
+  identity (revision, runtime variant, dependency/artifact pins and preparation/runtime settings).
+  Audio/active-variant edits, transcript edits for Kitten, or changed pack identity invalidate them.
+  Worker caches use the same identity; unloading only drops the in-memory state, rebuilt locally
+  on demand. Markers do not promise a loaded model or persist engine tensors.
+
+### POST /voices/{voice_id}/engines/{engine_id}/prepare
+
+Explicit preparation for `kitten2` or `pocket-lite`, serialized on the existing inference executor
+and through the same adapter lock/validation/cache used by lazy first-use preparation.
+No transcription/download occurs in this endpoint or during synthesis.
+
+- Body `{}` uses the stored transcript. For Kitten, `{ "transcript": "the exact words" }`
+  saves edited words as the user's own, or `{ "transcript_confirmed": true }` confirms the stored
+  words. Confirming empty text is not sufficient. Pocket Lite does not use a transcript.
+- 202 `{ "binding": { ... } }`: queued/running (`preparing`) or already `ready`.
+  Duplicate Prepare clicks do not enqueue duplicates. **Poll `GET /voices/{voice_id}/engines`**
+  until ready/failed/needs_preparation; this is not an install job.
+- 409 `transcript_review`: `{ "error": "...", "code": "transcript_review",
+  "reason": "missing"|"unreviewed", "transcript": "<stored words>" }`.
+  Show the reference and let the user confirm/edit before retrying. The existing explicit
+  `/voices/{voice_id}/transcribe` action may generate text; review it before preparing.
+- Other errors: 400 `bad_request` (non-string transcript), `unsupported` (no local cloning) or
+  `nothing_to_prepare` (Pocket); 404 `unknown_engine` or `voice_not_found`; 409
+  `engine_not_installed` or `preparation_busy` (editing through Prepare while a job is running).
+- A worker failure becomes binding `failed` with an actionable error; retry Prepare. A queued
+  job whose inputs changed cannot mark those new inputs ready. Missing/unreviewed Kitten words
+  also fail lazy synthesis with an actionable 400, never a request-time Whisper pass.
+
+### DELETE /voices/{voice_id}/engines/{engine_id}/prepare
+
+200 `{ "cancelled": bool, "binding": { ... }|null }`. Cancels queued/loading preparation;
+`false` means no job was running. An already executing worker operation is bounded by its timeout
+and may finish ready; cancellation is not reported as a preparation failure.
+
 ### DELETE /voices/{voice_id}
 
 - Purpose: Delete a voice from the library.
@@ -932,7 +1027,8 @@ Response:
 
 ### GET /voices/built-in
 
-- Purpose: List the curated built-in voices for the Pocket TTS backend.
+- Purpose: List Pocket's curated built-in voices; `?engines=all` also includes pack presets and
+  valid imported prepared voices.
 
 Response (JSON):
 
@@ -940,6 +1036,10 @@ Response (JSON):
   - `voice_id` (string, e.g. "pocket:amy"), `builtin_voice`, `backend` ("pocket_tts"),
     `display_name`, `source`, `license`, `language`, `language_code`, `category`, `note`,
     `prompt`, `requires_backend` ("pocket_tts").
+- With `engines=all`, entries also carry `engine`, `engine_label`, `installed`, and imports carry
+  `imported: true` plus `provenance` (`source_filename`, `sha256`, `size`, `imported_at`,
+  `engine_revision`). The `engines` summary includes `import_prepared_voice`.
+
 
 ### POST /voices/{voice_id}/duplicate
 

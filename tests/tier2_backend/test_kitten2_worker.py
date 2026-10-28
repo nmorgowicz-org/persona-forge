@@ -141,12 +141,29 @@ def test_prepare_requires_existing_reference():
         worker.handle({"op": "prepare", "voice_id": "vd_1", "reference_path": "/nope.wav"})
 
 
+@pytest.mark.parametrize("text", [None, "", "   "])
+def test_prepare_refuses_missing_words_so_synthesis_cannot_start_whisper(tmp_path: Path, text):
+    reference = tmp_path / "ref.wav"
+    reference.write_bytes(b"RIFF")
+    worker, stub = make_worker()
+    worker.handle({"op": "load", "warmup": False})
+    with pytest.raises(kw.WorkerError, match="transcript"):
+        worker.handle({
+            "op": "prepare", "voice_id": "v", "reference_path": str(reference),
+            "reference_text": text,
+        })
+    assert stub.calls == []
+
+
 def test_unload_drops_model_and_prepared_voices(tmp_path: Path):
     reference = tmp_path / "ref.wav"
     reference.write_bytes(b"RIFF")
     worker, _ = make_worker()
     worker.handle({"op": "load", "warmup": False})
-    worker.handle({"op": "prepare", "voice_id": "v", "reference_path": str(reference)})
+    worker.handle({
+        "op": "prepare", "voice_id": "v", "reference_path": str(reference),
+        "reference_text": "Some words.",
+    })
     worker.handle({"op": "unload"})
     assert worker.handle({"op": "ping"})["loaded"] is False
     with pytest.raises(kw.WorkerError):

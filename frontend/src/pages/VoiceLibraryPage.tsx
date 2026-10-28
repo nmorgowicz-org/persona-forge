@@ -73,6 +73,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { BuiltInVoicesTab } from '@/components/voices/BuiltInVoicesTab'
 import { CompareTab } from '@/components/voices/CompareTab'
+import { VoiceEnginesRow } from '@/components/voices/VoiceEnginesRow'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useProsodyEditor } from '@/components/prosody/useProsodyEditor'
 import { ProsodyControls } from '@/components/prosody/ProsodyControls'
@@ -763,6 +764,8 @@ function VoiceCard({
   onFocusOnMountConsumed,
   projects,
   onSetProject,
+  libraryVersion,
+  onOpenEngines,
 }: {
   voice: VoiceMeta
   busy: boolean
@@ -800,6 +803,10 @@ function VoiceCard({
   onFocusOnMountConsumed?: () => void
   projects: Project[]
   onSetProject: (voiceId: string, projectId: string) => void
+  // Bumped whenever the library reloads, so the Engines row refetches a voice's binding status
+  // after any edit to its transcript or audio.
+  libraryVersion: number
+  onOpenEngines: () => void
 }) {
 
   const reducedMotion = useReducedMotionSafe()
@@ -1056,6 +1063,14 @@ function VoiceCard({
          )}
        </div>
 
+      <VoiceEnginesRow
+        voiceId={voice.voice_id}
+        transcript={voice.sample_text}
+        refreshToken={libraryVersion}
+        onTranscribe={onTranscribe}
+        onOpenEngines={onOpenEngines}
+      />
+
        <QualityGatePanel
          voice={voice}
          busy={busy}
@@ -1236,6 +1251,8 @@ export function VoiceLibraryPage() {
     }
   }, [voiceLibraryFocusVoiceId, deepLinkProsodyVoiceId, activeTab])
 
+  const [libraryVersion, setLibraryVersion] = useState(0)
+
   async function refresh() {
     const [v, segs, projs] = await Promise.all([
       listVoices().catch((err) => {
@@ -1248,6 +1265,7 @@ export function VoiceLibraryPage() {
     storeSetVoices(v)
     storeSetSegments(segs)
     setProjects(projs)
+    setLibraryVersion((version) => version + 1)
   }
 
   // Whether a load has ever completed. The store starts empty, so without this "you have no
@@ -1717,6 +1735,8 @@ export function VoiceLibraryPage() {
       onRefresh={refresh}
       projects={projects}
       onSetProject={moveVoiceToProject}
+      libraryVersion={libraryVersion}
+      onOpenEngines={() => setPage('runtime')}
     />
   )
 

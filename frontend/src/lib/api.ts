@@ -178,6 +178,15 @@ export interface BuiltInVoiceMeta {
   gender_source?: 'upstream' | 'name' | 'estimated' | null
   accent?: string | null
   age?: string | null
+  /** True for a prepared voice the user imported (removable; carries provenance). */
+  imported?: boolean
+  provenance?: {
+    source_filename: string
+    sha256: string
+    size: number
+    imported_at: string
+    engine_revision: string
+  } | null
 }
 
 export interface BuiltInEngineSummary {
@@ -185,6 +194,8 @@ export interface BuiltInEngineSummary {
   label: string
   installed: boolean
   voices: number
+  /** Whether this engine can import prepared voice files (Phonon today). */
+  import_prepared_voice?: boolean
 }
 
 
@@ -719,6 +730,117 @@ export async function removeEngine(engineId: string): Promise<void> {
   const res = await fetch(`/engines/${encodeURIComponent(engineId)}/remove`, {
     method: 'POST',
   })
+  if (!res.ok) throw new Error(await readError(res))
+}
+
+// -- Saved voice x engine bindings (My voices "Engines" row) ------------------------------------------
+
+export type BindingStatus = 'ready' | 'needs_preparation' | 'preparing' | 'failed' | 'unsupported'
+
+export interface VoiceEngineBinding {
+  engine: string
+  label: string
+  status: BindingStatus
+  /** False for an engine that cannot clone from a recording (Phonon, Kokoro). */
+  supported: boolean
+  installed: boolean
+  needs_transcript: boolean
+  blocker: 'engine_not_installed' | 'transcript_missing' | 'transcript_unreviewed' | null
+  reason: string | null
+  error: string | null
+  prepared_at: number | null
+  can_prepare: boolean
+}
+
+export async function getVoiceEngineBindings(voiceId: string): Promise<VoiceEngineBinding[]> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/engines`)
+  if (!res.ok) throw new Error(await readError(res))
+  return (await res.json()).engines ?? []
+}
+
+/** The server wants the transcript confirmed or typed before an engine that clones with it can prepare. */
+export class TranscriptReviewRequired extends Error {
+  reason: 'missing' | 'unreviewed'
+  transcript: string
+  constructor(message: string, reason: 'missing' | 'unreviewed', transcript: string) {
+    super(message)
+    this.name = 'TranscriptReviewRequired'
+    this.reason = reason
+    this.transcript = transcript
+  }
+}
+
+/**
+ * Start preparing a saved voice on an engine. Resolves with the binding (`preparing`); poll
+ * `getVoiceEngineBindings`. Rejects with `TranscriptReviewRequired` when the words need review.
+ */
+export async function prepareVoiceOnEngine(
+  voiceId: string,
+  engineId: string,
+  review?: { transcript?: string; transcriptConfirmed?: boolean },
+): Promise<VoiceEngineBinding> {
+  const res = await fetch(
+    `/voices/${encodeURIComponent(voiceId)}/engines/${encodeURIComponent(engineId)}/prepare`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...(review?.transcript !== undefined ? { transcript: review.transcript } : {}),
+        ...(review?.transcriptConfirmed ? { transcript_confirmed: true } : {}),
+      }),
+    },
+  )
+  const body = await res.json().catch(() => ({}))
+  if (res.status === 409 && body?.code === 'transcript_review') {
+    throw new TranscriptReviewRequired(body.error, body.reason, body.transcript ?? '')
+  }
+  if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`)
+  return body.binding
+}
+
+export async function cancelVoicePreparation(voiceId: string, engineId: string): Promise<void> {
+  const res = await fetch(
+    `/voices/${encodeURIComponent(voiceId)}/engines/${encodeURIComponent(engineId)}/prepare`,
+    { method: 'DELETE' },
+  )
+  if (!res.ok) throw new Error(await readError(res))
+}
+
+// -- Imported prepared voices (Built-in -> Add imported voice) -----------------------------------------
+
+export interface ImportedVoiceRecord {
+  engine: string
+  slug: string
+  voice_id: string
+  display_name: string
+  source_filename: string
+  sha256: string
+  size: number
+  imported_at: string
+  engine_revision: string
+}
+
+export async function importPreparedVoice(
+  engineId: string,
+  file: File,
+  name: string,
+): Promise<ImportedVoiceRecord> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('name', name)
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/imported-voices`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return (await res.json()).voice
+}
+
+export async function removeImportedVoice(engineId: string, slug: string): Promise<void> {
+  const res = await fetch(
+    `/engines/${encodeURIComponent(engineId)}/imported-voices/${encodeURIComponent(slug)}`,
+    { method: 'DELETE' },
+  )
   if (!res.ok) throw new Error(await readError(res))
 }
 

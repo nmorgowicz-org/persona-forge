@@ -1,9 +1,9 @@
 # Multi-engine speech: Kokoro, Phonon, Kitten TTS, and first-class built-in voices
 
-**Date:** 2026-10-23 (revised same day after review and Phase B screening). **Status:** research-backed
-proposal; no integration implemented. Phase B technical screening and an objective cloning bake-off
-have run (see [20261023-phase-b-screening.md](20261023-phase-b-screening.md)); the blind listening
-pass has not, so no engine is quality-ranked yet.
+**Date:** 2026-10-23 (updated through 2026-10-28). **Status:** implementation in progress; the engine
+framework, optional packs and voice UI described as **Built** below are integrated. Phase B
+screening and an objective cloning bake-off have run (see
+[20261023-phase-b-screening.md](20261023-phase-b-screening.md)); no final engine quality ranking.
 
 **Purpose:** turn Persona Forge from a single-renderer app (Pocket-TTS) into a **multi-engine**
 speech studio where:
@@ -212,8 +212,11 @@ See [runtime invariants](../agent-reference/RUNTIME_AND_MEMORY.md),
 - **Engine state (shown in UI):** `not_installed` → `downloading` → `installed` (idle, loads on
   demand) → `loading` → `active` → (`idle_unloaded` = still "Ready") ; plus `failed` with reason and
   `needs_token` for gated downloads. Keep install state, active engine, and API default separate.
-- Imported prepared voices (Phonon files, Kitten native `voices.json` entries) are untrusted: validate
-  schema, shapes/dtypes, sizes, revision; reject pickle/object arrays and arbitrary paths/URLs.
+- Imported prepared voices are untrusted: validate schema, shapes/dtypes, sizes, revision;
+  reject pickle/object arrays and arbitrary paths/URLs. Only engines with a runtime add-voice
+  operation and a pinned file schema accept them — Phonon (`TTS.add_voice` safetensors, §5.4).
+  Kitten native `voices.json`/NPZ is not importable: its runtime reads the pinned snapshot at
+  construction and has no add call.
 
 ### 4.2 Adapter interface
 
@@ -559,8 +562,41 @@ Finding while doing this: Kitten has no language field, and only some voice ids 
   cloning)). Hover/tap explains why.
 - **Prepare for…** runs preparation (transcript review step when the engine needs one and the stored
   transcript is unreviewed or mismatched).
-- Import prepared voice (Phonon file / Kitten native) appears as an action under Built-in → "Add
-  imported voice", stored with provenance.
+- Import prepared voice appears under Built-in → "Add imported voice", stored with provenance.
+  **Format decision:** Phonon 31M safetensors only. Kitten native `voices.json`/NPZ is not
+  importable: its runtime reads the pinned snapshot at construction, has no add-voice operation,
+  and importing arbitrary archives would open an unpickling-capable path.
+
+**Built (item 7):** `voice_bindings.py`, `voice_prepare.py`, `imported_voices.py`; the My voices
+Engines row and Built-in import dialog, provenance and removal. Existing families and saved
+variants remain unchanged. Keyboard-focusable chips explain Ready/Prepare/Preparing/Failed and
+why preset-only engines cannot clone. Missing/mismatched transcript text is editable/confirmable;
+the existing user-clicked Whisper action is separate, never invoked by preparation or synthesis.
+
+Bindings are keyed by resolved audio content, transcript where used, and the pack's
+revision/runtime/dependency/artifact/settings identity. Lazy and explicit preparation use that
+same key, reject unreviewed Kitten words, and revalidate inputs before publishing readiness.
+Explicit jobs use the existing single-worker inference executor, not a second model-work pool;
+adapter locks serialize them with pack synthesis. Worker loss clears in-memory prepared caches;
+idle unload preserves the validated marker but rebuilds state locally on next use.
+
+Imports are size-bounded, schema-checked non-executable safetensors; names and all stored paths
+are app-generated, files carry filename/SHA-256/date/revision provenance, and the real Phonon parser
+must accept them before publication. Invalid/stale imports are not served, and removal forgets the
+warm copy without touching the source/catalog. HTTP contracts: [API reference](../api/HTTP_API_REFERENCE.md).
+
+**Verified (2026-10-28, Mac, real packs in `/tmp/pf_all`, headless browser):** the Engines row chips
+(Pocket ✓ Ready, Kitten 2 • Prepare, Pocket Lite · Install to use, Phonon/Kokoro — not supported);
+explicit Prepare for Kitten 2 ran on the real MLX pack and flipped the chip … Preparing → ✓ Ready;
+editing the voice's reference text flipped it back to • Prepare; a missing transcript is refused at
+Prepare time with a review/edit step (never a request-time Whisper download), and Kitten's worker
+returns a plain 400 when asked to clone without words. A real pinned Phonon catalog voice file was
+re-imported under a distinct name through the UI (validation, engine round trip, provenance sheet,
+`Imported` badge), served through `/v1/audio/speech`, and removed with a confirm dialog that leaves
+the catalog file untouched; pickle/shape/path/extension rejects return the documented 400/422 codes.
+The catalog roundtrip is also covered by `test_real_catalog_safetensors_roundtrip_when_fixture_is_supplied`
+(set `PHONON_CATALOG_VOICE_FILE`).
+
 
 ### 5.5 Compare (A/B) tab
 
@@ -829,8 +865,8 @@ packages and a second torch consumer, so it stays a **pack with its own venv and
 
 1. **Worker** (`kitten2_worker.py`, runs inside the pack venv): ops `ping`, `load` (device and
    backend chosen at load: `mlx` on Apple silicon, `cuda` with `cache_implementation="static"` on
-   NVIDIA, otherwise refuse), `prepare` (reference audio plus transcript, so Whisper runs at
-   preparation and never during a request, per §4.6 item 6), `synthesize`, `unload`. A first
+   NVIDIA, otherwise refuse), `prepare` (reference audio plus reviewed transcript; Whisper never
+   runs in the worker or during a request, per §4.6 item 6), `synthesize`, `unload`. A first
    synthesize on CUDA compiles for about 33 s, so `load` runs a warm-up request and the UI shows
    "warming up" instead of hanging.
 2. **Pack manifest** for `kitten2` with per-platform runtime variants (`python-mlx`, `python-cuda`),

@@ -245,10 +245,11 @@ class Kitten2Worker:
         if not isinstance(reference, str) or not os.path.isfile(reference):
             raise WorkerError("prepare needs an existing reference_path")
         text = request.get("reference_text")
-        # Without a transcript kittenml loads Whisper on first use, so callers should send one.
+        if not isinstance(text, str) or not text.strip():
+            raise WorkerError("prepare needs a reviewed transcript; transcription never runs during synthesis")
         self._voices[voice_id] = {
             "reference": reference,
-            "reference_text": text if isinstance(text, str) and text.strip() else None,
+            "reference_text": text.strip(),
         }
         return {"ok": True, "voice_id": voice_id, "has_transcript": bool(text)}
 

@@ -17,8 +17,21 @@ from typing import Any, Callable, Iterator
 
 import numpy as np
 
-from persona_forge import engine_packs, kitten2_pack, kitten2_worker, pack_logs, voice_library
-from persona_forge.engine_lifecycle import IN_FLIGHT, IdleUnloader, LoadTracker, warm_wait_s
+from persona_forge import (
+    engine_packs,
+    kitten2_pack,
+    kitten2_worker,
+    pack_logs,
+    voice_bindings,
+    voice_library,
+)
+from persona_forge.engine_lifecycle import (
+    IN_FLIGHT,
+    IdleUnloader,
+    LoadTracker,
+    wait_until_ready,
+    warm_wait_s,
+)
 from persona_forge.pack_process import PackProcess, PackProcessError
 
 ENGINE_ID = "kitten2"
@@ -31,6 +44,7 @@ LOAD_TIMEOUT_S = 300.0
 WARMUP_TIMEOUT_S = 600.0
 WARMUP_ESTIMATE_S = 35.0  # measured: about 33 s for the first compiled call on a 5090
 REQUEST_TIMEOUT_S = 240.0
+PREPARE_TIMEOUT_S = 120.0  # one ``prepare`` op on a loaded worker; it only records the reference
 
 
 class EngineUnavailable(RuntimeError):
@@ -163,7 +177,8 @@ class Kitten2Engine:
         )
         self._lock = threading.RLock()
         self._process: PackProcess | None = None
-        self._prepared: dict[str, tuple[str, float]] = {}
+        # Use the exact binding identity for both lazy and explicit preparation.
+        self._prepared: dict[str, dict[str, str]] = {}
         self._load_info: dict[str, Any] = {}
         # idle | loading | warming | ready | error, with elapsed time while loading or warming.
         self._tracker = LoadTracker(estimates={"warming": WARMUP_ESTIMATE_S})
@@ -307,8 +322,16 @@ class Kitten2Engine:
 
     # -- synthesis -----------------------------------------------------------------------------
 
-    def _prepare_saved_voice(self, process: PackProcess, voice_id: str) -> bool:
-        """Prepare a saved voice for cloning. Returns False when ``voice_id`` is not saved."""
+    def _prepare_saved_voice(
+        self, process: PackProcess, voice_id: str, *, force: bool = False
+    ) -> bool:
+        """Prepare a saved voice for cloning. Returns False when ``voice_id`` is not saved.
+
+        The worker's copy is keyed by reference file *and* transcript, so editing the words
+        re-prepares it. Each successful prepare records a binding marker (``voice_bindings``);
+        ``force`` re-runs it even when the worker already holds the voice, which is what an
+        explicit Prepare needs so a stale marker is refreshed.
+        """
         meta = voice_library.get_voice(voice_id)
         if meta is None:
             return False
@@ -325,19 +348,53 @@ class Kitten2Engine:
                 "This voice has no transcript, which Kitten TTS 2 needs to clone it. Open the "
                 "voice in Voice Library and choose Transcribe (or type the words), then try again."
             )
-        stamp = wav_path.stat().st_mtime
-        cached = self._prepared.get(voice_id)
-        if cached is None or cached != (str(wav_path), stamp):
+        if voice_bindings.transcript_unreviewed(meta):
+            raise InvalidVoice(
+                "Review the transcript in Voice Library and confirm or edit the words before "
+                "preparing this voice for Kitten TTS 2."
+            )
+        key = voice_bindings.current_key(meta, ENGINE_ID)
+        if force or self._prepared.get(voice_id) != key:
             process.request(
                 {
                     "op": "prepare",
                     "voice_id": voice_id,
                     "reference_path": str(wav_path),
                     "reference_text": transcript,
-                }
+                },
+                timeout=PREPARE_TIMEOUT_S,
             )
-            self._prepared[voice_id] = (str(wav_path), stamp)
+            fresh = voice_bindings.meta_with_path(voice_id)
+            if fresh is None or voice_bindings.current_key(fresh, ENGINE_ID) != key:
+                self._prepared.pop(voice_id, None)
+                raise InvalidVoice("The voice changed during preparation. Prepare it again.")
+            self._prepared[voice_id] = key
+            voice_bindings.write_marker(voice_id, ENGINE_ID, key)
         return True
+
+    def prepare_voice(self, voice_id: str, *, cancel: threading.Event | None = None) -> None:
+        """Prepare a saved voice now, instead of at its first synthesis.
+
+        Waits for a cold engine to load (an explicit preparation is a background job, not a
+        request that can be told to retry), then runs the worker's ``prepare`` bounded by
+        ``PREPARE_TIMEOUT_S``. Raises ``InvalidVoice`` for an unknown voice or a missing
+        transcript, so the transcript is resolved here and never during a request.
+        """
+        wait_until_ready(self._await_ready, EngineWarming, cancel=cancel)
+        with self._lock:
+            process = self._ensure_started()
+            try:
+                prepared = self._prepare_saved_voice(process, voice_id)
+            except PackProcessError:
+                if not process.is_alive:
+                    self._process = None
+                    self._prepared.clear()
+                raise
+            if not prepared:
+                raise InvalidVoice(
+                    f"{voice_id!r} is not a saved voice, or its reference clip is missing."
+                )
+            self._arm_idle_timer()
 
     def synthesize(
         self,

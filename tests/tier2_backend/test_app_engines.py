@@ -632,7 +632,10 @@ def test_builtin_catalog_lists_pack_presets_only_when_asked(client, monkeypatch)
     ids = {v["voice_id"] for v in full["voices"]}
     assert {"kokoro:af_heart", "kokoro:ff_siwis"} <= ids
     kokoro = next(e for e in full["engines"] if e["id"] == "kokoro")
-    assert kokoro == {"id": "kokoro", "label": "Kokoro 82M", "installed": True, "voices": 2}
+    assert kokoro == {
+        "id": "kokoro", "label": "Kokoro 82M", "installed": True, "voices": 2,
+        "import_prepared_voice": False,
+    }
     assert next(v for v in full["voices"] if v["voice_id"] == "kokoro:ff_siwis")["language_code"] == "fr"
     assert all(v["installed"] for v in full["voices"])
 

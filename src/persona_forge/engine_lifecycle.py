@@ -35,6 +35,39 @@ def warm_wait_s() -> float:
         return DEFAULT_WARM_WAIT_S
 
 
+PREPARE_PATIENCE_S = 600.0  # longest an explicit preparation waits for a cold engine to load
+
+
+class PrepareCancelled(RuntimeError):
+    """A preparation was cancelled before it reached the worker."""
+
+
+def wait_until_ready(
+    await_ready: Callable[[], None],
+    retry_on: type[Exception],
+    *,
+    cancel: threading.Event | None = None,
+    patience_s: float = PREPARE_PATIENCE_S,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
+    """Call an adapter's ``await_ready`` until the engine can serve.
+
+    A request that meets a cold engine gets a retryable 503; an explicit preparation is a
+    background job with nobody to retry it, so it keeps waiting (bounded by ``patience_s``)
+    and stops early when ``cancel`` is set. Errors other than ``retry_on`` propagate.
+    """
+    deadline = clock() + patience_s
+    while True:
+        if cancel is not None and cancel.is_set():
+            raise PrepareCancelled("Preparation was cancelled.")
+        try:
+            await_ready()
+            return
+        except retry_on:
+            if clock() >= deadline:
+                raise
+
+
 class LoadTracker:
     """Thread-safe load state with elapsed time and, where known, an estimate for the phase."""
 

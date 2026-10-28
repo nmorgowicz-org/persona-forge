@@ -344,6 +344,33 @@ def idle_unload_after(engine_id: str, root: Path | None = None) -> float | None:
         return None
 
 
+def binding_revision(engine_id: str, root: Path | None = None) -> str:
+    """Short identity of what an installed pack was built from; ``""`` when there is no pack.
+
+    Derived from the manifest's version, pinned revision and requirement pins, so a repair or
+    upgrade that changes the runtime or weights changes it, while an unrelated manifest edit does
+    not. Saved-voice bindings are keyed by it (plan §4.1).
+    """
+    directory = find_pack_dir(engine_id, root)
+    if directory is None:
+        return ""
+    try:
+        manifest = load_manifest(directory)
+    except PackManifestError:
+        return ""
+    identity = json.dumps(
+        [
+            manifest.version, manifest.revision, manifest.runtime, sorted(manifest.requirements),
+            [(a.path, a.sha256, a.size) for a in manifest.artifacts],
+            manifest.raw.get("runtime_settings", {}),
+            manifest.raw.get("preparation_settings", {}),
+        ],
+        sort_keys=True, separators=(",", ":"),
+    )
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+
+
+
 def _download_artifact(url: str, dest: Path, artifact: PackArtifact, *, allow_file: bool) -> None:
     """Download with byte-range resume, then verify size and hash before publishing."""
     parsed = urlparse(url)
