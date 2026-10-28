@@ -37,6 +37,22 @@ jobs:
         with:
           node-version: "24"
 
+      # A self-hosted setup can return without a complete Node installation. Fail at the
+      # toolchain boundary, not later as a misleading Renovate configuration failure.
+      - name: Verify Node toolchain (including npx)
+        run: |
+          command -v node npm npx
+          node --version
+          node -e '
+            const [major, minor] = process.versions.node.split(".").map(Number);
+            if (major !== 24 || minor < 11) {
+              console.error(`Expected Node ^24.11.0, got ${process.version}`);
+              process.exit(1);
+            }
+          '
+          npm --version
+          npx --version
+
       - name: Install validation dependencies
         run: python -m pip install -r requirements-dev.txt
 
