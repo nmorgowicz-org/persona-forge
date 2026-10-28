@@ -80,8 +80,7 @@ def test_worker_defaults_to_a_preset():
 def test_a_seed_is_applied_to_every_generator_the_model_draws_from(monkeypatch):
     import random
 
-    import torch
-
+    torch = pytest.importorskip("torch")  # the lean CI lane installs no torch
     worker, _ = make_worker()
     worker.handle({"op": "load"})
     draws = []

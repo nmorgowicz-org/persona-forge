@@ -21,6 +21,7 @@ class Recorder:
     def __init__(self, fail_on: str | None = None):
         self.commands: list[list[str]] = []
         self.fail_on = fail_on
+        self.platform: str | None = None  # the platform the install under test is pretending to be
 
     def __call__(self, command, env=None):
         self.commands.append([str(part) for part in command])
@@ -30,13 +31,17 @@ class Recorder:
         # Pretend the venv now exists so later steps and the manifest see an interpreter.
         if "venv" in self.commands[-1] and ("venv" == self.commands[-1][1] or "-m" in self.commands[-1]):
             target = Path(self.commands[-1][2] if "venv" == self.commands[-1][1] else self.commands[-1][-1])
-            python = target / ("Scripts/python.exe" if kp.sys.platform == "win32" else "bin/python")
+            python = target / (
+                "Scripts/python.exe" if (self.platform or kp.sys.platform) == "win32" else "bin/python"
+            )
             python.parent.mkdir(parents=True, exist_ok=True)
             python.write_text("")
 
 
 def run_install(tmp_path, *, target, runner=None, prefetch=None, uv="/usr/bin/uv", platform="linux"):
     runner = runner or Recorder()
+    if isinstance(runner, Recorder):
+        runner.platform = platform  # the interpreter path must follow the pretend platform, not the host
     calls = []
     kp.install(
         tmp_path,
