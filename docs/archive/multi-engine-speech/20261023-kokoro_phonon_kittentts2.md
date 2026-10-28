@@ -1,5 +1,11 @@
 # Multi-engine speech: Kokoro, Phonon, Kitten TTS, and first-class built-in voices
 
+> **Archived 2026-10-28.** Built on branch `feat/multi-engine-speech`; [§11](#11-outcome-and-open-items)
+> lists what shipped, what was not built and why, and what was never tested. Kept for provenance — this
+> is not a live plan; active plans live in `docs/plans/`. Current guidance:
+> [SPEECH_ENGINES.md](../../SPEECH_ENGINES.md), [VOICES.md](../../VOICES.md),
+> [COMPARE.md](../../COMPARE.md) and [RUNTIME_AND_MEMORY.md](../../agent-reference/RUNTIME_AND_MEMORY.md) §6.
+
 **Date:** 2026-10-23 (updated through 2026-10-28). **Status:** built and served; this file is now a
 finished record. Five engines are served: Pocket (the default) and, as optional packs running beside
 it, Kitten TTS 2, Phonon 31M, Kokoro 82M and Pocket Lite (18M). KokoClone, Phonon 40M and the Pocket
@@ -197,7 +203,7 @@ integration found in the tree or `git log --all` messages.
 | `pocket_tts_runtime.py` | Load, cached voice state, batch, streaming, unload. Template for the adapter interface; becomes the first adapter. |
 | `pocket_artifact_resolver.py`, `pocket_english_config.py` | Pinned revisions with size/SHA-256 verification. Generalize into a per-engine artifact manifest. |
 | `accelerator_manifest.py`, `gpu_probe.py`, `gpu_family.py`, `device.py` | Hardware detection and accelerator wheel selection. Reuse for engine hardware-fit and recommendations. |
-| Desktop app (`desktop/`, [DESKTOP_APP](../architecture/DESKTOP_APP.md)) | Already provisions a **versioned Python environment** and accelerator-matched PyTorch wheel on first launch, with CPU fallback. Engine packs should reuse this provisioning machinery (§4.4). |
+| Desktop app (`desktop/`, [DESKTOP_APP](../../architecture/DESKTOP_APP.md)) | Already provisions a **versioned Python environment** and accelerator-matched PyTorch wheel on first launch, with CPU fallback. Engine packs should reuse this provisioning machinery (§4.4). |
 | `app.py::POCKET_BUILTIN_VOICES`, `/voices/built-in` | 30 curated Pocket entries (24 English + 6 non-English). Becomes the Pocket slice of the unified catalog. |
 | `app.py::openai_audio_speech`, `_resolve_builtin_voice` | Accepts `voice`, `voice_id`, `builtin_voice`, `pocket:<name>`. Does not route on `model`; PCM streaming is Pocket-specific. |
 | `voice_library.py`, `/voices/<id>/activate` | Strict `vd_...` IDs; default must be a saved voice. A preset cannot be API default today — fixed in Phase A. |
@@ -208,10 +214,10 @@ integration found in the tree or `git log --all` messages.
 | `IntegrationsPage.tsx` | Snippets derive from selected/first saved voice, not the API default; ID list is saved-only; idle-unloaded shown as offline. Phase A1 fixes. |
 | `VariantCompare.tsx` | Existing A/B UI for variants; basis for the cross-engine A/B feature. |
 
-See [runtime invariants](../agent-reference/RUNTIME_AND_MEMORY.md),
-[Pocket integration](../architecture/pocket_tts_integration.md),
-[model swap and queueing](../architecture/MODEL_SWAP_AND_QUEUEING.md),
-[HTTP API](../api/HTTP_API_REFERENCE.md), [operations](../dev/INTERNAL_OPERATIONS.md).
+See [runtime invariants](../../agent-reference/RUNTIME_AND_MEMORY.md),
+[Pocket integration](../../architecture/pocket_tts_integration.md),
+[model swap and queueing](../../architecture/MODEL_SWAP_AND_QUEUEING.md),
+[HTTP API](../../api/HTTP_API_REFERENCE.md), [operations](../../dev/INTERNAL_OPERATIONS.md).
 
 ## 4. Architecture
 
@@ -647,7 +653,7 @@ idle unload preserves the validated marker but rebuilds state locally on next us
 Imports are size-bounded, schema-checked non-executable safetensors; names and all stored paths
 are app-generated, files carry filename/SHA-256/date/revision provenance, and the real Phonon parser
 must accept them before publication. Invalid/stale imports are not served, and removal forgets the
-warm copy without touching the source/catalog. HTTP contracts: [API reference](../api/HTTP_API_REFERENCE.md).
+warm copy without touching the source/catalog. HTTP contracts: [API reference](../../api/HTTP_API_REFERENCE.md).
 
 **Verified (2026-10-28, Mac, real packs in `/tmp/pf_all`, headless browser):** the Engines row chips
 (Pocket ✓ Ready, Kitten 2 • Prepare, Pocket Lite · Install to use, Phonon/Kokoro — not supported);
@@ -1206,12 +1212,12 @@ Docs deliverables ride the phases: Phase C updates `docs/api/HTTP_API_REFERENCE.
 engine-manager and Compare docs.
 
 **Docs delivered (2026-10-28).** Phase C's reference docs exist and were audited against `app.py`:
-[`HTTP_API_REFERENCE.md`](../api/HTTP_API_REFERENCE.md) (including `GET /voices/built-in?engines=all` and its
-`installed`, `gender`, `gender_source`, `accent`, `age` fields), [`ENV_REFERENCE.md`](../ENV_REFERENCE.md) and
-[`RUNTIME_AND_MEMORY.md`](../agent-reference/RUNTIME_AND_MEMORY.md) §6, which now states the verified pack-engine
+[`HTTP_API_REFERENCE.md`](../../api/HTTP_API_REFERENCE.md) (including `GET /voices/built-in?engines=all` and its
+`installed`, `gender`, `gender_source`, `accent`, `age` fields), [`ENV_REFERENCE.md`](../../ENV_REFERENCE.md) and
+[`RUNTIME_AND_MEMORY.md`](../../agent-reference/RUNTIME_AND_MEMORY.md) §6, which now states the verified pack-engine
 architecture that §4.3 required before implementation. Phase E's user-facing pages exist:
-[`SPEECH_ENGINES.md`](../SPEECH_ENGINES.md), [`VOICES.md`](../VOICES.md) and [`COMPARE.md`](../COMPARE.md), listed in
-[`docs/README.md`](../README.md). Each carries its own known-limitations list.
+[`SPEECH_ENGINES.md`](../../SPEECH_ENGINES.md), [`VOICES.md`](../../VOICES.md) and [`COMPARE.md`](../../COMPARE.md), listed in
+[`docs/README.md`](../../README.md). Each carries its own known-limitations list.
 
 ## 8. Testing
 

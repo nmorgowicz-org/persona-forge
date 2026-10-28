@@ -6,7 +6,7 @@ then runs offline in its own process beside the active engine, so installing one
 Pocket.
 
 This page is the task guide. The design and the measurements behind it are in
-[the multi-engine plan](plans/20261023-kokoro_phonon_kittentts2.md); every endpoint is in the
+[the multi-engine plan](archive/multi-engine-speech/20261023-kokoro_phonon_kittentts2.md); every endpoint is in the
 [HTTP API reference](api/HTTP_API_REFERENCE.md). Related pages: [Voices](VOICES.md), [Compare](COMPARE.md).
 
 ## The engines

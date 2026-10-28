@@ -61,7 +61,7 @@
 Optional speech engines (`kitten2`, `phonon-31m`, `kokoro`, `pocket-lite`) are *packs*: they run in their own
 process and never load a model into the web worker. Everything below was checked against the code named in
 brackets; the product-level design and decisions are in
-[`docs/plans/20261023-kokoro_phonon_kittentts2.md`](../plans/20261023-kokoro_phonon_kittentts2.md) §4.3-§4.6.
+[`docs/archive/multi-engine-speech/20261023-kokoro_phonon_kittentts2.md`](../archive/multi-engine-speech/20261023-kokoro_phonon_kittentts2.md) §4.3-§4.6.
 
 ### 6.1 Ownership and isolation
 

@@ -82,7 +82,7 @@ def clear_active_default_voice_id() -> None:
         logger.warning("Could not clear active API default %s", ACTIVE_DEFAULT_FILE)
 
 
-# Structured no-voice API default (Phase A1 of docs/plans/20261023-kokoro_phonon_kittentts2.md):
+# Structured no-voice API default (Phase A1 of docs/archive/multi-engine-speech/20261023-kokoro_phonon_kittentts2.md):
 # {"engine": str | None, "voice": str, "variant": str | None, "updated_at": float}. `voice` is
 # either a saved library id (``vd_...``) or a namespaced built-in preset: ``pocket:<name>`` or a
 # pack engine's ``kokoro:<voice>`` / ``phonon:<voice>`` / ``kitten2:<voice>`` / ``pocket-lite:<name>``.

@@ -1,11 +1,16 @@
 # Phase B — technical screening results (2026-10-23)
 
+> **Archived 2026-10-28** together with [the multi-engine plan](20261023-kokoro_phonon_kittentts2.md).
+> Kept for provenance — this is not a live plan; active plans live in `docs/plans/`.
+
 Companion to [20261023-kokoro_phonon_kittentts2.md](20261023-kokoro_phonon_kittentts2.md). This is
 the **screening pass** from §6.2, not the measurement pass: 1 warmup + 3 trials per case, one
 representative voice per engine plus one accent/alternative. It answers "does it run, does it clone,
 what does it cost?" and decides what goes to Phase C. Ranking stays in Phase E.
 
-Raw per-run JSON lives in [bench/](bench/). Audio stayed on the test machines, outside Git.
+Raw per-run JSON lives in [bench/](bench/). Audio stayed on the test machines, outside Git, and so did
+the working directories this page names (`bench/scripts/`, `bench/listen/`, `bench/listen2/`): only the
+eight JSON files are in the repository.
 
 ## Targets and method
 

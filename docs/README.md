@@ -72,6 +72,10 @@ Compact references written for AI coding agents working in this repo.
   kept as a record once resolved or superseded
 - [`archive/desktop-app/`](archive/desktop-app/) — archived desktop architecture, execution, and
   Phase 6B update-gates design; update acceptance and installed GPU fallback results after the next release
+- [`archive/multi-engine-speech/`](archive/multi-engine-speech/) — the finished multi-engine speech
+  plan ([Outcome and open items](archive/multi-engine-speech/20261023-kokoro_phonon_kittentts2.md#11-outcome-and-open-items)
+  lists what shipped, what was not built and what is untested), its Phase B screening results, and the
+  raw `bench/` JSON; current guidance is [SPEECH_ENGINES.md](SPEECH_ENGINES.md)
 - [`dev/benchmarks/`](dev/benchmarks/) — benchmark logs from the OpenVINO era
 - [`archive/openvino/OPENVINO_IMPLEMENTATION.md`](archive/openvino/OPENVINO_IMPLEMENTATION.md)
   and [`dev/benchmarks/OPENVINO_RESULTS.md`](dev/benchmarks/OPENVINO_RESULTS.md) —

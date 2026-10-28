@@ -2,7 +2,7 @@
 
 **Voice Library → Compare** renders the same text on two to four engine/voice slots, lets you rate the clips
 without knowing which engine made which, and keeps your ratings. It exists because no engine has been ranked
-best: the plan only records measurements and a few listening sessions ([plan §5.5, §5.10](plans/20261023-kokoro_phonon_kittentts2.md)).
+best: the plan only records measurements and a few listening sessions ([plan §5.5, §5.10](archive/multi-engine-speech/20261023-kokoro_phonon_kittentts2.md)).
 Install engines first: [Speech engines](SPEECH_ENGINES.md). Saved voices and Prepare: [Voices](VOICES.md).
 
 ## Run a comparison
