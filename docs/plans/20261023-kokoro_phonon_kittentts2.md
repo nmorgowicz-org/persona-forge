@@ -975,6 +975,15 @@ presets, and are not evaluated here.
   0.965 for the standard model (four references, three sentences). The listening verdict in §9.1 was
   on the 4.0.0 weights; `/tmp/pfbench/pl401/listen.html` has the 4.0.1 pairs for a re-listen.
 
+#### 9.3.2 Windows (RTX 5090 host, CPU torch, 2026-10-27)
+
+Pack built on the Mac with `pocket-tts` 4.0.1 and copied as files with symlinks resolved (the token
+did not leave the Mac); the engine class drove a real worker process on Windows (not the HTTP app).
+Verified pack; first call (worker start, load, one synthesis) 24 s; presets warm RTF 0.15; a saved voice
+cloned from its reference path (Windows paths) at warm RTF 0.16; a seeded repeat agreed to within one
+16-bit step; an unknown preset raised the invalid-voice error. This used the default CPU torch
+wheel: no GPU was involved. Scratch files removed.
+
 ## 10. Evidence and reproducibility
 
 Upstream revisions inspected (not approved pins): Kokoro GitHub
