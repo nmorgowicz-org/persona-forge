@@ -493,8 +493,13 @@ export interface FastModeIssue {
 }
 
 export interface EngineLoadStatus {
-  state?: 'idle' | 'loading' | 'ready' | 'error'
+  /** idle -> loading (worker starting) -> warming (first call compiling) -> ready. `ready` is the plan's "active". */
+  state?: 'idle' | 'loading' | 'warming' | 'ready' | 'error'
   error?: string | null
+  /** Seconds spent in the current loading or warming phase; null otherwise. */
+  elapsed_s?: number | null
+  /** Expected length of the current phase, only where it has been measured. */
+  estimated_s?: number | null
   mode?: 'compiled' | 'eager' | 'mlx' | null
   fast_mode_issue?: FastModeIssue | null
 }

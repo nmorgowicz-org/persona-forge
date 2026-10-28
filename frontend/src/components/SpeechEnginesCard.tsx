@@ -1,4 +1,5 @@
 import { loadCompareSummary, type EngineSummary } from '@/lib/compareResults'
+import { engineLoadNote, isEngineBusy } from '@/lib/engineStatus'
 import { useEffect, useState } from 'react'
 import {
   CheckCircle2,
@@ -66,7 +67,7 @@ export function SpeechEnginesCard() {
   }
 
   const busy = engines.some(
-    (engine) => engine.install_job?.state === 'running' || engine.load_status?.state === 'loading',
+    (engine) => engine.install_job?.state === 'running' || isEngineBusy(engine.load_status),
   )
 
   // Installs and re-checks run in the background; refresh the cards until they settle.
@@ -396,6 +397,17 @@ export function SpeechEnginesCard() {
                 </p>
               )}
 
+              {isEngineBusy(engine.load_status) && (
+                <div
+                  role="status"
+                  data-testid={`engine-${engine.id}-${engine.load_status?.state}`}
+                  className="flex items-center gap-2 rounded-control border border-border bg-muted/40 px-3 py-2 text-[11px]"
+                >
+                  <Loader2 className="size-3 shrink-0 animate-spin" />
+                  {engineLoadNote(engine.label, engine.load_status)}
+                </div>
+              )}
+
               {engine.load_status?.mode && engine.state.status === 'verified' && (
                 <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                   <Zap className="size-3" />
@@ -433,10 +445,10 @@ export function SpeechEnginesCard() {
                       type="button"
                       size="xs"
                       variant="outline"
-                      disabled={pendingAction !== null || engine.load_status.state === 'loading'}
+                      disabled={pendingAction !== null || isEngineBusy(engine.load_status)}
                       onClick={() => void recheck(engine.id)}
                     >
-                      {engine.load_status.state === 'loading' ||
+                      {isEngineBusy(engine.load_status) ||
                       (pendingAction?.id === engine.id && pendingAction.action === 'recheck') ? (
                         <Loader2 className="animate-spin" />
                       ) : (

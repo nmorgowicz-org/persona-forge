@@ -5,7 +5,7 @@ newline-delimited JSON protocol that ``pack_process.PackProcess`` drives: one re
 stdin, one response per line on stdout. ``kittenml`` is imported lazily so the protocol can be
 tested with a stub model and no weights.
 
-Ops: ``ping``, ``load``, ``prepare``, ``synthesize``, ``unload``.
+Ops: ``ping``, ``load``, ``warmup``, ``prepare``, ``synthesize``, ``unload``.
 """
 
 from __future__ import annotations
@@ -162,6 +162,7 @@ class Kitten2Worker:
         self._factory = factory or _default_factory
         self._choose = runtime_chooser or choose_runtime
         self._model: Any = None
+        self._cache_dir: str | None = None
         self._runtime: dict[str, Any] = {}
         self._voices: dict[str, dict[str, str | None]] = {}
 
@@ -176,31 +177,46 @@ class Kitten2Worker:
         return {"ok": True, "loaded": self._model is not None}
 
     def _op_load(self, request: Mapping[str, Any]) -> dict[str, Any]:
-        fast_issue: dict[str, Any] | None = None
         if self._model is None:
             self._runtime = self._choose()
             if request.get("fast_mode") is False:
                 self._runtime = {**self._runtime, "static_cache": False}
-            self._model = self._factory(request.get("cache_dir"), self._runtime)
-        if request.get("warmup", True):
-            # The first compiled CUDA call takes about 33 s; pay it here, not on a request.
-            try:
-                self._model.generate("Ready.", voice=DEFAULT_PRESET)
-            except Exception as exc:
-                if not self._runtime.get("static_cache"):
-                    raise
-                # Compiling needs a C/C++ toolchain (Triton). Without one, run eager: about
-                # 1.4x slower than real time instead of 0.3x, but it works with no setup.
-                raw = f"{type(exc).__name__}: {exc}".strip()
-                fast_issue = explain_compile_failure(
-                    raw.splitlines()[0][:300] if raw else "",
-                    triton_missing=isinstance(exc, ModuleNotFoundError)
-                    and "triton" in str(exc).lower(),
-                )
-                self._model = None
-                self._runtime = {**self._runtime, "static_cache": False}
-                self._model = self._factory(request.get("cache_dir"), self._runtime)
-                self._model.generate("Ready.", voice=DEFAULT_PRESET)
+            self._cache_dir = request.get("cache_dir")
+            self._model = self._factory(self._cache_dir, self._runtime)
+        warmup = bool(request.get("warmup", True))
+        fast_issue = self._warm() if warmup else None
+        # ``warmup_pending`` tells the adapter to send a separate ``warmup`` request, so it can
+        # report "loading" and "warming" as different states and answer callers meanwhile.
+        return {**self._load_reply(fast_issue), "warmup_pending": not warmup}
+
+    def _op_warmup(self, _request: Mapping[str, Any]) -> dict[str, Any]:
+        self._require_model()
+        return self._load_reply(self._warm())
+
+    def _warm(self) -> dict[str, Any] | None:
+        """Run the first synthesis call. Returns the fast-mode problem if it had to fall back."""
+        fast_issue: dict[str, Any] | None = None
+        # The first compiled CUDA call takes about 33 s; pay it here, not on a request.
+        try:
+            self._model.generate("Ready.", voice=DEFAULT_PRESET)
+        except Exception as exc:
+            if not self._runtime.get("static_cache"):
+                raise
+            # Compiling needs a C/C++ toolchain (Triton). Without one, run eager: about
+            # 1.4x slower than real time instead of 0.3x, but it works with no setup.
+            raw = f"{type(exc).__name__}: {exc}".strip()
+            fast_issue = explain_compile_failure(
+                raw.splitlines()[0][:300] if raw else "",
+                triton_missing=isinstance(exc, ModuleNotFoundError)
+                and "triton" in str(exc).lower(),
+            )
+            self._model = None
+            self._runtime = {**self._runtime, "static_cache": False}
+            self._model = self._factory(self._cache_dir, self._runtime)
+            self._model.generate("Ready.", voice=DEFAULT_PRESET)
+        return fast_issue
+
+    def _load_reply(self, fast_issue: dict[str, Any] | None) -> dict[str, Any]:
         if self._runtime.get("backend") == "mlx":
             mode = "mlx"
         elif self._runtime.get("static_cache"):

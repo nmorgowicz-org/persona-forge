@@ -317,6 +317,15 @@ change to a section above, not a new subsystem.
    retryable response and the UI shows progress. Warm-up runs fixed shape buckets, and the compile
    cache lives under the app data directory so a restart does not pay it again. Worst-case latency,
    not the median, is what gets reported on the engine card.
+   **Built:** `src/persona_forge/engine_lifecycle.py` (`LoadTracker`) drives `idle` → `loading` →
+   `warming` → `ready` (`ready` is this plan's `active`; the name is kept because the cards already
+   read it) | `error`. The Kitten 2 worker's `load` no longer warms; the adapter then sends a
+   separate `warmup` op, and any pack worker can opt in by answering `warmup_pending`. `GET /engines`
+   `load_status` carries `elapsed_s` and `estimated_s` (Kitten warm-up: 35 s). A request to a loading or
+   warming engine waits at most `ENGINE_WARM_WAIT_S` (default 5 s), then gets `503` + `Retry-After` +
+   code `engine_warming`; the load continues in the background and concurrent requests share it. The
+   engine cards, Speak, Compare and voice previews show the state and retry on that signal. Not built:
+   shape-bucket warm-up and the app-data compile cache (the worker still compiles in-process).
 4. **Normalise output loudness at the serving layer (§4.5).** Kitten 2 output is peak-normalised to
    0.99 with RMS 0.16-0.22; Pocket and KokoClone sit near 0.09. Without correction, changing the API
    default changes the volume every client hears, and any A/B test is biased toward the louder

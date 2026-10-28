@@ -18,12 +18,16 @@ from typing import Any, Iterator
 import numpy as np
 
 from persona_forge import engine_packs, kitten2_pack, kitten2_worker, voice_library
+from persona_forge.engine_lifecycle import IN_FLIGHT, LoadTracker, warm_wait_s
 from persona_forge.pack_process import PackProcess, PackProcessError
 
 ENGINE_ID = "kitten2"
 PRESET_PREFIX = "kitten2:"
-# Compiled CUDA decoding compiles on first use; the worker's warm-up absorbs it at load.
-LOAD_TIMEOUT_S = 600.0
+# Loading reads the weights; the first compiled CUDA call is a separate ``warmup`` request, so a
+# request that arrives meanwhile can be told to retry instead of queueing behind the compile.
+LOAD_TIMEOUT_S = 300.0
+WARMUP_TIMEOUT_S = 600.0
+WARMUP_ESTIMATE_S = 35.0  # measured: about 33 s for the first compiled call on a 5090
 REQUEST_TIMEOUT_S = 240.0
 
 
@@ -33,6 +37,20 @@ class EngineUnavailable(RuntimeError):
 
 class InvalidVoice(ValueError):
     """The requested voice or preset does not exist for this engine."""
+
+
+class EngineWarming(EngineUnavailable):
+    """The engine is loading or warming up; the same request will work shortly.
+
+    The speech route answers 503 with ``Retry-After`` and error code ``engine_warming``.
+    """
+
+    def __init__(self, label: str, state: str, retry_after_s: int) -> None:
+        phrase = "warming up (compiling its first call)" if state == "warming" else "loading"
+        super().__init__(f"{label} is {phrase}; retry in about {retry_after_s} s.")
+        self.label = label
+        self.state = state
+        self.retry_after_s = retry_after_s
 
 
 def pack_directory(root: Path | None = None) -> Path | None:
@@ -130,6 +148,7 @@ def _idle_from_env(default: float = 600.0) -> float:
 
 class Kitten2Engine:
     id = ENGINE_ID
+    label = "Kitten TTS 2"
 
     def __init__(self, idle_unload_s: float | None = None) -> None:
         self._idle_s = idle_unload_s if idle_unload_s is not None else _idle_from_env()
@@ -138,37 +157,37 @@ class Kitten2Engine:
         self._prepared: dict[str, tuple[str, float]] = {}
         self._timer: threading.Timer | None = None
         self._load_info: dict[str, Any] = {}
-        self._load_state = "idle"  # idle | loading | ready | error
-        self._load_error: str | None = None
+        # idle | loading | warming | ready | error, with elapsed time while loading or warming.
+        self._tracker = LoadTracker(estimates={"warming": WARMUP_ESTIMATE_S})
 
     def status(self) -> dict[str, Any]:
         """Load state plus the speed mode and, when fast mode is unavailable, why."""
-        return {**self._load_info, "state": self._load_state, "error": self._load_error}
+        return {**self._load_info, **self._tracker.snapshot()}
 
     def recheck(self) -> bool:
         """Reload the worker in the background so a newly installed compiler is picked up.
 
         Returns False when a load is already running.
         """
-        with self._lock:
-            if self._load_state == "loading":
-                return False
-            self._load_state = "loading"
-            self._load_error = None
-        threading.Thread(target=self._load_in_background, name="kitten2-recheck", daemon=True).start()
+        if not self._tracker.claim_load():
+            return False
+        self._start_load(reload=True, name="kitten2-recheck")
         return True
 
-    def _load_in_background(self) -> None:
+    def _start_load(self, *, reload: bool, name: str) -> None:
+        threading.Thread(
+            target=self._load_in_background, kwargs={"reload": reload}, name=name, daemon=True
+        ).start()
+
+    def _load_in_background(self, *, reload: bool = False) -> None:
         try:
-            self.unload()
+            if reload:
+                self.unload()
             with self._lock:
                 self._ensure_started()
                 self._arm_idle_timer()
-        except EngineUnavailable as exc:
-            self._load_state = "error"
-            self._load_error = str(exc)
-        else:
-            self._load_state = "ready"
+        except Exception as exc:  # the failure is on the card and in the next request's 503
+            self._tracker.fail(str(exc))
 
     def describe(self) -> dict[str, Any]:
         from persona_forge import speech_engines
@@ -180,19 +199,50 @@ class Kitten2Engine:
 
     # -- lifecycle -----------------------------------------------------------------------------
 
+    def _not_installed(self) -> EngineUnavailable:
+        return EngineUnavailable(
+            "The Kitten TTS 2 engine pack is not installed; install it in Settings → "
+            "Speech engines."
+        )
+
+    def _await_ready(self) -> None:
+        """Return once the worker can serve. A cold or warming engine is loaded in the background
+        and the request waits at most ``ENGINE_WARM_WAIT_S`` for it, then gets ``EngineWarming``.
+        """
+        process = self._process
+        if process is not None and process.is_alive and self._tracker.state == "ready":
+            return
+        if pack_python() is None:
+            raise self._not_installed()  # not a load state: nothing is starting
+        if self._tracker.claim_load():
+            self._start_load(reload=False, name="kitten2-load")
+        state = self._tracker.wait_settled(warm_wait_s())
+        if state in IN_FLIGHT:
+            raise EngineWarming(self.label, state, self._tracker.retry_after_s())
+        if state == "error":
+            raise EngineUnavailable(self._tracker.error or f"{self.label} failed to load.")
+
     def _ensure_started(self) -> PackProcess:
         if self._process is not None and self._process.is_alive:
+            self._tracker.enter("ready")
             return self._process
+        try:
+            return self._spawn()
+        except Exception as exc:
+            self._tracker.fail(str(exc))
+            raise
+
+    def _spawn(self) -> PackProcess:
         self._process = None
         self._prepared.clear()
+        self._load_info = {"mode": None, "fast_mode_issue": None}
         python = pack_python()
         if python is None:
-            raise EngineUnavailable(
-                "The Kitten TTS 2 engine pack is not installed; install it in Settings → "
-                "Speech engines."
-            )
+            raise self._not_installed()
+        self._tracker.enter("loading")
         env: dict[str, str] = {}
-        load_request: dict[str, Any] = {"op": "load"}
+        # The worker only loads here; ``warmup`` below is the compile-heavy first call.
+        load_request: dict[str, Any] = {"op": "load", "warmup": False}
         directory = None if os.environ.get("KITTEN2_PYTHON") else pack_directory()
         if directory is not None:
             # Serve from the pack's own weights and never download mid-request: a missing file
@@ -208,15 +258,18 @@ class Kitten2Engine:
         process.start()
         try:
             loaded = process.request(load_request, timeout=LOAD_TIMEOUT_S)
+            if loaded.get("warmup_pending"):
+                self._tracker.enter("warming")
+                loaded = {**loaded, **process.request({"op": "warmup"}, timeout=WARMUP_TIMEOUT_S)}
         except PackProcessError as exc:
             process.close()
             raise EngineUnavailable(str(exc)) from exc
         self._process = process
-        self._load_state = "ready"
         self._load_info = {
             "mode": loaded.get("mode"),
             "fast_mode_issue": loaded.get("fast_mode_issue"),
         }
+        self._tracker.enter("ready")
         return process
 
     def _arm_idle_timer(self) -> None:
@@ -235,6 +288,8 @@ class Kitten2Engine:
                 self._timer = None
             process, self._process = self._process, None
             self._prepared.clear()
+            if self._tracker.state == "ready":
+                self._tracker.enter("idle")
         if process is not None:
             process.close()
 
@@ -290,6 +345,7 @@ class Kitten2Engine:
         # engine; they are accepted so the shared route can stay engine-agnostic.
         del language, style_preset, postprocess, prosody_repair, instruct, speed
         requested = (voice_variant_id or voice_id or "").strip()
+        self._await_ready()
         with self._lock:
             process = self._ensure_started()
             request: dict[str, Any] = {"op": "synthesize", "text": text}

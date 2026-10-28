@@ -1,3 +1,4 @@
+import { fetchSpeech } from '@/lib/engineStatus'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
@@ -97,6 +98,7 @@ export function BuiltInVoicesTab() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewName, setPreviewName] = useState<string | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  const [previewNote, setPreviewNote] = useState<string | null>(null)
   const [detail, setDetail] = useState<BuiltInVoiceMeta | null>(null)
   const [apiDefault, setApiDefaultState] = useState<ApiDefaultRecord | null>(null)
   const [settingDefault, setSettingDefault] = useState<string | null>(null)
@@ -250,6 +252,7 @@ export function BuiltInVoicesTab() {
     stopPreview()
     const token = ++previewToken.current
     setPreviewError(null)
+    setPreviewNote(null)
     setPreviewName(voice.display_name)
     setPreviewing(voice.voice_id)
     try {
@@ -257,11 +260,13 @@ export function BuiltInVoicesTab() {
       let blob: Blob
       if (isPackVoice(voice)) {
         // Pack engines are served beside the active backend through the OpenAI-compatible route.
-        const res = await fetch('/v1/audio/speech', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: voice.engine, input: text, voice: voice.voice_id, response_format: 'wav' }),
-        })
+        // A cold engine answers 503 "engine_warming" while it loads; wait it out and say so.
+        const { response: res } = await fetchSpeech(
+          { model: voice.engine, input: text, voice: voice.voice_id, response_format: 'wav' },
+          (wait) => {
+            if (token === previewToken.current) setPreviewNote(wait.message)
+          },
+        )
         if (!res.ok) {
           const body = await res.json().catch(() => ({}))
           throw new Error(body?.error?.message || `HTTP ${res.status}`)
@@ -277,7 +282,10 @@ export function BuiltInVoicesTab() {
         setPreviewError(String((err as Error)?.message || err))
       }
     } finally {
-      if (token === previewToken.current) setPreviewing(null)
+      if (token === previewToken.current) {
+        setPreviewing(null)
+        setPreviewNote(null)
+      }
     }
   }
 
@@ -445,6 +453,11 @@ export function BuiltInVoicesTab() {
             Close
           </Button>
         </div>
+      )}
+      {previewNote && (
+        <p role="status" className="rounded-control border border-border bg-muted/40 px-3 py-2 text-xs">
+          {previewNote} Retrying automatically.
+        </p>
       )}
       {previewError && (
         <p className="rounded-control border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">

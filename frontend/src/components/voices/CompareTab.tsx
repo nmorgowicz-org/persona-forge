@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Play, Plus, Shuffle, Square, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { engineLoadSuffix, fetchSpeech, useEngineLoadStatus } from '@/lib/engineStatus'
 import {
   clearCompareResults,
   loadCompareSummary,
@@ -13,7 +14,6 @@ interface ModelEntry {
   id: string
   label: string
   installed?: boolean
-  warming?: boolean
   capabilities: { clone?: boolean }
 }
 interface VoiceEntry {
@@ -38,6 +38,8 @@ interface Result {
   seconds?: number
   gain?: number
   error?: string
+  /** The server's own message while an engine loads or warms and the request is retried. */
+  note?: string
 }
 interface Rating {
   naturalness: number
@@ -98,6 +100,7 @@ export function CompareTab({
   const [running, setRunning] = useState(false)
   const [playing, setPlaying] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { status: engineStatus, refresh: refreshEngineStatus } = useEngineLoadStatus()
   const [loaded, setLoaded] = useState(false)
   const [reference, setReference] = useState<Reference | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -116,15 +119,6 @@ export function CompareTab({
       .then(([m, v]) => {
         const list: ModelEntry[] = m.data ?? []
         setModels(list)
-        // Engines still loading their worker answer slowly; say so instead of looking broken.
-        fetch('/engines')
-          .then((res) => res.json())
-          .then((body: { engines?: { id: string; load_status?: { state?: string } }[] }) => {
-            const cards = body.engines ?? []
-            const warming = new Set(cards.filter((c) => c.load_status?.state === 'loading').map((c) => c.id))
-            setModels((cur) => cur.map((e) => ({ ...e, warming: warming.has(e.id) })))
-          })
-          .catch(() => undefined)
         setVoices(v.data ?? [])
         const ready = list.filter((e) => e.installed !== false)
         setSlots(ready.slice(0, 2).map((e) => ({ engine: e.id, voice: '' })))
@@ -205,17 +199,21 @@ export function CompareTab({
       const voice = slot.voice || voicesFor(slot.engine)[0]?.voice_id
       const started = clock()
       try {
-        const res = await fetch('/v1/audio/speech', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: slot.engine, input: text, voice, response_format: 'wav' }),
-        })
+        // A cold engine answers 503 "engine_warming" while it loads; wait it out and keep the
+        // one-off warm-up out of the generation time that gets compared.
+        const { response: res, waitedMs } = await fetchSpeech(
+          { model: slot.engine, input: text, voice, response_format: 'wav' },
+          (wait) => {
+            refreshEngineStatus()
+            setResults((cur) => cur.map((r, k) => (k === i ? { status: 'running', note: wait.message } : r)))
+          },
+        )
         if (!res.ok) {
           const body = await res.json().catch(() => ({}))
           throw new Error(body?.error?.message || `HTTP ${res.status}`)
         }
         const bytes = await res.arrayBuffer()
-        const ms = clock() - started
+        const ms = clock() - started - waitedMs
         const decoded = await ctx.decodeAudioData(bytes.slice(0))
         const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }))
         setResults((cur) =>
@@ -336,7 +334,7 @@ export function CompareTab({
               {models.map((m) => (
                 <option key={m.id} value={m.id} disabled={m.installed === false}>
                   {m.label}
-                  {m.installed === false ? ' (install to compare)' : m.warming ? ' (warming up)' : ''}
+                  {m.installed === false ? ' (install to compare)' : engineLoadSuffix(engineStatus[m.id])}
                 </option>
               ))}
             </select>
@@ -435,7 +433,17 @@ export function CompareTab({
                   {showNames && blind && (
                     <span className="text-xs">{models.find((m) => m.id === slot.engine)?.label ?? slot.engine}</span>
                   )}
-                  {result.status === 'running' && <Loader2 className="size-3 animate-spin" />}
+                  {result.status === 'running' && (
+                    <>
+                      <Loader2 className="size-3 animate-spin" />
+                      {result.note && (
+                        <span role="status" className="text-[11px] text-muted-foreground">
+                          {/* The server's message names the engine, which blind mode must not reveal. */}
+                          {showNames ? result.note : 'An engine is still getting ready.'} Retrying automatically.
+                        </span>
+                      )}
+                    </>
+                  )}
                   {result.status === 'done' && (
                     <>
                       <Button

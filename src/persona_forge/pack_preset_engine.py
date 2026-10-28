@@ -14,10 +14,17 @@ from typing import Any, Iterator
 import numpy as np
 
 from persona_forge import voice_library
-from persona_forge.kitten2_engine import EngineUnavailable, InvalidVoice, _decode_wav
+from persona_forge.engine_lifecycle import IN_FLIGHT, LoadTracker, warm_wait_s
+from persona_forge.kitten2_engine import (
+    EngineUnavailable,
+    EngineWarming,
+    InvalidVoice,
+    _decode_wav,
+)
 from persona_forge.pack_process import PackProcess, PackProcessError
 
 LOAD_TIMEOUT_S = 120.0
+WARMUP_TIMEOUT_S = 600.0
 REQUEST_TIMEOUT_S = 120.0
 
 
@@ -33,6 +40,8 @@ class PackPresetEngine:
     worker_file = ""
     preset_prefix = ""
     streams = False
+    # Expected length of the worker's ``warmup`` step, when it has one and the figure is measured.
+    warmup_estimate_s: float | None = None
 
     # -- hooks ---
     def _pack_python(self) -> Path | None:
@@ -52,8 +61,9 @@ class PackPresetEngine:
         self._process: PackProcess | None = None
         self._timer: threading.Timer | None = None
         self._load_info: dict[str, Any] = {}
-        self._load_state = "idle"  # idle | loading | ready | error
-        self._load_error: str | None = None
+        # idle | loading | warming | ready | error, with elapsed time while loading or warming.
+        estimates = {"warming": self.warmup_estimate_s} if self.warmup_estimate_s else {}
+        self._tracker = LoadTracker(estimates=estimates)
 
     def _idle_from_env(self, default: float = 600.0) -> float:
         try:
@@ -62,29 +72,29 @@ class PackPresetEngine:
             return default
 
     def status(self) -> dict[str, Any]:
-        return {**self._load_info, "state": self._load_state, "error": self._load_error}
+        return {**self._load_info, **self._tracker.snapshot()}
 
     def recheck(self) -> bool:
         """Reload the worker in the background. Returns False when a load is already running."""
-        with self._lock:
-            if self._load_state == "loading":
-                return False
-            self._load_state = "loading"
-            self._load_error = None
-        threading.Thread(target=self._load_in_background, name=f"{self.id}-recheck", daemon=True).start()
+        if not self._tracker.claim_load():
+            return False
+        self._start_load(reload=True, name=f"{self.id}-recheck")
         return True
 
-    def _load_in_background(self) -> None:
+    def _start_load(self, *, reload: bool, name: str) -> None:
+        threading.Thread(
+            target=self._load_in_background, kwargs={"reload": reload}, name=name, daemon=True
+        ).start()
+
+    def _load_in_background(self, *, reload: bool = False) -> None:
         try:
-            self.unload()
+            if reload:
+                self.unload()
             with self._lock:
                 self._ensure_started()
                 self._arm_idle_timer()
-        except EngineUnavailable as exc:
-            self._load_state = "error"
-            self._load_error = str(exc)
-        else:
-            self._load_state = "ready"
+        except Exception as exc:  # the failure is on the card and in the next request's 503
+            self._tracker.fail(str(exc))
 
     def describe(self) -> dict[str, Any]:
         from persona_forge import speech_engines
@@ -94,16 +104,46 @@ class PackPresetEngine:
         info["status"] = self.status()
         return info
 
+    def _not_installed(self) -> EngineUnavailable:
+        return EngineUnavailable(
+            f"The {self.label} engine pack is not installed; install it in Settings → "
+            "Speech engines."
+        )
+
+    def _await_ready(self) -> None:
+        """Return once the worker can serve. A cold or warming engine is loaded in the background
+        and the request waits at most ``ENGINE_WARM_WAIT_S`` for it, then gets ``EngineWarming``.
+        """
+        process = self._process
+        if process is not None and process.is_alive and self._tracker.state == "ready":
+            return
+        if self._pack_python() is None:
+            raise self._not_installed()  # not a load state: nothing is starting
+        if self._tracker.claim_load():
+            self._start_load(reload=False, name=f"{self.id}-load")
+        state = self._tracker.wait_settled(warm_wait_s())
+        if state in IN_FLIGHT:
+            raise EngineWarming(self.label, state, self._tracker.retry_after_s())
+        if state == "error":
+            raise EngineUnavailable(self._tracker.error or f"{self.label} failed to load.")
+
     def _ensure_started(self) -> PackProcess:
         if self._process is not None and self._process.is_alive:
+            self._tracker.enter("ready")
             return self._process
+        try:
+            return self._spawn()
+        except Exception as exc:
+            self._tracker.fail(str(exc))
+            raise
+
+    def _spawn(self) -> PackProcess:
         self._process = None
+        self._load_info = {"mode": None, "fast_mode_issue": None}
         python = self._pack_python()
         if python is None:
-            raise EngineUnavailable(
-                f"The {self.label} engine pack is not installed; install it in Settings → "
-                "Speech engines."
-            )
+            raise self._not_installed()
+        self._tracker.enter("loading")
         load_request, env = self._load_request()
         process = PackProcess(
             [str(python), self.worker_file],
@@ -113,12 +153,15 @@ class PackPresetEngine:
         process.start()
         try:
             loaded = process.request(load_request, timeout=LOAD_TIMEOUT_S)
+            if loaded.get("warmup_pending"):
+                self._tracker.enter("warming")
+                loaded = {**loaded, **process.request({"op": "warmup"}, timeout=WARMUP_TIMEOUT_S)}
         except PackProcessError as exc:
             process.close()
             raise EngineUnavailable(str(exc)) from exc
         self._process = process
-        self._load_state = "ready"
         self._load_info = {"mode": loaded.get("mode"), "fast_mode_issue": None}
+        self._tracker.enter("ready")
         return process
 
     def _arm_idle_timer(self) -> None:
@@ -136,6 +179,8 @@ class PackPresetEngine:
                 self._timer.cancel()
                 self._timer = None
             process, self._process = self._process, None
+            if self._tracker.state == "ready":
+                self._tracker.enter("idle")
         if process is not None:
             process.close()
 
@@ -187,6 +232,7 @@ class PackPresetEngine:
         del language, style_preset, postprocess, prosody_repair, instruct
         requested = (voice_variant_id or voice_id or "").strip()
         self._check_voice(requested)
+        self._await_ready()
         with self._lock:
             process = self._ensure_started()
             request: dict[str, Any] = {"op": "synthesize", "text": text}
@@ -226,6 +272,7 @@ class PackPresetEngine:
         requested = (voice_id or "").strip()
         self._check_voice(requested)
         request: dict[str, Any] = {"text": text}
+        self._await_ready()
         with self._lock:
             process = self._ensure_started()
             cloned = self._prepare_voice(process, requested)

@@ -67,6 +67,30 @@ def test_load_warms_up_unless_disabled():
     assert stub.calls == [("Ready.", {"voice": "Bruno"})]
 
 
+def test_load_without_warmup_defers_the_first_call_to_a_warmup_request():
+    worker, stub = make_worker()
+
+    loaded = worker.handle({"op": "load", "warmup": False})
+
+    assert loaded["warmup_pending"] is True and stub.calls == []
+    warmed = worker.handle({"op": "warmup"})
+    assert stub.calls == [("Ready.", {"voice": "Bruno"})]
+    assert warmed["mode"] == "mlx" and warmed["fast_mode_issue"] is None
+
+
+def test_a_load_that_warms_up_itself_has_nothing_pending():
+    worker, _ = make_worker()
+
+    assert worker.handle({"op": "load"})["warmup_pending"] is False
+
+
+def test_warmup_before_load_fails():
+    worker, _ = make_worker()
+
+    with pytest.raises(kw.WorkerError, match="not loaded"):
+        worker.handle({"op": "warmup"})
+
+
 def test_synthesize_before_load_fails():
     worker, _ = make_worker()
     with pytest.raises(kw.WorkerError, match="not loaded"):
@@ -225,6 +249,17 @@ def test_cuda_falls_back_to_eager_with_the_reason_when_compiling_fails():
     assert "Failed to find C compiler" in response["fast_mode_issue"]["detail"]
     assert built == [True, False]
     assert worker.handle({"op": "synthesize", "text": "hi"})["ok"] is True
+
+
+def test_a_deferred_warmup_falls_back_to_eager_with_the_reason():
+    worker, built = _cuda_worker(fail_when_compiled=True)
+
+    assert worker.handle({"op": "load", "warmup": False})["mode"] == "compiled"
+    response = worker.handle({"op": "warmup"})
+
+    assert response["mode"] == "eager"
+    assert "Failed to find C compiler" in response["fast_mode_issue"]["detail"]
+    assert built == [True, False]
 
 
 def test_fast_mode_can_be_declined():

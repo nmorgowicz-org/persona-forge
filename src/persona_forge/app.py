@@ -23,7 +23,7 @@ _UI_PREFERENCES_MAX_BODY = 16 * 1024
 
 
 import soundfile as sf
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, make_response, request, send_from_directory
 
 from persona_forge.pocket_voices import POCKET_BUILTIN_VOICES, gender_of
 from persona_forge import (
@@ -140,8 +140,21 @@ if _frontend_enabled:
         return send_from_directory(_FRONTEND_DIR, "favicon.svg")
 
 
-def _openai_error(message: str, status: int, err_type: str = "invalid_request_error"):
-    return jsonify({"error": {"message": message, "type": err_type, "code": None}}), status
+def _openai_error(
+    message: str, status: int, err_type: str = "invalid_request_error", code: str | None = None
+):
+    return jsonify({"error": {"message": message, "type": err_type, "code": code}}), status
+
+
+def _engine_warming_error(exc: "kitten2_engine.EngineWarming"):
+    """503 + ``Retry-After`` for an engine that is loading or compiling its first call.
+
+    Retryable by design: OpenAI-style clients retry a 503 and honour ``Retry-After``.
+    """
+    body, status = _openai_error(str(exc), 503, "api_error", code="engine_warming")
+    response = make_response(body, status)
+    response.headers["Retry-After"] = str(exc.retry_after_s)
+    return response
 
 
 def _is_capacity_error(exc: BaseException) -> bool:
@@ -2601,6 +2614,7 @@ def engines_list():
 
 
 _benchmark_lock = threading.Lock()
+_BENCHMARK_WARMING_PATIENCE_S = 600.0  # longest a cold engine load + compile may take
 
 
 @app.post("/engines/<engine_id>/benchmark")
@@ -2625,10 +2639,18 @@ def engines_benchmark(engine_id: str):
         runs: list[tuple[float, float]] = []
         for _ in range(4):
             started = time.perf_counter()
-            res = client.post(
-                "/v1/audio/speech",
-                json={"model": engine_id, "input": hardware_fit.BENCH_TEXT, "voice": pick["voice_id"], "response_format": "wav"},
-            )
+            deadline = started + _BENCHMARK_WARMING_PATIENCE_S
+            while True:
+                res = client.post(
+                    "/v1/audio/speech",
+                    json={"model": engine_id, "input": hardware_fit.BENCH_TEXT, "voice": pick["voice_id"], "response_format": "wav"},
+                )
+                # A cold engine answers 503 + Retry-After while it loads or compiles. The cold run
+                # is the point of this benchmark, so wait it out and count the wait.
+                warming = res.status_code == 503 and res.headers.get("Retry-After")
+                if not warming or time.perf_counter() >= deadline:
+                    break
+                time.sleep(min(float(res.headers["Retry-After"]), 1.0))
             taken = time.perf_counter() - started
             if res.status_code != 200:
                 body = res.get_json(silent=True) or {}
@@ -2957,6 +2979,8 @@ def openai_audio_speech():
             wav, sr, enabled=output_level.resolve_enabled(normalize_loudness)
         )
         audio, media_type = _encode(level.audio, sr, fmt)
+    except kitten2_engine.EngineWarming as exc:
+        return _engine_warming_error(exc)
     except kitten2_engine.EngineUnavailable as exc:
         return _openai_error(str(exc), 503, "api_error")
     except kitten2_engine.InvalidVoice as exc:
@@ -3021,6 +3045,8 @@ def _openai_audio_speech_stream_pack(
     )
     try:
         first = next(stream, b"")  # surface a bad voice or missing pack as a normal error
+    except kitten2_engine.EngineWarming as exc:
+        return _engine_warming_error(exc)
     except kitten2_engine.EngineUnavailable as exc:
         return _openai_error(str(exc), 503, "api_error")
     except kitten2_engine.InvalidVoice as exc:

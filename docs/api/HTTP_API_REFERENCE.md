@@ -97,6 +97,11 @@ Response:
     dB, present only when normalised.
 - 503:
   - If model not loaded or a runtime reconfiguration is in progress.
+  - **Engine warming** (retryable): a pack engine that is still loading its worker or compiling its
+    first call answers `503` with a `Retry-After` header (whole seconds) and error code
+    `engine_warming`. See "Engine warm-up" below.
+  - A pack that is not installed, or whose worker failed to load, also answers 503 with the reason
+    in `message` but **no** `Retry-After` and no `engine_warming` code: retrying will not help.
 - 400:
   - If JSON invalid, input text missing, unsupported `response_format`, invalid `seed`, or a
     non-boolean `normalize_loudness`.
@@ -106,6 +111,7 @@ Response:
 Error format:
 
 - Always returns an OpenAI-style JSON: `{ "error": { "message": "...", "type": "...", "code": null } }`.
+  `code` is `null` except for `engine_warming`.
 
 Important notes:
 
@@ -125,6 +131,28 @@ Important notes:
   by several dB. Those responses carry `X-Loudness-Normalized: false`. Request `wav`/`mp3`
   (or an engine that does not stream) when level consistency matters more than first-audio
   latency.
+
+#### Engine warm-up (`engine_warming`)
+
+A pack engine goes `idle` → `loading` (worker starting, weights loading) → `warming` (first call
+compiling kernels; about 33 s for compiled Kitten TTS 2 on NVIDIA) → `ready`. The first request to
+an idle engine starts that load in the background. Nothing blocks until a gunicorn timeout:
+
+- The request waits for the engine for at most **`ENGINE_WARM_WAIT_S` seconds (default `5`)**.
+  Engines that load in a couple of seconds therefore still answer the first request normally.
+  `0` never waits. The value is read on every request.
+- If the engine is still loading or warming after that, the answer is
+  `503 Service Unavailable` with `Retry-After: <seconds>` and
+  `{ "error": { "message": "Kitten TTS 2 is warming up (compiling its first call); retry in about 30 s.", "type": "api_error", "code": "engine_warming" } }`.
+  The message names the engine and the phase (`loading` or `warming up`). `Retry-After` is the
+  remaining estimate where one is measured (Kitten TTS 2 warm-up: 35 s), clamped to 1–60 s, and
+  `5` otherwise or once the estimate is exceeded.
+- The load keeps running after the 503, so the retry is served as soon as `ready`. Concurrent
+  requests share one load. The request itself is not queued: resend it.
+- OpenAI SDKs retry a 503 and honour `Retry-After`, so most clients need no change. The built-in
+  UI (Speak, Compare, voice previews) retries by itself and shows the message.
+- The same answer applies to `response_format: "pcm"` streaming engines, before any audio is sent.
+- Poll `GET /engines` (`load_status`, below) to watch progress without sending synthesis requests.
 
 ### GET /v1/models
 
@@ -163,9 +191,18 @@ Important notes:
   `status` (`built-in`|`not-installed`|`installed`|`verified`|`invalid`),
   `artifacts_present`, `artifacts_total`, `disk_bytes`, `verified`, `errors`.
 - Provisioned packs (Kitten TTS 2) also carry `install_job` (`state` `idle|running|done|error`,
-  `step`, `step_index`, `step_count`, `error`) and `load_status` (`state`
-  `idle|loading|ready|error`, `error`, `mode` `compiled|eager|mlx`, and `fast_mode_issue` with
-  `code`, `message`, `action`, `help_url`, `detail` when fast mode is unavailable).
+  `step`, `step_index`, `step_count`, `error`) and `load_status`:
+  - `state`: `idle` (installed, loads on demand, also after an idle unload) → `loading` (worker
+    starting) → `warming` (worker loaded; first call compiling) → `ready`, or `error`. `ready` is
+    the plan's "active": the worker can serve now. Engines whose worker has no warm-up step go
+    straight from `loading` to `ready`.
+  - `elapsed_s`: seconds spent in the current `loading`/`warming` phase, else `null`.
+  - `estimated_s`: expected length of the current phase where it has been measured (Kitten TTS 2
+    `warming`: 35), else `null`.
+  - `error`, `mode` (`compiled|eager|mlx`; `null` until warm-up has finished) and `fast_mode_issue`
+    with `code`, `message`, `action`, `help_url`, `detail` when fast mode is unavailable.
+  While `loading` or `warming`, `POST /v1/audio/speech` for that engine answers a retryable 503
+  (see "Engine warm-up").
 - Read-only and local: no network access, no model load.
 
 ### POST /engines/{engine_id}/verify
@@ -567,7 +604,7 @@ Times one cold and three warm requests of a fixed sentence through `/v1/audio/sp
 preset voice, or the first saved voice for cloning engines) and saves the result to
 `engine_benchmarks.json`. Returns `{engine, benchmark}` with `cold_seconds`, `rtf_median`,
 `rtf_worst` (generation seconds per second of audio), `warm_runs`, `load_average`, `voice`, `at`.
-404 unknown engine, 400 when no voice is available, 409 when another benchmark is running or the
+The cold run waits through an engine's `loading`/`warming` phases (retrying the `engine_warming` 503), so `cold_seconds` includes the warm-up. 404 unknown engine, 400 when no voice is available, 409 when another benchmark is running or the
 engine cannot serve (for example a pack that is not installed). `GET /engines` cards now carry
 `hardware_fit` (`level` of `recommended`, `ok`, `unsupported`, `unknown`, and `text`) and `benchmark`
 (the saved result or null). The result depends on machine load, so the card shows the load average.

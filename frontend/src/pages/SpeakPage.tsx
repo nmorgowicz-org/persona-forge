@@ -30,6 +30,7 @@ import { AudioPlayer } from '@/components/AudioPlayer'
 import { InfoIcon } from '@/components/InfoIcon'
 import { SpeakEngineChoice } from '@/components/SpeakEngineChoice'
 import { useSpeakEngines } from '@/lib/speakEngines'
+import { fetchSpeech, useEngineLoadStatus } from '@/lib/engineStatus'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { PageHeader } from '@/components/ui/page-header'
@@ -160,6 +161,8 @@ export function SpeakPage() {
   const [resultMeta, setResultMeta] = useState<SpeakResultMeta | null>(null)
   const { models: engineModels, presets: enginePresets } = useSpeakEngines()
   const [engineChoice, setEngineChoice] = useState('')
+  const { status: engineLoadStatus, refresh: refreshEngineStatus } = useEngineLoadStatus()
+  const [engineWait, setEngineWait] = useState<string | null>(null)
   const [enginePreset, setEnginePreset] = useState('')
   const chosenEngine = engineModels.find((m) => m.id === engineChoice)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -289,17 +292,20 @@ export function SpeakPage() {
   async function generateWithEngine(engineId: string, voice: string | null) {
     const started = speakClock()
     try {
-      const res = await fetch('/v1/audio/speech', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // A cold engine answers 503 "engine_warming" while it loads; wait it out and say so.
+      const { response: res, waitedMs } = await fetchSpeech(
+        {
           model: engineId,
           input: text,
           voice: voice ?? undefined,
           response_format: 'wav',
           ...(seedInput.trim() && chosenEngine?.capabilities.seed ? { seed: Number(seedInput) } : {}),
-        }),
-      })
+        },
+        (wait) => {
+          setEngineWait(wait.message)
+          refreshEngineStatus()
+        },
+      )
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(body?.error?.message || body?.error || `HTTP ${res.status}`)
@@ -310,7 +316,8 @@ export function SpeakPage() {
       const ctx = new AudioContext()
       const seconds = (await ctx.decodeAudioData(await blob.arrayBuffer())).duration
       void ctx.close()
-      const elapsed = (speakClock() - started) / 1000
+      // Time the request that produced the audio, not the one-off wait for the engine to warm up.
+      const elapsed = (speakClock() - started - waitedMs) / 1000
       const existing = useAppStore.getState().speakAudioUrl
       if (existing) URL.revokeObjectURL(existing)
       setSpeakAudioBlob(blob)
@@ -327,6 +334,7 @@ export function SpeakPage() {
     } catch (err) {
       setSpeakError(err instanceof Error ? err.message : String(err))
     } finally {
+      setEngineWait(null)
       setSpeakIsGenerating(false)
     }
   }
@@ -483,6 +491,8 @@ export function SpeakPage() {
             preset={enginePreset}
             onEngine={setEngineChoice}
             onPreset={setEnginePreset}
+            loadStatus={engineLoadStatus}
+            waiting={engineWait}
           />
 
           <div className="flex flex-col gap-1">

@@ -290,7 +290,7 @@ def test_kitten2_adapter_serves_a_preset(monkeypatch, tmp_path):
 
     assert rate == 24000 and job is None and len(wav) == 240
     worker = _FakeWorker.instances[0]
-    assert worker.requests[0] == {"op": "load"}
+    assert worker.requests[0] == {"op": "load", "warmup": False}  # warm-up is its own request
     assert worker.requests[-1] == {"op": "synthesize", "text": "hi", "seed": 5, "preset": "Luna"}
 
 

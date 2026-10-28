@@ -1,3 +1,5 @@
+import { engineLoadNote } from '@/lib/engineStatus'
+import type { EngineLoadStatus } from '@/lib/api'
 import type { PresetVoice, SpeakEngineModel } from '@/lib/speakEngines'
 
 interface Props {
@@ -7,6 +9,10 @@ interface Props {
   preset: string
   onEngine: (engine: string) => void
   onPreset: (preset: string) => void
+  /** Real load state per engine from GET /engines. */
+  loadStatus?: Record<string, EngineLoadStatus | undefined>
+  /** The server's message while a request to the chosen engine is being retried. */
+  waiting?: string | null
 }
 
 /**
@@ -14,10 +20,20 @@ interface Props {
  * existing generate path. Any other engine is served beside the active one through the
  * OpenAI-compatible endpoint, so choosing it never unloads or swaps anything.
  */
-export function SpeakEngineChoice({ models, presets, engine, preset, onEngine, onPreset }: Props) {
+export function SpeakEngineChoice({
+  models,
+  presets,
+  engine,
+  preset,
+  onEngine,
+  onPreset,
+  loadStatus,
+  waiting,
+}: Props) {
   const active = models.find((m) => m.active)
   const chosen = models.find((m) => m.id === engine)
   const engineVoices = presets.filter((v) => v.engine === engine)
+  const busyNote = chosen ? engineLoadNote(chosen.label, loadStatus?.[chosen.id]) : null
   if (models.length < 2) return null
   return (
     <div className="flex flex-col gap-1" data-testid="speak-engine-choice">
@@ -57,6 +73,12 @@ export function SpeakEngineChoice({ models, presets, engine, preset, onEngine, o
           </select>
         )}
       </div>
+      {chosen && (busyNote || waiting) && (
+        <span role="status" data-testid="speak-engine-warming" className="max-w-72 text-[11px] text-foreground">
+          {busyNote ?? waiting}
+          {waiting && busyNote ? ' Generating as soon as it is ready.' : ''}
+        </span>
+      )}
       {chosen && (
         <span className="max-w-72 text-[10px] text-muted-foreground">
           {chosen.label} runs beside {active?.label ?? 'the active engine'}; nothing is unloaded.
