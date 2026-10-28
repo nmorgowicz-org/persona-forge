@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -67,7 +68,9 @@ def file_sha256(path: str | os.PathLike[str]) -> str:
     stat = resolved.stat()
     stamp = (stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
     cached = _hashes.get(str(resolved))
-    if cached is not None and cached[0] == stamp:
+    # st_ctime is the creation time on Windows, so it cannot reveal a timestamp-preserving edit
+    # there; reference clips are small, so skip the cache on that platform.
+    if sys.platform != "win32" and cached is not None and cached[0] == stamp:
         return cached[1]
     digest = hashlib.sha256()
     with resolved.open("rb") as handle:

@@ -120,7 +120,10 @@ def _safe_relative_path(value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         raise PackManifestError("artifact path must be a non-empty string")
     path = Path(value)
-    if path.is_absolute() or ".." in path.parts:
+    # Reject rooted paths on every platform: "/etc/passwd" is not absolute on Windows (no drive),
+    # and a backslash path is not rooted on POSIX, so check both spellings.
+    rooted = value.startswith(("/", "\\")) or bool(path.anchor)
+    if rooted or path.is_absolute() or ".." in path.parts or ".." in value.replace("\\", "/").split("/"):
         raise PackManifestError(f"artifact path must stay inside the pack: {value!r}")
     return value
 
