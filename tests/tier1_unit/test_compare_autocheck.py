@@ -262,12 +262,16 @@ def test_find_snapshot_prefers_the_pinned_revision_and_the_first_cache(tmp_path)
 
 
 def test_status_never_touches_the_network_and_reports_sizes(tmp_path, monkeypatch):
-    import huggingface_hub
+    try:
+        import huggingface_hub
+    except ImportError:  # the lean CI lane has no huggingface_hub; then status() cannot download
+        huggingface_hub = None
 
     def no_network(*a, **k):  # pragma: no cover - only runs when the contract is broken
         raise AssertionError("status() must not download")
 
-    monkeypatch.setattr(huggingface_hub, "snapshot_download", no_network)
+    if huggingface_hub is not None:
+        monkeypatch.setattr(huggingface_hub, "snapshot_download", no_network)
     checker = ac.AutoChecker(cache_dirs=[tmp_path])
     fake_cache(tmp_path, ac.WHISPER_TINY_EN, "x")
     status = {m["id"]: m for m in checker.models_status()}
