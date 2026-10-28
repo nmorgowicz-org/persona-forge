@@ -95,6 +95,9 @@ export function CompareTab({
   const [text, setText] = useState(SAMPLES[0])
   const [slots, setSlots] = useState<Slot[]>([])
   const [results, setResults] = useState<Result[]>([])
+  // What the clips below were generated from. Editing the slots or text afterwards must not
+  // re-label them, re-order them or attach their ratings to a different engine.
+  const [ran, setRan] = useState<{ text: string; slots: Slot[] } | null>(null)
   const [order, setOrder] = useState<number[]>([])
   const [blind, setBlind] = useState(true)
   const [revealed, setRevealed] = useState(false)
@@ -114,6 +117,31 @@ export function CompareTab({
   // mode they only exist after the reveal. Nothing runs until a Check click.
   const autoCheck = useAutoCheck((!blind || revealed) && results.some((r) => r.status === 'done'))
   const audio = useRef<{ ctx: AudioContext; source?: AudioBufferSourceNode } | null>(null)
+  const clipUrls = useRef<string[]>([])
+  const shownSlots = ran?.slots ?? slots
+
+  function releaseClips() {
+    for (const url of clipUrls.current) URL.revokeObjectURL(url)
+    clipUrls.current = []
+    buffers.current = {}
+    clips.current = {}
+  }
+
+  // Leaving the tab: stop playback, close the audio context, free every clip.
+  useEffect(
+    () => () => {
+      try {
+        audio.current?.source?.stop()
+      } catch {
+        // already stopped
+      }
+      void audio.current?.ctx.close().catch(() => undefined)
+      audio.current = null
+      releaseClips()
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
 
   useEffect(() => {
     loadCompareSummary()
@@ -141,7 +169,9 @@ export function CompareTab({
     const cloning = models.filter((m) => m.installed !== false && m.capabilities.clone).slice(0, 4)
     if (cloning.length >= 2) setSlots(cloning.map((m) => ({ engine: m.id, voice: startVoice })))
     else setSlots((cur) => cur.map((slot) => ({ ...slot, voice: startVoice })))
+    releaseClips()
     setResults([])
+    setRan(null)
     setReference(null)
     onStarted?.()
     // models and voices are loaded once with `loaded`; only a new start voice should re-seed.
@@ -181,6 +211,8 @@ export function CompareTab({
     setRatings({})
     setOrder(shuffled(slots.map((_, i) => i)))
     setReference(null)
+    releaseClips()
+    setRan({ text, slots })
     generatedText.current = text
     autoCheck.reset()
     const refId = slots
@@ -225,6 +257,7 @@ export function CompareTab({
         const ms = clock() - started - waitedMs
         const decoded = await ctx.decodeAudioData(bytes.slice(0))
         const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }))
+        clipUrls.current.push(url)
         setResults((cur) =>
           cur.map((r, k) =>
             k === i ? { status: 'done', url, ms, seconds: decoded.duration, gain: levelGain(decoded) } : r,
@@ -273,7 +306,7 @@ export function CompareTab({
   function favourite(index: number) {
     setRatings((cur) => {
       const next: Record<number, Rating> = {}
-      for (const i of slots.keys()) {
+      for (const i of shownSlots.keys()) {
         next[i] = { ...DEFAULT_RATING, ...cur[i], favourite: i === index }
       }
       return next
@@ -284,8 +317,8 @@ export function CompareTab({
     setRevealed(true)
     const session = {
       at: new Date().toISOString(),
-      text,
-      slots: slots.map((slot, i) => {
+      text: ran?.text ?? text,
+      slots: shownSlots.map((slot, i) => {
         const voiceId = slot.voice || voicesFor(slot.engine)[0]?.voice_id
         const entry = voices.find((v) => v.voice_id === voiceId)
         return {
@@ -311,7 +344,7 @@ export function CompareTab({
 
   const done = results.filter((r) => r.status === 'done').length
   const showNames = !blind || revealed
-  const display = useMemo(() => (blind ? order : slots.map((_, i) => i)), [blind, order, slots])
+  const display = useMemo(() => (blind ? order : shownSlots.map((_, i) => i)), [blind, order, shownSlots])
 
   return (
     <div className="flex flex-col gap-4">
@@ -438,13 +471,13 @@ export function CompareTab({
             <AutoCheckSetup
               status={autoCheck.status}
               statusError={autoCheck.statusError}
-              needsSimilarity={slots.some(isClone)}
+              needsSimilarity={shownSlots.some(isClone)}
               onDownload={(ids) => void autoCheck.download(ids)}
             />
           )}
           {display.map((slotIndex, position) => {
             const result = results[slotIndex]
-            const slot = slots[slotIndex]
+            const slot = shownSlots[slotIndex]
             const rating = ratings[slotIndex]
             if (!result || !slot) return null
             return (

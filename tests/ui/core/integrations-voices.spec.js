@@ -868,6 +868,24 @@ test.describe('Speak and Integrations public request races', () => {
     })
   }
 
+  test('Speak "Set current" saves the engine and preset that Generate would use', async ({ page }) => {
+    const fixture = await stubIntegrations(page)
+    await selectSpeakVoice(page, 'Narrator Ready')
+    await page.getByRole('combobox', { name: 'Engine', exact: true }).selectOption('kokoro')
+    await page.getByRole('combobox', { name: 'Engine voice', exact: true }).selectOption('kokoro:bm_george')
+    const writes = []
+    await page.route((url) => url.pathname === '/api-default', (route) => {
+      if (route.request().method() !== 'PUT') return route.fallback()
+      writes.push(route.request().postDataJSON())
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify(fixture.apiDefault) })
+    })
+
+    await page.getByRole('button', { name: 'Set current' }).click()
+
+    await expect.poll(() => writes.length).toBe(1)
+    expect(writes[0]).toEqual({ voice: 'kokoro:bm_george', engine: 'kokoro' })
+  })
+
   test('an older default GET snapshot cannot overwrite a successful Set default PUT', async ({ page }) => {
     const fixture = await stubIntegrations(page)
     await openIntegrations(page)

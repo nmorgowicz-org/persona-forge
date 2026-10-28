@@ -183,6 +183,9 @@ export function SpeakPage() {
     selectedPreset?.engine && selectedPreset.engine !== 'pocket-tts' && selectedPreset.installed !== false
       ? selectedPreset.engine
       : null
+  // The pair Generate actually sends, so "Set current" saves exactly what was just heard.
+  const effectiveVoice = enginePreset || voiceId
+  const effectiveEngineId = presetEngineId ?? (engineChoice || null)
   const effectiveEngine = engineModels.find((m) => m.id === (presetEngineId ?? engineChoice))
 
 
@@ -444,12 +447,27 @@ export function SpeakPage() {
     }
   }
 
+  // Choosing another engine while a pack preset from a different one is picked would leave two
+  // authorities for the engine; drop the stale voice so the dropdown wins.
+  function handleEngineChange(next: string) {
+    setEngineChoice(next)
+    if (presetEngineId && next !== presetEngineId) {
+      setVoiceId(null)
+      setEnginePreset('')
+    }
+  }
+
+  const isCurrentApiDefault =
+    !!apiDefault &&
+    apiDefault.voice === effectiveVoice &&
+    (!effectiveEngineId || apiDefault.engine === effectiveEngineId)
+
   async function makeApiDefault() {
-    if (!voiceId) return
+    if (!effectiveVoice) return
     setSavingApiDefault(true)
     setApiDefaultError(null)
     try {
-      const record = await setApiDefault({ voice: voiceId })
+      const record = await setApiDefault({ voice: effectiveVoice, engine: effectiveEngineId })
       setApiDefaultState(record)
     } catch (err) {
       setApiDefaultError(String((err as Error)?.message || err))
@@ -552,12 +570,12 @@ export function SpeakPage() {
                 type="button"
                 size="xs"
                 variant="outline"
-                disabled={!voiceId || savingApiDefault || apiDefault?.voice === voiceId}
+                disabled={!effectiveVoice || savingApiDefault || isCurrentApiDefault}
                 onClick={() => void makeApiDefault()}
               >
                 {savingApiDefault ? (
                   <Loader2 className="animate-spin" />
-                ) : apiDefault?.voice === voiceId ? (
+                ) : isCurrentApiDefault ? (
                   'Current'
                 ) : (
                   'Set current'
@@ -574,7 +592,7 @@ export function SpeakPage() {
             presets={enginePresets}
             engine={engineChoice}
             preset={enginePreset}
-            onEngine={setEngineChoice}
+            onEngine={handleEngineChange}
             onPreset={setEnginePreset}
             loadStatus={engineLoadStatus}
             card={engineCards.find((card) => card.id === (presetEngineId ?? engineChoice)) ?? null}

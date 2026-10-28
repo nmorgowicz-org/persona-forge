@@ -146,7 +146,7 @@ export function IntegrationsPage() {
         setCloneEngines(
           engines.filter(
             (engine) =>
-              engine.kind === 'pack' &&
+              (engine.kind === 'pack' || engine.kind === 'builtin+pack') &&
               engine.capabilities.clone &&
               (engine.state.status === 'installed' || engine.state.status === 'verified'),
           ),
