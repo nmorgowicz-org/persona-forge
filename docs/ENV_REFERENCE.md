@@ -224,6 +224,7 @@ When cloning is available, the mounted REF_AUDIO is automatically registered as 
 | `KOKORO_PYTHON` | unset | Development override: run the Kokoro worker with this interpreter instead of the installed pack. |
 | `KOKORO_IDLE_UNLOAD_S` | pack manifest `idle_unload_after`, else `600` | Seconds of inactivity before the Kokoro worker process is stopped (`0` keeps it loaded). Overrides the pack manifest. |
 | `POCKET_LITE_IDLE_UNLOAD_S` | pack manifest `idle_unload_after`, else `600` | Seconds of inactivity before the Pocket Lite worker process is stopped (`0` keeps it loaded). Overrides the pack manifest. |
+| `IMPORTED_VOICES_DIR` | `<app data>/imported-voices` | Where prepared voice files imported through **Voices → Built-in → Add imported voice** (`POST /engines/{engine_id}/imported-voices`) and their provenance are stored, one folder per engine. Imports are kept apart from engine packs, so removing a pack does not delete them. |
 
 ## Text normalisation
 
@@ -241,6 +242,7 @@ When cloning is available, the mounted REF_AUDIO is automatically registered as 
 
 | Var | Default | Description |
 | ----- | --------- | ------------- |
+| `PERSONA_FORGE_HOST` | `0.0.0.0` | Bind address used only when `src/persona_forge/app.py` is run directly as a script (Flask development server, port 8318). `persona-forge serve` and the container entrypoint do not read it. |
 | `TTS_DIAG` | `0` | Diagnostic logits logging in early decode steps. Also via `/tmp/tts_diag`. |
 | `TTS_MAX_NEW_TOKENS` | unset | Caps max_new_tokens to catch non-terminating decode. Also via `/tmp/tts_max_new`. |
 | `TTS_NON_STREAMING` | unset | Forces non_streaming_mode=True. Also via `/tmp/tts_non_streaming`. |

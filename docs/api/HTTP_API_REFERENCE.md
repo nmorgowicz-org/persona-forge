@@ -85,7 +85,21 @@ Request body (JSON):
 
 - `input` or `text` (string, required) — text to synthesize (`input` preferred).
 - `language` (string, optional, default "English") — language label.
-- `voice_id` (string, optional) — ID of a voice to clone.
+- `voice_id` (string, optional) — ID of a voice to clone, or a namespaced preset ID
+  (`kokoro:af_heart`, `phonon:Zoey`, `kitten2:Bruno`, `pocket-lite:jane`, `pocket:vera`).
+- `voice` (string, optional) — the OpenAI SDK's spelling of the same field. Either works; `voice_id`
+  wins when both are sent.
+- `builtin_voice` (string, optional) — a Pocket preset name, with or without the `pocket:` prefix
+  (`vera` and `pocket:vera` are the same). Overrides `voice_id`/`voice`. Only valid while
+  `TTS_BACKEND=pocket_tts`, otherwise 400 (`builtin_voice is only supported when TTS_BACKEND=pocket_tts`);
+  ignored when `voice_variant_id` is set. Pack engines' presets go in `voice`.
+- `speed` (number, optional) — playback-rate control. A non-numeric value (a boolean included) is 400.
+  Only engines whose `capabilities.speed` is `true` apply it (Phonon 31M, Kokoro 82M; ranges under their
+  install sections below); Pocket, Pocket Lite and Kitten TTS 2 ignore it. Streaming responses say whether it
+  applied in `X-Speed-Applied`.
+- `style_preset` (string, optional), `postprocess` (boolean or object, optional) — Pocket/Qwen-path options,
+  passed through as in `/generate/async`. Pack engines accept and ignore them. The Pocket PCM stream applies no
+  post-processing.
 - `voice_variant_id` (string, optional) — explicit effective voice override. It takes precedence
   over `voice_id`/`voice` and `builtin_voice` before default resolution, namespace routing and
   validation; batch and PCM use the same resolved ID. Use a resolvable dotted saved-variant ID.
@@ -128,8 +142,14 @@ Response:
   - Header: `X-Loudness-Normalized`: `true` when the clip was level-normalised, `false` when it was
     not (opt-out, silent audio, or a streamed response). `X-Loudness-Gain-Db`: the applied gain in
     dB, present only when normalised.
+  - `response_format: "pcm"` from a streaming engine (`audio/pcm`, chunked): `X-Audio-Sample-Rate: 24000`,
+    `X-Audio-Channels: 1`, `X-Audio-Bits: 16` and `X-Loudness-Normalized: false`; the pack engines' stream
+    (Phonon 31M, Pocket Lite) adds `X-Speed-Applied: true|false`. A whole-clip `pcm` response (Kitten TTS 2,
+    Kokoro, or any request with `prosody_repair`) is a normal batch response with the headers above and no
+    `X-Audio-*` headers.
 - 503:
-  - If model not loaded or a runtime reconfiguration is in progress.
+  - If model not loaded or a runtime reconfiguration is in progress, or no speech engine is active
+    (`No speech engine is active; install one in Runtime → Speech engines.`).
   - **Engine warming** (retryable): a pack engine that is still loading its worker or compiling its
     first call answers `503` with a `Retry-After` header (whole seconds) and error code
     `engine_warming`. See "Engine warm-up" below.
@@ -144,7 +164,9 @@ Response:
     non-boolean `normalize_loudness`.
   - An explicit engine/voice namespace mismatch: choose a voice belonging to the named engine,
     or change `model` to the voice's engine. This rejects silent speaker substitution. Pocket
-    Lite intentionally still accepts `pocket:<name>` as a preset alias.
+    Lite intentionally still accepts `pocket:<name>` as a preset alias. A `pocket:` preset requested
+    while another built-in backend is active is also 400: select Pocket in Runtime first, requests never
+    switch the backend.
   - A saved reference clip is missing: restore it or save the voice again in Voice Library.
     Kitten 2 also refuses missing/unreviewed transcript text; add/Transcribe and confirm the
     words in Voice Library, then Prepare or retry. No audio or backend swap occurs.
@@ -245,27 +267,31 @@ an idle engine starts that load in the background. Nothing blocks until a gunico
 - Purpose: OpenAI-compatible model discovery; lists registered speech engines.
 - Response 200: `{ "object": "list", "data": [ ... ] }`, each entry:
   `id` (`pocket-tts`), `object` (`model`), `label`, `description`, `backend`, `runtime`,
-  `source`, `license`, `installed`, `active`, `owned_by` (`local`), and `capabilities`
+  `source`, `license`, `installed`, `pack_only`, `active`, `created` (always `0`), `owned_by` (`local`), and `capabilities`
   (`clone`, `presets`, `import_prepared_voice`, `streaming`, `languages`, `speed`,
   `expression_tags`, `seed`, `instructions`).
 - No model load is required; safe to poll before the engine is ready.
 
 ### GET /v1/audio/voices
 
-- Purpose: list every voice the endpoint can serve for the active engine.
+- Purpose: list every voice the endpoint can serve: saved voices, Pocket presets and every installed pack
+  engine's presets.
 - Response 200: `{ "object": "list", "data": [ ... ] }`, each entry:
   `voice_id` (`vd_...` or `pocket:<name>`), `object` (`voice`), `engine`, `kind`
-  (`library`|`preset`), `display_name`, `language`, `language_code`, `servable`.
+  (`library`|`preset`), `display_name`, `language`, `language_code`, `servable` (always `true`: the
+  listing is eligibility, not residency) and, on an imported voice, `imported: true`. Saved voices carry the
+  active backend's engine id.
 - **Language filter:** by default only English voices are listed. The setting is the UI
   preference `voiceCatalog.language` (`en` or `all`, in Speech engines or the Built-in voices tab);
   `?language=all` or `?language=en` overrides it per call. The response carries `language_filter` and
   `hidden_by_language_filter`. This only affects listing: a request may name any voice, in any
   language, and is served. Each voice has `language_code`; saved voices without one are always shown.
 - Pocket presets (`pocket:<name>`) are included only when the Pocket backend is active.
-- When the Kitten TTS 2 pack is installed, its 115 built-in voices are listed as `kitten2:<Name>`
-  (`engine: "kitten2"`, `kind: "preset"`). Names come from the downloaded weights, so listing never
-  loads the model. Saved library voices work with Kitten 2 too (cloning); an unknown preset name
-  returns 400.
+- Every installed pack engine's presets are listed under its namespace (`kitten2:<Name>`, `phonon:<Name>`,
+  `kokoro:<name>`, `pocket-lite:<name>`; `engine` is the pack id, `kind: "preset"`), followed by valid
+  imported voices. Names come from the installed pack, so listing never loads a model. An uninstalled engine's
+  voices are not listed here (use `GET /voices/built-in?engines=all` to browse them). Saved library voices work
+  with the cloning packs too (`kitten2`, `pocket-lite`); an unknown preset name returns 400.
 
 ### GET /engines
 
@@ -282,6 +308,8 @@ an idle engine starts that load in the background. Nothing blocks until a gunico
   rests on). It claims support only (an NVIDIA GPU or Apple silicon for Kitten TTS 2; "runs on CPU
   without a GPU" for Phonon, Kokoro and Pocket Lite), never quality or speed. The UI's dismissal is the
   persisted preference `engines.nudgeDismissed` (boolean, `/ui/preferences`).
+- Every card carries `api_default` (boolean): `true` for the engine that serves the API default, so a UI can
+  say why Remove is refused (see `POST /engines/{engine_id}/remove`).
 - Engines whose download is gated on Hugging Face also carry `hf_gate`: `{ "repo", "url", "token":
   { "set", "source", "can_clear" } }` (today only `pocket-lite`). It never contains the token.
 - Provisioned packs (Kitten TTS 2) also carry `install_job` (`state` `idle|running|done|error`,
@@ -377,12 +405,25 @@ an idle engine starts that load in the background. Nothing blocks until a gunico
 
 ### POST /engines/{engine_id}/install
 
-- Purpose: download a pack's artifacts from the URLs pinned in its manifest, resume partial
-  downloads, verify size and SHA-256, then publish the verification stamp.
-- Response 200: `{ "engine": { ...card... }, "state": { ... } }` with `state.status = "verified"`.
+- Purpose: install a pack. Two shapes, chosen by the engine:
+  - **Provisioned engines** (`kitten2`, `phonon-31m`, `kokoro`, `pocket-lite`) run as a background job and
+    answer immediately: `202 { "started": true, "job": { ... } }`, or `409 { "started": false, "job": ... }`
+    when an install is already running. Poll `GET /engines/{engine_id}/install` or `GET /engines`
+    (`install_job`). Per-engine details follow below.
+  - **Manifest-only packs** (a pack directory under `ENGINE_PACKS_DIR`): download the artifacts from the URLs
+    pinned in its manifest, resume partial downloads, verify size and SHA-256, then publish the verification
+    stamp.
+- Response 200 (manifest-only packs): `{ "engine": { ...card... }, "state": { ... } }` with
+  `state.status = "verified"`.
 - 409: no manifest, active install, not enough disk, unsupported source scheme, or verification
   failure (`{ "error": "..." }`). Partial downloads are kept as `<artifact>.part` for retry;
   unverified bytes are never published as the artifact.
+
+### GET /engines/{engine_id}/install
+
+Progress of a provisioned engine's background install: `{ "job": { "state": "idle"|"running"|"done"|"error",
+"step", "step_index", "step_count", "error", "error_code", "error_link" } }`. 404 for an engine with no background
+install.
 
 ### POST /engines/kitten2/install
 
@@ -449,19 +490,21 @@ an idle engine starts that load in the background. Nothing blocks until a gunico
   the streamed audio matches the whole-clip render within one 16-bit step). Its voice states are
   separate from the standard Pocket runtime.
 
-### POST /engines/kitten2/recheck
+### POST /engines/{engine_id}/recheck
 
-- Purpose: reload the engine in the background so a newly installed compiler is picked up (fast
-  mode on NVIDIA needs a C++ compiler: Microsoft C++ Build Tools on Windows, `build-essential` on
-  Linux). No restart is needed.
-- 202 `{ "started": true, "status": { ... } }`; 409 when the pack is not installed or a load is
-  already running.
+- Purpose: reload a provisioned engine's worker in the background. For Kitten TTS 2 this picks up a newly
+  installed compiler (fast mode on NVIDIA needs a C++ compiler: Microsoft C++ Build Tools on Windows,
+  `build-essential` on Linux) without a restart. Any of `kitten2`, `phonon-31m`, `kokoro`, `pocket-lite`
+  accepts it.
+- 202 `{ "started": true, "status": { ... } }` (`status` is the `load_status` object of `GET /engines`); 409
+  `{ "error" }` when the pack is not installed, or `{ "started": false, "status" }` when a load is already
+  running; 404 for an engine with no worker to reload.
 
 ### POST /engines/{engine_id}/remove
 
 - Purpose: delete a pack directory (manifest and artifacts). Built-in engines have no pack.
 - 200: `{ "removed": "<engine_id>" }`.
-- 409: the engine is active — switch engines first.
+- 409: the engine is the active built-in engine (`Cannot remove the active engine; switch engines first.`).
 - 409: the engine serves the API default (a pack voice, or a saved voice cloned on it). Body:
   `{ "error": "<Engine> serves the API default voice '<voice>'. Change the API default first, then
   remove the engine.", "code": "api_default_engine", "api_default": { "engine", "voice" } }`. The pack
@@ -693,7 +736,8 @@ Request body (JSON):
 
 Response:
 
-- 200: WAV audio with dev-oriented headers (`X-Streaming-*`, `X-Streaming-SNR-Db`, etc.)
+- 200: WAV audio with dev-oriented headers (`X-Streaming-*`, `X-Streaming-SNR-Db`, etc.).
+  `X-Streaming-Max-Abs` and `X-Streaming-SNR-Db` read `unavailable` when the comparison cannot be computed.
 - 503: Model not loaded or swap in progress
 - 500: Inference error
 
@@ -1017,6 +1061,8 @@ Response (JSON):
 
 - `voices` (array) — each object contains voice metadata:
   - `voice_id`, `description`, `sample_text`, `language`, `seed`, `selections`, `created_at`.
+  - `api_active` (boolean): `true` for the voice that is the saved-voice API default (read from the
+    structured default, `GET /api-default`), when the active backend is `pocket_tts`, `pytorch` or `openvino`.
 
 ### GET /voices/{voice_id}
 
@@ -1120,18 +1166,41 @@ Response:
 
 ### GET /voices/built-in
 
-- Purpose: List Pocket's curated built-in voices; `?engines=all` also includes pack presets and
-  valid imported prepared voices.
+- Purpose: the built-in voice catalog. By default only Pocket's curated voices (what Speak uses);
+  `?engines=all` adds every pack engine's presets and valid imported prepared voices, **including engines that
+  are not installed** (listed from a bundled catalog, `installed: false`, so they can be browsed before
+  installing).
 
 Response (JSON):
 
 - `voices` (array) — each object:
-  - `voice_id` (string, e.g. "pocket:amy"), `builtin_voice`, `backend` ("pocket_tts"),
-    `display_name`, `source`, `license`, `language`, `language_code`, `category`, `note`,
-    `prompt`, `requires_backend` ("pocket_tts").
-- With `engines=all`, entries also carry `engine`, `engine_label`, `installed`, and imports carry
-  `imported: true` plus `provenance` (`source_filename`, `sha256`, `size`, `imported_at`,
-  `engine_revision`). The `engines` summary includes `import_prepared_voice`.
+  - Always: `voice_id` (`pocket:vera`, `kokoro:af_heart`, ...), `builtin_voice` (the name without the
+    namespace), `backend`, `display_name`, `source`, `license`, `language`, `language_code`, `category`, `note`,
+    `prompt`, `requires_backend`, `engine`, `engine_label`, `installed`, `gender`, `gender_source`.
+  - Pocket entries: `backend: "pocket_tts"`, `engine: "pocket-tts"`, `installed: true`,
+    `requires_backend: "pocket_tts"`, `category` one of `conversation`, `reading`, `other`, `multilingual`. Their
+    `gender` is read from the app's own note (`Female ...` / `Male ...`) with `gender_source: "upstream"`; both
+    are `null` when the note does not say. They carry no `accent` or `age` field.
+  - Pack entries (only with `engines=all`): `backend` is the engine id, `requires_backend: null`, `category:
+    "preset"` (or `"imported"`), `installed` is the engine's install state, `note` is the catalog's description of the voice
+    (empty when it has none), plus `accent` and `age`.
+  - `gender`: `"female"`, `"male"` or `null`. `gender_source` says how far to trust it: `"upstream"` (Phonon's own
+    catalog; Kokoro's naming scheme, where the second letter of the name is `f`/`m`; or, for Pocket and Pocket
+    Lite, the app's own note on the voice), `"name"` (Kitten TTS 2 only: the voice name contains an explicit word such
+    as `NewsAnchorFemale`) or `"estimated"` (Kitten TTS 2 only: guessed from the median pitch of the voice's
+    reference clip). In the bundled catalog 106 of Kitten's 115 voices are estimates and 9 come from the name. An
+    estimate is a stopgap and errs on low female and high male voices; the UI labels it "(est.)". Both fields are
+    `null` when nothing is known (Phonon's 12 "character" voices, one of Pocket Lite's 21).
+  - `accent` (string or `null`): Phonon's upstream English `locale` as a name (`American`, `British`,
+    `Australian`, ...); Kokoro's `American`/`British` from the first letter of the name; `null` for every other
+    engine and for non-English voices. `age` (string or `null`): Phonon's upstream `age`; `null` elsewhere.
+  - Imported voices (`engines=all`): `imported: true`, `category: "imported"`, `language: "English"`, `gender`,
+    `gender_source`, `accent` and `age` all `null`, and `provenance` (`source_filename`, `sha256`, `size`,
+    `imported_at`, `engine_revision`).
+- With `engines=all`, also `engines`: one summary per engine (`id`, `label`, `installed`, `voices` (count),
+  `import_prepared_voice`), Pocket first.
+- Listing never loads a model and needs no network: an installed engine's voice names come from its pack, their
+  descriptions from the bundled catalog (`engine_voice_catalog.json`).
 
 ### POST /voices/{voice_id}/duplicate
 
@@ -1312,7 +1381,9 @@ Response (JSON):
 ### POST /voices/{voice_id}/activate
 
 - Purpose: Make a saved voice the no-voice runtime API default. Hot-swaps the Pocket voice
-  state or Qwen clone prompt and persists the choice across restarts.
+  state or Qwen clone prompt and persists the choice across restarts. It also records the structured
+  API default (`engine` = the active backend, as `PUT /api-default` does for a saved voice without
+  `engine`), so `GET /api-default` reports it.
 
 Response (JSON):
 

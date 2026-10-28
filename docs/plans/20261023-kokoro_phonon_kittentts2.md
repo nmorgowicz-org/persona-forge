@@ -1137,6 +1137,14 @@ Docs deliverables ride the phases: Phase C updates `docs/api/HTTP_API_REFERENCE.
 `docs/ENV_REFERENCE.md` and `docs/agent-reference/RUNTIME_AND_MEMORY.md`; Phase E adds user-facing
 engine-manager and Compare docs.
 
+**Docs delivered (2026-10-28).** Phase C's reference docs exist and were audited against `app.py`:
+[`HTTP_API_REFERENCE.md`](../api/HTTP_API_REFERENCE.md) (including `GET /voices/built-in?engines=all` and its
+`installed`, `gender`, `gender_source`, `accent`, `age` fields), [`ENV_REFERENCE.md`](../ENV_REFERENCE.md) and
+[`RUNTIME_AND_MEMORY.md`](../agent-reference/RUNTIME_AND_MEMORY.md) §6, which now states the verified pack-engine
+architecture that §4.3 required before implementation. Phase E's user-facing pages exist:
+[`SPEECH_ENGINES.md`](../SPEECH_ENGINES.md), [`VOICES.md`](../VOICES.md) and [`COMPARE.md`](../COMPARE.md), listed in
+[`docs/README.md`](../README.md). Each carries its own known-limitations list.
+
 ## 8. Testing
 
 Pre-flight commands (must pass before/after each phase): backend `pytest tests/tier1_unit -q`,
