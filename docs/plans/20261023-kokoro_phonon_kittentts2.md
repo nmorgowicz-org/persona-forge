@@ -240,6 +240,13 @@ an explicit error rather than silently degrading.
   audio; they never delay endpoint requests.
 - Each engine carries its own idle-unload timer (pack-manifest field `idle_unload_after`),
   mirroring the existing Pocket idle-unload policy.
+  **Built:** every pack manifest carries `idle_unload_after` (seconds, `0` = never; validated as a
+  non-negative number; written by each installer: Kitten 2 1800 s because a reload re-pays the compile,
+  the others 600 s). `engine_lifecycle.IdleUnloader` resolves argument > per-engine env
+  (`*_IDLE_UNLOAD_S`) > manifest > engine default (older packs lack the field), on every call. All four
+  adapters use it; `GET /engines` `load_status` exposes `idle_unload_after` and `idle_unload_source`.
+  An idle timer never stops a worker mid-stream. Verified with a real Phonon pack and a 3 s override:
+  unloaded to `idle`, reloaded on the next request.
 - Non-Pocket engines run as a **managed child process** in their own environment, with bounded local
   IPC, health checks, kill-on-cancel/timeout, RSS/VRAM accounting, and no shell interpolation.
   ONNX/Rust engines may move in-process only after import/native-library compatibility is proved.

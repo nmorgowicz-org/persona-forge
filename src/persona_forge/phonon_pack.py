@@ -27,6 +27,8 @@ from persona_forge.kitten2_pack import (
 
 ENGINE_ID = "phonon-31m"
 PACK_VERSION = "1"
+# Seconds idle before the worker is stopped; written to the manifest as idle_unload_after.
+IDLE_UNLOAD_AFTER_S = 600.0
 PTTS_VERSION = "0.4.1"
 
 # Run inside the pack with the network switched off: proves the prefetch is complete and that the
@@ -100,6 +102,7 @@ def build_manifest() -> dict[str, Any]:
         "description": "Very fast English voices on any CPU. Runs in its own private environment.",
         "runtime": "ptts-native-cpu",
         "provisioner": ENGINE_ID,
+        "idle_unload_after": IDLE_UNLOAD_AFTER_S,
         "requirements": [f"ptts=={PTTS_VERSION}"],
         "artifacts": [],
     }

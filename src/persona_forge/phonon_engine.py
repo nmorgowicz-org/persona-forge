@@ -70,6 +70,7 @@ class PhononEngine(PackPresetEngine):
     id = ENGINE_ID
     label = "Phonon 31M"
     idle_env = "PHONON_IDLE_UNLOAD_S"
+    idle_default_s = phonon_pack.IDLE_UNLOAD_AFTER_S
     worker_file = str(Path(phonon_worker.__file__).resolve())
     preset_prefix = PRESET_PREFIX
     streams = True

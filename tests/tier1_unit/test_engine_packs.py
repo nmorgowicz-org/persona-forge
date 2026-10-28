@@ -213,3 +213,40 @@ def test_pack_for_registered_engine_merges_into_its_card(tmp_path):
     assert cards["pocket-tts"]["kind"] == "builtin+pack"
     assert cards["pocket-tts"]["state"]["status"] == "not-installed"
     assert cards["pocket-tts"]["version"] == "0.4.1"
+
+
+# -- idle_unload_after ---------------------------------------------------------------------------
+
+
+def test_manifest_without_idle_unload_after_parses_to_none():
+    manifest = engine_packs.parse_manifest(_payload())
+
+    assert manifest.idle_unload_after is None
+    assert manifest.as_dict()["idle_unload_after"] is None
+
+
+@pytest.mark.parametrize("value", [0, 0.0, 30, 600.5])
+def test_manifest_accepts_a_non_negative_idle_unload_after(value):
+    manifest = engine_packs.parse_manifest(_payload(idle_unload_after=value))
+
+    assert manifest.idle_unload_after == float(value)
+    assert manifest.as_dict()["idle_unload_after"] == float(value)
+
+
+@pytest.mark.parametrize("value", [-1, -0.5, "600", True, False, [], float("nan"), float("inf")])
+def test_manifest_rejects_a_bad_idle_unload_after(value):
+    with pytest.raises(engine_packs.PackManifestError, match="idle_unload_after"):
+        engine_packs.parse_manifest(_payload(idle_unload_after=value))
+
+
+def test_idle_unload_after_is_looked_up_by_engine_id(tmp_path):
+    _write_pack(tmp_path, _payload(idle_unload_after=45), {})
+
+    assert engine_packs.idle_unload_after("kokoro", tmp_path) == 45.0
+    assert engine_packs.idle_unload_after("other", tmp_path) is None
+
+
+def test_idle_unload_after_is_none_for_an_older_pack_without_the_field(tmp_path):
+    _write_pack(tmp_path, _payload(), {})
+
+    assert engine_packs.idle_unload_after("kokoro", tmp_path) is None

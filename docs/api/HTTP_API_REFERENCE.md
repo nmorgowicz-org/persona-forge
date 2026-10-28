@@ -196,6 +196,11 @@ an idle engine starts that load in the background. Nothing blocks until a gunico
     starting) → `warming` (worker loaded; first call compiling) → `ready`, or `error`. `ready` is
     the plan's "active": the worker can serve now. Engines whose worker has no warm-up step go
     straight from `loading` to `ready`.
+  - `idle_unload_after` (seconds; `0` = never) and `idle_unload_source` (`argument|env|manifest|default`):
+    the effective idle-unload period. It comes from the pack manifest's `idle_unload_after`, the
+    per-engine env override wins (see `docs/ENV_REFERENCE.md`), and packs installed before the field
+    existed use the engine default. After the period the worker stops and `state` returns to `idle`;
+    the next request reloads it. The manifest value is also on `pack.idle_unload_after`.
   - `elapsed_s`: seconds spent in the current `loading`/`warming` phase, else `null`.
   - `estimated_s`: expected length of the current phase where it has been measured (Kitten TTS 2
     `warming`: 35), else `null`.

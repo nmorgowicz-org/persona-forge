@@ -27,6 +27,8 @@ from persona_forge.pocket_lite_worker import ENGLISH_PRESETS, MODEL_NAME
 
 ENGINE_ID = "pocket-lite"
 PACK_VERSION = "1"
+# Seconds idle before the worker is stopped; written to the manifest as idle_unload_after.
+IDLE_UNLOAD_AFTER_S = 600.0
 
 # Loads the checkpoint online (which downloads the cloning weights, tokenizer and fallback weights)
 # and fetches every English preset voice. Refuses a model without cloning so a missing token or
@@ -118,6 +120,7 @@ def build_manifest() -> dict[str, Any]:
         "description": "A smaller, faster Pocket model that still clones. Runs in the app's Python.",
         "runtime": "python-cpu",
         "provisioner": ENGINE_ID,
+        "idle_unload_after": IDLE_UNLOAD_AFTER_S,
         "requirements": [f"pocket-tts=={pocket_tts_version()}", f"checkpoint {MODEL_NAME}"],
         "artifacts": [],
     }

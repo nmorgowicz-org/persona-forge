@@ -32,6 +32,8 @@ from persona_forge.kitten2_pack import (
 
 ENGINE_ID = "kokoro"
 PACK_VERSION = "1"
+# Seconds idle before the worker is stopped; written to the manifest as idle_unload_after.
+IDLE_UNLOAD_AFTER_S = 600.0
 KOKORO_ONNX_VERSION = "0.6.1"
 RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 # (filename, size in bytes, sha256) for the files the worker loads.
@@ -107,6 +109,7 @@ def build_manifest() -> dict[str, Any]:
         "description": "Multilingual preset voices on any CPU. Runs in its own private environment.",
         "runtime": "onnxruntime-cpu",
         "provisioner": ENGINE_ID,
+        "idle_unload_after": IDLE_UNLOAD_AFTER_S,
         "requirements": [f"kokoro-onnx=={KOKORO_ONNX_VERSION}"],
         "artifacts": [],
     }

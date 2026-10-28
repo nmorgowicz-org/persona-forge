@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -68,6 +69,9 @@ class PackManifest:
     # Packs built by running installers (venv + packages + weights) instead of hashed downloads
     # name their provisioner here; they may then declare no artifacts.
     provisioner: str | None = None
+    # Seconds of inactivity before the engine's worker is stopped; 0 = never. None = the pack
+    # predates the field, so the adapter uses its own default.
+    idle_unload_after: float | None = None
     manifest_sha256: str = ""
     raw: Mapping[str, Any] = field(default_factory=dict)
 
@@ -84,6 +88,7 @@ class PackManifest:
             "revision": self.revision,
             "notes": self.notes,
             "provisioner": self.provisioner,
+            "idle_unload_after": self.idle_unload_after,
             "manifest_sha256": self.manifest_sha256,
         }
 
@@ -148,6 +153,17 @@ def parse_manifest(payload: Mapping[str, Any], manifest_sha256: str = "") -> Pac
     ):
         raise PackManifestError("requirements must be a list of non-empty strings")
 
+    idle_unload_after = payload.get("idle_unload_after")
+    if idle_unload_after is not None:
+        if (
+            isinstance(idle_unload_after, bool)
+            or not isinstance(idle_unload_after, (int, float))
+            or not math.isfinite(idle_unload_after)
+            or idle_unload_after < 0
+        ):
+            raise PackManifestError("idle_unload_after must be a non-negative number of seconds")
+        idle_unload_after = float(idle_unload_after)
+
     return PackManifest(
         id=pack_id,
         engine_id=engine_id,
@@ -160,6 +176,7 @@ def parse_manifest(payload: Mapping[str, Any], manifest_sha256: str = "") -> Pac
         revision=payload.get("revision") if isinstance(payload.get("revision"), str) else None,
         notes=payload.get("notes") if isinstance(payload.get("notes"), str) else None,
         provisioner=provisioner,
+        idle_unload_after=idle_unload_after,
         manifest_sha256=manifest_sha256,
         raw=payload,
     )
@@ -314,6 +331,17 @@ def find_pack_dir(engine_id: str, root: Path | None = None) -> Path | None:
         if manifest.engine_id == engine_id:
             return entry
     return None
+
+
+def idle_unload_after(engine_id: str, root: Path | None = None) -> float | None:
+    """The installed pack's ``idle_unload_after`` seconds, or None (no pack, or an older pack)."""
+    directory = find_pack_dir(engine_id, root)
+    if directory is None:
+        return None
+    try:
+        return load_manifest(directory).idle_unload_after
+    except PackManifestError:
+        return None
 
 
 def _download_artifact(url: str, dest: Path, artifact: PackArtifact, *, allow_file: bool) -> None:

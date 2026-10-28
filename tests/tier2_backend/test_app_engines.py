@@ -750,3 +750,21 @@ def test_temporary_model_patches_restore_generation_and_adapters(client, app_mod
     response = client.post("/v1/audio/speech", json={"input": "hello"})
     assert response.status_code == 200, response.get_data(as_text=True)
     assert response.content_type.startswith("audio/")
+
+
+def test_engine_card_exposes_the_effective_idle_unload(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("ENGINE_PACKS_DIR", str(tmp_path))
+    monkeypatch.delenv("KITTEN2_IDLE_UNLOAD_S", raising=False)
+    pack = tmp_path / "kitten2"
+    pack.mkdir()
+    (pack / "manifest.json").write_text(
+        '{"id": "kitten2", "engine_id": "kitten2", "version": "1", "provisioner": "kitten2",'
+        ' "artifacts": [], "idle_unload_after": 123}',
+        encoding="utf-8",
+    )
+
+    card = {c["id"]: c for c in client.get("/engines").get_json()["engines"]}["kitten2"]
+
+    assert card["load_status"]["idle_unload_after"] == 123.0
+    assert card["load_status"]["idle_unload_source"] == "manifest"
+    assert card["pack"]["idle_unload_after"] == 123.0

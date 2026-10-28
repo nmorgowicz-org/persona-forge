@@ -66,6 +66,7 @@ class KokoroEngine(PackPresetEngine):
     id = ENGINE_ID
     label = "Kokoro 82M"
     idle_env = "KOKORO_IDLE_UNLOAD_S"
+    idle_default_s = kokoro_pack.IDLE_UNLOAD_AFTER_S
     worker_file = str(Path(kokoro_worker.__file__).resolve())
     preset_prefix = PRESET_PREFIX
 

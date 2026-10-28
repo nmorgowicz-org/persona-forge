@@ -114,3 +114,89 @@ class LoadTracker:
             if remaining <= 0:
                 return DEFAULT_RETRY_AFTER_S  # overran the estimate: poll gently
             return min(max(math.ceil(remaining), 1), MAX_RETRY_AFTER_S)
+
+
+class IdleUnloader:
+    """Per-engine idle-unload policy and timer, shared by every pack adapter.
+
+    Effective seconds resolve as: explicit ``override`` > env var > pack manifest
+    ``idle_unload_after`` > ``default_s`` (older packs have no field). ``0`` means never unload.
+    Resolution happens on every call, so a pack installed or edited after start-up is honoured.
+
+    ``on_idle`` runs on the timer thread. A timer that was superseded by a later ``arm`` or
+    ``cancel`` never fires its callback, even if it was already running when cancelled.
+    """
+
+    def __init__(
+        self,
+        *,
+        env_name: str,
+        default_s: float,
+        on_idle: Callable[[], None],
+        manifest_value: Callable[[], float | None],
+        override: float | None = None,
+        timer_factory: Callable[..., Any] = threading.Timer,
+    ) -> None:
+        self._env_name = env_name
+        self._default_s = default_s
+        self._on_idle = on_idle
+        self._manifest_value = manifest_value
+        self._override = override
+        self._timer_factory = timer_factory
+        self._lock = threading.Lock()
+        self._timer: Any = None
+        self._generation = 0
+
+    def resolve(self) -> tuple[float, str]:
+        """Effective seconds and where they came from: argument | env | manifest | default."""
+        if self._override is not None:
+            return max(0.0, float(self._override)), "argument"
+        raw = os.environ.get(self._env_name) if self._env_name else None
+        if raw is not None:
+            try:
+                value = float(raw)
+            except ValueError:
+                value = math.nan
+            if math.isfinite(value) and value >= 0:
+                return value, "env"
+        try:
+            manifest = self._manifest_value()
+        except Exception:  # an unreadable pack must not break serving
+            manifest = None
+        if manifest is not None:
+            return manifest, "manifest"
+        return self._default_s, "default"
+
+    @property
+    def seconds(self) -> float:
+        return self.resolve()[0]
+
+    def arm(self) -> None:
+        """(Re)start the countdown from now; a no-op beyond cancelling when the value is 0."""
+        seconds = self.seconds
+        with self._lock:
+            self._cancel_locked()
+            if seconds <= 0:
+                return
+            generation = self._generation
+
+            def fire() -> None:
+                with self._lock:
+                    if generation != self._generation:
+                        return
+                self._on_idle()
+
+            timer = self._timer_factory(seconds, fire)
+            timer.daemon = True
+            self._timer = timer
+            timer.start()
+
+    def cancel(self) -> None:
+        with self._lock:
+            self._cancel_locked()
+
+    def _cancel_locked(self) -> None:
+        self._generation += 1
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None

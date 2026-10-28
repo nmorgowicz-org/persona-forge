@@ -26,6 +26,8 @@ from persona_forge import accelerator_manifest, engine_packs, install_check
 
 ENGINE_ID = "kitten2"
 PACK_VERSION = "1"
+# A reload re-pays the ~33 s kernel compile, so keep it loaded longer than the others.
+IDLE_UNLOAD_AFTER_S = 1800.0
 KITTENML_VERSION = "0.9.6"
 # Windows needs Triton for fast mode; Linux gets it with torch. Installing it is harmless without
 # a compiler: the worker falls back to standard mode and says why.
@@ -173,6 +175,7 @@ def build_manifest(target: Target, platform: str | None = None) -> dict[str, Any
         "description": "Cloning and 115 built-in voices. Runs in its own private environment.",
         "runtime": target.runtime,
         "provisioner": ENGINE_ID,
+        "idle_unload_after": IDLE_UNLOAD_AFTER_S,
         "requirements": [*torch_pkgs, *package_requirements(target, platform)],
         "torch_index": torch_index,
         "artifacts": [],

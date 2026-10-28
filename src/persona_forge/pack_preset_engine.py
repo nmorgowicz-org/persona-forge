@@ -6,15 +6,14 @@ silent fallback. Subclasses supply the pack paths, the ``load`` request and a fe
 
 from __future__ import annotations
 
-import os
 import threading
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 import numpy as np
 
-from persona_forge import voice_library
-from persona_forge.engine_lifecycle import IN_FLIGHT, LoadTracker, warm_wait_s
+from persona_forge import engine_packs, voice_library
+from persona_forge.engine_lifecycle import IN_FLIGHT, IdleUnloader, LoadTracker, warm_wait_s
 from persona_forge.kitten2_engine import (
     EngineUnavailable,
     EngineWarming,
@@ -37,6 +36,8 @@ class PackPresetEngine:
     id = ""
     label = ""
     idle_env = ""
+    # Used when neither the env override nor the pack manifest sets ``idle_unload_after``.
+    idle_default_s = 600.0
     worker_file = ""
     preset_prefix = ""
     streams = False
@@ -55,24 +56,41 @@ class PackPresetEngine:
         if seed_value is not None:
             request["seed"] = int(seed_value)
 
-    def __init__(self, idle_unload_s: float | None = None) -> None:
-        self._idle_s = idle_unload_s if idle_unload_s is not None else self._idle_from_env()
+    def __init__(
+        self,
+        idle_unload_s: float | None = None,
+        *,
+        timer_factory: Callable[..., Any] = threading.Timer,
+    ) -> None:
         self._lock = threading.RLock()
         self._process: PackProcess | None = None
-        self._timer: threading.Timer | None = None
+        self._active = 0  # streams in flight; an idle timer must not stop a worker mid-stream
+        self._idle = IdleUnloader(
+            env_name=self.idle_env,
+            default_s=self.idle_default_s,
+            on_idle=self._unload_if_idle,
+            manifest_value=lambda: engine_packs.idle_unload_after(self.id),
+            override=idle_unload_s,
+            timer_factory=timer_factory,
+        )
         self._load_info: dict[str, Any] = {}
         # idle | loading | warming | ready | error, with elapsed time while loading or warming.
         estimates = {"warming": self.warmup_estimate_s} if self.warmup_estimate_s else {}
         self._tracker = LoadTracker(estimates=estimates)
 
-    def _idle_from_env(self, default: float = 600.0) -> float:
-        try:
-            return float(os.environ.get(self.idle_env, default))
-        except ValueError:
-            return default
+    @property
+    def idle_unload_after(self) -> float:
+        """Effective idle-unload seconds (0 = never)."""
+        return self._idle.seconds
 
     def status(self) -> dict[str, Any]:
-        return {**self._load_info, **self._tracker.snapshot()}
+        seconds, source = self._idle.resolve()
+        return {
+            **self._load_info,
+            **self._tracker.snapshot(),
+            "idle_unload_after": seconds,
+            "idle_unload_source": source,
+        }
 
     def recheck(self) -> bool:
         """Reload the worker in the background. Returns False when a load is already running."""
@@ -165,19 +183,17 @@ class PackPresetEngine:
         return process
 
     def _arm_idle_timer(self) -> None:
-        if self._timer is not None:
-            self._timer.cancel()
-        if self._idle_s <= 0:
-            return
-        self._timer = threading.Timer(self._idle_s, self.unload)
-        self._timer.daemon = True
-        self._timer.start()
+        self._idle.arm()
+
+    def _unload_if_idle(self) -> None:
+        with self._lock:
+            if self._active:
+                return  # a stream is running; its end re-arms the timer
+        self.unload()
 
     def unload(self) -> None:
         with self._lock:
-            if self._timer is not None:
-                self._timer.cancel()
-                self._timer = None
+            self._idle.cancel()
             process, self._process = self._process, None
             if self._tracker.state == "ready":
                 self._tracker.enter("idle")
@@ -275,19 +291,22 @@ class PackPresetEngine:
         self._await_ready()
         with self._lock:
             process = self._ensure_started()
-            cloned = self._prepare_voice(process, requested)
-            if cloned:
-                request["voice_id"] = requested
-            self._fill_request(request, "" if cloned else requested, seed_value, speed)
+            self._idle.cancel()
+            self._active += 1
         try:
+            with self._lock:
+                cloned = self._prepare_voice(process, requested)
+                if cloned:
+                    request["voice_id"] = requested
+                self._fill_request(request, "" if cloned else requested, seed_value, speed)
             yield from process.stream(request)
         except PackProcessError as exc:
             if str(exc).startswith("unknown preset"):
                 raise InvalidVoice(str(exc)) from exc
             raise
         finally:
-            if not process.is_alive:
-                with self._lock:
-                    if self._process is process:
-                        self._process = None
-            self._arm_idle_timer()
+            with self._lock:
+                self._active -= 1
+                if not process.is_alive and self._process is process:
+                    self._process = None
+                self._arm_idle_timer()

@@ -53,12 +53,13 @@ class PocketLiteEngine(PackPresetEngine):
     id = ENGINE_ID
     label = "Pocket Lite (18M)"
     idle_env = "POCKET_LITE_IDLE_UNLOAD_S"
+    idle_default_s = pocket_lite_pack.IDLE_UNLOAD_AFTER_S
     worker_file = str(Path(pocket_lite_worker.__file__).resolve())
     preset_prefix = PRESET_PREFIX
     streams = True
 
-    def __init__(self, idle_unload_s: float | None = None) -> None:
-        super().__init__(idle_unload_s)
+    def __init__(self, idle_unload_s: float | None = None, **kwargs: Any) -> None:
+        super().__init__(idle_unload_s, **kwargs)
         self._prepared: dict[str, tuple[str, float]] = {}
 
     def _pack_python(self) -> Path | None:

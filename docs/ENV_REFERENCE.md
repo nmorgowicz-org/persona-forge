@@ -206,13 +206,14 @@ When cloning is available, the mounted REF_AUDIO is automatically registered as 
 | `ENGINE_PACKS_ALLOW_FILE_SOURCES` | unset | Test/debug only: allow `file://` artifact sources in pack manifests. Leave unset in production so installs only use http(s). |
 | `ENGINE_PACKS_UV` | auto-detected | Path to `uv` used to build the Kitten TTS 2 pack environment. Without it the installer falls back to `python -m venv` and `pip`. |
 | `KITTEN2_PYTHON` | unset | Development override: run the Kitten TTS 2 worker with this interpreter instead of the installed pack. |
-| `KITTEN2_IDLE_UNLOAD_S` | `600` | Seconds of inactivity before the Kitten TTS 2 worker process is stopped to free memory (`0` keeps it loaded). It restarts on the next request. |
+| `KITTEN2_IDLE_UNLOAD_S` | pack manifest `idle_unload_after`, else `1800` | Seconds of inactivity before the Kitten TTS 2 worker process is stopped to free memory (`0` keeps it loaded). Overrides the pack manifest; invalid or negative values are ignored. It restarts on the next request (a reload re-pays the compile warm-up, hence the longer default). |
 | `ENGINE_INSTALL_SPEED_CHECK` | `1` | Set to `0`, `false`, `no` or `off` to skip the speed check that each pack install runs after verifying (one short synthesis through the worker, recorded as RTF on the engine card). A slow result never fails an install. See the HTTP API reference, `GET /engines` (`install_check`). |
 | `ENGINE_WARM_WAIT_S` | `5` | Seconds a `/v1/audio/speech` request waits for a pack engine that is loading or warming up before it gets a retryable `503` with `Retry-After` and error code `engine_warming`. `0` never waits. See the HTTP API reference, "Engine warm-up". |
 | `PHONON_PYTHON` | unset | Development override: run the Phonon 31M worker with this interpreter instead of the installed pack. |
-| `PHONON_IDLE_UNLOAD_S` | `600` | Seconds of inactivity before the Phonon worker process is stopped (`0` keeps it loaded). |
+| `PHONON_IDLE_UNLOAD_S` | pack manifest `idle_unload_after`, else `600` | Seconds of inactivity before the Phonon worker process is stopped (`0` keeps it loaded). Overrides the pack manifest. |
 | `KOKORO_PYTHON` | unset | Development override: run the Kokoro worker with this interpreter instead of the installed pack. |
-| `KOKORO_IDLE_UNLOAD_S` | `600` | Seconds of inactivity before the Kokoro worker process is stopped (`0` keeps it loaded). |
+| `KOKORO_IDLE_UNLOAD_S` | pack manifest `idle_unload_after`, else `600` | Seconds of inactivity before the Kokoro worker process is stopped (`0` keeps it loaded). Overrides the pack manifest. |
+| `POCKET_LITE_IDLE_UNLOAD_S` | pack manifest `idle_unload_after`, else `600` | Seconds of inactivity before the Pocket Lite worker process is stopped (`0` keeps it loaded). Overrides the pack manifest. |
 
 ## Text normalisation
 

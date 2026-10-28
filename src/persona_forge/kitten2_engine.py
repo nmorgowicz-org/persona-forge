@@ -13,12 +13,12 @@ import os
 import threading
 import wave
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 import numpy as np
 
 from persona_forge import engine_packs, kitten2_pack, kitten2_worker, voice_library
-from persona_forge.engine_lifecycle import IN_FLIGHT, LoadTracker, warm_wait_s
+from persona_forge.engine_lifecycle import IN_FLIGHT, IdleUnloader, LoadTracker, warm_wait_s
 from persona_forge.pack_process import PackProcess, PackProcessError
 
 ENGINE_ID = "kitten2"
@@ -139,30 +139,47 @@ def _decode_wav(data: bytes) -> tuple[np.ndarray, int]:
     return np.frombuffer(frames, dtype="<i2").astype(np.float32) / 32768.0, rate
 
 
-def _idle_from_env(default: float = 600.0) -> float:
-    try:
-        return float(os.environ.get("KITTEN2_IDLE_UNLOAD_S", default))
-    except ValueError:
-        return default
-
-
 class Kitten2Engine:
     id = ENGINE_ID
     label = "Kitten TTS 2"
 
-    def __init__(self, idle_unload_s: float | None = None) -> None:
-        self._idle_s = idle_unload_s if idle_unload_s is not None else _idle_from_env()
+    idle_env = "KITTEN2_IDLE_UNLOAD_S"
+
+    def __init__(
+        self,
+        idle_unload_s: float | None = None,
+        *,
+        timer_factory: Callable[..., Any] = threading.Timer,
+    ) -> None:
+        self._idle = IdleUnloader(
+            env_name=self.idle_env,
+            default_s=kitten2_pack.IDLE_UNLOAD_AFTER_S,
+            on_idle=self.unload,
+            manifest_value=lambda: engine_packs.idle_unload_after(self.id),
+            override=idle_unload_s,
+            timer_factory=timer_factory,
+        )
         self._lock = threading.RLock()
         self._process: PackProcess | None = None
         self._prepared: dict[str, tuple[str, float]] = {}
-        self._timer: threading.Timer | None = None
         self._load_info: dict[str, Any] = {}
         # idle | loading | warming | ready | error, with elapsed time while loading or warming.
         self._tracker = LoadTracker(estimates={"warming": WARMUP_ESTIMATE_S})
 
     def status(self) -> dict[str, Any]:
         """Load state plus the speed mode and, when fast mode is unavailable, why."""
-        return {**self._load_info, **self._tracker.snapshot()}
+        seconds, source = self._idle.resolve()
+        return {
+            **self._load_info,
+            **self._tracker.snapshot(),
+            "idle_unload_after": seconds,
+            "idle_unload_source": source,
+        }
+
+    @property
+    def idle_unload_after(self) -> float:
+        """Effective idle-unload seconds (0 = never)."""
+        return self._idle.seconds
 
     def recheck(self) -> bool:
         """Reload the worker in the background so a newly installed compiler is picked up.
@@ -273,19 +290,11 @@ class Kitten2Engine:
         return process
 
     def _arm_idle_timer(self) -> None:
-        if self._timer is not None:
-            self._timer.cancel()
-        if self._idle_s <= 0:
-            return
-        self._timer = threading.Timer(self._idle_s, self.unload)
-        self._timer.daemon = True
-        self._timer.start()
+        self._idle.arm()
 
     def unload(self) -> None:
         with self._lock:
-            if self._timer is not None:
-                self._timer.cancel()
-                self._timer = None
+            self._idle.cancel()
             process, self._process = self._process, None
             self._prepared.clear()
             if self._tracker.state == "ready":
