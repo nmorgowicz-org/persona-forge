@@ -806,6 +806,46 @@ Saved Compare-tab listening sessions (`compare_results.json` next to `ui_prefere
   newest 500 kept). 400 on a malformed session, 413 above 512 KB.
 - `DELETE`: clears all saved sessions.
 
+### /compare/auto-check
+
+Optional "auto-check" hints under a Compare clip (plan §5.10): word error rate and speaker
+similarity. **Offline and non-authoritative**: every response carries a `disclaimer` ("not calibrated
+for synthetic voices; never replaces your rating"), nothing is downloaded while browsing or while a
+request is served, and nothing runs until the UI's Check button is clicked. Auto-check never enters
+`model.executor` (the repo has no priority mechanism for it), so it cannot queue ahead of speech
+requests; it does share the CPU, and it refuses a second concurrent check instead of holding a
+gunicorn thread. The Compare tab only shows the hints once the blind reveal has happened (or blind
+mode is off), because the scores could otherwise hint at the engine and sway the ratings.
+
+Models (pinned revisions, looked up in the app model cache, then the default Hugging Face cache):
+`whisper-tiny-en` (`Systran/faster-whisper-tiny.en`, 78 MB, word error rate) and
+`wavlm-base-plus-sv` (`microsoft/wavlm-base-plus-sv`, 405 MB, speaker similarity). Word error rate
+spells numbers, money, times and codes out on both sides, ignores case, punctuation and hyphens, and
+folds runs of single letters (`A B` and `AB`) together. A metric that cannot run is `null` with a
+note; it is never estimated. Similarity is a cosine of WavLM-SV embeddings (1 is identical) against
+the saved voice's reference clip; different voices can still score high (0.85 in the Phase B
+bake-off).
+
+- `GET /compare/auto-check/status`: `{models: [{id, label, purpose, available, size_bytes,
+  size_label, path, repo, revision}], job, disclaimer}`. `job` is `{state: idle|running|done|error,
+  step, step_index, step_count, error}`. Never touches the network.
+- `POST /compare/auto-check/install` (the explicit opt-in; the UI's "Enable auto-check: download
+  model (N MB)" button): optional `{models: [ids]}`, default every known id; ids already on disk are
+  skipped. `202 {started: true, models, job, disclaimer}` and the download runs in the background
+  into the app model cache; poll `/status`. `409` when a download is already running or nothing is
+  missing, `400` for an unknown id.
+- `POST /compare/auto-check` (multipart form): `audio` (the clip, wav, at most 25 MB and 120 s),
+  `text` (the sample text, at most 5000 characters), optional `reference_voice_id` (a saved voice;
+  without it `similarity` is `null`). Returns `{wer, transcript, similarity, details, notes,
+  disclaimer, models}`; `wer` is a fraction (0.12 is 12%) and can exceed 1, `details` has
+  `substitutions`, `deletions`, `insertions`, `reference_words`, `hypothesis_words`. Errors: `400`
+  (missing/empty/unreadable/overlong audio, missing or overlong text, reference voice without
+  audio), `404` unknown `reference_voice_id`, `413` over the size limit, `409` with
+  `code: "models_missing"` and the model list when no requested metric can run (word error rate
+  needs `whisper-tiny-en`; similarity needs `wavlm-base-plus-sv`), `429` with `code: "busy"` while
+  another check runs. A model that is present for one metric but missing for the other returns 200
+  with the missing metric `null` and a note.
+
 ### API language enforcement
 
 The UI preference `api.enforceLanguage` (Integrations page, "Enforce English on the API", default

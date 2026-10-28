@@ -647,8 +647,8 @@ the summary shows median and worst generation time, and each engine card shows "
 **Also built (Mac, browser-checked):** the reference clip is played first with its transcript
 (or "No transcript saved"), a "Same voice on every cloning engine" button fills up to four slots with
 one saved voice, and an engine whose worker is still loading shows "(warming up)" (checked with a
-stubbed `/engines` response, not a real slow load). **Still not built:** the optional automatic-check
-hints (word error, speaker similarity), deliberately skipped.
+stubbed `/engines` response, not a real slow load). **Auto-check hints are now built (see §5.10):** a
+per-clip Check button for word error rate and, on cloned voices, speaker similarity.
 Ratings left at the default 3 are saved as 3, so they count in the averages. Cloning a saved voice
 that has no transcript on Kitten 2 returns a plain 400 (it used to try a network model download).
 
@@ -854,6 +854,47 @@ for §5.5. What it taught:
 - Automatic scores (speaker-similarity, Whisper word error rate) may appear as small "auto-check"
   hints under a clip, labelled non-authoritative. The similarity metric used here is not calibrated
   for synthetic voices and must never replace the rating.
+
+**Auto-check status (built 2026-10-28; Mac, real packs in `/tmp/pf_all`, isolated server, headless
+browser).** Backend `compare_autocheck.py` plus `POST /compare/auto-check`, `GET .../status`,
+`POST .../install` (see the API reference); UI `AutoCheck.tsx` / `useAutoCheck.ts` in the Compare tab.
+
+- **Word error rate:** the app's existing transcriber (faster-whisper `tiny.en`, int8, greedy, the
+  `asr_check` settings, 78 MB) reusing its loaded instance when there is one, but loaded **offline
+  only** (`local_files_only`); the old `asr_check` loader would download silently, so it is not used
+  for this. Numbers, money, times and codes are spelled out on both sides with the TTS normaliser
+  (otherwise Whisper's "10 minutes" against "ten minutes" scores as an error, the bake-off's
+  structured-text WER of about 1.0), case/punctuation/hyphens are ignored and runs of single letters
+  are folded (`A B` = `AB`). Known limit: `AB-104` is read digit by digit but a bare `AB 104` as a
+  number, so that one word can count as an error. Whisper tiny also mishears real words ("invoice"
+  as "in voice"); it is a hint.
+- **Speaker similarity:** WavLM-SV (`microsoft/wavlm-base-plus-sv`, 405 MB) cosine to the saved
+  voice's reference clip, only for cloned voices; `null` otherwise. Not calibrated for synthetic
+  voices (bake-off different-speaker floor 0.85), so the UI says "never replaces the rating".
+- **Offline policy:** status and checks never touch the network; a metric whose model is absent is
+  `null` with a note, never estimated. The only download is the explicit "Enable auto-check:
+  download model (N MB)" button (off by default, pinned revisions, into the app model cache, polled
+  like a pack install). Models are looked up in the app cache first, then the default Hugging Face
+  cache, so an existing download is reused.
+- **Priority:** the repo has no priority mechanism for `model.executor`, so auto-check never uses it,
+  runs only from a Check click, refuses a concurrent second check (no queue holding gunicorn
+  threads) and unloads its models after 120 s idle. It still shares CPU: back-to-back checks slowed
+  concurrent Pocket speech requests by about 16% in a worst-case loop (median 0.26 s to 0.30 s);
+  non-inference endpoints were unaffected.
+- **Blind mode:** the hints (and the download box) appear only after the reveal, or with blind mode
+  off, so the scores cannot hint at the engine or sway the ratings; a note says so before the reveal.
+- **Verified:** unit tests (WER including numbers/punctuation/time/acronym cases, cosine, identical
+  vs different signals through a stub embedder, offline lookup, download job), route tests with stubs,
+  3 Playwright tests with the API stubbed, and the real browser against `/tmp/pf_all` with Pocket and
+  Kitten 2 clones of one saved voice: real WER and similarity on a plain sentence (0% for both,
+  similarity 0.90 Pocket / 0.93 Kitten 2) and on the structured sentence (3.8% Pocket, 15% Kitten 2,
+  similarity 0.92 / 0.91; the same sentence scored 29% / 36% before the time and acronym folding was
+  added, and each run is a fresh synthesis so the numbers move); on a server with
+  empty caches the box offered "download models (483 MB)", nothing was downloaded before the click,
+  and the click fetched both pinned models (about 14 s) after which Check worked from the new copy.
+- **Not verified / not built:** the scores are not stored with the saved ratings and do not feed the
+  engine summary; no comparison against human judgements, so the numbers are unvalidated hints; the
+  similarity floor was not re-measured here; non-English text (Whisper `tiny.en` is English only).
 
 ## 6. Evaluation (Phase B: technical screening)
 

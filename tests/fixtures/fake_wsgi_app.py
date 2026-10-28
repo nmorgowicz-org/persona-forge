@@ -37,3 +37,7 @@ _rt = FakeModelRuntime(
 )
 _rt.install()
 
+# The WSGI target `tests.fixtures.fake_wsgi_app:app`. Imported only for gunicorn to find; ruff's F401
+# autofix once removed it as "unused", which left the spawned-process acceptance tests unable to boot.
+from persona_forge.app import app  # noqa: E402, F401
+

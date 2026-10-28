@@ -46,6 +46,7 @@ from persona_forge import (
     speech_engines,
     voice_catalog,
     compare_store,
+    compare_autocheck,
     hardware_fit,
     ui_preferences_store,
     voice_design,
@@ -2780,6 +2781,107 @@ def compare_results_post():
 def compare_results_delete():
     compare_store.clear()
     return jsonify({"count": 0, "summary": []})
+
+
+# --- Compare auto-check hints (plan §5.10) ------------------------------------------------------
+# Optional, offline, non-authoritative: word error rate and speaker similarity for one clip the
+# browser already holds. Never enters model.executor (there is no priority mechanism there, so it
+# would delay endpoint requests), never runs unless the user clicks, never downloads except from
+# POST /compare/auto-check/install. See compare_autocheck.py.
+_AUTOCHECK_MAX_UPLOAD = 25 * 1024 * 1024
+_AUTOCHECK_MAX_TEXT = 5000
+
+
+def _autocheck_status_payload() -> dict[str, Any]:
+    return {
+        "models": _autocheck_models(),
+        "job": compare_autocheck.get_download_job().status(),
+        "disclaimer": compare_autocheck.DISCLAIMER,
+    }
+
+
+def _autocheck_models() -> list[dict[str, Any]]:
+    return compare_autocheck.get_checker().models_status()
+
+
+@app.get("/compare/auto-check/status")
+def compare_autocheck_status():
+    """Which auto-check models are on disk (with sizes) and the state of any download. Offline."""
+    return jsonify(_autocheck_status_payload())
+
+
+@app.post("/compare/auto-check/install")
+def compare_autocheck_install():
+    """Explicit opt-in: download the missing auto-check models in the background. Poll /status."""
+    data = request.get_json(silent=True)
+    wanted = data.get("models") if isinstance(data, dict) else None
+    by_id = {spec.id: spec for spec in compare_autocheck.SPECS}
+    if wanted is not None:
+        if not isinstance(wanted, list) or not wanted or any(item not in by_id for item in wanted):
+            return jsonify({"error": "models must list known auto-check model ids", "known": list(by_id)}), 400
+        specs = [by_id[item] for item in dict.fromkeys(wanted)]
+    else:
+        specs = list(compare_autocheck.SPECS)
+    available = {m["id"] for m in _autocheck_models() if m["available"]}
+    specs = [spec for spec in specs if spec.id not in available]
+    if not specs:
+        return jsonify({"started": False, "error": "Those auto-check models are already downloaded.",
+                        **_autocheck_status_payload()}), 409
+    started = compare_autocheck.get_download_job().start(specs)
+    status = 202 if started else 409
+    payload = _autocheck_status_payload()
+    if not started:
+        payload["error"] = "A download is already running."
+    return jsonify({"started": started, **payload}), status
+
+
+@app.post("/compare/auto-check")
+def compare_autocheck_run():
+    """Score one generated clip: multipart ``audio`` (wav), ``text`` and optional ``reference_voice_id``."""
+    if request.content_length and request.content_length > _AUTOCHECK_MAX_UPLOAD:
+        return jsonify({"error": "Audio clip too large", "code": "too_large"}), 413
+    upload = request.files.get("audio")
+    text = (request.form.get("text") or "").strip()
+    if upload is None:
+        return jsonify({"error": "audio is required"}), 400
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    if len(text) > _AUTOCHECK_MAX_TEXT:
+        return jsonify({"error": f"text must be at most {_AUTOCHECK_MAX_TEXT} characters"}), 400
+    data = upload.read(_AUTOCHECK_MAX_UPLOAD + 1)
+    if len(data) > _AUTOCHECK_MAX_UPLOAD:
+        return jsonify({"error": "Audio clip too large", "code": "too_large"}), 413
+
+    reference_path: str | None = None
+    reference_voice_id = (request.form.get("reference_voice_id") or "").strip()
+    if reference_voice_id:
+        meta = voice_library.get_voice(reference_voice_id)
+        if meta is None:
+            return jsonify({"error": "reference voice not found"}), 404
+        reference_path = (meta.get("wav_path") or "").strip()
+        if not reference_path or not os.path.isfile(reference_path):
+            return jsonify({"error": "The reference voice has no readable audio"}), 400
+
+    checker = compare_autocheck.get_checker()
+    try:
+        result = checker.check(data, text, reference_path)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except compare_autocheck.AutoCheckBusy:
+        return jsonify({"error": "Another auto-check is still running.", "code": "busy"}), 429
+    except compare_autocheck.AutoCheckUnavailable:
+        return jsonify(
+            {
+                "error": "The auto-check models are not downloaded. Enable auto-check to download them.",
+                "code": "models_missing",
+                "models": checker.models_status(),
+            }
+        ), 409
+    except Exception:
+        logger.exception("Compare auto-check failed")
+        return jsonify({"error": "Auto-check failed; see server logs for details."}), 500
+    result["models"] = checker.models_status()
+    return jsonify(result)
 
 
 @app.post("/generate")

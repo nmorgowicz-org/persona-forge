@@ -9,6 +9,8 @@ import {
   saveCompareSessions,
   type EngineSummary,
 } from '@/lib/compareResults'
+import { AutoCheckHint, AutoCheckSetup } from '@/components/voices/AutoCheck'
+import { useAutoCheck } from '@/components/voices/useAutoCheck'
 
 interface ModelEntry {
   id: string
@@ -106,6 +108,11 @@ export function CompareTab({
   const [saveError, setSaveError] = useState<string | null>(null)
   const [summary, setSummary] = useState<{ count: number; rows: EngineSummary[] }>({ count: 0, rows: [] })
   const buffers = useRef<Record<number, AudioBuffer>>({})
+  const clips = useRef<Record<number, Blob>>({})
+  const generatedText = useRef(text)
+  // Auto-check hints would let a listener guess the engine (and sway the ratings), so in blind
+  // mode they only exist after the reveal. Nothing runs until a Check click.
+  const autoCheck = useAutoCheck((!blind || revealed) && results.some((r) => r.status === 'done'))
   const audio = useRef<{ ctx: AudioContext; source?: AudioBufferSourceNode } | null>(null)
 
   useEffect(() => {
@@ -174,6 +181,8 @@ export function CompareTab({
     setRatings({})
     setOrder(shuffled(slots.map((_, i) => i)))
     setReference(null)
+    generatedText.current = text
+    autoCheck.reset()
     const refId = slots
       .map((slot) => slot.voice || voicesFor(slot.engine)[0]?.voice_id)
       .find((id) => voices.some((v) => v.voice_id === id && v.kind === 'library'))
@@ -222,6 +231,7 @@ export function CompareTab({
           ),
         )
         buffers.current[i] = decoded
+        clips.current[i] = new Blob([bytes], { type: 'audio/wav' })
       } catch (err) {
         setResults((cur) =>
           cur.map((r, k) => (k === i ? { status: 'error', error: String((err as Error)?.message || err) } : r)),
@@ -419,6 +429,19 @@ export function CompareTab({
           <p className="text-[11px] text-muted-foreground">
             Clips are level-matched to {TARGET_RMS_DB} dB RMS on playback, so loudness cannot decide the result.
           </p>
+          {blind && !revealed && (
+            <p className="text-[11px] text-muted-foreground">
+              Optional auto-check hints appear after you reveal the engines, so they cannot sway your ratings.
+            </p>
+          )}
+          {showNames && done > 0 && (
+            <AutoCheckSetup
+              status={autoCheck.status}
+              statusError={autoCheck.statusError}
+              needsSimilarity={slots.some(isClone)}
+              onDownload={(ids) => void autoCheck.download(ids)}
+            />
+          )}
           {display.map((slotIndex, position) => {
             const result = results[slotIndex]
             const slot = slots[slotIndex]
@@ -483,6 +506,19 @@ export function CompareTab({
                       Favourite
                     </label>
                   </div>
+                )}
+                {showNames && result.status === 'done' && (
+                  <AutoCheckHint
+                    state={autoCheck.checks[slotIndex]}
+                    canCheck={autoCheck.werReady}
+                    busy={autoCheck.anyRunning}
+                    isClone={isClone(slot)}
+                    onCheck={() => {
+                      const clip = clips.current[slotIndex]
+                      const voiceId = isClone(slot) ? slot.voice || voicesFor(slot.engine)[0]?.voice_id : null
+                      if (clip) void autoCheck.check(slotIndex, clip, generatedText.current, voiceId ?? null)
+                    }}
+                  />
                 )}
               </div>
             )
