@@ -796,8 +796,10 @@ def test_speech_failed_lazy_prepare_returns_actionable_json_before_audio(
 
     response = _post_speech(client, engine_id, voice_id, fmt)
 
-    _speech_error(response, 503, "reference encoder crashed", "Voice Library", "Prepare", "Repair",
+    # The worker's own detail goes to the server log, not to the client.
+    _speech_error(response, 503, "worker failed", "Voice Library", "Prepare", "Repair",
                   "Runtime → Speech engines")
+    assert "reference encoder crashed" not in response.get_data(as_text=True)
     # Readiness is a validated-input marker, not a guarantee that this worker can encode it.
     assert _status(voice_id, engine_id)["status"] == ("ready" if ready_marker else "needs_preparation")
 

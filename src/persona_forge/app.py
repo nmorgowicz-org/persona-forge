@@ -3626,7 +3626,8 @@ def openai_audio_speech():
                 422,
                 "invalid_request_error",
             )
-        return _openai_error(f"Inference error: {exc}", 500, "api_error")
+        logger.exception("Speech inference failed")
+        return _openai_error("Inference error; see the server log for details.", 500, "api_error")
     response = Response(audio, content_type=media_type)
     response.headers["X-Model-Recognized"] = "true" if model_recognized else "false"
     response.headers["X-Seed"] = str(resolved_seed)
@@ -3659,8 +3660,9 @@ def openai_audio_speech():
 def _pack_worker_error(engine: Any, exc: PackProcessError):
     # In particular, lazy preparation can fail before the first PCM chunk. Keep that response
     # JSON-shaped, just like batch, and do not mislabel a failed worker as a warming engine.
+    logger.warning("%s worker failed: %s", engine.label, exc)
     return _openai_error(
-        f"{engine.label} worker failed: {exc}. For a saved voice, retry Prepare in Voice "
+        f"{engine.label} worker failed. For a saved voice, retry Prepare in Voice "
         "Library; if it still fails, choose Repair in Runtime → Speech engines and view logs.",
         503,
         "api_error",

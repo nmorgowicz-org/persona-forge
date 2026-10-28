@@ -742,7 +742,8 @@ def test_temporary_model_patches_restore_generation_and_adapters(client, app_mod
         patch.setitem(speech_engines.ADAPTERS, "kitten2", object())
         response = client.post("/v1/audio/speech", json={"input": "hello"})
         assert response.status_code == 500
-        assert "temporary capture failure" in response.get_json()["error"]["message"]
+        assert "Inference error" in response.get_json()["error"]["message"]
+        assert "temporary capture failure" not in response.get_json()["error"]["message"]
 
     assert rt.TTS_BACKEND == app_module.model.TTS_BACKEND == original_backend
     assert rt._run_generate is app_module.model._run_generate is original_generate
