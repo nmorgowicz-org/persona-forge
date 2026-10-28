@@ -43,6 +43,11 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      - name: Ensure Node 26 Linux runtime prerequisite
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/ci_node26_prerequisites.sh
+
       # uv build invokes Hatch's standard wheel hook, which runs the frontend's npm ci/check/build
       # steps to bake the Studio UI into the wheel.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0

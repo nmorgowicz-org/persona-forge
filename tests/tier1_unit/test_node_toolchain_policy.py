@@ -127,3 +127,59 @@ def test_frontend_lock_and_docker_match_app_runtime():
     assert locked_types["integrity"].startswith("sha512-")
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert re.search(r"^ARG NODE_IMAGE=node:26-slim@sha256:[0-9a-f]{64}$", dockerfile, re.MULTILINE)
+
+
+def test_all_node26_setup_paths_provision_linux_runtime_first():
+    helper_run = "bash scripts/ci_node26_prerequisites.sh"
+    covered = set()
+    for path in (ROOT / ".github/workflows").glob("*.yml"):
+        relative = path.relative_to(ROOT).as_posix()
+        workflow = load_workflow(relative)
+        for job_name, job in workflow["jobs"].items():
+            steps = job.get("steps", [])
+            for index, step in enumerate(steps):
+                if not step.get("uses", "").startswith("actions/setup-node@"):
+                    continue
+                version = step["with"]["node-version"]
+                if version == "${{ env.NODE_VERSION }}":
+                    version = workflow["env"]["NODE_VERSION"]
+                if version != "26":
+                    assert not any(s.get("run") == helper_run for s in steps), relative
+                    continue
+                # All current app setup sites bear Linux (including the native matrix).
+                covered.add((path.name, job_name))
+                prerequisites = [i for i, s in enumerate(steps) if s.get("run") == helper_run]
+                assert len(prerequisites) == 1, (relative, job_name)
+                prerequisite_index = prerequisites[0]
+                assert prerequisite_index < index, (relative, job_name)
+                assert any(
+                    s.get("uses", "").startswith("actions/checkout@")
+                    for s in steps[:prerequisite_index]
+                ), (relative, job_name)
+                prerequisite = steps[prerequisite_index]
+                assert prerequisite["shell"] == "bash"
+                expected_guard = "runner.os == 'Linux'"
+                if step.get("if"):
+                    expected_guard += f" && {step['if']}"
+                assert prerequisite["if"] == expected_guard, (relative, job_name)
+                assert not prerequisite.get("continue-on-error", False)
+    assert covered == {
+        ("ci-ui.yml", "frontend-lint"),
+        ("ci-ui.yml", "e2e"),
+        ("ci-packaging.yml", "package"),
+        ("desktop-build.yml", "build-wheel"),
+        ("release-launcher.yml", "build-wheel"),
+    }
+
+
+def test_node26_prerequisite_changes_trigger_relevant_path_gates():
+    helper = "scripts/ci_node26_prerequisites.sh"
+    packaging = load_workflow(".github/workflows/ci-packaging.yml")
+    triggers = packaging.get("on", packaging.get(True))
+    assert helper in triggers["pull_request"]["paths"]
+    assert helper in triggers["push"]["paths"]
+    ui = load_workflow(".github/workflows/ci-ui.yml")
+    filters_step = next(s for s in ui["jobs"]["paths-filter"]["steps"] if s.get("id") == "filter")
+    filters = yaml.safe_load(filters_step["with"]["filters"])
+    assert helper in filters["code"]
+    assert helper in filters["frontend"]
