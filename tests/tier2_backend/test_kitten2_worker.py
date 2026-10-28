@@ -219,7 +219,9 @@ def test_cuda_falls_back_to_eager_with_the_reason_when_compiling_fails():
     response = worker.handle({"op": "load"})
 
     assert response["mode"] == "eager"
-    assert response["fast_mode_issue"]["code"] == "fast_mode_failed"
+    # On Windows a missing compiler is the build-tools case, with its own guidance.
+    expected = "needs_build_tools" if sys.platform == "win32" else "fast_mode_failed"
+    assert response["fast_mode_issue"]["code"] == expected
     assert "Failed to find C compiler" in response["fast_mode_issue"]["detail"]
     assert built == [True, False]
     assert worker.handle({"op": "synthesize", "text": "hi"})["ok"] is True
@@ -284,7 +286,8 @@ def test_a_windows_compile_failure_reaches_the_load_response():
 
         def generate(self, text, **kwargs):
             if self.compiled:
-                raise FileNotFoundError(2, "The system cannot find the file specified")
+                # The fourth argument is what Windows adds ("[WinError 2]"); other systems ignore it.
+                raise FileNotFoundError(2, "The system cannot find the file specified", None, 2)
             return super().generate(text, **kwargs)
 
     worker = kw.Kitten2Worker(

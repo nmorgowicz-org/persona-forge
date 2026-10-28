@@ -425,7 +425,7 @@ a note naming engines that are not installed. Preview generates locally through 
 API default" are hidden for them, with the reason in the drawer. **Preview cache (§9.2) not built,
 on purpose:** it exists for downloading upstream sample files, and none of these engines ships
 sample URLs, so there is nothing to cache. If an upstream sample source is added later the cache
-spec still stands. **Not built:** Compare from a voice's drawer, uninstalled engines' voices
+spec still stands. **Compare from a saved voice's actions menu: built** ("Compare engines" opens the Compare tab with that voice on every installed cloning engine; checked in a real browser with two saved voices). **Not built:** uninstalled engines' voices
 (needs a bundled catalog per engine; today only installed engines list voices), and the API default
 for pack voices (the default applies to the active engine, so it needs the same design decision as
 engine switching).
@@ -993,6 +993,21 @@ model 1.5 s, voices 1.2 s). The download of the model and voices dominates Phono
 is slow. The 153 s and 199 s runs probably included first-time Python 3.12 provisioning and a colder
 network; that was not isolated, so treat the new numbers as typical and the old ones as a cold-start
 worst case. No code change.
+
+#### 9.3.4 Streaming for Pocket Lite and Phonon (2026-10-28)
+
+Pocket Lite gained a worker `stream` op (the model's own chunk generator), `streams = True` on its
+adapter and `streaming: "frame"`. The shared adapter's stream path now uses the clone hooks, so a saved
+voice streams too, and the route replaced its hard-coded Phonon check with "pack engine whose capability
+is frame streaming". Phonon's worker and adapter already streamed, but it had no route or end-to-end
+test until now. **Kokoro is deliberately excluded** (no native streaming; sentence-chunking would add
+audible seams): a `pcm` request still gets one whole clip, and a test pins that.
+Measured over HTTP on the Mac with real packs: first audio 0.02 s warm for both engines against
+0.19 s (Phonon) and 0.29-0.34 s (Pocket Lite) for a whole clip; streamed audio matches the whole-clip
+render at the same seed (equal length, at most one 16-bit step apart); a client that disconnects
+mid-stream leaves no stuck worker (the next request succeeds). Not measured: Intel or Windows
+streaming, perceived seams between chunks (none were audible in the one clip described by the numbers,
+but nobody has listened).
 
 ## 10. Evidence and reproducibility
 

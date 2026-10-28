@@ -5,7 +5,7 @@ the model's memory is returned when the engine idles out. Same newline-delimited
 the other pack workers.
 
 Ops: ``ping``, ``load``, ``prepare`` (clone a saved voice from its reference clip), ``synthesize``,
-``unload``.
+``stream`` (int16 PCM chunks as they are produced, then a ``done`` message), ``unload``.
 
 Voice states are specific to a checkpoint: the 18M model has its own built-in voice files and a
 state made by the standard model cannot be reused, so nothing is shared with the main runtime.
@@ -18,7 +18,7 @@ import io
 import json
 import sys
 import wave
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 import numpy as np
 
@@ -138,6 +138,27 @@ class PocketLiteWorker:
             "format": "wav",
         }
 
+    def stream(self, request: Mapping[str, Any]) -> Iterator[dict[str, Any]]:
+        """Yield one message per audio chunk, then a final ``done`` message."""
+        text = request.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise WorkerError("stream needs text")
+        state = self._state_for(request)
+        seed = request.get("seed")
+        if isinstance(seed, int):
+            _apply_seed(seed)
+        chunks = self._loaded().generate_audio_stream(state, text)
+        try:
+            for chunk in chunks:
+                samples = chunk.detach().cpu().numpy() if hasattr(chunk, "detach") else np.asarray(chunk)
+                pcm = (np.clip(samples.astype(np.float32).ravel(), -1.0, 1.0) * 32767.0).astype("<i2")
+                yield {"ok": True, "chunk_b64": base64.b64encode(pcm.tobytes()).decode("ascii")}
+        finally:
+            close = getattr(chunks, "close", None)
+            if callable(close):
+                close()
+        yield {"ok": True, "done": True}
+
     def _op_unload(self, _request: Mapping[str, Any]) -> dict[str, Any]:
         self._model = None
         self._states.clear()
@@ -150,11 +171,18 @@ def serve(worker: PocketLiteWorker, stdin: Any, stdout: Any) -> None:
         if not line:
             continue
         try:
-            response = worker.handle(json.loads(line))
+            request = json.loads(line)
+            if request.get("op") == "stream":
+                for message in worker.stream(request):
+                    stdout.write(json.dumps(message, separators=(",", ":")) + "\n")
+                    stdout.flush()
+                continue
+            responses = [worker.handle(request)]
         except Exception as exc:  # report, never die: the parent decides whether to restart
-            response = {"ok": False, "error": str(exc) or type(exc).__name__}
-        stdout.write(json.dumps(response, separators=(",", ":")) + "\n")
-        stdout.flush()
+            responses = [{"ok": False, "error": str(exc) or type(exc).__name__}]
+        for response in responses:
+            stdout.write(json.dumps(response, separators=(",", ":")) + "\n")
+            stdout.flush()
 
 
 def main() -> None:
