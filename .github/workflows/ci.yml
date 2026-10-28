@@ -46,7 +46,7 @@ jobs:
           node -e '
             const [major, minor] = process.versions.node.split(".").map(Number);
             if (major !== 24 || minor < 11) {
-              console.error(`Expected Node ^24.11.0, got ${process.version}`);
+              console.error("Expected Node ^24.11.0, got " + process.version);
               process.exit(1);
             }
           '
