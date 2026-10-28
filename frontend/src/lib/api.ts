@@ -414,8 +414,18 @@ export async function listCatalogVoices(): Promise<{
   return { voices: body.voices ?? [], engines: body.engines ?? [] }
 }
 
+/** Why the API default cannot be served right now, with the repair to make (plan §4.5). */
+export interface ApiDefaultProblem {
+  code: 'engine_not_installed' | 'voice_missing' | string
+  engine: string
+  message: string
+  repair: string
+}
+
 export interface ApiDefaultRecord {
   engine: string | null
+  /** Human name of `engine` (for a pack engine, e.g. "Kokoro 82M"). */
+  engine_label?: string | null
   voice: string
   variant: string | null
   kind: 'library' | 'preset'
@@ -423,6 +433,8 @@ export interface ApiDefaultRecord {
   language: string | null
   language_code: string | null
   servable: boolean
+  /** Set when the default's engine was removed or its voice vanished; requests get an error until repaired. */
+  problem?: ApiDefaultProblem | null
   source?: 'record' | 'legacy'
 }
 
@@ -539,6 +551,8 @@ export interface EngineCard {
   source: string | null
   license: string | null
   active: boolean
+  /** True when this engine serves the API default; it cannot be removed until the default changes. */
+  api_default?: boolean
   capabilities: Partial<EngineCapabilities>
   state: EngineState
   requirements: string[]

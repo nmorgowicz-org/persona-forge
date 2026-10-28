@@ -82,7 +82,14 @@ Request body (JSON):
   the active backend in a separate process (no 409); a missing pack returns 503 with an install hint. Kitten 2 holds roughly 2 GB while loaded
   and stops itself after `KITTEN2_IDLE_UNLOAD_S` of inactivity. An unknown label is treated as a client-side name and served by
   the active engine, so existing OpenAI clients keep working; the response reports
-  `X-Model-Recognized: false`. Naming a registered engine that is not active returns 409.
+  `X-Model-Recognized: false`. A request never switches the built-in backend (see "Switching
+  engines from a request" below). **Which engine serves a request:** an engine named outright in
+  `model` serves it; otherwise a namespaced `voice`/`voice_id` (`kokoro:af_heart`, `phonon:Zoey`,
+  `kitten2:Bruno`, `pocket-lite:jane`) is served by its own engine, even when `model` is a generic
+  label such as `tts-1`; with no voice, the persisted API default (see `GET /api-default`) names the
+  engine, so a Kokoro or Phonon default serves a bare request. A request that names a different
+  engine does not use the default's voice. A default that cannot be served is an error, never
+  another speaker (409 `api_default_unavailable`, below).
 
 Response:
 
@@ -105,13 +112,19 @@ Response:
 - 400:
   - If JSON invalid, input text missing, unsupported `response_format`, invalid `seed`, or a
     non-boolean `normalize_loudness`.
+- 409 (`api_default_unavailable`): the request relies on the API default (no voice, and no other
+  engine named) and the default's engine was removed or its voice no longer exists. The message
+  names the default, what is missing and the repair ("Install Kokoro 82M again in Runtime → Speech
+  engines, or choose a different API default"). Nothing is synthesised; there is no fallback to
+  another speaker or engine. `GET /api-default` reports the same `problem`. Naming a voice
+  explicitly still works while the default is broken.
 - 500:
   - If an inference error occurs.
 
 Error format:
 
 - Always returns an OpenAI-style JSON: `{ "error": { "message": "...", "type": "...", "code": null } }`.
-  `code` is `null` except for `engine_warming`.
+  `code` is `null` except for `engine_warming` and `api_default_unavailable`.
 
 Important notes:
 
@@ -131,6 +144,36 @@ Important notes:
   by several dB. Those responses carry `X-Loudness-Normalized: false`. Request `wav`/`mp3`
   (or an engine that does not stream) when level consistency matters more than first-audio
   latency.
+
+#### Switching engines from a request (not supported)
+
+The plan's "Allow API requests to switch engines" setting is **not built, on purpose**. Pack engines
+(Kitten 2, Phonon, Kokoro, Pocket Lite) already run beside the active backend in their own worker
+process, so a request for one never needs a switch. What is left is a swap among the built-in
+backends (`pocket_tts`, `openvino`, `pytorch`), and the current lifecycle cannot do that safely
+from a request:
+
+- Only `pocket-tts` is a registered engine, so a request cannot name `openvino` or `pytorch`
+  (`model: "openvino"` is an unknown label: served by the active backend, `X-Model-Recognized:
+  false`). `active_engine()` reports `pocket-tts` for the Qwen3-TTS backends as a legacy label.
+- The one existing swap, `apply_runtime_config({"TTS_BACKEND": ...})`, is a global reconfiguration,
+  not a queued job: it sets `reconfig_in_progress`, which makes `/generate` and `/v1/audio/speech`
+  answer 503 "Model not loaded" to every other client while it unloads and reloads (the documented
+  FIFO queueing only covers VoiceDesign/OmniVoice swaps). It writes `runtime.json` unless told not
+  to, flips `TTS_BACKEND` before the load succeeds, and has no rollback if the load fails. A Qwen3-TTS
+  load is ~5.4–6.9 GiB, 60–120 s or more on a cold OpenVINO cache, and needs a one-time IR export;
+  two clients naming different backends would thrash it.
+- A safe version needs a queued swap job with a bounded wait, a rollback path and an engine id for
+  each built-in backend, which is a lifecycle redesign (`MODEL_SWAP_AND_QUEUEING.md` is normative).
+
+What clients get today: the backend is changed in Runtime (or `POST /runtime/config`), not by a
+request. A request the active backend cannot serve gets a clear error instead of a swap:
+`builtin_voice` on a non-Pocket backend is a 400 ("builtin_voice is only supported when
+TTS_BACKEND=pocket_tts"), `PUT /api-default` with a Pocket preset while another backend is active is
+a 409 ("Built-in presets require TTS_BACKEND=pocket_tts"), and an engine pack that is missing is a
+503 with the install hint. The 409 "model is not active; the active engine is X" in the request
+path only fires for a registered non-pack engine other than the active one; since `pocket-tts` is the
+only such engine and is also the fallback label for the Qwen backends, it cannot occur today.
 
 #### Engine warm-up (`engine_warming`)
 
@@ -317,6 +360,11 @@ an idle engine starts that load in the background. Nothing blocks until a gunico
 - Purpose: delete a pack directory (manifest and artifacts). Built-in engines have no pack.
 - 200: `{ "removed": "<engine_id>" }`.
 - 409: the engine is active — switch engines first.
+- 409: the engine serves the API default (a pack voice, or a saved voice cloned on it). Body:
+  `{ "error": "<Engine> serves the API default voice '<voice>'. Change the API default first, then
+  remove the engine.", "code": "api_default_engine", "api_default": { "engine", "voice" } }`. The pack
+  stays on disk. `GET /engines` cards carry `api_default: true` for that engine so a UI can say why
+  Remove is unavailable.
 - 404: no removable pack for that id.
 
 ### POST /generate/with_metrics
@@ -813,6 +861,10 @@ Response:
 ### DELETE /voices/{voice_id}
 
 - Purpose: Delete a voice from the library.
+- If the voice is the API default on the active backend, the default is cleared. If it is the API
+  default on a pack engine, the record stays and reports `problem.code = "voice_missing"` (see
+  `GET /api-default`), so requests without a voice fail with the repair message instead of using
+  another speaker.
 
 Response:
 
@@ -965,6 +1017,42 @@ Response (JSON):
 
 - 200: `{ "deleted": "<variant_filename>" }`.
 - 404: if variant not found.
+
+### GET /api-default
+
+- Purpose: the effective no-voice API default: engine + voice + variant. Persisted separately from
+  Speak's transient selection. `{ "default": null }` when none is set.
+- 200 `{ "default": { ... } }` with `voice` (`vd_...` saved voice, `pocket:<name>`, or a pack voice:
+  `kokoro:<voice>`, `phonon:<Name>`, `kitten2:<Name>`, `pocket-lite:<name>`), `engine` (the active
+  backend such as `pocket_tts` for Pocket voices and for saved voices served by the active backend,
+  or the pack engine id such as `kokoro`, `phonon-31m`), `engine_label`, `variant`, `kind`
+  (`preset`|`library`), `display_name`, `language`, `language_code`, `updated_at`, `source`
+  (`record`|`legacy`), `servable` and `problem`.
+- `problem` is `null` when the default can be served. For a default on a pack engine it is
+  `{ "code", "engine", "message", "repair" }` when it cannot: `engine_not_installed` (the pack was
+  removed or is damaged) or `voice_missing` (the pack no longer offers the voice, or the saved voice
+  was deleted); `servable` is then `false`. `repair` is the action to take: reinstall the engine, or
+  choose another default. The record is kept so the problem stays visible; it is never replaced
+  silently. Defaults served by the active backend (Pocket presets, saved voices) behave as before:
+  a deleted saved voice clears the default.
+
+### PUT /api-default
+
+- Purpose: set the default. Body: `voice` (required), `engine` (optional), `variant` (optional).
+- A pack voice (`kokoro:af_heart`) is served by that pack engine whatever `engine` says; an `engine`
+  that disagrees is a 400. A saved voice (`vd_...`) stays on the active backend unless `engine` names
+  an installed pack engine that clones (`kitten2`, `pocket-lite`): then requests without a voice
+  clone it on that engine (it is prepared on the first request). Saved voices on the active backend
+  keep their hot-swap behaviour and the legacy `.active_default` mirror; a pack-engine default clears
+  that mirror because it does not change the active backend's runtime voice.
+- Validated against the registry at set time: the engine must be installed and the voice offered
+  (or, for a saved voice, exist, and have a transcript where the engine needs one).
+- Persisted atomically (`<voice library>/.api_default.json`); if a write fails the previous default
+  is restored whole and a saved-voice activation is rolled back. It survives restarts.
+- 200: `{ "default": { ... } }` as in `GET`. 400: invalid body, id shape, unknown namespace, engine
+  and voice disagree, an engine that cannot clone a saved voice, or a saved voice without the
+  transcript the engine needs. 404: unknown voice. 409: engine not installed, or a Pocket preset
+  while another backend is active. 500: the default could not be saved.
 
 ### POST /voices/{voice_id}/activate
 

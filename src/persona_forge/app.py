@@ -532,13 +532,83 @@ def voices_builtin():
     return jsonify({"voices": voices, "engines": engines})
 
 
+def _pack_voice_engine(voice: str | None) -> "speech_engines.EngineInfo | None":
+    """The pack engine whose namespace prefixes ``voice`` (``kokoro:af_heart``), else None."""
+    if not voice or ":" not in voice:
+        return None
+    for provisioned in provisioned_engines.all_engines():
+        if voice.startswith(provisioned.engine.PRESET_PREFIX):
+            return speech_engines.ENGINES.get(provisioned.engine_id)
+    return None
+
+
+def _api_default_engine(record: dict[str, Any]) -> "speech_engines.EngineInfo | None":
+    """The pack engine that serves the API default, or None when the active backend does."""
+    by_voice = _pack_voice_engine(record.get("voice"))
+    if by_voice is not None:
+        return by_voice
+    info = speech_engines.ENGINES.get(record.get("engine") or "")
+    return info if info is not None and info.pack_only else None
+
+
+def _api_default_problem(
+    record: dict[str, Any], engine: "speech_engines.EngineInfo"
+) -> dict[str, str] | None:
+    """Why a pack-engine API default cannot be served right now, with the repair to make.
+
+    Checked when the default is set and again on every request that relies on it, so a removed
+    engine or a vanished voice is reported instead of being replaced by another speaker.
+    """
+    voice = record["voice"]
+    provisioned = provisioned_engines.get(engine.id)
+    if provisioned is None or not provisioned.engine.is_installed():
+        return {
+            "code": "engine_not_installed",
+            "engine": engine.id,
+            "message": (
+                f"The API default voice {voice!r} needs the {engine.label} engine, which is "
+                "not installed."
+            ),
+            "repair": (
+                f"Install {engine.label} again in Runtime → Speech engines, or choose a "
+                "different API default (Voices → Built-in, or Integrations)."
+            ),
+        }
+    prefix = provisioned.engine.PRESET_PREFIX
+    if voice.startswith(prefix):
+        if voice[len(prefix):] not in provisioned.engine.list_presets():
+            return {
+                "code": "voice_missing",
+                "engine": engine.id,
+                "message": (
+                    f"The API default voice {voice!r} is no longer offered by {engine.label}."
+                ),
+                "repair": "Choose a different API default (Voices → Built-in, or Integrations).",
+            }
+    elif voice_library.get_voice(voice) is None:
+        return {
+            "code": "voice_missing",
+            "engine": engine.id,
+            "message": f"The API default voice {voice!r} was deleted.",
+            "repair": "Choose a different API default (Voices → Built-in, or Integrations).",
+        }
+    return None
+
+
 def _api_default_view() -> dict[str, Any] | None:
     """Return the effective API default enriched for the UI, or None."""
-    record = voice_library.get_api_default()
+    record = voice_library.get_api_default(keep_missing=True)
     if record is None:
         return None
     voice = record["voice"]
+    pack = _api_default_engine(record)
+    if pack is not None:
+        return _pack_api_default_view(record, pack)
+    if not voice_library.is_preset_voice_id(voice) and voice_library.get_voice(voice) is None:
+        return None  # a vanished saved voice on the active backend reads as unset, as before
     backend = record.get("engine") or getattr(model, "TTS_BACKEND", None)
+    active = speech_engines.engine_for_backend(backend)
+    engine_label = active.label if active is not None else None
     if voice.startswith("pocket:"):
         preset = voice.split(":", 1)[1]
         meta = POCKET_BUILTIN_VOICES.get(preset)
@@ -547,21 +617,63 @@ def _api_default_view() -> dict[str, Any] | None:
         return {
             **record,
             "engine": backend,
+            "engine_label": engine_label,
             "kind": "preset",
             "display_name": meta["display_name"],
             "language": meta["language"],
             "language_code": meta["language_code"],
             "servable": backend == "pocket_tts",
+            "problem": None,
         }
     meta = voice_library.get_voice(voice) or {}
     return {
         **record,
         "engine": backend,
+        "engine_label": engine_label,
         "kind": "library",
         "display_name": meta.get("description") or meta.get("display_name") or voice,
         "language": meta.get("language"),
         "language_code": meta.get("language_code"),
         "servable": True,
+        "problem": None,
+    }
+
+
+def _pack_api_default_view(
+    record: dict[str, Any], pack: "speech_engines.EngineInfo"
+) -> dict[str, Any]:
+    voice = record["voice"]
+    provisioned = provisioned_engines.get(pack.id)
+    problem = _api_default_problem(record, pack)
+    prefix = provisioned.engine.PRESET_PREFIX if provisioned is not None else ""
+    if prefix and voice.startswith(prefix):
+        name = voice[len(prefix):]
+        try:
+            code = provisioned.engine.preset_language(name) if provisioned else None
+        except Exception:
+            code = None
+        return {
+            **record,
+            "engine": pack.id,
+            "engine_label": pack.label,
+            "kind": "preset",
+            "display_name": name,
+            "language": "English" if code == "en" else code,
+            "language_code": code,
+            "servable": problem is None,
+            "problem": problem,
+        }
+    meta = voice_library.get_voice(voice) or {}
+    return {
+        **record,
+        "engine": pack.id,
+        "engine_label": pack.label,
+        "kind": "library",
+        "display_name": meta.get("description") or meta.get("display_name") or voice,
+        "language": meta.get("language"),
+        "language_code": meta.get("language_code"),
+        "servable": problem is None,
+        "problem": problem,
     }
 
 
@@ -608,15 +720,97 @@ def _activate_library_voice_for_api(
     return meta, None
 
 
+def _restore_runtime_voice(previous: str | None, attempted: str) -> None:
+    """Activation already swapped the runtime voice; put the previous one back so the runtime and
+    the persisted default still agree."""
+    if previous and previous != attempted:
+        _activate_library_voice_for_api(previous)
+
+
+def _pack_default_refusal(pack: "speech_engines.EngineInfo", voice: str):
+    """Set-time check that a pack engine is installed; returns an error response or None."""
+    provisioned = provisioned_engines.get(pack.id)
+    if provisioned is None or not provisioned.engine.is_installed():
+        return (
+            jsonify(
+                {
+                    "error": f"{pack.label} is not installed. Install it in Runtime → Speech "
+                    f"engines before making {voice!r} the API default."
+                }
+            ),
+            409,
+        )
+    return None
+
+
+def _set_pack_default(
+    pack: "speech_engines.EngineInfo", voice: str, variant: str | None
+):
+    """Make a pack engine's built-in voice, or a saved voice cloned on it, the API default."""
+    if ":" in voice and not voice_library.is_preset_voice_id(voice):
+        return jsonify({"error": f"invalid preset voice: {voice!r}"}), 400
+    refusal = _pack_default_refusal(pack, voice)
+    if refusal is not None:
+        return refusal
+    provisioned = provisioned_engines.get(pack.id)
+    assert provisioned is not None
+    prefix = provisioned.engine.PRESET_PREFIX
+    if voice.startswith(prefix):
+        if voice[len(prefix):] not in provisioned.engine.list_presets():
+            return jsonify({"error": f"unknown {pack.label} voice: {voice}"}), 404
+    else:
+        if not pack.capabilities.clone:
+            return (
+                jsonify(
+                    {
+                        "error": f"{pack.label} cannot clone a saved voice. Pick one of its "
+                        f"built-in '{prefix}<voice>' voices, or an engine that clones."
+                    }
+                ),
+                400,
+            )
+        meta = voice_library.get_voice(voice)
+        if meta is None:
+            return jsonify({"error": "voice_id not found"}), 404
+        needs_transcript = getattr(provisioned.engine, "CLONE_NEEDS_TRANSCRIPT", False)
+        if needs_transcript and not (meta.get("sample_text") or "").strip():
+            return (
+                jsonify(
+                    {
+                        "error": f"{pack.label} needs this voice's transcript to clone it. Add or "
+                        "generate the transcript in My voices, then set it as the API default."
+                    }
+                ),
+                400,
+            )
+    try:
+        # The saved-voice mirror drives the *active backend's* runtime voice; a pack engine's
+        # default must not touch it.
+        voice_library.set_api_default(pack.id, voice, variant, mirror_legacy=False)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except OSError as exc:
+        return jsonify({"error": f"Could not save the API default: {exc}"}), 500
+    return jsonify({"default": _api_default_view()})
+
+
 @app.get("/api-default")
 def api_default_get():
-    """Return the effective no-voice API default (engine + voice + variant)."""
+    """Return the effective no-voice API default (engine + voice + variant).
+
+    A pack-engine default whose engine was removed or whose voice vanished is still returned,
+    with ``servable: false`` and a ``problem`` that names the repair.
+    """
     return jsonify({"default": _api_default_view()})
 
 
 @app.put("/api-default")
 def api_default_put():
-    """Set the no-voice API default; built-in presets and saved voices are both accepted."""
+    """Set the no-voice API default; built-in presets (Pocket or a pack engine) and saved voices.
+
+    Pack-engine defaults are validated against the registry first (engine installed, voice
+    offered); the persisted record is written atomically and rolled back whole on failure.
+    """
     data = _json_body()
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
@@ -626,6 +820,16 @@ def api_default_put():
     engine = (data.get("engine") or "").strip() or None
     variant = (data.get("variant") or "").strip() or None
     backend = getattr(model, "TTS_BACKEND", None)
+    pack_for_voice = _pack_voice_engine(voice)
+    if pack_for_voice is not None:
+        if engine and engine not in (pack_for_voice.id, pack_for_voice.backend):
+            return (
+                jsonify(
+                    {"error": f"voice {voice!r} belongs to engine {pack_for_voice.id!r}, not {engine!r}"}
+                ),
+                400,
+            )
+        return _set_pack_default(pack_for_voice, voice, variant)
     if voice.startswith("pocket:"):
         if voice.split(":", 1)[1] not in POCKET_BUILTIN_VOICES:
             return jsonify({"error": f"unknown built-in voice: {voice}"}), 404
@@ -633,10 +837,23 @@ def api_default_put():
             return jsonify({"error": "Built-in presets require TTS_BACKEND=pocket_tts"}), 409
         voice_library.set_api_default(engine or backend, voice, variant)
         return jsonify({"default": _api_default_view()})
+    if ":" in voice:
+        return jsonify({"error": f"unknown voice namespace in {voice!r}"}), 400
+    requested = speech_engines.ENGINES.get(engine or "")
+    if requested is not None and requested.pack_only:
+        return _set_pack_default(requested, voice, variant)
+    previous_mirror = voice_library.get_active_default_voice_id()
     _meta, error = _activate_library_voice_for_api(voice)
     if error is not None:
         return error
-    voice_library.set_api_default(engine or backend, voice, variant)
+    try:
+        voice_library.set_api_default(engine or backend, voice, variant)
+    except ValueError as exc:
+        _restore_runtime_voice(previous_mirror, voice)
+        return jsonify({"error": f"Could not save the API default: {exc}"}), 400
+    except OSError as exc:
+        _restore_runtime_voice(previous_mirror, voice)
+        return jsonify({"error": f"Could not save the API default: {exc}"}), 500
     return jsonify({"default": _api_default_view()})
 
 
@@ -767,7 +984,13 @@ def voices_delete(voice_id: str):
         return jsonify({"error": "voice_id not found"}), 404
     if voice_library.get_active_default_voice_id() == voice_id:
         voice_library.clear_active_default_voice_id()
-    voice_library.clear_api_default_for_voice(voice_id)
+    record = voice_library.get_api_default(keep_missing=True)
+    if record is not None and record["voice"] == voice_id and _api_default_engine(record) is not None:
+        # A default served by a pack engine stays, so the engine card and requests report the
+        # deleted voice with its repair instead of quietly serving another speaker.
+        pass
+    else:
+        voice_library.clear_api_default_for_voice(voice_id)
     model.invalidate_voice_clone_prompt(voice_id)
     try:
         from persona_forge import pocket_tts_runtime
@@ -2608,9 +2831,13 @@ def generate_with_metrics():
 @app.get("/engines")
 def engines_list():
     """List built-in engines and installed packs with their local state."""
-    return jsonify(
-        {"engines": engine_packs.engine_cards(getattr(model, "TTS_BACKEND", None))}
-    )
+    cards = engine_packs.engine_cards(getattr(model, "TTS_BACKEND", None))
+    record = voice_library.get_api_default(keep_missing=True)
+    holder = _api_default_engine(record) if record else None
+    for card in cards:
+        # Lets the card explain why Remove is disabled (the API refuses it too).
+        card["api_default"] = holder is not None and card.get("id") == holder.id
+    return jsonify({"engines": cards})
 
 
 _benchmark_lock = threading.Lock()
@@ -2721,12 +2948,28 @@ def engines_recheck(engine_id: str):
 
 @app.post("/engines/<engine_id>/remove")
 def engines_remove(engine_id: str):
-    """Delete a pack. The active engine cannot be removed."""
+    """Delete a pack. Neither the active engine nor the engine serving the API default can be removed."""
     active = speech_engines.engine_for_backend(getattr(model, "TTS_BACKEND", None))
     if active is not None and active.id == engine_id:
         return jsonify(
             {"error": "Cannot remove the active engine; switch engines first."}
         ), 409
+    record = voice_library.get_api_default(keep_missing=True)
+    holder = _api_default_engine(record) if record else None
+    if record is not None and holder is not None and holder.id == engine_id:
+        return (
+            jsonify(
+                {
+                    "error": (
+                        f"{holder.label} serves the API default voice {record['voice']!r}. "
+                        "Change the API default first, then remove the engine."
+                    ),
+                    "code": "api_default_engine",
+                    "api_default": {"engine": holder.id, "voice": record["voice"]},
+                }
+            ),
+            409,
+        )
     try:
         removed = engine_packs.remove_pack(engine_id)
     except engine_packs.PackInstallError as exc:
@@ -2898,18 +3141,44 @@ def openai_audio_speech():
     language = (data.get("language") or "English").strip()
     # OpenAI SDK sends "voice", our internal convention uses "voice_id" — accept both.
     voice_id = (data.get("voice_id") or data.get("voice") or "").strip() or None
+    named_engine = speech_engines.named_engine(data.get("model"))
     if voice_id is None and not (data.get("builtin_voice") or "").strip():
         # No voice in the request: apply the persisted API default. Saved voices already
         # resolve through the runtime; passing them explicitly keeps the effective default
         # authoritative even after a restart. Presets must exist in the pinned catalog.
-        default = voice_library.get_api_default()
-        if default:
+        default = voice_library.get_api_default(keep_missing=True)
+        default_pack = _api_default_engine(default) if default else None
+        if default is not None and default_pack is not None:
+            # A default on a pack engine routes to that engine, unless the request names a
+            # different engine outright (then that engine serves with its own voice). A broken
+            # default is reported with its repair, never replaced by another speaker or engine.
+            if named_engine is None or named_engine.id == default_pack.id:
+                problem = _api_default_problem(default, default_pack)
+                if problem is not None:
+                    return _openai_error(
+                        f"{problem['message']} {problem['repair']}",
+                        409,
+                        "invalid_request_error",
+                        code="api_default_unavailable",
+                    )
+                serving_engine = default_pack
+                voice_id = default["voice"]
+        elif default and (
+            voice_library.is_preset_voice_id(default["voice"])
+            or voice_library.get_voice(default["voice"]) is not None
+        ):
             candidate = default["voice"]
             if candidate.startswith("pocket:"):
                 if candidate.split(":", 1)[1] in POCKET_BUILTIN_VOICES:
                     voice_id = candidate
             else:
                 voice_id = candidate
+    elif voice_id is not None and named_engine is None:
+        # Voice ids imply their engine: ``kokoro:af_heart`` is served by Kokoro even when the
+        # client sent a generic ``model`` such as ``tts-1``.
+        implied = _pack_voice_engine(voice_id)
+        if implied is not None:
+            serving_engine = implied
     voice_id, builtin_error = _resolve_builtin_voice(data, voice_id)
     if builtin_error:
         return _openai_error(builtin_error, 400)

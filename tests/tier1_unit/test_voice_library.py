@@ -617,6 +617,57 @@ class TestApiDefault:
 
         assert voice_library.get_api_default() is None
 
+    def test_a_failed_mirror_write_restores_the_previous_default(self, tmp_api_default, monkeypatch):
+        first = self._saved_voice()
+        voice_library.set_api_default("pocket_tts", "pocket:vera")
+        before = (tmp_api_default / ".api_default.json").read_text()
+
+        def boom(_voice_id):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(voice_library, "set_active_default_voice_id", boom)
+        with pytest.raises(OSError):
+            voice_library.set_api_default("pocket_tts", first["voice_id"])
+
+        assert (tmp_api_default / ".api_default.json").read_text() == before
+        restored = voice_library.get_api_default()
+        assert restored is not None and restored["voice"] == "pocket:vera"
+
+    @pytest.mark.parametrize(
+        ("voice", "valid"),
+        [
+            ("kokoro:af_heart", True),
+            ("phonon:Captain Silas Blackwater", True),
+            ("pocket-lite:jane", True),
+            ("kitten2:Bruno", True),
+            ("kokoro:", False),
+            ("kokoro: leading", False),
+            ("kokoro:trailing ", False),
+            ("kokoro:../x", False),
+            ("Kokoro:af_heart", False),
+            ("vd_0123456789ab", False),
+        ],
+    )
+    def test_preset_id_shapes(self, voice, valid):
+        assert voice_library.is_preset_voice_id(voice) is valid
+
+    def test_pack_default_is_kept_and_does_not_touch_the_mirror(self, tmp_api_default):
+        saved = self._saved_voice()
+        voice_library.set_api_default("pocket_tts", saved["voice_id"])
+
+        voice_library.set_api_default("kokoro", "kokoro:af_heart")
+
+        assert voice_library.get_active_default_voice_id() is None
+        current = voice_library.get_api_default()
+        assert current is not None and current["voice"] == "kokoro:af_heart"
+
+    def test_a_vanished_saved_voice_is_only_returned_on_request(self, tmp_api_default):
+        voice_library.set_api_default("pocket-lite", "vd_0000000000ff", mirror_legacy=False)
+
+        assert voice_library.get_api_default() is None
+        kept = voice_library.get_api_default(keep_missing=True)
+        assert kept is not None and kept["voice"] == "vd_0000000000ff"
+
     def test_clear_for_matching_voice_removes_both_files(self, tmp_api_default):
         saved = self._saved_voice()
         voice_library.set_api_default("pocket_tts", saved["voice_id"])

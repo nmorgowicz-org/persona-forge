@@ -84,11 +84,25 @@ def clear_active_default_voice_id() -> None:
 
 # Structured no-voice API default (Phase A1 of docs/plans/20261023-kokoro_phonon_kittentts2.md):
 # {"engine": str | None, "voice": str, "variant": str | None, "updated_at": float}. `voice` is
-# either a saved library id (``vd_...``) or a built-in preset (``pocket:<name>``). The legacy
+# either a saved library id (``vd_...``) or a namespaced built-in preset: ``pocket:<name>`` or a
+# pack engine's ``kokoro:<voice>`` / ``phonon:<voice>`` / ``kitten2:<voice>`` / ``pocket-lite:<name>``.
+# ``engine`` is the active backend for Pocket presets and backend-served saved voices, and the pack
+# engine id for pack voices and for saved voices cloned on a pack engine. The legacy
 # ``.active_default`` file stays authoritative for the runtime hot-swap path and is kept in sync
-# for saved voices, so older code and rollbacks keep working unchanged.
+# for saved voices served by the active backend, so older code and rollbacks keep working unchanged.
+# This module checks the shape of the id only; whether the engine is installed and the voice exists
+# is the caller's check (it owns the engine registry).
 API_DEFAULT_FILE = VOICE_LIBRARY_DIR / ".api_default.json"
 _PRESET_VOICE_RE = re.compile(r"^pocket:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+# Pack voices keep upstream names, some with spaces ("Captain Silas Blackwater").
+_PACK_VOICE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}:[A-Za-z0-9](?:[A-Za-z0-9 _.-]{0,94}[A-Za-z0-9_.-])?$")
+
+
+def is_preset_voice_id(voice: str) -> bool:
+    """True for a namespaced built-in id (``pocket:vera``, ``kokoro:af_heart``); shape only."""
+    if voice.startswith("pocket:"):
+        return bool(_PRESET_VOICE_RE.match(voice))
+    return bool(_PACK_VOICE_RE.match(voice))
 
 
 def _write_text_atomic(path: Path, payload: str) -> None:
@@ -104,12 +118,14 @@ def _write_text_atomic(path: Path, payload: str) -> None:
             pass
 
 
-def get_api_default() -> dict[str, Any] | None:
+def get_api_default(*, keep_missing: bool = False) -> dict[str, Any] | None:
     """Return the effective no-voice API default, or None.
 
     Prefers the structured record, falling back to the legacy single-value file. A saved voice
     that no longer exists is treated as unset rather than served as a stale reference. Presets
-    are validated by the caller (which owns the built-in catalog).
+    are validated by the caller (which owns the built-in catalog). With ``keep_missing`` a vanished
+    saved voice is still returned so the caller can report it (a default on a pack engine must
+    surface a repair instead of silently falling back to another speaker).
     """
     record: dict[str, Any] | None = None
     try:
@@ -139,23 +155,46 @@ def get_api_default() -> dict[str, Any] | None:
     if record is None:
         return None
     voice = record["voice"]
-    if not voice.startswith("pocket:") and get_voice(voice) is None:
+    if not is_preset_voice_id(voice) and get_voice(voice) is None and not keep_missing:
         return None
     return record
 
 
+def _read_text_or_none(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _restore_text(path: Path, payload: str | None) -> None:
+    if payload is None:
+        path.unlink(missing_ok=True)
+    else:
+        _write_text_atomic(path, payload)
+
+
 def set_api_default(
-    engine: str | None, voice: str, variant: str | None = None
+    engine: str | None,
+    voice: str,
+    variant: str | None = None,
+    *,
+    mirror_legacy: bool = True,
 ) -> dict[str, Any]:
-    """Persist the structured API default and mirror saved voices to the legacy file."""
+    """Persist the structured API default and mirror saved voices to the legacy file.
+
+    The change is all-or-nothing: if either file cannot be written, both are put back as they
+    were before the call and the error is raised, so a half-applied default never survives.
+    ``mirror_legacy=False`` is for a saved voice served by a pack engine: the legacy file drives
+    the *active backend's* runtime voice, which that default must not touch.
+    """
     voice = (voice or "").strip()
     if not voice:
         raise ValueError("voice is required")
-    is_preset = voice.startswith("pocket:")
-    if is_preset:
-        if not _PRESET_VOICE_RE.match(voice):
-            raise ValueError(f"invalid preset voice: {voice!r}")
-    elif not _is_valid_voice_id(voice):
+    is_preset = is_preset_voice_id(voice)
+    if ":" in voice and not is_preset:
+        raise ValueError(f"invalid preset voice: {voice!r}")
+    if not is_preset and not _is_valid_voice_id(voice):
         raise ValueError(f"invalid voice_id: {voice!r}")
 
     record = {
@@ -164,13 +203,23 @@ def set_api_default(
         "variant": (variant or "").strip() or None,
         "updated_at": time.time(),
     }
-    _write_text_atomic(API_DEFAULT_FILE, json.dumps(record, sort_keys=True))
-    if is_preset:
-        # Presets have no library record; the runtime falls back to its mounted default, and
-        # request-time resolution passes the preset explicitly.
-        clear_active_default_voice_id()
-    else:
-        set_active_default_voice_id(voice)
+    before_record = _read_text_or_none(API_DEFAULT_FILE)
+    before_legacy = _read_text_or_none(ACTIVE_DEFAULT_FILE)
+    try:
+        _write_text_atomic(API_DEFAULT_FILE, json.dumps(record, sort_keys=True))
+        if is_preset or not mirror_legacy:
+            # Presets have no library record; the runtime falls back to its mounted default, and
+            # request-time resolution passes the preset explicitly.
+            clear_active_default_voice_id()
+        else:
+            set_active_default_voice_id(voice)
+    except Exception:
+        for path, payload in ((API_DEFAULT_FILE, before_record), (ACTIVE_DEFAULT_FILE, before_legacy)):
+            try:
+                _restore_text(path, payload)
+            except OSError:
+                logger.warning("Could not restore %s after a failed API default change", path)
+        raise
     return {**record, "source": "record"}
 
 

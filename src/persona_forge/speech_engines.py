@@ -425,6 +425,23 @@ def adapter_for(engine: EngineInfo) -> SpeechEngine:
     return adapter
 
 
+def named_engine(model_name: str | None) -> EngineInfo | None:
+    """The engine a request's ``model`` names outright, else None.
+
+    ``None`` covers an omitted model, the "serve whatever is active" aliases (``tts-1``,
+    ``persona-forge``) and unrecognised labels: for those the API default, or a voice's own
+    namespace, decides the engine.
+    """
+    key = (model_name or "").strip().lower()
+    if key in MODEL_ALIASES:
+        alias = MODEL_ALIASES[key]
+        return ENGINES.get(alias) if alias is not None else None
+    for engine in ENGINES.values():
+        if key in (engine.id, engine.backend):
+            return engine
+    return None
+
+
 def resolve_model(
     model_name: str | None, current_backend: str | None
 ) -> tuple[EngineInfo | None, bool]:

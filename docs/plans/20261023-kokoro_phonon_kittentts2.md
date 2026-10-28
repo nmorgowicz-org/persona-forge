@@ -236,6 +236,16 @@ an explicit error rather than silently degrading.
 - Requests targeting a non-active engine trigger a queued, visible swap only if the user enabled
   "allow API requests to switch engines" (default **off**: return a clear error naming the active
   engine). Swaps reuse the existing swap banner/queue UX.
+  **Decision (2026-10-28): the switch is not built.** Pack engines run beside the active backend, so
+  only a swap among the built-in backends is left, and the lifecycle cannot do that from a request
+  without a redesign: only `pocket-tts` is a registered engine (a request cannot name `openvino` or
+  `pytorch`), and the one existing swap (`apply_runtime_config` with `TTS_BACKEND`) is a global
+  reconfiguration that makes `/generate` and `/v1/audio/speech` answer 503 to everyone else while it
+  runs (not a queued swap), persists to `runtime.json`, changes `TTS_BACKEND` before the load
+  succeeds and cannot roll back, and loads 5.4-6.9 GiB in 60-120 s or more. See §5.6 and
+  `docs/api/HTTP_API_REFERENCE.md` ("Switching engines from a request"). Revisit only with a queued
+  swap job (bounded wait, rollback, an engine id per built-in backend). The setting is not shown,
+  because a switch that does nothing would mislead.
 - Preview, quick-benchmark and Compare jobs run at a lower queue priority than API and Speak
   audio; they never delay endpoint requests.
 - Each engine carries its own idle-unload timer (pack-manifest field `idle_unload_after`),
@@ -301,6 +311,9 @@ an explicit error rather than silently degrading.
   Migrate the existing saved default on upgrade; activation is transactional on the executor
   (validate/prepare → persist → else restore). Missing selections surface a repair action, never a
   silent speaker fallback. Optional user-defined aliases (`alloy` → `kokoro:af_heart`).
+  **Built (2026-10-28):** the default can be a pack voice (`kokoro:`, `phonon:`, `kitten2:`,
+  `pocket-lite:`) or a saved voice cloned on a cloning pack engine (`kitten2`, `pocket-lite`); see
+  §5.3 for the behaviour, `GET/PUT /api-default` in the API reference for the contract.
 - Streaming is advertised honestly (`frame`/`sentence`/`none`); batch engines still serve PCM as a
   single chunk when requested. Cancel on disconnect; release the executor only after worker cleanup.
 
@@ -456,11 +469,22 @@ nudge.
 engine's presets (`GET /voices/built-in?engines=all`; the plain route is unchanged for Speak).
 With Phonon and Kokoro installed it showed 89 English voices; an engine filter, engine badges, and
 a note naming engines that are not installed. Preview generates locally through `/v1/audio/speech`
-(a real Kokoro preview played). Pack voices can be favourited and copied; "Use in Speak" and "Set as
-API default" are hidden for them, with the reason in the drawer. **Preview cache (§9.2) not built,
+(a real Kokoro preview played). Pack voices can be favourited, copied and set as
+the API default (below); "Use in Speak" is hidden for them, with the reason in the drawer. **Preview cache (§9.2) not built,
 on purpose:** it exists for downloading upstream sample files, and none of these engines ships
 sample URLs, so there is nothing to cache. If an upstream sample source is added later the cache
-spec still stands. **Compare from a saved voice's actions menu: built** ("Compare engines" opens the Compare tab with that voice on every installed cloning engine; checked in a real browser with two saved voices). **Not built:** the API default for pack voices (the default applies to the active engine, so it needs the same design decision as engine switching).
+spec still stands. **Compare from a saved voice's actions menu: built** ("Compare engines" opens the Compare tab with that voice on every installed cloning engine; checked in a real browser with two saved voices). **API default for pack voices: built (2026-10-28).** The drawer's **Set as API default** now works for every installed pack engine's voices ("Use in Speak" stays hidden for them; Speak has its Engine selector). Decisions:
+
+- The API default is **engine + voice**, not "a voice on the active engine". It does not need an engine switch: pack engines already run beside the active backend, so a request with no voice and no named engine is simply routed to the default's engine adapter. Requests that name a *different* engine outright do not use the default's voice.
+- **Voice ids imply their engine** (§4.5): a namespaced `voice` (`kokoro:af_heart`) is served by Kokoro even when `model` is a generic label such as `tts-1`. An explicit `model` still wins.
+- **Saved voices on a cloning pack engine: included** (`PUT /api-default {voice: "vd_...", engine: "kitten2"|"pocket-lite"}`), because §4.5 already defines the default as engine + voice and saved voices "use the API-default engine". The adapter prepares the clone on the first request, so there is no separate prepare step; Kitten requires the voice's transcript, checked at set time. Saved voices without an `engine` keep the old semantics exactly (active backend, hot-swap, legacy `.active_default` mirror); a pack-engine default clears that mirror and never touches the active backend's runtime voice. On Integrations a "Saved voices run on" select appears when a cloning pack is installed and applies to the **Set default** buttons of saved voices.
+- **Persisted, nothing migrated.** The record is the existing `.api_default.json` (`engine` holds the pack engine id); older records and the legacy file are unchanged. Writes are atomic and all-or-nothing (the previous record and mirror are restored if either write fails; a saved-voice activation that was already applied is rolled back).
+- **Validated twice.** At set time (engine installed, voice offered, saved voice exists and has what the engine needs; shape checked against a per-namespace allowlist, never used as a path) and at use time on every request that relies on the default.
+- **Repair, not fallback.** An engine removed outside the app (or damaged), a voice the pack stopped offering, or a deleted saved voice gives `409 api_default_unavailable` on a request that relies on the default, with the message and repair named; `GET /api-default` returns the record with `servable: false` and a `problem` (`engine_not_installed` | `voice_missing`, plus `repair`). Deleting a saved voice that is a pack-engine default keeps the record so this surfaces (a default on the active backend is still cleared, as before). Integrations shows a "needs repair" banner with **Open Speech engines** and **Choose another default**; the drawer shows the same text on the voice.
+- **Removing the engine that serves the default is blocked** (journey 6): `POST /engines/<id>/remove` returns `409` with `code: "api_default_engine"` and "Change the API default first"; the Runtime engine card shows an "API default" badge, a note and a disabled Remove (`GET /engines` carries `api_default`).
+- Integrations: the effective default shows the engine badge, readiness, and snippets (curl, Python, Test endpoint) with the namespaced id and `model` set to the engine id. The "Available voice IDs" table still lists saved and Pocket voices only (a pack engine's 40-115 voices would swamp it); pack voices are set from Voices → Built-in.
+
+Checked in a real browser with the packs in `/tmp/pf_all` (Kitten 2, Phonon, Kokoro): set `kokoro:af_heart` from the drawer, Integrations showed "Kokoro 82M · ready" and copyable snippets, the server was restarted, and a bare request returned the same bytes as an explicit Kokoro request; Remove was refused (API 409, UI button disabled with the note); the Phonon default streamed PCM; moving the Phonon pack aside produced the 409 error and the red banner, and a Kitten clone default served a bare request and, after the voice was deleted, reported `voice_missing`. Pocket Lite was not installed on that machine (its weights are gated), so it is covered by the stub-pack route tests only.
 
 **Uninstalled engines' voices: built.** `src/persona_forge/engine_voice_catalog.json` bundles each pack engine's voice names and languages (Kitten 115, Phonon 37, Kokoro 41; Pocket Lite's 21 come from its worker), so the tab lists them before install with a "Needs install" badge, an **Install** button on the card and in the drawer, an "Installed only" toggle, and every engine in the engine filter. The install runs inline with step progress and the list reloads with the engine's real voices when it finishes. The file is generated from installed packs (`python -m persona_forge.voice_catalog`), and `tests/tier2_backend/test_voice_catalog.py` compares it with any pack that is installed, so a stale list fails the test. Preview stays disabled until install (nothing upstream to play). Checked in a real browser: browsed with only Kokoro installed, installed Phonon inline (about 40 s), and its cards switched to Preview, which produced real audio.
 
@@ -537,9 +561,10 @@ engines, and a note says the engine runs beside the active one and nothing is un
 has an "Enforce English on the API" checkbox (off by default, saved on the server): when on, a
 non-English voice or `language` gets a 400 that names the voice and the setting. **Not built:** the
 rest of the §5.6 picker (engine sections inside the voice combobox, an engine dropdown for saved
-voices beyond the one above, measured swap time), and "Allow API requests to switch engines". Pack
-engines never need a switch, and switching the built-in backends on demand means unloading and
-reloading the runtime from an API request, which is a separate design decision.
+voices beyond the one above, measured swap time), and "Allow API requests to switch engines".
+**Switching: investigated, not built, by decision (see §4.3).** Pack engines never need a switch, and
+a swap among the built-in backends from an API request would need a lifecycle redesign. A pack voice
+can now be the API default (§5.3).
 
 ### 5.7 Integrations page
 
@@ -552,6 +577,11 @@ reloading the runtime from an API request, which is a separate design decision.
 - Available IDs table: all ready voices across installed engines with copy buttons and engine
   column; filter for "servable now".
 - Setting: "Allow API requests to switch engines" (off by default) with explanation.
+  **Not built:** see §4.3. What clients get instead: the active backend is changed in Runtime; a
+  request the active backend cannot serve gets a clear error (a 400 for `builtin_voice` on a
+  non-Pocket backend, a 409 for a Pocket preset default while another backend is active, a 503 with
+  an install hint for a missing pack). **Header card, snippets, Test endpoint and the repair banner
+  are built** around the API default's engine (§5.3).
 - Optional "Enforce language preference on the API" (off by default): when on, requests for
   non-English voices/models get the §5.8 language error instead of audio; when off, the request is
   served as-is.
@@ -577,7 +607,8 @@ checkpoint — pick a French-capable model or an English voice".
 4. On the MacBook: install Kitten 2 (MLX) or record "unsupported" with a clear message.
 5. Request an unprepared voice/engine pair via API → actionable error, no audio, no swap.
 6. Remove an engine that is the API default → blocked with "change API default first" or guided
-   repair.
+   repair. **Built:** blocked (API 409 and a disabled Remove with a note); a default whose engine
+   disappeared outside the app gets the repair banner (§5.3).
 7. Set Languages to "English only" → non-English voices and checkpoints hidden everywhere; a
    requested French voice over the API still serves (enforcement off), then errors with the §5.8
    message after turning enforcement on.

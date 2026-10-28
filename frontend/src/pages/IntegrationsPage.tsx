@@ -11,28 +11,32 @@ import { cn } from '@/lib/utils'
 import {
   getApiDefault,
   listBuiltInVoices,
+  listEngines,
   listVoices,
   setApiDefault,
   type ApiDefaultRecord,
   type BuiltInVoiceMeta,
+  type EngineCard,
   type VoiceMeta,
 } from '@/lib/api'
 
-const CURL_SNIPPET = (voiceId: string) => `curl -X POST "$PERSONA_FORGE_BASE_URL/v1/audio/speech" \\
+// `model` names a pack engine ("kokoro", "pocket-lite"); the generic label serves whatever the
+// voice or the API default implies.
+const CURL_SNIPPET = (voiceId: string, model?: string) => `curl -X POST "$PERSONA_FORGE_BASE_URL/v1/audio/speech" \\
   -H "Content-Type: application/json" \\
-  -d '{
+  -d '{${model ? `\n    "model": "${model}",` : ''}
     "input": "Hello from Hermes.",
     "voice_id": "${voiceId}",
     "response_format": "mp3"
   }' \\
   --output speech.mp3`
 
-const PYTHON_SNIPPET = (voiceId: string) => `from openai import OpenAI
+const PYTHON_SNIPPET = (voiceId: string, model = 'persona-forge') => `from openai import OpenAI
 
 client = OpenAI(base_url="$PERSONA_FORGE_BASE_URL", api_key="not-needed")
 
 response = client.audio.speech.create(
-    model="persona-forge",
+    model="${model}",
     voice="${voiceId}",
     input="Hello from Hermes.",
 )
@@ -96,6 +100,7 @@ function CodeBlock({ code }: { code: string }) {
 }
 
 export function IntegrationsPage() {
+  const setPage = useAppStore((s) => s.setPage)
   const storeVoiceId = useAppStore((s) => s.voiceId)
   const storeVoices = useAppStore((s) => s.voices)
   const modelLoaded = useAppStore((s) => s.modelLoaded)
@@ -108,17 +113,28 @@ export function IntegrationsPage() {
   const [enforceLanguage, setEnforceLanguage] = useState(() => getPref<boolean>('api.enforceLanguage', false))
   const [useSpeakVoice, setUseSpeakVoice] = useState(false)
   const [pendingVoice, setPendingVoice] = useState<string | null>(null)
+  // Engine a saved voice runs on when made the default; '' = the active engine.
+  const [cloneEngines, setCloneEngines] = useState<EngineCard[]>([])
+  const [savedVoiceEngine, setSavedVoiceEngine] = useState('')
   const [pageError, setPageError] = useState<string | null>(null)
   const [test, setTest] = useState<TestState>({ phase: 'idle' })
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([listVoices(), listBuiltInVoices(), getApiDefault()])
-      .then(([saved, presets, effective]) => {
+    Promise.all([listVoices(), listBuiltInVoices(), getApiDefault(), listEngines().catch(() => [])])
+      .then(([saved, presets, effective, engines]) => {
         if (cancelled) return
         setVoices(saved)
         setBuiltIns(presets)
         setApiDefaultState(effective)
+        setCloneEngines(
+          engines.filter(
+            (engine) =>
+              engine.kind === 'pack' &&
+              engine.capabilities.clone &&
+              (engine.state.status === 'installed' || engine.state.status === 'verified'),
+          ),
+        )
       })
       .catch((err: unknown) => {
         if (!cancelled) setPageError(String((err as Error)?.message || err))
@@ -132,6 +148,15 @@ export function IntegrationsPage() {
   const defaultVoiceId = apiDefault?.voice ?? null
   const exampleVoiceId =
     (useSpeakVoice ? speakVoiceId : defaultVoiceId) ?? speakVoiceId ?? 'my-voice'
+  // A default served by a pack engine is addressed by that engine's id; a saved voice has no
+  // namespace to imply it, so its snippet names the engine too.
+  const packDefaultEngine =
+    apiDefault && apiDefault.engine && apiDefault.engine_label && apiDefault.engine !== 'pocket_tts' &&
+    !['pytorch', 'openvino', 'pocket_tts'].includes(apiDefault.engine)
+      ? apiDefault.engine
+      : null
+  const exampleModel =
+    !useSpeakVoice && exampleVoiceId === defaultVoiceId && packDefaultEngine ? packDefaultEngine : undefined
 
   const voiceEntries = [
     ...voices.map((voice) => ({
@@ -176,7 +201,11 @@ export function IntegrationsPage() {
     setPendingVoice(voice)
     setPageError(null)
     try {
-      const record = await setApiDefault({ voice })
+      const isSaved = voice.startsWith('vd_')
+      const record = await setApiDefault({
+        voice,
+        ...(isSaved && savedVoiceEngine ? { engine: savedVoiceEngine } : {}),
+      })
       setApiDefaultState(record)
       setUseSpeakVoice(false)
     } catch (err) {
@@ -197,6 +226,7 @@ export function IntegrationsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          ...(exampleModel ? { model: exampleModel } : {}),
           input: 'Hello from Hermes.',
           voice_id: exampleVoiceId,
           response_format: 'mp3',
@@ -275,12 +305,21 @@ export function IntegrationsPage() {
             <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
               {apiDefault.voice}
             </code>
-            <Badge variant="outline" className="text-[10px]">
-              {apiDefault.engine || 'engine: current'}
+            <Badge variant="outline" className="text-[10px]" data-testid="api-default-engine">
+              {apiDefault.engine_label || apiDefault.engine || 'engine: current'}
             </Badge>
             <Badge variant="outline" className="text-[10px]">
               {apiDefault.kind === 'preset' ? 'built-in voice' : 'saved voice'}
             </Badge>
+            {apiDefault.problem ? (
+              <Badge variant="destructive" className="text-[10px]">
+                needs repair
+              </Badge>
+            ) : (
+              <Badge variant="secondary" className="text-[10px]">
+                ready
+              </Badge>
+            )}
             {apiDefault.variant && (
               <Badge variant="outline" className="text-[10px]">
                 variant: {apiDefault.variant}
@@ -292,6 +331,36 @@ export function IntegrationsPage() {
             No API default is set. Requests without a voice fall back to the runtime default
             reference. Pick a voice below to make it explicit.
           </p>
+        )}
+        {apiDefault?.problem && (
+          <div
+            role="alert"
+            className="flex flex-col gap-2 rounded-control border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            data-testid="api-default-problem"
+          >
+            <p>
+              <span className="font-medium">Requests without a voice are failing.</span>{' '}
+              {apiDefault.problem.message} {apiDefault.problem.repair}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {apiDefault.problem.code === 'engine_not_installed' && (
+                <Button type="button" size="xs" variant="outline" onClick={() => setPage('runtime')}>
+                  Open Speech engines
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                onClick={() => {
+                  setPref('voiceLibrary.tab', 'builtin')
+                  setPage('voice-library')
+                }}
+              >
+                Choose another default
+              </Button>
+            </div>
+          </div>
         )}
         {pageError && <p className="text-xs text-destructive">{pageError}</p>}
         <label className="flex items-start gap-2 text-xs" data-testid="enforce-language">
@@ -321,11 +390,13 @@ export function IntegrationsPage() {
         <div>
           <p className="text-sm font-semibold">OpenAI-compatible speech endpoint</p>
           <p className="text-xs text-muted-foreground">
-            <code>POST /v1/audio/speech</code> — pass any saved voice_id or built-in
-            <code> pocket:*</code> voice as the voice.
+            <code>POST /v1/audio/speech</code> — pass any saved voice_id or a built-in voice
+            (<code>pocket:*</code>, or a pack engine's <code>kokoro:*</code>, <code>phonon:*</code>,
+            <code> kitten2:*</code>, <code>pocket-lite:*</code>) as the voice. A namespaced voice is
+            served by its own engine.
           </p>
         </div>
-        <CodeBlock code={CURL_SNIPPET(exampleVoiceId)} />
+        <CodeBlock code={CURL_SNIPPET(exampleVoiceId, exampleModel)} />
       </motion.div>
 
       <motion.div
@@ -340,7 +411,7 @@ export function IntegrationsPage() {
             Drop-in for any app already using the OpenAI SDK for TTS, like Hermes.
           </p>
         </div>
-        <CodeBlock code={PYTHON_SNIPPET(exampleVoiceId)} />
+        <CodeBlock code={PYTHON_SNIPPET(exampleVoiceId, exampleModel)} />
       </motion.div>
 
       <motion.div
@@ -398,6 +469,27 @@ export function IntegrationsPage() {
             saved reference.
           </p>
         </div>
+        {cloneEngines.length > 0 && (
+          <label className="flex flex-wrap items-center gap-2 text-xs" data-testid="saved-voice-engine">
+            <span className="font-medium">Saved voices run on</span>
+            <select
+              className="rounded-control border border-border bg-background px-2 py-1 text-xs"
+              value={savedVoiceEngine}
+              onChange={(event) => setSavedVoiceEngine(event.target.value)}
+            >
+              <option value="">The active engine</option>
+              {cloneEngines.map((engine) => (
+                <option key={engine.id} value={engine.id}>
+                  {engine.label}
+                </option>
+              ))}
+            </select>
+            <span className="text-muted-foreground">
+              Applies when you press Set default on a saved voice. Built-in voices of Kokoro, Phonon and
+              the other packs are set from Voices → Built-in.
+            </span>
+          </label>
+        )}
         <div className="flex flex-wrap gap-1.5">
           {voiceEntries.map((entry) => (
             <span

@@ -238,6 +238,11 @@ export function SpeechEnginesCard() {
                 <span className="text-sm font-medium">{engine.label}</span>
                 <code className="font-mono text-[10px] text-muted-foreground">{engine.id}</code>
                 {engine.active && <Badge className="text-[10px]">active</Badge>}
+                {engine.api_default && (
+                  <Badge variant="secondary" className="text-[10px]" data-testid="engine-api-default-badge">
+                    API default
+                  </Badge>
+                )}
                 <Badge variant="outline" className="text-[10px]">
                   {engine.kind === 'builtin' ? 'built in' : engine.kind === 'pack' ? 'pack' : 'built in + pack'}
                 </Badge>
@@ -378,13 +383,16 @@ export function SpeechEnginesCard() {
                       variant="ghost"
                       disabled={
                         engine.active ||
+                        engine.api_default ||
                         pendingAction !== null ||
                         engine.install_job?.state === 'running'
                       }
                       title={
                         engine.active
                           ? 'Switch to another engine before removing this one'
-                          : undefined
+                          : engine.api_default
+                            ? 'This engine serves the API default. Change the API default first (Voices → Built-in, or Integrations).'
+                            : undefined
                       }
                       onClick={() => void remove(engine.id)}
                     >
@@ -399,6 +407,13 @@ export function SpeechEnginesCard() {
                   </>
                 )}
               </div>
+
+              {engine.api_default && (
+                <p className="text-[11px] text-muted-foreground" data-testid="engine-api-default-note">
+                  This engine serves the API default, so it can't be removed. Change the API default
+                  first (Voices → Built-in, or Integrations).
+                </p>
+              )}
 
               {engine.install_job?.state === 'running' && (
                 <div className="flex flex-col gap-1" role="status">

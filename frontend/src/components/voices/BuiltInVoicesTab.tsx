@@ -627,8 +627,17 @@ export function BuiltInVoicesTab() {
                 {isPackVoice(detail) && (
                   <p className="text-xs text-muted-foreground">
                     To use this voice, pick {detail.engine_label} in the Engine selector on Speak, or pass{' '}
-                    <code>model: {detail.engine}</code> and this voice ID to the API. It can't be set as the API
-                    default yet, because the default applies to the active engine.
+                    <code>model: {detail.engine}</code> and this voice ID to the API. As the API default,
+                    requests that leave out a voice are served by {detail.engine_label} with this voice.
+                  </p>
+                )}
+                {apiDefault?.voice === detail.voice_id && apiDefault.problem && (
+                  <p
+                    role="alert"
+                    className="rounded-control border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                    data-testid="api-default-problem"
+                  >
+                    {apiDefault.problem.message} {apiDefault.problem.repair}
                   </p>
                 )}
 
@@ -684,11 +693,12 @@ export function BuiltInVoicesTab() {
                       Use in Speak
                     </Button>
                   )}
-                  {!isPackVoice(detail) && (
+                  {!needsInstall(detail) && (
                   <Button
                     type="button"
                     size="sm"
                     variant="outline"
+                    data-testid="set-api-default"
                     disabled={settingDefault === detail.voice_id || apiDefault?.voice === detail.voice_id}
                     onClick={() => void makeDefault(detail)}
                   >

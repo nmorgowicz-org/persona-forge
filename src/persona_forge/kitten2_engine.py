@@ -23,6 +23,8 @@ from persona_forge.pack_process import PackProcess, PackProcessError
 
 ENGINE_ID = "kitten2"
 PRESET_PREFIX = "kitten2:"
+# Cloning needs the reference transcript (checked again at request time).
+CLONE_NEEDS_TRANSCRIPT = True
 # Loading reads the weights; the first compiled CUDA call is a separate ``warmup`` request, so a
 # request that arrives meanwhile can be told to retry instead of queueing behind the compile.
 LOAD_TIMEOUT_S = 300.0
