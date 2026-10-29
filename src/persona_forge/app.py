@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import os
+from datetime import datetime, timezone
 import queue
 import sys
 import time
@@ -22,23 +23,40 @@ _UI_PREFERENCES_MAX_BODY = 16 * 1024
 
 
 import soundfile as sf
-from flask import Flask, Response, jsonify, request, send_from_directory, send_file
+from flask import Flask, Response, jsonify, make_response, request, send_from_directory
 
+from persona_forge.pocket_voices import POCKET_BUILTIN_VOICES, gender_of
 from persona_forge import (
     audio_diagnostics,
     audio_style,
+    engine_details,
+    engine_packs,
     frontend,
+    hf_access,
+    imported_voices,
+    kitten2_engine,
+    provisioned_engines,
     model,
     omnivoice_engine,
     project_library,
     prosody_repair,
+    output_level,
+    pack_logs,
     segment_library,
+    speech_engines,
+    voice_catalog,
+    compare_store,
+    compare_autocheck,
+    hardware_fit,
     ui_preferences_store,
     voice_design,
+    voice_bindings,
     voice_library,
+    voice_prepare,
 )
 from persona_forge.asr_check import transcribe_reference_audio, validate_reference_text
 from persona_forge.alignment_jobs import AlignmentJobManager
+from persona_forge.pack_process import PackProcessError
 
 # candidate_id -> (wav, sample_rate). In-memory only, single-user local tool (locked decision,
 # docs/architecture/PERSONA_FORGE_STUDIO.md §5): cleared at the start of every /omnivoice/audition call, so
@@ -130,8 +148,26 @@ if _frontend_enabled:
         return send_from_directory(_FRONTEND_DIR, "favicon.svg")
 
 
-def _openai_error(message: str, status: int, err_type: str = "invalid_request_error"):
-    return jsonify({"error": {"message": message, "type": err_type, "code": None}}), status
+def _openai_error(
+    message: str, status: int, err_type: str = "invalid_request_error", code: str | None = None
+):
+    return jsonify({"error": {"message": message, "type": err_type, "code": code}}), status
+
+
+def _engine_warming_error(exc: "kitten2_engine.EngineWarming"):
+    """503 + ``Retry-After`` for an engine that is loading or compiling its first call.
+
+    Retryable by design: OpenAI-style clients retry a 503 and honour ``Retry-After``.
+    """
+    body, status = _openai_error(exc.public_message, 503, "api_error", code="engine_warming")
+    response = make_response(body, status)
+    response.headers["Retry-After"] = str(exc.retry_after_s)
+    return response
+
+
+def _is_capacity_error(exc: BaseException) -> bool:
+    """True when generation stopped because MAX_SPEECH_SECONDS was exceeded."""
+    return isinstance(exc, RuntimeError) and "cache capacity exceeded" in str(exc)
 
 
 # Encodings we can actually produce. Anything else is rejected with 400 rather than
@@ -424,38 +460,6 @@ def voice_design_progress():
 
 # ── Built-in Pocket Voices ────────────────────────────────────────────────────────────────────
 
-POCKET_BUILTIN_VOICES = {
-    "vera": {"display_name": "Vera", "license": "CC BY 4.0", "language": "English", "language_code": "en", "category": "conversation", "note": "Female, natural Aussie"},
-    "jane": {"display_name": "Jane", "license": "CC0", "language": "English", "language_code": "en", "category": "conversation", "note": "Female conversation"},
-    "anna": {"display_name": "Anna", "license": "CC0", "language": "English", "language_code": "en", "category": "conversation", "note": "Female conversation"},
-    "fantine": {"display_name": "Fantine", "license": "CC BY 4.0", "language": "English", "language_code": "en", "category": "reading", "note": "Female reading"},
-    "alba": {"display_name": "Alba", "license": "CC BY 4.0", "language": "English", "language_code": "en", "category": "reading", "note": "Reading / character"},
-    "marius": {"display_name": "Marius", "license": "CC BY 4.0", "language": "English", "language_code": "en", "category": "reading", "note": "Male reading"},
-    "jean": {"display_name": "Jean", "license": "CC0", "language": "English", "language_code": "en", "category": "reading", "note": "Male reading"},
-    "azelma": {"display_name": "Azelma", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Female"},
-    "bill_boerst": {"display_name": "Bill Boerst", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
-    "caro_davy": {"display_name": "Caro Davy", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Female"},
-    "charles": {"display_name": "Charles", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
-    "cosette": {"display_name": "Cosette", "license": "CC BY 4.0", "language": "English", "language_code": "en", "category": "other", "note": "Female"},
-    "eponine": {"display_name": "Eponine", "license": "CC BY 4.0", "language": "English", "language_code": "en", "category": "other", "note": "Female"},
-    "eve": {"display_name": "Eve", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Female"},
-    "george": {"display_name": "George", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
-    "javert": {"display_name": "Javert", "license": "CC BY 4.0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
-    "mary": {"display_name": "Mary", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Female"},
-    "michael": {"display_name": "Michael", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
-    "paul": {"display_name": "Paul", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
-    "peter_yearsley": {"display_name": "Peter Yearsley", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
-    "stuart_bell": {"display_name": "Stuart Bell", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male"},
-    "estelle": {"display_name": "Estelle", "license": "CC BY 4.0", "language": "French", "language_code": "fr", "category": "multilingual", "note": "French"},
-    "giovanni": {"display_name": "Giovanni", "license": "CC BY 4.0", "language": "Italian", "language_code": "it", "category": "multilingual", "note": "Italian"},
-    "juergen": {"display_name": "Juergen", "license": "CC BY 4.0", "language": "German", "language_code": "de", "category": "multilingual", "note": "German"},
-    "lola": {"display_name": "Lola", "license": "CC BY 4.0", "language": "Spanish", "language_code": "es", "category": "multilingual", "note": "Spanish"},
-    "rafael": {"display_name": "Rafael", "license": "CC BY 4.0", "language": "Portuguese", "language_code": "pt", "category": "multilingual", "note": "Portuguese"},
-    "hf_expresso_happy": {"display_name": "Expresso Happy", "license": "CC BY-NC 4.0", "language": "English", "language_code": "en", "category": "other", "note": "Happy delivery", "path": "hf://kyutai/tts-voices/expresso/ex03-ex01_happy_001_channel1_334s.wav"},
-    "hf_voice_zero_bill": {"display_name": "Bill (Zero)", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Male", "path": "hf://kyutai/tts-voices/voice-zero/bill_boerst.wav"},
-    "hf_voice_donations_0a67": {"display_name": "Donation 0a67", "license": "CC0", "language": "English", "language_code": "en", "category": "other", "note": "Female", "path": "hf://kyutai/tts-voices/voice-donations/0a67_enhanced.wav"},
-    "hf_cml_fr_10087": {"display_name": "French 10087", "license": "CC BY 4.0", "language": "French", "language_code": "fr", "category": "multilingual", "note": "Female", "path": "hf://kyutai/tts-voices/cml-tts/fr/10087_11650_000028-0002_enhanced.wav"},
-}
 
 @app.get("/voices")
 def voices_list():
@@ -464,7 +468,8 @@ def voices_list():
     active_id = None
     if getattr(model, "TTS_BACKEND", None) in ("pytorch", "openvino", "pocket_tts"):
         try:
-            active_id = voice_library.get_active_default_voice_id()
+            default = voice_library.get_api_default()
+            active_id = default["voice"] if default else None
         except Exception:
             active_id = None
     for voice in voices:
@@ -489,8 +494,422 @@ def voices_builtin():
             "note": meta["note"],
             "prompt": vid,
             "requires_backend": "pocket_tts",
+            "engine": "pocket-tts",
+            "engine_label": "Pocket TTS",
+            "installed": True,
+            "gender": gender_of(meta["note"]) or None,
+            "gender_source": "upstream" if gender_of(meta["note"]) else None,
         })
-    return jsonify({"voices": voices})
+    if request.args.get("engines") != "all":
+        return jsonify({"voices": voices})
+    # Unified catalog: every pack engine's presets. An installed engine reports its own voices;
+    # one that is not installed lists the bundled catalog so it can be browsed before installing.
+    engines = [{"id": "pocket-tts", "label": "Pocket TTS", "installed": True, "voices": len(voices), "import_prepared_voice": False}]
+    for info in speech_engines.list_engines():
+        provisioned = provisioned_engines.get(info.id)
+        if provisioned is None:
+            continue
+        installed = provisioned.engine.is_installed()
+        entries = (
+            voice_catalog.installed_voices(provisioned) if installed else voice_catalog.bundled_voices(info.id)
+        )
+        for entry in entries:
+            name, code = entry["name"], entry["language"]
+            voices.append({
+                "voice_id": f"{provisioned.engine.PRESET_PREFIX}{name}",
+                "builtin_voice": name,
+                "backend": info.id,
+                "display_name": name,
+                "source": info.source,
+                "license": info.license,
+                "language": "English" if code == "en" else code,
+                "language_code": code,
+                "category": "preset",
+                "note": entry.get("description", ""),
+                "gender": entry.get("gender") or None,
+                "gender_source": entry.get("gender_source") or None,
+                "accent": entry.get("accent") or None,
+                "age": entry.get("age") or None,
+                "prompt": name,
+                "requires_backend": None,
+                "engine": info.id,
+                "engine_label": info.label,
+                "installed": installed,
+            })
+        imported = imported_voices.list_imported(info.id) if info.capabilities.import_prepared_voice else []
+        for record in imported:
+            voices.append({
+                "voice_id": record["voice_id"],
+                "builtin_voice": record["slug"],
+                "backend": info.id,
+                "display_name": record["display_name"],
+                "source": record["source_filename"],
+                "license": info.license,
+                "language": "English",
+                "language_code": "en",
+                "category": "imported",
+                "note": f"Imported {record['imported_at'][:10]} from {record['source_filename']}",
+                "gender": None,
+                "gender_source": None,
+                "accent": None,
+                "age": None,
+                "prompt": record["slug"],
+                "requires_backend": None,
+                "engine": info.id,
+                "engine_label": info.label,
+                "installed": installed,
+                "imported": True,
+                "provenance": {
+                    key: record.get(key)
+                    for key in ("source_filename", "sha256", "size", "imported_at", "engine_revision")
+                },
+            })
+        engines.append({
+            "id": info.id,
+            "label": info.label,
+            "installed": installed,
+            "voices": len(entries) + len(imported),
+            "import_prepared_voice": info.capabilities.import_prepared_voice,
+        })
+    return jsonify({"voices": voices, "engines": engines})
+
+
+def _offered_voice_names(provisioned: Any) -> list[str]:
+    """Built-in voice names an installed pack engine serves: its presets plus the user's imports."""
+    names = list(provisioned.engine.list_presets())
+    imported = getattr(provisioned.engine, "list_imported", None)
+    return names + (list(imported()) if imported is not None else [])
+
+
+def _pack_voice_engine(voice: str | None) -> "speech_engines.EngineInfo | None":
+    """The pack engine whose namespace prefixes ``voice`` (``kokoro:af_heart``), else None."""
+    if not voice or ":" not in voice:
+        return None
+    for provisioned in provisioned_engines.all_engines():
+        if voice.startswith(provisioned.engine.PRESET_PREFIX):
+            return speech_engines.ENGINES.get(provisioned.engine_id)
+    return None
+
+
+def _api_default_engine(record: dict[str, Any]) -> "speech_engines.EngineInfo | None":
+    """The pack engine that serves the API default, or None when the active backend does."""
+    by_voice = _pack_voice_engine(record.get("voice"))
+    if by_voice is not None:
+        return by_voice
+    info = speech_engines.ENGINES.get(record.get("engine") or "")
+    return info if info is not None and info.pack_only else None
+
+
+def _api_default_problem(
+    record: dict[str, Any], engine: "speech_engines.EngineInfo"
+) -> dict[str, str] | None:
+    """Why a pack-engine API default cannot be served right now, with the repair to make.
+
+    Checked when the default is set and again on every request that relies on it, so a removed
+    engine or a vanished voice is reported instead of being replaced by another speaker.
+    """
+    voice = record["voice"]
+    provisioned = provisioned_engines.get(engine.id)
+    if provisioned is None or not provisioned.engine.is_installed():
+        return {
+            "code": "engine_not_installed",
+            "engine": engine.id,
+            "message": (
+                f"The API default voice {voice!r} needs the {engine.label} engine, which is "
+                "not installed."
+            ),
+            "repair": (
+                f"Install {engine.label} again in Runtime → Speech engines, or choose a "
+                "different API default (Voices → Built-in, or Integrations)."
+            ),
+        }
+    prefix = provisioned.engine.PRESET_PREFIX
+    if voice.startswith(prefix):
+        if voice[len(prefix):] not in _offered_voice_names(provisioned):
+            return {
+                "code": "voice_missing",
+                "engine": engine.id,
+                "message": (
+                    f"The API default voice {voice!r} is no longer offered by {engine.label}."
+                ),
+                "repair": "Choose a different API default (Voices → Built-in, or Integrations).",
+            }
+    elif voice_library.get_voice(voice) is None:
+        return {
+            "code": "voice_missing",
+            "engine": engine.id,
+            "message": f"The API default voice {voice!r} was deleted.",
+            "repair": "Choose a different API default (Voices → Built-in, or Integrations).",
+        }
+    return None
+
+
+def _api_default_view() -> dict[str, Any] | None:
+    """Return the effective API default enriched for the UI, or None."""
+    record = voice_library.get_api_default(keep_missing=True)
+    if record is None:
+        return None
+    voice = record["voice"]
+    pack = _api_default_engine(record)
+    if pack is not None:
+        return _pack_api_default_view(record, pack)
+    if not voice_library.is_preset_voice_id(voice) and voice_library.get_voice(voice) is None:
+        return None  # a vanished saved voice on the active backend reads as unset, as before
+    backend = record.get("engine") or getattr(model, "TTS_BACKEND", None)
+    active = speech_engines.engine_for_backend(backend)
+    engine_label = active.label if active is not None else None
+    if voice.startswith("pocket:"):
+        preset = voice.split(":", 1)[1]
+        meta = POCKET_BUILTIN_VOICES.get(preset)
+        if meta is None:
+            return None
+        return {
+            **record,
+            "engine": backend,
+            "engine_label": engine_label,
+            "kind": "preset",
+            "display_name": meta["display_name"],
+            "language": meta["language"],
+            "language_code": meta["language_code"],
+            "servable": backend == "pocket_tts",
+            "problem": None,
+        }
+    meta = voice_library.get_voice(voice) or {}
+    return {
+        **record,
+        "engine": backend,
+        "engine_label": engine_label,
+        "kind": "library",
+        "display_name": meta.get("description") or meta.get("display_name") or voice,
+        "language": meta.get("language"),
+        "language_code": meta.get("language_code"),
+        "servable": True,
+        "problem": None,
+    }
+
+
+def _pack_api_default_view(
+    record: dict[str, Any], pack: "speech_engines.EngineInfo"
+) -> dict[str, Any]:
+    voice = record["voice"]
+    provisioned = provisioned_engines.get(pack.id)
+    problem = _api_default_problem(record, pack)
+    prefix = provisioned.engine.PRESET_PREFIX if provisioned is not None else ""
+    if prefix and voice.startswith(prefix):
+        name = voice[len(prefix):]
+        try:
+            code = provisioned.engine.preset_language(name) if provisioned else None
+        except Exception:
+            code = None
+        return {
+            **record,
+            "engine": pack.id,
+            "engine_label": pack.label,
+            "kind": "preset",
+            "display_name": name,
+            "language": "English" if code == "en" else code,
+            "language_code": code,
+            "servable": problem is None,
+            "problem": problem,
+        }
+    meta = voice_library.get_voice(voice) or {}
+    return {
+        **record,
+        "engine": pack.id,
+        "engine_label": pack.label,
+        "kind": "library",
+        "display_name": meta.get("description") or meta.get("display_name") or voice,
+        "language": meta.get("language"),
+        "language_code": meta.get("language_code"),
+        "servable": problem is None,
+        "problem": problem,
+    }
+
+
+def _activate_library_voice_for_api(
+    voice_id: str,
+) -> tuple[dict[str, Any] | None, tuple[Any, int] | None]:
+    """Rebuild runtime state for a saved voice; return ``(meta, error_response)``."""
+    active_backend = getattr(model, "TTS_BACKEND", None)
+    if active_backend not in ("pytorch", "openvino", "pocket_tts"):
+        return None, (
+            jsonify({"error": f"Activate-for-API is unavailable for TTS_BACKEND={active_backend}"}),
+            409,
+        )
+    if not model._service_started:
+        return None, (jsonify({"error": "Model not loaded"}), 503)
+    meta = voice_library.get_voice(voice_id)
+    if meta is None:
+        return None, (jsonify({"error": "voice_id not found"}), 404)
+
+    if active_backend in ("pytorch", "openvino"):
+        if not (meta.get("sample_text") or "").strip():
+            return None, (
+                jsonify(
+                    {
+                        "error": (
+                            "This voice has no reference transcript. Generate a transcript with Whisper "
+                            "or edit the reference text before activating it."
+                        )
+                    }
+                ),
+                400,
+            )
+        rebuild = model.activate_default_voice_from_library
+    else:
+        from persona_forge import pocket_tts_runtime
+
+        rebuild = pocket_tts_runtime.set_default_voice_state_from_library
+
+    try:
+        # Run on the model executor so the voice-state forward pass never races generation.
+        model.executor.submit(rebuild, voice_id).result(timeout=120)
+    except Exception:
+        logger.exception("Voice activation failed")
+        return None, (jsonify({"error": "Activate failed; see the server log."}), 500)
+    return meta, None
+
+
+def _restore_runtime_voice(previous: str | None, attempted: str) -> None:
+    """Activation already swapped the runtime voice; put the previous one back so the runtime and
+    the persisted default still agree."""
+    if previous and previous != attempted:
+        _activate_library_voice_for_api(previous)
+
+
+def _pack_default_refusal(pack: "speech_engines.EngineInfo", voice: str):
+    """Set-time check that a pack engine is installed; returns an error response or None."""
+    provisioned = provisioned_engines.get(pack.id)
+    if provisioned is None or not provisioned.engine.is_installed():
+        return (
+            jsonify(
+                {
+                    "error": f"{pack.label} is not installed. Install it in Runtime → Speech "
+                    f"engines before making {voice!r} the API default."
+                }
+            ),
+            409,
+        )
+    return None
+
+
+def _set_pack_default(
+    pack: "speech_engines.EngineInfo", voice: str, variant: str | None
+):
+    """Make a pack engine's built-in voice, or a saved voice cloned on it, the API default."""
+    if ":" in voice and not voice_library.is_preset_voice_id(voice):
+        return jsonify({"error": f"invalid preset voice: {voice!r}"}), 400
+    refusal = _pack_default_refusal(pack, voice)
+    if refusal is not None:
+        return refusal
+    provisioned = provisioned_engines.get(pack.id)
+    assert provisioned is not None
+    prefix = provisioned.engine.PRESET_PREFIX
+    if voice.startswith(prefix):
+        if voice[len(prefix):] not in _offered_voice_names(provisioned):
+            return jsonify({"error": f"unknown {pack.label} voice: {voice}"}), 404
+    else:
+        if not pack.capabilities.clone:
+            return (
+                jsonify(
+                    {
+                        "error": f"{pack.label} cannot clone a saved voice. Pick one of its "
+                        f"built-in '{prefix}<voice>' voices, or an engine that clones."
+                    }
+                ),
+                400,
+            )
+        meta = voice_library.get_voice(voice)
+        if meta is None:
+            return jsonify({"error": "voice_id not found"}), 404
+        needs_transcript = getattr(provisioned.engine, "CLONE_NEEDS_TRANSCRIPT", False)
+        if needs_transcript and not (meta.get("sample_text") or "").strip():
+            return (
+                jsonify(
+                    {
+                        "error": f"{pack.label} needs this voice's transcript to clone it. Add or "
+                        "generate the transcript in My voices, then set it as the API default."
+                    }
+                ),
+                400,
+            )
+    try:
+        # The saved-voice mirror drives the *active backend's* runtime voice; a pack engine's
+        # default must not touch it.
+        voice_library.set_api_default(pack.id, voice, variant, mirror_legacy=False)
+    except voice_library.ApiDefaultError as exc:
+        return jsonify({"error": exc.public_message}), 400
+    except ValueError:
+        return jsonify({"error": "That voice cannot be the API default."}), 400
+    except OSError as exc:
+        logger.warning("Could not save the API default: %s", exc)
+        return jsonify({"error": "Could not save the API default; check the data folder is writable."}), 500
+    return jsonify({"default": _api_default_view()})
+
+
+@app.get("/api-default")
+def api_default_get():
+    """Return the effective no-voice API default (engine + voice + variant).
+
+    A pack-engine default whose engine was removed or whose voice vanished is still returned,
+    with ``servable: false`` and a ``problem`` that names the repair.
+    """
+    return jsonify({"default": _api_default_view()})
+
+
+@app.put("/api-default")
+def api_default_put():
+    """Set the no-voice API default; built-in presets (Pocket or a pack engine) and saved voices.
+
+    Pack-engine defaults are validated against the registry first (engine installed, voice
+    offered); the persisted record is written atomically and rolled back whole on failure.
+    """
+    data = _json_body()
+    if not data:
+        return jsonify({"error": "Invalid JSON"}), 400
+    voice = (data.get("voice") or "").strip()
+    if not voice:
+        return jsonify({"error": "voice is required"}), 400
+    engine = (data.get("engine") or "").strip() or None
+    variant = (data.get("variant") or "").strip() or None
+    backend = getattr(model, "TTS_BACKEND", None)
+    pack_for_voice = _pack_voice_engine(voice)
+    if pack_for_voice is not None:
+        if engine and engine not in (pack_for_voice.id, pack_for_voice.backend):
+            return (
+                jsonify(
+                    {"error": f"voice {voice!r} belongs to engine {pack_for_voice.id!r}, not {engine!r}"}
+                ),
+                400,
+            )
+        return _set_pack_default(pack_for_voice, voice, variant)
+    if voice.startswith("pocket:"):
+        if voice.split(":", 1)[1] not in POCKET_BUILTIN_VOICES:
+            return jsonify({"error": f"unknown built-in voice: {voice}"}), 404
+        if backend != "pocket_tts":
+            return jsonify({"error": "Built-in presets require TTS_BACKEND=pocket_tts"}), 409
+        voice_library.set_api_default(engine or backend, voice, variant)
+        return jsonify({"default": _api_default_view()})
+    if ":" in voice:
+        return jsonify({"error": f"unknown voice namespace in {voice!r}"}), 400
+    requested = speech_engines.ENGINES.get(engine or "")
+    if requested is not None and requested.pack_only:
+        return _set_pack_default(requested, voice, variant)
+    previous_mirror = voice_library.get_active_default_voice_id()
+    _meta, error = _activate_library_voice_for_api(voice)
+    if error is not None:
+        return error
+    try:
+        voice_library.set_api_default(engine or backend, voice, variant)
+    except ValueError as exc:
+        _restore_runtime_voice(previous_mirror, voice)
+        reason = exc.public_message if isinstance(exc, voice_library.ApiDefaultError) else "invalid voice"
+        return jsonify({"error": f"Could not save the API default: {reason}"}), 400
+    except OSError as exc:
+        _restore_runtime_voice(previous_mirror, voice)
+        logger.warning("Could not save the API default: %s", exc)
+        return jsonify({"error": "Could not save the API default; check the data folder is writable."}), 500
+    return jsonify({"default": _api_default_view()})
 
 
 def _resolve_builtin_voice(data: dict, voice_id: str | None) -> tuple[str | None, str | None]:
@@ -576,6 +995,69 @@ def voices_transcribe(voice_id: str):
     return jsonify(updated)
 
 
+@app.get("/voices/engines")
+def voices_engines_all():
+    """Per-engine binding status for every saved voice in one call (no worker is contacted)."""
+    return jsonify(
+        {
+            "engines": [
+                {
+                    "id": engine.id,
+                    "label": engine.label,
+                    "clone": engine.capabilities.clone,
+                    "import_prepared_voice": engine.capabilities.import_prepared_voice,
+                }
+                for engine in speech_engines.list_engines()
+            ],
+            "voices": voice_bindings.all_bindings(),
+        }
+    )
+
+
+@app.get("/voices/<voice_id>/engines")
+def voices_engines_get(voice_id: str):
+    """Binding status of one saved voice on every engine (poll this while preparing)."""
+    bindings = voice_bindings.bindings_for_voice(voice_id)
+    if not bindings:
+        return jsonify({"error": "voice_id not found"}), 404
+    return jsonify({"voice_id": voice_id, "engines": bindings})
+
+
+@app.post("/voices/<voice_id>/engines/<engine_id>/prepare")
+def voices_engine_prepare(voice_id: str, engine_id: str):
+    """Prepare a saved voice on a cloning engine now; returns 202 and the binding to poll.
+
+    For an engine that clones with the transcript, ``transcript`` (typed words) or
+    ``transcript_confirmed: true`` (keep the stored words) is the review step.
+    """
+    data = request.get_json(silent=True)
+    data = data if isinstance(data, dict) else {}
+    transcript = data.get("transcript")
+    if transcript is not None and not isinstance(transcript, str):
+        return jsonify({"error": "transcript must be a string", "code": "bad_request"}), 400
+    try:
+        binding = voice_prepare.start(
+            voice_id,
+            engine_id,
+            transcript=transcript,
+            confirm_transcript=data.get("transcript_confirmed") is True,
+            on_transcript_saved=_invalidate_voice_clone_state,
+        )
+    except voice_prepare.PrepareRefused as refused:
+        return jsonify({"error": refused.public_message, "code": refused.code, **refused.extra}), refused.status
+    return jsonify({"binding": binding}), 202
+
+
+@app.delete("/voices/<voice_id>/engines/<engine_id>/prepare")
+def voices_engine_prepare_cancel(voice_id: str, engine_id: str):
+    """Stop a queued or waiting preparation. ``cancelled: false`` when none is running."""
+    cancelled = voice_prepare.cancel(voice_id, engine_id)
+    bindings = voice_bindings.bindings_for_voice(voice_id)
+    binding = next((b for b in bindings if b["engine"] == engine_id), None)
+    return jsonify({"cancelled": cancelled, "binding": binding})
+
+
+
 @app.post("/voices/<voice_id>/duplicate")
 def voices_duplicate(voice_id: str):
     """Fork a voice into an independent voice_id (also used as a safety copy before
@@ -620,6 +1102,13 @@ def voices_delete(voice_id: str):
         return jsonify({"error": "voice_id not found"}), 404
     if voice_library.get_active_default_voice_id() == voice_id:
         voice_library.clear_active_default_voice_id()
+    record = voice_library.get_api_default(keep_missing=True)
+    if record is not None and record["voice"] == voice_id and _api_default_engine(record) is not None:
+        # A default served by a pack engine stays, so the engine card and requests report the
+        # deleted voice with its repair instead of quietly serving another speaker.
+        pass
+    else:
+        voice_library.clear_api_default_for_voice(voice_id)
     model.invalidate_voice_clone_prompt(voice_id)
     try:
         from persona_forge import pocket_tts_runtime
@@ -795,40 +1284,15 @@ def voices_delete_variant(voice_id: str, variant_filename: str):
 @app.post("/voices/<voice_id>/activate")
 def voices_activate(voice_id: str):
     """Make a saved voice the runtime API default and hot-swap its clone state."""
-    active_backend = getattr(model, "TTS_BACKEND", None)
-    if active_backend not in ("pytorch", "openvino", "pocket_tts"):
-        return (
-            jsonify({"error": f"Activate-for-API is unavailable for TTS_BACKEND={active_backend}"}),
-            409,
-        )
-    if not model._service_started:
-        return jsonify({"error": "Model not loaded"}), 503
-    meta = voice_library.get_voice(voice_id)
+    meta, error = _activate_library_voice_for_api(voice_id)
+    if error is not None:
+        return error
     if meta is None:
         return jsonify({"error": "voice_id not found"}), 404
-
-    if active_backend in ("pytorch", "openvino"):
-        if not (meta.get("sample_text") or "").strip():
-            return jsonify(
-                {
-                    "error": (
-                        "This voice has no reference transcript. Generate a transcript with Whisper "
-                        "or edit the reference text before activating it."
-                    )
-                }
-            ), 400
-        rebuild = model.activate_default_voice_from_library
-    else:
-        from persona_forge import pocket_tts_runtime
-
-        rebuild = pocket_tts_runtime.set_default_voice_state_from_library
-
-    try:
-        # Run on the model executor so the voice-state forward pass never races generation.
-        model.executor.submit(rebuild, voice_id).result(timeout=120)
-    except Exception as exc:
-        return jsonify({"error": f"Activate failed: {exc}"}), 500
-    return jsonify({**meta, "api_active": True})
+    voice_library.set_api_default(getattr(model, "TTS_BACKEND", None), voice_id)
+    payload = dict(meta)
+    payload["api_active"] = True
+    return jsonify(payload)
 
 
 @app.post("/voices/<voice_id>/warm")
@@ -909,7 +1373,8 @@ def voices_preview_prosody(voice_id: str):
     if result is None:
         return jsonify({"error": "Preview failed"}), 500
 
-    wav, sr, plan = result
+    wav, sr = result[0], result[1]
+    plan = result[2] if len(result) > 2 else None
     
     # 1. Calculate metrics for the adjusted audio
     try:
@@ -1422,12 +1887,13 @@ def omnivoice_audition():
 
     # Per-segment durations (preferred) or legacy global duration (for compat)
     durations = data.get("durations")
+    cleaned_durations: list[float | None] | None
     if durations is not None:
         if not isinstance(durations, list):
             return jsonify({"error": "durations must be a list of numbers or null"}), 400
         if len(durations) != len(segments):
             return jsonify({"error": "durations length must match segments length"}), 400
-        cleaned_durations: list[float | None] = []
+        cleaned_durations = []
         for d in durations:
             if d is None:
                 cleaned_durations.append(None)
@@ -1749,6 +2215,8 @@ def _validate_region_edits(edits_raw: Any) -> list[dict[str, Any]] | None:
         if not isinstance(raw, dict):
             return None
         edit_type = raw.get("type")
+        if not isinstance(edit_type, str):
+            return None
         fields = _REGION_EDIT_FIELDS.get(edit_type)
         if fields is None:
             return None
@@ -1756,9 +2224,13 @@ def _validate_region_edits(edits_raw: Any) -> list[dict[str, Any]] | None:
         edit: dict[str, Any] = {"type": edit_type}
         try:
             for key in required:
-                edit[key] = float(raw.get(key))
+                value = raw.get(key)
+                if value is None:
+                    return None
+                edit[key] = float(value)
             for key in optional:
-                edit[key] = float(raw.get(key) or 0.0)
+                value = raw.get(key)
+                edit[key] = float(value) if value is not None else 0.0
         except (TypeError, ValueError):
             return None
         edits.append(edit)
@@ -2005,6 +2477,7 @@ def omnivoice_segments_create():
 
     # Enrich metadata from audition job (if candidate still resolvable)
     job_id, params, candidate_payload, segment_index = _find_candidate_job(candidate_id)
+    params = params or []
 
     # _params tuple: (segments, instruct, language, candidates_per_segment, seed, num_step,
     #                 cleaned_durations, speed, guidance_scale, diverse_candidates,
@@ -2288,6 +2761,140 @@ def ui_preferences_post():
     return jsonify({"values": merged})
 
 
+@app.get("/compare/results")
+def compare_results_get():
+    sessions = compare_store.load()
+    return jsonify({"count": len(sessions), "summary": compare_store.summarise(sessions)})
+
+
+@app.post("/compare/results")
+def compare_results_post():
+    if request.content_length and request.content_length > 512 * 1024:
+        return jsonify({"error": "Compare results body too large"}), 413
+    data = _json_body()
+    sessions = data.get("sessions") if isinstance(data, dict) else None
+    if not isinstance(sessions, list) or not 1 <= len(sessions) <= compare_store.MAX_SESSIONS:
+        return jsonify({"error": "Body must be {'sessions': [...]} with at least one session"}), 400
+    try:
+        compare_store.append(sessions)
+    except compare_store.SessionInvalid as exc:
+        return jsonify({"error": exc.safe_message}), 400
+    sessions_now = compare_store.load()
+    return jsonify({"count": len(sessions_now), "summary": compare_store.summarise(sessions_now)})
+
+
+@app.delete("/compare/results")
+def compare_results_delete():
+    compare_store.clear()
+    return jsonify({"count": 0, "summary": []})
+
+
+# --- Compare auto-check hints (plan §5.10) ------------------------------------------------------
+# Optional, offline, non-authoritative: word error rate and speaker similarity for one clip the
+# browser already holds. Never enters model.executor (there is no priority mechanism there, so it
+# would delay endpoint requests), never runs unless the user clicks, never downloads except from
+# POST /compare/auto-check/install. See compare_autocheck.py.
+_AUTOCHECK_MAX_UPLOAD = 25 * 1024 * 1024
+_AUTOCHECK_MAX_TEXT = 5000
+
+
+def _autocheck_status_payload() -> dict[str, Any]:
+    return {
+        "models": _autocheck_models(),
+        "job": compare_autocheck.get_download_job().status(),
+        "disclaimer": compare_autocheck.DISCLAIMER,
+    }
+
+
+def _autocheck_models() -> list[dict[str, Any]]:
+    return compare_autocheck.get_checker().models_status()
+
+
+@app.get("/compare/auto-check/status")
+def compare_autocheck_status():
+    """Which auto-check models are on disk (with sizes) and the state of any download. Offline."""
+    return jsonify(_autocheck_status_payload())
+
+
+@app.post("/compare/auto-check/install")
+def compare_autocheck_install():
+    """Explicit opt-in: download the missing auto-check models in the background. Poll /status."""
+    data = request.get_json(silent=True)
+    wanted = data.get("models") if isinstance(data, dict) else None
+    by_id = {spec.id: spec for spec in compare_autocheck.SPECS}
+    if wanted is not None:
+        if not isinstance(wanted, list) or not wanted or any(item not in by_id for item in wanted):
+            return jsonify({"error": "models must list known auto-check model ids", "known": list(by_id)}), 400
+        specs = [by_id[item] for item in dict.fromkeys(wanted)]
+    else:
+        specs = list(compare_autocheck.SPECS)
+    available = {m["id"] for m in _autocheck_models() if m["available"]}
+    specs = [spec for spec in specs if spec.id not in available]
+    if not specs:
+        return jsonify({"started": False, "error": "Those auto-check models are already downloaded.",
+                        **_autocheck_status_payload()}), 409
+    started = compare_autocheck.get_download_job().start(specs)
+    status = 202 if started else 409
+    payload = _autocheck_status_payload()
+    if not started:
+        payload["error"] = "A download is already running."
+    return jsonify({"started": started, **payload}), status
+
+
+@app.post("/compare/auto-check")
+def compare_autocheck_run():
+    """Score one generated clip: multipart ``audio`` (wav), ``text`` and optional ``reference_voice_id``."""
+    if request.content_length and request.content_length > _AUTOCHECK_MAX_UPLOAD:
+        return jsonify({"error": "Audio clip too large", "code": "too_large"}), 413
+    upload = request.files.get("audio")
+    text = (request.form.get("text") or "").strip()
+    if upload is None:
+        return jsonify({"error": "audio is required"}), 400
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    if len(text) > _AUTOCHECK_MAX_TEXT:
+        return jsonify({"error": f"text must be at most {_AUTOCHECK_MAX_TEXT} characters"}), 400
+    data = upload.read(_AUTOCHECK_MAX_UPLOAD + 1)
+    if len(data) > _AUTOCHECK_MAX_UPLOAD:
+        return jsonify({"error": "Audio clip too large", "code": "too_large"}), 413
+
+    reference_path: str | None = None
+    reference_voice_id = (request.form.get("reference_voice_id") or "").strip()
+    if reference_voice_id:
+        meta = voice_library.get_voice(reference_voice_id)
+        if meta is None:
+            return jsonify({"error": "reference voice not found"}), 404
+        candidate = os.path.normpath((meta.get("wav_path") or "").strip() or os.sep)
+        library = os.path.normpath(str(voice_library.VOICE_LIBRARY_DIR))
+        # Only audio that lives in the voice library can be a reference.
+        if not candidate.startswith(library + os.sep) or not os.path.isfile(candidate):
+            return jsonify({"error": "The reference voice has no readable audio"}), 400
+        reference_path = candidate
+
+    checker = compare_autocheck.get_checker()
+    try:
+        result = checker.check(data, text, reference_path)
+    except compare_autocheck.ClipError as exc:
+        return jsonify({"error": exc.public_message}), 400
+    except ValueError:
+        return jsonify({"error": "The audio clip could not be checked."}), 400
+    except compare_autocheck.AutoCheckBusy:
+        return jsonify({"error": "Another auto-check is still running.", "code": "busy"}), 429
+    except compare_autocheck.AutoCheckUnavailable:
+        return jsonify(
+            {
+                "error": "The auto-check models are not downloaded. Enable auto-check to download them.",
+                "code": "models_missing",
+                "models": checker.models_status(),
+            }
+        ), 409
+    except Exception:
+        logger.exception("Compare auto-check failed")
+        return jsonify({"error": "Auto-check failed; see server logs for details."}), 500
+    result["models"] = checker.models_status()
+    return jsonify(result)
+
+
 @app.post("/generate")
 def generate():
     # Bridge the same startup race /omnivoice/audition already queues through, instead
@@ -2334,7 +2941,7 @@ def generate():
         ).result(timeout=480)
         audio, media_type = _encode(wav, sr, fmt)
     except Exception as exc:
-        if isinstance(exc, RuntimeError) and "cache capacity exceeded" in str(exc):
+        if _is_capacity_error(exc):
             print(
                 f"[OV-CAPACITY] capacity exceeded; text_len={len(text)}; "
                 f"likely no EOS or REF_TEXT mismatch.",
@@ -2407,7 +3014,7 @@ def generate_with_metrics():
         ).result(timeout=480)
         audio, media_type = _encode(wav, sr, "wav")
     except Exception as exc:
-        if isinstance(exc, RuntimeError) and "cache capacity exceeded" in str(exc):
+        if _is_capacity_error(exc):
             return jsonify({
                 "error": (
                     "Generation aborted: model exceeded its allowed audio length. "
@@ -2445,6 +3052,388 @@ def generate_with_metrics():
     return jsonify(response_payload)
 
 
+@app.get("/engines")
+def engines_list():
+    """List built-in engines and installed packs with their local state."""
+    cards = engine_packs.engine_cards(getattr(model, "TTS_BACKEND", None))
+    record = voice_library.get_api_default(keep_missing=True)
+    holder = _api_default_engine(record) if record else None
+    for card in cards:
+        # Lets the card explain why Remove is disabled (the API refuses it too).
+        card["api_default"] = holder is not None and card.get("id") == holder.id
+    pack_installed = any(
+        card.get("kind") != "builtin" and card.get("state", {}).get("status") in ("verified", "installed")
+        for card in cards
+    )
+    # The first-run hint (None once any pack is installed, or when the fit is unknown). The UI
+    # keeps its own "dismissed" preference; this only says whether there is something true to show.
+    nudge = hardware_fit.first_run_nudge(hardware_fit.machine_facts(), pack_installed)
+    return jsonify({"engines": cards, "nudge": nudge})
+
+
+@app.get("/engines/hf-token")
+def engines_hf_token_status():
+    """Whether a Hugging Face token is available for gated engine downloads. Never the token."""
+    return _no_store(jsonify(hf_access.status()))
+
+
+@app.put("/engines/hf-token")
+def engines_hf_token_save():
+    """Store the token for gated pack downloads (owner-only file; sent only to the download).
+
+    The response is the same ``{set, source, can_clear}`` status as GET; the token is not echoed.
+    """
+    payload = request.get_json(silent=True)
+    token = payload.get("token") if isinstance(payload, dict) else None
+    try:
+        hf_access.save(token)
+    except hf_access.InvalidToken as exc:
+        return _no_store(jsonify({"error": exc.public_message})), 400
+    except OSError:
+        return _no_store(jsonify({"error": "The token could not be saved to the app data folder."})), 500
+    return _no_store(jsonify(hf_access.status()))
+
+
+@app.delete("/engines/hf-token")
+def engines_hf_token_clear():
+    """Forget the stored token. An environment or login token, if any, still applies."""
+    removed = hf_access.clear()
+    return _no_store(jsonify({**hf_access.status(), "removed": removed}))
+
+
+def _no_store(response):
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/engines/<engine_id>/details")
+def engines_details(engine_id: str):
+    """Pins, installed versions, weights, runtime, install check, idle unload, disk and log tails."""
+    details = engine_details.build(engine_id, getattr(model, "TTS_BACKEND", None))
+    if details is None:
+        return jsonify({"error": "Details are available for pack engines only"}), 404
+    return jsonify({"details": details})
+
+
+@app.get("/engines/<engine_id>/logs")
+def engines_logs(engine_id: str):
+    """The last install and worker log lines (bounded and redacted); cheap enough to poll."""
+    if provisioned_engines.get(engine_id) is None:
+        return jsonify({"error": "engine has no pack logs"}), 404
+    return jsonify({"logs": pack_logs.read(engine_id, engine_packs.find_pack_dir(engine_id))})
+
+
+_benchmark_lock = threading.Lock()
+_BENCHMARK_WARMING_PATIENCE_S = 600.0  # longest a cold engine load + compile may take
+
+
+@app.post("/engines/<engine_id>/benchmark")
+def engines_benchmark(engine_id: str):
+    """Time one cold and three warm requests through /v1/audio/speech and save the result."""
+    import io
+    import wave
+
+    if next((e for e in speech_engines.list_engines() if e.id == engine_id), None) is None:
+        return jsonify({"error": "Unknown engine"}), 404
+    if not _benchmark_lock.acquire(blocking=False):
+        return jsonify({"error": "A benchmark is already running. Wait for it to finish."}), 409
+    try:
+        client = app.test_client()
+        voices = client.get("/v1/audio/voices?language=all").get_json()["data"]
+        info = next((e for e in speech_engines.list_engines() if e.id == engine_id), None)
+        pick = next((v for v in voices if v.get("engine") == engine_id and v.get("kind") == "preset"), None)
+        if pick is None and info is not None and info.capabilities.clone:
+            pick = next((v for v in voices if v.get("kind") == "library"), None)
+        if pick is None:
+            return jsonify({"error": "No voice is available to benchmark this engine with."}), 400
+        runs: list[tuple[float, float]] = []
+        for _ in range(4):
+            started = time.perf_counter()
+            deadline = started + _BENCHMARK_WARMING_PATIENCE_S
+            while True:
+                res = client.post(
+                    "/v1/audio/speech",
+                    json={"model": engine_id, "input": hardware_fit.BENCH_TEXT, "voice": pick["voice_id"], "response_format": "wav"},
+                )
+                # A cold engine answers 503 + Retry-After while it loads or compiles. The cold run
+                # is the point of this benchmark, so wait it out and count the wait.
+                warming = res.status_code == 503 and res.headers.get("Retry-After")
+                if not warming or time.perf_counter() >= deadline:
+                    break
+                time.sleep(min(float(res.headers["Retry-After"]), 1.0))
+            taken = time.perf_counter() - started
+            if res.status_code != 200:
+                body = res.get_json(silent=True) or {}
+                message = (body.get("error") or {}).get("message") if isinstance(body.get("error"), dict) else body.get("error")
+                return jsonify({"error": message or f"Benchmark request failed ({res.status_code})"}), 409
+            with wave.open(io.BytesIO(res.data)) as wav:
+                runs.append((taken, wav.getnframes() / wav.getframerate()))
+        result = {
+            **hardware_fit.summarise_runs(runs, hardware_fit.load_average()),
+            "voice": pick.get("display_name") or pick["voice_id"],
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        hardware_fit.save_result(engine_id, result)
+        return jsonify({"engine": engine_id, "benchmark": result})
+    finally:
+        _benchmark_lock.release()
+
+
+@app.post("/engines/<engine_id>/verify")
+def engines_verify(engine_id: str):
+    """Re-hash one pack's artifacts (built-ins are always verified)."""
+    card = engine_packs.verify_engine(engine_id, getattr(model, "TTS_BACKEND", None))
+    if card is None:
+        return jsonify({"error": "engine not found"}), 404
+    return jsonify({"engine": card})
+
+
+@app.post("/engines/<engine_id>/install")
+def engines_install(engine_id: str):
+    """Install an engine pack. Provisioned packs run as a background job; poll the status route."""
+    provisioned = provisioned_engines.get(engine_id)
+    if provisioned is not None:
+        started = provisioned.pack.start_install()
+        return (
+            jsonify({"started": started, "job": provisioned.pack.job_status()}),
+            202 if started else 409,
+        )
+    try:
+        status = engine_packs.install_pack(engine_id)
+    except engine_packs.PackInstallError as exc:
+        return jsonify({"error": exc.public_message}), 409
+    cards = engine_packs.engine_cards(getattr(model, "TTS_BACKEND", None))
+    card = next((item for item in cards if item["id"] == engine_id), None)
+    return jsonify({"engine": card, "state": status.as_dict()})
+
+
+@app.get("/engines/<engine_id>/install")
+def engines_install_status(engine_id: str):
+    """Progress of a background install: state, current step, and any error."""
+    provisioned = provisioned_engines.get(engine_id)
+    if provisioned is None:
+        return jsonify({"error": "engine has no background install"}), 404
+    return jsonify({"job": provisioned.pack.job_status()})
+
+
+@app.post("/engines/<engine_id>/recheck")
+def engines_recheck(engine_id: str):
+    """Reload an engine in the background so newly installed prerequisites are picked up."""
+    provisioned = provisioned_engines.get(engine_id)
+    adapter = speech_engines.get_managed_adapter(engine_id) if provisioned is not None else None
+    if provisioned is None or adapter is None:
+        return jsonify({"error": "engine does not support re-check"}), 404
+    if not provisioned.engine.is_installed():
+        return jsonify({"error": "The engine is not installed."}), 409
+    started = adapter.recheck()
+    return jsonify({"started": started, "status": adapter.status()}), 202 if started else 409
+
+
+@app.post("/engines/<engine_id>/remove")
+def engines_remove(engine_id: str):
+    """Delete a pack. Neither the active engine nor the engine serving the API default can be removed."""
+    active = speech_engines.engine_for_backend(getattr(model, "TTS_BACKEND", None))
+    if active is not None and active.id == engine_id:
+        return jsonify(
+            {"error": "Cannot remove the active engine; switch engines first."}
+        ), 409
+    record = voice_library.get_api_default(keep_missing=True)
+    holder = _api_default_engine(record) if record else None
+    if record is not None and holder is not None and holder.id == engine_id:
+        return (
+            jsonify(
+                {
+                    "error": (
+                        f"{holder.label} serves the API default voice {record['voice']!r}. "
+                        "Change the API default first, then remove the engine."
+                    ),
+                    "code": "api_default_engine",
+                    "api_default": {"engine": holder.id, "voice": record["voice"]},
+                }
+            ),
+            409,
+        )
+    loaded = speech_engines.ADAPTERS.get(engine_id)
+    unload = getattr(loaded, "unload", None)
+    if callable(unload):
+        unload()  # stop the worker so it neither keeps serving nor holds the files open
+    try:
+        removed = engine_packs.remove_pack(engine_id)
+    except engine_packs.PackInstallError as exc:
+        return jsonify({"error": exc.public_message}), 409
+    if callable(unload):
+        unload()  # a request that raced the delete may have restarted the worker
+    if not removed:
+        return jsonify({"error": "pack not found or not removable"}), 404
+    pack_logs.forget(engine_id)
+    return jsonify({"removed": engine_id})
+
+
+def _import_refusal(refused: "imported_voices.ImportRefused"):
+    return jsonify({"error": refused.public_message, "code": refused.code}), refused.status
+
+
+@app.get("/engines/<engine_id>/imported-voices")
+def engines_imported_list(engine_id: str):
+    """Imported prepared voices of an engine, with their provenance."""
+    info = speech_engines.ENGINES.get(engine_id)
+    if info is None:
+        return jsonify({"error": "Unknown engine", "code": "unknown_engine"}), 404
+    if not info.capabilities.import_prepared_voice:
+        return jsonify({"error": f"{info.label} cannot import prepared voices.", "code": "import_unsupported"}), 400
+    return jsonify({"voices": imported_voices.list_imported(engine_id, include_broken=True)})
+
+
+@app.post("/engines/<engine_id>/imported-voices")
+def engines_imported_add(engine_id: str):
+    """Import a prepared voice file (multipart ``file`` + ``name``); validated, engine-checked, stored."""
+    upload = request.files.get("file")
+    if upload is None:
+        return jsonify({"error": "Choose a prepared voice file to import.", "code": "missing_file"}), 400
+    # Read one byte past the cap so an oversized upload is refused without buffering all of it.
+    data = upload.stream.read(imported_voices.MAX_FILE_BYTES + 1)
+    try:
+        record = imported_voices.import_voice(
+            engine_id,
+            filename=upload.filename or "",
+            data=data,
+            display_name=request.form.get("name") or "",
+        )
+    except imported_voices.ImportRefused as refused:
+        return _import_refusal(refused)
+    return jsonify({"voice": record}), 201
+
+
+@app.delete("/engines/<engine_id>/imported-voices/<slug>")
+def engines_imported_remove(engine_id: str, slug: str):
+    """Remove an imported voice (its file and provenance) and stop the engine serving it."""
+    try:
+        removed = imported_voices.remove(engine_id, slug)
+    except imported_voices.ImportRefused as refused:
+        return _import_refusal(refused)
+    if not removed:
+        return jsonify({"error": "No such imported voice.", "code": "not_found"}), 404
+    return jsonify({"removed": slug})
+
+
+def _voice_language_code(voice_id: str | None) -> str:
+    """Language of a voice id: presets know theirs, saved voices carry it in their metadata."""
+    if not voice_id:
+        return "en"
+    if voice_id.startswith("pocket:"):
+        entry = POCKET_BUILTIN_VOICES.get(voice_id.split(":", 1)[1])
+        return str((entry or {}).get("language_code") or "en")
+    for provisioned in provisioned_engines.all_engines():
+        prefix = provisioned.engine.PRESET_PREFIX
+        if voice_id.startswith(prefix):
+            return provisioned.engine.preset_language(voice_id[len(prefix):]) or "en"
+    return str((voice_library.get_voice(voice_id) or {}).get("language_code") or "en")
+
+
+def _language_enforcement_error(voice_id: str | None, language: str) -> str | None:
+    """With "Enforce language on the API" on, refuse non-English voices and languages."""
+    if not ui_preferences_store.load().get("api.enforceLanguage"):
+        return None
+    code = _voice_language_code(voice_id).lower().split("-")[0]
+    if code != "en":
+        return (
+            f"Voice {voice_id!r} is not English (language {code!r}), and the English-only setting "
+            "is enforced on the API. Pick an English voice, or turn off Enforce language "
+            "on the Integrations page."
+        )
+    if language.strip().lower() not in ("english", "en"):
+        return (
+            f"Language {language!r} is not English, and the English-only setting is enforced on the "
+            "API. Use an English language, or turn off Enforce language on the Integrations page."
+        )
+    return None
+
+
+@app.get("/v1/models")
+def openai_models():
+    """List registered speech engines in an OpenAI-compatible shape."""
+    active = speech_engines.engine_for_backend(getattr(model, "TTS_BACKEND", None))
+    data = []
+    for engine in speech_engines.list_engines():
+        entry = engine.as_dict()
+        provisioned = provisioned_engines.get(engine.id)
+        if provisioned is not None:
+            entry["installed"] = provisioned.engine.is_installed()
+        entry["created"] = 0
+        entry["owned_by"] = "local"
+        entry["active"] = active is not None and engine.id == active.id
+        data.append(entry)
+    return jsonify({"object": "list", "data": data})
+
+
+@app.get("/v1/audio/voices")
+def openai_voices():
+    """List every voice the endpoint can serve, saved and built-in."""
+    active = speech_engines.active_engine(getattr(model, "TTS_BACKEND", None))
+    engine_id = active.id if active else None
+    data = []
+    for voice in voice_library.list_voices():
+        meta = voice_library.get_voice(voice["voice_id"]) or {}
+        data.append(
+            {
+                "voice_id": voice["voice_id"],
+                "object": "voice",
+                "engine": engine_id,
+                "kind": "library",
+                "display_name": meta.get("description") or voice["voice_id"],
+                "language": meta.get("language"),
+                "language_code": meta.get("language_code"),
+                "servable": True,
+            }
+        )
+    if getattr(model, "TTS_BACKEND", None) == "pocket_tts":
+        for vid, meta in POCKET_BUILTIN_VOICES.items():
+            data.append(
+                {
+                    "voice_id": f"pocket:{vid}",
+                    "object": "voice",
+                    "engine": engine_id,
+                    "kind": "preset",
+                    "display_name": meta["display_name"],
+                    "language": meta["language"],
+                    "language_code": meta["language_code"],
+                    "servable": True,
+                }
+            )
+    for provisioned in provisioned_engines.all_engines():
+        imported_names = set(getattr(provisioned.engine, "list_imported", lambda: [])())
+        for name in _offered_voice_names(provisioned):
+            code = provisioned.engine.preset_language(name)
+            entry = {
+                "voice_id": f"{provisioned.engine.PRESET_PREFIX}{name}",
+                "object": "voice",
+                "engine": provisioned.engine_id,
+                "kind": "preset",
+                "display_name": name,
+                "language": "English" if code == "en" else code,
+                "language_code": code,
+                "servable": True,
+            }
+            if name in imported_names:
+                entry["imported"] = True
+            data.append(entry)
+    scope = request.args.get("language") or ui_preferences_store.load().get("voiceCatalog.language", "en")
+    hidden = 0
+    if scope != "all":
+        # Listing only: a request can still name any voice explicitly.
+        kept = [v for v in data if (v.get("language_code") or "en").lower().split("-")[0] == "en"]
+        hidden = len(data) - len(kept)
+        data = kept
+    return jsonify(
+        {
+            "object": "list",
+            "data": data,
+            "language_filter": "all" if scope == "all" else "en",
+            "hidden_by_language_filter": hidden,
+        }
+    )
+
+
 @app.post("/v1/audio/speech")
 def openai_audio_speech():
     # Bridge the same startup race /omnivoice/audition already queues through, instead
@@ -2456,6 +3445,25 @@ def openai_audio_speech():
     data = _json_body()
     if not data:
         return _openai_error("Invalid JSON", 400)
+    engine, model_recognized = speech_engines.resolve_model(
+        data.get("model"), getattr(model, "TTS_BACKEND", None)
+    )
+    active_engine = speech_engines.active_engine(getattr(model, "TTS_BACKEND", None))
+    if active_engine is None:
+        return _openai_error(
+            "No speech engine is active; install one in Runtime → Speech engines.",
+            503,
+            "api_error",
+        )
+    # Pack-only engines run in their own worker process beside the active backend, so asking for
+    # one does not require switching TTS_BACKEND.
+    serving_engine = engine if engine is not None and engine.pack_only else active_engine
+    if engine is not None and not engine.pack_only and engine.id != active_engine.id:
+        return _openai_error(
+            f"Model {engine.id!r} is not active; the active engine is {active_engine.id!r}.",
+            409,
+            "invalid_request_error",
+        )
     text = (data.get("input") or data.get("text") or "").strip()
     if not text:
         return _openai_error("'input' is required", 400)
@@ -2471,45 +3479,147 @@ def openai_audio_speech():
         )
     language = (data.get("language") or "English").strip()
     # OpenAI SDK sends "voice", our internal convention uses "voice_id" — accept both.
-    voice_id = (data.get("voice_id") or data.get("voice") or "").strip() or None
-    voice_id, builtin_error = _resolve_builtin_voice(data, voice_id)
-    if builtin_error:
-        return _openai_error(builtin_error, 400)
+    # Resolve the same higher-precedence voice the batch adapters use before applying defaults
+    # or routing namespaces. PCM receives this effective ID too, rather than dropping variants.
+    voice_variant_id = (data.get("voice_variant_id") or "").strip() or None
+    voice_id = voice_variant_id or (data.get("voice_id") or data.get("voice") or "").strip() or None
+    named_engine = speech_engines.named_engine(data.get("model"))
+    if voice_id is None and not (data.get("builtin_voice") or "").strip():
+        # No voice in the request: apply the persisted API default. Saved voices already
+        # resolve through the runtime; passing them explicitly keeps the effective default
+        # authoritative even after a restart. Presets must exist in the pinned catalog.
+        default = voice_library.get_api_default(keep_missing=True)
+        default_pack = _api_default_engine(default) if default else None
+        if default is not None and default_pack is not None:
+            # A default on a pack engine routes to that engine, unless the request names a
+            # different engine outright (then that engine serves with its own voice). A broken
+            # default is reported with its repair, never replaced by another speaker or engine.
+            if named_engine is None or named_engine.id == default_pack.id:
+                problem = _api_default_problem(default, default_pack)
+                if problem is not None:
+                    return _openai_error(
+                        f"{problem['message']} {problem['repair']}",
+                        409,
+                        "invalid_request_error",
+                        code="api_default_unavailable",
+                    )
+                serving_engine = default_pack
+                voice_id = default["voice"]
+        elif default and (named_engine is None or named_engine.id == active_engine.id) and (
+            voice_library.is_preset_voice_id(default["voice"])
+            or voice_library.get_voice(default["voice"]) is not None
+        ):
+            candidate = default["voice"]
+            if candidate.startswith("pocket:"):
+                if candidate.split(":", 1)[1] in POCKET_BUILTIN_VOICES:
+                    voice_id = candidate
+            else:
+                voice_id = candidate
+    elif voice_id is not None and named_engine is None:
+        # Voice ids imply their engine: ``kokoro:af_heart`` is served by Kokoro even when the
+        # client sent a generic ``model`` such as ``tts-1``.
+        implied = _pack_voice_engine(voice_id)
+        if implied is not None:
+            serving_engine = implied
+    if voice_variant_id is None:
+        voice_id, builtin_error = _resolve_builtin_voice(data, voice_id)
+        if builtin_error:
+            return _openai_error(builtin_error, 400)
+    # A named engine is authoritative, but must never silently replace another engine's
+    # speaker. Pocket Lite deliberately accepts pocket:<name> as a preset alias.
+    voice_engine = _pack_voice_engine(voice_id)
+    pocket_preset = bool(voice_id and voice_id.startswith("pocket:"))
+    if (
+        (voice_engine is not None and voice_engine.id != serving_engine.id)
+        or (pocket_preset and serving_engine.id not in ("pocket-tts", "pocket-lite"))
+    ):
+        return _openai_error(
+            f"Voice {voice_id!r} does not belong to engine {serving_engine.id!r}; "
+            "choose a voice from that engine or change model to the voice's engine.",
+            400,
+        )
+    if (
+        pocket_preset
+        and serving_engine.id == "pocket-tts"
+        and model.TTS_BACKEND != "pocket_tts"
+    ):
+        return _openai_error(
+            "Pocket preset voices require TTS_BACKEND=pocket_tts. Select Pocket in Runtime "
+            "before requesting this voice; API requests never switch the backend.",
+            400,
+        )
+    language_error = _language_enforcement_error(voice_id, language)
+    if language_error:
+        return _openai_error(language_error, 400)
     instruct = (data.get("instruct") or "").strip() or None
     seed = data.get("seed")
     if seed is not None and not isinstance(seed, int):
         return _openai_error("seed must be an integer", 400)
+    normalize_loudness = data.get("normalize_loudness")
+    if normalize_loudness is not None and not isinstance(normalize_loudness, bool):
+        return _openai_error("normalize_loudness must be a boolean", 400)
     resolved_seed = model.resolve_seed(seed)
+    speed = data.get("speed")
+    if speed is not None and (isinstance(speed, bool) or not isinstance(speed, (int, float))):
+        return _openai_error("speed must be a number", 400)
+    # Engines without a speed control ignore it, as before; the header says whether it applied.
+    speed_applied = bool(speed is not None and serving_engine.capabilities.speed)
+
+    # Pack engines whose worker streams (Phonon, Pocket Lite) send raw PCM chunks as produced.
+    if (
+        fmt == "pcm"
+        and serving_engine.pack_only
+        and serving_engine.capabilities.streaming == "frame"
+        and not repair_requested
+    ):
+        return _openai_audio_speech_stream_pack(
+            serving_engine, text, language, voice_id, resolved_seed,
+            float(speed) if speed_applied and speed is not None else None,
+            model_recognized,
+        )
 
     # Pocket-TTS streaming path: Hermes TTS streaming via OpenAI SDK with_streaming_response.
     # Returns chunked PCM (int16 LE, 24kHz) — no post-processing for low latency.
     # Only activates for PCM format (Hermes requirement); mp3/wav use batch for compatibility.
     if (
         model.TTS_BACKEND == "pocket_tts"
+        and serving_engine.id == "pocket-tts"
         and fmt == "pcm"
         and not repair_requested
     ):
         return _openai_audio_speech_stream_pocket_tts(
-            text, language, voice_id, resolved_seed, instruct, data
+            text, language, voice_id, resolved_seed, instruct, data, model_recognized
         )
 
     # Batch path: all other backends/formats, plus repair-enabled requests.
     try:
-        wav, sr, job_id = model.executor.submit(
-            model._run_generate,
+        adapter = speech_engines.adapter_for(serving_engine)
+        wav, sr, job_id = adapter.synthesize(
             text,
             language,
             voice_id=voice_id,
-            voice_variant_id=data.get("voice_variant_id"),
+            voice_variant_id=voice_variant_id,
             style_preset=data.get("style_preset"),
             postprocess=data.get("postprocess"),
             prosody_repair=repair_requested,
             seed_value=resolved_seed,
             instruct=instruct,
-        ).result(timeout=480)
-        audio, media_type = _encode(wav, sr, fmt)
+            speed=float(speed) if speed_applied and speed is not None else None,
+        )
+        level = output_level.normalize(
+            wav, sr, enabled=output_level.resolve_enabled(normalize_loudness)
+        )
+        audio, media_type = _encode(level.audio, sr, fmt)
+    except kitten2_engine.EngineWarming as exc:
+        return _engine_warming_error(exc)
+    except kitten2_engine.EngineUnavailable as exc:
+        return _openai_error(exc.public_message, 503, "api_error")
+    except kitten2_engine.InvalidVoice as exc:
+        return _openai_error(exc.public_message, 400, "invalid_request_error")
+    except PackProcessError as exc:
+        return _pack_worker_error(serving_engine, exc)
     except Exception as exc:
-        if isinstance(exc, RuntimeError) and "cache capacity exceeded" in str(exc):
+        if _is_capacity_error(exc):
             print(
                 f"[OV-CAPACITY] capacity exceeded; text_len={len(text)}; "
                 f"likely no EOS or REF_TEXT mismatch.",
@@ -2522,9 +3632,14 @@ def openai_audio_speech():
                 422,
                 "invalid_request_error",
             )
-        return _openai_error(f"Inference error: {exc}", 500, "api_error")
+        logger.exception("Speech inference failed")
+        return _openai_error("Inference error; see the server log for details.", 500, "api_error")
     response = Response(audio, content_type=media_type)
+    response.headers["X-Model-Recognized"] = "true" if model_recognized else "false"
     response.headers["X-Seed"] = str(resolved_seed)
+    response.headers["X-Loudness-Normalized"] = "true" if level.applied else "false"
+    if level.applied:
+        response.headers["X-Loudness-Gain-Db"] = f"{level.gain_db:.2f}"
     if job_id:
         response.headers["X-Job-Id"] = job_id
         prog = model.get_job_progress(job_id)
@@ -2548,6 +3663,69 @@ def openai_audio_speech():
     return response
 
 
+def _pack_worker_error(engine: Any, exc: PackProcessError):
+    # In particular, lazy preparation can fail before the first PCM chunk. Keep that response
+    # JSON-shaped, just like batch, and do not mislabel a failed worker as a warming engine.
+    logger.warning("%s worker failed: %s", engine.label, exc)
+    return _openai_error(
+        f"{engine.label} worker failed. For a saved voice, retry Prepare in Voice "
+        "Library; if it still fails, choose Repair in Runtime → Speech engines and view logs.",
+        503,
+        "api_error",
+    )
+
+
+def _openai_audio_speech_stream_pack(
+    engine: Any,
+    text: str,
+    language: str,
+    voice_id: str | None,
+    resolved_seed: int | None,
+    speed: float | None,
+    model_recognized: bool,
+):
+    """Stream a pack engine's audio as raw int16 PCM (its worker process produces the chunks)."""
+    adapter = speech_engines.adapter_for(engine)
+    stream = adapter.stream_pcm(
+        text, language, voice_id=voice_id, seed_value=resolved_seed, speed=speed
+    )
+    try:
+        first = next(stream, b"")  # surface a bad voice or missing pack as a normal error
+    except kitten2_engine.EngineWarming as exc:
+        return _engine_warming_error(exc)
+    except kitten2_engine.EngineUnavailable as exc:
+        return _openai_error(exc.public_message, 503, "api_error")
+    except kitten2_engine.InvalidVoice as exc:
+        return _openai_error(exc.public_message, 400, "invalid_request_error")
+    except PackProcessError as exc:
+        return _pack_worker_error(engine, exc)
+
+    def body():
+        try:
+            if first:
+                yield first
+            yield from stream
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
+
+    return Response(
+        body(),
+        content_type="audio/pcm",
+        headers={
+            "X-Seed": str(resolved_seed) if resolved_seed is not None else "",
+            "X-Model-Recognized": "true" if model_recognized else "false",
+            "X-Loudness-Normalized": "false",  # a stream cannot know the whole clip's level
+            "X-Speed-Applied": "true" if speed is not None else "false",  # None unless supported
+            "X-Audio-Sample-Rate": "24000",
+            "X-Audio-Channels": "1",
+            "X-Audio-Bits": "16",
+        },
+        direct_passthrough=True,
+    )
+
+
 def _openai_audio_speech_stream_pocket_tts(
     text: str,
     language: str,
@@ -2555,6 +3733,7 @@ def _openai_audio_speech_stream_pocket_tts(
     resolved_seed: int | None,
     instruct: str | None,
     data: dict,
+    model_recognized: bool,
 ):
     """Stream Pocket-TTS audio as raw PCM for Hermes TTS streaming integration."""
     if instruct:
@@ -2564,7 +3743,8 @@ def _openai_audio_speech_stream_pocket_tts(
 
     def produce() -> None:
         try:
-            for pcm_chunk in model._run_generate_pocket_tts_stream(
+            adapter = speech_engines.adapter_for(speech_engines.ENGINES["pocket-tts"])
+            for pcm_chunk in adapter.stream_pcm(
                 text,
                 language,
                 voice_id=voice_id,
@@ -2595,6 +3775,8 @@ def _openai_audio_speech_stream_pocket_tts(
         content_type="audio/pcm",
         headers={
             "X-Seed": str(resolved_seed) if resolved_seed is not None else "",
+            "X-Model-Recognized": "true" if model_recognized else "false",
+            "X-Loudness-Normalized": "false",  # a stream cannot know the whole clip's level
             "X-Audio-Sample-Rate": "24000",
             "X-Audio-Channels": "1",
             "X-Audio-Bits": "16",
@@ -2784,10 +3966,10 @@ def generate_stream():
         return jsonify({"error": "Model not loaded"}), 503
     # Fast-fail only when model is loaded — if it's idle-unloaded, the executor will reload
     # and _run_generate_with_streaming will raise RuntimeError if vocoder isn't available.
-    if model.model is not None:
-        vocoder = getattr(model.ov_runtime, "vocoder_runtime", None)
-        if vocoder is None or not vocoder.enabled:
-            return jsonify({"error": "Streaming requires the FP32 OpenVINO vocoder"}), 503
+    ov_runtime = getattr(model, "ov_runtime", None)
+    vocoder = getattr(ov_runtime, "vocoder_runtime", None)
+    if model.model is not None and (vocoder is None or not vocoder.enabled):
+        return jsonify({"error": "Streaming requires the FP32 OpenVINO vocoder"}), 503
     data = _json_body()
     if not data:
         return jsonify({"error": "Invalid JSON"}), 400
@@ -2848,7 +4030,7 @@ def generate_stream():
         content_type="application/octet-stream",
         headers={
             "X-Audio-Format": "f32le",
-            "X-Audio-Sample-Rate": str(vocoder.sample_rate),
+            "X-Audio-Sample-Rate": str(getattr(vocoder, "sample_rate", 24000)),
             "X-Audio-Channels": "1",
             "X-Stream-Error-Semantics": "connection-close",
         },
@@ -2859,6 +4041,25 @@ def generate_stream():
 def _parity_kwargs(data: dict[str, Any]) -> dict[str, Any]:
     keys = ("do_sample", "temperature", "top_p", "top_k", "max_new_tokens")
     return {key: data[key] for key in keys if data.get(key) is not None}
+
+
+def _streaming_diff_metrics(streamed: Any, raw: Any) -> tuple[Any, float | None, float | None]:
+    """Return ``(diff, max_abs, snr_db)`` for streaming parity diagnostics.
+
+    Diagnostics must never turn a successful render into a 500, so anything unexpected in the
+    comparison degrades to ``None`` and the headers report "unavailable".
+    """
+    import numpy as np
+
+    try:
+        diff = streamed.astype(np.float64) - raw.astype(np.float64)
+        signal = float(np.sum(raw.astype(np.float64) ** 2))
+        noise = float(np.sum(diff ** 2))
+        snr = float("inf") if noise == 0.0 else 10.0 * float(np.log10(signal / noise))
+        max_abs = float(np.max(np.abs(diff), initial=0.0))
+        return diff, max_abs, snr
+    except (TypeError, ValueError, FloatingPointError):
+        return None, None, None
 
 
 @app.post("/stream_internal")
@@ -2896,9 +4097,7 @@ def stream_internal():
         streamed = np.concatenate(chunks) if chunks else wav
         if streamed.shape != raw.shape:
             raise RuntimeError(f"stream/batch length mismatch: {streamed.size} != {raw.size}")
-        diff = streamed.astype(np.float64) - raw.astype(np.float64)
-        signal, noise = float(np.sum(raw.astype(np.float64) ** 2)), float(np.sum(diff ** 2))
-        snr = float("inf") if noise == 0.0 else 10.0 * np.log10(signal / noise)
+        diff, max_abs, snr = _streaming_diff_metrics(streamed, raw)
         audio, media_type = _encode(streamed, sr, "wav")
         headers = {
             "X-Streaming-Frames": str(streamed.size // 1920),
@@ -2908,8 +4107,14 @@ def stream_internal():
             "X-Streaming-Reused-Decode": str(reuse).lower(),
             "X-Streaming-TTFB-Seconds": f"{chunk_times[0]:.6f}" if chunk_times else "none",
             "X-Streaming-Total-Seconds": f"{info['elapsed_seconds']:.6f}",
-            "X-Streaming-Max-Abs": f"{float(np.max(np.abs(diff), initial=0.0)):.9g}",
-            "X-Streaming-SNR-Db": "inf" if np.isinf(snr) else f"{snr:.6f}",
+            "X-Streaming-Max-Abs": (
+                "unavailable" if max_abs is None else f"{max_abs:.9g}"
+            ),
+            "X-Streaming-SNR-Db": (
+                "unavailable"
+                if snr is None
+                else ("inf" if np.isinf(snr) else f"{snr:.6f}")
+            ),
         }
         return audio, media_type, headers
 
@@ -2957,4 +4162,4 @@ def batch_internal():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8318)
+    app.run(host=os.environ.get("PERSONA_FORGE_HOST", "0.0.0.0"), port=8318)

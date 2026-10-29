@@ -1,0 +1,1519 @@
+{
+ "kitten2": [
+  {
+   "description": "Airport Announcer",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "AirportAnnouncer"
+  },
+  {
+   "description": "Alfred",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Alfred"
+  },
+  {
+   "description": "Arabic",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "ar",
+   "name": "Arabic"
+  },
+  {
+   "description": "Arabic Falconer",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "ar",
+   "name": "ArabicFalconer"
+  },
+  {
+   "description": "Arabic Mother",
+   "gender": "female",
+   "gender_source": "name",
+   "language": "ar",
+   "name": "ArabicMother"
+  },
+  {
+   "description": "Arabic News",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "ar",
+   "name": "ArabicNews"
+  },
+  {
+   "description": "Audiobook Narrator Female",
+   "gender": "female",
+   "gender_source": "name",
+   "language": "en",
+   "name": "AudiobookNarratorFemale"
+  },
+  {
+   "description": "Bella",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Bella"
+  },
+  {
+   "description": "Bored Teenager",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "BoredTeenager"
+  },
+  {
+   "description": "Bruno",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Bruno"
+  },
+  {
+   "description": "Calm Hostage Negotiator",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "CalmHostageNegotiator"
+  },
+  {
+   "description": "Chinese",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "zh",
+   "name": "Chinese"
+  },
+  {
+   "description": "Chinese Livestream Seller",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "zh",
+   "name": "ChineseLivestreamSeller"
+  },
+  {
+   "description": "Chinese News Cctv",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "zh",
+   "name": "ChineseNewsCctv"
+  },
+  {
+   "description": "Chinese Xianxia Master",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "zh",
+   "name": "ChineseXianxiaMaster"
+  },
+  {
+   "description": "Claire",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Claire"
+  },
+  {
+   "description": "Dante",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Dante"
+  },
+  {
+   "description": "Diana",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Diana"
+  },
+  {
+   "description": "Dolores",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Dolores"
+  },
+  {
+   "description": "Dutch Baker",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "nl",
+   "name": "DutchBaker"
+  },
+  {
+   "description": "Dutch Grandpa Story",
+   "gender": "male",
+   "gender_source": "name",
+   "language": "nl",
+   "name": "DutchGrandpaStory"
+  },
+  {
+   "description": "Dutch Weather Presenter",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "nl",
+   "name": "DutchWeatherPresenter"
+  },
+  {
+   "description": "Edith",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Edith"
+  },
+  {
+   "description": "Eleanor",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Eleanor"
+  },
+  {
+   "description": "Elliot",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Elliot"
+  },
+  {
+   "description": "Fairytale Narrator Whimsical",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "FairytaleNarratorWhimsical"
+  },
+  {
+   "description": "Frank",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Frank"
+  },
+  {
+   "description": "French",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "fr",
+   "name": "French"
+  },
+  {
+   "description": "French Documentary",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "fr",
+   "name": "FrenchDocumentary"
+  },
+  {
+   "description": "French Grandmere Recette",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "fr",
+   "name": "FrenchGrandmereRecette"
+  },
+  {
+   "description": "French Teacher",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "fr",
+   "name": "FrenchTeacher"
+  },
+  {
+   "description": "French Waiter",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "fr",
+   "name": "FrenchWaiter"
+  },
+  {
+   "description": "German",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "de",
+   "name": "German"
+  },
+  {
+   "description": "German Kneipe",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "de",
+   "name": "GermanKneipe"
+  },
+  {
+   "description": "German Professor",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "de",
+   "name": "GermanProfessor"
+  },
+  {
+   "description": "German Train Announcement",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "de",
+   "name": "GermanTrainAnnouncement"
+  },
+  {
+   "description": "Grace",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Grace"
+  },
+  {
+   "description": "Grandma Bedtime Story",
+   "gender": "female",
+   "gender_source": "name",
+   "language": "en",
+   "name": "GrandmaBedtimeStory"
+  },
+  {
+   "description": "Grief Eulogy",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "GriefEulogy"
+  },
+  {
+   "description": "Herbert",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Herbert"
+  },
+  {
+   "description": "Hindi",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "hi",
+   "name": "Hindi"
+  },
+  {
+   "description": "Hindi Bollywood Drama",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "hi",
+   "name": "HindiBollywoodDrama"
+  },
+  {
+   "description": "Hindi College Friends",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "hi",
+   "name": "HindiCollegeFriends"
+  },
+  {
+   "description": "Hindi Dadi Kahani",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "hi",
+   "name": "HindiDadiKahani"
+  },
+  {
+   "description": "Hindi Yoga Teacher",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "hi",
+   "name": "HindiYogaTeacher"
+  },
+  {
+   "description": "Hugo",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Hugo"
+  },
+  {
+   "description": "Indonesian News Anchor",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "id",
+   "name": "IndonesianNewsAnchor"
+  },
+  {
+   "description": "Indonesian Tour Guide",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "id",
+   "name": "IndonesianTourGuide"
+  },
+  {
+   "description": "Iris",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Iris"
+  },
+  {
+   "description": "Italian",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "it",
+   "name": "Italian"
+  },
+  {
+   "description": "Italian Fashion Designer",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "it",
+   "name": "ItalianFashionDesigner"
+  },
+  {
+   "description": "Italian Football Fan",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "it",
+   "name": "ItalianFootballFan"
+  },
+  {
+   "description": "Italian Gondolier",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "it",
+   "name": "ItalianGondolier"
+  },
+  {
+   "description": "Italian Nonna Kitchen",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "it",
+   "name": "ItalianNonnaKitchen"
+  },
+  {
+   "description": "Italian Opera Tenor",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "it",
+   "name": "ItalianOperaTenor"
+  },
+  {
+   "description": "Japanese Anime Heroine",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "ja",
+   "name": "JapaneseAnimeHeroine"
+  },
+  {
+   "description": "Japanese Grandma",
+   "gender": "female",
+   "gender_source": "name",
+   "language": "ja",
+   "name": "JapaneseGrandma"
+  },
+  {
+   "description": "Japanese Salaryman Apology",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "ja",
+   "name": "JapaneseSalarymanApology"
+  },
+  {
+   "description": "Japanese Train Conductor",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "ja",
+   "name": "JapaneseTrainConductor"
+  },
+  {
+   "description": "Jasper",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Jasper"
+  },
+  {
+   "description": "Julian",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Julian"
+  },
+  {
+   "description": "Kiki",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Kiki"
+  },
+  {
+   "description": "Korean Grandpa Advice",
+   "gender": "male",
+   "gender_source": "name",
+   "language": "ko",
+   "name": "KoreanGrandpaAdvice"
+  },
+  {
+   "description": "Korean Kdrama Confession",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "ko",
+   "name": "KoreanKdramaConfession"
+  },
+  {
+   "description": "Korean News Anchor",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "ko",
+   "name": "KoreanNewsAnchor"
+  },
+  {
+   "description": "Laurence",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Laurence"
+  },
+  {
+   "description": "Leo",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Leo"
+  },
+  {
+   "description": "Luna",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Luna"
+  },
+  {
+   "description": "Maeve",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Maeve"
+  },
+  {
+   "description": "Marcus",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Marcus"
+  },
+  {
+   "description": "Martha",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Martha"
+  },
+  {
+   "description": "Matthew",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Matthew"
+  },
+  {
+   "description": "Miles",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Miles"
+  },
+  {
+   "description": "Nervous First Date",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "NervousFirstDate"
+  },
+  {
+   "description": "News Anchor Female",
+   "gender": "female",
+   "gender_source": "name",
+   "language": "en",
+   "name": "NewsAnchorFemale"
+  },
+  {
+   "description": "Otis",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Otis"
+  },
+  {
+   "description": "Pilot Cabin Announcement",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "PilotCabinAnnouncement"
+  },
+  {
+   "description": "Polish Babcia Pierogi",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "pl",
+   "name": "PolishBabciaPierogi"
+  },
+  {
+   "description": "Polish Mountain Guide",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "pl",
+   "name": "PolishMountainGuide"
+  },
+  {
+   "description": "Polish News Anchor",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "pl",
+   "name": "PolishNewsAnchor"
+  },
+  {
+   "description": "Polish Poetry Student",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "pl",
+   "name": "PolishPoetryStudent"
+  },
+  {
+   "description": "Portuguese",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "pt",
+   "name": "Portuguese"
+  },
+  {
+   "description": "Portuguese Beach",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "pt",
+   "name": "PortugueseBeach"
+  },
+  {
+   "description": "Portuguese Business",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "pt",
+   "name": "PortugueseBusiness"
+  },
+  {
+   "description": "Portuguese Fado",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "pt",
+   "name": "PortugueseFado"
+  },
+  {
+   "description": "Portuguese Grandpa Farm",
+   "gender": "male",
+   "gender_source": "name",
+   "language": "pt",
+   "name": "PortugueseGrandpaFarm"
+  },
+  {
+   "description": "Portuguese News Anchor",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "pt",
+   "name": "PortugueseNewsAnchor"
+  },
+  {
+   "description": "Raven",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Raven"
+  },
+  {
+   "description": "Reginald",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Reginald"
+  },
+  {
+   "description": "Rosie",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Rosie"
+  },
+  {
+   "description": "Russian",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "ru",
+   "name": "Russian"
+  },
+  {
+   "description": "Russian Babushka",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "ru",
+   "name": "RussianBabushka"
+  },
+  {
+   "description": "Russian Fairy Tale",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "ru",
+   "name": "RussianFairyTale"
+  },
+  {
+   "description": "Russian Hockey Cheer",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "ru",
+   "name": "RussianHockeyCheer"
+  },
+  {
+   "description": "Russian Literature Teacher",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "ru",
+   "name": "RussianLiteratureTeacher"
+  },
+  {
+   "description": "Russian Space Control",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "ru",
+   "name": "RussianSpaceControl"
+  },
+  {
+   "description": "Russian Taxi Driver",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "ru",
+   "name": "RussianTaxiDriver"
+  },
+  {
+   "description": "Sable",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Sable"
+  },
+  {
+   "description": "Saoirse",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Saoirse"
+  },
+  {
+   "description": "Sarcastic Coworker",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "SarcasticCoworker"
+  },
+  {
+   "description": "Serena",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Serena"
+  },
+  {
+   "description": "Spanish",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "es",
+   "name": "Spanish"
+  },
+  {
+   "description": "Spanish Abuela",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "es",
+   "name": "SpanishAbuela"
+  },
+  {
+   "description": "Spanish Breakup Sad",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "es",
+   "name": "SpanishBreakupSad"
+  },
+  {
+   "description": "Spanish News",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "es",
+   "name": "SpanishNews"
+  },
+  {
+   "description": "Spanish Tango",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "es",
+   "name": "SpanishTango"
+  },
+  {
+   "description": "Turkish Fisherman",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "tr",
+   "name": "TurkishFisherman"
+  },
+  {
+   "description": "Turkish Grandma Cooking",
+   "gender": "female",
+   "gender_source": "name",
+   "language": "tr",
+   "name": "TurkishGrandmaCooking"
+  },
+  {
+   "description": "Turkish News Anchor",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "tr",
+   "name": "TurkishNewsAnchor"
+  },
+  {
+   "description": "Victor",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Victor"
+  },
+  {
+   "description": "Victoria",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Victoria"
+  },
+  {
+   "description": "Vincent",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Vincent"
+  },
+  {
+   "description": "Walter",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Walter"
+  },
+  {
+   "description": "Weather Presenter Cheerful",
+   "gender": "female",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "WeatherPresenterCheerful"
+  },
+  {
+   "description": "Willow",
+   "gender": "male",
+   "gender_source": "estimated",
+   "language": "en",
+   "name": "Willow"
+  }
+ ],
+ "kokoro": [
+  {
+   "accent": "American",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "af_alloy"
+  },
+  {
+   "accent": "American",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "af_aoede"
+  },
+  {
+   "accent": "American",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "af_bella"
+  },
+  {
+   "accent": "American",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "af_heart"
+  },
+  {
+   "accent": "American",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "af_jessica"
+  },
+  {
+   "accent": "American",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "af_kore"
+  },
+  {
+   "accent": "American",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "af_nicole"
+  },
+  {
+   "accent": "American",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "af_nova"
+  },
+  {
+   "accent": "American",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "af_river"
+  },
+  {
+   "accent": "American",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "af_sarah"
+  },
+  {
+   "accent": "American",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "af_sky"
+  },
+  {
+   "accent": "American",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "am_adam"
+  },
+  {
+   "accent": "American",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "am_echo"
+  },
+  {
+   "accent": "American",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "am_eric"
+  },
+  {
+   "accent": "American",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "am_fenrir"
+  },
+  {
+   "accent": "American",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "am_liam"
+  },
+  {
+   "accent": "American",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "am_michael"
+  },
+  {
+   "accent": "American",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "am_onyx"
+  },
+  {
+   "accent": "American",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "am_puck"
+  },
+  {
+   "accent": "American",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "am_santa"
+  },
+  {
+   "accent": "British",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "bf_alice"
+  },
+  {
+   "accent": "British",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "bf_emma"
+  },
+  {
+   "accent": "British",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "bf_isabella"
+  },
+  {
+   "accent": "British",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "bf_lily"
+  },
+  {
+   "accent": "British",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "bm_daniel"
+  },
+  {
+   "accent": "British",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "bm_fable"
+  },
+  {
+   "accent": "British",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "bm_george"
+  },
+  {
+   "accent": "British",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "bm_lewis"
+  },
+  {
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "es",
+   "name": "ef_dora"
+  },
+  {
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "es",
+   "name": "em_alex"
+  },
+  {
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "es",
+   "name": "em_santa"
+  },
+  {
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "fr",
+   "name": "ff_siwis"
+  },
+  {
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "hi",
+   "name": "hf_alpha"
+  },
+  {
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "hi",
+   "name": "hf_beta"
+  },
+  {
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "hi",
+   "name": "hm_omega"
+  },
+  {
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "hi",
+   "name": "hm_psi"
+  },
+  {
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "it",
+   "name": "if_sara"
+  },
+  {
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "it",
+   "name": "im_nicola"
+  },
+  {
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "pt",
+   "name": "pf_dora"
+  },
+  {
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "pt",
+   "name": "pm_alex"
+  },
+  {
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "pt",
+   "name": "pm_santa"
+  }
+ ],
+ "phonon-31m": [
+  {
+   "accent": "British",
+   "age": "Young Adult",
+   "description": "Punchy and forward, with crisp consonant attack and a pitch that lifts across a line, sitting high over a music bed.",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Alfie"
+  },
+  {
+   "description": "An enormous ancient demon. A cavernous, impossibly deep bass voice that rumbles like stone grinding in a crypt, with a dry rasping edge and a faint hiss on every s. Calm, slow and amused, never shouting, every syllable set down deliberately, menace held under perfect control.",
+   "language": "en",
+   "name": "Azgorath"
+  },
+  {
+   "accent": "British",
+   "age": "Middle-age",
+   "description": "Full, rich mid-range tones, softly relaxed and spoken close to the mic, moving briskly with light pitch play.",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Bryony"
+  },
+  {
+   "description": "An old British pirate captain from the West Country, around sixty. Deep, gravelly and booming, rolling his Rs, salt-cracked from decades of shouting over gales. Roguish and hearty, with a wicked chuckle under every boast.",
+   "language": "en",
+   "name": "Captain Silas Blackwater"
+  },
+  {
+   "accent": "American",
+   "age": "Middle-age",
+   "description": "Low, grounded and quick to the point, with a sincerity that keeps an apology honest.",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Delia"
+  },
+  {
+   "accent": "American",
+   "age": "Young Adult",
+   "description": "Punchy and close in, with crisp consonant attack that cuts through a music bed and pitch that lifts across each line.",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Easton"
+  },
+  {
+   "accent": "British",
+   "age": "Middle-age",
+   "description": "Efficient and firm, sincere in attention, with tidy articulation that holds up at phone bandwidth.",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Edwin"
+  },
+  {
+   "accent": "British",
+   "age": "Young",
+   "description": "A young British voice with sharp, enthusiastic energy and crisp articulation, sparky and to the point for customer support and care.",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Elodie-Rose"
+  },
+  {
+   "accent": "American",
+   "age": "Middle-age",
+   "description": "Rounded, soft-edged tone with gentle lift at the end of phrases and an easy, relaxed delivery.",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Everly"
+  },
+  {
+   "description": "A kind fairy godmother, an older woman in her sixties. A low, warm, velvety alto voice, cosy and grandmotherly, unhurried and soothing, with a soft rich chuckle and a twinkle in every word. Gentle and reassuring, never high, never thin.",
+   "language": "en",
+   "name": "Fairy Godmother"
+  },
+  {
+   "description": "A curious, kind-hearted elf boy of about ten. A natural child's voice in a warm, soft middle range, never squeaky or shrill, earnest and wide-eyed, a little breathless with excitement, speaking quickly when amazed. Clean, close studio recording with no background noise or hiss.",
+   "language": "en",
+   "name": "Fennick the Young Elf"
+  },
+  {
+   "accent": "British",
+   "age": "Young",
+   "description": "A young British voice, glossy and confident with fast, girly chatter and bubbly sparkle, perfect for a friendly receptionist or assistant.",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Freya"
+  },
+  {
+   "description": "A big, good-natured ogre who lives under a bridge. Gruff and grainy, rumbling low end, heavy chest resonance, slow lumbering rhythm with loose rounded words, and warm humour sitting just under the grumble.",
+   "language": "en",
+   "name": "Grub the Ogre"
+  },
+  {
+   "accent": "American",
+   "age": "Middle-age",
+   "description": "Settled, even-toned and genuinely kind, with crisp consonants that hold up over a handset.",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Hadley"
+  },
+  {
+   "accent": "American",
+   "age": "Adult",
+   "description": "Modern, confident and friendly voice with a standard American accent.",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Harper"
+  },
+  {
+   "accent": "British",
+   "age": "Middle-age",
+   "description": "Soft and close, airy in texture, with lively pitch movement and an attentive, sincere delivery.",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Hugh"
+  },
+  {
+   "accent": "British",
+   "age": "Adult",
+   "description": "A bubbly, friendly British English adult voice that puts callers instantly at ease. Great for onboarding assistants and warm concierge interactions.",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Imogen"
+  },
+  {
+   "accent": "American",
+   "age": "Young Adult",
+   "description": "Cheerful presence with real resonance under it, personable when the copy turns intimate and decisive on the final line.",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Juniper"
+  },
+  {
+   "accent": "British",
+   "age": "Young Adult",
+   "description": "Sparky and to the point, high forward energy with clean edges on the consonants and the range to drop low for one line then climb back.",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Lottie"
+  },
+  {
+   "accent": "British",
+   "age": "Adult",
+   "description": "A sparky, attentive British English adult voice that gets to the point with a smile. Ideal for fast, efficient customer support and helpful voice assistants.",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Maeve"
+  },
+  {
+   "description": "A wise old British wizard, around eighty. Rich and resonant with an aged grain, warm and kindly, deliberate pace with weighted pauses before the words that matter, able to rise into a ringing incantation.",
+   "language": "en",
+   "name": "Master Aldric"
+  },
+  {
+   "accent": "American",
+   "age": "Young Adult",
+   "description": "Buoyant and high in energy, with a playful lift at the ends of phrases and clean attack that survives a loud mix.",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Micah"
+  },
+  {
+   "accent": "American",
+   "age": "Young Adult",
+   "description": "Resonant and decisive, with genuine dynamic range, dropping right down for one clause then driving back up.",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Miles"
+  },
+  {
+   "description": "A sultry, seductive woman in her thirties. Low, husky alto, close to the microphone and almost whispered, slow and languid, purring, with a warm knowing smile in every word. Intimate, flirtatious and teasing, like a late-night torch singer luring someone closer, with a hint of danger underneath.",
+   "language": "en",
+   "name": "Morwenna of the Deep"
+  },
+  {
+   "description": "An elderly gravedigger in a Victorian churchyard. Low, raspy and half whispered, melancholic, with heavy pauses that let every word settle like dirt on a coffin lid.",
+   "language": "en",
+   "name": "Old Mortlake"
+  },
+  {
+   "accent": "British",
+   "age": "Adult",
+   "description": "A confident, upbeat British English adult voice with infectious energy. Perfect for proactive assistants and motivating customer success calls.",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Pippa"
+  },
+  {
+   "accent": "American",
+   "age": "Middle-age",
+   "description": "Trim, focused delivery with clean edges on every consonant and a steady, low-set core that carries through phone bandwidth.",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Preston"
+  },
+  {
+   "accent": "American",
+   "age": "Adult",
+   "description": "A high-energy American adult voice that pushes and encourages with the intensity of someone who genuinely believes in you.",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Russell"
+  },
+  {
+   "description": "A brave but pompous English knight, middle-aged. Booming, plummy and theatrical, full of puffed-up self-importance, rolling grand phrases, with a comic wobble of nerves showing through the bravado.",
+   "language": "en",
+   "name": "Sir Bramwell"
+  },
+  {
+   "accent": "British",
+   "age": "Middle-age",
+   "description": "Light and airy, sitting a touch higher, with crisp consonants and a slow, patient delivery.",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Spencer"
+  },
+  {
+   "accent": "British",
+   "age": "Young Adult",
+   "description": "Sparky and close in, quick off the mark, with firm consonants and the range to drop right down for a clause then come back up.",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Teddy"
+  },
+  {
+   "description": "A regal, cold-hearted queen of ice. A cool, crystalline mezzo voice, poised and elegant, precise articulation, unhurried and quietly commanding, with an enigmatic chill and a faint smile that never warms.",
+   "language": "en",
+   "name": "The Snow Queen"
+  },
+  {
+   "description": "A monstrous creature lurking in the dark. Gravelly, breathy and pitched near the floor, a threatening growl that stays quiet to stay frightening, with a slow mocking sneer.",
+   "language": "en",
+   "name": "The Thing Under the Stairs"
+  },
+  {
+   "accent": "British",
+   "age": "Adult",
+   "description": "A sparky, attentive British English adult voice that gets to the point with a smile. Ideal for fast, efficient customer support and helpful voice assistants.",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Toby"
+  },
+  {
+   "accent": "American",
+   "age": "Middle-age",
+   "description": "Buoyant energy over a resonant mid-low core, phrases landing softly and consonants cutting through a handset.",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Trevor"
+  },
+  {
+   "description": "An ancient dragon, thousands of years old. Very low and resonant, deep chest weight with gravel at the bottom of the register, slow and controlled with long pauses, dry and offhand, with the flat calm of something far too old to be impressed.",
+   "language": "en",
+   "name": "Vyrmathrax the Ancient"
+  },
+  {
+   "accent": "American",
+   "age": "Adult",
+   "description": "Playful, upbeat and Gen Z energy voice with a standard American accent. Perfect for engaging conversations!",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "Zoey"
+  }
+ ],
+ "pocket-lite": [
+  {
+   "description": "Reading / character",
+   "language": "en",
+   "name": "alba"
+  },
+  {
+   "description": "Female conversation",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "anna"
+  },
+  {
+   "description": "Female",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "azelma"
+  },
+  {
+   "description": "Male",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "bill_boerst"
+  },
+  {
+   "description": "Female",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "caro_davy"
+  },
+  {
+   "description": "Male",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "charles"
+  },
+  {
+   "description": "Female",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "cosette"
+  },
+  {
+   "description": "Female",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "eponine"
+  },
+  {
+   "description": "Female",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "eve"
+  },
+  {
+   "description": "Female reading",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "fantine"
+  },
+  {
+   "description": "Male",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "george"
+  },
+  {
+   "description": "Female conversation",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "jane"
+  },
+  {
+   "description": "Male",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "javert"
+  },
+  {
+   "description": "Male reading",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "jean"
+  },
+  {
+   "description": "Male reading",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "marius"
+  },
+  {
+   "description": "Female",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "mary"
+  },
+  {
+   "description": "Male",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "michael"
+  },
+  {
+   "description": "Male",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "paul"
+  },
+  {
+   "description": "Male",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "peter_yearsley"
+  },
+  {
+   "description": "Male",
+   "gender": "male",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "stuart_bell"
+  },
+  {
+   "description": "Female, natural Aussie",
+   "gender": "female",
+   "gender_source": "upstream",
+   "language": "en",
+   "name": "vera"
+  }
+ ]
+}

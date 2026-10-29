@@ -216,6 +216,12 @@ class _FakeModule(types.ModuleType):
     This ensures model.X and rt.X are always in sync; patching one immediately
     affects the other, which is critical when tests manipulate rt.model,
     rt.generate_should_fail, etc. and then the app code reads from model.*.
+
+    Monkeypatch delegated state on the owning runtime (the ``rt`` fixture), not
+    this proxy. Since pytest 9.2, monkeypatch snapshots an object's __dict__ for
+    attributes without a data descriptor; our module dictionary deliberately
+    does not contain delegated runtime state. Patching the owner preserves
+    property setters and restores the actual original value at teardown.
     """
     _rt: Any  # reference to FakeModelRuntime
     def __init__(self, rt: Any, name: str) -> None:

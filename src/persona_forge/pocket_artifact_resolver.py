@@ -56,7 +56,7 @@ TOKENIZER_SHA256 = "d461765ae179566678c93091c5fa6f2984c31bbe990bf1aa62d92c64d91b
 
 # Built-in voice embeddings: name -> (size bytes, sha256), pinned at
 # kyutai/pocket-tts-without-voice-cloning@VOICE_EMBEDDINGS_REVISION.
-# This list must stay in sync with persona_forge.app.POCKET_BUILTIN_VOICES
+# This list must stay in sync with persona_forge.pocket_voices.POCKET_BUILTIN_VOICES
 # (the predefined-name subset, i.e. the 26 entries without the hf:// wav voices).
 VOICE_EMBEDDING_PINS: Mapping[str, Tuple[int, str]] = {
     "alba": (6_194_424, "69c32db63ca56843d994f81f343f62e0bf2d73f7e4c9bc73e44bb1110b1d8845"),

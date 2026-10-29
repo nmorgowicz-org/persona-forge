@@ -1,0 +1,63 @@
+{
+  "engine": "kokoro (native PyTorch)",
+  "package": "kokoro 0.9.4",
+  "model": "hexgrad/Kokoro-82M",
+  "target": "Windows, AMD CPU host, RTX 5090 32GB, driver 617.42",
+  "torch": {
+    "torch": "2.11.0+cu128",
+    "cuda": "12.8",
+    "available": true,
+    "device": "NVIDIA GeForce RTX 5090",
+    "capability": [
+      12,
+      0
+    ]
+  },
+  "load_s": 3.124,
+  "vram_peak_mib": 1083.2,
+  "vram_reserved_mib": 1396.0,
+  "cases": [
+    {
+      "case": "short",
+      "audio_s": 2.35,
+      "ttfb_s": 0.1111,
+      "median_s": 0.1111,
+      "min_s": 0.098,
+      "max_s": 0.1143,
+      "rtf": 0.047,
+      "trials_s": [
+        0.098,
+        0.1143,
+        0.1111
+      ]
+    },
+    {
+      "case": "assistant",
+      "audio_s": 9.375,
+      "ttfb_s": 0.1575,
+      "median_s": 0.1575,
+      "min_s": 0.1354,
+      "max_s": 0.1589,
+      "rtf": 0.017,
+      "trials_s": [
+        0.1354,
+        0.1575,
+        0.1589
+      ]
+    },
+    {
+      "case": "long",
+      "audio_s": 25.375,
+      "ttfb_s": 0.3191,
+      "median_s": 0.3192,
+      "min_s": 0.3048,
+      "max_s": 0.3308,
+      "rtf": 0.013,
+      "trials_s": [
+        0.3308,
+        0.3192,
+        0.3048
+      ]
+    }
+  ]
+}

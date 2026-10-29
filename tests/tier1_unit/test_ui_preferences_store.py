@@ -103,13 +103,48 @@ def test_merge_keeps_untouched_keys(prefs_json):
     assert ui_preferences_store.load(path=prefs_json) == expected
 
 
+@pytest.mark.parametrize("value", [True, False])
+def test_integrations_servable_only_round_trip(prefs_json, value):
+    ui_preferences_store.merge_and_save({"theme": "teal"}, path=prefs_json)
+    values = {"theme": "teal", "integrations.servableOnly": value}
+
+    assert ui_preferences_store.merge_and_save(
+        {"integrations.servableOnly": value}, path=prefs_json
+    ) == values
+    assert ui_preferences_store.load(path=prefs_json) == values
+    assert json.loads(prefs_json.read_text())["values"] == values
+
+
+@pytest.mark.parametrize("value", ["true", "false", 0, 1, None, [], {}])
+def test_integrations_servable_only_rejects_nonboolean_without_saving(prefs_json, value):
+    ui_preferences_store.merge_and_save(
+        {"theme": "teal", "integrations.servableOnly": True}, path=prefs_json
+    )
+    before = prefs_json.read_bytes()
+
+    with pytest.raises(
+        ui_preferences_store.PreferencesInvalid,
+        match=r"^integrations\.servableOnly: must be a boolean",
+    ):
+        ui_preferences_store.merge_and_save(
+            {"theme": "rose", "integrations.servableOnly": value}, path=prefs_json
+        )
+
+    assert prefs_json.read_bytes() == before
+
+
 def test_round_trip_all_keys(prefs_json):
     values = {
         "theme": "rose",
         "experienceLevel": "expert",
-        "voiceLibrary.tab": "voices",
+        "voiceLibrary.tab": "builtin",
         "voiceLibrary.layout": "grid-3",
         "voiceLibrary.analysisExpanded": True,
+        "voiceFavorites": ["pocket:vera", "vd_000000000001"],
+        "voiceCatalog.language": "all",
+        "api.enforceLanguage": True,
+        "integrations.servableOnly": True,
+        "engines.nudgeDismissed": True,
         "updates.dismissedVersion": "2.3.0",
     }
     assert set(values) == set(ui_preferences_store.ALLOWED_KEYS)

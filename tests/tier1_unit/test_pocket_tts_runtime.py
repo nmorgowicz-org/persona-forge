@@ -50,7 +50,7 @@ class FakeTTSModel:
             )
         return {"ref_path": path}
 
-    def generate_audio(self, voice_state: dict[str, Any], text: str) -> torch.Tensor:
+    def generate_audio(self, voice_state: dict[str, Any], text: str) -> "torch.Tensor":  # noqa: F821 (torch imported lazily)
         torch = pytest.importorskip("torch")
         return torch.ones(2000)  # ~1 frame at 24kHz/12fps
 

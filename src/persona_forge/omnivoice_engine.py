@@ -35,7 +35,7 @@ import time
 from typing import Any
 
 from persona_forge import model
-from persona_forge.asr_check import has_speech, compute_transcript_match_score, _MIN_MATCH_SCORE_SHORT, _MIN_MATCH_SCORE_LONG, _MAX_WORDS_SHORT, _MAX_SOFT_MATCH_SCORE, _SOFT_REJECT_IF_LOGPROB_BELOW
+from persona_forge.asr_check import has_speech, compute_transcript_match_score, _MIN_MATCH_SCORE_SHORT, _MIN_MATCH_SCORE_LONG, _MAX_WORDS_SHORT, _SOFT_REJECT_IF_LOGPROB_BELOW
 from persona_forge.audio_post import analyze_take, stitch_segments
 
 logger = logging.getLogger(__name__)

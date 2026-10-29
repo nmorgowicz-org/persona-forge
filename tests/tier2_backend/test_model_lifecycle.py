@@ -1,7 +1,6 @@
 """Test startup, 503, idle unload/reload, backend mismatch, malloc_trim."""
 
 import pytest
-from unittest.mock import patch
 
 
 @pytest.mark.integration

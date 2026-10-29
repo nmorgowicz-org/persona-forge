@@ -6,7 +6,6 @@ persona_forge.app so that model-heavy imports see the fake, not the real runtime
 
 from __future__ import annotations
 
-import sys
 
 import pytest
 
@@ -71,3 +70,13 @@ def _reset_swap_state():
     _reset_swap_flags()
     yield
     _reset_swap_flags()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_install_speed_check(monkeypatch):
+    """Pack install tests use fake runners; never let one spawn a real worker for the speed check.
+
+    Tests that exercise the check pass an explicit ``measure`` (or call ``install_check.run`` with a
+    stub worker), which bypasses this switch.
+    """
+    monkeypatch.setenv("ENGINE_INSTALL_SPEED_CHECK", "0")

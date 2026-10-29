@@ -71,6 +71,9 @@ import { RegionEditor } from '@/components/waveform/RegionEditor'
 import { AlignmentCompare } from '@/components/waveform/AlignmentCompare'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { BuiltInVoicesTab } from '@/components/voices/BuiltInVoicesTab'
+import { CompareTab } from '@/components/voices/CompareTab'
+import { VoiceEnginesRow } from '@/components/voices/VoiceEnginesRow'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useProsodyEditor } from '@/components/prosody/useProsodyEditor'
 import { ProsodyControls } from '@/components/prosody/ProsodyControls'
@@ -740,6 +743,7 @@ function VoiceCard({
   layoutMode,
   onUse,
   onDesignFrom,
+  onCompare,
   onReopenInStitchStudio,
   onDelete,
   onDuplicate,
@@ -760,12 +764,15 @@ function VoiceCard({
   onFocusOnMountConsumed,
   projects,
   onSetProject,
+  libraryVersion,
+  onOpenEngines,
 }: {
   voice: VoiceMeta
   busy: boolean
   layoutMode: string
   onUse: () => void
   onDesignFrom: (() => void) | null
+  onCompare: () => void
   onReopenInStitchStudio: (() => void) | null
   onDelete: () => void
   // Fork this voice into a brand-new voice_id. Omitting variantFilename forks whichever
@@ -796,6 +803,10 @@ function VoiceCard({
   onFocusOnMountConsumed?: () => void
   projects: Project[]
   onSetProject: (voiceId: string, projectId: string) => void
+  // Bumped whenever the library reloads, so the Engines row refetches a voice's binding status
+  // after any edit to its transcript or audio.
+  libraryVersion: number
+  onOpenEngines: () => void
 }) {
 
   const reducedMotion = useReducedMotionSafe()
@@ -1052,6 +1063,14 @@ function VoiceCard({
          )}
        </div>
 
+      <VoiceEnginesRow
+        voiceId={voice.voice_id}
+        transcript={voice.sample_text}
+        refreshToken={libraryVersion}
+        onTranscribe={onTranscribe}
+        onOpenEngines={onOpenEngines}
+      />
+
        <QualityGatePanel
          voice={voice}
          busy={busy}
@@ -1140,6 +1159,7 @@ function VoiceCard({
           <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => onDuplicate()} title="Materialize the currently-active audio as a brand-new, independent voice_id"><GitFork /> Fork to independent voice_id</Button>
           <Button size="sm" variant="ghost" className="w-full justify-start" disabled={voice.api_active} onClick={onActivateForApi}><Radio /> Activate for API</Button>
           {onDesignFrom && <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onDesignFrom}><Sparkles /> Design from voice</Button>}
+          <Button data-testid="voice-compare-engines" size="sm" variant="ghost" className="w-full justify-start" onClick={onCompare} title="Render this voice on every installed cloning engine and rate them"><Columns2 /> Compare engines</Button>
           {onReopenInStitchStudio && <Button size="sm" variant="ghost" className="w-full justify-start" onClick={onReopenInStitchStudio}><Layers /> Open in Stitch Studio</Button>}
           <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => setEditing(true)}><Pencil /> Edit transcript</Button>
           <Button size="sm" variant="ghost" className="w-full justify-start" onClick={() => runMutation(onNormalize)}><Wand2 /> Normalize loudness</Button>
@@ -1197,17 +1217,19 @@ export function VoiceLibraryPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [groupByProject, setGroupByProject] = useState(false)
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
-  const [activeTab, setActiveTab] = useState<'voices' | 'segments'>(() =>
-    getPref<'voices' | 'segments'>('voiceLibrary.tab', 'voices'),
+  const [activeTab, setActiveTab] = useState<'voices' | 'builtin' | 'segments' | 'compare'>(() =>
+    getPref<'voices' | 'builtin' | 'segments' | 'compare'>('voiceLibrary.tab', 'voices'),
   )
   // setPref only on genuine user/system-driven changes below (Tabs onValueChange, the
   // deep-link effect) -- not here. A useEffect keyed on activeTab also fires on the initial
   // mount, which would silently write the *default* value to the server the first time
   // anyone opens the library, before the user has chosen anything.
-  function selectTab(tab: 'voices' | 'segments') {
+  function selectTab(tab: 'voices' | 'builtin' | 'segments' | 'compare') {
     setActiveTab(tab)
     setPref('voiceLibrary.tab', tab)
   }
+  // Set by "Compare engines" on a voice; the Compare tab uses it as its starting voice.
+  const [compareVoice, setCompareVoice] = useState<string | null>(null)
   const setVoiceId = useAppStore((s) => s.setVoiceId)
 
   const setPage = useAppStore((s) => s.setPage)
@@ -1229,6 +1251,8 @@ export function VoiceLibraryPage() {
     }
   }, [voiceLibraryFocusVoiceId, deepLinkProsodyVoiceId, activeTab])
 
+  const [libraryVersion, setLibraryVersion] = useState(0)
+
   async function refresh() {
     const [v, segs, projs] = await Promise.all([
       listVoices().catch((err) => {
@@ -1241,6 +1265,7 @@ export function VoiceLibraryPage() {
     storeSetVoices(v)
     storeSetSegments(segs)
     setProjects(projs)
+    setLibraryVersion((version) => version + 1)
   }
 
   // Whether a load has ever completed. The store starts empty, so without this "you have no
@@ -1682,6 +1707,10 @@ export function VoiceLibraryPage() {
       onDesignFrom={
         hasChipSelections(voice.selections) ? () => designFromVoice(voice.voice_id) : null
       }
+      onCompare={() => {
+        setCompareVoice(voice.voice_id)
+        selectTab('compare')
+      }}
       onReopenInStitchStudio={
         (voice.selections as OmniVoiceSelections | null | undefined)?.stitch_plan?.clips?.length
           ? () => reopenInStitchStudio(voice)
@@ -1706,6 +1735,8 @@ export function VoiceLibraryPage() {
       onRefresh={refresh}
       projects={projects}
       onSetProject={moveVoiceToProject}
+      libraryVersion={libraryVersion}
+      onOpenEngines={() => setPage('runtime')}
     />
   )
 
@@ -1839,21 +1870,31 @@ export function VoiceLibraryPage() {
             <Skeleton key={row} className="h-16 w-full rounded-panel" />
           ))}
         </div>
-      ) : voices.length === 0 && segments.length === 0 && !error ? (
-        <EmptyState
-          className="py-16"
-          title="No voices saved yet"
-          description="Design a voice or clone one from a reference clip. Saved voices and segments collect here, and the API serves them."
-          actionLabel="Design your first voice"
-          onAction={() => setPage('voice-design')}
-        />
       ) : (
-        <Tabs value={activeTab} onValueChange={(v) => selectTab(v === 'segments' ? 'segments' : 'voices')}>
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) =>
+            selectTab(
+              v === 'segments' ? 'segments' : v === 'builtin' ? 'builtin' : v === 'compare' ? 'compare' : 'voices',
+            )
+          }
+        >
           <TabsList>
-            <TabsTrigger value="voices" data-testid="voice-library-tab-voices">Reference voices</TabsTrigger>
+            <TabsTrigger value="voices" data-testid="voice-library-tab-voices">My voices</TabsTrigger>
+            <TabsTrigger value="builtin" data-testid="voice-library-tab-builtin">Built-in voices</TabsTrigger>
             <TabsTrigger value="segments" data-testid="voice-library-tab-segments">Segments</TabsTrigger>
+            <TabsTrigger value="compare" data-testid="voice-library-tab-compare">Compare</TabsTrigger>
           </TabsList>
           <TabsContent value="voices" className="flex flex-col gap-6">
+          {voices.length === 0 && !error && (
+            <EmptyState
+              className="py-16"
+              title="No voices saved yet"
+              description="Design a voice or clone one from a reference clip. Built-in voices are ready to use immediately."
+              actionLabel="Design your first voice"
+              onAction={() => setPage('voice-design')}
+            />
+          )}
           {voices.length > 0 && (
             <section className="flex flex-col gap-3">
                <div className="flex items-center justify-between">
@@ -1950,6 +1991,14 @@ export function VoiceLibraryPage() {
 
             </section>
           )}
+          </TabsContent>
+
+          <TabsContent value="builtin" className="flex flex-col gap-6">
+            <BuiltInVoicesTab />
+          </TabsContent>
+
+          <TabsContent value="compare" className="flex flex-col gap-6">
+            <CompareTab startVoice={compareVoice} onStarted={() => setCompareVoice(null)} />
           </TabsContent>
 
           <TabsContent value="segments" className="flex flex-col gap-6">

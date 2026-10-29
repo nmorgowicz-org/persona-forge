@@ -1,0 +1,111 @@
+{
+  "engine": "kittentts (nano 0.1)",
+  "package": "kittentts 0.1.3",
+  "model": "KittenML/kitten-tts-nano-0.1 (15M ONNX)",
+  "target": "docker-agent, Intel i7-1360P, 6 vCPU, cgroup --cpus=4",
+  "load_average": "23.38 19.46 15.91",
+  "corpus_sha256": "cd24e22a18dd33160858b446d7d465b9df06ec357b9d410ea2ccbf681d8d76a8",
+  "load_s": 3.839,
+  "peak_rss_after_load_mib": 139.8,
+  "peak_rss_final_mib": 546.8,
+  "voices_available": [
+    "expr-voice-2-f",
+    "expr-voice-2-m",
+    "expr-voice-3-f",
+    "expr-voice-3-m",
+    "expr-voice-4-f",
+    "expr-voice-4-m",
+    "expr-voice-5-f",
+    "expr-voice-5-m"
+  ],
+  "streaming": false,
+  "languages": [
+    "en"
+  ],
+  "cases": [
+    {
+      "case": "short",
+      "voice": "expr-voice-2-m",
+      "audio_s": 2.15,
+      "rtf": 0.923,
+      "trials_s": [
+        2.1801,
+        1.9834,
+        1.7279
+      ],
+      "min_s": 1.7279,
+      "median_s": 1.9834,
+      "max_s": 2.1801
+    },
+    {
+      "case": "assistant",
+      "voice": "expr-voice-2-m",
+      "audio_s": 8.875,
+      "rtf": 1.01,
+      "trials_s": [
+        7.4836,
+        9.045,
+        8.9649
+      ],
+      "min_s": 7.4836,
+      "median_s": 8.9649,
+      "max_s": 9.045
+    },
+    {
+      "case": "structured",
+      "voice": "expr-voice-2-m",
+      "audio_s": 7.8,
+      "rtf": 0.921,
+      "trials_s": [
+        7.0193,
+        7.1853,
+        7.5336
+      ],
+      "min_s": 7.0193,
+      "median_s": 7.1853,
+      "max_s": 7.5336
+    },
+    {
+      "case": "long",
+      "voice": "expr-voice-2-m",
+      "audio_s": 24.4,
+      "rtf": 0.807,
+      "trials_s": [
+        17.6779,
+        19.6937,
+        20.606
+      ],
+      "min_s": 17.6779,
+      "median_s": 19.6937,
+      "max_s": 20.606
+    },
+    {
+      "case": "assistant",
+      "voice": "expr-voice-3-f",
+      "audio_s": 10.875,
+      "rtf": 0.874,
+      "trials_s": [
+        9.5062,
+        9.7429,
+        9.1074
+      ],
+      "min_s": 9.1074,
+      "median_s": 9.5062,
+      "max_s": 9.7429
+    },
+    {
+      "case": "short",
+      "voice": "expr-voice-5-f",
+      "audio_s": 2.4,
+      "rtf": 0.818,
+      "trials_s": [
+        1.9628,
+        1.6577,
+        2.2328
+      ],
+      "min_s": 1.6577,
+      "median_s": 1.9628,
+      "max_s": 2.2328
+    }
+  ]
+}

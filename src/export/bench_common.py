@@ -24,6 +24,7 @@ for _key, _val in (
 import statistics
 import sys
 from dataclasses import dataclass
+from typing import Any
 from pathlib import Path
 
 from persona_forge.model_config import configure_hf_token, resolve_model_repo, resolve_torch_load_config
@@ -118,8 +119,8 @@ def percentile(values: list[float], pct: float) -> float:
 
 @dataclass
 class LoadedModel:
-    model: object
-    voice_clone_prompt: object
+    model: Any
+    voice_clone_prompt: Any
 
 
 def load_model() -> LoadedModel:

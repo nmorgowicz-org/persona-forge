@@ -13,6 +13,7 @@ directory (`persona_forge/paths.py`) — the var name and override behavior are 
 way. See [MIGRATION.md](MIGRATION.md) for the full container-path-to-native-path mapping.
 
 Legend:
+
 - Required: must be set.
 - Recommended: omission changes behavior noticeably.
 - Advanced: leave alone unless you know what you're doing.
@@ -24,7 +25,7 @@ Legend:
 The app starts without a default reference voice. Normal users can add or generate voices in the UI.
 
 | Var | Required? | Description |
-|-----|-----------|-------------|
+| ----- | ----------- | ------------- |
 | `REF_AUDIO_PATH` | No | Optional host path to a default reference WAV. When present, it is mounted as `/voice/reference.wav`, promoted into the Voice Library, and analyzed with Whisper. |
 | `REF_TEXT` | No | Optional power-user transcript override for `REF_AUDIO_PATH`. Qwen backends use it if supplied; Pocket TTS ignores it. |
 | `REF_TEXT_AUTO` | No (`whisper`) | Transcript bootstrap when `REF_AUDIO_PATH` is set and `REF_TEXT` is omitted. Default `whisper` transcribes the audio and stores review metadata. Set `0` to disable. |
@@ -33,7 +34,7 @@ The app starts without a default reference voice. Normal users can add or genera
 Recommended (simple knobs):
 
 | Var | Default | Description |
-|-----|---------|-------------|
+| ----- | --------- | ------------- |
 | `MODEL_SIZE` | `1.7B` | Base checkpoint size. Leave at 1.7B unless you specifically need 0.6B. |
 | `TTS_BACKEND` | `pocket_tts` | Inference backend. `pocket_tts` is the product default (self-contained, no export step); switch to `openvino` for the accelerated Qwen path on Intel CPUs (requires export), or `pytorch` as a portable rollback. |
 | `LOW_RAM_MODE` | `1` | Enables idle unload + malloc tuning; recommended on 10–15 GiB hosts. |
@@ -44,7 +45,7 @@ Recommended (simple knobs):
 ## Runtime / backend
 
 | Var | Default | Description |
-|-----|---------|-------------|
+| ----- | --------- | ------------- |
 | `PERSONA_FORGE_SHELL` | unset | Set to `desktop` by the desktop shell's `ServerSpec` (contract §6.10). `/health` reports it as `shell` so the SPA knows it's inside the desktop app (hides the web update banner, D13). Only the *server*'s host context — a browser on another machine reaching a desktop-hosted server also sees `desktop`. |
 | `TTS_BACKEND` | `pocket_tts` | `pocket_tts` (default, self-contained, no export needed), `openvino` (opt-in accelerated Qwen path on Intel CPUs, requires export), or `pytorch` (portable rollback, slower). When the Qwen3-TTS engine is invoked without an explicit value, the preset fallback auto-selects `openvino` if a valid IR export already exists on disk, else `pytorch` — it never triggers the export itself. `/health` reports `backend_source`/`backend_fallback_choice`. |
 | `TTS_DEVICE` | auto-detect | Forces the torch device the Qwen3-TTS PyTorch backend and OmniVoice load onto: `cuda`, `xpu`, `mps`, or `cpu`. Unset auto-detects the best available (`cuda` > `xpu` > `mps` > `cpu`). A forced-but-unavailable device warns and falls back to `cpu` rather than failing. `DEVICE` is accepted as a legacy alias. |
@@ -58,6 +59,7 @@ Recommended (simple knobs):
 | `ALIGNER_PROVIDERS` | `CPUExecutionProvider` | Comma-separated onnxruntime execution providers for the aligner (portable CPU baseline; add OpenVINO/CoreML where available). |
 | `ALIGNER_LATENCY_BUDGET_SECONDS` | `5` | Fail-closed warm p95 budget for Precise alignment. Job responses and `GET /alignment/performance` expose observed duration and budget status. |
 | `ALIGNER_IDLE_UNLOAD_SECONDS` | `120` | Seconds after the serialized alignment queue drains before releasing the ONNX session. |
+| `AUTOCHECK_IDLE_UNLOAD_SECONDS` | `120` | Seconds after the last Compare auto-check before the Whisper and WavLM-SV models it loaded are released (`0` keeps them loaded). |
 | `GENERATION_REPAIR_BUDGET_SECONDS` | `5` | Hard per-request deadline for explicit `prosody_repair` on complete-file generation routes. Timeout returns the original un-repaired output with a `budget_fallback` outcome. |
 
 ## Accelerator families
@@ -67,7 +69,7 @@ Family (which torch wheel to install) is a separate axis from the runtime device
 first-boot install behavior, and per-family validation status.
 
 | Var | Default | Description |
-|-----|---------|-------------|
+| ----- | --------- | ------------- |
 | `GPU_FAMILY` | `auto` | Torch wheel family: `cpu` / `intel-xpu` / `cuda` / `rocm`. `auto` picks the highest-priority vendor (`cuda` > `rocm` > `intel-xpu`) only when the device is actually present/capable — for NVIDIA this includes a successful `nvidia-smi` run, not just Linux sysfs/device-node probes, so `auto` also works on Windows; an explicit value (including `cpu`) always wins; unrecognized values warn and fall back to auto-detect. Changes the torch wheel for the Qwen3-TTS PyTorch backend and OmniVoice only — Pocket-TTS is CPU-only and unaffected. |
 | `ACCEL_VENV_DIR` | `/opt/accel-venv` | Persisted per-family first-boot install location (`<dir>/<family>/site-packages`). Mounted as the compose `accel-venv` named volume so the install survives container recreation; unused when the family resolves to `cpu`. |
 | `ACCEL_TORCH_INDEX_URL` | per-family manifest pin (`.../whl/xpu`, `.../whl/cu126`, `.../whl/rocm7.1`) | Wheel index for the first-boot torch/torchaudio install when the family is not `cpu`. Sourced from `persona_forge/accelerator_manifest.py`; override if the default is wrong for your hardware. |
@@ -81,7 +83,7 @@ Native (non-container) accelerator installs use `uv sync --extra <cuda12\|cuda13
 Unless you're tuning performance, leave these at defaults.
 
 | Var | Default | Description |
-|-----|---------|-------------|
+| ----- | --------- | ------------- |
 | `OV_MODEL_DIR` | Preset-specific | Path to exported OpenVINO IR. |
 | `OV_INFERENCE_THREADS` | Auto (cores-2) | Inference threads for OpenVINO and Torch. |
 | `OV_DYNAMIC_QUANT_GROUP_SIZE` | `32` | OpenVINO dynamic quant group size: 0 = off; 32 = default; 64 = faster, slightly less accurate. |
@@ -126,12 +128,20 @@ Unless you're tuning performance, leave these at defaults.
 | `FRONTEND_ENABLED` | `1` | Serve web UI at `/`. Set `0` for API-only. |
 | `FRONTEND_DIST_DIR` | Auto-resolved | Path to compiled frontend static files; normally auto-resolved. |
 
+`PERSONA_FORGE_BASE_URL` in the Integrations snippets is a **client-side** environment
+variable, not a server setting. Set it to the service origin (for example,
+`http://127.0.0.1:8318`); the generated curl/Python/JavaScript examples also accept the
+Desktop SDK URL ending in `/v1`, with or without a trailing slash. They normalize the suffix
+before appending `/v1/audio/speech` (curl) or `/v1` (SDK base URL), exactly once. Python and
+JavaScript read the environment explicitly; they do not treat `$PERSONA_FORGE_BASE_URL` as
+an interpolated string. The server does not need this variable.
+
 ## VoiceDesign / model (advanced)
 
 Leave at defaults unless you know what you're doing.
 
 | Var | Default | Description |
-|-----|---------|-------------|
+| ----- | --------- | ------------- |
 | `VOICE_DESIGN_MODEL_SIZE` | `1.7B` | VoiceDesign checkpoint size. |
 | `VOICE_DESIGN_MODEL_REPO` | Preset | Expert override for VoiceDesign model repo. |
 | `VOICE_DESIGN_MODEL_REVISION` | unset | Pin specific VoiceDesign revision. |
@@ -140,12 +150,13 @@ Leave at defaults unless you know what you're doing.
 | `MODEL_REVISION` | unset | Pin specific Base revision; must match exported IR metadata. |
 | `HF_TOKEN` | (from HF_TOKEN_FILE if set) | Hugging Face token for gated checkpoints. |
 | `HF_TOKEN_FILE` | unset | Path to a file containing HF_TOKEN (Docker secret pattern). |
+| (stored engine token) | unset | Not an env var: a token pasted on a gated engine's card (Runtime → Speech engines) is kept in `<DATA_DIR>/.engine_hf_token` (0600) and used only for that engine's download, ahead of `HF_TOKEN`. `HF_TOKEN` still works when none is stored. No env change is needed. |
 | `MODEL_CACHE_CONTAINER_PATH` | `/root/.cache/huggingface/hub` | Internal: mount reporting path for HF cache. |
 
 ## OmniVoice / ASR (advanced)
 
 | Var | Default | Description |
-|-----|---------|-------------|
+| ----- | --------- | ------------- |
 | `ASR_MIN_MATCH_SHORT` | `0.70` | Min fuzzy transcript match for short segments. |
 | `ASR_MIN_MATCH_LONG` | `0.80` | Min fuzzy transcript match for longer segments. |
 | `ASR_SHORT_SEGMENT_WORDS` | `5` | Word count boundary for “short” vs “long.” |
@@ -155,7 +166,7 @@ Leave at defaults unless you know what you're doing.
 ## Silence trim
 
 | Var | Default | Description |
-|-----|---------|-------------|
+| ----- | --------- | ------------- |
 | `SILENCE_TRIM` | `1` | Trim leading/trailing silence from generated audio. Set `0` to disable. |
 | `SILENCE_TRIM_THRESH` | `0.01` | Silence threshold as fraction of peak amplitude. |
 | `SILENCE_TRIM_PAD_MS` | `30` | Padding (ms) after detected silence to avoid clipping consonants. |
@@ -166,7 +177,7 @@ Leave at defaults unless you know what you're doing.
 Only used when TTS_BACKEND=pocket_tts. Pocket TTS does not use or require REF_TEXT; it builds voice state from reference audio only.
 
 | Var | Default | Description |
-|-----|---------|-------------|
+| ----- | --------- | ------------- |
 | `POCKET_TTS_TEMP` | `1.2` | Sampling temperature. |
 | `POCKET_TTS_LSD_DECODE_STEPS` | `5` | LSD refinement steps per audio frame. |
 | `POCKET_TTS_EOS_THRESHOLD` | `-4.0` | Logits-based EOS threshold. |
@@ -184,7 +195,7 @@ voice-embedding paths point at **resolver-verified** artifacts in `POCKET_TTS_AR
 controls where the English voice-cloning model comes from:
 
 | Mode | Behavior |
-|------|----------|
+| ------ | ---------- |
 | `auto` (default) | Verified cache first, then the ungated LunaHR mirror, then the gated official `kyutai/pocket-tts` repo (only with an `HF_TOKEN`; gated sources are never probed unauthenticated). If the cloning model cannot be resolved, the service degrades to the separately pinned built-in-only model — voice cloning is disabled and `/health` reports `pocket_cloning_status: degraded`. |
 | `lunahr` | Verified cache or the ungated LunaHR mirror only. Fails closed (no degradation) if the cloning model cannot be resolved. |
 | `official` | Verified cache or the gated official repo (requires `HF_TOKEN`). May degrade to built-in-only like `auto`. |
@@ -197,10 +208,41 @@ Changes require a model reload (`/runtime/config` marks both vars as reload keys
 
 When cloning is available, the mounted REF_AUDIO is automatically registered as a voice named "Mounted reference (Default)" in the library so it can be selected explicitly as well as used as the default.
 
-## Debug / dev (do not use in production)
+## Engine packs
+
+| Var | Default | Description |
+| ----- | --------- | ------------- |
+| `ENGINE_PACKS_DIR` | `<DATA_DIR>/engine-packs` | Directory scanned by `GET /engines`. Each subdirectory holds a `manifest.json` plus its pinned artifacts. Verification is local-only (existence, size, SHA-256); nothing is downloaded and no code runs during verification. |
+| `ENGINE_PACKS_ALLOW_FILE_SOURCES` | unset | Test/debug only: allow `file://` artifact sources in pack manifests. Leave unset in production so installs only use http(s). |
+| `ENGINE_PACKS_UV` | auto-detected | Path to `uv` used to build the Kitten TTS 2 pack environment. Without it the installer falls back to `python -m venv` and `pip`. |
+| `KITTEN2_PYTHON` | unset | Development override: run the Kitten TTS 2 worker with this interpreter instead of the installed pack. |
+| `KITTEN2_IDLE_UNLOAD_S` | pack manifest `idle_unload_after`, else `1800` | Seconds of inactivity before the Kitten TTS 2 worker process is stopped to free memory (`0` keeps it loaded). Overrides the pack manifest; invalid or negative values are ignored. It restarts on the next request (a reload re-pays the compile warm-up, hence the longer default). |
+| `ENGINE_INSTALL_SPEED_CHECK` | `1` | Set to `0`, `false`, `no` or `off` to skip the speed check that each pack install runs after verifying (one short synthesis through the worker, recorded as RTF on the engine card). A slow result never fails an install. See the HTTP API reference, `GET /engines` (`install_check`). |
+| `ENGINE_WARM_WAIT_S` | `5` | Seconds a `/v1/audio/speech` request waits for a pack engine that is loading or warming up before it gets a retryable `503` with `Retry-After` and error code `engine_warming`. `0` never waits. See the HTTP API reference, "Engine warm-up". |
+| `PHONON_PYTHON` | unset | Development override: run the Phonon 31M worker with this interpreter instead of the installed pack. |
+| `PHONON_IDLE_UNLOAD_S` | pack manifest `idle_unload_after`, else `600` | Seconds of inactivity before the Phonon worker process is stopped (`0` keeps it loaded). Overrides the pack manifest. |
+| `KOKORO_PYTHON` | unset | Development override: run the Kokoro worker with this interpreter instead of the installed pack. |
+| `KOKORO_IDLE_UNLOAD_S` | pack manifest `idle_unload_after`, else `600` | Seconds of inactivity before the Kokoro worker process is stopped (`0` keeps it loaded). Overrides the pack manifest. |
+| `POCKET_LITE_IDLE_UNLOAD_S` | pack manifest `idle_unload_after`, else `600` | Seconds of inactivity before the Pocket Lite worker process is stopped (`0` keeps it loaded). Overrides the pack manifest. |
+| `IMPORTED_VOICES_DIR` | `<app data>/imported-voices` | Where prepared voice files imported through **Voices → Built-in → Add imported voice** (`POST /engines/{engine_id}/imported-voices`) and their provenance are stored, one folder per engine. Imports are kept apart from engine packs, so removing a pack does not delete them. |
+
+## Text normalisation
 
 | Var | Default | Description |
 |-----|---------|-------------|
+| `TTS_NORMALIZE_TEXT` | `1` | Spell out numbers, money, times, ordinals, units, ISO dates and codes before Pocket-TTS synthesis (English). Set `0` to send text unchanged. Kitten TTS 2, Phonon 31M and Kokoro read structured text correctly themselves (Kokoro is multilingual, and this normaliser is English-only) and never use this. |
+
+## Output loudness
+
+| Var | Default | Description |
+|-----|---------|-------------|
+| `TTS_NORMALIZE_LOUDNESS` | `1` | Level-match every complete clip served by `POST /v1/audio/speech` to −23 dBFS RMS (active speech only, boost capped at 12 dB, soft peak limit at −1 dBFS) so switching engine does not change the volume. Set `0`/`false`/`no`/`off` to serve each engine's native level; a request's `normalize_loudness` field overrides this per call. Streamed PCM is never normalised. See `docs/api/HTTP_API_REFERENCE.md`. |
+
+## Debug / dev (do not use in production)
+
+| Var | Default | Description |
+| ----- | --------- | ------------- |
+| `PERSONA_FORGE_HOST` | `0.0.0.0` | Bind address used only when `src/persona_forge/app.py` is run directly as a script (Flask development server, port 8318). `persona-forge serve` and the container entrypoint do not read it. |
 | `TTS_DIAG` | `0` | Diagnostic logits logging in early decode steps. Also via `/tmp/tts_diag`. |
 | `TTS_MAX_NEW_TOKENS` | unset | Caps max_new_tokens to catch non-terminating decode. Also via `/tmp/tts_max_new`. |
 | `TTS_NON_STREAMING` | unset | Forces non_streaming_mode=True. Also via `/tmp/tts_non_streaming`. |

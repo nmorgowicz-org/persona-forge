@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import {
   AlertCircle,
@@ -15,16 +15,26 @@ import {
   generateAsync,
   getGenerateJobProgress,
   cancelGenerate,
-  listBuiltInVoices,
+  listAllVoiceBindings,
+  listCatalogVoices,
   listVoices,
+  getApiDefault,
+  setApiDefault,
   warmVoice,
+  type ApiDefaultRecord,
   type BuiltInVoiceMeta,
+  type VoiceEngineBinding,
 } from '@/lib/api'
 import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
 import { VoiceSelector } from '@/components/VoiceSelector'
 import { AudioPlayer } from '@/components/AudioPlayer'
 import { InfoIcon } from '@/components/InfoIcon'
+import { SpeakEngineChoice } from '@/components/SpeakEngineChoice'
+import { SavedVoiceEngineChoice } from '@/components/SavedVoiceEngineChoice'
+import { shortEngineLabel } from '@/lib/voiceEngines'
+import { useSpeakEngines } from '@/lib/speakEngines'
+import { fetchSpeech, useEngineLoadStatus } from '@/lib/engineStatus'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { PageHeader } from '@/components/ui/page-header'
@@ -39,6 +49,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { AdvancedDrawer } from '@/components/audio/AdvancedDrawer'
 import { useReducedMotionSafe } from '@/lib/motion'
 
+
+const speakClock = () => performance.now()
 
 function StructuredError({ error }: { error: string }) {
   const info = classifyGenerateError(error, null)
@@ -146,11 +158,41 @@ export function SpeakPage() {
   const polishLabelId = useId()
   const [stylePreset, setStylePreset] = useState<(typeof POLISH_OPTIONS)[number]['id']>('off')
   const [seedInput, setSeedInput] = useState('')
-  const [builtInVoices, setBuiltInVoices] = useState<BuiltInVoiceMeta[]>([])
+  const [catalogVoices, setCatalogVoices] = useState<BuiltInVoiceMeta[]>([])
+  const [readiness, setReadiness] = useState<Record<string, VoiceEngineBinding[]>>({})
+  const [apiDefault, setApiDefaultState] = useState<ApiDefaultRecord | null>(null)
+  const [savingApiDefault, setSavingApiDefault] = useState(false)
+  const [apiDefaultError, setApiDefaultError] = useState<string | null>(null)
   const [resultMeta, setResultMeta] = useState<SpeakResultMeta | null>(null)
+  const { models: engineModels, presets: enginePresets } = useSpeakEngines()
+  const engineChoice = useAppStore((s) => s.speakEngineChoice)
+  const setEngineChoice = useAppStore((s) => s.setSpeakEngineChoice)
+  const { status: engineLoadStatus, cards: engineCards, refresh: refreshEngineStatus } = useEngineLoadStatus()
+  const [engineWait, setEngineWait] = useState<string | null>(null)
+  const enginePreset = useAppStore((s) => s.speakEnginePreset)
+  const setEnginePreset = useAppStore((s) => s.setSpeakEnginePreset)
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const runtimeTtsBackend = useAppStore((s) => s.runtimeTtsBackend)
   const isPocketBackend = runtimeTtsBackend === 'pocket_tts'
+
+  // Engine implied by the voice (plan §5.6): a pack preset serves from its own engine, a saved
+  // voice from the engine chosen for it (dropdown below), else the active engine.
+  const selectedPreset = catalogVoices.find((voice) => voice.voice_id === voiceId)
+  const selectedSavedBindings = voiceId && !selectedPreset ? readiness[voiceId] : undefined
+  const presetEngineId =
+    selectedPreset?.engine && selectedPreset.engine !== 'pocket-tts' && selectedPreset.installed !== false
+      ? selectedPreset.engine
+      : null
+  // The pair Generate actually sends, so "Set current" saves exactly what was just heard.
+  const effectiveVoice = enginePreset || voiceId
+  const effectiveEngineId = presetEngineId ?? (engineChoice || null)
+  // Only a pack engine is named in the default. The active built-in engine is the server's
+  // fallback, so naming it would store an id the server does not treat as the active backend.
+  const defaultEngineId =
+    effectiveEngineId && engineCards.find((card) => card.id === effectiveEngineId)?.kind !== 'builtin'
+      ? effectiveEngineId
+      : null
+  const effectiveEngine = engineModels.find((m) => m.id === (presetEngineId ?? engineChoice))
 
 
   async function refreshVoices() {
@@ -167,14 +209,28 @@ export function SpeakPage() {
   }, [])
 
   useEffect(() => {
-    if (!isPocketBackend) {
-      setBuiltInVoices([])
-      if (voiceId?.startsWith('pocket:')) setVoiceId(null)
-      return
-    }
-    listBuiltInVoices()
-      .then(setBuiltInVoices)
-      .catch(() => setBuiltInVoices([]))
+    getApiDefault()
+      .then(setApiDefaultState)
+      .catch(() => setApiDefaultState(null))
+  }, [])
+
+  // The unified catalog (Pocket plus every provisioned engine's presets) and the per-voice
+  // engine readiness come straight from the existing routes; no engine is contacted.
+  const refreshReadiness = useCallback(() => {
+    listAllVoiceBindings()
+      .then(setReadiness)
+      .catch(() => setReadiness({}))
+  }, [])
+
+  useEffect(() => {
+    listCatalogVoices()
+      .then((catalog) => setCatalogVoices(catalog.voices))
+      .catch(() => setCatalogVoices([]))
+    refreshReadiness()
+  }, [refreshReadiness])
+
+  useEffect(() => {
+    if (!isPocketBackend && voiceId?.startsWith('pocket:')) setVoiceId(null)
   }, [isPocketBackend, setVoiceId, voiceId])
 
   // Cleanup poll timer on unmount
@@ -265,12 +321,70 @@ export function SpeakPage() {
     poll()
   }
 
+  // A pack engine is served beside the active one, so it skips the job queue and plays directly.
+  async function generateWithEngine(engineId: string, voice: string | null) {
+    const started = speakClock()
+    try {
+      // A cold engine answers 503 "engine_warming" while it loads; wait it out and say so.
+      const { response: res, waitedMs } = await fetchSpeech(
+        {
+          model: engineId,
+          input: text,
+          voice: voice ?? undefined,
+          response_format: 'wav',
+          ...(seedInput.trim() && effectiveEngine?.capabilities.seed ? { seed: Number(seedInput) } : {}),
+        },
+        (wait) => {
+          setEngineWait(wait.message)
+          refreshEngineStatus()
+        },
+      )
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body?.error?.message || body?.error || `HTTP ${res.status}`)
+      }
+      const seedHeader = res.headers.get('X-Seed')
+      if (seedHeader) setSpeakLastSeed(Number(seedHeader))
+      const blob = await res.blob()
+      const ctx = new AudioContext()
+      const seconds = (await ctx.decodeAudioData(await blob.arrayBuffer())).duration
+      void ctx.close()
+      // Time the request that produced the audio, not the one-off wait for the engine to warm up.
+      const elapsed = (speakClock() - started - waitedMs) / 1000
+      const existing = useAppStore.getState().speakAudioUrl
+      if (existing) URL.revokeObjectURL(existing)
+      setSpeakAudioBlob(blob)
+      setSpeakAudioUrl(URL.createObjectURL(blob))
+      setResultMeta({
+        jobId: null,
+        backend: engineId,
+        stylePreset: null,
+        appliedSteps: [],
+        rtf: seconds > 0 ? elapsed / seconds : null,
+        audioSeconds: seconds,
+      })
+      announce(`Generation complete. ${seconds.toFixed(1)}s of audio ready.`)
+    } catch (err) {
+      setSpeakError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setEngineWait(null)
+      setSpeakIsGenerating(false)
+    }
+  }
+
   async function handleGenerate() {
     if (!text.trim() || speakIsGenerating) return
     setSpeakIsGenerating(true)
     setSpeakError(null)
     setSpeakJobProgress(null)
     setResultMeta(null)
+    // Discovery may still be pending on a remount. An explicit choice must never fall
+    // through to the active-runtime job path just because its model card has not arrived.
+    const requestedEngine = presetEngineId ?? engineChoice
+    if (requestedEngine) {
+      await generateWithEngine(requestedEngine, enginePreset || voiceId)
+      return
+    }
     try {
       const seed = seedInput.trim() ? Number(seedInput) : undefined
       const { job_id } = await generateAsync({
@@ -300,15 +414,72 @@ export function SpeakPage() {
   }
 
   function handleVoiceChange(nextVoiceId: string | null) {
+    const changed = nextVoiceId !== voiceId
     setVoiceId(nextVoiceId)
-    const builtIn = builtInVoices.find((voice) => voice.voice_id === nextVoiceId)
-    if (builtIn?.language) setLanguage(builtIn.language)
+    const preset = catalogVoices.find((voice) => voice.voice_id === nextVoiceId)
+    const bindings = nextVoiceId ? readiness[nextVoiceId] : undefined
+    const packPresetEngine =
+      preset?.engine && preset.engine !== 'pocket-tts' && preset.installed !== false
+        ? preset.engine
+        : null
+    if (preset) {
+      // Engine is implied by the voice (§5.6): a pack preset serves from its own engine,
+      // Pocket presets and the runtime default from the active engine.
+      setEngineChoice(packPresetEngine ?? '')
+      setEnginePreset(packPresetEngine ? preset.voice_id : '')
+    } else if (changed && bindings) {
+      // A saved voice defaults to the active engine unless a pack engine has already prepared
+      // it — then that engine is implied (§5.6 "prepared engines"). Re-selecting the same
+      // voice keeps whatever the dropdown chose.
+      const prepared = bindings.find(
+        (binding) =>
+          binding.supported &&
+          binding.installed &&
+          binding.engine !== 'pocket-tts' &&
+          binding.status === 'ready',
+      )
+      setEngineChoice(prepared ? prepared.engine : '')
+      setEnginePreset('')
+    } else {
+      setEnginePreset('')
+    }
+    if (preset?.language) setLanguage(preset.language)
     // Bounce the runtime to actually load/cache this voice's clone state now, so the
     // next Generate click doesn't pay a cold-load or first-time voice-state-build cost.
     if (nextVoiceId && !nextVoiceId.startsWith('pocket:')) {
       warmVoice(nextVoiceId).catch(() => {
         // Best-effort; get_pocket_tts_voice_state re-resolves on generate anyway.
       })
+    }
+  }
+
+  // Choosing another engine while a pack preset from a different one is picked would leave two
+  // authorities for the engine; drop the stale voice so the dropdown wins.
+  function handleEngineChange(next: string) {
+    setEngineChoice(next)
+    if (presetEngineId && next !== presetEngineId) {
+      setVoiceId(null)
+      setEnginePreset('')
+    }
+  }
+
+  const packEngineIds = new Set(engineCards.filter((card) => card.kind !== 'builtin').map((card) => card.id))
+  const isCurrentApiDefault =
+    !!apiDefault &&
+    apiDefault.voice === effectiveVoice &&
+    (apiDefault.engine && packEngineIds.has(apiDefault.engine) ? apiDefault.engine : null) === defaultEngineId
+
+  async function makeApiDefault() {
+    if (!effectiveVoice) return
+    setSavingApiDefault(true)
+    setApiDefaultError(null)
+    try {
+      const record = await setApiDefault({ voice: effectiveVoice, engine: defaultEngineId })
+      setApiDefaultState(record)
+    } catch (err) {
+      setApiDefaultError(String((err as Error)?.message || err))
+    } finally {
+      setSavingApiDefault(false)
     }
   }
 
@@ -357,9 +528,82 @@ export function SpeakPage() {
         <div className="flex flex-wrap items-center gap-3">
           <VoiceSelector
             voices={voices}
-            builtInVoices={isPocketBackend ? builtInVoices : []}
+            catalogVoices={catalogVoices}
+            readiness={readiness}
             voiceId={voiceId}
             onChange={handleVoiceChange}
+            onOpen={refreshReadiness}
+          />
+
+          {selectedSavedBindings && (
+            <div className="flex flex-col gap-1">
+              <SavedVoiceEngineChoice
+                bindings={selectedSavedBindings}
+                engine={engineChoice}
+                onEngine={(id) => {
+                  setEngineChoice(id)
+                  setEnginePreset('')
+                }}
+              />
+              {(() => {
+                const preparing = selectedSavedBindings.find(
+                  (binding) => binding.engine === effectiveEngine?.id && binding.installed && binding.status === 'needs_preparation',
+                )
+                if (!preparing) return null
+                return (
+                  <span
+                    data-testid="speak-prepare-note"
+                    role="note"
+                    className="max-w-52 text-[10px] text-warning"
+                  >
+                    Generating will first prepare this voice for {shortEngineLabel(preparing)} — one-time.
+                    {preparing.needs_transcript ? ' You confirm the words first.' : ''}
+                  </span>
+                )
+              })()}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-1">
+            <span className="micro-label">API default</span>
+            <div className="flex items-center gap-2">
+              <span
+                className="max-w-44 truncate text-xs text-muted-foreground"
+                title={apiDefault?.voice}
+              >
+                {apiDefault ? apiDefault.display_name || apiDefault.voice : 'Runtime reference'}
+              </span>
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                disabled={!effectiveVoice || savingApiDefault || isCurrentApiDefault}
+                onClick={() => void makeApiDefault()}
+              >
+                {savingApiDefault ? (
+                  <Loader2 className="animate-spin" />
+                ) : isCurrentApiDefault ? (
+                  'Current'
+                ) : (
+                  'Set current'
+                )}
+              </Button>
+            </div>
+            {apiDefaultError && (
+              <span className="max-w-56 text-[10px] text-destructive">{apiDefaultError}</span>
+            )}
+          </div>
+
+          <SpeakEngineChoice
+            models={engineModels}
+            presets={enginePresets}
+            engine={engineChoice}
+            preset={enginePreset}
+            onEngine={handleEngineChange}
+            onPreset={setEnginePreset}
+            loadStatus={engineLoadStatus}
+            card={engineCards.find((card) => card.id === (presetEngineId ?? engineChoice)) ?? null}
+            waiting={engineWait}
           />
 
           <div className="flex flex-col gap-1">
@@ -388,7 +632,7 @@ export function SpeakPage() {
             <span id={polishLabelId} className="micro-label">
               Post-processing
             </span>
-            <Select value={stylePreset} onValueChange={(value) => setStylePreset(value as typeof stylePreset)}>
+            <Select disabled={Boolean(effectiveEngine)} value={stylePreset} onValueChange={(value) => setStylePreset(value as typeof stylePreset)}>
               <SelectTrigger className="w-44" aria-labelledby={polishLabelId}>
                 <SelectValue placeholder="Tone / polish" />
               </SelectTrigger>
@@ -414,6 +658,8 @@ export function SpeakPage() {
               inputMode="numeric"
               placeholder="Random seed"
               value={seedInput}
+              disabled={Boolean(effectiveEngine) && !effectiveEngine?.capabilities.seed}
+              title={effectiveEngine && !effectiveEngine.capabilities.seed ? `${effectiveEngine.label} doesn't support seeds` : undefined}
               onChange={(e) => setSeedInput(e.target.value)}
               className="h-9 w-32 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
             />

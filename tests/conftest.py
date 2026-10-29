@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import tempfile
-from typing import Any
 
 import os
 import sys

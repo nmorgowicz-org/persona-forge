@@ -10,7 +10,6 @@ path is covered by the Phase 0 spike evidence.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 import persona_forge.forced_alignment as fa
 

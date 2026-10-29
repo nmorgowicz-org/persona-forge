@@ -11,6 +11,7 @@
 //   experienceLevel            lib/experienceLevel.ts
 //   voiceLibrary.tab/layout    pages/VoiceLibraryPage.tsx
 //   voiceLibrary.analysisExpanded  pages/VoiceLibraryPage.tsx ('true'/'false', default true)
+//   engines.nudgeDismissed     components/SpeechEnginesCard.tsx ('true'/'false', default false)
 //   updates.dismissedVersion   lib/updateCheck.ts
 
 export type PrefKey =
@@ -19,6 +20,11 @@ export type PrefKey =
   | 'voiceLibrary.tab'
   | 'voiceLibrary.layout'
   | 'voiceLibrary.analysisExpanded'
+  | 'voiceFavorites'
+  | 'voiceCatalog.language'
+  | 'api.enforceLanguage'
+  | 'integrations.servableOnly'
+  | 'engines.nudgeDismissed'
   | 'updates.dismissedVersion'
 
 type Codec = {
@@ -33,7 +39,7 @@ type Codec = {
 // would reject with a 400 and lose the rest of the batch.
 const THEMES = ['violet', 'teal', 'amber', 'rose']
 const EXPERIENCE_LEVELS = ['guided', 'expert']
-const VOICE_LIBRARY_TABS = ['voices', 'segments']
+const VOICE_LIBRARY_TABS = ['voices', 'builtin', 'segments', 'compare']
 
 const isString = (value: unknown): value is string => typeof value === 'string'
 const oneOf =
@@ -64,6 +70,40 @@ const CODECS: Record<PrefKey, Codec> = {
   },
   'voiceLibrary.analysisExpanded': {
     storageKey: 'voice-library-analysis-expanded',
+    decode: (raw) => (raw === 'false' ? false : raw === 'true' ? true : undefined),
+    encode: (value) => String(Boolean(value)),
+  },
+  voiceFavorites: {
+    storageKey: 'voice-favorites',
+    decode: (raw) => {
+      if (!isString(raw)) return undefined
+      try {
+        const parsed = JSON.parse(raw)
+        return Array.isArray(parsed) ? parsed.filter(isString) : undefined
+      } catch {
+        return undefined
+      }
+    },
+    encode: (value) =>
+      JSON.stringify(Array.isArray(value) ? value.filter(isString) : []),
+  },
+  'voiceCatalog.language': {
+    storageKey: 'voice-catalog-language',
+    decode: oneOf(['en', 'all']),
+    encode: (value) => String(value),
+  },
+  'api.enforceLanguage': {
+    storageKey: 'api-enforce-language',
+    decode: (raw) => (raw === 'false' ? false : raw === 'true' ? true : undefined),
+    encode: (value) => String(Boolean(value)),
+  },
+  'integrations.servableOnly': {
+    storageKey: 'integrations-servable-only',
+    decode: (raw) => (raw === 'false' ? false : raw === 'true' ? true : undefined),
+    encode: (value) => String(Boolean(value)),
+  },
+  'engines.nudgeDismissed': {
+    storageKey: 'engines-nudge-dismissed',
     decode: (raw) => (raw === 'false' ? false : raw === 'true' ? true : undefined),
     encode: (value) => String(Boolean(value)),
   },

@@ -32,11 +32,9 @@ from persona_forge.audio_post import (
     plan_boundary_pauses,
 )
 from persona_forge.audio_style import (
-    analyze_reference,
     apply_style_preset,
     detect_pause_intervals,
     get_pause_targets,
-    PROSODY_MAPS,
 )
 from persona_forge.reference_analysis import calculate_quality_score
 
@@ -82,6 +80,173 @@ def clear_active_default_voice_id() -> None:
         ACTIVE_DEFAULT_FILE.unlink(missing_ok=True)
     except OSError:
         logger.warning("Could not clear active API default %s", ACTIVE_DEFAULT_FILE)
+
+
+# Structured no-voice API default (Phase A1 of docs/archive/multi-engine-speech/20261023-kokoro_phonon_kittentts2.md):
+# {"engine": str | None, "voice": str, "variant": str | None, "updated_at": float}. `voice` is
+# either a saved library id (``vd_...``) or a namespaced built-in preset: ``pocket:<name>`` or a
+# pack engine's ``kokoro:<voice>`` / ``phonon:<voice>`` / ``kitten2:<voice>`` / ``pocket-lite:<name>``.
+# ``engine`` is the active backend for Pocket presets and backend-served saved voices, and the pack
+# engine id for pack voices and for saved voices cloned on a pack engine. The legacy
+# ``.active_default`` file stays authoritative for the runtime hot-swap path and is kept in sync
+# for saved voices served by the active backend, so older code and rollbacks keep working unchanged.
+# This module checks the shape of the id only; whether the engine is installed and the voice exists
+# is the caller's check (it owns the engine registry).
+API_DEFAULT_FILE = VOICE_LIBRARY_DIR / ".api_default.json"
+_PRESET_VOICE_RE = re.compile(r"^pocket:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+# Pack voices keep upstream names, some with spaces ("Captain Silas Blackwater").
+_PACK_VOICE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}:[A-Za-z0-9](?:[A-Za-z0-9 _.-]{0,94}[A-Za-z0-9_.-])?$")
+
+
+def is_preset_voice_id(voice: str) -> bool:
+    """True for a namespaced built-in id (``pocket:vera``, ``kokoro:af_heart``); shape only."""
+    if voice.startswith("pocket:"):
+        return bool(_PRESET_VOICE_RE.match(voice))
+    return bool(_PACK_VOICE_RE.match(voice))
+
+
+def _write_text_atomic(path: Path, payload: str) -> None:
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+def get_api_default(*, keep_missing: bool = False) -> dict[str, Any] | None:
+    """Return the effective no-voice API default, or None.
+
+    Prefers the structured record, falling back to the legacy single-value file. A saved voice
+    that no longer exists is treated as unset rather than served as a stale reference. Presets
+    are validated by the caller (which owns the built-in catalog). With ``keep_missing`` a vanished
+    saved voice is still returned so the caller can report it (a default on a pack engine must
+    surface a repair instead of silently falling back to another speaker).
+    """
+    record: dict[str, Any] | None = None
+    try:
+        parsed = json.loads(API_DEFAULT_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        parsed = None
+    if isinstance(parsed, dict):
+        voice = parsed.get("voice")
+        if isinstance(voice, str) and voice.strip():
+            record = {
+                "engine": (parsed.get("engine") or None),
+                "voice": voice.strip(),
+                "variant": (parsed.get("variant") or None),
+                "updated_at": parsed.get("updated_at"),
+                "source": "record",
+            }
+    if record is None:
+        legacy = get_active_default_voice_id()
+        if legacy:
+            record = {
+                "engine": None,
+                "voice": legacy,
+                "variant": None,
+                "updated_at": None,
+                "source": "legacy",
+            }
+    if record is None:
+        return None
+    voice = record["voice"]
+    if not is_preset_voice_id(voice) and get_voice(voice) is None and not keep_missing:
+        return None
+    return record
+
+
+def _read_text_or_none(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _restore_text(path: Path, payload: str | None) -> None:
+    if payload is None:
+        path.unlink(missing_ok=True)
+    else:
+        _write_text_atomic(path, payload)
+
+
+class ApiDefaultError(ValueError):
+    """The requested API default is not valid; the message is safe to show."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.public_message = message
+
+
+def set_api_default(
+    engine: str | None,
+    voice: str,
+    variant: str | None = None,
+    *,
+    mirror_legacy: bool = True,
+) -> dict[str, Any]:
+    """Persist the structured API default and mirror saved voices to the legacy file.
+
+    The change is all-or-nothing: if either file cannot be written, both are put back as they
+    were before the call and the error is raised, so a half-applied default never survives.
+    ``mirror_legacy=False`` is for a saved voice served by a pack engine: the legacy file drives
+    the *active backend's* runtime voice, which that default must not touch.
+    """
+    voice = (voice or "").strip()
+    if not voice:
+        raise ApiDefaultError("voice is required")
+    is_preset = is_preset_voice_id(voice)
+    if ":" in voice and not is_preset:
+        raise ApiDefaultError(f"invalid preset voice: {voice!r}")
+    if not is_preset and not _is_valid_voice_id(voice):
+        raise ApiDefaultError(f"invalid voice_id: {voice!r}")
+
+    record = {
+        "engine": (engine or "").strip() or None,
+        "voice": voice,
+        "variant": (variant or "").strip() or None,
+        "updated_at": time.time(),
+    }
+    before_record = _read_text_or_none(API_DEFAULT_FILE)
+    before_legacy = _read_text_or_none(ACTIVE_DEFAULT_FILE)
+    try:
+        _write_text_atomic(API_DEFAULT_FILE, json.dumps(record, sort_keys=True))
+        if is_preset or not mirror_legacy:
+            # Presets have no library record; the runtime falls back to its mounted default, and
+            # request-time resolution passes the preset explicitly.
+            clear_active_default_voice_id()
+        else:
+            set_active_default_voice_id(voice)
+    except Exception:
+        for path, payload in ((API_DEFAULT_FILE, before_record), (ACTIVE_DEFAULT_FILE, before_legacy)):
+            try:
+                _restore_text(path, payload)
+            except OSError:
+                logger.warning("Could not restore %s after a failed API default change", path)
+        raise
+    return {**record, "source": "record"}
+
+
+def clear_api_default() -> None:
+    """Clear both the structured record and the legacy default."""
+    try:
+        API_DEFAULT_FILE.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Could not clear structured API default %s", API_DEFAULT_FILE)
+    clear_active_default_voice_id()
+
+
+def clear_api_default_for_voice(voice_id: str) -> bool:
+    """Clear the default when it points at ``voice_id``; return whether it was cleared."""
+    record = get_api_default()
+    if record is None or record.get("voice") != voice_id:
+        return False
+    clear_api_default()
+    return True
 
 
 def new_voice_id() -> str:
@@ -286,7 +451,7 @@ def get_alignment_directed_wav(
             return None
 
     identity = _fa.cache_identity(_fa.sha256_bytes(wav_bytes), _fa.sha256_text(transcript))
-    cached = meta.get("alignment")
+    cached = meta.get("alignment") or {}
     if _fa.identity_matches(cached, identity):
         boundaries = list(cached.get("boundaries", []))
     else:
@@ -440,7 +605,7 @@ def create_prosody_variant(
     if result is None:
         return None
 
-    adjusted, sr = result
+    adjusted, sr = result[0], result[1]
 
     slug = _slugify_variant(style_preset, pace_multiplier, voice_id)
     variant_filename = f"prosody_{slug}.wav"
@@ -501,7 +666,7 @@ def preview_prosody_variant(
     if result is None:
         return None
 
-    adjusted, sr = result
+    adjusted, sr = result[0], result[1]
     buf = io.BytesIO()
     sf.write(buf, adjusted, sr, format="WAV", subtype="PCM_16")
     return buf.getvalue()

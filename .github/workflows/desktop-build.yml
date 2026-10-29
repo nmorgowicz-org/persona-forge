@@ -64,7 +64,7 @@ concurrency:
 env:
   UV_VERSION: "0.12.9"
   PYTHON_VERSION: "3.13"
-  NODE_VERSION: "24"
+  NODE_VERSION: "26"
   RUST_VERSION: "1.98"
   TAURI_CLI_VERSION: "2.11.5"
 
@@ -81,6 +81,10 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+      - name: Ensure Node 26 Linux runtime prerequisite
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/ci_node26_prerequisites.sh
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}

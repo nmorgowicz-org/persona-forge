@@ -48,6 +48,7 @@ import { Separator } from '@/components/ui/separator'
 import { SwapBanner } from '@/components/SwapBanner'
 import { HealthStatusBanner } from '@/components/HealthStatusBanner'
 import { StartupState } from '@/components/StartupState'
+import { EngineStatusChip } from '@/components/EngineStatusChip'
 import { Announcer } from '@/components/ui/announcer'
 import { UpdateAvailableBanner } from '@/components/UpdateAvailableBanner'
 import { getRuntimeConfig, getHealth } from '@/lib/api'
@@ -516,9 +517,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/80 bg-background/80 px-4 backdrop-blur-sm">
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-5" />
-          <div className="flex flex-col">
-            <span className="text-sm font-medium leading-none">{active?.label}</span>
-            <span className="text-[11px] text-muted-foreground">{active?.description}</span>
+          <div className="flex min-w-0 flex-col">
+            <span className="truncate text-sm font-medium leading-none">{active?.label}</span>
+            <span className="truncate text-[11px] text-muted-foreground">{active?.description}</span>
           </div>
           <button
             type="button"
@@ -532,6 +533,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="hidden sm:inline">Search</span>
             <kbd className="hidden rounded border border-border bg-muted px-1 font-mono text-[10px] sm:inline">⌘K</kbd>
           </button>
+          {/* Plan §5.1: the global engine status chip — active engine, state, device, on every page. */}
+          <EngineStatusChip />
         </header>
         <UpdateAvailableBanner />
         <HealthStatusBanner />

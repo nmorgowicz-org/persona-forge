@@ -124,6 +124,8 @@ export interface VoiceMeta {
   description: string
   sample_text: string
   language: string
+  /** Optional persisted code used by API language enforcement; missing means English. */
+  language_code?: string | null
   seed?: number | null
   selections?: unknown
   created_at: number
@@ -159,7 +161,9 @@ export interface VoiceMeta {
 export interface BuiltInVoiceMeta {
   voice_id: string
   builtin_voice: string
-  backend: 'pocket_tts'
+  backend: string
+  engine?: string
+  engine_label?: string
   display_name: string
   source: string
   license: string
@@ -168,8 +172,34 @@ export interface BuiltInVoiceMeta {
   category: 'conversation' | 'reading' | 'multilingual' | 'other' | string
   note: string
   prompt: string
-  requires_backend: 'pocket_tts'
+  requires_backend: string | null
+  /** False when the voice comes from the bundled catalog of an engine that is not installed. */
+  installed?: boolean
+  gender?: 'female' | 'male' | null
+  /** `estimated` is a pitch guess (Kitten ships no gender); show it as an estimate. */
+  gender_source?: 'upstream' | 'name' | 'estimated' | null
+  accent?: string | null
+  age?: string | null
+  /** True for a prepared voice the user imported (removable; carries provenance). */
+  imported?: boolean
+  provenance?: {
+    source_filename: string
+    sha256: string
+    size: number
+    imported_at: string
+    engine_revision: string
+  } | null
 }
+
+export interface BuiltInEngineSummary {
+  id: string
+  label: string
+  installed: boolean
+  voices: number
+  /** Whether this engine can import prepared voice files (Phonon today). */
+  import_prepared_voice?: boolean
+}
+
 
 export interface GenerateResult {
   blob: Blob
@@ -384,6 +414,443 @@ export async function listBuiltInVoices(): Promise<BuiltInVoiceMeta[]> {
   if (!res.ok) throw new Error(await readError(res))
   const body = await res.json()
   return body.voices ?? body
+}
+
+/** Pocket's voices plus every installed pack engine's presets, and which engines are installed. */
+export async function listCatalogVoices(): Promise<{
+  voices: BuiltInVoiceMeta[]
+  engines: BuiltInEngineSummary[]
+}> {
+  const res = await fetch('/voices/built-in?engines=all')
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  return { voices: body.voices ?? [], engines: body.engines ?? [] }
+}
+
+/** Why the API default cannot be served right now, with the repair to make (plan §4.5). */
+export interface ApiDefaultProblem {
+  code: 'engine_not_installed' | 'voice_missing' | string
+  engine: string
+  message: string
+  repair: string
+}
+
+export interface ApiDefaultRecord {
+  engine: string | null
+  /** Human name of `engine` (for a pack engine, e.g. "Kokoro 82M"). */
+  engine_label?: string | null
+  voice: string
+  variant: string | null
+  kind: 'library' | 'preset'
+  display_name: string | null
+  language: string | null
+  language_code: string | null
+  servable: boolean
+  /** Set when the default's engine was removed or its voice vanished; requests get an error until repaired. */
+  problem?: ApiDefaultProblem | null
+  source?: 'record' | 'legacy'
+}
+
+export async function getApiDefault(): Promise<ApiDefaultRecord | null> {
+  const res = await fetch('/api-default')
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  return (body.default as ApiDefaultRecord | null) ?? null
+}
+
+export async function setApiDefault(params: {
+  voice: string
+  engine?: string | null
+  variant?: string | null
+}): Promise<ApiDefaultRecord | null> {
+  const res = await fetch('/api-default', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  return (body.default as ApiDefaultRecord | null) ?? null
+}
+
+export interface EngineCapabilities {
+  clone: boolean
+  presets: boolean
+  import_prepared_voice: boolean
+  streaming: 'frame' | 'sentence' | 'none' | string
+  languages: string[]
+  speed: boolean
+  expression_tags: boolean
+  seed: boolean
+  instructions: boolean
+}
+
+export interface EngineState {
+  status: 'built-in' | 'not-installed' | 'installed' | 'verified' | 'invalid'
+  artifacts_present: number
+  artifacts_total: number
+  disk_bytes: number
+  verified: boolean
+  errors: string[]
+}
+
+export interface EnginePackArtifact {
+  path: string
+  sha256: string
+  size: number
+  source: string | null
+}
+
+export interface EngineInstallJob {
+  state: 'idle' | 'running' | 'done' | 'error'
+  step: string
+  step_index: number
+  step_count: number
+  error: string | null
+  /** Set when the user can fix it: a missing or rejected Hugging Face token, unaccepted terms, or no network. */
+  error_code?: 'needs_token' | 'terms_not_accepted' | 'token_rejected' | 'network' | null
+  /** The page that fixes `error_code` (the gated repository, or the token settings page). */
+  error_link?: string | null
+}
+
+/** Whether a Hugging Face token is available; the token itself is never sent to the browser. */
+export interface HfTokenStatus {
+  set: boolean
+  source: 'stored' | 'environment' | 'login' | null
+  can_clear: boolean
+}
+
+export interface EngineHfGate {
+  repo: string
+  url: string
+  token: HfTokenStatus
+}
+
+export interface EngineNudge {
+  kind: 'gpu' | 'apple' | 'cpu'
+  engines: string[]
+  text: string
+  basis: string
+}
+
+export interface FastModeIssue {
+  code: string
+  message: string
+  action: string
+  help_url?: string | null
+  detail?: string | null
+}
+
+export interface EngineLoadStatus {
+  /** idle -> loading (worker starting) -> warming (first call compiling) -> ready. `ready` is the plan's "active". */
+  state?: 'idle' | 'loading' | 'warming' | 'ready' | 'error'
+  error?: string | null
+  /** Seconds spent in the current loading or warming phase; null otherwise. */
+  elapsed_s?: number | null
+  /** Expected length of the current phase, only where it has been measured. */
+  estimated_s?: number | null
+  mode?: 'compiled' | 'eager' | 'mlx' | null
+  fast_mode_issue?: FastModeIssue | null
+}
+
+export interface EngineBenchmark {
+  cold_seconds: number
+  rtf_median: number | null
+  rtf_worst: number | null
+  warm_runs: number
+  load_average: number | null
+  voice: string
+  at: string
+}
+
+/** One short synthesis timed right after the pack installed; `slow` means slower than real time. */
+export interface EngineInstallCheck {
+  outcome: 'ok' | 'slow' | 'unavailable'
+  rtf: number | null
+  compute_seconds: number | null
+  audio_seconds: number | null
+  device: string | null
+  mode: string | null
+  warmup_seconds: number | null
+  load_average: number | null
+  note: string | null
+  error: string | null
+  at: string
+}
+
+export interface EngineCard {
+  id: string
+  label: string
+  description: string
+  kind: 'builtin' | 'pack' | 'builtin+pack'
+  version: string | null
+  runtime: string
+  source: string | null
+  license: string | null
+  active: boolean
+  /** True when this engine serves the API default; it cannot be removed until the default changes. */
+  api_default?: boolean
+  capabilities: Partial<EngineCapabilities>
+  state: EngineState
+  requirements: string[]
+  install_job?: EngineInstallJob
+  load_status?: EngineLoadStatus
+  hardware_fit?: { level: 'recommended' | 'ok' | 'unsupported' | 'unknown'; text: string }
+  benchmark?: EngineBenchmark | null
+  install_check?: EngineInstallCheck | null
+  /** Present for engines whose download is gated on Hugging Face (today: Pocket Lite). */
+  hf_gate?: EngineHfGate
+  pack: {
+    id: string
+    version: string
+    artifacts: EnginePackArtifact[]
+    notes: string | null
+  } | null
+}
+
+export async function listEnginesWithNudge(): Promise<{ engines: EngineCard[]; nudge: EngineNudge | null }> {
+  const res = await fetch('/engines')
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  return { engines: body.engines ?? [], nudge: body.nudge ?? null }
+}
+
+export async function listEngines(): Promise<EngineCard[]> {
+  return (await listEnginesWithNudge()).engines
+}
+
+export interface EngineLogTail {
+  lines: string[]
+  dropped: number
+  updated_at: number | null
+  source: 'memory' | 'file' | 'none'
+}
+
+export interface EngineLogs {
+  install: EngineLogTail
+  worker: EngineLogTail
+  max_lines: number
+}
+
+export interface EngineWeight {
+  kind: 'huggingface' | 'file'
+  name: string
+  revision: string | null
+  size_bytes: number
+  sha256: string | null
+  present: boolean
+}
+
+export interface EngineDetails {
+  id: string
+  label: string
+  installed: boolean
+  engine: {
+    pack_id: string | null
+    pack_version: string | null
+    revision: string | null
+    provisioner: string | null
+    manifest_sha256: string | null
+    source: string | null
+    license: string | null
+  }
+  packages: { name: string; pinned: string; installed: string | null; where: string }[]
+  other_pins: string[]
+  weights: EngineWeight[]
+  artifacts: EnginePackArtifact[]
+  runtime: {
+    variant: string | null
+    device: string | null
+    mode: string | null
+    load_state: string | null
+    hardware_fit: { level: string; text: string } | null
+  }
+  install_check: EngineInstallCheck | null
+  idle_unload: { seconds: number | null; source: string | null; manifest_seconds: number | null }
+  disk_bytes: number | null
+  install_job: EngineInstallJob | null
+  hf_gate: EngineHfGate | null
+  logs: EngineLogs
+}
+
+export async function getEngineDetails(engineId: string): Promise<EngineDetails> {
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/details`)
+  if (!res.ok) throw new Error(await readError(res))
+  return (await res.json()).details
+}
+
+export async function getEngineLogs(engineId: string): Promise<EngineLogs> {
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/logs`)
+  if (!res.ok) throw new Error(await readError(res))
+  return (await res.json()).logs
+}
+
+export async function saveHfToken(token: string): Promise<HfTokenStatus> {
+  const res = await fetch('/engines/hf-token', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function clearHfToken(): Promise<HfTokenStatus> {
+  const res = await fetch('/engines/hf-token', { method: 'DELETE' })
+  if (!res.ok) throw new Error(await readError(res))
+  return res.json()
+}
+
+export async function verifyEngine(engineId: string): Promise<EngineCard> {
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/verify`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  return body.engine
+}
+
+/** Install a pack. Provisioned packs run in the background and return no card (poll `listEngines`). */
+export async function installEngine(engineId: string): Promise<EngineCard | null> {
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/install`, {
+    method: 'POST',
+  })
+  if (!res.ok && res.status !== 409) throw new Error(await readError(res))
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok && !body?.job) throw new Error(body?.error || `Install failed (${res.status})`)
+  return body.engine ?? null
+}
+
+export async function recheckEngine(engineId: string): Promise<void> {
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/recheck`, {
+    method: 'POST',
+  })
+  if (!res.ok && res.status !== 409) throw new Error(await readError(res))
+}
+
+export async function removeEngine(engineId: string): Promise<void> {
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/remove`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error(await readError(res))
+}
+
+// -- Saved voice x engine bindings (My voices "Engines" row) ------------------------------------------
+
+export type BindingStatus = 'ready' | 'needs_preparation' | 'preparing' | 'failed' | 'unsupported'
+
+export interface VoiceEngineBinding {
+  engine: string
+  label: string
+  status: BindingStatus
+  /** False for an engine that cannot clone from a recording (Phonon, Kokoro). */
+  supported: boolean
+  installed: boolean
+  needs_transcript: boolean
+  blocker: 'engine_not_installed' | 'transcript_missing' | 'transcript_unreviewed' | null
+  reason: string | null
+  error: string | null
+  prepared_at: number | null
+  can_prepare: boolean
+}
+
+export async function getVoiceEngineBindings(voiceId: string): Promise<VoiceEngineBinding[]> {
+  const res = await fetch(`/voices/${encodeURIComponent(voiceId)}/engines`)
+  if (!res.ok) throw new Error(await readError(res))
+  return (await res.json()).engines ?? []
+}
+
+/** Binding status for every saved voice in one call (GET /voices/engines), keyed by voice_id. */
+export async function listAllVoiceBindings(): Promise<Record<string, VoiceEngineBinding[]>> {
+  const res = await fetch('/voices/engines')
+  if (!res.ok) throw new Error(await readError(res))
+  return (await res.json()).voices ?? {}
+}
+
+/** The server wants the transcript confirmed or typed before an engine that clones with it can prepare. */
+export class TranscriptReviewRequired extends Error {
+  reason: 'missing' | 'unreviewed'
+  transcript: string
+  constructor(message: string, reason: 'missing' | 'unreviewed', transcript: string) {
+    super(message)
+    this.name = 'TranscriptReviewRequired'
+    this.reason = reason
+    this.transcript = transcript
+  }
+}
+
+/**
+ * Start preparing a saved voice on an engine. Resolves with the binding (`preparing`); poll
+ * `getVoiceEngineBindings`. Rejects with `TranscriptReviewRequired` when the words need review.
+ */
+export async function prepareVoiceOnEngine(
+  voiceId: string,
+  engineId: string,
+  review?: { transcript?: string; transcriptConfirmed?: boolean },
+): Promise<VoiceEngineBinding> {
+  const res = await fetch(
+    `/voices/${encodeURIComponent(voiceId)}/engines/${encodeURIComponent(engineId)}/prepare`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...(review?.transcript !== undefined ? { transcript: review.transcript } : {}),
+        ...(review?.transcriptConfirmed ? { transcript_confirmed: true } : {}),
+      }),
+    },
+  )
+  const body = await res.json().catch(() => ({}))
+  if (res.status === 409 && body?.code === 'transcript_review') {
+    throw new TranscriptReviewRequired(body.error, body.reason, body.transcript ?? '')
+  }
+  if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`)
+  return body.binding
+}
+
+export async function cancelVoicePreparation(voiceId: string, engineId: string): Promise<void> {
+  const res = await fetch(
+    `/voices/${encodeURIComponent(voiceId)}/engines/${encodeURIComponent(engineId)}/prepare`,
+    { method: 'DELETE' },
+  )
+  if (!res.ok) throw new Error(await readError(res))
+}
+
+// -- Imported prepared voices (Built-in -> Add imported voice) -----------------------------------------
+
+export interface ImportedVoiceRecord {
+  engine: string
+  slug: string
+  voice_id: string
+  display_name: string
+  source_filename: string
+  sha256: string
+  size: number
+  imported_at: string
+  engine_revision: string
+}
+
+export async function importPreparedVoice(
+  engineId: string,
+  file: File,
+  name: string,
+): Promise<ImportedVoiceRecord> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('name', name)
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/imported-voices`, {
+    method: 'POST',
+    body: form,
+  })
+  if (!res.ok) throw new Error(await readError(res))
+  return (await res.json()).voice
+}
+
+export async function removeImportedVoice(engineId: string, slug: string): Promise<void> {
+  const res = await fetch(
+    `/engines/${encodeURIComponent(engineId)}/imported-voices/${encodeURIComponent(slug)}`,
+    { method: 'DELETE' },
+  )
+  if (!res.ok) throw new Error(await readError(res))
 }
 
 export async function getVoice(voiceId: string): Promise<VoiceMeta> {
@@ -1408,4 +1875,12 @@ export async function setSegmentProject(
   })
   if (!res.ok) throw new Error(await readError(res))
   return res.json()
+}
+
+/** Time one cold and three warm requests on this machine and save the result. */
+export async function benchmarkEngine(engineId: string): Promise<EngineBenchmark> {
+  const res = await fetch(`/engines/${encodeURIComponent(engineId)}/benchmark`, { method: 'POST' })
+  if (!res.ok) throw new Error(await readError(res))
+  const body = await res.json()
+  return body.benchmark
 }

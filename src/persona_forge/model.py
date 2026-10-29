@@ -108,7 +108,7 @@ BASE_PROFILE = ModelProfile(
 )
 
 _voice_design_max_speech_seconds = os.getenv("VOICE_DESIGN_MAX_SPEECH_SECONDS", "").strip()
-_voice_design_preset = get_voice_design_preset(
+_voice_design_preset: dict[str, Any] = get_voice_design_preset(
     os.getenv("VOICE_DESIGN_MODEL_SIZE"),
     float(_voice_design_max_speech_seconds) if _voice_design_max_speech_seconds else None,
 )
@@ -128,12 +128,12 @@ VOICE_DESIGN_PROFILE = ModelProfile(
     build_voice_clone_prompt=False,
 )
 
-model = None
+model: Any = None  # TTSModel, a Qwen model or an OpenVINO wrapper depending on the backend
 voice_clone_prompt = None
 active_profile: ModelProfile | None = None
 
 ov_metadata = None
-ov_config = None
+ov_config: dict[str, Any] | None = None
 ov_runtime = None
 
 executor = ThreadPoolExecutor(max_workers=1)
@@ -261,7 +261,7 @@ def _validate_ov_metadata(model_dir: str, model_repo: str, revision: str | None)
         raise RuntimeError(f"OV_MODEL_DIR missing metadata.json: {meta_path}")
 
     ov_metadata = json.loads(meta_path.read_text(encoding="utf-8"))
-    from persona_forge.openvino.runtime_config import get_ov_config, resolve_inference_threads
+    from persona_forge.openvino.runtime_config import get_ov_config
     ov_config = get_ov_config()
 
     # Validate metadata matches loaded model
@@ -510,6 +510,7 @@ def load_model(profile: ModelProfile | None = None):
         )
 
         model = pocket_tts_runtime.pocket_tts_model
+        assert model is not None, "Pocket TTS runtime did not load a model"
 
         voice_clone_prompt = pocket_tts_runtime.build_default_voice_state(
             model,
@@ -940,7 +941,7 @@ def health_state() -> dict[str, Any]:
                     "compression": ov_metadata.get("compression"),
                     "int8_config": ov_metadata.get("int8_config"),
                     "config": ov_config,
-                    "cache_dir": ov_config.get("CACHE_DIR"),
+                    "cache_dir": (ov_config or {}).get("CACHE_DIR"),
                     "runtime_wired": ov_runtime is not None,
                     "active_compression": (
                         ov_runtime.compression if ov_runtime is not None else None
@@ -1007,7 +1008,7 @@ def health_state() -> dict[str, Any]:
                 )
             base["pocket_tts"]["message"] = message
 
-    def _json_safe(obj):
+    def _json_safe(obj: Any) -> Any:
         if isinstance(obj, Path):
             return obj.as_posix()
         if isinstance(obj, dict):
@@ -1975,7 +1976,7 @@ def _run_generate(
         job.postprocess_applied = False
         job.metadata["prosody_repair"] = _initial_generation_repair_metadata(prosody_repair)
         from persona_forge import voice_library
-        meta = voice_library.get_voice(effective_voice_id)
+        meta = voice_library.get_voice(effective_voice_id) if effective_voice_id else None
         if meta:
             job.voice_family_id = meta.get("family_id")
             job.variant_kind = meta.get("variant_kind")
@@ -2144,8 +2145,8 @@ def _run_generate(
             _bf16_auto_fallback = os.environ.get("TTS_DIAG_BF16_AUTO_FALLBACK", "").lower() in ("1", "true")
             if _bf16_auto_fallback and TTS_BACKEND == "pytorch" and TORCH_DTYPE_NAME == "bfloat16":
                 print(
-                    f"[diag] pytorch+bfloat16 timed out; TTS_DIAG_BF16_AUTO_FALLBACK is set, "
-                    f"switching to float32 to avoid future hangs",
+                    "[diag] pytorch+bfloat16 timed out; TTS_DIAG_BF16_AUTO_FALLBACK is set, "
+                    "switching to float32 to avoid future hangs",
                     flush=True,
                 )
                 try:
@@ -2157,8 +2158,8 @@ def _run_generate(
                     print(f"[diag] Failed to switch to float32 on timeout: {ex}", flush=True)
             elif not _bf16_auto_fallback and TTS_BACKEND == "pytorch" and TORCH_DTYPE_NAME == "bfloat16":
                 print(
-                    f"[diag] pytorch+bfloat16 timed out; auto-fallback to float32 is disabled "
-                    f"(set TTS_DIAG_BF16_AUTO_FALLBACK=1 to enable).",
+                    "[diag] pytorch+bfloat16 timed out; auto-fallback to float32 is disabled "
+                    "(set TTS_DIAG_BF16_AUTO_FALLBACK=1 to enable).",
                     flush=True,
                 )
 

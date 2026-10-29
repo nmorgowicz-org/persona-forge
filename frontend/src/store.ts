@@ -117,12 +117,20 @@ interface StoreState {
   loadingMessage: string | null
   healthStatus: string | null
   healthError: string | null
+  /** The device the active backend runs on, from /health (cpu / mps / cuda / xpu). Null until
+   * /health reports one; the shell's engine status chip shows it. */
+  healthDevice: string | null
   /** True once /health has answered at least once -- a 503 counts. Without it, "the service
    * has never started" and "nobody has asked yet" are the same state, and the cold-boot
    * splash would flash on every ordinary page load. */
   healthChecked: boolean
   text: string
   voiceId: string | null
+  /** In-session Speak engine/preset choices; shared with Integrations, never API defaults. */
+  speakEngineChoice: string
+  speakEnginePreset: string
+  setSpeakEngineChoice: (engine: string) => void
+  setSpeakEnginePreset: (preset: string) => void
   voices: VoiceMeta[]
    speakAudioUrl: string | null
    speakIsGenerating: boolean
@@ -169,6 +177,11 @@ interface StoreState {
   announcedMessage: string | null
   announce: (text: string) => void
   clearAnnouncedMessage: () => void
+
+  // Engine id the Built-in voices tab should filter to the next time it opens (set by an engine
+  // card's "Use as API default"); the tab reads it once and clears it.
+  pendingBuiltinEngine: string | null
+  setPendingBuiltinEngine: (engineId: string | null) => void
 
   setPage: (page: Page) => void
   setTheme: (theme: Theme) => void
@@ -384,9 +397,14 @@ export const useAppStore = create<StoreState>((set) => ({
   loadingMessage: null,
   healthStatus: null,
   healthError: null,
+  healthDevice: null,
   healthChecked: false,
   text: '',
   voiceId: null,
+  speakEngineChoice: '',
+  speakEnginePreset: '',
+  setSpeakEngineChoice: (speakEngineChoice) => set({ speakEngineChoice }),
+  setSpeakEnginePreset: (speakEnginePreset) => set({ speakEnginePreset }),
    voices: [],
    speakAudioUrl: null,
    speakIsGenerating: false,
@@ -409,6 +427,9 @@ export const useAppStore = create<StoreState>((set) => ({
     voiceLibraryFocusVoiceId: null,
     announcedMessage: null,
 
+    pendingBuiltinEngine: null,
+    setPendingBuiltinEngine: (engineId) => set({ pendingBuiltinEngine: engineId }),
+
     setPage: (page) => set({ page }),
   setTheme: (theme) => {
     applyTheme(theme)
@@ -424,7 +445,9 @@ export const useAppStore = create<StoreState>((set) => ({
   setServiceStarted: (serviceStarted) => set({ serviceStarted }),
   setLoadingMessage: (loadingMessage) => set({ loadingMessage }),
   setText: (text) => set({ text }),
-  setVoiceId: (voiceId) => set({ voiceId }),
+  setVoiceId: (voiceId) => set((state) => state.voiceId === voiceId
+    ? { voiceId }
+    : { voiceId, speakEngineChoice: '', speakEnginePreset: '' }),
   setVoices: (voices) => set({ voices }),
   setSpeakAudioUrl: (url) => set({ speakAudioUrl: url }),
   setSpeakIsGenerating: (v) => set({ speakIsGenerating: v }),
@@ -775,6 +798,9 @@ const PROGRESS_POLL_MS = 700
       }
       if ((data.error || null) !== store.healthError) {
         useAppStore.setState({ healthError: data.error || null })
+      }
+      if ((data.device || null) !== store.healthDevice) {
+        useAppStore.setState({ healthDevice: data.device || null })
       }
       if (data.swap_in_progress !== store.swapInProgress) {
         useAppStore.setState({ swapInProgress: Boolean(data.swap_in_progress) })

@@ -3,6 +3,17 @@
 `node tests/ui/capture/index.mjs` drives a real (or fake) instance of the app with Puppeteer and
 writes screenshots/GIFs to `docs/screenshots/artifacts/<feature>/`.
 
+## Integrations regression tests
+
+After building `frontend/dist`, run `cd tests/ui && npm run test:ci` for the sequential
+Playwright suite against the isolated fake-model server. This runner first runs
+`npm run test:helpers`: Node's test runner executes the real TypeScript servability helpers
+(Node 26 native stripping) and generated curl/Python/JavaScript snippets. Snippet tests use
+`sh` and `python3`, substituting only the HTTP/SDK boundary, so no model or service is needed.
+They exercise origin and `/v1`-suffixed client URLs, quoting, correct engine selection, and
+readiness races without warm-up. The Playwright Integrations fixture uses all 115 bundled
+Kitten preset records; real-pack browser evidence is recorded separately in plan §5.7.
+
 ## Quick start
 
 ```bash

@@ -221,6 +221,7 @@ class TestNormalizeReference:
         after = voice_library.get_voice_wav_bytes(saved["voice_id"])
 
         assert updated is not None
+        assert after is not None
         assert after != before
         wav, sr = sf.read(io.BytesIO(after), dtype="float32")
         assert np.max(np.abs(wav)) > 0.05
@@ -234,7 +235,9 @@ class TestNormalizeReference:
         )
         original = voice_library.get_voice_wav_bytes(saved["voice_id"])
         voice_library.normalize_reference(saved["voice_id"])
-        assert voice_library.get_voice(saved["voice_id"])["undo_available"] is True
+        normalized_meta = voice_library.get_voice(saved["voice_id"])
+        assert normalized_meta is not None
+        assert normalized_meta["undo_available"] is True
 
         restored = voice_library.undo_reference_edit(saved["voice_id"])
 
@@ -252,6 +255,8 @@ class TestTrimReferenceSilence:
         updated = voice_library.trim_reference_silence(saved["voice_id"])
         after = voice_library.get_voice_wav_bytes(saved["voice_id"])
 
+        assert before is not None
+        assert after is not None
         before_wav, _ = sf.read(io.BytesIO(before), dtype="float32")
         after_wav, _ = sf.read(io.BytesIO(after), dtype="float32")
 
@@ -274,7 +279,9 @@ class TestAdjustReferencePauses:
             sample_text="hello there friend",
             language="English",
         )
-        before, sr = sf.read(io.BytesIO(voice_library.get_voice_wav_bytes(saved["voice_id"])), dtype="float32")
+        before_bytes = voice_library.get_voice_wav_bytes(saved["voice_id"])
+        assert before_bytes is not None
+        before, sr = sf.read(io.BytesIO(before_bytes), dtype="float32")
         before_gap = next(
             gap for gap in voice_library.detect_pause_intervals(before, sr)
             if gap[0] > 0 and gap[1] < before.size / sr
@@ -283,7 +290,9 @@ class TestAdjustReferencePauses:
         updated = voice_library.adjust_reference_pauses(
             saved["voice_id"], style_preset="Neutral", pace_multiplier=pace_multiplier
         )
-        after, _ = sf.read(io.BytesIO(voice_library.get_voice_wav_bytes(saved["voice_id"])), dtype="float32")
+        after_bytes = voice_library.get_voice_wav_bytes(saved["voice_id"])
+        assert after_bytes is not None
+        after, _ = sf.read(io.BytesIO(after_bytes), dtype="float32")
 
         assert updated is not None
         after_gap = next(
@@ -454,14 +463,18 @@ class TestSetDefaultVariant:
         assert second is not None
 
         updated_second = voice_library.set_default_variant(second["voice_id"])
+        assert updated_second is not None
         assert updated_second["is_default"] is True
 
         refreshed_first = voice_library.get_voice(first["voice_id"])
+        assert refreshed_first is not None
         assert refreshed_first.get("is_default", False) is False
 
         updated_first = voice_library.set_default_variant(first["voice_id"])
+        assert updated_first is not None
         assert updated_first["is_default"] is True
         refreshed_second = voice_library.get_voice(second["voice_id"])
+        assert refreshed_second is not None
         assert refreshed_second.get("is_default", False) is False
 
     def test_voice_without_family_id_is_its_own_family(self):
@@ -469,6 +482,7 @@ class TestSetDefaultVariant:
             b"a", description="desc", sample_text="text", language="English"
         )
         updated = voice_library.set_default_variant(saved["voice_id"])
+        assert updated is not None
         assert updated["is_default"] is True
 
     def test_unknown_voice_returns_none(self):
@@ -547,3 +561,135 @@ def test_ensure_mounted_ref_voice_reuses_existing_voice_with_matching_audio(tmp_
     ]
     assert not voice_library._voice_dir(voice_library.MOUNTED_REF_VOICE_ID).exists()
     assert voice_library.find_voice_id_for_audio(str(ref_audio)) == saved["voice_id"]
+
+
+class TestApiDefault:
+    """Structured API default (Phase A1): presets, saved voices, legacy migration."""
+
+    @pytest.fixture(autouse=True)
+    def tmp_api_default(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(voice_library, "VOICE_LIBRARY_DIR", tmp_path)
+        monkeypatch.setattr(voice_library, "ACTIVE_DEFAULT_FILE", tmp_path / ".active_default")
+        monkeypatch.setattr(voice_library, "API_DEFAULT_FILE", tmp_path / ".api_default.json")
+        yield tmp_path
+
+    def _saved_voice(self) -> dict:
+        return voice_library.save_voice(
+            b"RIFF....", description="calm narrator", sample_text="hello there", language="English"
+        )
+
+    def test_legacy_default_is_reported_as_legacy(self):
+        saved = self._saved_voice()
+        voice_library.set_active_default_voice_id(saved["voice_id"])
+
+        record = voice_library.get_api_default()
+
+        assert record is not None
+        assert record["voice"] == saved["voice_id"]
+        assert record["source"] == "legacy"
+        assert record["engine"] is None
+
+    def test_preset_default_persists_and_clears_legacy_mirror(self):
+        voice_library.set_active_default_voice_id("vd_000000000001")
+
+        record = voice_library.set_api_default("pocket_tts", "pocket:vera", variant="expressive")
+
+        assert record["voice"] == "pocket:vera"
+        assert record["variant"] == "expressive"
+        assert voice_library.get_active_default_voice_id() is None
+        persisted = voice_library.get_api_default()
+        assert persisted is not None
+        assert persisted["engine"] == "pocket_tts"
+        assert persisted["source"] == "record"
+
+    def test_saved_voice_default_mirrors_legacy_file(self):
+        saved = self._saved_voice()
+
+        voice_library.set_api_default("pocket_tts", saved["voice_id"])
+
+        assert voice_library.get_active_default_voice_id() == saved["voice_id"]
+        mirrored = voice_library.get_api_default()
+        assert mirrored is not None
+        assert mirrored["voice"] == saved["voice_id"]
+
+    def test_stale_saved_voice_is_treated_as_unset(self):
+        voice_library.set_api_default("pocket_tts", "vd_0000000000ff")
+
+        assert voice_library.get_api_default() is None
+
+    def test_a_failed_mirror_write_restores_the_previous_default(self, tmp_api_default, monkeypatch):
+        first = self._saved_voice()
+        voice_library.set_api_default("pocket_tts", "pocket:vera")
+        before = (tmp_api_default / ".api_default.json").read_text()
+
+        def boom(_voice_id):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(voice_library, "set_active_default_voice_id", boom)
+        with pytest.raises(OSError):
+            voice_library.set_api_default("pocket_tts", first["voice_id"])
+
+        assert (tmp_api_default / ".api_default.json").read_text() == before
+        restored = voice_library.get_api_default()
+        assert restored is not None and restored["voice"] == "pocket:vera"
+
+    @pytest.mark.parametrize(
+        ("voice", "valid"),
+        [
+            ("kokoro:af_heart", True),
+            ("phonon:Captain Silas Blackwater", True),
+            ("pocket-lite:jane", True),
+            ("kitten2:Bruno", True),
+            ("kokoro:", False),
+            ("kokoro: leading", False),
+            ("kokoro:trailing ", False),
+            ("kokoro:../x", False),
+            ("Kokoro:af_heart", False),
+            ("vd_0123456789ab", False),
+        ],
+    )
+    def test_preset_id_shapes(self, voice, valid):
+        assert voice_library.is_preset_voice_id(voice) is valid
+
+    def test_pack_default_is_kept_and_does_not_touch_the_mirror(self, tmp_api_default):
+        saved = self._saved_voice()
+        voice_library.set_api_default("pocket_tts", saved["voice_id"])
+
+        voice_library.set_api_default("kokoro", "kokoro:af_heart")
+
+        assert voice_library.get_active_default_voice_id() is None
+        current = voice_library.get_api_default()
+        assert current is not None and current["voice"] == "kokoro:af_heart"
+
+    def test_a_vanished_saved_voice_is_only_returned_on_request(self, tmp_api_default):
+        voice_library.set_api_default("pocket-lite", "vd_0000000000ff", mirror_legacy=False)
+
+        assert voice_library.get_api_default() is None
+        kept = voice_library.get_api_default(keep_missing=True)
+        assert kept is not None and kept["voice"] == "vd_0000000000ff"
+
+    def test_clear_for_matching_voice_removes_both_files(self, tmp_api_default):
+        saved = self._saved_voice()
+        voice_library.set_api_default("pocket_tts", saved["voice_id"])
+
+        assert voice_library.clear_api_default_for_voice(saved["voice_id"]) is True
+        assert voice_library.get_api_default() is None
+        assert not (tmp_api_default / ".active_default").exists()
+        assert not (tmp_api_default / ".api_default.json").exists()
+
+    def test_clear_for_other_voice_leaves_default(self):
+        saved = self._saved_voice()
+        voice_library.set_api_default("pocket_tts", saved["voice_id"])
+
+        assert voice_library.clear_api_default_for_voice("vd_0000000000fe") is False
+        remaining = voice_library.get_api_default()
+        assert remaining is not None
+        assert remaining["voice"] == saved["voice_id"]
+
+    @pytest.mark.parametrize(
+        "voice",
+        ["pocket:", "pocket:../evil", "pocket:bad name", "vd_nothex", "not-a-voice"],
+    )
+    def test_rejects_invalid_voice_forms(self, voice):
+        with pytest.raises(ValueError):
+            voice_library.set_api_default("pocket_tts", voice)

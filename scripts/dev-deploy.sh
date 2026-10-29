@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 
 # Deploy the working checkout to the dev container on docker-agent.
 #
-# Run this ON docker-agent, from /home/nick/projects/persona-forge.
+# Run this ON docker-agent, from /root/projects/persona-forge.
 #
 # The dev override (docker-compose.persona-forge-dev.yml) bind-mounts src/ and
 # frontend/dist/ over the pinned ghcr image, so the common case -- a frontend or
