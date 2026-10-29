@@ -7,6 +7,79 @@
 * **desktop:** recognize NVIDIA's CUDA UMD version header so CUDA 13-capable drivers select the correct accelerator environment.
 * **packaging:** preserve package-specific accelerator wheel sources in standalone launcher and desktop requirements.
 
+## [3.3.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.2.0...persona-forge-v3.3.0) (2026-10-29)
+
+
+### Features
+
+* **api:** let a pack engine voice be the API default and block removing an engine that is the default ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **api:** normalise output loudness across engines with an opt-out ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **api:** route /v1/audio/speech by model or namespaced voice id and stream pcm for Pocket Lite and Phonon ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **compare:** add blind cross-engine Compare with saved ratings and optional auto-check hints ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **engines:** add engine registry, pack installer, worker transport, warming state, install-time speed check and manifest-driven idle unload ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **engines:** add optional Kitten TTS 2, Phonon 31M, Kokoro 82M and Pocket Lite 18M speech engines served beside Pocket-TTS ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **speak:** add engine choice and a sectioned voice picker with readiness badges ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **ui:** add engine cards with details, token field and nudge, plus a global engine status chip and an Integrations voice table ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **voices:** add per-voice engine readiness, explicit Prepare and imported Phonon voices ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **voices:** browse every engine's voices, including uninstalled engines, with gender, accent and age filters and inline install ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+
+
+### Bug Fixes
+
+* **deps:** update sysinfo to 0.40 and handle its fallible System ([a539160](https://github.com/nmorgowicz-org/persona-forge/commit/a53916095c86e7e8cf385d350eccbe13671e253e))
+* **engines:** detect Blackwell GPUs on newer NVIDIA drivers and stop installing wheels without sm_120 kernels ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **engines:** stop workers whose pack was removed and leave auto-detected non-English text unnormalised, and name only pack engines in Speak API defaults ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **engines:** unload idle workers atomically, stop workers on pack removal and hash Kokoro's downloaded files in Verify hashes ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **security:** keep imported-voice and Compare reference paths inside their folders, mask URLs in linear time and stop returning raw errors from 500 responses ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **speech:** normalise Pocket text only on English rendering paths ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **ui:** save the effective engine and voice from Speak, reconcile engine changes, show cloning engines on Integrations and snapshot Compare results with cleanup ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **voices:** read a Kitten voice's language from its name so non-English voices stay out of English-only lists ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+
+
+### Tests
+
+* **engines:** collect pack tests in every CI lane and fix Windows and lean-lane failures ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+
+
+### Documentation
+
+* **engines:** add engine, voices and compare user guides, document the pack runtime and archive the multi-engine plan ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+
+
+### Build System
+
+* add ruff with a correctness-only rule set and clear the findings it and pyright report in the OpenVINO talker, omnivoice engine and export parity scripts ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+
+
+### Continuous Integration
+
+* split Node 24 Renovate validation from Node 26 builds and provision libatomic for Node 26 ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump body-parser from 2.3.0 to 2.4.0 in /frontend ([#442](https://github.com/nmorgowicz-org/persona-forge/issues/442)) ([8576b4f](https://github.com/nmorgowicz-org/persona-forge/commit/8576b4f6e7fd07ad56fbea3251e5ac506558eb35))
+* **deps:** bump docker images, setup-uv and frontend lockfile ([a539160](https://github.com/nmorgowicz-org/persona-forge/commit/a53916095c86e7e8cf385d350eccbe13671e253e))
+* **deps:** bump fast-uri from 3.1.8 to 3.1.9 in /frontend ([#437](https://github.com/nmorgowicz-org/persona-forge/issues/437)) ([ce79888](https://github.com/nmorgowicz-org/persona-forge/commit/ce79888d1a12b66cd02e9fb55e030b24ce96db22))
+* **deps:** bump filelock from 3.32.3 to 4.2.1 ([#439](https://github.com/nmorgowicz-org/persona-forge/issues/439)) ([76362c2](https://github.com/nmorgowicz-org/persona-forge/commit/76362c2f602f42598873f679229befd2b5f5bd06))
+* **deps:** bump ip-address from 10.7.2 to 10.7.4 in /frontend ([#432](https://github.com/nmorgowicz-org/persona-forge/issues/432)) ([0d9b811](https://github.com/nmorgowicz-org/persona-forge/commit/0d9b8114d8b576b221b1b621d435176d4d9c8f7c))
+* **deps:** bump ruff to 0.17.3, gradio to 6.16.0 and msgpack ([a539160](https://github.com/nmorgowicz-org/persona-forge/commit/a53916095c86e7e8cf385d350eccbe13671e253e))
+* **deps:** bump setuptools from 84.0.0 to 84.1.0 ([#440](https://github.com/nmorgowicz-org/persona-forge/issues/440)) ([fb37c00](https://github.com/nmorgowicz-org/persona-forge/commit/fb37c00fb0245339cfdd0bdd9d3a8d1c8732398b))
+* **deps:** bump undici from 7.30.0 to 7.30.1 in /frontend ([#438](https://github.com/nmorgowicz-org/persona-forge/issues/438)) ([fc7375f](https://github.com/nmorgowicz-org/persona-forge/commit/fc7375f77b5bc1a79213a1518bc1af7af699e8b2))
+* **deps:** update astral-sh/setup-uv action to v10.3.2 ([#429](https://github.com/nmorgowicz-org/persona-forge/issues/429)) ([a0c7107](https://github.com/nmorgowicz-org/persona-forge/commit/a0c71077278a77a731c13e15417e2b4410bfc0ca))
+* **deps:** update dependency motion to v14.4.0 ([#430](https://github.com/nmorgowicz-org/persona-forge/issues/430)) ([2fb3677](https://github.com/nmorgowicz-org/persona-forge/commit/2fb36774109aaa109761c533d606c0098bfe620e))
+* **deps:** update dependency motion to v14.6.0 ([#443](https://github.com/nmorgowicz-org/persona-forge/issues/443)) ([8f78644](https://github.com/nmorgowicz-org/persona-forge/commit/8f7864419b3b7585b5893920674b886390e5e830))
+* **deps:** update dependency zustand to v5.0.16 ([#441](https://github.com/nmorgowicz-org/persona-forge/issues/441)) ([5e66619](https://github.com/nmorgowicz-org/persona-forge/commit/5e666199532f6010b1d40897736658eab8445c8d))
+* **deps:** update docker/login-action digest to 81c6f93 ([#434](https://github.com/nmorgowicz-org/persona-forge/issues/434)) ([31c235a](https://github.com/nmorgowicz-org/persona-forge/commit/31c235a644e7617691357cdb891cd3a244ef28f4))
+* **deps:** update frontend npm dependencies ([#433](https://github.com/nmorgowicz-org/persona-forge/issues/433)) ([ee7f4ff](https://github.com/nmorgowicz-org/persona-forge/commit/ee7f4ffb464caedb66d1812dfb047ec2a952543a))
+* **deps:** update frontend npm dependencies ([#435](https://github.com/nmorgowicz-org/persona-forge/issues/435)) ([8e9dc73](https://github.com/nmorgowicz-org/persona-forge/commit/8e9dc73876b5d9a6ceca8d3ae488eed8aa4491f2))
+* **deps:** update Node to v26, docker base images and pytest ([f189f12](https://github.com/nmorgowicz-org/persona-forge/commit/f189f12301fe5a899419ed1d180d3ae4c01d68ce))
+* **deps:** update node.js to v26 ([#450](https://github.com/nmorgowicz-org/persona-forge/issues/450)) ([f87a9f7](https://github.com/nmorgowicz-org/persona-forge/commit/f87a9f76914ba0dfc5d7b8e0d1df954c296e471a))
+* **deps:** update python:3.13-slim docker digest to 57b29a7 ([#428](https://github.com/nmorgowicz-org/persona-forge/issues/428)) ([1ac50b8](https://github.com/nmorgowicz-org/persona-forge/commit/1ac50b8572a88962b2384068c0db8037e62e9579))
+* **deps:** update python:3.13-slim docker digest to b3575dc ([#444](https://github.com/nmorgowicz-org/persona-forge/issues/444)) ([7eabb51](https://github.com/nmorgowicz-org/persona-forge/commit/7eabb51e0d997c9da8532cf913bb775ccd5670ea))
+* **deps:** update python:3.13-slim docker digest to d98cc29 ([#436](https://github.com/nmorgowicz-org/persona-forge/issues/436)) ([74abbe1](https://github.com/nmorgowicz-org/persona-forge/commit/74abbe196513f0e9f6593cb5c88e416f90811642))
+* **deps:** update renovate to 44.181.11 and its pin test ([a539160](https://github.com/nmorgowicz-org/persona-forge/commit/a53916095c86e7e8cf385d350eccbe13671e253e))
+
 ## [3.2.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.1.6...persona-forge-v3.2.0) (2026-10-22)
 
 
