@@ -29,9 +29,13 @@ impl InUse for SysinfoInUse {
             // A directory that doesn't exist can't be in use.
             Err(_) => return false,
         };
-        let system = System::new_with_specifics(
+        // sysinfo 0.40 can fail to read the process table. Unknown means "maybe in use", so the
+        // directory is kept rather than risk pruning a version that is running.
+        let Ok(system) = System::new_with_specifics(
             RefreshKind::nothing().with_processes(ProcessRefreshKind::everything()),
-        );
+        ) else {
+            return true;
+        };
         system.processes().values().any(|process| {
             process
                 .exe()
