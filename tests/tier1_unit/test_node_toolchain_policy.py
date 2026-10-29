@@ -80,7 +80,7 @@ def test_validator_pin_manager_tracks_new_workflow():
     pin_pattern = manager["matchStrings"][0].replace("(?<currentValue>", "(?P<currentValue>")
     match = re.search(pin_pattern, (ROOT / VALIDATOR).read_text(encoding="utf-8"))
     assert match is not None
-    assert match.group("currentValue") == "44.171.4"
+    assert match.group("currentValue") == "44.181.11"
 
 
 def test_renovate_node_override_is_narrow_and_ordered_last():
