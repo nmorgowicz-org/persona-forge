@@ -264,7 +264,19 @@ def test_preparing_an_unknown_voice_is_refused(kitten):
         kitten.prepare_voice("vd_000000000abc")
 
 
-def test_prepare_waits_for_a_loading_engine_instead_of_failing(kitten):
+def test_prepare_waits_for_a_loading_engine_instead_of_failing(kitten, monkeypatch):
+    monkeypatch.setenv("ENGINE_WARM_WAIT_S", "0.05")  # short, so the wait must retry
+    warmings: list[int] = []
+    original_await = kitten._await_ready
+
+    def counting():
+        try:
+            original_await()
+        except EngineWarming:
+            warmings.append(1)
+            raise
+
+    monkeypatch.setattr(kitten, "_await_ready", counting)
     voice = _voice()
     FakeProcess.load_gate = threading.Event()
     result: list[object] = []
@@ -274,6 +286,7 @@ def test_prepare_waits_for_a_loading_engine_instead_of_failing(kitten):
     worker.start()
     time.sleep(0.3)  # several warm-wait windows pass: a request would have been told to retry
     assert worker.is_alive()
+    assert warmings, "prepare never retried through EngineWarming"
 
     FakeProcess.load_gate.set()
     worker.join(5)

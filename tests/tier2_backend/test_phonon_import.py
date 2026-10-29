@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from persona_forge import imported_voices, pack_preset_engine, phonon_engine, phonon_worker
-from persona_forge.kitten2_engine import EngineUnavailable, InvalidVoice
+from persona_forge.kitten2_engine import EngineUnavailable, EngineWarming, InvalidVoice
 
 
 class StubModel:
@@ -279,12 +279,25 @@ def test_import_waits_for_a_loading_worker(engine, monkeypatch):
         return original(self, payload, timeout=timeout)
 
     monkeypatch.setattr(FakeProcess, "request", slow)
+    monkeypatch.setenv("ENGINE_WARM_WAIT_S", "0.05")  # short, so the wait must retry
+    warmings: list[int] = []
+    original_await = engine._await_ready
+
+    def counting():
+        try:
+            original_await()
+        except EngineWarming:
+            warmings.append(1)
+            raise
+
+    monkeypatch.setattr(engine, "_await_ready", counting)
     done = threading.Event()
     threading.Thread(
         target=lambda: (engine.import_voice("imported-mine", "/data/x.safetensors"), done.set()),
         daemon=True,
     ).start()
     assert not done.wait(0.3)
+    assert warmings, "import never retried through EngineWarming"
 
     gate.set()
 
