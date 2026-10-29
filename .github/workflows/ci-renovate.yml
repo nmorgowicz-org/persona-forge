@@ -39,4 +39,4 @@ jobs:
           npx --version
 
       - name: Validate Renovate configuration
-        run: npx --yes --package renovate@44.171.4 renovate-config-validator renovate.json
+        run: npx --yes --package renovate@44.181.11 renovate-config-validator renovate.json
