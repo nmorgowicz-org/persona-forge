@@ -63,6 +63,19 @@ and retains complete logs in its temporary work directory.
 For changes to container inputs, apply `ready-to-test` only after these local gates pass and
 require the container image build/import smoke test. A skipped image job is not runtime evidence.
 
+The Renovate config validator runs the Renovate version named by the
+`# renovate: datasource=npm depName=renovate <version>` tag in
+`.github/workflows/ci-renovate.yml`. That tag is the only copy of the pin: the step derives the
+version from it at run time, and a `customType: "regex"` manager in `renovate.json` rewrites that
+same line, so a Renovate release arrives as a one-line edit to the workflow. Tests
+`tests/tier1_unit/test_node_toolchain_policy.py` fail if the manager's pattern, the step's `sed`
+program, or the tag stop agreeing, or if a second copy of the version is reintroduced. Run them
+with:
+
+```bash
+pytest tests/tier1_unit/test_node_toolchain_policy.py -q
+```
+
 ## Focused Checks
 
 For focused audio style and voice-library changes, add:

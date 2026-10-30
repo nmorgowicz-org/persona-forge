@@ -66,21 +66,61 @@ def test_required_validate_gate_includes_reusable_validator():
     assert "!startsWith(github.event.head_commit.message, 'chore: release ')" in caller["if"]
 
 
-def test_validator_pin_manager_tracks_new_workflow():
-    managers = [m for m in load_renovate()["customManagers"] if m.get("depNameTemplate") == "renovate"]
-    assert len(managers) == 1
+def _sed_pin(workflow: str) -> str | None:
+    """Apply the validator step's own `sed` extraction and return the pin it reads.
+
+    The program is taken from the workflow instead of being restated here: the version may
+    exist in exactly one place, so no test may hold a second copy of it.
+    """
+    program = re.search(r"pin=\$\(sed -n '([^']+)' ", workflow)
+    assert program is not None, "the validator step must derive its pin from the tag"
+    # The program is `s/BRE/replacement/p`; only the BRE constructs it uses get translated.
+    parts = program.group(1).split("/")
+    assert parts[0] == "s" and parts[2] == "\\1" and parts[3] == "p" and len(parts) == 4, (
+        f"validator must read the pin with a single-capture s/BRE/backreference-1/p: {program.group(1)!r}"
+    )
+    # `[[:space:]]` and the escaped parentheses are BRE-only spellings.
+    pattern = parts[1].replace(r"\(", "(").replace(r"\)", ")").replace("[[:space:]]", "[ \t]")
+    try:
+        compiled = re.compile(pattern)
+    except re.error as err:  # a BRE Python cannot express is itself a divergence to catch
+        raise AssertionError(f"validator pin program {pattern!r} is not portable: {err}") from err
+    for line in workflow.splitlines():
+        found = compiled.fullmatch(line)
+        if found:
+            return found.group(1)
+    return None
+
+
+def test_validator_pin_manager_reads_the_workflow_tag():
+    workflow = (ROOT / VALIDATOR).read_text(encoding="utf-8")
+    managers = [
+        m
+        for m in load_renovate()["customManagers"]
+        # Renovate removes exactly one delimiter at each end, not every slash.
+        if any(re.fullmatch(p[1:-1], VALIDATOR) for p in m["managerFilePatterns"])
+    ]
+    assert len(managers) == 1, managers
     manager = managers[0]
-    assert manager["datasourceTemplate"] == "npm"
     assert len(manager["managerFilePatterns"]) == 1
-    # Renovate removes exactly one delimiter at each end, not every slash.
-    file_pattern = manager["managerFilePatterns"][0][1:-1]
-    assert re.fullmatch(file_pattern, VALIDATOR)
-    assert not re.fullmatch(file_pattern, ".github/workflows/ci.yml")
+    assert not any(
+        re.fullmatch(p[1:-1], ".github/workflows/ci.yml") for p in manager["managerFilePatterns"]
+    )
     # The regex manager uses JS named groups; adapt only the group syntax for Python.
-    pin_pattern = manager["matchStrings"][0].replace("(?<currentValue>", "(?P<currentValue>")
-    match = re.search(pin_pattern, (ROOT / VALIDATOR).read_text(encoding="utf-8"))
+    pin_pattern = manager["matchStrings"][0]
+    for group in ("datasource", "depName", "versioning", "currentValue"):
+        pin_pattern = pin_pattern.replace(f"(?<{group}", f"(?P<{group}")
+    match = re.search(pin_pattern, workflow)
     assert match is not None
-    assert match.group("currentValue") == "44.181.11"
+    # Renovate's regex manager collects every match, and the step's sed takes the first: a
+    # second tag line anywhere in the file would fork the pin into two updates.
+    assert len(re.findall(pin_pattern, workflow)) == 1
+    assert match.group("datasource") == "npm"
+    assert match.group("depName") == "renovate"
+    # CI reads the same string out of the same tag, so bumping the tag moves both at once.
+    # A mismatch here means the tag form and the step's extraction have diverged.
+    assert _sed_pin(workflow) == match.group("currentValue")
+    assert re.search(r"renovate@\d", workflow) is None, "the step must run renovate@${pin}, not a second pin"
 
 
 def test_renovate_node_override_is_narrow_and_ordered_last():
