@@ -66,6 +66,17 @@ env:
   # Allow slow reads throughout Python provisioning, native installs, and resolution.
   # Cold Linux CPython/Torch downloads hit uv's 30-second default; job timeouts still apply.
   UV_HTTP_TIMEOUT: "300"
+  # uv build runs Hatch's wheel hook, which shells out to `npm ci` to bake the Studio UI into
+  # the wheel (hatch_build.py). npm aborts a stalled read with `errno -110`
+  # (`npm error network read ETIMEDOUT`) — the exact failure behind the package-* deaths on
+  # PR #463 and on main pushes 2026-10-24/2026-10-29 — and defaults to 2 retries behind a
+  # 10 s/60 s backoff plus a 300 s per-attempt timeout. A healthy registry read never idles for
+  # 30 s (bytes flow continuously, and this timeout bounds idleness, not transfer time), so
+  # failing fast and retrying wide turns a stall into a retry instead of a failed build.
+  NPM_CONFIG_FETCH_TIMEOUT: "30000"
+  NPM_CONFIG_FETCH_RETRIES: "8"
+  NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: "1000"
+  NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "8000"
 
 jobs:
   package:
