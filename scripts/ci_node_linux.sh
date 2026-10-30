@@ -57,6 +57,14 @@ fetch() {
   curl -fsSL --connect-timeout 10 --max-time 300 --retry 2 --retry-all-errors --retry-delay 2 "$@"
 }
 
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
 dist="https://nodejs.org/dist/latest-v${major}.x"
 for attempt in $(seq 1 "$attempts"); do
   work=$(mktemp -d)
@@ -65,7 +73,7 @@ for attempt in $(seq 1 "$attempts"); do
     archive=$(awk -v want="linux-${arch}.tar.gz" '$2 ~ ("-" want "$") { print $2; exit }' "$work/SHASUMS256.txt")
     expected=$(awk -v name="$archive" '$2 == name { print $1 }' "$work/SHASUMS256.txt")
     if [[ -n "$archive" && -n "$expected" ]] && fetch -o "$work/$archive" "$dist/$archive"; then
-      actual=$(sha256sum "$work/$archive" | cut -d' ' -f1)
+      actual=$(sha256_of "$work/$archive")
       if [[ "$actual" == "$expected" ]]; then
         tar -xzf "$work/$archive" -C "$work"
         installed="$work/${archive%.tar.gz}"

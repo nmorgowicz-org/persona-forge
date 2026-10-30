@@ -83,7 +83,8 @@ success after a failed download and leave no `node` on PATH
 it is missing, fetches the official tarball from nodejs.org with bounded retries and a SHA-256
 check against the published `SHASUMS256.txt`. It fails closed only when both routes are down.
 `tests/tier1_unit/test_ci_node_linux.py` drives it with fake commands and a local tarball, so it
-runs without network access:
+runs without network access. The gate is Linux-only by contract and the tests follow it: they
+run on Linux and skip elsewhere, so the macOS/Windows packaging lanes stay green:
 
 ```bash
 pytest tests/tier1_unit/test_ci_node_linux.py -q

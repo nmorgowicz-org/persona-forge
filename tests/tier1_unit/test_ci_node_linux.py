@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -12,8 +13,11 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 BASH = shutil.which("bash")
+# The gate is Linux-only by contract (it is the Linux half of ci-renovate's toolchain), and the
+# stubbed `uname` below would otherwise drive the Linux branch on a host that lacks `sha256sum`.
 pytestmark = pytest.mark.skipif(
-    os.name == "nt" or not BASH, reason="requires native Bash, tar and sha256sum"
+    os.name == "nt" or not BASH or sys.platform != "linux",
+    reason="exercises the Linux install branch; needs bash, tar and sha256sum",
 )
 
 SCRIPT = ROOT / "scripts" / "ci_node_linux.sh"
