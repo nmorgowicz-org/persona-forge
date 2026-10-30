@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from persona_forge.pocket_artifact_resolver import (
     KYUTAI_WITHOUT_CLONING_REPO,
@@ -25,6 +26,16 @@ from persona_forge.pocket_artifact_resolver import (
 )
 
 pytestmark = pytest.mark.requires_torch
+
+
+def _config_path(path: str | Path) -> str:
+    """The path exactly as the config records it.
+
+    ``render_english_config`` normalizes separators to forward slashes because a raw Windows
+    path is an invalid escape inside a YAML double-quoted scalar. Comparing the parsed value
+    keeps these assertions honest on every platform instead of passing only on POSIX.
+    """
+    return str(path).replace("\\", "/")
 
 
 class FakeTTSModel:
@@ -511,9 +522,11 @@ class TestResolvedArtifactLoading:
         # Ready mode must not disable the package's voice-cloning capability.
         assert getattr(model, "has_voice_cloning", True) is not False
 
-        config_text = (tmp_path / "config" / "english-pf.yaml").read_text(encoding="utf-8")
-        assert f'weights_path: "{plans["model_cloning_english"].path}"' in config_text
-        assert f"tokenizer_path: \"{plans['tokenizer_english'].path}\"" in config_text
+        config = yaml.safe_load((tmp_path / "config" / "english-pf.yaml").read_text(encoding="utf-8"))
+        assert config["weights_path"] == _config_path(plans["model_cloning_english"].path)
+        assert config["flow_lm"]["lookup_table"]["tokenizer_path"] == _config_path(
+            plans["tokenizer_english"].path
+        )
 
     def test_cloning_failure_degrades_to_builtin_only_in_auto(self, pocket_tts_runtime, tmp_path, monkeypatch):
         rt = pocket_tts_runtime
@@ -541,8 +554,8 @@ class TestResolvedArtifactLoading:
         assert rt.pocket_tts_cloning_available is False
         assert rt.pocket_tts_cloning_status_message == prov["message"]
 
-        config_text = (tmp_path / "config" / "english-pf.yaml").read_text(encoding="utf-8")
-        assert f'weights_path: "{plans["model_noncloning_english"].path}"' in config_text
+        config = yaml.safe_load((tmp_path / "config" / "english-pf.yaml").read_text(encoding="utf-8"))
+        assert config["weights_path"] == _config_path(plans["model_noncloning_english"].path)
 
     def test_degraded_load_keeps_provenance_message_on_ref_audio_failure(
         self, pocket_tts_runtime, tmp_path, monkeypatch
