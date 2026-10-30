@@ -14,29 +14,50 @@ jobs:
       (github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore: release '))
     runs-on: arc-general
     timeout-minutes: 15
+    env:
+      # npx must fetch the Renovate tarball before the validator can run, and stalled ARC
+      # egress is what has killed this job: npm aborts a stalled read with `errno -110`
+      # (`npm error network read ETIMEDOUT`) and defaults to 2 retries behind a 10 s/60 s
+      # backoff plus a 300 s per-attempt timeout, so it burns minutes before giving up.
+      # A healthy tarball read never idles for 30 s (bytes flow continuously, and this
+      # timeout bounds idleness, not transfer time), so failing fast and retrying wide turns
+      # a stall into a retry instead of a failed job.
+      NPM_CONFIG_FETCH_TIMEOUT: "30000"
+      NPM_CONFIG_FETCH_RETRIES: "8"
+      NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: "1000"
+      NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "8000"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      # Renovate 44.171.4 requires ^24.11.0; the app/build toolchain is independently Node 26.
+      # Renovate 44.x declares engines.node ^24.11.0 (checked across npm's 44.0.0-44.198.0, no
+      # release raises the floor); the app/build toolchain is independently Node 26.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        timeout-minutes: 5
         with:
           node-version: "24"
 
-      # A self-hosted setup can return without a complete Node installation. Fail at the
-      # toolchain boundary, not later as a misleading Renovate configuration failure.
-      - name: Verify Node toolchain (including npx)
-        run: |
-          command -v node npm npx
-          node --version
-          node -e '
-            const [major, minor] = process.versions.node.split(".").map(Number);
-            if (major !== 24 || minor < 11) {
-              console.error("Expected Node ^24.11.0, got " + process.version);
-              process.exit(1);
-            }
-          '
-          npm --version
-          npx --version
+      # actions/setup-node reports success after a failed manifest/download/extract and leaves
+      # no `node` on PATH (actions/setup-node#1556), and all of its own retries hit the same
+      # GitHub manifest host, so a pod with stalled egress reaches this point with nothing.
+      # Provision the toolchain instead of failing a required gate for the network, and still
+      # fail here — not later as a misleading Renovate configuration error — when both routes
+      # are down.
+      - name: Ensure a usable Node ^24.11.0 toolchain (including npx)
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: bash scripts/ci_node_linux.sh 24 11
 
+      # renovate: datasource=npm depName=renovate 44.186.7
+      # The step takes its pin from that tag: renovate.json's custom.regex manager rewrites the
+      # tag, so the version Renovate tracks, the version a reader sees, and the version that runs
+      # here are the same string and can never drift apart (PR #462 failed because a second copy
+      # of the old pin lived in a test assertion).
       - name: Validate Renovate configuration
-        run: npx --yes --package renovate@44.181.11 renovate-config-validator renovate.json
+        run: |
+          pin=$(sed -n 's/^[[:space:]]*# renovate: datasource=npm depName=renovate \([0-9][0-9.]*\)[[:space:]]*$/\1/p' "$GITHUB_WORKSPACE/.github/workflows/ci-renovate.yml")
+          if [ -z "$pin" ]; then
+            echo "::error::no '# renovate: datasource=npm depName=renovate' pin tag in this workflow"
+            exit 1
+          fi
+          echo "Validating renovate.json with renovate-config-validator $pin"
+          npx --yes --package "renovate@${pin}" renovate-config-validator renovate.json

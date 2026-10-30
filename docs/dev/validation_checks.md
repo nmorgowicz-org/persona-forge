@@ -63,6 +63,33 @@ and retains complete logs in its temporary work directory.
 For changes to container inputs, apply `ready-to-test` only after these local gates pass and
 require the container image build/import smoke test. A skipped image job is not runtime evidence.
 
+The Renovate config validator runs the Renovate version named by the
+`# renovate: datasource=npm depName=renovate <version>` tag in
+`.github/workflows/ci-renovate.yml`. That tag is the only copy of the pin: the step derives the
+version from it at run time, and a `customType: "regex"` manager in `renovate.json` rewrites that
+same line, so a Renovate release arrives as a one-line edit to the workflow. Tests
+`tests/tier1_unit/test_node_toolchain_policy.py` fail if the manager's pattern, the step's `sed`
+program, or the tag stop agreeing, or if a second copy of the version is reintroduced. Run them
+with:
+
+```bash
+pytest tests/tier1_unit/test_node_toolchain_policy.py -q
+```
+
+That job's Node requirement is a gate, not an assumption. `actions/setup-node` can report
+success after a failed download and leave no `node` on PATH
+([actions/setup-node#1556](https://github.com/actions/setup-node/issues/1556)), so
+`scripts/ci_node_linux.sh` verifies Node ^24.11.0 (including `npx`) after the action and, when
+it is missing, fetches the official tarball from nodejs.org with bounded retries and a SHA-256
+check against the published `SHASUMS256.txt`. It fails closed only when both routes are down.
+`tests/tier1_unit/test_ci_node_linux.py` drives it with fake commands and a local tarball, so it
+runs without network access. The gate is Linux-only by contract and the tests follow it: they
+run on Linux and skip elsewhere, so the macOS/Windows packaging lanes stay green:
+
+```bash
+pytest tests/tier1_unit/test_ci_node_linux.py -q
+```
+
 ## Focused Checks
 
 For focused audio style and voice-library changes, add:

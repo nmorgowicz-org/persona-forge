@@ -30,6 +30,14 @@ env:
   PYTHON_VERSION: "3.13"
   NODE_VERSION: "26"
   RUST_VERSION: "1.98"
+  # `uv build` runs Hatch's wheel hook, which shells out to `npm ci` (hatch_build.py). npm
+  # aborts a stalled read with `errno -110` and defaults to 2 retries behind a 10 s/60 s
+  # backoff plus a 300 s per-attempt timeout; the registry read itself never idles for 30 s on
+  # a healthy download, so fail fast and retry wide (same reasoning as ci-packaging.yml).
+  NPM_CONFIG_FETCH_TIMEOUT: "30000"
+  NPM_CONFIG_FETCH_RETRIES: "8"
+  NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: "1000"
+  NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "8000"
 
 jobs:
   build-wheel:

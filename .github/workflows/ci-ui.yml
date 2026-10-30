@@ -7,6 +7,18 @@ on:
 permissions:
   contents: read
 
+env:
+  # Both jobs run `npm ci`: npm aborts a stalled read with `errno -110`
+  # (`npm error network read ETIMEDOUT`) and defaults to 2 retries behind a 10 s/60 s backoff
+  # plus a 300 s per-attempt timeout, so it gives up long before ARC egress recovers. A healthy
+  # registry read never idles for 30 s (bytes flow continuously, and this timeout bounds
+  # idleness, not transfer time), so failing fast and retrying wide turns a stall into a retry
+  # instead of a failed job.
+  NPM_CONFIG_FETCH_TIMEOUT: "30000"
+  NPM_CONFIG_FETCH_RETRIES: "8"
+  NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: "1000"
+  NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "8000"
+
 concurrency:
   group: ci-ui-${{ github.ref }}
   cancel-in-progress: true
@@ -156,10 +168,28 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('tests/ui/package-lock.json') }}
 
-      - name: Install Playwright browsers
+      # A browsers-cache miss means one ~170 MB read from a single host (cdn.playwright.dev,
+      # which redirects to the Chrome for Testing bucket). Playwright's own 5 attempts all died
+      # `read ETIMEDOUT` ~13 s apart on PR #463, and this is a required check on shared ARC
+      # runners whose egress stalls (see the same bounded loop around the BuildKit pre-pull in
+      # image.yml). Fresh attempts after a backoff are what keep a stall from failing the job;
+      # npm ci in this job gets the same tolerance through NPM_CONFIG_* above.
+      - name: Install Playwright browsers with retries
         if: needs.paths-filter.outputs.code == 'true'
+        shell: bash
         working-directory: tests/ui
-        run: npx playwright install --with-deps chromium
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if npx playwright install --with-deps chromium; then
+              exit 0
+            fi
+            if [ "${attempt}" -lt 5 ]; then
+              sleep "$((attempt * 10))"
+            fi
+          done
+          echo "Unable to install Playwright Chromium after 5 attempts" >&2
+          exit 1
 
       - name: Start fake_model_server
         if: needs.paths-filter.outputs.code == 'true'
