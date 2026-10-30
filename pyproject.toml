@@ -134,6 +134,13 @@ override-dependencies = [
   "accelerate==1.15.0",
 ]
 
+# Gradio is a declared dependency of both omnivoice and qwen-tts, and neither consumer's
+# inference path imports it: only omnivoice/cli/demo.py does, and the image installs both
+# engines with --no-deps (Dockerfile). Leaving it resolved pinned the tree to gradio 3.36.1 —
+# 40+ open advisories, several critical — and its `pillow<13` cap held pillow back a major
+# release. Excluding it keeps the locked environment identical to what ships.
+exclude-dependencies = ["gradio"]
+
 conflicts = [
   [
     { extra = "cuda12" },
