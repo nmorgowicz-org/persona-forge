@@ -7,6 +7,41 @@
 * **desktop:** recognize NVIDIA's CUDA UMD version header so CUDA 13-capable drivers select the correct accelerator environment.
 * **packaging:** preserve package-specific accelerator wheel sources in standalone launcher and desktop requirements.
 
+## [3.3.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.3.0...persona-forge-v3.3.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* **deps:** bump rustls from 0.23.45 to 0.23.46 in the desktop lock ([040c97b](https://github.com/nmorgowicz-org/persona-forge/commit/040c97b71de983bb02e72831a549d7a858a5c586))
+* **deps:** exclude the unused gradio tree from uv.lock ([040c97b](https://github.com/nmorgowicz-org/persona-forge/commit/040c97b71de983bb02e72831a549d7a858a5c586))
+* **deps:** update rust dependencies ([#466](https://github.com/nmorgowicz-org/persona-forge/issues/466)) ([a5cb854](https://github.com/nmorgowicz-org/persona-forge/commit/a5cb85431c301563afb8e16adc94878cde8129c2))
+
+
+### Tests
+
+* **ci:** derive the Renovate validator pin from the workflow tag instead of pinning it twice ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+* **pocket-tts:** assert the recorded config paths instead of a raw Windows path ([040c97b](https://github.com/nmorgowicz-org/persona-forge/commit/040c97b71de983bb02e72831a549d7a858a5c586))
+
+
+### Documentation
+
+* **ci:** document how the Renovate validator pin stays current ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+
+
+### Continuous Integration
+
+* fail fast and retry wide on stalled ARC egress ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+* **renovate:** provision the Node toolchain when setup-node installs nothing ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+* **renovate:** single-source the Renovate validator pin and guard it against drift ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump pillow ([53d6fea](https://github.com/nmorgowicz-org/persona-forge/commit/53d6fea350dc645767269b946d49ca0455695ab7))
+* **deps:** bump pillow from 12.3.0 to 13.0.0 in the uv group across 1 directory ([#460](https://github.com/nmorgowicz-org/persona-forge/issues/460)) ([53d6fea](https://github.com/nmorgowicz-org/persona-forge/commit/53d6fea350dc645767269b946d49ca0455695ab7))
+* **deps:** group renovate 44.186.7 and frontend npm updates and fix their CI ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+* **deps:** update dependency renovate to v44.190.1 ([#467](https://github.com/nmorgowicz-org/persona-forge/issues/467)) ([dea2db7](https://github.com/nmorgowicz-org/persona-forge/commit/dea2db7525512d6c65633889a28ad283d043ecd8))
+
 ## [3.3.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.2.0...persona-forge-v3.3.0) (2026-10-29)
 
 
