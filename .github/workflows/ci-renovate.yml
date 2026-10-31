@@ -47,7 +47,7 @@ jobs:
         shell: bash
         run: bash scripts/ci_node_linux.sh 24 11
 
-      # renovate: datasource=npm depName=renovate 44.186.7
+      # renovate: datasource=npm depName=renovate 44.190.1
       # The step takes its pin from that tag: renovate.json's custom.regex manager rewrites the
       # tag, so the version Renovate tracks, the version a reader sees, and the version that runs
       # here are the same string and can never drift apart (PR #462 failed because a second copy
