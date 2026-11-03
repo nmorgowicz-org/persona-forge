@@ -82,9 +82,11 @@ success after a failed download and leave no `node` on PATH
 `scripts/ci_node_linux.sh` verifies Node ^24.11.0 (including `npx`) after the action and, when
 it is missing, fetches the official tarball from nodejs.org with bounded retries and a SHA-256
 check against the published `SHASUMS256.txt`. It fails closed only when both routes are down.
-`tests/tier1_unit/test_ci_node_linux.py` drives it with fake commands and a local tarball, so it
-runs without network access. The gate is Linux-only by contract and the tests follow it: they
-run on Linux and skip elsewhere, so the macOS/Windows packaging lanes stay green:
+Packaging uses the same gate after `setup-node`, passing `NODE_VERSION` with a minor floor of
+zero to require its configured Node major and recover missing `node`/`npm`/`npx` before the
+wheel build. `tests/tier1_unit/test_ci_node_linux.py` drives the helper with fake commands and
+a local tarball, so it runs without network access. The gate is Linux-only by contract and
+the tests follow it: they run on Linux and skip elsewhere.
 
 ```bash
 pytest tests/tier1_unit/test_ci_node_linux.py -q
