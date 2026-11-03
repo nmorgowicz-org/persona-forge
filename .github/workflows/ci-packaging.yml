@@ -27,6 +27,7 @@ on:
     paths:
       - .github/workflows/ci-packaging.yml
       - scripts/ci_node26_prerequisites.sh
+      - scripts/ci_node_linux.sh
       - pyproject.toml
       - uv.lock
       - hatch_build.py
@@ -41,6 +42,7 @@ on:
     paths:
       - .github/workflows/ci-packaging.yml
       - scripts/ci_node26_prerequisites.sh
+      - scripts/ci_node_linux.sh
       - pyproject.toml
       - uv.lock
       - hatch_build.py
@@ -149,6 +151,11 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify Node toolchain and recover failed Linux downloads
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash scripts/ci_node_linux.sh "$NODE_VERSION" 0
 
       # On this self-hosted Windows box, System32 precedes Git\bin on PATH, so plain `shell:
       # bash` resolves to the WSL launcher stub at System32\bash.exe (WSL isn't installed here,
