@@ -74,7 +74,7 @@
   "packageRules": [
     {
       "description": "Ecosystem grouping: collapse non-major Python dep bumps into one PR per Renovate run. Placed first so the stack-specific rules below (OpenVINO, PyTorch) can override groupName for the packages they name.",
-      "matchManagers": ["pep621", "pip_requirements", "pip-compile"],
+      "matchManagers": ["pep621", "pip_requirements", "pip-compile", "uv"],
       "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
       "groupName": "python dependencies",
       "groupSlug": "python-deps"
@@ -91,11 +91,19 @@
     {
       "description": "Ecosystem grouping: one PR for all GitHub Actions bumps, including digest pins.",
       "matchManagers": ["github-actions"],
-      "groupName": "GitHub Actions",
-      "groupSlug": "github-actions",
+      "groupName": "development and CI tooling",
+      "groupSlug": "dev-ci-tooling",
       "separateMajorMinor": false,
       "automerge": false,
       "addLabels": ["github-actions"]
+    },
+    {
+      "description": "Batch explicitly named development tools with GitHub Actions across managers; keep runtime packages and Rust toolchain updates in their own groups.",
+      "matchPackageNames": ["renovate", "ruff", "pytest", "pytest-cov", "pytest-xdist", "pytest-timeout"],
+      "groupName": "development and CI tooling",
+      "groupSlug": "dev-ci-tooling",
+      "separateMajorMinor": false,
+      "automerge": false
     },
     {
       "description": "Batch Rust dependency updates to avoid Cargo.lock conflicts.",
