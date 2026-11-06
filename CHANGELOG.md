@@ -7,6 +7,51 @@
 * **desktop:** recognize NVIDIA's CUDA UMD version header so CUDA 13-capable drivers select the correct accelerator environment.
 * **packaging:** preserve package-specific accelerator wheel sources in standalone launcher and desktop requirements.
 
+## [3.3.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.3.0...persona-forge-v3.3.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **deps:** bump rustls from 0.23.45 to 0.23.46 in the desktop lock ([040c97b](https://github.com/nmorgowicz-org/persona-forge/commit/040c97b71de983bb02e72831a549d7a858a5c586))
+* **deps:** consolidate outstanding updates and synchronize frontend lockfile ([3fdf99b](https://github.com/nmorgowicz-org/persona-forge/commit/3fdf99b8ab7d53ece2284aec7259c2f0edf9c7d2))
+* **deps:** exclude the unused gradio tree from uv.lock ([040c97b](https://github.com/nmorgowicz-org/persona-forge/commit/040c97b71de983bb02e72831a549d7a858a5c586))
+* **deps:** update rust dependencies ([#466](https://github.com/nmorgowicz-org/persona-forge/issues/466)) ([a5cb854](https://github.com/nmorgowicz-org/persona-forge/commit/a5cb85431c301563afb8e16adc94878cde8129c2))
+
+
+### Tests
+
+* **ci:** derive the Renovate validator pin from the workflow tag instead of pinning it twice ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+* **pocket-tts:** assert the recorded config paths instead of a raw Windows path ([040c97b](https://github.com/nmorgowicz-org/persona-forge/commit/040c97b71de983bb02e72831a549d7a858a5c586))
+
+
+### Documentation
+
+* **ci:** document how the Renovate validator pin stays current ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+* document dependency grouping policy ([3fdf99b](https://github.com/nmorgowicz-org/persona-forge/commit/3fdf99b8ab7d53ece2284aec7259c2f0edf9c7d2))
+
+
+### Continuous Integration
+
+* fail fast and retry wide on stalled ARC egress ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+* **renovate:** provision the Node toolchain when setup-node installs nothing ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+* **renovate:** single-source the Renovate validator pin and guard it against drift ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump pillow ([53d6fea](https://github.com/nmorgowicz-org/persona-forge/commit/53d6fea350dc645767269b946d49ca0455695ab7))
+* **deps:** bump pillow from 12.3.0 to 13.0.0 in the uv group across 1 directory ([#460](https://github.com/nmorgowicz-org/persona-forge/issues/460)) ([53d6fea](https://github.com/nmorgowicz-org/persona-forge/commit/53d6fea350dc645767269b946d49ca0455695ab7))
+* **deps:** group renovate 44.186.7 and frontend npm updates and fix their CI ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+* **deps:** lock file maintenance ([#471](https://github.com/nmorgowicz-org/persona-forge/issues/471)) ([8c0cab9](https://github.com/nmorgowicz-org/persona-forge/commit/8c0cab935c24acd3117d6e04eb92705195bd38fe))
+* **deps:** lock file maintenance ([#472](https://github.com/nmorgowicz-org/persona-forge/issues/472)) ([d901fbf](https://github.com/nmorgowicz-org/persona-forge/commit/d901fbf358919c5c0efd93773b1514c86c55372d))
+* **deps:** update dependency renovate to v44.190.1 ([#467](https://github.com/nmorgowicz-org/persona-forge/issues/467)) ([dea2db7](https://github.com/nmorgowicz-org/persona-forge/commit/dea2db7525512d6c65633889a28ad283d043ecd8))
+* **deps:** update dependency renovate to v44.198.3 ([#469](https://github.com/nmorgowicz-org/persona-forge/issues/469)) ([ca259ad](https://github.com/nmorgowicz-org/persona-forge/commit/ca259ad0b2a1e8c9945dfaa5c8ef9a367177d413))
+* **deps:** update dependency renovate to v44.199.0 ([#475](https://github.com/nmorgowicz-org/persona-forge/issues/475)) ([8c0a0d9](https://github.com/nmorgowicz-org/persona-forge/commit/8c0a0d93ab4525a232a32023f3a8ecff70008c74))
+* **deps:** update frontend npm dependencies ([#470](https://github.com/nmorgowicz-org/persona-forge/issues/470)) ([ae4e0c0](https://github.com/nmorgowicz-org/persona-forge/commit/ae4e0c061ced8b698567f1acbe51dbe2ff8bc1cf))
+* **deps:** update github/codeql-action digest to 33d7b85 ([#474](https://github.com/nmorgowicz-org/persona-forge/issues/474)) ([048e065](https://github.com/nmorgowicz-org/persona-forge/commit/048e0657fc95d32a611d9d7d23405a307b13bd68))
+* **deps:** update python:3.13-slim docker digest to ae14d4c ([#473](https://github.com/nmorgowicz-org/persona-forge/issues/473)) ([37a8cac](https://github.com/nmorgowicz-org/persona-forge/commit/37a8cac0c69699b57bb670e2e929d31b78c08ed7))
+* **renovate:** group development and CI tooling without slowing updates ([3fdf99b](https://github.com/nmorgowicz-org/persona-forge/commit/3fdf99b8ab7d53ece2284aec7259c2f0edf9c7d2))
+
 ## [3.3.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.2.0...persona-forge-v3.3.0) (2026-10-29)
 
 
