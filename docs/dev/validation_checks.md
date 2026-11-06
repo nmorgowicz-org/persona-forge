@@ -44,6 +44,12 @@ See [TEST_STRATEGY.md](../TEST_STRATEGY.md) §1.8 for the full changed-file mapp
 
 ## Dependency Bump Verification
 
+Routine dependency updates keep the existing immediate cadence. Renovate groups GitHub
+Actions and explicitly named Python/CI tools (including Ruff and the Renovate validator)
+into one development-and-CI tooling PR. Frontend npm packages, container base images,
+and compatibility-sensitive model stacks retain separate groups. Python runtime grouping
+also covers the uv manager so lockfile updates follow their dependency group.
+
 For any Renovate or Dependabot update involving Torch, Torchaudio, Transformers, or the
 OpenVINO stack, run the source contract check before installing or merging the candidate:
 
