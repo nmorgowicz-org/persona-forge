@@ -126,7 +126,7 @@ export function IntegrationsPage() {
   }, [])
 
   useEffect(() => {
-    let cancelled = false
+    const load = { cancelled: false }
     const defaultVersionAtStart = defaultMutationVersion.current
     Promise.all([
       listVoices(),
@@ -136,7 +136,7 @@ export function IntegrationsPage() {
       listAllVoiceBindings(),
     ])
       .then(([saved, catalog, effective, engines, voiceBindings]) => {
-        if (cancelled) return
+        if (load.cancelled) return
         setVoices(saved)
         setCatalogVoices(catalog.voices)
         if (defaultMutationVersion.current === defaultVersionAtStart) setApiDefaultState(effective)
@@ -153,8 +153,8 @@ export function IntegrationsPage() {
         )
       })
       .catch((err: unknown) => {
-        if (!cancelled) setPageError(String((err as Error)?.message || err))
-        if (!cancelled) {
+        if (!load.cancelled) setPageError(String((err as Error)?.message || err))
+        if (!load.cancelled) {
           // A failed status read must not leave stale "ready" bindings usable in snippets.
           setBindings({})
           setEngines([])
@@ -162,10 +162,10 @@ export function IntegrationsPage() {
         }
       })
       .finally(() => {
-        if (!cancelled) setCatalogLoading(false)
+        if (!load.cancelled) setCatalogLoading(false)
       })
     return () => {
-      cancelled = true
+      load.cancelled = true
     }
   }, [refreshVersion])
 

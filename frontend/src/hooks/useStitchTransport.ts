@@ -189,9 +189,9 @@ export function useStitchTransport(src: string | null): StitchTransport {
   // this hook's owner (or anything else) once per frame.
   useEffect(() => {
     if (!isPlaying) return
-    let cancelled = false
+    const run = { cancelled: false }
     const tick = () => {
-      if (cancelled) return
+      if (run.cancelled) return
       const audio = elRef.current
       if (audio) {
         // The arrangement loop wraps here rather than in 'timeupdate': that event fires a few
@@ -214,7 +214,7 @@ export function useStitchTransport(src: string | null): StitchTransport {
     }
     rafRef.current = requestAnimationFrame(tick)
     return () => {
-      cancelled = true
+      run.cancelled = true
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current)
       rafRef.current = null
     }

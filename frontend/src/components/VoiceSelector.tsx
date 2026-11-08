@@ -142,7 +142,7 @@ export function VoiceSelector({
       Boolean(hint && hint.toLowerCase().includes(q))
 
     const result: VoiceOptionSection[] = []
-    let index = 0
+    const counter = { index: 0 }
     const next = (
       group: VoiceOption['group'],
       id: string | null,
@@ -150,7 +150,7 @@ export function VoiceSelector({
       hint?: string,
       voice?: VoiceMeta,
       builtin?: BuiltInVoiceMeta,
-    ): VoiceOption => ({ group, id, label, hint, voice, builtin, index: index++ })
+    ): VoiceOption => ({ group, id, label, hint, voice, builtin, index: counter.index++ })
 
     const families = new Map<string, VoiceMeta[]>()
     const uncategorized: VoiceMeta[] = []
@@ -260,10 +260,10 @@ export function VoiceSelector({
     })
 
     // Reassign indices after merging favorites so keyboard order matches render order.
-    index = 0
+    counter.index = 0
     result.forEach((section) => {
       section.options.forEach((option) => {
-        option.index = index++
+        option.index = counter.index++
       })
     })
     return result
