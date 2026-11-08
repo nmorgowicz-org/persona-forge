@@ -14,15 +14,32 @@ manager.
 from __future__ import annotations
 
 import base64
+import errno
 import json
 import os
 import queue
+import signal
 import subprocess
 import threading
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from persona_forge import pack_logs
+
+# Container-escape EPERM (EPERM on a pid we created ourselves): the child exited on its own,
+# and within the container's tiny pid namespace its pid was recycled to a process this one may
+# not signal before our SIGTERM landed. Target of the signal == target of poll(), so treating
+# it as "already gone" is always safe here.
+_SIGNAL_GONE = (errno.ESRCH, errno.EPERM)
+
+
+def _signal_child(process: subprocess.Popen[str], sig: signal.Signals) -> bool:
+    """Send ``sig`` to the child; False when it is already gone, never raising for a dead one."""
+    try:
+        process.send_signal(sig)
+    except OSError as exc:
+        return exc.errno not in _SIGNAL_GONE
+    return True
 
 
 class PackProcessError(RuntimeError):
@@ -204,12 +221,19 @@ class PackProcess:
         if process is None:
             return
         if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+            if _signal_child(process, signal.SIGTERM):
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    _signal_child(process, signal.SIGKILL)
+                    process.wait(timeout=5)
+            else:
+                # The pid was recycled, so the child is already gone: reap without signaling
+                # again - a second signal could hit whatever process owns the pid now.
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
 
     def close(self) -> None:
         process = self._process

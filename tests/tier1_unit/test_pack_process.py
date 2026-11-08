@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import errno
+import os
+import signal
 import sys
 from pathlib import Path
 
@@ -59,6 +62,29 @@ def test_timeout_kills_the_worker(worker_command):
     with pytest.raises(PackProcessError, match="timed out"):
         worker.request({"op": "sleep"})
 
+    assert worker.is_alive is False
+
+
+def test_kill_survives_container_pid_reuse_eperm(worker_command, monkeypatch):
+    """ARC containers recycle pids, so SIGTERM can raise EPERM instead of ESRCH.
+
+    CPython raises PermissionError only when kill() answers EPERM for a pid we created
+    ourselves - the pid was reused by a process we may not signal. A wedged-but-live worker
+    still gets SIGKILL after the SIGTERM grace, so only the gone signal is tolerated.
+    """
+    real_kill = os.kill
+
+    def fake_kill(pid: int, sig: int) -> None:
+        if sig == int(signal.SIGTERM):
+            # The child died between poll() and the signal, and its pid was recycled.
+            real_kill(pid, int(signal.SIGKILL))
+            raise PermissionError(errno.EPERM, "Permission denied")
+        real_kill(pid, sig)
+
+    monkeypatch.setattr(os, "kill", fake_kill)
+    worker = PackProcess(worker_command, request_timeout=5)
+    worker.start()
+    worker.kill()
     assert worker.is_alive is False
 
 
