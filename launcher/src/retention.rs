@@ -313,7 +313,7 @@ mod tests {
         // the copy is fully flushed; retry briefly, which is the canonical workaround.
         let mut child: Option<std::process::Child> = None;
         for _ in 0..10 {
-            if let Ok(c) = std::process::Command::new(&sleep_copy).arg("5").spawn() {
+            if let Ok(c) = std::process::Command::new(&sleep_copy).arg("2").spawn() {
                 child = Some(c);
                 break;
             }
@@ -325,7 +325,10 @@ mod tests {
 
         assert!(SysinfoInUse.is_in_use(&root.path().join("old")));
 
-        child.kill().unwrap();
+        // Let the child exit on its own rather than signalling it: the ARC runner pods answer
+        // EPERM for Child::kill() on processes they created, which turned this assertion into a
+        // spurious test failure. The subject here is detecting a process that holds the old
+        // binary, not signal delivery.
         child.wait().unwrap();
 
         // Give the OS a moment to actually reap/remove the process from the table.
@@ -343,13 +346,14 @@ mod tests {
         fs::copy("C:\\Windows\\System32\\ping.exe", &ping_copy).unwrap();
 
         let mut child = std::process::Command::new(&ping_copy)
-            .args(["-n", "20", "127.0.0.1"])
+            .args(["-n", "3", "127.0.0.1"])
             .spawn()
             .unwrap();
 
         assert!(SysinfoInUse.is_in_use(&root.path().join("old")));
 
-        child.kill().unwrap();
+        // Exit on its own: the test is about detecting a live process holding the old binary,
+        // not about terminating it (and fewer ping packets keeps the Windows leg quick).
         child.wait().unwrap();
 
         std::thread::sleep(std::time::Duration::from_millis(200));
