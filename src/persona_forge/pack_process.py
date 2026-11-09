@@ -47,6 +47,22 @@ def _signal_child(process: subprocess.Popen[str], sig: signal.Signals) -> bool:
     return True
 
 
+def _force_kill(process: subprocess.Popen[str]) -> bool:
+    """Force-terminate the child; False when it is already gone.
+
+    Windows has no ``SIGKILL``, so escalation there goes through ``Popen.kill()``
+    (``TerminateProcess``). Never raises for a dead or unsignalable child.
+    """
+    sigkill = getattr(signal, "SIGKILL", None)
+    if sigkill is None:
+        try:
+            process.kill()
+        except OSError as exc:
+            return exc.errno not in _SIGNAL_GONE
+        return True
+    return _signal_child(process, sigkill)
+
+
 def _reap(process: subprocess.Popen[str], timeout: float) -> bool:
     """Wait for the child to exit; False when it is still running after ``timeout``.
 
@@ -261,7 +277,7 @@ class PackProcess:
             return
         if _reap(process, _SIGTERM_GRACE):
             return
-        _signal_child(process, signal.SIGKILL)
+        _force_kill(process)
         if not _reap(process, _SIGKILL_GRACE):
             self._abandon(process)
 

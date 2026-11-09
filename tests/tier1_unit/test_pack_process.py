@@ -66,6 +66,7 @@ def test_timeout_kills_the_worker(worker_command):
     assert worker.is_alive is False
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="EPERM on os.kill is POSIX semantics; Windows uses TerminateProcess")
 def test_kill_survives_container_pid_reuse_eperm(worker_command, monkeypatch):
     """ARC containers recycle pids, so SIGTERM can raise EPERM instead of ESRCH.
 
