@@ -32,6 +32,11 @@ from persona_forge import pack_logs
 # it as "already gone" is always safe here.
 _SIGNAL_GONE = (errno.ESRCH, errno.EPERM)
 
+# Teardown bounds. SIGTERM gets the graceful window; SIGKILL only needs long enough for the
+# kernel to reap an already-dead child, so a hostile runner cannot stall the request path twice.
+_SIGTERM_GRACE = 5.0
+_SIGKILL_GRACE = 2.0
+
 
 def _signal_child(process: subprocess.Popen[str], sig: signal.Signals) -> bool:
     """Send ``sig`` to the child; False when it is already gone, never raising for a dead one."""
@@ -39,6 +44,20 @@ def _signal_child(process: subprocess.Popen[str], sig: signal.Signals) -> bool:
         process.send_signal(sig)
     except OSError as exc:
         return exc.errno not in _SIGNAL_GONE
+    return True
+
+
+def _reap(process: subprocess.Popen[str], timeout: float) -> bool:
+    """Wait for the child to exit; False when it is still running after ``timeout``.
+
+    kill() is called from the request path, which must report its own timeout; a runner that
+    refuses the signal (or whose pid namespace reuses the pid) must not surface as an unrelated
+    PermissionError/TimeoutExpired from the transport.
+    """
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return False
     return True
 
 
@@ -75,6 +94,10 @@ class PackProcess:
         self._responses: queue.Queue[dict[str, Any] | None] = queue.Queue()
         self._lock = threading.Lock()
         self._stderr_lines: list[str] = []
+        # Set when kill() could not confirm the child's death. A pid recycled inside the
+        # container's namespace can leave a live process we do not own answering waitpid()
+        # forever; the transport then reports its own verdict instead of a fresh poll.
+        self._unowned = False
 
     @property
     def pid(self) -> int | None:
@@ -82,7 +105,7 @@ class PackProcess:
 
     @property
     def is_alive(self) -> bool:
-        return self._process is not None and self._process.poll() is None
+        return self._process is not None and self._process.poll() is None and not self._unowned
 
     @property
     def stderr_tail(self) -> str:
@@ -91,6 +114,7 @@ class PackProcess:
     def start(self) -> None:
         if self._process is not None:
             raise PackProcessError("worker already started")
+        self._unowned = False
         try:
             self._process = subprocess.Popen(
                 self._command,
@@ -133,7 +157,7 @@ class PackProcess:
                 del self._stderr_lines[:100]
 
     def _alive(self) -> bool:
-        return self._process is not None and self._process.poll() is None
+        return self.is_alive
 
     def request(self, payload: Mapping[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         """Send one request and return its response; raises PackProcessError on failure."""
@@ -217,23 +241,42 @@ class PackProcess:
             raise PackProcessError(f"worker returned invalid base64: {exc}") from exc
 
     def kill(self) -> None:
+        """Best-effort teardown; never raises.
+
+        ``request`` calls this on its own timeout path, so a runner that refuses the signal
+        (EPERM for a pid recycled inside the container's namespace) or whose ``waitpid`` cannot
+        confirm the death must not surface here as an unrelated PermissionError or
+        TimeoutExpired. When the death cannot be confirmed the worker is abandoned: it is never
+        reused and ``is_alive`` reports False.
+        """
         process = self._process
         if process is None:
             return
-        if process.poll() is None:
-            if _signal_child(process, signal.SIGTERM):
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    _signal_child(process, signal.SIGKILL)
-                    process.wait(timeout=5)
-            else:
-                # The pid was recycled, so the child is already gone: reap without signaling
-                # again - a second signal could hit whatever process owns the pid now.
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    pass
+        if process.poll() is not None:
+            return
+        if not _signal_child(process, signal.SIGTERM):
+            # The pid already belongs to a process we may not signal: the worker is gone, and
+            # escalating could hit whatever owns the pid now.
+            self._abandon(process)
+            return
+        if _reap(process, _SIGTERM_GRACE):
+            return
+        _signal_child(process, signal.SIGKILL)
+        if not _reap(process, _SIGKILL_GRACE):
+            self._abandon(process)
+
+    def _abandon(self, process: subprocess.Popen[str]) -> None:
+        """Mark an unconfirmably-dead worker unusable and let it exit on EOF.
+
+        Closing stdin lets a worker that is merely wedged drain its last request and finish;
+        the process itself may outlive this call when the runner cannot deliver signals.
+        """
+        self._unowned = True
+        try:
+            if process.stdin is not None and not process.stdin.closed:
+                process.stdin.close()
+        except OSError:
+            pass
 
     def close(self) -> None:
         process = self._process
@@ -244,9 +287,7 @@ class PackProcess:
                 process.stdin.close()
         except OSError:
             pass
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
+        if not self._unowned and not _reap(process, _SIGTERM_GRACE):
             self.kill()
         self._process = None
 
