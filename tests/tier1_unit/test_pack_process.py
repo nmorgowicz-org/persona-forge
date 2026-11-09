@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import errno
+import os
+import signal
 import sys
 from pathlib import Path
 
 import pytest
 
+from persona_forge import pack_process
 from persona_forge.pack_process import PackProcess, PackProcessError
 
 WORKER_SOURCE = """
@@ -58,6 +62,61 @@ def test_timeout_kills_the_worker(worker_command):
 
     with pytest.raises(PackProcessError, match="timed out"):
         worker.request({"op": "sleep"})
+
+    assert worker.is_alive is False
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="EPERM on os.kill is POSIX semantics; Windows uses TerminateProcess")
+def test_kill_survives_container_pid_reuse_eperm(worker_command, monkeypatch):
+    """ARC containers recycle pids, so SIGTERM can raise EPERM instead of ESRCH.
+
+    CPython raises PermissionError only when kill() answers EPERM for a pid we created
+    ourselves - the pid was reused by a process we may not signal. A wedged-but-live worker
+    still gets SIGKILL after the SIGTERM grace, so only the gone signal is tolerated.
+    """
+    real_kill = os.kill
+
+    def fake_kill(pid: int, sig: int) -> None:
+        if sig == int(signal.SIGTERM):
+            # The child died between poll() and the signal, and its pid was recycled.
+            real_kill(pid, int(signal.SIGKILL))
+            raise PermissionError(errno.EPERM, "Permission denied")
+        real_kill(pid, sig)
+
+    monkeypatch.setattr(os, "kill", fake_kill)
+    worker = PackProcess(worker_command, request_timeout=5)
+    worker.start()
+    worker.kill()
+    assert worker.is_alive is False
+
+
+def test_kill_never_raises_when_signals_are_refused(worker_command, monkeypatch):
+    """ARC containers answered EPERM for the worker's own pid, so neither signal lands.
+
+    ``kill`` runs on the request path: an exception here replaced the caller's own
+    "timed out" report with a transport-level PermissionError.
+    """
+    monkeypatch.setattr(pack_process, "_signal_child", lambda process, sig: False)
+    worker = pack_process.PackProcess(worker_command, request_timeout=0.2)
+    worker.start()
+
+    with pytest.raises(PackProcessError, match="timed out"):
+        worker.request({"op": "sleep"})
+
+    assert worker.is_alive is False
+
+
+def test_kill_abandons_a_worker_whose_death_cannot_be_confirmed(worker_command, monkeypatch):
+    """Signals can be accepted while ``waitpid`` still answers "running" for a recycled pid.
+
+    The transport must stop blocking and stop claiming the worker is usable, instead of
+    surfacing subprocess.TimeoutExpired from the teardown of an unrelated request.
+    """
+    monkeypatch.setattr(pack_process, "_reap", lambda process, timeout: False)
+    worker = pack_process.PackProcess(worker_command, request_timeout=5)
+    worker.start()
+
+    worker.kill()
 
     assert worker.is_alive is False
 

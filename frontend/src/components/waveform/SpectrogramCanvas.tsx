@@ -45,7 +45,7 @@ export function SpectrogramCanvas({
   // Decode, then transform off-thread. The decode is async and lives in the browser, so this
   // never blocks a frame either.
   useEffect(() => {
-    let dead = false
+    const closed = { dead: false }
     spectrogramRef.current = null
     if (!blob || !cacheKey) return
     const run = async () => {
@@ -55,17 +55,17 @@ export function SpectrogramCanvas({
         const samples = buffer.getChannelData(0)
         const result = await getSpectrogram(cacheKey, samples, buffer.sampleRate)
         void ctx.close()
-        if (!dead) {
+        if (!closed.dead) {
           spectrogramRef.current = result
           setAnalysis({ blob, cacheKey, spectrogram: result, failed: false })
         }
       } catch {
-        if (!dead) setAnalysis({ blob, cacheKey, spectrogram: null, failed: true })
+        if (!closed.dead) setAnalysis({ blob, cacheKey, spectrogram: null, failed: true })
       }
     }
     void run()
     return () => {
-      dead = true
+      closed.dead = true
     }
   }, [blob, cacheKey])
 

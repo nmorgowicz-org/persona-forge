@@ -41,17 +41,17 @@ export function useMediaClock(
 
   useEffect(() => {
     if (!active) return
-    let frame = 0
+    const raf = { frame: 0 }
     const tick = () => {
       const media = mediaRef.current
       if (media) {
         const seconds = media.currentTime
         for (const callback of subscribersRef.current) callback(seconds)
       }
-      frame = requestAnimationFrame(tick)
+      raf.frame = requestAnimationFrame(tick)
     }
-    frame = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(frame)
+    raf.frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf.frame)
   }, [active, mediaRef])
 
   return clock

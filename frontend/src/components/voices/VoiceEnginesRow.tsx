@@ -83,19 +83,19 @@ export function VoiceEnginesRow({
   }, [voiceId])
 
   useEffect(() => {
-    let current = true
+    const fetchState = { current: true }
     getVoiceEngineBindings(voiceId)
       .then((next) => {
-        if (current && mounted.current) {
+        if (fetchState.current && mounted.current) {
           setBindings(next)
           setError(null)
         }
       })
       .catch((err: unknown) => {
-        if (current && mounted.current) setError(String((err as Error)?.message || err))
+        if (fetchState.current && mounted.current) setError(String((err as Error)?.message || err))
       })
     return () => {
-      current = false
+      fetchState.current = false
     }
     // refreshToken is the "refetch now" signal from the library.
   }, [voiceId, refreshToken])
