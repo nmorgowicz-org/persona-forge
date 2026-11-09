@@ -26,10 +26,11 @@ from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from persona_forge import pack_logs
 
-# Container-escape EPERM (EPERM on a pid we created ourselves): the child exited on its own,
-# and within the container's tiny pid namespace its pid was recycled to a process this one may
-# not signal before our SIGTERM landed. Target of the signal == target of poll(), so treating
-# it as "already gone" is always safe here.
+# ESRCH/EPERM from a signal on our own child both mean "this transport cannot end it": the
+# process is gone, or the sandbox refuses signal delivery outright (a container AppArmor
+# profile that mediates signals but allows none still answers kill(pid, 0) with success).
+# Neither case improves by signalling again, and a repeated signal can only reach whatever
+# process owns the pid now.
 _SIGNAL_GONE = (errno.ESRCH, errno.EPERM)
 
 # Teardown bounds. SIGTERM gets the graceful window; SIGKILL only needs long enough for the
@@ -259,11 +260,11 @@ class PackProcess:
     def kill(self) -> None:
         """Best-effort teardown; never raises.
 
-        ``request`` calls this on its own timeout path, so a runner that refuses the signal
-        (EPERM for a pid recycled inside the container's namespace) or whose ``waitpid`` cannot
-        confirm the death must not surface here as an unrelated PermissionError or
-        TimeoutExpired. When the death cannot be confirmed the worker is abandoned: it is never
-        reused and ``is_alive`` reports False.
+        ``request`` calls this on its own timeout path, so a sandbox that refuses signal
+        delivery (EPERM on a child we created ourselves) or whose ``waitpid`` cannot confirm the
+        death must not surface here as an unrelated PermissionError or TimeoutExpired. When the
+        death cannot be confirmed the worker is abandoned: it is never reused and ``is_alive``
+        reports False.
         """
         process = self._process
         if process is None:
