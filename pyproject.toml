@@ -10,7 +10,7 @@ dependencies = [
   "flask==3.1.3",
   # POSIX-only WSGI server (Dockerfile CMD / persona_forge.cli serve). Waitress below is the
   # Windows equivalent — gunicorn has no Windows support (no fork()).
-  "gunicorn==26.2.0; sys_platform != 'win32'",
+  "gunicorn==27.0.0; sys_platform != 'win32'",
   "waitress==3.0.2; sys_platform == 'win32'",
   "soundfile==0.14.0",
   # Shared by OmniVoice and pocket-tts (our two main accent-design/cloning levers) as well as
