@@ -2,7 +2,7 @@
   "extends": [
     "github>nmorgowicz-org/docker-compose-config//renovate"
   ],
-  "npmrc": "legacy-peer-deps=true",
+  "npmrc": "legacy-peer-deps=true\nallow-remote=all",
   "pip_requirements": {
     "managerFilePatterns": [
       "/(^|/)[\\w-]*requirements([-._]\\w+)*\\.(txt|pip)$/"
