@@ -7,6 +7,67 @@
 * **desktop:** recognize NVIDIA's CUDA UMD version header so CUDA 13-capable drivers select the correct accelerator environment.
 * **packaging:** preserve package-specific accelerator wheel sources in standalone launcher and desktop requirements.
 
+## [3.3.1](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.3.0...persona-forge-v3.3.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* **deps:** bump rustls from 0.23.45 to 0.23.46 in the desktop lock ([040c97b](https://github.com/nmorgowicz-org/persona-forge/commit/040c97b71de983bb02e72831a549d7a858a5c586))
+* **deps:** consolidate outstanding updates and synchronize frontend lockfile ([3fdf99b](https://github.com/nmorgowicz-org/persona-forge/commit/3fdf99b8ab7d53ece2284aec7259c2f0edf9c7d2))
+* **deps:** exclude the unused gradio tree from uv.lock ([040c97b](https://github.com/nmorgowicz-org/persona-forge/commit/040c97b71de983bb02e72831a549d7a858a5c586))
+* **deps:** update dependency gunicorn to v27 ([#491](https://github.com/nmorgowicz-org/persona-forge/issues/491)) ([329d17d](https://github.com/nmorgowicz-org/persona-forge/commit/329d17d593089b26261032f4e55c71d61dc53d30))
+* **deps:** update rust dependencies ([#466](https://github.com/nmorgowicz-org/persona-forge/issues/466)) ([a5cb854](https://github.com/nmorgowicz-org/persona-forge/commit/a5cb85431c301563afb8e16adc94878cde8129c2))
+* **deps:** update rust dependencies ([#490](https://github.com/nmorgowicz-org/persona-forge/issues/490)) ([344867c](https://github.com/nmorgowicz-org/persona-forge/commit/344867c88a7369895e3d8b8023f5a8af19a526db))
+* **frontend:** satisfy the oxlint 1.91 react/immutability rule ([a6b0661](https://github.com/nmorgowicz-org/persona-forge/commit/a6b06617469a4ebb236ef60118a745ce172cd06a))
+* **pack-process:** escalate portably when SIGKILL is unavailable ([a6b0661](https://github.com/nmorgowicz-org/persona-forge/commit/a6b06617469a4ebb236ef60118a745ce172cd06a))
+* **pack-process:** make teardown total when the runner refuses signals ([a6b0661](https://github.com/nmorgowicz-org/persona-forge/commit/a6b06617469a4ebb236ef60118a745ce172cd06a))
+
+
+### Tests
+
+* **ci:** derive the Renovate validator pin from the workflow tag instead of pinning it twice ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+* **launcher:** stop depending on signal delivery in the retention test ([a6b0661](https://github.com/nmorgowicz-org/persona-forge/commit/a6b06617469a4ebb236ef60118a745ce172cd06a))
+* **pocket-tts:** assert the recorded config paths instead of a raw Windows path ([040c97b](https://github.com/nmorgowicz-org/persona-forge/commit/040c97b71de983bb02e72831a549d7a858a5c586))
+
+
+### Documentation
+
+* **ci:** document how the Renovate validator pin stays current ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+* document dependency grouping policy ([3fdf99b](https://github.com/nmorgowicz-org/persona-forge/commit/3fdf99b8ab7d53ece2284aec7259c2f0edf9c7d2))
+* **pack-process:** describe the measured reason a signal cannot land ([a6b0661](https://github.com/nmorgowicz-org/persona-forge/commit/a6b06617469a4ebb236ef60118a745ce172cd06a))
+
+
+### Continuous Integration
+
+* fail fast and retry wide on stalled ARC egress ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+* **renovate:** allow remote npm fetches during lockfile updates ([#493](https://github.com/nmorgowicz-org/persona-forge/issues/493)) ([9bad77b](https://github.com/nmorgowicz-org/persona-forge/commit/9bad77b55dc3c82eed26119d5b87a540ccb2e579))
+* **renovate:** provision the Node toolchain when setup-node installs nothing ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+* **renovate:** single-source the Renovate validator pin and guard it against drift ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump pillow ([53d6fea](https://github.com/nmorgowicz-org/persona-forge/commit/53d6fea350dc645767269b946d49ca0455695ab7))
+* **deps:** bump pillow from 12.3.0 to 13.0.0 in the uv group across 1 directory ([#460](https://github.com/nmorgowicz-org/persona-forge/issues/460)) ([53d6fea](https://github.com/nmorgowicz-org/persona-forge/commit/53d6fea350dc645767269b946d49ca0455695ab7))
+* **deps:** group renovate 44.186.7 and frontend npm updates and fix their CI ([632813d](https://github.com/nmorgowicz-org/persona-forge/commit/632813d82734aeda92e28a6f3b00a16bcc73ce40))
+* **deps:** lock file maintenance ([#471](https://github.com/nmorgowicz-org/persona-forge/issues/471)) ([8c0cab9](https://github.com/nmorgowicz-org/persona-forge/commit/8c0cab935c24acd3117d6e04eb92705195bd38fe))
+* **deps:** lock file maintenance ([#472](https://github.com/nmorgowicz-org/persona-forge/issues/472)) ([d901fbf](https://github.com/nmorgowicz-org/persona-forge/commit/d901fbf358919c5c0efd93773b1514c86c55372d))
+* **deps:** update dependency renovate to v44.190.1 ([#467](https://github.com/nmorgowicz-org/persona-forge/issues/467)) ([dea2db7](https://github.com/nmorgowicz-org/persona-forge/commit/dea2db7525512d6c65633889a28ad283d043ecd8))
+* **deps:** update dependency renovate to v44.198.3 ([#469](https://github.com/nmorgowicz-org/persona-forge/issues/469)) ([ca259ad](https://github.com/nmorgowicz-org/persona-forge/commit/ca259ad0b2a1e8c9945dfaa5c8ef9a367177d413))
+* **deps:** update dependency renovate to v44.199.0 ([#475](https://github.com/nmorgowicz-org/persona-forge/issues/475)) ([8c0a0d9](https://github.com/nmorgowicz-org/persona-forge/commit/8c0a0d93ab4525a232a32023f3a8ecff70008c74))
+* **deps:** update dependency renovate to v44.221.1 ([a6b0661](https://github.com/nmorgowicz-org/persona-forge/commit/a6b06617469a4ebb236ef60118a745ce172cd06a))
+* **deps:** update dependency renovate to v44.222.5 ([#488](https://github.com/nmorgowicz-org/persona-forge/issues/488)) ([27163da](https://github.com/nmorgowicz-org/persona-forge/commit/27163dabcd6c423890686093d0c8b6263ae1203a))
+* **deps:** update frontend npm dependencies ([a6b0661](https://github.com/nmorgowicz-org/persona-forge/commit/a6b06617469a4ebb236ef60118a745ce172cd06a))
+* **deps:** update frontend npm dependencies ([#470](https://github.com/nmorgowicz-org/persona-forge/issues/470)) ([ae4e0c0](https://github.com/nmorgowicz-org/persona-forge/commit/ae4e0c061ced8b698567f1acbe51dbe2ff8bc1cf))
+* **deps:** update frontend npm dependencies ([#489](https://github.com/nmorgowicz-org/persona-forge/issues/489)) ([a5618a5](https://github.com/nmorgowicz-org/persona-forge/commit/a5618a5e34bf964c0a9dfbc3da58642645ebc67a))
+* **deps:** update github/codeql-action digest to 33d7b85 ([#474](https://github.com/nmorgowicz-org/persona-forge/issues/474)) ([048e065](https://github.com/nmorgowicz-org/persona-forge/commit/048e0657fc95d32a611d9d7d23405a307b13bd68))
+* **deps:** update lock file maintenance ([a6b0661](https://github.com/nmorgowicz-org/persona-forge/commit/a6b06617469a4ebb236ef60118a745ce172cd06a))
+* **deps:** update lock file maintenance for rust dependencies ([a6b0661](https://github.com/nmorgowicz-org/persona-forge/commit/a6b06617469a4ebb236ef60118a745ce172cd06a))
+* **deps:** update node.js to e6bedef ([#492](https://github.com/nmorgowicz-org/persona-forge/issues/492)) ([803bfbd](https://github.com/nmorgowicz-org/persona-forge/commit/803bfbd3aa88ef5efb74b8197ab2e5ee8cd4d617))
+* **deps:** update python:3.13-slim docker digest to ae14d4c ([#473](https://github.com/nmorgowicz-org/persona-forge/issues/473)) ([37a8cac](https://github.com/nmorgowicz-org/persona-forge/commit/37a8cac0c69699b57bb670e2e929d31b78c08ed7))
+* **deps:** update python:3.13-slim docker digest to e48f59c ([a6b0661](https://github.com/nmorgowicz-org/persona-forge/commit/a6b06617469a4ebb236ef60118a745ce172cd06a))
+* **renovate:** group development and CI tooling without slowing updates ([3fdf99b](https://github.com/nmorgowicz-org/persona-forge/commit/3fdf99b8ab7d53ece2284aec7259c2f0edf9c7d2))
+
 ## [3.3.0](https://github.com/nmorgowicz-org/persona-forge/compare/persona-forge-v3.2.0...persona-forge-v3.3.0) (2026-10-29)
 
 
