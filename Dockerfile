@@ -11,7 +11,7 @@
 # the equivalent pins/patches directly against the host Python instead of a container build;
 # accelerator wheels are opt-in extras at install time there rather than a first-boot install
 # into a persisted volume. See docs/MIGRATION.md for moving a deployment between the two.
-ARG PYTHON_IMAGE=python:3.13-slim@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50
+ARG PYTHON_IMAGE=python:3.13-slim@sha256:168d3a5d10f2152f8e8d77b6843ac82c22a846cfefeef7afdf9aa630404e82a7
 # Keep the build-only Node toolchain on 26, aligned with CI and frontend types.
 # Both base images are digest-pinned; --build-arg overrides remain available for CI.
 ARG NODE_IMAGE=node:26-slim@sha256:abe7e5a82b61a8ef67b315b85497c9e65173387ccf2f4a029248184b8e020be5
